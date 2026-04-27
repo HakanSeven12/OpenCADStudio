@@ -153,9 +153,9 @@ impl Pipeline {
             cache: None,
         });
 
-        // Xray variant: only draws where fragments are BEHIND the depth buffer
-        // (depth_compare=Greater), without writing depth. Used to ghost selected
-        // wires through occluding geometry at reduced alpha.
+        // Selection overlay variant: renders selected wires on top of everything
+        // (depth_compare=Always), without writing depth. Ensures selected entities
+        // are always fully visible regardless of occluding geometry.
         let wire_xray_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wire_xray.pipeline"),
             layout: Some(&wire_layout),
@@ -173,7 +173,7 @@ impl Pipeline {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Greater,
+                depth_compare: wgpu::CompareFunction::Always,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -535,12 +535,12 @@ impl Pipeline {
 
     pub fn upload_wires(&mut self, device: &wgpu::Device, wires: &[WireModel]) {
         self.gpu_wires = wires.iter().map(|w| WireGpu::new(device, w)).collect();
-        // Ghost copies of selected wires at 25% alpha, drawn through occluding
-        // geometry in the xray pass to keep selected entities fully visible.
+        // Full-brightness copies of selected wires, drawn on top of everything
+        // in the selection overlay pass so they're always visible.
         self.gpu_selected_wires = wires
             .iter()
             .filter(|w| w.selected)
-            .map(|w| WireGpu::new_ghost(device, w, 0.25))
+            .map(|w| WireGpu::new(device, w))
             .collect();
     }
 
@@ -773,10 +773,9 @@ impl Pipeline {
             }
         }
 
-        // ── Pass 7: selected wire X-ray ghost pass ────────────────────────
-        // Draws ghost copies of selected wires only where they are occluded
-        // (depth_compare=Greater). Visible parts are already drawn at full
-        // brightness by the wire pass; this only reveals hidden portions.
+        // ── Pass 7: selected wire overlay pass ───────────────────────────
+        // Redraws selected wires with depth_compare=Always so they appear on
+        // top of all other geometry at full brightness.
         if !self.gpu_selected_wires.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wire_xray.render_pass"),

@@ -1030,20 +1030,43 @@ impl Scene {
             Some(h) => h,
             None => return,
         };
-        // Use the viewport's own camera so that the pan axes match the 3-D view
-        // orientation (important for tilted/rotated MSPACE views).
-        // camera_for_viewport already encodes the correct distance/scale via view_height,
-        // so no additional scale division is needed.
+        // Use the viewport's own camera for the pan axes (matches 3-D view orientation).
         let vp_cam = match self.camera_for_viewport(vp_handle) {
             Some(c) => c,
             None => return,
         };
-        let model_delta = vp_cam.screen_delta_to_world(screen_dx, screen_dy, bounds);
+
+        // Read viewport dims (immutable borrow ends here).
+        let (view_height, vp_height, locked) = match self.document.get_entity(vp_handle) {
+            Some(acadrust::EntityType::Viewport(vp)) => {
+                (vp.view_height as f32, vp.height as f32, vp.status.locked)
+            }
+            _ => return,
+        };
+        if locked {
+            return;
+        }
+
+        // Correct pan speed: how many model units correspond to one screen pixel.
+        //
+        // The paper camera's ortho_size() gives the visible paper-space half-height
+        // (in paper mm). One screen pixel = 2*half_h / canvas_height paper mm.
+        // Inside the viewport, one paper mm = view_height / vp_height model units.
+        // Together: model_per_pixel = (2*half_h / canvas_height) * (view_height / vp_height)
+        let paper_half_h = self.camera.borrow().ortho_size();
+        let speed = if bounds.height > 0.0 && paper_half_h > 1e-6 && vp_height > 1e-6 {
+            (2.0 * paper_half_h / bounds.height) * (view_height / vp_height)
+        } else {
+            vp_cam.distance * 0.001
+        };
+
+        let cam_right = vp_cam.rotation * glam::Vec3::X;
+        let cam_up = vp_cam.rotation * glam::Vec3::Y;
+        let model_delta = -(cam_right * screen_dx * speed) + (cam_up * screen_dy * speed);
 
         if let Some(acadrust::EntityType::Viewport(vp)) =
             self.document.get_entity_mut(vp_handle)
         {
-            if vp.status.locked { return; }
             vp.view_target.x += model_delta.x as f64;
             vp.view_target.y += model_delta.y as f64;
             vp.view_target.z += model_delta.z as f64;

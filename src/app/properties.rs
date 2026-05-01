@@ -244,7 +244,10 @@ impl H7CAD {
     /// Rebuild the cached selected_grips from the current entity selection.
     pub(super) fn refresh_selected_grips(&mut self) {
         let i = self.active_tab;
-        let wo = self.tabs[i].scene.world_offset;
+        let is_paper = self.tabs[i].scene.current_layout != "Model";
+        // Paper-space entity coordinates are NOT offset by world_offset (same rule
+        // as wire tessellation in wires_for_block). Only subtract in model space.
+        let wo = if is_paper { [0.0f64; 3] } else { self.tabs[i].scene.world_offset };
         let (new_handle, new_grips) = {
             let selected = self.tabs[i].scene.selected_entities();
             if selected.len() == 1 {

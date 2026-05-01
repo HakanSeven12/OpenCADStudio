@@ -3,7 +3,7 @@ use super::document::DocumentTab;
 use super::history::history_dropdown_labels;
 use super::helpers::grid_plane_from_camera;
 use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
-use crate::scene::grip::grips_to_screen;
+use crate::scene::grip::{grips_to_screen, grips_to_screen_paper};
 use crate::scene::paper_canvas::PaperCanvas;
 use crate::scene::viewport_pane::{PaperViewportPane, ViewportPane};
 use crate::ui::overlay;
@@ -138,9 +138,21 @@ impl H7CAD {
                     let bounds = iced::Rectangle {
                         x: 0.0, y: 0.0, width: vw, height: vh,
                     };
-                    let vp_mat = tab.scene.camera.borrow().view_proj(bounds);
                     let sel_h = tab.selected_handle;
-                    grips_to_screen(&tab.selected_grips, vp_mat, bounds)
+                    let screen_grips = if is_paper {
+                        let cam = tab.scene.camera.borrow();
+                        let aspect = if vh > 0.0 { vw / vh } else { 1.0 };
+                        let half_h = cam.ortho_size();
+                        let half_w = half_h * aspect;
+                        let tx = cam.target.x;
+                        let ty = cam.target.y;
+                        drop(cam);
+                        grips_to_screen_paper(&tab.selected_grips, tx, ty, half_w, half_h, bounds)
+                    } else {
+                        let vp_mat = tab.scene.camera.borrow().view_proj(bounds);
+                        grips_to_screen(&tab.selected_grips, vp_mat, bounds)
+                    };
+                    screen_grips
                         .into_iter()
                         .filter(|(_, screen, _, _)| {
                             screen.x.is_finite()

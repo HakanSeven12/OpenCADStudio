@@ -50,6 +50,53 @@ pub fn grips_to_screen(
         .collect()
 }
 
+/// Paper-space variant: project grips using the 2-D linear `to_px` transform.
+/// Parameters match the `to_px` closure in `paper_canvas.rs`.
+pub fn grips_to_screen_paper(
+    grips: &[GripDef],
+    tx: f32, ty: f32,
+    half_w: f32, half_h: f32,
+    bounds: Rectangle,
+) -> Vec<(usize, Point, bool, GripShape)> {
+    grips
+        .iter()
+        .map(|g| {
+            let screen = Point::new(
+                (g.world.x - tx + half_w) / (2.0 * half_w) * bounds.width,
+                (ty + half_h - g.world.y) / (2.0 * half_h) * bounds.height,
+            );
+            (g.id, screen, g.is_midpoint, g.shape)
+        })
+        .collect()
+}
+
+/// Paper-space hit-test variant (mirrors `find_hit_grip` but uses 2-D projection).
+pub fn find_hit_grip_paper(
+    cursor: Point,
+    grips: &[GripDef],
+    tx: f32, ty: f32,
+    half_w: f32, half_h: f32,
+    bounds: Rectangle,
+) -> Option<(usize, bool, Vec3)> {
+    let mut best_dist = GRIP_THRESHOLD_PX;
+    let mut best: Option<(usize, bool, Vec3)> = None;
+
+    for g in grips {
+        let screen = Point::new(
+            (g.world.x - tx + half_w) / (2.0 * half_w) * bounds.width,
+            (ty + half_h - g.world.y) / (2.0 * half_h) * bounds.height,
+        );
+        let dx = screen.x - cursor.x;
+        let dy = screen.y - cursor.y;
+        let d = (dx * dx + dy * dy).sqrt();
+        if d < best_dist {
+            best_dist = d;
+            best = Some((g.id, g.is_midpoint, g.world));
+        }
+    }
+    best
+}
+
 /// Find the closest grip within `GRIP_THRESHOLD_PX` pixels of `cursor`.
 /// Returns `(grip_id, is_translate, world_pos)` if found, else `None`.
 pub fn find_hit_grip(

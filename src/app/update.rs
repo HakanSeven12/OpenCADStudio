@@ -1,7 +1,7 @@
 use super::{H7CAD, Message, POLY_START_DELAY_MS};
 use super::helpers::{parse_coord, angle_close, ortho_constrain, polar_constrain, ucs_to_wcs, ucs_z_axis};
 use crate::scene::{self, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX};
-use crate::scene::grip::{find_hit_grip, GripEdit};
+use crate::scene::grip::{find_hit_grip, find_hit_grip_paper, GripEdit};
 use crate::scene::object::GripApply;
 use crate::modules::ModuleEvent;
 use crate::ui::PropertiesPanel;
@@ -1362,8 +1362,20 @@ impl H7CAD {
 
                 if self.tabs[i].active_cmd.is_none() && !self.tabs[i].selected_grips.is_empty() {
                     if let Some(handle) = self.tabs[i].selected_handle {
-                        let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                        let grip_hit = find_hit_grip(p, &self.tabs[i].selected_grips, vp_mat, bounds);
+                        let is_paper = self.tabs[i].scene.current_layout != "Model";
+                        let grip_hit = if is_paper {
+                            let cam = self.tabs[i].scene.camera.borrow();
+                            let aspect = if vh > 0.0 { vw / vh } else { 1.0 };
+                            let half_h = cam.ortho_size();
+                            let half_w = half_h * aspect;
+                            let tx = cam.target.x;
+                            let ty = cam.target.y;
+                            drop(cam);
+                            find_hit_grip_paper(p, &self.tabs[i].selected_grips, tx, ty, half_w, half_h, bounds)
+                        } else {
+                            let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
+                            find_hit_grip(p, &self.tabs[i].selected_grips, vp_mat, bounds)
+                        };
                         if let Some((grip_id, is_translate, world)) = grip_hit {
                             self.tabs[i].active_grip = Some(GripEdit {
                                 handle,

@@ -103,15 +103,23 @@ fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
     // distance, which is 5/3 × text_height (≈ 1.667).  factor = 1.0 → single
     // spacing, factor = 2.0 → double spacing, etc.
     let line_h = t.height as f32 * ls_factor * (5.0 / 3.0) * font.line_spacing;
-    let total_h = line_h * n_lines;
+    let h = t.height as f32;
+    // CXF glyphs sit on the baseline (y=0) and extend UP by `h` (cap height).
+    // Block top   = line-0 baseline + h
+    // Block bottom = last-line baseline = line-0 baseline − (n_lines−1)·line_h
+    //
+    // v_offset is the Y of line-0 baseline relative to the insertion point, so:
+    //   Top    attachment → block top    at insertion → v_offset = −h
+    //   Bottom attachment → block bottom at insertion → v_offset = (n_lines−1)·line_h
+    //   Middle attachment → block center at insertion → midpoint of the two above
     let v_offset = match t.attachment_point {
-        AttachmentPoint::TopLeft | AttachmentPoint::TopCenter | AttachmentPoint::TopRight => 0.0,
+        AttachmentPoint::TopLeft | AttachmentPoint::TopCenter | AttachmentPoint::TopRight => -h,
         AttachmentPoint::MiddleLeft
         | AttachmentPoint::MiddleCenter
-        | AttachmentPoint::MiddleRight => -total_h * 0.5,
+        | AttachmentPoint::MiddleRight => ((n_lines - 1.0) * line_h - h) * 0.5,
         AttachmentPoint::BottomLeft
         | AttachmentPoint::BottomCenter
-        | AttachmentPoint::BottomRight => -total_h,
+        | AttachmentPoint::BottomRight => (n_lines - 1.0) * line_h,
     };
     let h_anchor = match t.attachment_point {
         AttachmentPoint::TopCenter

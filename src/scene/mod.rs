@@ -3115,7 +3115,7 @@ fn tessellate_entity(
     let (entity_color, pattern_length, pattern, line_weight_px, aci) =
         render::render_style_for(document, e);
     let entity_color = render::adapt_to_bg(entity_color, bg_color);
-    let lt_scale = e.common().linetype_scale as f32;
+    let lt_scale = document.header.linetype_scale as f32 * e.common().linetype_scale as f32;
     let lt_name = render::linetype_name_for(document, e);
 
     if let EntityType::Dimension(dim) = e {

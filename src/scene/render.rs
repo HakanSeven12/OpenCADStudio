@@ -213,7 +213,8 @@ pub(super) fn render_style_for(
     };
 
     let lt_name = linetype_name_for(document, e);
-    let lt_scale = e.common().linetype_scale as f32;
+    // Effective scale = global LTSCALE × per-entity scale (both default to 1.0).
+    let lt_scale = document.header.linetype_scale as f32 * e.common().linetype_scale as f32;
     let (pattern_length, pattern) = resolve_pattern(&document.line_types, lt_name, lt_scale);
 
     let line_weight_px = {

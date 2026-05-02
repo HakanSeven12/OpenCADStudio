@@ -71,7 +71,7 @@ Legend: ✅ Done · ⚠️ Partial · ❌ Not done
 | ✅ | **Point** | `src/entities/point.rs` |
 | ✅ | **Ellipse** | `src/entities/ellipse.rs` |
 | ✅ | **LwPolyline** | `src/entities/lwpolyline.rs` |
-| ❌ | **Spline** | `src/entities/spline.rs` — control points used as-is in WCS |
+| ✅ | **Spline** | DXF spec: spline control points are already in WCS (normal field unused) |
 | ❌ | **Polyline (3D)** | tessellated in `src/scene/tessellate.rs` — vertices used as-is |
 | ❌ | **AttributeDefinition / AttributeEntity** | OCS insertion point not transformed |
 | ❌ | **Hatch** | elevation applied but normal not used for OCS→WCS in wire outline |
@@ -139,8 +139,8 @@ Then transform each OCS point: `WCS = x*Ax + y*Ay + z*N`
 | Status | Entity | Missing Snap | Location |
 |---|---|---|---|
 | ✅ | **INSERT** | `Insertion` snap point | `src/scene/mod.rs` — appended after explode |
-| ❌ | **INSERT** | Nested entity snap points not traversed | `src/snap/mod.rs` — only top-level wire snap_pts checked |
-| ⚠️ | **Hatch** | Snap points for circular arc boundaries | Center snaps added for CircularArc/EllipticArc edges — `src/scene/tessellate.rs` |
+| ✅ | **INSERT** | Nested entity snap points | All sub-entity WireModels are flat-mapped into the scene wire list — snap sees them all |
+| ✅ | **Hatch** | Snap points for circular arc boundaries | Center snaps added for CircularArc/EllipticArc edges — `src/scene/tessellate.rs` |
 
 ### Medium
 
@@ -148,15 +148,15 @@ Then transform each OCS point: `WCS = x*Ax + y*Ay + z*N`
 |---|---|---|---|
 | ✅ | **Dimension** | Node snap hints on defpoints | `src/scene/tessellate.rs` — `dimension_snap_pts()` |
 | ✅ | **Spline** | Fit/control points in snap_pts | `src/entities/spline.rs:38` |
-| ❌ | **MultiLeader** | Vertices not in snap_pts | `src/entities/multileader.rs:150` — key_vertices populated but snap_pts empty |
-| ❌ | **MLine** | Vertices not in snap_pts | empty snap_pts |
+| ✅ | **MultiLeader** | Vertices and connection points in snap_pts | `src/entities/multileader.rs` |
+| ✅ | **MLine** | Vertices in snap_pts | `src/entities/mline.rs` |
 
 ### Low
 
 | Status | Entity | Missing Snap | Location |
 |---|---|---|---|
 | ⚠️ | **Ellipse** (partial arc) | Endpoints not in pre-baked snap_pts | Arc endpoints emitted only as `Center`; functional via wire tessellation but semantically wrong |
-| ❌ | **Hatch** | Elevation Z ignored | Snap Z is always 0 instead of `hatch.elevation` |
+| ✅ | **Hatch** | Elevation Z | Snap Z uses `hatch.elevation - world_offset.z` — `src/scene/tessellate.rs:627` |
 
 ---
 
@@ -206,15 +206,13 @@ These are fixed in our post-load `fix_dxf_dimension_rotations()` in `src/io/mod.
 
 | Status | Count |
 |---|---|
-| ✅ Done | 27 |
-| ⚠️ Partial | 5 |
-| ❌ Not done | 9 |
-| **Total** | **41** |
+| ✅ Done | 35 |
+| ⚠️ Partial | 3 |
+| ❌ Not done | 5 |
+| **Total** | **43** |
 
 ### Remaining gaps by priority
 
-**High:** INSERT nested snap traversal
+**Medium:** OCS→WCS for Polyline/Attribute/Hatch/Leader · Viewport interior view compositing
 
-**Medium:** OCS→WCS for Spline/Polyline/Attribute/Hatch/MLine/Leader · Viewport iç görünüm · MultiLeader snap · MLine snap · RasterImage clip
-
-**Low:** LWPolyline plinegen · Complex linetype text · OLE2Frame · Shape rotation
+**Low:** LWPolyline plinegen (GPU shader change needed) · Complex linetype text shapes · OLE2Frame improvement · Shape rotation

@@ -152,7 +152,7 @@ fn try_join_arcs(arcs: &[&(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<En
         if (a.radius - r).abs() > 1e-3 { return None; }
     }
 
-    // Collect (start_deg, end_deg) — normalize CCW into [0, 360)
+    // Collect (start_angle, end_angle) in radians.
     let mut intervals: Vec<[f32; 2]> = segs.iter().map(|(_, a)| {
         [a.start_angle as f32, a.end_angle as f32]
     }).collect();
@@ -164,17 +164,17 @@ fn try_join_arcs(arcs: &[&(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<En
     let merged_start = intervals[0][0];
     let mut merged_end   = intervals[0][1];
     for &[s, e] in &intervals[1..] {
-        let span = ((e - merged_end) + 360.0) % 360.0;
-        let gap  = ((s - merged_end) + 360.0) % 360.0;
+        let span = (e - merged_end).rem_euclid(std::f32::consts::TAU);
+        let gap  = (s - merged_end).rem_euclid(std::f32::consts::TAU);
         let _ = span;
         if gap > 1e-3 { return None; } // discontinuous
         merged_end = e;
     }
 
-    let span = ((merged_end - merged_start) + 360.0) % 360.0;
+    let span = merged_end - merged_start;
     let handles: Vec<Handle> = arcs.iter().map(|(h, _)| *h).collect();
 
-    if (span - 360.0).abs() < 0.5 {
+    if (span - std::f32::consts::TAU).abs() < 0.01 {
         // Full circle
         let mut circle = acadrust::entities::Circle::new();
         circle.common = first.common.clone();

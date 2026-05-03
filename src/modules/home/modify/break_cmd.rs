@@ -235,21 +235,20 @@ fn break_ellipse(ell: &EllipseEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
 
 // ── Small utilities ────────────────────────────────────────────────────────
 
-/// Returns the angle (degrees, 0-360) of `pt` viewed from (cx, cy) in the XZ plane.
+/// Returns the angle (radians, 0-2π) of `pt` viewed from (cx, cy) in the XZ plane.
 fn angle_on_arc(cx: f32, cy: f32, pt: Vec3) -> f32 {
     let dx = pt.x - cx;
     let dy = pt.z - cy; // XZ plane
-    let a = dy.atan2(dx).to_degrees();
-    (a + 360.0) % 360.0
+    dy.atan2(dx).rem_euclid(std::f32::consts::TAU)
 }
 
 /// Clamp angle `a` to within the arc's angular range (CCW from `start` to `end`).
 fn clamp_to_arc(a: f32, start: f32, end: f32) -> f32 {
-    let span = ((end - start) + 360.0) % 360.0;
-    let rel = ((a - start) + 360.0) % 360.0;
+    let span = (end - start).rem_euclid(std::f32::consts::TAU);
+    let rel = (a - start).rem_euclid(std::f32::consts::TAU);
     if rel <= span {
         a
-    } else if rel < span + (360.0 - span) / 2.0 {
+    } else if rel < span + (std::f32::consts::TAU - span) / 2.0 {
         end
     } else {
         start

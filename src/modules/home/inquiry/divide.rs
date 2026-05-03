@@ -183,7 +183,7 @@ fn point_at_distance(entity: &EntityType, d: f64) -> Option<Vector3> {
             let span = arc_span_rad(a.start_angle, a.end_angle);
             let t = d / a.radius; // arc_length = r * theta
             if t > span { return None; }
-            let angle = a.start_angle.to_radians() + t;
+            let angle = a.start_angle + t;
             Some(Vector3::new(
                 a.center.x + a.radius * angle.cos(),
                 a.center.y + a.radius * angle.sin(),
@@ -227,7 +227,7 @@ fn point_at_distance(entity: &EntityType, d: f64) -> Option<Vector3> {
     }
 }
 
-fn arc_span_rad(start_deg: f64, end_deg: f64) -> f64 {
-    let span = ((end_deg - start_deg) + 360.0) % 360.0;
-    if span < 1e-6 { 2.0 * PI } else { span.to_radians() }
+fn arc_span_rad(start: f64, end: f64) -> f64 {
+    let span = (end - start).rem_euclid(2.0 * PI);
+    if span < 1e-6 { 2.0 * PI } else { span }
 }

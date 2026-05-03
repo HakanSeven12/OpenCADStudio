@@ -87,7 +87,7 @@ fn apply_transform(h: &mut Hatch, t: &EntityTransform) {
         if len2 < 1e-12 {
             return;
         }
-        let line_angle_deg = dy.atan2(dx).to_degrees();
+        let line_angle = dy.atan2(dx);
         for path in &mut entity.paths {
             for edge in &mut path.edges {
                 match edge {
@@ -113,8 +113,8 @@ fn apply_transform(h: &mut Hatch, t: &EntityTransform) {
                             p2,
                         );
                         let tmp = a.start_angle;
-                        a.start_angle = 2.0 * line_angle_deg - a.end_angle;
-                        a.end_angle = 2.0 * line_angle_deg - tmp;
+                        a.start_angle = 2.0 * line_angle - a.end_angle;
+                        a.end_angle = 2.0 * line_angle - tmp;
                     }
                     BoundaryEdge::EllipticArc(e) => {
                         crate::scene::transform::reflect_xy_point(
@@ -131,8 +131,8 @@ fn apply_transform(h: &mut Hatch, t: &EntityTransform) {
                         e.major_axis_endpoint.x = 2.0 * dot * ax / len2 - rx;
                         e.major_axis_endpoint.y = 2.0 * dot * ay / len2 - ry;
                         let tmp = e.start_angle;
-                        e.start_angle = 2.0 * line_angle_deg - e.end_angle;
-                        e.end_angle = 2.0 * line_angle_deg - tmp;
+                        e.start_angle = 2.0 * line_angle - e.end_angle;
+                        e.end_angle = 2.0 * line_angle - tmp;
                     }
                     BoundaryEdge::Spline(s) => {
                         for cp in &mut s.control_points {

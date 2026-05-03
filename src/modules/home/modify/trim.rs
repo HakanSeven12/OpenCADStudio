@@ -260,8 +260,8 @@ fn build_geos(entities: &[EntityType]) -> Vec<Geo> {
                     cx: a.center.x,
                     cy: a.center.y,
                     r: a.radius,
-                    a0: a.start_angle.to_radians(),
-                    a1: a.end_angle.to_radians(),
+                    a0: a.start_angle,
+                    a1: a.end_angle,
                 }),
                 EntityType::Circle(c) => Some(Geo::Circle {
                     handle: h,
@@ -949,8 +949,8 @@ fn trim_line(orig: &LineEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
 
 /// Trim an Arc entity. Returns the surviving arc segments.
 fn trim_arc(orig: &ArcEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
-    let a0 = orig.start_angle.to_radians();
-    let a1 = orig.end_angle.to_radians();
+    let a0 = orig.start_angle;
+    let a1 = orig.end_angle;
     let span = {
         let s = norm(a1) - norm(a0);
         if s <= 0.0 {
@@ -969,8 +969,8 @@ fn trim_arc(orig: &ArcEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
             }
             let mut a = orig.clone();
             a.common.handle = Handle::NULL;
-            a.start_angle = angle_at(ta).to_degrees();
-            a.end_angle = angle_at(tb).to_degrees();
+            a.start_angle = angle_at(ta);
+            a.end_angle = angle_at(tb);
             Some(EntityType::Arc(a))
         })
         .collect()
@@ -1362,8 +1362,8 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
             a.center.x,
             a.center.y,
             a.radius,
-            a.start_angle.to_radians(),
-            a.end_angle.to_radians(),
+            a.start_angle,
+            a.end_angle,
             a.center.y,
         ),
         EntityType::Ellipse(e) => {
@@ -1466,8 +1466,8 @@ impl CadCommand for TrimCommand {
             Some(EntityType::Arc(a)) => {
                 let cx = a.center.x;
                 let cy = a.center.y;
-                let a0 = a.start_angle.to_radians();
-                let a1 = a.end_angle.to_radians();
+                let a0 = a.start_angle;
+                let a1 = a.end_angle;
                 let ts = arc_seg_ts(cx, cy, a.radius, a0, a1, handle, &self.geos);
                 if ts.is_empty() {
                     return CmdResult::NeedPoint;
@@ -1630,8 +1630,8 @@ impl CadCommand for TrimCommand {
             Some(EntityType::Arc(a)) => {
                 let cx = a.center.x;
                 let cy = a.center.y;
-                let a0 = a.start_angle.to_radians();
-                let a1 = a.end_angle.to_radians();
+                let a0 = a.start_angle;
+                let a1 = a.end_angle;
                 let ts = arc_seg_ts(cx, cy, a.radius, a0, a1, handle, &self.geos);
                 if ts.is_empty() {
                     return vec![];

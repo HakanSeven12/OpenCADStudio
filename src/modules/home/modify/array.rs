@@ -531,8 +531,8 @@ impl ArrayPathCommand {
             }
             EntityType::Arc(a) => {
                 let (cx, cy, r) = (a.center.x as f32, a.center.y as f32, a.radius as f32);
-                let a0 = a.start_angle.to_radians() as f32;
-                let a1 = a.end_angle.to_radians() as f32;
+                let a0 = a.start_angle as f32;
+                let a1 = a.end_angle as f32;
                 let span = {
                     let s = fn_norm(a1) - fn_norm(a0);
                     if s <= 0.0 {

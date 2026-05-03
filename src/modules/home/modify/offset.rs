@@ -394,8 +394,8 @@ fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
                 .collect()
         }
         EntityType::Arc(a) => {
-            let a0 = norm_rad(a.start_angle.to_radians());
-            let a1 = norm_rad(a.end_angle.to_radians());
+            let a0 = norm_rad(a.start_angle);
+            let a1 = norm_rad(a.end_angle);
             let span = {
                 let s = a1 - a0;
                 if s <= 0.0 {

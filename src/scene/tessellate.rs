@@ -659,8 +659,11 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
                             key_verts.push(p1);
                         }
                         acadrust::entities::BoundaryEdge::CircularArc(arc) => {
-                            let sa = (arc.start_angle as f32).to_radians();
-                            let ea = (arc.end_angle as f32).to_radians();
+                            let (sa, ea) = if arc.counter_clockwise {
+                                (arc.start_angle as f32, arc.end_angle as f32)
+                            } else {
+                                (arc.end_angle as f32, arc.start_angle as f32)
+                            };
                             let span = if ea > sa {
                                 ea - sa
                             } else {
@@ -688,8 +691,11 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
                             let r_min = r_maj * ell.minor_axis_ratio as f32;
                             let rot = (ell.major_axis_endpoint.y as f32)
                                 .atan2(ell.major_axis_endpoint.x as f32);
-                            let sa = ell.start_angle as f32;
-                            let ea = ell.end_angle as f32;
+                            let (sa, ea) = if ell.counter_clockwise {
+                                (ell.start_angle as f32, ell.end_angle as f32)
+                            } else {
+                                (ell.end_angle as f32, ell.start_angle as f32)
+                            };
                             let span = if ea > sa {
                                 ea - sa
                             } else {

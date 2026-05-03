@@ -144,16 +144,16 @@ fn lengthen_arc(arc: &ArcEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityTyp
     let cy = arc.center.z as f32; // Y-up: DXF Y → world Z
 
     // Current arc span
-    let span = arc_span_deg(arc.start_angle, arc.end_angle);
-    let current_arc_len = arc.radius * span.to_radians();
+    let span = arc_span_rad(arc.start_angle, arc.end_angle);
+    let current_arc_len = arc.radius * span;
 
     let new_arc_len = apply_mode(current_arc_len, mode)?;
     if new_arc_len < 1e-10 { return None; }
-    let new_span_deg = (new_arc_len / arc.radius).to_degrees();
+    let new_span = new_arc_len / arc.radius;
 
     // Which end (start or end angle) is closer to pick?
-    let start_rad = arc.start_angle.to_radians();
-    let end_rad   = arc.end_angle.to_radians();
+    let start_rad = arc.start_angle;
+    let end_rad   = arc.end_angle;
 
     let start_pt = Vec3::new(
         cx + arc.radius as f32 * start_rad.cos() as f32,
@@ -168,17 +168,17 @@ fn lengthen_arc(arc: &ArcEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityTyp
     let dist_start = (pick_pt - start_pt).length();
     let dist_end   = (pick_pt - end_pt).length();
 
-    let delta_span = new_span_deg - span;
+    let delta_span = new_span - span;
 
     let mut result = arc.clone();
     result.common.handle = Handle::NULL;
 
     if dist_end <= dist_start {
         // Extend end angle
-        result.end_angle = arc.start_angle + new_span_deg;
+        result.end_angle = arc.start_angle + new_span;
     } else {
         // Extend start angle (move start backwards)
-        result.start_angle = arc.end_angle - new_span_deg;
+        result.start_angle = arc.end_angle - new_span;
     }
     let _ = delta_span;
     Some(EntityType::Arc(result))
@@ -257,9 +257,9 @@ fn apply_mode(current: f64, mode: &LenMode) -> Option<f64> {
     }
 }
 
-fn arc_span_deg(start: f64, end: f64) -> f64 {
-    let span = ((end - start) + 360.0) % 360.0;
-    if span < 1e-6 { 360.0 } else { span }
+fn arc_span_rad(start: f64, end: f64) -> f64 {
+    let span = (end - start).rem_euclid(std::f64::consts::TAU);
+    if span < 1e-6 { std::f64::consts::TAU } else { span }
 }
 
 fn xz_to_v3(v: Vec3, z: f64) -> Vector3 {

@@ -273,10 +273,10 @@ fn bulge_to_arc(
 
     // acadrust arcs are always CCW: positive bulge → CCW from p0 to p1
     // Negative bulge → CW from p0 to p1 = CCW from p1 to p0
-    let (start_deg, end_deg) = if b > 0.0 {
-        (norm_deg(a0_rad.to_degrees()), norm_deg(a1_rad.to_degrees()))
+    let (start_angle, end_angle) = if b > 0.0 {
+        (norm_angle(a0_rad), norm_angle(a1_rad))
     } else {
-        (norm_deg(a1_rad.to_degrees()), norm_deg(a0_rad.to_degrees()))
+        (norm_angle(a1_rad), norm_angle(a0_rad))
     };
 
     let mut common = common_src.clone();
@@ -286,16 +286,15 @@ fn bulge_to_arc(
         common,
         center: Vector3::new(cx, cy, elevation),
         radius: r,
-        start_angle: start_deg,
-        end_angle: end_deg,
+        start_angle,
+        end_angle,
         ..ArcEnt::new()
     };
     Some(EntityType::Arc(arc))
 }
 
-fn norm_deg(a: f64) -> f64 {
-    let t = TAU.to_degrees();
-    ((a % t) + t) % t
+fn norm_angle(a: f64) -> f64 {
+    ((a % TAU) + TAU) % TAU
 }
 
 fn explode_mline(ml: &MLine) -> Vec<EntityType> {

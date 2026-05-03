@@ -149,16 +149,15 @@ fn compute_fillet(
     let arc_cx = px + arc_dist * bx / blen;
     let arc_cy = py + arc_dist * by / blen;
 
-    // Arc angles in degrees
-    let a_start_deg = (t1[1] - arc_cy).atan2(t1[0] - arc_cx).to_degrees();
-    let a_end_deg = (t2[1] - arc_cy).atan2(t2[0] - arc_cx).to_degrees();
+    let a_start = (t1[1] - arc_cy).atan2(t1[0] - arc_cx);
+    let a_end = (t2[1] - arc_cy).atan2(t2[0] - arc_cx);
 
     // Pick CCW direction that fills the concave corner
     let cross = dir1[0] * dir2[1] - dir1[1] * dir2[0];
-    let (start_deg, end_deg) = if cross <= 0.0 {
-        (a_start_deg, a_end_deg)
+    let (start_angle, end_angle) = if cross <= 0.0 {
+        (a_start, a_end)
     } else {
-        (a_end_deg, a_start_deg)
+        (a_end, a_start)
     };
 
     // Trim l1 to T1 and l2 to T2
@@ -171,8 +170,8 @@ fn compute_fillet(
     arc.common.handle = Handle::NULL;
     arc.center = Vector3::new(arc_cx, arc_cy, z);
     arc.radius = radius;
-    arc.start_angle = start_deg;
-    arc.end_angle = end_deg;
+    arc.start_angle = norm_angle(start_angle);
+    arc.end_angle = norm_angle(end_angle);
 
     Some((
         EntityType::Line(new_l1),
@@ -265,13 +264,9 @@ fn line_pts(l: &LineEnt) -> Vec<[f32; 3]> {
     ]
 }
 
-fn arc_pts(cx: f64, cy: f64, r: f64, a0_deg: f64, a1_deg: f64, z: f64) -> Vec<[f32; 3]> {
-    use std::f64::consts::TAU;
-    let fn_norm = |a: f64| -> f64 { ((a % TAU) + TAU) % TAU };
-    let a0 = a0_deg.to_radians();
-    let a1 = a1_deg.to_radians();
+fn arc_pts(cx: f64, cy: f64, r: f64, a0: f64, a1: f64, z: f64) -> Vec<[f32; 3]> {
     let span = {
-        let s = fn_norm(a1) - fn_norm(a0);
+        let s = norm_angle(a1) - norm_angle(a0);
         if s <= 0.0 {
             s + TAU
         } else {
@@ -281,7 +276,7 @@ fn arc_pts(cx: f64, cy: f64, r: f64, a0_deg: f64, a1_deg: f64, z: f64) -> Vec<[f
     let steps = (span.abs() * 20.0).ceil().max(4.0) as usize;
     (0..=steps)
         .map(|i| {
-            let ang = fn_norm(a0) + span * (i as f64 / steps as f64);
+            let ang = norm_angle(a0) + span * (i as f64 / steps as f64);
             [
                 (cx + r * ang.cos()) as f32,
                 (cy + r * ang.sin()) as f32,
@@ -309,41 +304,41 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
 
 // ── Arc geometry helpers ───────────────────────────────────────────────────
 
-/// Extract center, radius, start/end angle (degrees), elevation from an arc.
+/// Extract center, radius, start/end angle (radians), elevation from an arc.
 fn arc_geom(a: &ArcEnt) -> ([f64; 2], f64, f64, f64, f64) {
     ([a.center.x, a.center.y], a.radius, a.start_angle, a.end_angle, a.center.z)
 }
 
-/// Normalize angle to [0, 360).
-fn norm360(a: f64) -> f64 { ((a % 360.0) + 360.0) % 360.0 }
+/// Normalize angle to [0, 2π).
+fn norm_angle(a: f64) -> f64 { ((a % TAU) + TAU) % TAU }
 
 /// Return the CCW angular span from `start` to `end`.
 fn arc_span(start: f64, end: f64) -> f64 {
-    let s = (end - start + 360.0) % 360.0;
-    if s < 1e-6 { 360.0 } else { s }
+    let s = (end - start).rem_euclid(TAU);
+    if s < 1e-6 { TAU } else { s }
 }
 
-/// Project a pick point onto an arc: return the parameter t ∈ [0, 360) = the angle.
+/// Project a pick point onto an arc: return the angle in radians.
 fn arc_angle_at(center: [f64; 2], pt: [f64; 2]) -> f64 {
-    norm360((pt[1] - center[1]).atan2(pt[0] - center[0]).to_degrees())
+    norm_angle((pt[1] - center[1]).atan2(pt[0] - center[0]))
 }
 
 /// Clamp angle `a` into the arc range (CCW from `start` to `end`).
 /// Returns the nearer endpoint if `a` is outside.
 fn clamp_angle_to_arc(a: f64, start: f64, end: f64) -> f64 {
     let span = arc_span(start, end);
-    let rel = (a - start + 360.0) % 360.0;
+    let rel = (a - start).rem_euclid(TAU);
     if rel <= span { a }
-    else if rel < span + (360.0 - span) / 2.0 { end }
+    else if rel < span + (TAU - span) / 2.0 { end }
     else { start }
 }
 
-/// Trim an arc so it goes from `new_start` to `new_end` (both in degrees).
+/// Trim an arc so it goes from `new_start` to `new_end` (both in radians).
 fn trim_arc(orig: &ArcEnt, new_start: f64, new_end: f64) -> ArcEnt {
     let mut a = orig.clone();
     a.common.handle = Handle::NULL;
-    a.start_angle = norm360(new_start);
-    a.end_angle   = norm360(new_end);
+    a.start_angle = norm_angle(new_start);
+    a.end_angle   = norm_angle(new_end);
     a
 }
 
@@ -795,7 +790,7 @@ fn fillet_line_arc(
                 // The tangent point on the arc must be within the arc's angular range
                 let tp_arc_angle = arc_angle_at(ac, tp_arc);
                 let tp_arc_clamped = clamp_angle_to_arc(tp_arc_angle, a_start, a_end);
-                if (norm360(tp_arc_angle) - norm360(tp_arc_clamped)).abs() > 0.5 { continue; }
+                if (norm_angle(tp_arc_angle) - norm_angle(tp_arc_clamped)).abs() > 0.01 { continue; }
 
                 // The tangent point on the line must be on the correct side of the click
                 // (prefer the intersection closest to the click)
@@ -809,8 +804,8 @@ fn fillet_line_arc(
 
                 // Build trimmed arc
                 let arc_click_angle = arc_angle_at(ac, click_arc);
-                let arc_click_rel = (arc_click_angle - a_start + 360.0) % 360.0;
-                let tp_arc_rel = (tp_arc_clamped - a_start + 360.0) % 360.0;
+                let arc_click_rel = (arc_click_angle - a_start).rem_euclid(TAU);
+                let tp_arc_rel = (tp_arc_clamped - a_start).rem_euclid(TAU);
                 let new_arc = if tp_arc_rel <= arc_click_rel {
                     trim_arc(arc, tp_arc_clamped, a_end)
                 } else {
@@ -827,8 +822,8 @@ fn fillet_line_arc(
                 fillet_arc.common.handle = Handle::NULL;
                 fillet_arc.center = Vector3::new(fc[0], fc[1], z);
                 fillet_arc.radius = radius;
-                fillet_arc.start_angle = norm360(fstart);
-                fillet_arc.end_angle   = norm360(fend);
+                fillet_arc.start_angle = norm_angle(fstart);
+                fillet_arc.end_angle   = norm_angle(fend);
 
                 best_dist = dist_total;
                 best = Some((EntityType::Line(new_line), EntityType::Arc(new_arc), EntityType::Arc(fillet_arc)));
@@ -870,12 +865,12 @@ fn fillet_arc_arc(
         let ca1 = clamp_angle_to_arc(arc_angle_at(c1, click1), s1, e1);
         let ca2 = clamp_angle_to_arc(arc_angle_at(c2, click2), s2, e2);
 
-        let new_a1 = if (ic1 - s1 + 360.0) % 360.0 <= (ca1 - s1 + 360.0) % 360.0 {
+        let new_a1 = if (ic1 - s1).rem_euclid(TAU) <= (ca1 - s1).rem_euclid(TAU) {
             trim_arc(a1, ic1, e1)
         } else {
             trim_arc(a1, s1, ic1)
         };
-        let new_a2 = if (ic2 - s2 + 360.0) % 360.0 <= (ca2 - s2 + 360.0) % 360.0 {
+        let new_a2 = if (ic2 - s2).rem_euclid(TAU) <= (ca2 - s2).rem_euclid(TAU) {
             trim_arc(a2, ic2, e2)
         } else {
             trim_arc(a2, s2, ic2)
@@ -909,8 +904,8 @@ fn fillet_arc_arc(
                 let tp2a = arc_angle_at(c2, tp2);
                 let tc1 = clamp_angle_to_arc(tp1a, s1, e1);
                 let tc2 = clamp_angle_to_arc(tp2a, s2, e2);
-                if (norm360(tp1a) - norm360(tc1)).abs() > 0.5 { continue; }
-                if (norm360(tp2a) - norm360(tc2)).abs() > 0.5 { continue; }
+                if (norm_angle(tp1a) - norm_angle(tc1)).abs() > 0.01 { continue; }
+                if (norm_angle(tp2a) - norm_angle(tc2)).abs() > 0.01 { continue; }
 
                 let dist_total = (tp1[0]-click1[0]).hypot(tp1[1]-click1[1])
                                + (tp2[0]-click2[0]).hypot(tp2[1]-click2[1]);
@@ -919,12 +914,12 @@ fn fillet_arc_arc(
                 let ca1 = clamp_angle_to_arc(arc_angle_at(c1, click1), s1, e1);
                 let ca2 = clamp_angle_to_arc(arc_angle_at(c2, click2), s2, e2);
 
-                let new_a1 = if (tc1 - s1 + 360.0) % 360.0 <= (ca1 - s1 + 360.0) % 360.0 {
+                let new_a1 = if (tc1 - s1).rem_euclid(TAU) <= (ca1 - s1).rem_euclid(TAU) {
                     trim_arc(a1, tc1, e1)
                 } else {
                     trim_arc(a1, s1, tc1)
                 };
-                let new_a2 = if (tc2 - s2 + 360.0) % 360.0 <= (ca2 - s2 + 360.0) % 360.0 {
+                let new_a2 = if (tc2 - s2).rem_euclid(TAU) <= (ca2 - s2).rem_euclid(TAU) {
                     trim_arc(a2, tc2, e2)
                 } else {
                     trim_arc(a2, s2, tc2)
@@ -939,8 +934,8 @@ fn fillet_arc_arc(
                 fillet_arc.common.handle = Handle::NULL;
                 fillet_arc.center = Vector3::new(fc[0], fc[1], z);
                 fillet_arc.radius = radius;
-                fillet_arc.start_angle = norm360(fstart);
-                fillet_arc.end_angle   = norm360(fend);
+                fillet_arc.start_angle = norm_angle(fstart);
+                fillet_arc.end_angle   = norm_angle(fend);
 
                 best_dist = dist_total;
                 best = Some((EntityType::Arc(new_a1), EntityType::Arc(new_a2), EntityType::Arc(fillet_arc)));

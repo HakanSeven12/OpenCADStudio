@@ -23,14 +23,8 @@ fn to_truck(arc: &Arc) -> TruckEntity {
     // Compute OCS basis vectors for this entity's normal.
     let (ax, ay) = crate::scene::transform::ocs_axes(normal);
 
-    // When normal.z < 0 the arc sweeps clockwise; reverse the half-angle choice.
-    let mid_a = if arc.normal.z < 0.0 {
-        let cw_span = if sa >= ea { sa - ea } else { sa - ea + TAU };
-        sa - cw_span * 0.5
-    } else {
-        let ccw_end = if ea >= sa { ea } else { ea + TAU };
-        sa + (ccw_end - sa) * 0.5
-    };
+    let ccw_end = if ea >= sa { ea } else { ea + TAU };
+    let mid_a = sa + (ccw_end - sa) * 0.5;
 
     // Arc centre in WCS.
     let (cwx, cwy, cwz) = crate::scene::transform::ocs_point_to_wcs((cx, cy, cz), normal);
@@ -55,13 +49,8 @@ fn to_truck(arc: &Arc) -> TruckEntity {
         let t = arc.thickness;
         let (nx, ny, nz) = normal;
         let n = 32usize;
-        let (start_a, end_a) = if arc.normal.z < 0.0 {
-            let cw_span = if sa >= ea { sa - ea } else { sa - ea + TAU };
-            (sa, sa - cw_span)
-        } else {
-            let ccw_end = if ea >= sa { ea } else { ea + TAU };
-            (sa, ccw_end)
-        };
+        let ccw_end = if ea >= sa { ea } else { ea + TAU };
+        let (start_a, end_a) = (sa, ccw_end);
         let mut pts: Vec<[f32; 3]> = Vec::with_capacity((n + 1) * 2 + 8);
         for i in 0..=n {
             let a = start_a + (end_a - start_a) * (i as f64 / n as f64);

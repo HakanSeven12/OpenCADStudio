@@ -74,44 +74,40 @@ fn bulge_from_midpoint(p0: [f64; 2], p1: [f64; 2], mid: [f64; 2]) -> Option<f64>
 /// Shared by LwPolyline and Polyline2D thickness paths.
 fn thick_segments(
     seg_data: &[(f64, f64, f64, f64)], // (x0, y0, x1, y1) per seg — or use run of (x,y,bulge)
-    path_pts: &[[f32; 3]],
+    path_pts: &[[f64; 3]],
     thickness: f64,
     normal: (f64, f64, f64),
-    key_verts: Vec<[f32; 3]>,
+    key_verts: Vec<[f64; 3]>,
     tangents: Vec<TangentGeom>,
 ) -> TruckEntity {
     let (nx, ny, nz) = normal;
     let t = thickness;
-    let off = |p: [f32; 3]| -> [f32; 3] {
-        [
-            (p[0] as f64 + t * nx) as f32,
-            (p[1] as f64 + t * ny) as f32,
-            (p[2] as f64 + t * nz) as f32,
-        ]
+    let off = |p: [f64; 3]| -> [f64; 3] {
+        [p[0] + t * nx, p[1] + t * ny, p[2] + t * nz]
     };
-    let mut pts: Vec<[f32; 3]> = Vec::with_capacity(path_pts.len() * 2 + seg_data.len() * 3 + 4);
+    let mut pts: Vec<[f64; 3]> = Vec::with_capacity(path_pts.len() * 2 + seg_data.len() * 3 + 4);
     // Bottom path
     pts.extend_from_slice(path_pts);
-    pts.push([f32::NAN; 3]);
+    pts.push([f64::NAN; 3]);
     // Top path
     for &p in path_pts {
         pts.push(off(p));
     }
     // Walls at each vertex (seg_data.0/.1 = start x/y of each seg, last seg appends its end too)
     if !seg_data.is_empty() {
-        pts.push([f32::NAN; 3]);
+        pts.push([f64::NAN; 3]);
         for (k, &(x0, y0, _x1, _y1)) in seg_data.iter().enumerate() {
             let pb = key_verts[k];
             let _ = (x0, y0); // key_verts already has correct WCS
             pts.push(pb);
             pts.push(off(pb));
             if k + 1 < seg_data.len() {
-                pts.push([f32::NAN; 3]);
+                pts.push([f64::NAN; 3]);
             }
         }
         // Last wall at the final vertex
         if let Some(&last) = key_verts.last() {
-            pts.push([f32::NAN; 3]);
+            pts.push([f64::NAN; 3]);
             pts.push(last);
             pts.push(off(last));
         }
@@ -143,7 +139,7 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
     let seg_count = if pline.is_closed { count } else { count - 1 };
     let mut edges: Vec<Edge> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
-    let mut key_verts: Vec<[f32; 3]> = Vec::new();
+    let mut key_verts: Vec<[f64; 3]> = Vec::new();
 
     // Convert OCS (x, y, elevation) to WCS Point3.
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
@@ -155,14 +151,14 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
     };
 
     if pline.thickness.abs() > 1e-10 {
-        let mut path: Vec<[f32; 3]> = Vec::new();
-        let mut kv: Vec<[f32; 3]> = Vec::new();
+        let mut path: Vec<[f64; 3]> = Vec::new();
+        let mut kv: Vec<[f64; 3]> = Vec::new();
         let mut tgs: Vec<TangentGeom> = Vec::new();
         let mut seg_data: Vec<(f64, f64, f64, f64)> = Vec::new();
         // First vertex
         let (w0x, w0y, w0z) = to_wcs(verts[0].location.x, verts[0].location.y);
-        path.push([w0x as f32, w0y as f32, w0z as f32]);
-        kv.push([w0x as f32, w0y as f32, w0z as f32]);
+        path.push([w0x, w0y, w0z]);
+        kv.push([w0x, w0y, w0z]);
         for i in 0..seg_count {
             let va = &verts[i];
             let vb = &verts[(i + 1) % count];
@@ -171,10 +167,12 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
             let bulge = va.bulge;
             if bulge.abs() < 1e-9 {
                 let (wx, wy, wz) = to_wcs(ox1, oy1);
-                path.push([wx as f32, wy as f32, wz as f32]);
+                path.push([wx, wy, wz]);
+                let p1_pt = path[path.len() - 2];
+                let p2_pt = *path.last().unwrap();
                 tgs.push(TangentGeom::Line {
-                    p1: path[path.len() - 2],
-                    p2: *path.last().unwrap(),
+                    p1: [p1_pt[0] as f32, p1_pt[1] as f32, p1_pt[2] as f32],
+                    p2: [p2_pt[0] as f32, p2_pt[1] as f32, p2_pt[2] as f32],
                 });
             } else {
                 let angle = 4.0 * bulge.atan();
@@ -209,11 +207,11 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
                 for j in 1..=16usize {
                     let a = a0 + (a1 - a0) * (j as f64 / 16.0);
                     let (wx, wy, wz) = to_wcs(ocx + r * a.cos(), ocy + r * a.sin());
-                    path.push([wx as f32, wy as f32, wz as f32]);
+                    path.push([wx, wy, wz]);
                 }
             }
             let (wbx, wby, wbz) = to_wcs(ox1, oy1);
-            kv.push([wbx as f32, wby as f32, wbz as f32]);
+            kv.push([wbx, wby, wbz]);
             seg_data.push((ox0, oy0, ox1, oy1));
         }
         return thick_segments(&seg_data, &path, pline.thickness, normal, kv, tgs);
@@ -221,9 +219,10 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
 
     // plinegen=false: NaN-separated segments so the linetype pattern restarts per vertex.
     if !pline.plinegen {
-        let mut pts: Vec<[f32; 3]> = Vec::new();
+        let mut pts: Vec<[f64; 3]> = Vec::new();
         let mut tgs: Vec<TangentGeom> = Vec::new();
-        let mut kv: Vec<[f32; 3]> = Vec::new();
+        let mut kv: Vec<[f64; 3]> = Vec::new();
+        let to_f32 = |p: [f64; 3]| -> [f32; 3] { [p[0] as f32, p[1] as f32, p[2] as f32] };
         for i in 0..seg_count {
             let va = &verts[i];
             let vb = &verts[(i + 1) % count];
@@ -231,19 +230,19 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
             let (ox1, oy1) = (vb.location.x, vb.location.y);
             let bulge = va.bulge;
             let (wx0, wy0, wz0) = to_wcs(ox0, oy0);
-            let p_start = [wx0 as f32, wy0 as f32, wz0 as f32];
+            let p_start = [wx0, wy0, wz0];
             pts.push(p_start);
             if i == 0 {
                 kv.push(p_start);
             }
             if bulge.abs() < 1e-9 {
                 let (wx1, wy1, wz1) = to_wcs(ox1, oy1);
-                let p_end = [wx1 as f32, wy1 as f32, wz1 as f32];
+                let p_end = [wx1, wy1, wz1];
                 pts.push(p_end);
                 kv.push(p_end);
                 tgs.push(TangentGeom::Line {
-                    p1: p_start,
-                    p2: p_end,
+                    p1: to_f32(p_start),
+                    p2: to_f32(p_end),
                 });
             } else {
                 let angle = 4.0 * bulge.atan();
@@ -273,10 +272,10 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
                 for j in 1..=16usize {
                     let a = a0 + (a1 - a0) * (j as f64 / 16.0);
                     let (wx, wy, wz) = to_wcs(ocx + r * a.cos(), ocy + r * a.sin());
-                    pts.push([wx as f32, wy as f32, wz as f32]);
+                    pts.push([wx, wy, wz]);
                 }
                 let (wx1, wy1, wz1) = to_wcs(ox1, oy1);
-                kv.push([wx1 as f32, wy1 as f32, wz1 as f32]);
+                kv.push([wx1, wy1, wz1]);
                 let (wcx, wcy, wcz) = to_wcs(ocx, ocy);
                 tgs.push(TangentGeom::Circle {
                     center: [wcx as f32, wcy as f32, wcz as f32],
@@ -284,7 +283,7 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
                 });
             }
             if i + 1 < seg_count {
-                pts.push([f32::NAN; 3]);
+                pts.push([f64::NAN; 3]);
             }
         }
         return TruckEntity {
@@ -351,9 +350,9 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
         }
 
         if i == 0 {
-            key_verts.push([p0.x as f32, p0.y as f32, p0.z as f32]);
+            key_verts.push([p0.x, p0.y, p0.z]);
         }
-        key_verts.push([p1.x as f32, p1.y as f32, p1.z as f32]);
+        key_verts.push([p1.x, p1.y, p1.z]);
     }
 
     TruckEntity {

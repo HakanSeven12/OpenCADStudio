@@ -18,7 +18,7 @@ use crate::scene::wire_model::SnapHint;
 // ── Marker geometry ───────────────────────────────────────────────────────────
 
 /// Small diamond marker at the shape insertion point.
-fn shape_marker(ox: f32, oy: f32, oz: f32, size: f32) -> Vec<[f32; 3]> {
+fn shape_marker(ox: f64, oy: f64, oz: f64, size: f64) -> Vec<[f64; 3]> {
     let s = size * 0.5;
     vec![
         [ox, oy + s, oz], // top
@@ -26,7 +26,7 @@ fn shape_marker(ox: f32, oy: f32, oz: f32, size: f32) -> Vec<[f32; 3]> {
         [ox, oy - s, oz], // bottom
         [ox - s, oy, oz], // left
         [ox, oy + s, oz], // close
-        [f32::NAN; 3],
+        [f64::NAN; 3],
     ]
 }
 
@@ -34,12 +34,12 @@ fn shape_marker(ox: f32, oy: f32, oz: f32, size: f32) -> Vec<[f32; 3]> {
 
 impl TruckConvertible for Shape {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        let ox = self.insertion_point.x as f32;
-        let oy = self.insertion_point.y as f32;
-        let oz = self.insertion_point.z as f32;
-        let size = (self.size as f32).abs().max(0.5);
+        let ox = self.insertion_point.x;
+        let oy = self.insertion_point.y;
+        let oz = self.insertion_point.z;
+        let size = self.size.abs().max(0.5);
 
-        let snap_pt = Vec3::new(ox, oy, oz);
+        let snap_pt = Vec3::new(ox as f32, oy as f32, oz as f32);
         let pts = shape_marker(ox, oy, oz, size);
 
         Some(TruckEntity {

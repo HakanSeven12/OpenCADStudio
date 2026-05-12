@@ -142,6 +142,12 @@ pub fn tessellate(
                 }
 
                 let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                let [ox, oy, oz] = world_offset;
+                let key_vertices: Vec<[f32; 3]> = te
+                    .key_vertices
+                    .into_iter()
+                    .map(|[x, y, z]| [(x - ox) as f32, (y - oy) as f32, (z - oz) as f32])
+                    .collect();
                 return WireModel {
                     name,
                     points,
@@ -153,7 +159,7 @@ pub fn tessellate(
                     snap_pts,
                     tangent_geoms: te.tangent_geoms,
                     aci: 0,
-                    key_vertices: te.key_vertices,
+                    key_vertices,
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
                     vp_scissor: None,
@@ -168,6 +174,14 @@ pub fn tessellate(
                     TruckTessResult::Point([x, y, z]) => {
                         let s = 0.1_f32;
                         let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                        let [ox, oy, oz] = world_offset;
+                        let key_vertices: Vec<[f32; 3]> = te
+                            .key_vertices
+                            .into_iter()
+                            .map(|[kx, ky, kz]| {
+                                [(kx - ox) as f32, (ky - oy) as f32, (kz - oz) as f32]
+                            })
+                            .collect();
                         return WireModel {
                             name,
                             points: vec![
@@ -184,7 +198,7 @@ pub fn tessellate(
                             snap_pts,
                             tangent_geoms: te.tangent_geoms,
                             aci: 0,
-                            key_vertices: te.key_vertices,
+                            key_vertices,
                             aabb: WireModel::UNBOUNDED_AABB,
                             plinegen: true,
                             vp_scissor: None,
@@ -202,7 +216,7 @@ pub fn tessellate(
                     let key_vertices: Vec<[f32; 3]> = te
                         .key_vertices
                         .into_iter()
-                        .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                        .map(|[x, y, z]| [(x - ox) as f32, (y - oy) as f32, (z - oz) as f32])
                         .collect();
                     return WireModel {
                         name,
@@ -231,7 +245,7 @@ pub fn tessellate(
                     let key_vertices: Vec<[f32; 3]> = te
                         .key_vertices
                         .into_iter()
-                        .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                        .map(|[x, y, z]| [(x - ox) as f32, (y - oy) as f32, (z - oz) as f32])
                         .collect();
                     return WireModel {
                         name,
@@ -254,17 +268,18 @@ pub fn tessellate(
             }
 
             TruckObject::Lines(points) => {
-                // Points are world-space f32 from entity converters (polyline,
-                // leader, mesh, solid2d, etc.).  Subtract world_offset so the
-                // geometry lands in local space alongside Line/Arc/Circle.
+                // Points are world-space f64 from entity converters (polyline,
+                // leader, mesh, solid2d, etc.). Subtract world_offset in f64
+                // before casting to f32 so drawings at large UTM-style
+                // coordinates keep sub-unit precision in the wire model.
                 let [ox, oy, oz] = world_offset;
                 let local_pts: Vec<[f32; 3]> = points
                     .into_iter()
                     .map(|[x, y, z]| {
                         if x.is_nan() {
-                            [x, y, z]
+                            [f32::NAN, f32::NAN, f32::NAN]
                         } else {
-                            [x - ox as f32, y - oy as f32, z - oz as f32]
+                            [(x - ox) as f32, (y - oy) as f32, (z - oz) as f32]
                         }
                     })
                     .collect();
@@ -272,12 +287,12 @@ pub fn tessellate(
                 let key_vertices: Vec<[f32; 3]> = te
                     .key_vertices
                     .into_iter()
-                    .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                    .map(|[x, y, z]| [(x - ox) as f32, (y - oy) as f32, (z - oz) as f32])
                     .collect();
                 let fill_tris: Vec<[f32; 3]> = te
                     .fill_tris
                     .into_iter()
-                    .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                    .map(|[x, y, z]| [(x - ox) as f32, (y - oy) as f32, (z - oz) as f32])
                     .collect();
                 return WireModel {
                     name,
@@ -304,9 +319,9 @@ pub fn tessellate(
                     .into_iter()
                     .map(|[x, y, z]| {
                         if x.is_nan() {
-                            [x, y, z]
+                            [f32::NAN, f32::NAN, f32::NAN]
                         } else {
-                            [x - ox as f32, y - oy as f32, z - oz as f32]
+                            [(x - ox) as f32, (y - oy) as f32, (z - oz) as f32]
                         }
                     })
                     .collect();
@@ -314,7 +329,7 @@ pub fn tessellate(
                 let key_vertices: Vec<[f32; 3]> = te
                     .key_vertices
                     .into_iter()
-                    .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                    .map(|[x, y, z]| [(x - ox) as f32, (y - oy) as f32, (z - oz) as f32])
                     .collect();
                 return WireModel {
                     name,
@@ -657,8 +672,12 @@ pub fn tessellate_multileader(
                 }
 
                 if ml.path_type == MultiLeaderPathType::Spline && ctrl.len() >= 2 {
-                    for pt in catmull_rom_pts(&ctrl, 8) {
-                        points.push(pt);
+                    let ctrl_f64: Vec<[f64; 3]> = ctrl
+                        .iter()
+                        .map(|c| [c[0] as f64, c[1] as f64, c[2] as f64])
+                        .collect();
+                    for pt in catmull_rom_pts(&ctrl_f64, 8) {
+                        points.push([pt[0] as f32, pt[1] as f32, pt[2] as f32]);
                     }
                 } else {
                     for &c in &ctrl {

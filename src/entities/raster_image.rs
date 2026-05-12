@@ -23,16 +23,16 @@ fn image_corners(
     v: &acadrust::types::Vector3,
     w: f64,
     h: f64,
-) -> [[f32; 3]; 4] {
-    let ox = origin.x as f32;
-    let oy = origin.y as f32;
-    let oz = origin.z as f32;
-    let ux = (u.x * w) as f32;
-    let uy = (u.y * w) as f32;
-    let uz = (u.z * w) as f32;
-    let vx = (v.x * h) as f32;
-    let vy = (v.y * h) as f32;
-    let vz = (v.z * h) as f32;
+) -> [[f64; 3]; 4] {
+    let ox = origin.x;
+    let oy = origin.y;
+    let oz = origin.z;
+    let ux = u.x * w;
+    let uy = u.y * w;
+    let uz = u.z * w;
+    let vx = v.x * h;
+    let vy = v.y * h;
+    let vz = v.z * h;
 
     [
         [ox, oy, oz],
@@ -42,15 +42,19 @@ fn image_corners(
     ]
 }
 
+fn to_f32_3(p: [f64; 3]) -> [f32; 3] {
+    [p[0] as f32, p[1] as f32, p[2] as f32]
+}
+
 /// Rectangle border + X diagonals — used as a placeholder for images.
-fn image_wire(corners: [[f32; 3]; 4], with_x: bool) -> Vec<[f32; 3]> {
+fn image_wire(corners: [[f64; 3]; 4], with_x: bool) -> Vec<[f64; 3]> {
     let [p0, p1, p2, p3] = corners;
     let mut pts = vec![p0, p1, p2, p3, p0];
     if with_x {
-        pts.push([f32::NAN; 3]);
+        pts.push([f64::NAN; 3]);
         pts.push(p0);
         pts.push(p2);
-        pts.push([f32::NAN; 3]);
+        pts.push([f64::NAN; 3]);
         pts.push(p1);
         pts.push(p3);
     }
@@ -76,14 +80,14 @@ impl TruckConvertible for RasterImage {
         );
 
         // Helper: pixel-space → world-space point.
-        let ox = self.insertion_point.x as f32;
-        let oy = self.insertion_point.y as f32;
-        let oz = self.insertion_point.z as f32;
-        let px_to_world = |px: f64, py: f64| -> [f32; 3] {
+        let ox = self.insertion_point.x;
+        let oy = self.insertion_point.y;
+        let oz = self.insertion_point.z;
+        let px_to_world = |px: f64, py: f64| -> [f64; 3] {
             [
-                ox + (self.u_vector.x * px + self.v_vector.x * py) as f32,
-                oy + (self.u_vector.y * px + self.v_vector.y * py) as f32,
-                oz + (self.u_vector.z * px + self.v_vector.z * py) as f32,
+                ox + self.u_vector.x * px + self.v_vector.x * py,
+                oy + self.u_vector.y * px + self.v_vector.y * py,
+                oz + self.u_vector.z * px + self.v_vector.z * py,
             ]
         };
 
@@ -91,7 +95,7 @@ impl TruckConvertible for RasterImage {
             let cb = &self.clip_boundary;
             match cb.clip_type {
                 acadrust::entities::ClipType::Polygonal if cb.vertices.len() >= 3 => {
-                    let mut poly: Vec<[f32; 3]> =
+                    let mut poly: Vec<[f64; 3]> =
                         cb.vertices.iter().map(|v| px_to_world(v.x, v.y)).collect();
                     if let Some(&first) = poly.first() {
                         poly.push(first);
@@ -135,10 +139,10 @@ impl Grippable for RasterImage {
             self.size.y,
         );
         vec![
-            square_grip(0, Vec3::from(corners[0])),
-            diamond_grip(1, Vec3::from(corners[1])),
-            diamond_grip(2, Vec3::from(corners[2])),
-            diamond_grip(3, Vec3::from(corners[3])),
+            square_grip(0, Vec3::from(to_f32_3(corners[0]))),
+            diamond_grip(1, Vec3::from(to_f32_3(corners[1]))),
+            diamond_grip(2, Vec3::from(to_f32_3(corners[2]))),
+            diamond_grip(3, Vec3::from(to_f32_3(corners[3]))),
         ]
     }
 
@@ -254,19 +258,19 @@ impl TruckConvertible for Wipeout {
             ) {
             // Convert pixel-space boundary vertices to world space:
             // world = insertion_point + u_vector * v.x * size.x + v_vector * v.y * size.y
-            let ox = self.insertion_point.x as f32;
-            let oy = self.insertion_point.y as f32;
-            let oz = self.insertion_point.z as f32;
-            let mut poly: Vec<[f32; 3]> = self
+            let ox = self.insertion_point.x;
+            let oy = self.insertion_point.y;
+            let oz = self.insertion_point.z;
+            let mut poly: Vec<[f64; 3]> = self
                 .clip_boundary_vertices
                 .iter()
                 .map(|v| {
-                    let wx = (self.u_vector.x * v.x * self.size.x
-                        + self.v_vector.x * v.y * self.size.y) as f32;
-                    let wy = (self.u_vector.y * v.x * self.size.x
-                        + self.v_vector.y * v.y * self.size.y) as f32;
-                    let wz = (self.u_vector.z * v.x * self.size.x
-                        + self.v_vector.z * v.y * self.size.y) as f32;
+                    let wx = self.u_vector.x * v.x * self.size.x
+                        + self.v_vector.x * v.y * self.size.y;
+                    let wy = self.u_vector.y * v.x * self.size.x
+                        + self.v_vector.y * v.y * self.size.y;
+                    let wz = self.u_vector.z * v.x * self.size.x
+                        + self.v_vector.z * v.y * self.size.y;
                     [ox + wx, oy + wy, oz + wz]
                 })
                 .collect();
@@ -330,10 +334,10 @@ impl Grippable for Wipeout {
                 self.size.y,
             );
             vec![
-                square_grip(0, Vec3::from(corners[0])),
-                diamond_grip(1, Vec3::from(corners[1])),
-                diamond_grip(2, Vec3::from(corners[2])),
-                diamond_grip(3, Vec3::from(corners[3])),
+                square_grip(0, Vec3::from(to_f32_3(corners[0]))),
+                diamond_grip(1, Vec3::from(to_f32_3(corners[1]))),
+                diamond_grip(2, Vec3::from(to_f32_3(corners[2]))),
+                diamond_grip(3, Vec3::from(to_f32_3(corners[3]))),
             ]
         }
     }

@@ -14,7 +14,11 @@ use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 
-fn v3(v: &acadrust::types::Vector3) -> [f32; 3] {
+fn v3(v: &acadrust::types::Vector3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
+fn v3f32(v: &acadrust::types::Vector3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 
@@ -31,22 +35,22 @@ impl TruckConvertible for Solid {
         let pts = vec![
             p0,
             p1,
-            [f32::NAN; 3],
+            [f64::NAN; 3],
             p1,
             p3,
-            [f32::NAN; 3],
+            [f64::NAN; 3],
             p3,
             p2,
-            [f32::NAN; 3],
+            [f64::NAN; 3],
             p2,
             p0,
         ];
 
         let snap = vec![
-            (Vec3::from(p0), SnapHint::Node),
-            (Vec3::from(p1), SnapHint::Node),
-            (Vec3::from(p2), SnapHint::Node),
-            (Vec3::from(p3), SnapHint::Node),
+            (Vec3::from(v3f32(&self.first_corner)), SnapHint::Node),
+            (Vec3::from(v3f32(&self.second_corner)), SnapHint::Node),
+            (Vec3::from(v3f32(&self.third_corner)), SnapHint::Node),
+            (Vec3::from(v3f32(&self.fourth_corner)), SnapHint::Node),
         ];
 
         Some(TruckEntity {
@@ -62,10 +66,10 @@ impl TruckConvertible for Solid {
 impl Grippable for Solid {
     fn grips(&self) -> Vec<GripDef> {
         vec![
-            square_grip(0, Vec3::from(v3(&self.first_corner))),
-            square_grip(1, Vec3::from(v3(&self.second_corner))),
-            square_grip(2, Vec3::from(v3(&self.third_corner))),
-            square_grip(3, Vec3::from(v3(&self.fourth_corner))),
+            square_grip(0, Vec3::from(v3f32(&self.first_corner))),
+            square_grip(1, Vec3::from(v3f32(&self.second_corner))),
+            square_grip(2, Vec3::from(v3f32(&self.third_corner))),
+            square_grip(3, Vec3::from(v3f32(&self.fourth_corner))),
         ]
     }
 

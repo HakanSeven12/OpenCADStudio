@@ -51,38 +51,26 @@ fn to_truck(arc: &Arc) -> TruckEntity {
         let n = 32usize;
         let ccw_end = if ea >= sa { ea } else { ea + TAU };
         let (start_a, end_a) = (sa, ccw_end);
-        let mut pts: Vec<[f32; 3]> = Vec::with_capacity((n + 1) * 2 + 8);
+        let mut pts: Vec<[f64; 3]> = Vec::with_capacity((n + 1) * 2 + 8);
         for i in 0..=n {
             let a = start_a + (end_a - start_a) * (i as f64 / n as f64);
             let p = arc_pt(a);
-            pts.push([p.x as f32, p.y as f32, p.z as f32]);
+            pts.push([p.x, p.y, p.z]);
         }
-        pts.push([f32::NAN; 3]);
+        pts.push([f64::NAN; 3]);
         for i in 0..=n {
             let a = start_a + (end_a - start_a) * (i as f64 / n as f64);
             let p = arc_pt(a);
-            pts.push([
-                (p.x + t * nx) as f32,
-                (p.y + t * ny) as f32,
-                (p.z + t * nz) as f32,
-            ]);
+            pts.push([p.x + t * nx, p.y + t * ny, p.z + t * nz]);
         }
-        pts.push([f32::NAN; 3]);
+        pts.push([f64::NAN; 3]);
         let ps = arc_pt(sa);
-        pts.push([ps.x as f32, ps.y as f32, ps.z as f32]);
-        pts.push([
-            (ps.x + t * nx) as f32,
-            (ps.y + t * ny) as f32,
-            (ps.z + t * nz) as f32,
-        ]);
-        pts.push([f32::NAN; 3]);
+        pts.push([ps.x, ps.y, ps.z]);
+        pts.push([ps.x + t * nx, ps.y + t * ny, ps.z + t * nz]);
+        pts.push([f64::NAN; 3]);
         let pe = arc_pt(ea);
-        pts.push([pe.x as f32, pe.y as f32, pe.z as f32]);
-        pts.push([
-            (pe.x + t * nx) as f32,
-            (pe.y + t * ny) as f32,
-            (pe.z + t * nz) as f32,
-        ]);
+        pts.push([pe.x, pe.y, pe.z]);
+        pts.push([pe.x + t * nx, pe.y + t * ny, pe.z + t * nz]);
         return TruckEntity {
             object: TruckObject::Lines(pts),
             snap_pts: vec![(cv, SnapHint::Center)],

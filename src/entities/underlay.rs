@@ -16,17 +16,21 @@ use crate::scene::wire_model::SnapHint;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn v3(v: &acadrust::types::Vector3) -> [f32; 3] {
+fn v3(v: &acadrust::types::Vector3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
+fn v3f32(v: &acadrust::types::Vector3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 
 /// Small cross marker at the insertion point (used when no clip boundary).
-fn cross_wire(origin: [f32; 3], size: f32) -> Vec<[f32; 3]> {
+fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
     let [ox, oy, oz] = origin;
     vec![
         [ox - size, oy, oz],
         [ox + size, oy, oz],
-        [f32::NAN; 3],
+        [f64::NAN; 3],
         [ox, oy - size, oz],
         [ox, oy + size, oz],
     ]
@@ -37,23 +41,24 @@ fn cross_wire(origin: [f32; 3], size: f32) -> Vec<[f32; 3]> {
 impl TruckConvertible for Underlay {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
         let origin = v3(&self.insertion_point);
+        let origin_f32 = v3f32(&self.insertion_point);
 
         if !self.clip_boundary_vertices.is_empty() {
             // Draw clip boundary polygon + close it.
             let world_verts = self.world_clip_boundary();
-            let mut pts: Vec<[f32; 3]> = world_verts
+            let mut pts: Vec<[f64; 3]> = world_verts
                 .iter()
-                .map(|v| [v.x as f32, v.y as f32, v.z as f32])
+                .map(|v| [v.x, v.y, v.z])
                 .collect();
             // Close polygon.
             if let Some(&first) = pts.first() {
                 pts.push(first);
             }
             // Insertion grip.
-            let key: Vec<[f32; 3]> = pts.clone();
+            let key: Vec<[f64; 3]> = pts.clone();
             Some(TruckEntity {
                 object: TruckObject::Lines(pts),
-                snap_pts: vec![(Vec3::from(origin), SnapHint::Node)],
+                snap_pts: vec![(Vec3::from(origin_f32), SnapHint::Node)],
                 tangent_geoms: vec![],
                 key_vertices: key,
                 fill_tris: vec![],
@@ -63,7 +68,7 @@ impl TruckConvertible for Underlay {
             let pts = cross_wire(origin, 1.0);
             Some(TruckEntity {
                 object: TruckObject::Lines(pts),
-                snap_pts: vec![(Vec3::from(origin), SnapHint::Node)],
+                snap_pts: vec![(Vec3::from(origin_f32), SnapHint::Node)],
                 tangent_geoms: vec![],
                 key_vertices: vec![origin],
                 fill_tris: vec![],
@@ -76,7 +81,7 @@ impl TruckConvertible for Underlay {
 
 impl Grippable for Underlay {
     fn grips(&self) -> Vec<GripDef> {
-        let origin = Vec3::from(v3(&self.insertion_point));
+        let origin = Vec3::from(v3f32(&self.insertion_point));
         let mut grips = vec![square_grip(0, origin)];
 
         if !self.clip_boundary_vertices.is_empty() {

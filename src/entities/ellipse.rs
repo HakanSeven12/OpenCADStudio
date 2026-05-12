@@ -125,9 +125,9 @@ fn to_truck(ell: &Ellipse) -> TruckEntity {
         let edge = Edge::new(&v_start, &v_end, Curve::BSplineCurve(bspline));
         let pt_start = ctrl_pts.first().unwrap();
         let pt_end = ctrl_pts.last().unwrap();
-        let key_vertices = vec![
-            [pt_start.x as f32, pt_start.y as f32, pt_start.z as f32],
-            [pt_end.x as f32, pt_end.y as f32, pt_end.z as f32],
+        let key_vertices: Vec<[f64; 3]> = vec![
+            [pt_start.x, pt_start.y, pt_start.z],
+            [pt_end.x, pt_end.y, pt_end.z],
         ];
         TruckEntity {
             object: TruckObject::Curve(edge),

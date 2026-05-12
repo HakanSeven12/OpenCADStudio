@@ -20,23 +20,19 @@ impl TruckConvertible for MLine {
         // Spine: center line connecting all vertex positions.
         // Also attempt to draw parallel offset lines (±scale/2 in miter direction)
         // when scale_factor is non-zero.
-        let scale = self.scale_factor as f32;
+        let scale = self.scale_factor;
 
-        let mut pts: Vec<[f32; 3]> = Vec::new();
+        let mut pts: Vec<[f64; 3]> = Vec::new();
 
         // Center spine.
         for v in &self.vertices {
-            pts.push([
-                v.position.x as f32,
-                v.position.y as f32,
-                v.position.z as f32,
-            ]);
+            pts.push([v.position.x, v.position.y, v.position.z]);
         }
         if closed && n >= 2 {
             pts.push([
-                self.vertices[0].position.x as f32,
-                self.vertices[0].position.y as f32,
-                self.vertices[0].position.z as f32,
+                self.vertices[0].position.x,
+                self.vertices[0].position.y,
+                self.vertices[0].position.z,
             ]);
         }
 
@@ -44,28 +40,28 @@ impl TruckConvertible for MLine {
         // along each vertex's miter direction.
         if scale.abs() > 1e-6 {
             let half = scale * 0.5;
-            for sign in [-1.0_f32, 1.0_f32] {
+            for sign in [-1.0_f64, 1.0_f64] {
                 let offset = half * sign;
-                pts.push([f32::NAN; 3]);
+                pts.push([f64::NAN; 3]);
                 for v in &self.vertices {
-                    let mx = v.miter.x as f32;
-                    let my = v.miter.y as f32;
-                    let mz = v.miter.z as f32;
+                    let mx = v.miter.x;
+                    let my = v.miter.y;
+                    let mz = v.miter.z;
                     pts.push([
-                        v.position.x as f32 + mx * offset,
-                        v.position.y as f32 + my * offset,
-                        v.position.z as f32 + mz * offset,
+                        v.position.x + mx * offset,
+                        v.position.y + my * offset,
+                        v.position.z + mz * offset,
                     ]);
                 }
                 if closed && n >= 2 {
                     let v0 = &self.vertices[0];
-                    let mx = v0.miter.x as f32;
-                    let my = v0.miter.y as f32;
-                    let mz = v0.miter.z as f32;
+                    let mx = v0.miter.x;
+                    let my = v0.miter.y;
+                    let mz = v0.miter.z;
                     pts.push([
-                        v0.position.x as f32 + mx * offset,
-                        v0.position.y as f32 + my * offset,
-                        v0.position.z as f32 + mz * offset,
+                        v0.position.x + mx * offset,
+                        v0.position.y + my * offset,
+                        v0.position.z + mz * offset,
                     ]);
                 }
             }
@@ -74,14 +70,14 @@ impl TruckConvertible for MLine {
             // at the first and last vertex of an open MLine.
             if !closed {
                 let cap_v = |v: &acadrust::entities::MLineVertex| {
-                    let mx = v.miter.x as f32;
-                    let my = v.miter.y as f32;
-                    let mz = v.miter.z as f32;
-                    let px = v.position.x as f32;
-                    let py = v.position.y as f32;
-                    let pz = v.position.z as f32;
+                    let mx = v.miter.x;
+                    let my = v.miter.y;
+                    let mz = v.miter.z;
+                    let px = v.position.x;
+                    let py = v.position.y;
+                    let pz = v.position.z;
                     [
-                        [f32::NAN; 3],
+                        [f64::NAN; 3],
                         [px + mx * (-half), py + my * (-half), pz + mz * (-half)],
                         [px + mx * half, py + my * half, pz + mz * half],
                     ]
@@ -91,16 +87,10 @@ impl TruckConvertible for MLine {
             }
         }
 
-        let key_verts: Vec<[f32; 3]> = self
+        let key_verts: Vec<[f64; 3]> = self
             .vertices
             .iter()
-            .map(|v| {
-                [
-                    v.position.x as f32,
-                    v.position.y as f32,
-                    v.position.z as f32,
-                ]
-            })
+            .map(|v| [v.position.x, v.position.y, v.position.z])
             .collect();
 
         let snap_pts = self

@@ -9,14 +9,14 @@ use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 
 fn to_truck(ole: &Ole2Frame) -> TruckEntity {
-    let x0 = ole.upper_left_corner.x as f32;
-    let y0 = ole.lower_right_corner.y as f32;
-    let x1 = ole.lower_right_corner.x as f32;
-    let y1 = ole.upper_left_corner.y as f32;
-    let z = ole.upper_left_corner.z as f32;
+    let x0 = ole.upper_left_corner.x;
+    let y0 = ole.lower_right_corner.y;
+    let x1 = ole.lower_right_corner.x;
+    let y1 = ole.upper_left_corner.y;
+    let z = ole.upper_left_corner.z;
 
     if (x1 - x0).abs() < 1e-6 && (y1 - y0).abs() < 1e-6 {
-        let s = 0.5_f32;
+        let s = 0.5_f64;
         return TruckEntity {
             object: TruckObject::Lines(vec![[-s, 0.0, z], [s, 0.0, z]]),
             snap_pts: vec![],
@@ -28,7 +28,7 @@ fn to_truck(ole: &Ole2Frame) -> TruckEntity {
 
     let cx = (x0 + x1) * 0.5;
     let cy = (y0 + y1) * 0.5;
-    let pts = vec![
+    let pts: Vec<[f64; 3]> = vec![
         // Rectangle
         [x0, y0, z],
         [x1, y0, z],
@@ -41,11 +41,11 @@ fn to_truck(ole: &Ole2Frame) -> TruckEntity {
         // Diagonal X
         [x0, y0, z],
         [x1, y1, z],
-        [f32::NAN; 3],
+        [f64::NAN; 3],
         [x1, y0, z],
         [x0, y1, z],
     ];
-    let center = Vec3::new(cx, cy, z);
+    let center = Vec3::new(cx as f32, cy as f32, z as f32);
     TruckEntity {
         object: TruckObject::Lines(pts),
         snap_pts: vec![(center, SnapHint::Center)],

@@ -14,16 +14,10 @@ use crate::scene::wire_model::TangentGeom;
 // ── Polyline (old-style 3D heavy polyline) ────────────────────────────────────
 
 fn tessellate_polyline(pl: &Polyline) -> TruckEntity {
-    let pts: Vec<[f32; 3]> = pl
+    let pts: Vec<[f64; 3]> = pl
         .vertices
         .iter()
-        .map(|v| {
-            [
-                v.location.x as f32,
-                v.location.y as f32,
-                v.location.z as f32,
-            ]
-        })
+        .map(|v| [v.location.x, v.location.y, v.location.z])
         .collect();
 
     let mut points = pts.clone();
@@ -148,7 +142,7 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
     let seg_count = if pl.is_closed() { count } else { count - 1 };
     let mut edges: Vec<Edge> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
-    let mut key_verts: Vec<[f32; 3]> = Vec::new();
+    let mut key_verts: Vec<[f64; 3]> = Vec::new();
 
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
         crate::scene::transform::ocs_point_to_wcs((x, y, elev), normal)
@@ -161,19 +155,18 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
     if pl.thickness.abs() > 1e-10 {
         let (nx, ny, nz) = normal;
         let t = pl.thickness;
-        let off = |p: [f32; 3]| -> [f32; 3] {
-            [
-                (p[0] as f64 + t * nx) as f32,
-                (p[1] as f64 + t * ny) as f32,
-                (p[2] as f64 + t * nz) as f32,
-            ]
+        let off = |p: [f64; 3]| -> [f64; 3] {
+            [p[0] + t * nx, p[1] + t * ny, p[2] + t * nz]
         };
-        let mut path: Vec<[f32; 3]> = Vec::new();
-        let mut kv: Vec<[f32; 3]> = Vec::new();
+        let to_f32 = |p: [f64; 3]| -> [f32; 3] {
+            [p[0] as f32, p[1] as f32, p[2] as f32]
+        };
+        let mut path: Vec<[f64; 3]> = Vec::new();
+        let mut kv: Vec<[f64; 3]> = Vec::new();
         let mut tgs: Vec<TangentGeom> = Vec::new();
         let (w0x, w0y, w0z) = to_wcs(verts[0].location.x, verts[0].location.y);
-        path.push([w0x as f32, w0y as f32, w0z as f32]);
-        kv.push([w0x as f32, w0y as f32, w0z as f32]);
+        path.push([w0x, w0y, w0z]);
+        kv.push([w0x, w0y, w0z]);
         for i in 0..seg_count {
             let va = &verts[i];
             let vb = &verts[(i + 1) % count];
@@ -182,10 +175,12 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
             let bulge = va.bulge;
             if bulge.abs() < 1e-9 {
                 let (wx, wy, wz) = to_wcs(ox1, oy1);
-                path.push([wx as f32, wy as f32, wz as f32]);
+                path.push([wx, wy, wz]);
+                let p1_pt = path[path.len() - 2];
+                let p2_pt = *path.last().unwrap();
                 tgs.push(TangentGeom::Line {
-                    p1: path[path.len() - 2],
-                    p2: *path.last().unwrap(),
+                    p1: to_f32(p1_pt),
+                    p2: to_f32(p2_pt),
                 });
             } else {
                 let angle = 4.0 * bulge.atan();
@@ -219,25 +214,25 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
                 for j in 1..=16usize {
                     let a = a0 + (a1 - a0) * (j as f64 / 16.0);
                     let (wx, wy, wz) = to_wcs(ocx + r * a.cos(), ocy + r * a.sin());
-                    path.push([wx as f32, wy as f32, wz as f32]);
+                    path.push([wx, wy, wz]);
                 }
             }
             let (wbx, wby, wbz) = to_wcs(ox1, oy1);
-            kv.push([wbx as f32, wby as f32, wbz as f32]);
+            kv.push([wbx, wby, wbz]);
         }
-        let mut pts: Vec<[f32; 3]> = Vec::with_capacity(path.len() * 2 + kv.len() * 3 + 4);
+        let mut pts: Vec<[f64; 3]> = Vec::with_capacity(path.len() * 2 + kv.len() * 3 + 4);
         pts.extend_from_slice(&path);
-        pts.push([f32::NAN; 3]);
+        pts.push([f64::NAN; 3]);
         for &p in &path {
             pts.push(off(p));
         }
         if !kv.is_empty() {
-            pts.push([f32::NAN; 3]);
+            pts.push([f64::NAN; 3]);
             for (i, &pb) in kv.iter().enumerate() {
                 pts.push(pb);
                 pts.push(off(pb));
                 if i + 1 < kv.len() {
-                    pts.push([f32::NAN; 3]);
+                    pts.push([f64::NAN; 3]);
                 }
             }
         }
@@ -304,9 +299,9 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
         }
 
         if i == 0 {
-            key_verts.push([p0.x as f32, p0.y as f32, p0.z as f32]);
+            key_verts.push([p0.x, p0.y, p0.z]);
         }
-        key_verts.push([p1.x as f32, p1.y as f32, p1.z as f32]);
+        key_verts.push([p1.x, p1.y, p1.z]);
     }
 
     TruckEntity {
@@ -411,12 +406,8 @@ impl Transformable for Polyline2D {
 // ── Polyline3D ────────────────────────────────────────────────────────────────
 
 fn tessellate_polyline3d(pl: &Polyline3D) -> TruckEntity {
-    let to_pt = |v: &acadrust::entities::Vertex3DPolyline| -> [f32; 3] {
-        [
-            v.position.x as f32,
-            v.position.y as f32,
-            v.position.z as f32,
-        ]
+    let to_pt = |v: &acadrust::entities::Vertex3DPolyline| -> [f64; 3] {
+        [v.position.x, v.position.y, v.position.z]
     };
 
     // DXF vertex flags:  8 = spline-fit curve point,  16 = spline frame control point.
@@ -426,11 +417,11 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> TruckEntity {
     let ctrl_pts: Vec<_> = pl.vertices.iter().filter(|v| v.flags & 16 != 0).collect();
 
     let (wire_pts, key_verts) = if !spline_curve.is_empty() {
-        let wire: Vec<[f32; 3]> = spline_curve.iter().map(|v| to_pt(v)).collect();
-        let ctrl: Vec<[f32; 3]> = ctrl_pts.iter().map(|v| to_pt(v)).collect();
+        let wire: Vec<[f64; 3]> = spline_curve.iter().map(|v| to_pt(v)).collect();
+        let ctrl: Vec<[f64; 3]> = ctrl_pts.iter().map(|v| to_pt(v)).collect();
         (wire, ctrl)
     } else {
-        let pts: Vec<[f32; 3]> = pl.vertices.iter().map(to_pt).collect();
+        let pts: Vec<[f64; 3]> = pl.vertices.iter().map(to_pt).collect();
         (pts.clone(), pts)
     };
 

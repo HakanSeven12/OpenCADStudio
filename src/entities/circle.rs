@@ -69,31 +69,23 @@ fn to_truck(circle: &Circle) -> TruckEntity {
                 cwz + r * (c * ax.2 + s * ay.2),
             )
         };
-        let mut pts: Vec<[f32; 3]> = Vec::with_capacity((n + 1) * 2 + 4 * 3);
+        let mut pts: Vec<[f64; 3]> = Vec::with_capacity((n + 1) * 2 + 4 * 3);
         for i in 0..=n {
             let (x, y, z) = circ_pt(i as f64 * tau / n as f64);
-            pts.push([x as f32, y as f32, z as f32]);
+            pts.push([x, y, z]);
         }
-        pts.push([f32::NAN; 3]);
+        pts.push([f64::NAN; 3]);
         for i in 0..=n {
             let (x, y, z) = circ_pt(i as f64 * tau / n as f64);
-            pts.push([
-                (x + t * nx) as f32,
-                (y + t * ny) as f32,
-                (z + t * nz) as f32,
-            ]);
+            pts.push([x + t * nx, y + t * ny, z + t * nz]);
         }
-        pts.push([f32::NAN; 3]);
+        pts.push([f64::NAN; 3]);
         for i in 0..4usize {
             let (x, y, z) = circ_pt(i as f64 * std::f64::consts::FRAC_PI_2);
-            pts.push([x as f32, y as f32, z as f32]);
-            pts.push([
-                (x + t * nx) as f32,
-                (y + t * ny) as f32,
-                (z + t * nz) as f32,
-            ]);
+            pts.push([x, y, z]);
+            pts.push([x + t * nx, y + t * ny, z + t * nz]);
             if i < 3 {
-                pts.push([f32::NAN; 3]);
+                pts.push([f64::NAN; 3]);
             }
         }
         return TruckEntity {

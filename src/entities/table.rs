@@ -139,8 +139,21 @@ impl TruckConvertible for Table {
             }
         }
 
+        // Table currently does its layout in glam::Vec3 (f32). The world_offset
+        // subtraction in tessellate.rs needs f64, so widen at the boundary —
+        // precision is already limited by the f32 math above (separate fix-up).
+        let pts_f64: Vec<[f64; 3]> = pts
+            .into_iter()
+            .map(|[x, y, z]| {
+                if x.is_nan() {
+                    [f64::NAN, f64::NAN, f64::NAN]
+                } else {
+                    [x as f64, y as f64, z as f64]
+                }
+            })
+            .collect();
         Some(TruckEntity {
-            object: TruckObject::Lines(pts),
+            object: TruckObject::Lines(pts_f64),
             snap_pts: vec![(origin, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],

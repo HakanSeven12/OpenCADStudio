@@ -64,9 +64,9 @@ fn to_truck(spl: &Spline) -> TruckEntity {
     } else {
         &spl.control_points
     };
-    let key_vertices: Vec<[f32; 3]> = snap_source
+    let key_vertices: Vec<[f64; 3]> = snap_source
         .iter()
-        .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+        .map(|p| [p.x, p.y, p.z])
         .collect();
 
     let is_closed = spl.flags.closed || spl.flags.periodic;

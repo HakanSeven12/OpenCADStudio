@@ -22,9 +22,13 @@ pub enum TruckObject {
     Contour(Wire),
     Text(Vec<TextStroke>),
     /// Pre-computed NaN-separated 3-D point list (leader lines, arrowheads, etc.).
-    Lines(Vec<[f32; 3]>),
+    /// Points are stored in WCS as **f64** so the large world_offset can be
+    /// subtracted in full precision in tessellate.rs before the f32 cast.
+    /// Casting WCS coordinates to f32 in the entity converters used to wreck
+    /// rotated sub-glyph precision on drawings far from origin.
+    Lines(Vec<[f64; 3]>),
     /// Like Lines but linetype pattern restarts at each NaN-separated segment (plinegen=false).
-    SegmentedLines(Vec<[f32; 3]>),
+    SegmentedLines(Vec<[f64; 3]>),
     Volume(Solid),
 }
 
@@ -32,10 +36,13 @@ pub struct TruckEntity {
     pub object: TruckObject,
     pub snap_pts: Vec<(Vec3, SnapHint)>,
     pub tangent_geoms: Vec<TangentGeom>,
-    pub key_vertices: Vec<[f32; 3]>,
-    /// Pre-triangulated fill geometry: flat list of [f32;3] vertices, 3 per triangle.
-    /// Non-empty for mesh-like entities (PolyfaceMesh, PolygonMesh) that need solid fill.
-    pub fill_tris: Vec<[f32; 3]>,
+    /// Polyline vertex positions in WCS f64; converted to offset-relative f32
+    /// at the wire-model boundary.
+    pub key_vertices: Vec<[f64; 3]>,
+    /// Pre-triangulated fill geometry: flat list of WCS f64 vertices, 3 per
+    /// triangle. Non-empty for mesh-like entities (PolyfaceMesh, PolygonMesh)
+    /// that need solid fill.
+    pub fill_tris: Vec<[f64; 3]>,
 }
 
 pub fn convert(entity: &EntityType, document: &CadDocument) -> Option<TruckEntity> {

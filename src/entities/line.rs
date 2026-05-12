@@ -21,38 +21,27 @@ fn to_truck(line: &Line) -> TruckEntity {
         crate::scene::transform::ocs_point_to_wcs((line.end.x, line.end.y, line.end.z), normal);
     let p0 = Point3::new(sx, sy, sz);
     let p1 = Point3::new(ex, ey, ez);
-    let kv = vec![
-        [p0.x as f32, p0.y as f32, p0.z as f32],
-        [p1.x as f32, p1.y as f32, p1.z as f32],
-    ];
+    let kv: Vec<[f64; 3]> = vec![[p0.x, p0.y, p0.z], [p1.x, p1.y, p1.z]];
     let tangent = TangentGeom::Line {
-        p1: kv[0],
-        p2: kv[1],
+        p1: [kv[0][0] as f32, kv[0][1] as f32, kv[0][2] as f32],
+        p2: [kv[1][0] as f32, kv[1][1] as f32, kv[1][2] as f32],
     };
 
     if line.thickness.abs() > 1e-10 {
         let t = line.thickness;
         let (nx, ny, nz) = normal;
-        let p0t = [
-            (sx + t * nx) as f32,
-            (sy + t * ny) as f32,
-            (sz + t * nz) as f32,
-        ];
-        let p1t = [
-            (ex + t * nx) as f32,
-            (ey + t * ny) as f32,
-            (ez + t * nz) as f32,
-        ];
-        let pts = vec![
+        let p0t = [sx + t * nx, sy + t * ny, sz + t * nz];
+        let p1t = [ex + t * nx, ey + t * ny, ez + t * nz];
+        let pts: Vec<[f64; 3]> = vec![
             kv[0],
             kv[1],
-            [f32::NAN; 3],
+            [f64::NAN; 3],
             p0t,
             p1t,
-            [f32::NAN; 3],
+            [f64::NAN; 3],
             kv[0],
             p0t,
-            [f32::NAN; 3],
+            [f64::NAN; 3],
             kv[1],
             p1t,
         ];

@@ -23,12 +23,12 @@ impl TruckConvertible for Ray {
             return None;
         }
         let (nx, ny, nz) = (dir.x / len, dir.y / len, dir.z / len);
-        let far = [
-            (bp.x + nx * DISPLAY_EXTENT) as f32,
-            (bp.y + ny * DISPLAY_EXTENT) as f32,
-            (bp.z + nz * DISPLAY_EXTENT) as f32,
+        let far: [f64; 3] = [
+            bp.x + nx * DISPLAY_EXTENT,
+            bp.y + ny * DISPLAY_EXTENT,
+            bp.z + nz * DISPLAY_EXTENT,
         ];
-        let start = [bp.x as f32, bp.y as f32, bp.z as f32];
+        let start: [f64; 3] = [bp.x, bp.y, bp.z];
         Some(TruckEntity {
             object: TruckObject::Lines(vec![start, far]),
             snap_pts: vec![],
@@ -159,21 +159,21 @@ impl TruckConvertible for XLine {
             return None;
         }
         let (nx, ny, nz) = (dir.x / len, dir.y / len, dir.z / len);
-        let far_pos = [
-            (bp.x + nx * DISPLAY_EXTENT) as f32,
-            (bp.y + ny * DISPLAY_EXTENT) as f32,
-            (bp.z + nz * DISPLAY_EXTENT) as f32,
+        let far_pos: [f64; 3] = [
+            bp.x + nx * DISPLAY_EXTENT,
+            bp.y + ny * DISPLAY_EXTENT,
+            bp.z + nz * DISPLAY_EXTENT,
         ];
-        let far_neg = [
-            (bp.x - nx * DISPLAY_EXTENT) as f32,
-            (bp.y - ny * DISPLAY_EXTENT) as f32,
-            (bp.z - nz * DISPLAY_EXTENT) as f32,
+        let far_neg: [f64; 3] = [
+            bp.x - nx * DISPLAY_EXTENT,
+            bp.y - ny * DISPLAY_EXTENT,
+            bp.z - nz * DISPLAY_EXTENT,
         ];
         Some(TruckEntity {
             object: TruckObject::Lines(vec![far_neg, far_pos]),
             snap_pts: vec![],
             tangent_geoms: vec![],
-            key_vertices: vec![[bp.x as f32, bp.y as f32, bp.z as f32]],
+            key_vertices: vec![[bp.x, bp.y, bp.z]],
             fill_tris: vec![],
         })
     }

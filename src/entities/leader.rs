@@ -13,12 +13,15 @@ use crate::scene::wire_model::TangentGeom;
 
 fn to_truck(leader: &Leader) -> TruckEntity {
     let verts = &leader.vertices;
-    let nan = [f32::NAN; 3];
-    let p3 = |v: &acadrust::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
+    let nan = [f64::NAN; 3];
+    let p3 = |v: &acadrust::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
+    let p3f = |v: &acadrust::types::Vector3| -> [f32; 3] {
+        [v.x as f32, v.y as f32, v.z as f32]
+    };
 
-    let mut points: Vec<[f32; 3]> = Vec::new();
+    let mut points: Vec<[f64; 3]> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
-    let mut key_verts: Vec<[f32; 3]> = Vec::new();
+    let mut key_verts: Vec<[f64; 3]> = Vec::new();
 
     // Main leader path
     for v in verts {
@@ -26,9 +29,10 @@ fn to_truck(leader: &Leader) -> TruckEntity {
         key_verts.push(p3(v));
     }
     for i in 0..verts.len().saturating_sub(1) {
+        // TangentGeom uses f32 (UI-only); cast at construction.
         tangents.push(TangentGeom::Line {
-            p1: p3(&verts[i]),
-            p2: p3(&verts[i + 1]),
+            p1: p3f(&verts[i]),
+            p2: p3f(&verts[i + 1]),
         });
     }
 
@@ -36,12 +40,12 @@ fn to_truck(leader: &Leader) -> TruckEntity {
     if leader.arrow_enabled && verts.len() >= 2 {
         let tip = &verts[0];
         let next = &verts[1];
-        let dx = (next.x - tip.x) as f32;
-        let dy = (next.y - tip.y) as f32;
+        let dx = next.x - tip.x;
+        let dy = next.y - tip.y;
         let len = (dx * dx + dy * dy).sqrt().max(1e-9);
         let (dx, dy) = (dx / len, dy / len);
-        let sz = (leader.text_height as f32).max(1.0) * 0.8;
-        let a = std::f32::consts::PI / 6.0;
+        let sz = (leader.text_height).max(1.0) * 0.8;
+        let a = std::f64::consts::PI / 6.0;
         let (s, c) = a.sin_cos();
         let tip_f = p3(tip);
         points.push(nan);
@@ -62,12 +66,8 @@ fn to_truck(leader: &Leader) -> TruckEntity {
     if leader.hookline_enabled && verts.len() >= 2 {
         let last = verts.last().unwrap();
         let prev = &verts[verts.len() - 2];
-        let sign = if (last.x - prev.x) >= 0.0 {
-            1.0_f32
-        } else {
-            -1.0_f32
-        };
-        let len = leader.text_height as f32 * 1.5;
+        let sign = if (last.x - prev.x) >= 0.0 { 1.0_f64 } else { -1.0_f64 };
+        let len = leader.text_height * 1.5;
         let last_f = p3(last);
         points.push(nan);
         points.push(last_f);

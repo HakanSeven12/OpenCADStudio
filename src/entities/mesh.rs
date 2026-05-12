@@ -10,7 +10,11 @@ use crate::scene::wire_model::SnapHint;
 
 // ── Face3D ────────────────────────────────────────────────────────────────────
 
-fn v3(v: &acadrust::types::Vector3) -> [f32; 3] {
+fn v3(v: &acadrust::types::Vector3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
+fn v3f32(v: &acadrust::types::Vector3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 
@@ -20,13 +24,17 @@ impl TruckConvertible for Face3D {
         let p1 = v3(&self.second_corner);
         let p2 = v3(&self.third_corner);
         let p3 = v3(&self.fourth_corner);
+        let p0f = v3f32(&self.first_corner);
+        let p1f = v3f32(&self.second_corner);
+        let p2f = v3f32(&self.third_corner);
+        let p3f = v3f32(&self.fourth_corner);
         let inv = self.invisible_edges;
 
         // Add edge as a line segment (separated by NaN from previous edges).
-        let mut pts: Vec<[f32; 3]> = Vec::new();
-        let mut add_edge = |a: [f32; 3], b: [f32; 3]| {
+        let mut pts: Vec<[f64; 3]> = Vec::new();
+        let mut add_edge = |a: [f64; 3], b: [f64; 3]| {
             if !pts.is_empty() {
-                pts.push([f32::NAN; 3]);
+                pts.push([f64::NAN; 3]);
             }
             pts.push(a);
             pts.push(b);
@@ -50,17 +58,17 @@ impl TruckConvertible for Face3D {
             let cx = (p0[0] + p1[0] + p2[0] + p3[0]) / 4.0;
             let cy = (p0[1] + p1[1] + p2[1] + p3[1]) / 4.0;
             let cz = (p0[2] + p1[2] + p2[2] + p3[2]) / 4.0;
-            let s = 0.1_f32;
+            let s = 0.1_f64;
             pts = vec![[cx - s, cy, cz], [cx + s, cy, cz]];
         }
 
         Some(TruckEntity {
             object: TruckObject::Lines(pts),
             snap_pts: vec![
-                (Vec3::from(p0), SnapHint::Node),
-                (Vec3::from(p1), SnapHint::Node),
-                (Vec3::from(p2), SnapHint::Node),
-                (Vec3::from(p3), SnapHint::Node),
+                (Vec3::from(p0f), SnapHint::Node),
+                (Vec3::from(p1f), SnapHint::Node),
+                (Vec3::from(p2f), SnapHint::Node),
+                (Vec3::from(p3f), SnapHint::Node),
             ],
             tangent_geoms: vec![],
             key_vertices: vec![p0, p1, p2, p3],
@@ -72,10 +80,10 @@ impl TruckConvertible for Face3D {
 impl Grippable for Face3D {
     fn grips(&self) -> Vec<GripDef> {
         vec![
-            square_grip(0, Vec3::from(v3(&self.first_corner))),
-            square_grip(1, Vec3::from(v3(&self.second_corner))),
-            square_grip(2, Vec3::from(v3(&self.third_corner))),
-            square_grip(3, Vec3::from(v3(&self.fourth_corner))),
+            square_grip(0, Vec3::from(v3f32(&self.first_corner))),
+            square_grip(1, Vec3::from(v3f32(&self.second_corner))),
+            square_grip(2, Vec3::from(v3f32(&self.third_corner))),
+            square_grip(3, Vec3::from(v3f32(&self.fourth_corner))),
         ]
     }
 
@@ -178,21 +186,17 @@ impl TruckConvertible for PolygonMesh {
             .flags
             .contains(acadrust::entities::PolygonMeshFlags::CLOSED_N);
 
-        let pt = |i: usize, j: usize| -> [f32; 3] {
+        let pt = |i: usize, j: usize| -> [f64; 3] {
             let v = &self.vertices[i * n + j];
-            [
-                v.location.x as f32,
-                v.location.y as f32,
-                v.location.z as f32,
-            ]
+            [v.location.x, v.location.y, v.location.z]
         };
 
-        let mut pts: Vec<[f32; 3]> = Vec::new();
-        let mut fill_tris: Vec<[f32; 3]> = Vec::new();
+        let mut pts: Vec<[f64; 3]> = Vec::new();
+        let mut fill_tris: Vec<[f64; 3]> = Vec::new();
 
         // Rows (M direction).
         for i in 0..m {
-            pts.push([f32::NAN; 3]);
+            pts.push([f64::NAN; 3]);
             for j in 0..n {
                 pts.push(pt(i, j));
             }
@@ -203,7 +207,7 @@ impl TruckConvertible for PolygonMesh {
 
         // Columns (N direction).
         for j in 0..n {
-            pts.push([f32::NAN; 3]);
+            pts.push([f64::NAN; 3]);
             for i in 0..m {
                 pts.push(pt(i, j));
             }
@@ -309,23 +313,19 @@ impl TruckConvertible for PolyfaceMesh {
             return None;
         }
 
-        let get_v = |idx: i16| -> Option<[f32; 3]> {
+        let get_v = |idx: i16| -> Option<[f64; 3]> {
             let i = (idx.abs() as usize).checked_sub(1)?;
             let v = self.vertices.get(i)?;
-            Some([
-                v.location.x as f32,
-                v.location.y as f32,
-                v.location.z as f32,
-            ])
+            Some([v.location.x, v.location.y, v.location.z])
         };
 
-        let mut pts: Vec<[f32; 3]> = Vec::new();
-        let mut fill_tris: Vec<[f32; 3]> = Vec::new();
+        let mut pts: Vec<[f64; 3]> = Vec::new();
+        let mut fill_tris: Vec<[f64; 3]> = Vec::new();
 
         for face in &self.faces {
             // Indices: 0 means unused. Negative = invisible edge (still render for wireframe).
             let indices = [face.index1, face.index2, face.index3, face.index4];
-            let verts: Vec<[f32; 3]> = indices
+            let verts: Vec<[f64; 3]> = indices
                 .iter()
                 .filter(|&&i| i != 0)
                 .filter_map(|&i| get_v(i))
@@ -334,7 +334,7 @@ impl TruckConvertible for PolyfaceMesh {
             if verts.len() < 2 {
                 continue;
             }
-            pts.push([f32::NAN; 3]);
+            pts.push([f64::NAN; 3]);
             for &p in &verts {
                 pts.push(p);
             }

@@ -39,7 +39,9 @@ use crate::scene::wire_model::{SnapHint, TangentGeom};
 // ── TruckConvertible ────────────────────────────────────────────────────────
 
 /// Catmull-Rom spline tessellation through `ctrl` points, `segs_per_span` segments each.
-pub(crate) fn catmull_rom_pts(ctrl: &[[f32; 3]], segs_per_span: u32) -> Vec<[f32; 3]> {
+/// Operates in f64 so it can be applied to either WCS-direct coordinates (entity path)
+/// or offset-relative coordinates (scene path) without precision loss.
+pub(crate) fn catmull_rom_pts(ctrl: &[[f64; 3]], segs_per_span: u32) -> Vec<[f64; 3]> {
     let n = ctrl.len();
     let mut out = Vec::new();
     for i in 0..n.saturating_sub(1) {
@@ -48,10 +50,10 @@ pub(crate) fn catmull_rom_pts(ctrl: &[[f32; 3]], segs_per_span: u32) -> Vec<[f32
         let p2 = ctrl[i + 1];
         let p3 = if i + 2 < n { ctrl[i + 2] } else { ctrl[n - 1] };
         for j in 0..=segs_per_span {
-            let t = j as f32 / segs_per_span as f32;
+            let t = j as f64 / segs_per_span as f64;
             let t2 = t * t;
             let t3 = t2 * t;
-            let mut pt = [0.0_f32; 3];
+            let mut pt = [0.0_f64; 3];
             for k in 0..3 {
                 pt[k] = 0.5
                     * ((2.0 * p1[k])
@@ -66,20 +68,26 @@ pub(crate) fn catmull_rom_pts(ctrl: &[[f32; 3]], segs_per_span: u32) -> Vec<[f32
 }
 
 fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-    let nan = [f32::NAN; 3];
-    let p3 = |v: &acadrust::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
+    let nan = [f64::NAN; 3];
+    let p3 = |v: &acadrust::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
 
-    let arrow_size = ml.arrowhead_size as f32;
+    let arrow_size = ml.arrowhead_size;
     let draw_arrow = arrow_size > 0.0;
     let invisible = ml.path_type == MultiLeaderPathType::Invisible;
 
-    let mut points: Vec<[f32; 3]> = Vec::new();
+    let mut points: Vec<[f64; 3]> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
-    let mut key_verts: Vec<[f32; 3]> = Vec::new();
+    let mut key_verts: Vec<[f64; 3]> = Vec::new();
     let mut snap_pts: Vec<(Vec3, SnapHint)> = Vec::new();
     let mut first = true;
 
-    let node = |arr: [f32; 3]| (Vec3::from(arr), SnapHint::Node);
+    // snap_pts uses f32 (UI-only); cast at construction.
+    let node = |arr: [f64; 3]| {
+        (
+            Vec3::new(arr[0] as f32, arr[1] as f32, arr[2] as f32),
+            SnapHint::Node,
+        )
+    };
 
     for root in &ml.context.leader_roots {
         let cp = &root.connection_point;
@@ -98,7 +106,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
                 first = false;
 
                 // Build the full control-point list: line.points + connection_point
-                let mut ctrl: Vec<[f32; 3]> = line.points.iter().map(|p| p3(p)).collect();
+                let mut ctrl: Vec<[f64; 3]> = line.points.iter().map(|p| p3(p)).collect();
                 let last_f = *ctrl.last().unwrap_or(&cp_f);
                 let dist = ((last_f[0] - cp_f[0]).powi(2) + (last_f[1] - cp_f[1]).powi(2)).sqrt();
                 if dist > 1e-9 {
@@ -122,9 +130,11 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
                 }
 
                 for i in 0..ctrl.len().saturating_sub(1) {
+                    let a = ctrl[i];
+                    let b = ctrl[i + 1];
                     tangents.push(TangentGeom::Line {
-                        p1: ctrl[i],
-                        p2: ctrl[i + 1],
+                        p1: [a[0] as f32, a[1] as f32, a[2] as f32],
+                        p2: [b[0] as f32, b[1] as f32, b[2] as f32],
                     });
                 }
             }
@@ -138,11 +148,11 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
                 } else {
                     *cp
                 };
-                let dx = (next.x - tip.x) as f32;
-                let dy = (next.y - tip.y) as f32;
+                let dx = next.x - tip.x;
+                let dy = next.y - tip.y;
                 let dl = (dx * dx + dy * dy).sqrt().max(1e-9);
                 let (dx, dy) = (dx / dl, dy / dl);
-                let a = std::f32::consts::PI / 6.0;
+                let a = std::f64::consts::PI / 6.0;
                 let (s, c) = a.sin_cos();
                 points.push(nan);
                 points.push([
@@ -166,11 +176,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
             let d = ml.dogleg_length;
             points.push(nan);
             points.push(cp_f);
-            points.push([
-                (cp.x + dir.x / dl * d) as f32,
-                (cp.y + dir.y / dl * d) as f32,
-                cp.z as f32,
-            ]);
+            points.push([cp.x + dir.x / dl * d, cp.y + dir.y / dl * d, cp.z]);
         }
     }
 
@@ -192,7 +198,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
         let ins = &ctx.text_location;
         let ins_x = ins.x;
         let ins_y = ins.y;
-        let z = ins.z as f32;
+        let z = ins.z;
         // Prefer text_direction (carries through rotations/mirrors); fall back
         // to text_rotation when no direction has been set.
         let td = ctx.text_direction;
@@ -202,7 +208,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
             ctx.text_rotation as f32
         };
         let (cos_r, sin_r) = (rot.cos(), rot.sin());
-        snap_pts.push(node([ins_x as f32, ins_y as f32, z]));
+        snap_pts.push(node([ins_x, ins_y, z]));
 
         // Resolve text style via handle when available, falling back to STANDARD.
         let style_name = ctx
@@ -267,6 +273,10 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
             let h_shift_local = -line_w * h_anchor;
             let wcs_dx = h_shift_local * cos_r - line_y_local * sin_r;
             let wcs_dy = h_shift_local * sin_r + line_y_local * cos_r;
+            // tessellate_text_ex emits f32 glyph points around `origin`.
+            // For entity-level WCS output, we accept the f32 cast here since
+            // glyph offsets are small relative to the insertion point and the
+            // entity path doesn't apply a world_offset before render.
             let origin = [ins_x as f32 + wcs_dx, ins_y as f32 + wcs_dy];
             let strokes = crate::scene::cxf::tessellate_text_ex(
                 origin,
@@ -283,7 +293,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
                 }
                 points.push(nan);
                 for &[x, y] in stroke {
-                    points.push([x, y, z]);
+                    points.push([x as f64, y as f64, z]);
                 }
             }
         }

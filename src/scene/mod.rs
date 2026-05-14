@@ -3901,7 +3901,8 @@ fn tessellate_entity(
                     if let Some(wpp) = world_per_pixel {
                         let w = (ab[2] - ab[0]).abs();
                         let h = (ab[3] - ab[1]).abs();
-                        if w.max(h) / wpp < 0.5 {
+                        // Keep in sync with `block_cache::MIN_PIXEL_SIZE`.
+                        if w.max(h) / wpp < 5.0 {
                             return vec![];
                         }
                     }
@@ -4102,6 +4103,71 @@ fn tessellate_entity(
     }
 
     let aabb = entity_aabb(e, world_offset);
+
+    // Text greeking: when a Text/MText entity's projected glyph height
+    // drops below a readable size, replace the per-glyph stroke geometry
+    // with a single filled rectangle in the text's color. Same visual
+    // hint ("text lives here") at a fraction of the tessellation cost.
+    if let Some(wpp) = world_per_pixel {
+        let text_height: Option<f64> = match e {
+            EntityType::Text(t) => Some(t.height * anno_scale as f64),
+            EntityType::MText(m) => Some(m.height * anno_scale as f64),
+            _ => None,
+        };
+        if let Some(h_world) = text_height {
+            let h_px = (h_world as f32) / wpp;
+            // < 4 px: glyphs aren't readable; emit a greeked rect instead.
+            // We still drew through the LOD floor (entity AABB > 2 px), so
+            // this rect is bigger than 2 px in at least one dimension.
+            if h_px < 4.0 && aabb != WireModel::UNBOUNDED_AABB {
+                let [x0, y0, x1, y1] = aabb;
+                let z = match e {
+                    EntityType::Text(t) => (t.insertion_point.z - world_offset[2]) as f32,
+                    EntityType::MText(m) => (m.insertion_point.z - world_offset[2]) as f32,
+                    _ => 0.0,
+                };
+                // Two CCW triangles spanning the AABB.
+                let fill_tris = vec![
+                    [x0, y0, z],
+                    [x1, y0, z],
+                    [x1, y1, z],
+                    [x0, y0, z],
+                    [x1, y1, z],
+                    [x0, y1, z],
+                ];
+                // The face3d pipeline dims fill_tris colors to 45% to fake
+                // ambient occlusion on PolyfaceMesh / 3DFACE solids. Greeked
+                // text doesn't want that shading — pre-boost the color so it
+                // emerges close to the original text color after the dim.
+                let boost = 1.0 / 0.45;
+                let [r, g, b, a] = entity_color;
+                let greek_color = [
+                    (r * boost).min(1.0),
+                    (g * boost).min(1.0),
+                    (b * boost).min(1.0),
+                    a,
+                ];
+                return vec![WireModel {
+                    name: h.value().to_string(),
+                    points: vec![],
+                    color: greek_color,
+                    selected: sel,
+                    aci,
+                    pattern_length: 0.0,
+                    pattern: [0.0; 8],
+                    line_weight_px: 1.0,
+                    snap_pts: vec![],
+                    tangent_geoms: vec![],
+                    key_vertices: vec![],
+                    aabb,
+                    plinegen: true,
+                    vp_scissor: None,
+                    fill_tris,
+                }];
+            }
+        }
+    }
+
     let mut base = tessellate::tessellate(
         document,
         h,

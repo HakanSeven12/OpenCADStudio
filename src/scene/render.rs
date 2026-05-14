@@ -96,6 +96,10 @@ pub struct Primitive {
     pub(super) bg_color: [f32; 4],
     pub(super) show_viewcube: bool,
     pub(super) geometry_epoch: u64,
+    /// Camera generation captured when this Primitive was assembled. Paired
+    /// with `geometry_epoch` so the wire buffers re-upload when the view
+    /// changes (frustum culling produces a different wire list).
+    pub(super) camera_generation: u64,
 }
 
 // ── shader::Primitive impl ────────────────────────────────────────────────
@@ -123,14 +127,21 @@ impl shader::Primitive for Primitive {
         pipeline.ensure_depth_texture(device, clip_size);
         pipeline.viewcube.ensure_depth_texture(device, full_size);
         pipeline.upload_uniforms(queue, &self.uniforms);
-        if self.geometry_epoch != pipeline.cached_epoch {
-            pipeline.upload_hatches(device, &self.hatches[..]);
-            pipeline.upload_wipeouts(device, &self.wipeout_hatches[..]);
-            pipeline.upload_images(device, queue, &self.images[..]);
-            pipeline.upload_meshes(device, &self.meshes[..]);
+        let cur_key = (self.geometry_epoch, self.camera_generation);
+        if cur_key != pipeline.cached_epoch {
+            // Static buffers (hatches/images/meshes) only need refresh on a
+            // real geometry change, not on every camera tick.
+            if self.geometry_epoch != pipeline.cached_epoch.0 {
+                pipeline.upload_hatches(device, &self.hatches[..]);
+                pipeline.upload_wipeouts(device, &self.wipeout_hatches[..]);
+                pipeline.upload_images(device, queue, &self.images[..]);
+                pipeline.upload_meshes(device, &self.meshes[..]);
+            }
+            // Wires re-upload on every camera change because the visible
+            // subset shifts under frustum culling.
             pipeline.upload_wires(device, &self.wires[..]);
             pipeline.upload_face3d(device, &self.face3d_wires[..], &self.wires[..]);
-            pipeline.cached_epoch = self.geometry_epoch;
+            pipeline.cached_epoch = cur_key;
         }
         pipeline.compute_wire_scissors(self.uniforms.view_proj, clip_size.width, clip_size.height);
         if self.show_viewcube {
@@ -306,6 +317,11 @@ impl Scene {
     ) -> Primitive {
         let cam = self.camera.borrow();
         self.selection.borrow_mut().vp_size = (bounds.width, bounds.height);
+        // Record the active widget's aspect so view_world_aabb() can compute
+        // a correct culling rectangle before entity_wires_arc() runs.
+        if bounds.height > 0.0 {
+            self.set_render_aspect(bounds.width / bounds.height);
+        }
 
         let entity_arc = self.entity_wires_arc();
         let (face3d_wires, other_wires) = split_face3d_wires(&entity_arc, &self.document);
@@ -339,6 +355,7 @@ impl Scene {
             bg_color,
             show_viewcube,
             geometry_epoch: self.geometry_epoch,
+            camera_generation: self.camera_generation,
         }
     }
 
@@ -381,6 +398,7 @@ impl Scene {
             bg_color: self.bg_color,
             show_viewcube: false,
             geometry_epoch: self.geometry_epoch,
+            camera_generation: self.camera_generation,
         }
     }
 

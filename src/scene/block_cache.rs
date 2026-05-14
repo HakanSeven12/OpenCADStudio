@@ -42,6 +42,11 @@ pub struct LocalWire {
     pub color_is_byblock: bool,
     pub lt_is_byblock: bool,
     pub lw_is_byblock: bool,
+    /// XY bounding box of this wire in block-local coordinates.
+    /// `[min_x, min_y, max_x, max_y]`. Used for view-frustum culling at
+    /// expand-time: transform corners by the Insert transform → world AABB
+    /// → test against the camera's world-space view rect.
+    pub aabb_local: [f32; 4],
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +74,10 @@ pub enum LocalSub {
 #[derive(Clone, Debug, Default)]
 pub struct BlockDefn {
     pub subs: Vec<LocalSub>,
+    /// Union of every sub's local AABB (including nested-INSERT contributions
+    /// resolved at expand time via their own defn's `aabb_local`). XY only —
+    /// the wire renderer is 2D-dominant.
+    pub aabb_local: [f32; 4],
 }
 
 #[derive(Default, Debug)]
@@ -97,7 +106,53 @@ impl BlockCache {
             let defn = build_defn(doc, name, anno_scale, bg_color);
             cache.defns.insert(name.clone(), Arc::new(defn));
         }
+        cache.compute_block_aabbs(&referenced);
         cache
+    }
+
+    /// Compute and store the `aabb_local` for every cached defn. Direct wires
+    /// contribute their own aabb_local; nested INSERT references look up the
+    /// nested defn (already cached) and transform its aabb_local by the
+    /// nested Insert's transform before unioning.
+    ///
+    /// Run as a post-pass so it doesn't matter which order build_defn was
+    /// called in. Cycle guard: a self-referential block keeps an empty AABB
+    /// (will fail every frustum test → not emitted, which is correct).
+    fn compute_block_aabbs(&mut self, names: &[String]) {
+        // Snapshot defn pointers up front — we mutate the map below.
+        let names: Vec<String> = names.to_vec();
+        for name in &names {
+            let mut visited: Vec<String> = Vec::new();
+            let aabb = self.defn_aabb_recursive(name, &mut visited);
+            if let Some(defn_arc) = self.defns.get_mut(name) {
+                let mut defn = (**defn_arc).clone();
+                defn.aabb_local = aabb;
+                *defn_arc = Arc::new(defn);
+            }
+        }
+    }
+
+    fn defn_aabb_recursive(&self, block_name: &str, visited: &mut Vec<String>) -> [f32; 4] {
+        if visited.iter().any(|n| n == block_name) {
+            return [0.0, 0.0, 0.0, 0.0];
+        }
+        let Some(defn) = self.defns.get(block_name) else {
+            return [0.0, 0.0, 0.0, 0.0];
+        };
+        visited.push(block_name.to_string());
+        let mut acc = [0.0_f32, 0.0, 0.0, 0.0];
+        for sub in &defn.subs {
+            let aabb = match sub {
+                LocalSub::Wire(lw) => lw.aabb_local,
+                LocalSub::Nested(nref) => {
+                    let nested_local = self.defn_aabb_recursive(&nref.block_name, visited);
+                    transform_aabb_xy(nested_local, &nref.xform)
+                }
+            };
+            acc = aabb_union(acc, aabb);
+        }
+        visited.pop();
+        acc
     }
 }
 
@@ -163,7 +218,10 @@ fn build_defn(
             }
         }
     }
-    BlockDefn { subs }
+    BlockDefn {
+        subs,
+        aabb_local: [0.0; 4],
+    }
 }
 
 fn build_nested_ref(
@@ -220,6 +278,10 @@ fn tessellate_sub_local(
         return None;
     }
 
+    let aabb_local = aabb_from_points_iter(
+        wire.points.iter().copied().chain(wire.fill_tris.iter().copied()),
+    );
+
     Some(LocalWire {
         points: wire.points,
         key_vertices: wire.key_vertices,
@@ -235,7 +297,87 @@ fn tessellate_sub_local(
         color_is_byblock,
         lt_is_byblock,
         lw_is_byblock,
+        aabb_local,
     })
+}
+
+fn aabb_from_points_iter<I: IntoIterator<Item = [f32; 3]>>(pts: I) -> [f32; 4] {
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for p in pts {
+        if !p[0].is_finite() {
+            continue;
+        }
+        if p[0] < min_x {
+            min_x = p[0];
+        }
+        if p[1] < min_y {
+            min_y = p[1];
+        }
+        if p[0] > max_x {
+            max_x = p[0];
+        }
+        if p[1] > max_y {
+            max_y = p[1];
+        }
+    }
+    if min_x.is_infinite() {
+        [0.0, 0.0, 0.0, 0.0]
+    } else {
+        [min_x, min_y, max_x, max_y]
+    }
+}
+
+/// Transform a local-space XY AABB by `t` and return the world-space XY AABB
+/// of the transformed corners. For non-rotated transforms the corners stay
+/// axis-aligned; for arbitrary OCS we still get a correct (looser) AABB by
+/// taking the min/max of the four transformed corner points.
+fn transform_aabb_xy(local: [f32; 4], t: &Transform) -> [f32; 4] {
+    let [x0, y0, x1, y1] = local;
+    let corners = [
+        Vector3::new(x0 as f64, y0 as f64, 0.0),
+        Vector3::new(x1 as f64, y0 as f64, 0.0),
+        Vector3::new(x1 as f64, y1 as f64, 0.0),
+        Vector3::new(x0 as f64, y1 as f64, 0.0),
+    ];
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for c in corners {
+        let v = t.apply(c);
+        if v.x < min_x {
+            min_x = v.x;
+        }
+        if v.y < min_y {
+            min_y = v.y;
+        }
+        if v.x > max_x {
+            max_x = v.x;
+        }
+        if v.y > max_y {
+            max_y = v.y;
+        }
+    }
+    [min_x as f32, min_y as f32, max_x as f32, max_y as f32]
+}
+
+fn aabb_union(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    // [0,0,0,0] is the "empty AABB" sentinel produced by aabb_from_points_iter
+    // when a wire has no finite points — treat it as if the other side wins.
+    if a == [0.0, 0.0, 0.0, 0.0] {
+        return b;
+    }
+    if b == [0.0, 0.0, 0.0, 0.0] {
+        return a;
+    }
+    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
+}
+
+pub fn aabb_disjoint_xy(a: [f32; 4], b: [f32; 4]) -> bool {
+    a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]
 }
 
 // ── Use-time expansion ───────────────────────────────────────────────────────
@@ -255,12 +397,32 @@ pub fn expand_insert(
     selected: bool,
     world_offset: [f64; 3],
     pslt_factor: f32,
+    // World-space XY view AABB (with world_offset already subtracted, so the
+    // comparison is in the same f32 space as emitted wires). `None` disables
+    // frustum culling — every cached sub is emitted.
+    view_aabb: Option<[f32; 4]>,
 ) -> Option<Vec<WireModel>> {
     let defn = cache.defn(&ins.block_name)?;
     let xform = ins.get_transform();
     let name = ins_handle.value().to_string();
     let mut batches = Batches::default();
     let mut visited: Vec<String> = Vec::with_capacity(8);
+    let [ox, oy, _] = world_offset;
+
+    // Whole-Insert cull: if the Insert's world AABB doesn't intersect the
+    // view, bail without doing any per-sub work.
+    if let Some(view) = view_aabb {
+        let insert_world = transform_aabb_xy(defn.aabb_local, &xform);
+        let insert_local = [
+            (insert_world[0] - ox as f32),
+            (insert_world[1] - oy as f32),
+            (insert_world[2] - ox as f32),
+            (insert_world[3] - oy as f32),
+        ];
+        if aabb_disjoint_xy(insert_local, view) {
+            return Some(vec![]);
+        }
+    }
 
     for offset in &array_offsets(ins) {
         let base_xform = if offset == &[0.0; 3] {
@@ -280,6 +442,7 @@ pub fn expand_insert(
             selected,
             world_offset,
             pslt_factor,
+            view_aabb,
         };
         expand_defn(defn, &base_xform, &ctx, &mut batches, &mut visited, 0);
     }
@@ -295,6 +458,8 @@ struct ExpandCtx<'a> {
     selected: bool,
     world_offset: [f64; 3],
     pslt_factor: f32,
+    // World-space XY view AABB (post world_offset). `None` = no culling.
+    view_aabb: Option<[f32; 4]>,
 }
 
 /// Style fingerprint used to group local wires into a single GPU buffer.
@@ -439,7 +604,22 @@ fn expand_defn(
     }
     for sub in &defn.subs {
         match sub {
-            LocalSub::Wire(lw) => emit_wire(lw, accum_xform, ctx, out),
+            LocalSub::Wire(lw) => {
+                if let Some(view) = ctx.view_aabb {
+                    let world = transform_aabb_xy(lw.aabb_local, accum_xform);
+                    let [ox, oy, _] = ctx.world_offset;
+                    let local = [
+                        world[0] - ox as f32,
+                        world[1] - oy as f32,
+                        world[2] - ox as f32,
+                        world[3] - oy as f32,
+                    ];
+                    if aabb_disjoint_xy(local, view) {
+                        continue;
+                    }
+                }
+                emit_wire(lw, accum_xform, ctx, out);
+            }
             LocalSub::Nested(nref) => {
                 if visited.iter().any(|n| n == &nref.block_name) {
                     // Cycle — skip.
@@ -448,6 +628,22 @@ fn expand_defn(
                 let Some(nested_defn) = ctx.cache.defn(&nref.block_name) else {
                     continue;
                 };
+                // Nested-INSERT cull: union AABB of the nested defn, transformed
+                // by composed xform, vs view rect.
+                if let Some(view) = ctx.view_aabb {
+                    let composed = nref.xform.then(accum_xform);
+                    let world = transform_aabb_xy(nested_defn.aabb_local, &composed);
+                    let [ox, oy, _] = ctx.world_offset;
+                    let local = [
+                        world[0] - ox as f32,
+                        world[1] - oy as f32,
+                        world[2] - ox as f32,
+                        world[3] - oy as f32,
+                    ];
+                    if aabb_disjoint_xy(local, view) {
+                        continue;
+                    }
+                }
                 // Resolve ByBlock for this nested ref against the outer ctx.
                 let nested_color = if nref.color_is_byblock {
                     ctx.ins_color
@@ -473,6 +669,7 @@ fn expand_defn(
                     selected: ctx.selected,
                     world_offset: ctx.world_offset,
                     pslt_factor: ctx.pslt_factor,
+                    view_aabb: ctx.view_aabb,
                 };
                 visited.push(nref.block_name.clone());
                 for offset in &nref.instance_offsets {

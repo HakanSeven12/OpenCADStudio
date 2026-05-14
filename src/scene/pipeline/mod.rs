@@ -65,9 +65,10 @@ pub struct Pipeline {
     gpu_face3d_fill: Option<Face3DGpu>,
     gpu_face3d_edges: Vec<WireGpu>,
     pub viewcube: ViewCubePipeline,
-    /// Last geometry epoch for which GPU buffers were uploaded.
-    /// Initialized to u64::MAX so the first frame always uploads.
-    pub cached_epoch: u64,
+    /// Last `(geometry_epoch, camera_generation)` value for which GPU buffers
+    /// were uploaded. We re-upload when either side changes — pan/zoom bumps
+    /// camera_generation, which triggers re-culling and a fresh upload.
+    pub cached_epoch: (u64, u64),
 }
 
 impl Pipeline {
@@ -595,7 +596,7 @@ impl Pipeline {
             gpu_face3d_fill: None,
             gpu_face3d_edges: vec![],
             viewcube,
-            cached_epoch: u64::MAX,
+            cached_epoch: (u64::MAX, u64::MAX),
         }
     }
 

@@ -220,9 +220,10 @@ pub struct Scene {
     /// skip re-uploading unchanged geometry buffers every frame.
     pub geometry_epoch: u64,
     /// Cached tessellation of all visible entity wires for the current layout.
-    /// Keyed by `geometry_epoch`; invalidated automatically when the epoch changes.
+    /// Keyed by `(geometry_epoch, camera_generation)` so a camera change
+    /// invalidates the cull-dependent wire list as well as a geometry change.
     /// Uses `Arc` so `build_primitive()` avoids a full Vec clone during navigation.
-    wire_cache: RefCell<Option<(u64, Arc<Vec<WireModel>>)>>,
+    wire_cache: RefCell<Option<((u64, u64), Arc<Vec<WireModel>>)>>,
     /// Index built from every SortEntitiesTable in the document.
     /// Maps block_handle → (entity_handle.value() → sort_handle.value()).
     /// Replaces the O(objects) linear scan inside `wires_for_block()` with an O(1) lookup.
@@ -240,7 +241,9 @@ pub struct Scene {
     viewport_wire_cache: RefCell<HashMap<Handle, (u64, Arc<Vec<WireModel>>)>>,
     /// Cached tessellation of paper-space layout block entities (title block, annotations, etc.).
     /// Separate from `wire_cache` so paper_canvas_wires() doesn't re-tessellate on every frame.
-    paper_sheet_cache: RefCell<Option<(u64, Arc<Vec<WireModel>>)>>,
+    /// Keyed by `(geometry_epoch, camera_generation)` — paper view changes
+    /// on zoom too, so culled wire output depends on camera.
+    paper_sheet_cache: RefCell<Option<((u64, u64), Arc<Vec<WireModel>>)>>,
     /// Per-viewport projected wire cache for the paper canvas (2-D Iced widget).
     /// Stores projected + clipped wires in paper-space coordinates.
     /// Maps vp_handle → (geometry_epoch, Vec<WireModel>).
@@ -287,6 +290,9 @@ pub struct Scene {
     /// Lets Insert tessellation transform-copy cached wires instead of
     /// clone+explode+re-tessellate per reference.
     block_defn_cache: RefCell<Option<(u64, Arc<block_cache::BlockCache>)>>,
+    /// Last viewport aspect ratio captured by the render pipeline. Used by
+    /// `view_world_aabb` to compute the world-space view rect on demand.
+    last_render_aspect: std::cell::Cell<f32>,
 }
 
 impl Scene {
@@ -323,6 +329,43 @@ impl Scene {
             model_extents_cache: RefCell::new(None),
             entity_block_map_cache: RefCell::new(None),
             block_defn_cache: RefCell::new(None),
+            last_render_aspect: std::cell::Cell::new(16.0 / 9.0),
+        }
+    }
+
+    /// Compute the current camera's world-space XY view AABB with
+    /// `world_offset` already subtracted (so the result is in the same f32
+    /// space as emitted wire points). Adds a 25% margin around the
+    /// frustum to absorb pan inertia and avoid clipped-edge popping.
+    pub(super) fn view_world_aabb(&self) -> Option<[f32; 4]> {
+        if self.current_layout != "Model" {
+            // Paper-space viewport composition handles its own culling; the
+            // top-level paper canvas is small enough not to need it.
+            return None;
+        }
+        let cam = self.camera.borrow();
+        let aspect = self.last_render_aspect.get().max(0.01);
+        let h = cam.ortho_size();
+        let w = h * aspect;
+        // Generous margin: in 3D / perspective the projection actually covers
+        // more than the orthographic-equivalent rect, and pan inertia briefly
+        // moves geometry past the visible edge before camera_generation bumps.
+        let margin = 1.25_f32;
+        let cx = (cam.target.x - self.world_offset[0] as f32) as f32;
+        let cy = (cam.target.y - self.world_offset[1] as f32) as f32;
+        Some([
+            cx - w * margin,
+            cy - h * margin,
+            cx + w * margin,
+            cy + h * margin,
+        ])
+    }
+
+    /// Called by the render pipeline once per frame so `view_world_aabb` knows
+    /// the active widget's aspect ratio.
+    pub fn set_render_aspect(&self, aspect: f32) {
+        if aspect.is_finite() && aspect > 0.0 {
+            self.last_render_aspect.set(aspect);
         }
     }
 
@@ -752,17 +795,18 @@ impl Scene {
     /// Shared by both `entity_wires_arc()` and `paper_canvas_wires()` so a single
     /// cache miss triggers only one tessellation pass, not two.
     fn paper_sheet_wires_arc(&self) -> Arc<Vec<WireModel>> {
+        let key = (self.geometry_epoch, self.camera_generation);
         {
             let cache = self.paper_sheet_cache.borrow();
-            if let Some((cached_epoch, ref arc)) = *cache {
-                if cached_epoch == self.geometry_epoch {
+            if let Some((cached_key, ref arc)) = *cache {
+                if cached_key == key {
                     return Arc::clone(arc);
                 }
             }
         }
         let layout_block = self.current_layout_block_handle();
         let arc = Arc::new(self.wires_for_block(layout_block));
-        *self.paper_sheet_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        *self.paper_sheet_cache.borrow_mut() = Some((key, Arc::clone(&arc)));
         arc
     }
 
@@ -770,10 +814,11 @@ impl Scene {
     /// Returns a shared `Arc` so `build_primitive()` can skip the clone during
     /// navigation frames where no preview wires are active.
     pub(super) fn entity_wires_arc(&self) -> Arc<Vec<WireModel>> {
+        let key = (self.geometry_epoch, self.camera_generation);
         {
             let cache = self.wire_cache.borrow();
-            if let Some((cached_epoch, ref arc)) = *cache {
-                if cached_epoch == self.geometry_epoch {
+            if let Some((cached_key, ref arc)) = *cache {
+                if cached_key == key {
                     return Arc::clone(arc);
                 }
             }
@@ -783,14 +828,14 @@ impl Scene {
         // no Vec clone needed.
         if self.current_layout == "Model" {
             let arc = self.paper_sheet_wires_arc();
-            *self.wire_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+            *self.wire_cache.borrow_mut() = Some((key, Arc::clone(&arc)));
             return arc;
         }
         // Paper space: extend sheet wires with projected viewport content.
         let mut wires = (*self.paper_sheet_wires_arc()).clone();
         wires.extend(self.viewport_content_wires(layout_block, None, None));
         let arc = Arc::new(wires);
-        *self.wire_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        *self.wire_cache.borrow_mut() = Some((key, Arc::clone(&arc)));
         arc
     }
 
@@ -953,9 +998,12 @@ impl Scene {
         };
         let blk_cache = self.block_cache_arc();
         let blk_ref: &block_cache::BlockCache = &blk_cache;
+        let view_aabb = self.view_world_aabb();
         let mut wires: Vec<WireModel> = visible
             .into_par_iter()
-            .flat_map(|e| tessellate_entity(doc, sel, avp, woff, bg, anno, e, Some(blk_ref)))
+            .flat_map(|e| {
+                tessellate_entity(doc, sel, avp, woff, bg, anno, e, Some(blk_ref), view_aabb)
+            })
             .collect();
 
         // Apply draw order via the cached index (O(1) block lookup).
@@ -1052,6 +1100,8 @@ impl Scene {
             1.0
         };
         let blk_cache = self.block_cache_arc();
+        // tessellate_one is used for one-off lookups (hit test, properties).
+        // Skip culling here so the caller always gets the full geometry.
         tessellate_entity(
             &self.document,
             &self.selected,
@@ -1061,6 +1111,7 @@ impl Scene {
             anno,
             e,
             Some(&blk_cache),
+            None,
         )
     }
 
@@ -1116,7 +1167,7 @@ impl Scene {
         // Prefer the already-computed wire AABB cache when available — avoids re-tessellating.
         if self.current_layout == "Model" {
             let cache = self.wire_cache.borrow();
-            if let Some((epoch, ref arc)) = *cache {
+            if let Some(((epoch, _cam_gen), ref arc)) = *cache {
                 if epoch == self.geometry_epoch {
                     for wire in arc.iter() {
                         let [ax, ay, bx, by] = wire.aabb;
@@ -3564,6 +3615,10 @@ impl Scene {
                 true
             })
             .flat_map(|e| {
+                // Per-viewport tessellation uses the viewport's own camera —
+                // not the model-space camera — so we don't pass a view_aabb
+                // here. (Viewports are typically small enough that culling
+                // them isn't worth the added complexity.)
                 tessellate_entity(
                     &self.document,
                     &self.selected,
@@ -3573,6 +3628,7 @@ impl Scene {
                     vp_anno_scale,
                     e,
                     Some(&blk_cache),
+                    None,
                 )
             })
             .collect()
@@ -3763,9 +3819,28 @@ fn tessellate_entity(
     anno_scale: f32,
     e: &EntityType,
     block_cache: Option<&block_cache::BlockCache>,
+    // World-space XY view AABB (post `world_offset` subtraction). When
+    // `Some`, entities whose AABB doesn't intersect this rect are skipped.
+    view_aabb: Option<[f32; 4]>,
 ) -> Vec<WireModel> {
     let h = e.common().handle;
     let sel = selected.contains(&h);
+
+    // Frustum cull for non-Insert, non-Viewport entities. Insert is handled
+    // separately (its WCS bbox depends on the block defn AABB × Insert
+    // transform — done inside expand_insert). Viewports always emit so the
+    // viewport frame stays visible regardless of zoom.
+    if let Some(view) = view_aabb {
+        match e {
+            EntityType::Viewport(_) | EntityType::Insert(_) => {}
+            _ => {
+                let ab = entity_aabb(e, world_offset);
+                if ab != WireModel::UNBOUNDED_AABB && block_cache::aabb_disjoint_xy(ab, view) {
+                    return vec![];
+                }
+            }
+        }
+    }
 
     if let EntityType::Viewport(vp) = e {
         // The sheet viewport (overall/id=1) is never shown — it represents the
@@ -3897,6 +3972,7 @@ fn tessellate_entity(
                 sel,
                 world_offset,
                 pslt_factor,
+                view_aabb,
             ) {
                 wires.push(marker);
                 return wires;

@@ -1066,7 +1066,7 @@ impl H7CAD {
                     let color = [0.6f32, 0.6, 0.8, 1.0]; // default colour; command embedded it
                     let _ = color; // color is captured inside mesh_fn
                     if let Some(mesh) = mesh_fn(name) {
-                        self.tabs[i].scene.meshes.insert(handle, mesh);
+                        self.tabs[i].scene.meshes.insert(handle, crate::scene::MeshLodSet::from_single(mesh));
                     }
                     self.tabs[i].dirty = true;
                     self.command_line.push_output("Solid created.");
@@ -1126,7 +1126,7 @@ impl H7CAD {
                         let new_entity = empty_solid3d();
                         let new_handle = self.tabs[i].scene.add_entity(new_entity);
                         mesh.name = format!("{}", new_handle.value());
-                        self.tabs[i].scene.meshes.insert(new_handle, mesh);
+                        self.tabs[i].scene.meshes.insert(new_handle, crate::scene::MeshLodSet::from_single(mesh));
                         self.tabs[i].dirty = true;
                         self.command_line.push_output("EXTRUDE: solid created.");
                     } else {
@@ -1201,7 +1201,7 @@ impl H7CAD {
                         let new_entity = empty_solid3d();
                         let new_handle = self.tabs[i].scene.add_entity(new_entity);
                         mesh.name = format!("{}", new_handle.value());
-                        self.tabs[i].scene.meshes.insert(new_handle, mesh);
+                        self.tabs[i].scene.meshes.insert(new_handle, crate::scene::MeshLodSet::from_single(mesh));
                         self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(&format!("REVOLVE: solid created ({:.0}°).", angle_deg));
@@ -1359,7 +1359,7 @@ impl H7CAD {
                     let new_entity = empty_solid3d();
                     let new_handle = self.tabs[i].scene.add_entity(new_entity);
                     mesh.name = format!("{}", new_handle.value());
-                    self.tabs[i].scene.meshes.insert(new_handle, mesh);
+                    self.tabs[i].scene.meshes.insert(new_handle, crate::scene::MeshLodSet::from_single(mesh));
                     self.tabs[i].dirty = true;
                     self.command_line.push_output("SWEEP: solid created.");
                 } else {
@@ -1443,7 +1443,7 @@ impl H7CAD {
                     let new_entity = empty_solid3d();
                     let new_handle = self.tabs[i].scene.add_entity(new_entity);
                     mesh.name = format!("{}", new_handle.value());
-                    self.tabs[i].scene.meshes.insert(new_handle, mesh);
+                    self.tabs[i].scene.meshes.insert(new_handle, crate::scene::MeshLodSet::from_single(mesh));
                     self.tabs[i].dirty = true;
                     self.command_line.push_output(&format!(
                         "LOFT: solid created from {} profiles.",

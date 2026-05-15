@@ -14,7 +14,7 @@ use std::sync::Arc;
 use super::pipeline::viewcube::{hover_id, VIEWCUBE_PX};
 use super::pipeline::Pipeline;
 use super::tessellate;
-use super::{HatchModel, ImageModel, MeshModel, Scene, Uniforms, WireModel};
+use super::{HatchModel, ImageModel, MeshLodSet, Scene, Uniforms, WireModel};
 
 // ── PaperViewportPipeline / PaperViewportPrimitive ────────────────────────
 //
@@ -86,7 +86,7 @@ pub struct Primitive {
     /// Wipeout fills — rendered in a separate pass AFTER wires.
     pub(super) wipeout_hatches: Arc<Vec<HatchModel>>,
     pub(super) images: Arc<Vec<ImageModel>>,
-    pub(super) meshes: Arc<Vec<MeshModel>>,
+    pub(super) meshes: Arc<Vec<MeshLodSet>>,
     pub(super) uniforms: Uniforms,
     /// Camera rotation matrix derived from the quaternion.
     /// Used by the ViewCube pipeline — no gimbal lock.
@@ -148,6 +148,7 @@ impl shader::Primitive for Primitive {
         pipeline.compute_wipeout_scissors(self.uniforms.view_proj, clip_size.width, clip_size.height);
         pipeline.compute_image_scissors(self.uniforms.view_proj, clip_size.width, clip_size.height);
         pipeline.compute_hatch_lod(self.uniforms.view_proj, clip_size.width, clip_size.height);
+        pipeline.compute_mesh_lod(self.uniforms.view_proj, clip_size.width, clip_size.height);
         if self.show_viewcube {
             pipeline.viewcube.upload(
                 queue,

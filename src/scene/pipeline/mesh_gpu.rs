@@ -7,7 +7,7 @@
 //                                ------
 //                                 40 B / vertex
 
-use crate::scene::mesh_model::MeshModel;
+use crate::scene::mesh_model::{MeshLodSet, MeshModel};
 use iced::wgpu;
 use iced::wgpu::util::DeviceExt;
 
@@ -53,6 +53,27 @@ pub struct MeshGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     pub index_count: u32,
+}
+
+/// GPU-side bundle of MeshLodSet — one MeshGpu per available LOD plus
+/// the world-XY AABB needed to pick a level per frame.
+pub struct MeshLodGpu {
+    pub lods: Vec<MeshGpu>,
+    pub world_aabb: [f32; 4],
+}
+
+impl MeshLodGpu {
+    pub fn new(device: &wgpu::Device, set: &MeshLodSet) -> Self {
+        Self {
+            lods: set
+                .lods
+                .iter()
+                .filter(|m| !m.indices.is_empty())
+                .map(|m| MeshGpu::new(device, m))
+                .collect(),
+            world_aabb: set.world_aabb,
+        }
+    }
 }
 
 impl MeshGpu {

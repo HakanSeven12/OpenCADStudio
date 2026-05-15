@@ -27,6 +27,8 @@ use camera::Camera;
 pub use camera::Projection;
 pub use hatch_model::HatchModel;
 pub use image_model::ImageModel;
+pub use mesh_model::MeshLodSet;
+#[allow(unused_imports)]
 pub use mesh_model::MeshModel;
 pub use object::{GripApply, GripDef};
 pub use pipeline::uniforms::Uniforms;
@@ -69,7 +71,7 @@ pub struct DerivedCaches {
     pub local_extent_max: f32,
     pub hatches: HashMap<Handle, HatchModel>,
     pub images: HashMap<Handle, ImageModel>,
-    pub meshes: HashMap<Handle, MeshModel>,
+    pub meshes: HashMap<Handle, MeshLodSet>,
     /// Number of entities removed by the corrupt-entity guard during load.
     /// Reported back to the UI so the user knows when a file had parser-junk
     /// entities silently dropped.
@@ -177,7 +179,7 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
         .collect();
 
     // meshes (parallel tessellation)
-    let meshes: HashMap<Handle, MeshModel> = mesh_handles
+    let meshes: HashMap<Handle, MeshLodSet> = mesh_handles
         .par_iter()
         .filter_map(|&handle| {
             let e = doc.get_entity(handle)?;
@@ -414,7 +416,7 @@ pub struct Scene {
     /// Cached image models, keyed by geometry_epoch.
     image_cache: RefCell<Option<(u64, Arc<Vec<ImageModel>>)>>,
     /// Cached mesh models, keyed by geometry_epoch.
-    mesh_cache: RefCell<Option<(u64, Arc<Vec<MeshModel>>)>>,
+    mesh_cache: RefCell<Option<(u64, Arc<Vec<MeshLodSet>>)>>,
     /// Per-viewport wire cache for paper-space rendering.
     /// Maps vp_handle → (geometry_epoch, Arc<Vec<WireModel>>).
     viewport_wire_cache: RefCell<HashMap<Handle, (u64, Arc<Vec<WireModel>>)>>,
@@ -436,7 +438,7 @@ pub struct Scene {
     /// GPU render data for hatch fills, keyed by the DXF entity Handle.
     pub hatches: HashMap<Handle, HatchModel>,
     /// GPU render data for solid meshes (truck Shell/Solid tessellation).
-    pub meshes: HashMap<Handle, MeshModel>,
+    pub meshes: HashMap<Handle, MeshLodSet>,
     /// GPU render data for raster images (RasterImage entities), keyed by handle.
     pub images: HashMap<Handle, ImageModel>,
     /// The viewport that is currently "entered" (MSPACE mode).
@@ -1097,7 +1099,7 @@ impl Scene {
         arc
     }
 
-    pub(super) fn meshes_arc(&self) -> Arc<Vec<MeshModel>> {
+    pub(super) fn meshes_arc(&self) -> Arc<Vec<MeshLodSet>> {
         {
             let cache = self.mesh_cache.borrow();
             if let Some((cached_epoch, ref arc)) = *cache {
@@ -3163,12 +3165,18 @@ impl Scene {
                 let dx = (new[0] - old[0]) as f32;
                 let dy = (new[1] - old[1]) as f32;
                 let dz = (new[2] - old[2]) as f32;
-                if let Some(mesh) = self.meshes.get_mut(&handle) {
-                    for v in &mut mesh.verts {
-                        v[0] += dx;
-                        v[1] += dy;
-                        v[2] += dz;
+                if let Some(set) = self.meshes.get_mut(&handle) {
+                    for lod in &mut set.lods {
+                        for v in &mut lod.verts {
+                            v[0] += dx;
+                            v[1] += dy;
+                            v[2] += dz;
+                        }
                     }
+                    set.world_aabb[0] += dx;
+                    set.world_aabb[1] += dy;
+                    set.world_aabb[2] += dx;
+                    set.world_aabb[3] += dy;
                 }
             }
         }

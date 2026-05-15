@@ -382,8 +382,15 @@ impl H7CAD {
             Message::StlExportPath(Some(path)) => {
                 // Re-build STL bytes (we can't easily pass them through the message).
                 let i = self.active_tab;
-                let meshes: Vec<crate::scene::mesh_model::MeshModel> =
-                    self.tabs[i].scene.meshes.values().cloned().collect();
+                // STL gets the highest-resolution LOD (slot 0) so the
+                // exported geometry isn't downgraded by the view-dependent
+                // mesh LOD ladder used for rendering.
+                let meshes: Vec<crate::scene::mesh_model::MeshModel> = self.tabs[i]
+                    .scene
+                    .meshes
+                    .values()
+                    .filter_map(|s| s.lods.first().cloned())
+                    .collect();
                 let mesh_refs: Vec<&crate::scene::mesh_model::MeshModel> = meshes.iter().collect();
                 match crate::io::stl::build_stl(&mesh_refs) {
                     Some(bytes) => match std::fs::write(&path, bytes) {
@@ -428,8 +435,13 @@ impl H7CAD {
 
             Message::StepExportPath(Some(path)) => {
                 let i = self.active_tab;
-                let meshes: Vec<crate::scene::mesh_model::MeshModel> =
-                    self.tabs[i].scene.meshes.values().cloned().collect();
+                // Export uses LOD 0 (full resolution); see StlExportPath above.
+                let meshes: Vec<crate::scene::mesh_model::MeshModel> = self.tabs[i]
+                    .scene
+                    .meshes
+                    .values()
+                    .filter_map(|s| s.lods.first().cloned())
+                    .collect();
                 let mesh_refs: Vec<&crate::scene::mesh_model::MeshModel> = meshes.iter().collect();
                 match crate::io::step::build_step(&mesh_refs) {
                     Some(text) => match std::fs::write(&path, text.as_bytes()) {
@@ -490,7 +502,10 @@ impl H7CAD {
                         let entity = empty_solid3d();
                         let handle = self.tabs[i].scene.add_entity(entity);
                         if !handle.is_null() {
-                            self.tabs[i].scene.meshes.insert(handle, mesh);
+                            self.tabs[i]
+                                .scene
+                                .meshes
+                                .insert(handle, crate::scene::MeshLodSet::from_single(mesh));
                             self.tabs[i].dirty = true;
                             self.command_line.push_output(&format!(
                                 "IMPORTOBJ: imported \"{}\" as mesh.",

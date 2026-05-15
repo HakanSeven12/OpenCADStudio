@@ -12,14 +12,14 @@ use iced::{Rectangle, Size};
 pub use face3d_gpu::Face3DGpu;
 pub use hatch_gpu::HatchGpu;
 pub use image_gpu::ImageGpu;
-pub use mesh_gpu::MeshGpu;
+pub use mesh_gpu::MeshLodGpu;
 pub use uniforms::Uniforms;
 pub use viewcube::ViewCubePipeline;
 pub use wire_gpu::WireGpu;
 
 use crate::scene::hatch_model::HatchModel;
 use crate::scene::image_model::ImageModel;
-use crate::scene::mesh_model::MeshModel;
+use crate::scene::mesh_model::MeshLodSet;
 use crate::scene::wire_model::WireModel;
 
 /// MSAA sample count for the main drawing pipelines.
@@ -70,7 +70,11 @@ pub struct Pipeline {
     gpu_images: Vec<ImageGpu>,
     /// Pixel scissor rects [x, y, w, h] for viewport-clipped images. Recomputed each frame.
     image_pixel_scissors: Vec<Option<[u32; 4]>>,
-    gpu_meshes: Vec<MeshGpu>,
+    gpu_meshes: Vec<MeshLodGpu>,
+    /// Per-mesh LOD level (0=high, 1=mid, 2=low) picked each frame from
+    /// the projected pixel diagonal. Mirrors `hatch_pixel_scissors` —
+    /// recomputed in `compute_mesh_lod`.
+    mesh_lod_levels: Vec<usize>,
     /// Batched 3DFACE fill (all faces in one buffer) and edges (merged wire).
     gpu_face3d_fill: Option<Face3DGpu>,
     gpu_face3d_edges: Vec<WireGpu>,
@@ -607,6 +611,7 @@ impl Pipeline {
             gpu_images: vec![],
             image_pixel_scissors: vec![],
             gpu_meshes: vec![],
+            mesh_lod_levels: vec![],
             gpu_face3d_fill: None,
             gpu_face3d_edges: vec![],
             viewcube,
@@ -697,11 +702,23 @@ impl Pipeline {
         self.gpu_face3d_edges = WireGpu::from_batch(device, face3d_wires);
     }
 
-    pub fn upload_meshes(&mut self, device: &wgpu::Device, meshes: &[MeshModel]) {
+    pub fn upload_meshes(&mut self, device: &wgpu::Device, meshes: &[MeshLodSet]) {
         self.gpu_meshes = meshes
             .iter()
-            .filter(|m| !m.indices.is_empty())
-            .map(|m| MeshGpu::new(device, m))
+            .filter(|s| s.lods.iter().any(|m| !m.indices.is_empty()))
+            .map(|s| MeshLodGpu::new(device, s))
+            .collect();
+    }
+
+    /// Per-frame mesh LOD selector. Picks slot 0/1/2 based on the
+    /// projected pixel diagonal of each mesh's `world_aabb` (Phase 3.4
+    /// ladder: >200 px → 0, 50–200 → 1, <50 → 2). Falls back to the
+    /// nearest available lower slot when a level wasn't generated.
+    pub fn compute_mesh_lod(&mut self, view_proj: glam::Mat4, clip_w: u32, clip_h: u32) {
+        self.mesh_lod_levels = self
+            .gpu_meshes
+            .iter()
+            .map(|m| pick_mesh_lod(m, view_proj, clip_w, clip_h))
             .collect();
     }
 
@@ -887,12 +904,22 @@ impl Pipeline {
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.mesh_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-            for mesh in &self.gpu_meshes {
-                if mesh.index_count > 0 {
-                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            for (i, set) in self.gpu_meshes.iter().enumerate() {
+                let level = self
+                    .mesh_lod_levels
+                    .get(i)
+                    .copied()
+                    .unwrap_or(0)
+                    .min(set.lods.len().saturating_sub(1));
+                let Some(mesh) = set.lods.get(level) else {
+                    continue;
+                };
+                if mesh.index_count == 0 {
+                    continue;
                 }
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.index_count, 0, 0..1);
             }
         }
 
@@ -1182,6 +1209,70 @@ impl Pipeline {
             self.depth_texture_size = size;
         }
     }
+}
+
+/// Project a mesh's `world_aabb` and pick a LOD slot:
+///   diagonal > 200 px → 0 (HIGH)
+///   diagonal 50–200 px → 1 (MID)
+///   diagonal < 50 px   → 2 (LOW)
+/// When the picked slot is missing from `gpu_meshes[i].lods`, walks down
+/// to the next available coarser/finer level so the mesh always renders.
+fn pick_mesh_lod(
+    mesh: &MeshLodGpu,
+    view_proj: glam::Mat4,
+    clip_w: u32,
+    clip_h: u32,
+) -> usize {
+    let diag_px = aabb_diagonal_pixels(mesh.world_aabb, view_proj, clip_w, clip_h);
+    let target = if diag_px > 200.0 {
+        0
+    } else if diag_px > 50.0 {
+        1
+    } else {
+        2
+    };
+    // Walk down to nearest available LOD (some entities won't have all 3).
+    for level in (0..=target).rev() {
+        if mesh.lods.get(level).is_some() {
+            return level;
+        }
+    }
+    0
+}
+
+fn aabb_diagonal_pixels(
+    aabb: [f32; 4],
+    view_proj: glam::Mat4,
+    clip_w: u32,
+    clip_h: u32,
+) -> f32 {
+    let [x0, y0, x1, y1] = aabb;
+    if !x0.is_finite() || !y0.is_finite() || !x1.is_finite() || !y1.is_finite() {
+        return f32::INFINITY;
+    }
+    let w = clip_w as f32;
+    let h = clip_h as f32;
+    let corners = [
+        view_proj.project_point3(glam::Vec3::new(x0, y0, 0.0)),
+        view_proj.project_point3(glam::Vec3::new(x1, y0, 0.0)),
+        view_proj.project_point3(glam::Vec3::new(x0, y1, 0.0)),
+        view_proj.project_point3(glam::Vec3::new(x1, y1, 0.0)),
+    ];
+    let mut min_px = f32::INFINITY;
+    let mut max_px = f32::NEG_INFINITY;
+    let mut min_py = f32::INFINITY;
+    let mut max_py = f32::NEG_INFINITY;
+    for c in &corners {
+        let px = (c.x + 1.0) * 0.5 * w;
+        let py = (1.0 - c.y) * 0.5 * h;
+        if px < min_px { min_px = px; }
+        if px > max_px { max_px = px; }
+        if py < min_py { min_py = py; }
+        if py > max_py { max_py = py; }
+    }
+    let dx = max_px - min_px;
+    let dy = max_py - min_py;
+    (dx * dx + dy * dy).sqrt()
 }
 
 /// Return `true` when the world-XY AABB's screen-space size is below the

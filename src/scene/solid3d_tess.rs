@@ -20,18 +20,54 @@ use acadrust::entities::acis::{
 };
 use acadrust::entities::{Body, Region, Solid3D};
 
-use crate::scene::mesh_model::MeshModel;
+use crate::scene::mesh_model::{MeshLodSet, MeshModel};
 
-// Number of arc segments per full circle for curved surface sampling.
-const CIRC_SEGS: usize = 48;
-// Grid resolution for sphere / torus latitude / longitude subdivision.
-const GRID_U: usize = 32;
-const GRID_V: usize = 16;
+/// Per-LOD sampling density. Higher values = finer mesh = more triangles.
+#[derive(Copy, Clone, Debug)]
+pub struct LodConfig {
+    /// Arc segments per full circle for curved-surface sampling.
+    pub circ_segs: usize,
+    /// Longitudinal grid count for sphere / torus surfaces.
+    pub grid_u: usize,
+    /// Latitudinal grid count for sphere / torus surfaces.
+    pub grid_v: usize,
+}
+
+impl LodConfig {
+    /// LOD 0 — full resolution. The pre-Phase-3.4 baseline.
+    pub const HIGH: LodConfig = LodConfig {
+        circ_segs: 48,
+        grid_u: 32,
+        grid_v: 16,
+    };
+    /// LOD 1 — half-resolution. Use between ~50–200 px projected diagonal.
+    pub const MID: LodConfig = LodConfig {
+        circ_segs: 24,
+        grid_u: 16,
+        grid_v: 8,
+    };
+    /// LOD 2 — quarter-resolution. Use below ~50 px.
+    pub const LOW: LodConfig = LodConfig {
+        circ_segs: 12,
+        grid_u: 8,
+        grid_v: 4,
+    };
+    /// Returns the three LOD configs in `[high, mid, low]` order — matches
+    /// the `MeshLodSet::lods` slot ordering.
+    pub const fn all() -> [LodConfig; 3] {
+        [Self::HIGH, Self::MID, Self::LOW]
+    }
+}
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Tessellate a SAT document into mesh buffers — shared by all ACIS entities.
-fn tessellate_sat(sat: &SatDocument, name: String, color: [f32; 4]) -> Option<MeshModel> {
+fn tessellate_sat(
+    sat: &SatDocument,
+    name: String,
+    color: [f32; 4],
+    lod: LodConfig,
+) -> Option<MeshModel> {
     let mut verts: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -49,17 +85,17 @@ fn tessellate_sat(sat: &SatDocument, name: String, color: [f32; 4]) -> Option<Me
             }
             "cone-surface" => {
                 if let Some(cone) = SatConeSurface::from_record(surf_rec) {
-                    tess_cone_face(sat, &face, &cone, &mut verts, &mut normals, &mut indices);
+                    tess_cone_face(sat, &face, &cone, lod, &mut verts, &mut normals, &mut indices);
                 }
             }
             "sphere-surface" => {
                 if let Some(sphere) = SatSphereSurface::from_record(surf_rec) {
-                    tess_sphere_face(&sphere, &mut verts, &mut normals, &mut indices);
+                    tess_sphere_face(&sphere, lod, &mut verts, &mut normals, &mut indices);
                 }
             }
             "torus-surface" => {
                 if let Some(torus) = SatTorusSurface::from_record(surf_rec) {
-                    tess_torus_face(&torus, &mut verts, &mut normals, &mut indices);
+                    tess_torus_face(&torus, lod, &mut verts, &mut normals, &mut indices);
                 }
             }
             _ => {}
@@ -78,6 +114,46 @@ fn tessellate_sat(sat: &SatDocument, name: String, color: [f32; 4]) -> Option<Me
     })
 }
 
+/// Tessellate a SAT document at all three LODs and bundle them into a
+/// `MeshLodSet` ready for the render pipeline to pick a level per frame.
+fn tessellate_sat_lods(
+    sat: &SatDocument,
+    name: String,
+    color: [f32; 4],
+) -> Option<MeshLodSet> {
+    let configs = LodConfig::all();
+    let mut lods: Vec<MeshModel> = Vec::with_capacity(3);
+    for lod in configs {
+        if let Some(m) = tessellate_sat(sat, name.clone(), color, lod) {
+            lods.push(m);
+        }
+    }
+    if lods.is_empty() {
+        return None;
+    }
+    let world_aabb = mesh_aabb(&lods[0]);
+    Some(MeshLodSet { lods, world_aabb })
+}
+
+/// World-XY AABB of the mesh — used by the render-pipeline LOD selector
+/// to pick a level based on projected pixel diagonal.
+fn mesh_aabb(mesh: &MeshModel) -> [f32; 4] {
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for &[x, y, _] in &mesh.verts {
+        if !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+        if x < min_x { min_x = x; }
+        if y < min_y { min_y = y; }
+        if x > max_x { max_x = x; }
+        if y > max_y { max_y = y; }
+    }
+    [min_x, min_y, max_x, max_y]
+}
+
 fn parse_acis(
     sat_fn: impl FnOnce() -> Option<SatDocument>,
     is_binary: bool,
@@ -92,40 +168,40 @@ fn parse_acis(
     None
 }
 
-/// Tessellate a `Region` entity (2D planar ACIS body) into a `MeshModel`.
-pub fn tessellate_region(region: &Region, color: [f32; 4]) -> Option<MeshModel> {
+/// Tessellate a `Region` entity (2D planar ACIS body) at all three LOD levels.
+pub fn tessellate_region(region: &Region, color: [f32; 4]) -> Option<MeshLodSet> {
     let sat = parse_acis(
         || region.parse_sat(),
         region.acis_data.is_binary,
         &region.acis_data.sab_data,
     )?;
     let name = region.common.handle.value().to_string();
-    tessellate_sat(&sat, name, color)
+    tessellate_sat_lods(&sat, name, color)
 }
 
-/// Tessellate a `Body` entity (3D ACIS body) into a `MeshModel`.
-pub fn tessellate_body(body: &Body, color: [f32; 4]) -> Option<MeshModel> {
+/// Tessellate a `Body` entity (3D ACIS body) at all three LOD levels.
+pub fn tessellate_body(body: &Body, color: [f32; 4]) -> Option<MeshLodSet> {
     let sat = parse_acis(
         || body.parse_sat(),
         body.acis_data.is_binary,
         &body.acis_data.sab_data,
     )?;
     let name = body.common.handle.value().to_string();
-    tessellate_sat(&sat, name, color)
+    tessellate_sat_lods(&sat, name, color)
 }
 
-/// Tessellate a `Solid3D` entity into a GPU-ready `MeshModel`.
+/// Tessellate a `Solid3D` entity at all three LOD levels.
 ///
 /// Returns `None` when the entity has no parseable SAT data or produces no
 /// triangles (e.g. the solid uses only unsupported surface types).
-pub fn tessellate_solid3d(solid: &Solid3D, color: [f32; 4]) -> Option<MeshModel> {
+pub fn tessellate_solid3d(solid: &Solid3D, color: [f32; 4]) -> Option<MeshLodSet> {
     let sat = parse_acis(
         || solid.parse_sat(),
         solid.acis_data.is_binary,
         &solid.acis_data.sab_data,
     )?;
     let name = solid.common.handle.value().to_string();
-    tessellate_sat(&sat, name, color)
+    tessellate_sat_lods(&sat, name, color)
 }
 
 // ── Topology helpers ──────────────────────────────────────────────────────────
@@ -262,6 +338,7 @@ fn tess_cone_face(
     sat: &SatDocument,
     face: &SatFace,
     cone: &SatConeSurface,
+    lod: LodConfig,
     verts: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
     indices: &mut Vec<u32>,
@@ -285,8 +362,8 @@ fn tess_cone_face(
     let (h_min, h_max, theta_min, theta_max, full_circle) =
         angular_range(cx, cy, cz, axis, u_dir, v_dir, &poly);
 
-    let segs_u = CIRC_SEGS;
-    let segs_v = segs_u / 4; // height subdivisions
+    let segs_u = lod.circ_segs;
+    let segs_v = (segs_u / 4).max(1); // height subdivisions
 
     let theta_span = if full_circle {
         TAU
@@ -416,6 +493,7 @@ fn angular_range(
 
 fn tess_sphere_face(
     sphere: &SatSphereSurface,
+    lod: LodConfig,
     verts: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
     indices: &mut Vec<u32>,
@@ -428,8 +506,8 @@ fn tess_sphere_face(
     let u_dir = norm3([ux, uy, uz]);
     let v_dir = cross3(pole, u_dir);
 
-    let nu = GRID_U;
-    let nv = GRID_V;
+    let nu = lod.grid_u.max(3);
+    let nv = lod.grid_v.max(2);
 
     for j in 0..nv {
         let phi0 = std::f64::consts::PI * (j as f64 / nv as f64); // 0..π
@@ -481,6 +559,7 @@ fn sphere_dir(pole: [f64; 3], u_dir: [f64; 3], v_dir: [f64; 3], theta: f64, phi:
 
 fn tess_torus_face(
     torus: &SatTorusSurface,
+    lod: LodConfig,
     verts: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
     indices: &mut Vec<u32>,
@@ -494,8 +573,8 @@ fn tess_torus_face(
     let major_r = torus.major_radius();
     let minor_r = torus.minor_radius();
 
-    let nu = GRID_U; // around the tube
-    let nv = GRID_V; // around the torus
+    let nu = lod.grid_u.max(3); // around the tube
+    let nv = lod.grid_v.max(3); // around the torus
 
     for j in 0..nv {
         let phi0 = TAU * (j as f64 / nv as f64);

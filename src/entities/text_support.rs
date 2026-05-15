@@ -341,6 +341,35 @@ pub fn measure_mtext_chars(text: &str, scale: f32, font: &cxf::CxfFile) -> f32 {
     width
 }
 
+/// Total number of visible lines an MText renders to — explicit `\P` /
+/// `\n` / `\N` breaks plus word-wrap induced sublines when
+/// `rectangle_width > 0`. Mirrors the line-splitting `entities/mtext.rs`
+/// and `tessellate_multileader` perform; lets renderers split the OBB
+/// into per-row LOD primitives without re-running the wrap measurement.
+pub fn mtext_line_count(
+    m: &acadrust::entities::MText,
+    document: &CadDocument,
+    anno_scale: f32,
+) -> usize {
+    let resolved = resolve_text_style(&m.style, document);
+    let font = cxf::get_font(&resolved.font_name);
+    let width_factor = resolved.width_factor.max(0.01);
+    let height = m.height as f32 * anno_scale;
+    let plain = strip_mtext_codes(&m.value);
+    let explicit = split_mtext_lines(&plain);
+    let total: usize = if m.rectangle_width > 0.0 && height > 0.0 {
+        let scale = height / 9.0 * width_factor;
+        let max_w = m.rectangle_width as f32 * anno_scale;
+        explicit
+            .iter()
+            .map(|l| word_wrap(l, max_w, scale, font).len())
+            .sum()
+    } else {
+        explicit.len()
+    };
+    total.max(1)
+}
+
 pub fn word_wrap(text: &str, max_w: f32, scale: f32, font: &'static cxf::CxfFile) -> Vec<String> {
     if max_w <= 0.0 || text.is_empty() {
         return vec![text.to_string()];

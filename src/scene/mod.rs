@@ -4162,13 +4162,22 @@ fn tessellate_entity(
         };
         if let Some(h_world) = text_height {
             let h_px = (h_world as f32) / wpp;
+            // Wrap-expanded line count for MText (Text = 1).
+            let n_lines = match e {
+                EntityType::MText(m) => {
+                    crate::entities::text_support::mtext_line_count(m, document, anno_scale)
+                }
+                _ => 1,
+            };
             if h_px < 1.0 {
-                let pts = text_baseline_points(e, anno_scale, world_offset);
+                let pts = text_baseline_points(e, anno_scale, world_offset, n_lines);
                 if pts.len() < 2 {
                     return vec![];
                 }
                 // Skip the baseline too if the line itself projects under
-                // 2 px (e.g. a 1-char text seen edge-on).
+                // 2 px (e.g. a 1-char text seen edge-on). All wrap lines
+                // share the same baseline length, so the first segment is
+                // a representative sample.
                 let dx = pts[1][0] - pts[0][0];
                 let dy = pts[1][1] - pts[0][1];
                 let len_px = (dx * dx + dy * dy).sqrt() / wpp;
@@ -4194,7 +4203,7 @@ fn tessellate_entity(
                 }];
             }
             if h_px < 5.0 && aabb != WireModel::UNBOUNDED_AABB {
-                let fill_tris = text_greek_obb_tris(e, anno_scale, world_offset);
+                let fill_tris = text_greek_obb_tris(e, anno_scale, world_offset, n_lines);
                 if fill_tris.is_empty() {
                     return vec![];
                 }
@@ -4260,9 +4269,15 @@ fn tessellate_entity(
 /// for block-defn subs it's block-local. No offset/transform applied.
 /// Width is approximated from glyph height × character count (TEXT) or
 /// from `rectangle_width` (MTEXT). Returns `None` for non-text entities.
+///
+/// `mtext_lines_override` lets the caller plug in a wrap-aware line count
+/// (from `text_support::mtext_line_count`). Without it, MText's OBB
+/// height collapses to a single line when the file omits `rectangle_height`,
+/// which makes downstream per-line LOD math degenerate.
 pub(crate) fn text_obb_corners_native(
     e: &EntityType,
     anno_scale: f32,
+    mtext_lines_override: Option<usize>,
 ) -> Option<[[f64; 3]; 4]> {
     use acadrust::entities::{
         AttachmentPoint, TextHorizontalAlignment, TextVerticalAlignment,
@@ -4317,15 +4332,26 @@ pub(crate) fn text_obb_corners_native(
         }
         EntityType::MText(m) => {
             let h_world = m.height * anno;
-            let lines = (m.value.matches('\n').count() + 1) as f64;
+            let raw_lines = (m.value.matches('\n').count() + 1) as f64;
+            let effective_lines = match mtext_lines_override {
+                Some(n) => n.max(1) as f64,
+                None => raw_lines,
+            };
             let w_world = if m.rectangle_width > 0.0 {
                 m.rectangle_width
             } else {
-                h_world * 8.0 * lines.max(1.0)
+                h_world * 8.0 * effective_lines.max(1.0)
             };
-            let total_h = m
-                .rectangle_height
-                .unwrap_or(h_world * lines.max(1.0) * m.line_spacing_factor.max(0.5));
+            // Wrap-aware override beats `rectangle_height` — the stored
+            // height can be stale on DWGs that were re-saved without
+            // updating the bounds.
+            let total_h = if mtext_lines_override.is_some() {
+                h_world * effective_lines.max(1.0) * m.line_spacing_factor.max(0.5)
+            } else {
+                m.rectangle_height.unwrap_or(
+                    h_world * raw_lines.max(1.0) * m.line_spacing_factor.max(0.5),
+                )
+            };
             // MText `attachment_point` puts `insertion_point` at one of the
             // 9 corners/midpoints of the text bbox. h_anchor / v_anchor are
             // fractions from (left, bottom) of the bbox.
@@ -4374,35 +4400,18 @@ pub(crate) fn text_obb_corners_native(
     ])
 }
 
-/// Baseline endpoints (`p00 → p10` of the OBB) for a sub-pixel Text / MText,
-/// in world-offset-subtracted f32 space. Used as the lowest LOD step before
-/// the entity is dropped entirely.
+/// NaN-separated baseline segments — one per visible wrap line — for a
+/// sub-pixel Text / MText, in world-offset-subtracted f32 space. `n_lines`
+/// must be the actual rendered line count (1 for Text, the wrap-expanded
+/// count for MText). Lines are emitted top → bottom along the OBB's up
+/// direction, each at the bottom edge of its slab.
 fn text_baseline_points(
     e: &EntityType,
     anno_scale: f32,
     world_offset: [f64; 3],
+    n_lines: usize,
 ) -> Vec<[f32; 3]> {
-    let Some(corners) = text_obb_corners_native(e, anno_scale) else {
-        return vec![];
-    };
-    let [ox, oy, oz] = world_offset;
-    let cast = |p: [f64; 3]| -> [f32; 3] {
-        [(p[0] - ox) as f32, (p[1] - oy) as f32, (p[2] - oz) as f32]
-    };
-    vec![cast(corners[0]), cast(corners[1])]
-}
-
-/// 6-vertex filled rect (2 triangles) for a greeked top-level Text / MText.
-/// Clamped to a single line's height — multi-line MText's OBB spans the
-/// whole block and using its full height would emit a misleadingly tall
-/// box. The face3d pipeline skips its 0.45 dim for wires with empty
-/// `points`, so these tris render at the literal text color.
-fn text_greek_obb_tris(
-    e: &EntityType,
-    anno_scale: f32,
-    world_offset: [f64; 3],
-) -> Vec<[f32; 3]> {
-    let Some(corners) = text_obb_corners_native(e, anno_scale) else {
+    let Some(corners) = text_obb_corners_native(e, anno_scale, Some(n_lines)) else {
         return vec![];
     };
     let line_h = match e {
@@ -4413,6 +4422,7 @@ fn text_greek_obb_tris(
     if line_h <= 0.0 {
         return vec![];
     }
+    let n_lines = n_lines.max(1);
     let [ox, oy, oz] = world_offset;
     let cast = |p: [f64; 3]| -> [f32; 3] {
         [(p[0] - ox) as f32, (p[1] - oy) as f32, (p[2] - oz) as f32]
@@ -4421,19 +4431,95 @@ fn text_greek_obb_tris(
     let br = cast(corners[1]);
     let full_tl = cast(corners[3]);
 
-    // Up direction = (bl → full_tl) normalized, then scale to a single
-    // line. Replaces the full-block top corners so MText with N lines
-    // still emits a single-line rect.
+    let (ux, uy, uz) = (full_tl[0] - bl[0], full_tl[1] - bl[1], full_tl[2] - bl[2]);
+    let ulen = (ux * ux + uy * uy + uz * uz).sqrt();
+    if ulen < 1e-9 {
+        return vec![bl, br];
+    }
+    let (nx, ny, nz) = (ux / ulen, uy / ulen, uz / ulen);
+
+    let mut pts = Vec::with_capacity(n_lines * 3);
+    for i in 0..n_lines {
+        // i = 0 is the topmost line — its bottom sits one line_h below
+        // the OBB top (≈ `ulen`). For n_lines > ulen/line_h the deepest
+        // baselines clamp to the OBB bottom.
+        let bot_off = ((i + 1) as f32) * line_h;
+        let along = (ulen - bot_off).max(0.0);
+        let p0 = [bl[0] + nx * along, bl[1] + ny * along, bl[2] + nz * along];
+        let p1 = [br[0] + nx * along, br[1] + ny * along, br[2] + nz * along];
+        if !pts.is_empty() {
+            pts.push([f32::NAN; 3]);
+        }
+        pts.extend_from_slice(&[p0, p1]);
+    }
+    pts
+}
+
+/// Filled tris for a greeked top-level Text / MText. One 2-triangle rect
+/// per visible line — `n_lines` is the actual rendered line count from
+/// `mtext_line_count` (1 for Text). Stacked top → bottom along the OBB's
+/// up direction. The face3d pipeline skips its 0.45 dim for wires with
+/// empty `points`, so these tris render at the literal text color.
+fn text_greek_obb_tris(
+    e: &EntityType,
+    anno_scale: f32,
+    world_offset: [f64; 3],
+    n_lines: usize,
+) -> Vec<[f32; 3]> {
+    let Some(corners) = text_obb_corners_native(e, anno_scale, Some(n_lines)) else {
+        return vec![];
+    };
+    let line_h = match e {
+        EntityType::Text(t) => (t.height * anno_scale as f64) as f32,
+        EntityType::MText(m) => (m.height * anno_scale as f64) as f32,
+        _ => return vec![],
+    };
+    if line_h <= 0.0 {
+        return vec![];
+    }
+    let n_lines = n_lines.max(1);
+    let [ox, oy, oz] = world_offset;
+    let cast = |p: [f64; 3]| -> [f32; 3] {
+        [(p[0] - ox) as f32, (p[1] - oy) as f32, (p[2] - oz) as f32]
+    };
+    let bl = cast(corners[0]);
+    let br = cast(corners[1]);
+    let full_tl = cast(corners[3]);
+
     let (ux, uy, uz) = (full_tl[0] - bl[0], full_tl[1] - bl[1], full_tl[2] - bl[2]);
     let ulen = (ux * ux + uy * uy + uz * uz).sqrt();
     if ulen < 1e-9 {
         return vec![];
     }
     let (nx, ny, nz) = (ux / ulen, uy / ulen, uz / ulen);
-    let tl = [bl[0] + nx * line_h, bl[1] + ny * line_h, bl[2] + nz * line_h];
-    let tr = [br[0] + nx * line_h, br[1] + ny * line_h, br[2] + nz * line_h];
 
-    vec![bl, br, tr, bl, tr, tl]
+    let mut tris = Vec::with_capacity(n_lines * 6);
+    for i in 0..n_lines {
+        let top_along = (ulen - (i as f32) * line_h).max(0.0);
+        let bot_along = (ulen - ((i + 1) as f32) * line_h).max(0.0);
+        let tl = [
+            bl[0] + nx * top_along,
+            bl[1] + ny * top_along,
+            bl[2] + nz * top_along,
+        ];
+        let tr = [
+            br[0] + nx * top_along,
+            br[1] + ny * top_along,
+            br[2] + nz * top_along,
+        ];
+        let lbl = [
+            bl[0] + nx * bot_along,
+            bl[1] + ny * bot_along,
+            bl[2] + nz * bot_along,
+        ];
+        let lbr = [
+            br[0] + nx * bot_along,
+            br[1] + ny * bot_along,
+            br[2] + nz * bot_along,
+        ];
+        tris.extend_from_slice(&[lbl, lbr, tr, lbl, tr, tl]);
+    }
+    tris
 }
 
 fn entity_aabb(e: &acadrust::EntityType, world_offset: [f64; 3]) -> [f32; 4] {

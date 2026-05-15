@@ -423,9 +423,17 @@ fn tessellate_sub_local(
     // so the greek path can emit a rect that matches the entity's rotation
     // instead of falling back to the axis-aligned `aabb_local`. Subtract the
     // defn's `local_offset` in f64 first so distant text retains precision.
+    // For MText the OBB height is built from the wrap-expanded line count
+    // so emit_greeked_text can split it into per-line rows.
     let [lo_x, lo_y, lo_z] = local_offset;
+    let mtext_lines = match sub {
+        EntityType::MText(m) => Some(
+            crate::entities::text_support::mtext_line_count(m, doc, anno_scale),
+        ),
+        _ => None,
+    };
     let text_obb_local: Option<[[f32; 3]; 4]> =
-        crate::scene::text_obb_corners_native(sub, anno_scale).map(|c| {
+        crate::scene::text_obb_corners_native(sub, anno_scale, mtext_lines).map(|c| {
             [
                 [(c[0][0] - lo_x) as f32, (c[0][1] - lo_y) as f32, (c[0][2] - lo_z) as f32],
                 [(c[1][0] - lo_x) as f32, (c[1][1] - lo_y) as f32, (c[1][2] - lo_z) as f32],
@@ -656,46 +664,69 @@ fn emit_greeked_text(
         [(w.x - ox) as f32, (w.y - oy) as f32, (w.z - oz) as f32]
     };
 
-    let corners: Option<[[f32; 3]; 4]> = if let (Some(obb), Some(h_local)) =
+    // Per-line rects: split the OBB by `h_local` so each visible wrap
+    // line gets its own box. Falls back to the axis-aligned AABB when no
+    // OBB / height was cached.
+    let tris: Vec<[f32; 3]> = if let (Some(obb), Some(h_local)) =
         (lw.text_obb_local, lw.text_height_local)
     {
         if h_local <= 0.0 {
-            None
-        } else {
-            // OBB[3] - OBB[0] = up direction in local frame, full-block
-            // height for MText; normalize and rescale to a single line.
-            let dx = obb[3][0] - obb[0][0];
-            let dy = obb[3][1] - obb[0][1];
-            let dz = obb[3][2] - obb[0][2];
-            let dlen = (dx * dx + dy * dy + dz * dz).sqrt();
-            if dlen < 1e-9 {
-                None
-            } else {
-                let nx = dx / dlen * h_local;
-                let ny = dy / dlen * h_local;
-                let nz = dz / dlen * h_local;
-                let bl = obb[0];
-                let br = obb[1];
-                let tl = [bl[0] + nx, bl[1] + ny, bl[2] + nz];
-                let tr = [br[0] + nx, br[1] + ny, br[2] + nz];
-                Some([xf(bl), xf(br), xf(tr), xf(tl)])
-            }
+            return;
         }
+        let (ux, uy, uz) = (
+            obb[3][0] - obb[0][0],
+            obb[3][1] - obb[0][1],
+            obb[3][2] - obb[0][2],
+        );
+        let ulen = (ux * ux + uy * uy + uz * uz).sqrt();
+        if ulen < 1e-9 {
+            return;
+        }
+        let n_lines = ((ulen / h_local).round() as usize).max(1);
+        let (nx, ny, nz) = (ux / ulen, uy / ulen, uz / ulen);
+        let bl_local = obb[0];
+        let br_local = obb[1];
+        let mut acc = Vec::with_capacity(n_lines * 6);
+        for i in 0..n_lines {
+            let top_off = (i as f32) * h_local;
+            let bot_off = ((i + 1) as f32) * h_local;
+            let top_along = (ulen - top_off).max(0.0);
+            let bot_along = (ulen - bot_off).max(0.0);
+            let tl = xf([
+                bl_local[0] + nx * top_along,
+                bl_local[1] + ny * top_along,
+                bl_local[2] + nz * top_along,
+            ]);
+            let tr = xf([
+                br_local[0] + nx * top_along,
+                br_local[1] + ny * top_along,
+                br_local[2] + nz * top_along,
+            ]);
+            let bl = xf([
+                bl_local[0] + nx * bot_along,
+                bl_local[1] + ny * bot_along,
+                bl_local[2] + nz * bot_along,
+            ]);
+            let br = xf([
+                br_local[0] + nx * bot_along,
+                br_local[1] + ny * bot_along,
+                br_local[2] + nz * bot_along,
+            ]);
+            acc.extend_from_slice(&[bl, br, tr, bl, tr, tl]);
+        }
+        acc
     } else {
-        // OBB missing — fall back to the axis-aligned local AABB. Already
-        // a tight per-entity rect (no multi-line block to clamp).
         let [x0, y0, x1, y1] = local_aabb;
         let z = 0.0_f32;
-        Some([
-            xf([x0, y0, z]),
-            xf([x1, y0, z]),
-            xf([x1, y1, z]),
-            xf([x0, y1, z]),
-        ])
+        let bl = xf([x0, y0, z]);
+        let br = xf([x1, y0, z]);
+        let tr = xf([x1, y1, z]);
+        let tl = xf([x0, y1, z]);
+        vec![bl, br, tr, bl, tr, tl]
     };
-    let Some([bl, br, tr, tl]) = corners else {
+    if tris.is_empty() {
         return;
-    };
+    }
 
     let final_color = if ctx.selected {
         WireModel::SELECTED
@@ -716,7 +747,7 @@ fn emit_greeked_text(
         .entry(key)
         .or_insert_with(|| BatchEntry::new(final_color, 0.0, [0.0; 8], 1.0, lw.aci, true, true));
 
-    for p in [bl, br, tr, bl, tr, tl] {
+    for p in tris {
         if p[0] < entry.min_x {
             entry.min_x = p[0];
         }
@@ -748,6 +779,12 @@ fn emit_text_baseline(
     let Some(obb) = lw.text_obb_local else {
         return;
     };
+    let Some(h_local) = lw.text_height_local else {
+        return;
+    };
+    if h_local <= 0.0 {
+        return;
+    }
     let [ox, oy, oz] = ctx.world_offset;
     let [lo_x, lo_y, lo_z] = defn_lo;
     let xf = |p: [f32; 3]| -> [f32; 3] {
@@ -758,16 +795,38 @@ fn emit_text_baseline(
         ));
         [(w.x - ox) as f32, (w.y - oy) as f32, (w.z - oz) as f32]
     };
-    let p0 = xf(obb[0]);
-    let p1 = xf(obb[1]);
 
-    // Skip the baseline too if the line itself projects under 2 px on screen.
-    let dx = p1[0] - p0[0];
-    let dy = p1[1] - p0[1];
+    // Single line: just obb[0] → obb[1]. Skip when the projected length
+    // falls under 2 px (single-char text seen edge-on). All wrap lines
+    // share the same baseline length, so checking once is enough.
+    let p0_world = xf(obb[0]);
+    let p1_world = xf(obb[1]);
+    let dx = p1_world[0] - p0_world[0];
+    let dy = p1_world[1] - p0_world[1];
     let len_px = (dx * dx + dy * dy).sqrt() / wpp;
     if len_px < 2.0 {
         return;
     }
+
+    // Compute the per-line baseline endpoints in *local* frame, then
+    // transform — keeps precision for distant text and matches the
+    // greek/baseline math used by the rect path.
+    let (ux, uy, uz) = (
+        obb[3][0] - obb[0][0],
+        obb[3][1] - obb[0][1],
+        obb[3][2] - obb[0][2],
+    );
+    let ulen = (ux * ux + uy * uy + uz * uz).sqrt();
+    let n_lines = if ulen < 1e-9 {
+        1
+    } else {
+        ((ulen / h_local).round() as usize).max(1)
+    };
+    let (nx, ny, nz) = if ulen < 1e-9 {
+        (0.0, 0.0, 0.0)
+    } else {
+        (ux / ulen, uy / ulen, uz / ulen)
+    };
 
     let final_color = if ctx.selected {
         WireModel::SELECTED
@@ -788,25 +847,45 @@ fn emit_text_baseline(
         .entry(key)
         .or_insert_with(|| BatchEntry::new(final_color, 0.0, [0.0; 8], 1.0, lw.aci, true, false));
 
-    let needs_sep = !entry.points.is_empty()
-        && !entry.points.last().map(|p| p[0].is_nan()).unwrap_or(false);
-    if needs_sep {
-        entry.points.push([f32::NAN; 3]);
-    }
-    for q in [p0, p1] {
-        if q[0] < entry.min_x {
-            entry.min_x = q[0];
+    let bl_local = obb[0];
+    let br_local = obb[1];
+    for i in 0..n_lines {
+        let along = if ulen < 1e-9 {
+            0.0
+        } else {
+            (ulen - ((i + 1) as f32) * h_local).max(0.0)
+        };
+        let p0 = xf([
+            bl_local[0] + nx * along,
+            bl_local[1] + ny * along,
+            bl_local[2] + nz * along,
+        ]);
+        let p1 = xf([
+            br_local[0] + nx * along,
+            br_local[1] + ny * along,
+            br_local[2] + nz * along,
+        ]);
+
+        let needs_sep = !entry.points.is_empty()
+            && !entry.points.last().map(|p| p[0].is_nan()).unwrap_or(false);
+        if needs_sep {
+            entry.points.push([f32::NAN; 3]);
         }
-        if q[1] < entry.min_y {
-            entry.min_y = q[1];
+        for q in [p0, p1] {
+            if q[0] < entry.min_x {
+                entry.min_x = q[0];
+            }
+            if q[1] < entry.min_y {
+                entry.min_y = q[1];
+            }
+            if q[0] > entry.max_x {
+                entry.max_x = q[0];
+            }
+            if q[1] > entry.max_y {
+                entry.max_y = q[1];
+            }
+            entry.points.push(q);
         }
-        if q[0] > entry.max_x {
-            entry.max_x = q[0];
-        }
-        if q[1] > entry.max_y {
-            entry.max_y = q[1];
-        }
-        entry.points.push(q);
     }
 }
 

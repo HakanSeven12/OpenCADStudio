@@ -75,6 +75,11 @@ pub struct Pipeline {
     /// the projected pixel diagonal. Mirrors `hatch_pixel_scissors` —
     /// recomputed in `compute_mesh_lod`.
     mesh_lod_levels: Vec<usize>,
+    /// Per-mesh frustum-visible flag (Phase 2.2). `false` when the
+    /// mesh's projected AABB falls entirely outside the viewport rect
+    /// — the draw loop skips it. Mirrors `mesh_lod_levels` length /
+    /// index space; recomputed alongside it.
+    mesh_visible: Vec<bool>,
     /// Batched 3DFACE fill (all faces in one buffer) and edges (merged wire).
     gpu_face3d_fill: Option<Face3DGpu>,
     gpu_face3d_edges: Vec<WireGpu>,
@@ -622,6 +627,7 @@ impl Pipeline {
             image_pixel_scissors: vec![],
             gpu_meshes: vec![],
             mesh_lod_levels: vec![],
+            mesh_visible: vec![],
             gpu_face3d_fill: None,
             gpu_face3d_edges: vec![],
             viewcube,
@@ -729,6 +735,14 @@ impl Pipeline {
             .gpu_meshes
             .iter()
             .map(|m| pick_mesh_lod(m, view_proj, clip_w, clip_h))
+            .collect();
+        // Phase 2.2 — frustum-visibility flag per mesh. Cheap: same
+        // 4-corner projection used for LOD selection, just answering a
+        // different question (any corner inside the viewport rect?).
+        self.mesh_visible = self
+            .gpu_meshes
+            .iter()
+            .map(|m| !aabb_offscreen(m.world_aabb, view_proj, clip_w, clip_h))
             .collect();
     }
 
@@ -915,6 +929,9 @@ impl Pipeline {
             pass.set_pipeline(&self.mesh_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             for (i, set) in self.gpu_meshes.iter().enumerate() {
+                if !self.mesh_visible.get(i).copied().unwrap_or(true) {
+                    continue;
+                }
                 let level = self
                     .mesh_lod_levels
                     .get(i)
@@ -1283,6 +1300,44 @@ fn aabb_diagonal_pixels(
     let dx = max_px - min_px;
     let dy = max_py - min_py;
     (dx * dx + dy * dy).sqrt()
+}
+
+/// `true` when the world-XY AABB projects entirely outside the
+/// viewport rect. Phase 2.2 mesh-frustum cull. Equivalent to a 2D
+/// bounding-box rejection test in NDC; same 4-corner projection used
+/// for LOD picking, so the extra cost is negligible.
+fn aabb_offscreen(
+    aabb: [f32; 4],
+    view_proj: glam::Mat4,
+    clip_w: u32,
+    clip_h: u32,
+) -> bool {
+    let [x0, y0, x1, y1] = aabb;
+    if !x0.is_finite() || !y0.is_finite() || !x1.is_finite() || !y1.is_finite() {
+        return false;
+    }
+    let w = clip_w as f32;
+    let h = clip_h as f32;
+    let corners = [
+        view_proj.project_point3(glam::Vec3::new(x0, y0, 0.0)),
+        view_proj.project_point3(glam::Vec3::new(x1, y0, 0.0)),
+        view_proj.project_point3(glam::Vec3::new(x0, y1, 0.0)),
+        view_proj.project_point3(glam::Vec3::new(x1, y1, 0.0)),
+    ];
+    let mut min_px = f32::INFINITY;
+    let mut max_px = f32::NEG_INFINITY;
+    let mut min_py = f32::INFINITY;
+    let mut max_py = f32::NEG_INFINITY;
+    for c in &corners {
+        let px = (c.x + 1.0) * 0.5 * w;
+        let py = (1.0 - c.y) * 0.5 * h;
+        if px < min_px { min_px = px; }
+        if px > max_px { max_px = px; }
+        if py < min_py { min_py = py; }
+        if py > max_py { max_py = py; }
+    }
+    // Reject if projected AABB sits fully to one side of the viewport.
+    max_px < 0.0 || min_px > w || max_py < 0.0 || min_py > h
 }
 
 /// Return `true` when the world-XY AABB's screen-space size is below the

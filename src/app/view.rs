@@ -605,8 +605,18 @@ impl H7CAD {
 
     pub fn subscription(&self) -> Subscription<Message> {
         use iced::event;
+        // Only request per-frame ticks while something on screen is animating
+        // (currently just the open-progress indicator). Without this gate the
+        // app burned 2-3% CPU continuously redrawing an unchanged view.
+        // See #18.
+        let needs_frames = self.opening.is_some();
+        let frames = if needs_frames {
+            window::frames().map(Message::Tick)
+        } else {
+            Subscription::none()
+        };
         iced::Subscription::batch([
-            window::frames().map(Message::Tick),
+            frames,
             event::listen_with(|ev, status, win_id| {
                 use iced::event::Status;
                 match ev {

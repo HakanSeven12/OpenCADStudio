@@ -782,6 +782,23 @@ impl OpenCADStudio {
                     }) => {
                         let ctrl = modifiers.control();
                         let shift = modifiers.shift();
+                        // Any key that produces a printable glyph types it,
+                        // even when its logical key resolves to navigation
+                        // (NumLock-on Numpad8 / Numpad2 arrive as
+                        // ArrowUp / ArrowDown but still carry text "8" /
+                        // "2"). Checked before the Arrow / history arms so
+                        // those numpad digits aren't swallowed as history
+                        // navigation. Whitespace / control text (Space,
+                        // Enter, Tab) falls through to the named handlers.
+                        if !ctrl && status == Status::Ignored {
+                            if let Some(t) = text.as_deref() {
+                                if !t.is_empty()
+                                    && t.chars().all(|c| !c.is_control() && !c.is_whitespace())
+                                {
+                                    return Some(Message::CommandAppendChar(t.to_string()));
+                                }
+                            }
+                        }
                         match key {
                             keyboard::Key::Named(keyboard::key::Named::Enter)
                             | keyboard::Key::Named(keyboard::key::Named::Space)
@@ -847,20 +864,9 @@ impl OpenCADStudio {
                                 "v" => Some(Message::Command("PASTECLIP".to_string())),
                                 _ => None,
                             },
-                            // Plain character keys (no ctrl) that nothing
-                            // else consumed — route them into the command
-                            // line input so typing always reaches it even
-                            // when focus is parked on a button / viewport.
-                            // Use the event's `text` (not the logical key)
-                            // so numpad digits and other keypad glyphs —
-                            // which don't arrive as `Key::Character` — are
-                            // captured too.
-                            _ if !ctrl && status == Status::Ignored => {
-                                let glyph = text
-                                    .as_deref()
-                                    .filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()));
-                                glyph.map(|t| Message::CommandAppendChar(t.to_string()))
-                            }
+                            // Printable glyphs are already handled by the
+                            // text guard above the match; anything reaching
+                            // here is a non-typing key we don't bind.
                             _ => None,
                         }
                     }

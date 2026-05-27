@@ -408,6 +408,25 @@ fn compute_world_offset(
     }
 }
 
+/// One viewport to render this frame — a camera, the screen rectangle it
+/// occupies, and the render mode it draws with. The unified renderer
+/// produces a `Vec<ViewportInstance>` for both layouts: a Model layout is
+/// one full-canvas instance (or several tiled ones), a paper layout is one
+/// instance per floating content viewport. The pipeline draws each in its
+/// own scissor pass, so a single shader widget covers every case.
+#[derive(Clone)]
+pub struct ViewportInstance {
+    /// Source viewport entity handle, or `Handle::NULL` for the implicit
+    /// full-canvas Model view that has no backing entity yet.
+    pub handle: Handle,
+    /// Screen rectangle (pixels, canvas-relative) this viewport fills.
+    pub screen_rect: iced::Rectangle,
+    pub camera: Camera,
+    pub render_mode: acadrust::entities::ViewportRenderMode,
+    /// `true` when this is the viewport receiving cursor input.
+    pub active: bool,
+}
+
 pub struct Scene {
     pub camera: Rc<RefCell<Camera>>,
     pub selection: Rc<RefCell<SelectionState>>,
@@ -4236,6 +4255,64 @@ impl Scene {
     pub fn update(&mut self, _dt: Duration) {}
 
     // ── Paper-space coordinate helpers ───────────────────────────────────
+
+    /// The viewports to render this frame, one entry per scissor pass.
+    ///
+    /// - **Model layout**: a single full-canvas instance driven by the
+    ///   scene camera (tiled splits will append more later). `model_mode`
+    ///   supplies its render mode (held on the tab, not the scene).
+    /// - **Paper layout**: one instance per content viewport entity
+    ///   (`id > 1`, owned by the current layout block, switched on),
+    ///   using each viewport's own camera and render mode.
+    pub fn active_viewports(
+        &self,
+        canvas_w: f32,
+        canvas_h: f32,
+        model_mode: acadrust::entities::ViewportRenderMode,
+    ) -> Vec<ViewportInstance> {
+        if self.current_layout == "Model" {
+            return vec![ViewportInstance {
+                handle: Handle::NULL,
+                screen_rect: iced::Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: canvas_w,
+                    height: canvas_h,
+                },
+                camera: self.camera.borrow().clone(),
+                render_mode: model_mode,
+                active: true,
+            }];
+        }
+        let layout_block = self.current_layout_block_handle();
+        let mut out: Vec<ViewportInstance> = Vec::new();
+        for e in self.document.entities() {
+            let EntityType::Viewport(vp) = e else {
+                continue;
+            };
+            if !Self::is_content_viewport(vp)
+                || vp.common.owner_handle != layout_block
+                || !vp.status.is_on
+            {
+                continue;
+            }
+            let h = vp.common.handle;
+            let (Some(screen_rect), Some(camera)) = (
+                self.viewport_screen_rect(h, (canvas_w, canvas_h)),
+                self.camera_for_viewport(h),
+            ) else {
+                continue;
+            };
+            out.push(ViewportInstance {
+                handle: h,
+                screen_rect,
+                camera,
+                render_mode: vp.render_mode,
+                active: self.active_viewport == Some(h),
+            });
+        }
+        out
+    }
 
     /// Convert a paper-space Viewport entity's position/size into a pixel
     /// `Rectangle` relative to the top-left of the paper canvas.

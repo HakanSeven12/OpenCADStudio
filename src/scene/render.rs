@@ -14,7 +14,7 @@ use std::sync::Arc;
 use super::pipeline::viewcube::{hover_id, VIEWCUBE_PX};
 use super::pipeline::MultiPipeline;
 use super::tess_util;
-use super::{HatchModel, ImageModel, MeshLodSet, Scene, Uniforms, WireModel};
+use super::{HatchModel, ImageModel, MeshLodSet, Scene, Uniforms, ViewportInstance, WireModel};
 
 // ── PaperViewportPipeline / PaperViewportPrimitive ────────────────────────
 //
@@ -547,6 +547,130 @@ impl Scene {
         Primitive {
             viewports: vec![data],
             bg_color,
+        }
+    }
+
+    /// Build the unified multi-viewport `Primitive` for the current layout.
+    /// Model layout → one full-window viewport (more once tiled); paper
+    /// layout → one viewport per floating content viewport. Each entry is
+    /// rendered into its own screen rectangle by its own inner pipeline.
+    pub(super) fn build_viewports(
+        &self,
+        bounds: Rectangle,
+        model_render_mode: acadrust::entities::ViewportRenderMode,
+        hover_region: Option<usize>,
+    ) -> Primitive {
+        self.selection.borrow_mut().vp_size = (bounds.width, bounds.height);
+        if bounds.height > 0.0 {
+            self.set_render_aspect(bounds.width / bounds.height);
+            self.set_render_pixel_scale(bounds.width, bounds.height);
+        }
+        let canvas = (bounds.width.max(1.0), bounds.height.max(1.0));
+        let instances = self.active_viewports(canvas.0, canvas.1, model_render_mode);
+        let bg_color = if self.current_layout == "Model" {
+            self.bg_color
+        } else {
+            self.paper_bg_color
+        };
+        let viewports: Vec<ViewportData> = instances
+            .iter()
+            .map(|inst| self.viewport_data_for(inst, canvas, hover_region))
+            .collect();
+        Primitive {
+            viewports: if viewports.is_empty() {
+                // Paper layout with no content viewports still needs a
+                // (blank) pass so the widget clears to the sheet colour.
+                vec![self.viewport_data_for(
+                    &ViewportInstance {
+                        handle: acadrust::Handle::NULL,
+                        screen_rect: Rectangle {
+                            x: 0.0,
+                            y: 0.0,
+                            width: canvas.0,
+                            height: canvas.1,
+                        },
+                        camera: self.camera.borrow().clone(),
+                        render_mode: model_render_mode,
+                        active: false,
+                    },
+                    canvas,
+                    None,
+                )]
+            } else {
+                viewports
+            },
+            bg_color,
+        }
+    }
+
+    /// Build one `ViewportData` from a `ViewportInstance`: gathers the
+    /// viewport's geometry (full model for the Model view / `Handle::NULL`,
+    /// or the layer-frozen subset for a paper viewport), its camera
+    /// uniforms, and the normalized screen rectangle.
+    fn viewport_data_for(
+        &self,
+        inst: &ViewportInstance,
+        canvas: (f32, f32),
+        hover_region: Option<usize>,
+    ) -> ViewportData {
+        let flags = render_mode_flags(inst.render_mode);
+        let view_wireframe = !flags.face3d_fill;
+
+        let base_arc = if inst.handle == acadrust::Handle::NULL {
+            self.entity_wires_arc()
+        } else {
+            self.model_wires_for_viewport_arc(inst.handle)
+        };
+        let (face3d_wires, other_wires) = split_face3d_wires(&base_arc, &self.document);
+        let all_wires = if self.interim_wire.is_none() && self.preview_wires.is_empty() {
+            Arc::new(other_wires)
+        } else {
+            let mut v = other_wires;
+            if let Some(iw) = &self.interim_wire {
+                v.push(iw.clone());
+            }
+            v.extend(self.preview_wires.iter().cloned());
+            Arc::new(v)
+        };
+
+        // Camera uniforms use the viewport's pixel size for aspect / ortho.
+        let bounds_px = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: inst.screen_rect.width.max(1.0),
+            height: inst.screen_rect.height.max(1.0),
+        };
+        let mut uniforms =
+            Uniforms::new(&inst.camera, bounds_px, self.document.header.lineweight_display);
+        uniforms.flat_shade = if flags.flat_shade { 1.0 } else { 0.0 };
+
+        let screen_rect = Rectangle {
+            x: inst.screen_rect.x / canvas.0,
+            y: inst.screen_rect.y / canvas.1,
+            width: inst.screen_rect.width / canvas.0,
+            height: inst.screen_rect.height / canvas.1,
+        };
+
+        ViewportData {
+            wires: all_wires,
+            face3d_wires: Arc::new(face3d_wires),
+            hatches: self.hatch_models_arc(),
+            wipeout_hatches: self.wipeout_models_arc(),
+            images: self.images_arc(),
+            meshes: self.meshes_arc(),
+            uniforms,
+            cam_rotation: inst.camera.view_rotation_mat(),
+            // Only the active viewport gets the hovered-region highlight.
+            hover_region: if inst.active { hover_region } else { None },
+            show_viewcube: inst.active,
+            fill_mode: self.document.header.fill_mode,
+            view_wireframe,
+            mesh_fill: flags.mesh_fill,
+            show_3d_edges: flags.show_3d_edges,
+            hidden_line: flags.hidden_line,
+            geometry_epoch: self.geometry_epoch,
+            camera_generation: self.camera_generation,
+            screen_rect,
         }
     }
 

@@ -141,12 +141,13 @@ impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for ViewportPane<'a>
         bounds: Rectangle,
     ) -> Self::Primitive {
         match &self.mode {
-            ViewportPaneMode::Model => self.scene.build_primitive(
-                state.hover_region,
-                bounds,
-                self.show_viewcube,
-                self.render_mode,
-            ),
+            // Unified multi-viewport build: Model layout yields one
+            // full-window viewport (more once tiled); the camera, render
+            // mode and ViewCube come from `active_viewports`.
+            ViewportPaneMode::Model => {
+                self.scene
+                    .build_viewports(bounds, self.render_mode, state.hover_region)
+            }
             ViewportPaneMode::Paper { handle } => {
                 self.scene
                     .build_viewport_primitive(*handle, state.hover_region, bounds, false)

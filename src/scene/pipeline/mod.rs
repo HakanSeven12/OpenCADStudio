@@ -1028,6 +1028,7 @@ impl Pipeline {
         bg_color: [f32; 4],
         mesh_wireframe: bool,
         hidden_line: bool,
+        show_3d_edges: bool,
     ) {
         let vp = clip_bounds;
         let msaa = &self.msaa_view;
@@ -1156,15 +1157,17 @@ impl Pipeline {
             });
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-            // Three draw modes share this pass:
-            //  - Solid: `mesh_pipeline` + the triangle index buffer.
-            //  - Wireframe: `mesh_wireframe_pipeline` + the pre-built
-            //    `wire_index_buffer` (each triangle edge expanded to a
-            //    line segment at upload).
-            //  - HiddenLine: depth prepass with `mesh_depth_pipeline`
-            //    (writes Z, no colour), then wire-edge draw on top.
-            //    The wire draw's LessEqual depth test naturally hides
-            //    edges occluded by the prepass.
+            // Four draw paths share this pass:
+            //  - Solid:           `mesh_pipeline` + triangle index buf.
+            //  - Wireframe:       `mesh_wireframe_pipeline` + the
+            //                     pre-built `wire_index_buffer`.
+            //  - HiddenLine:      depth prepass (`mesh_depth_pipeline`,
+            //                     writes Z, no colour) → wire overlay.
+            //  - Solid+Edges:     `mesh_pipeline` shaded fill → wire
+            //                     overlay; LessEqual depth test on the
+            //                     wire pass keeps the edges crisp on
+            //                     top of the shaded surface.
+            let want_solid_with_edges = !hidden_line && !mesh_wireframe && show_3d_edges;
             if hidden_line {
                 pass.set_pipeline(&self.mesh_depth_pipeline);
                 for (i, set) in self.gpu_meshes.iter().enumerate() {
@@ -1242,6 +1245,36 @@ impl Pipeline {
                     pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..icount, 0, 0..1);
                 }
+                // *WithEdges variants: overlay wire-edge segments on top
+                // of the shaded fill. The LessEqual depth test on the
+                // wireframe pipeline keeps the edges visible at the
+                // fragments that just got written by the solid pass.
+                if want_solid_with_edges {
+                    pass.set_pipeline(&self.mesh_wireframe_pipeline);
+                    for (i, set) in self.gpu_meshes.iter().enumerate() {
+                        if !self.mesh_visible.get(i).copied().unwrap_or(true) {
+                            continue;
+                        }
+                        let level = self
+                            .mesh_lod_levels
+                            .get(i)
+                            .copied()
+                            .unwrap_or(0)
+                            .min(set.lods.len().saturating_sub(1));
+                        let Some(mesh) = set.lods.get(level) else {
+                            continue;
+                        };
+                        if mesh.wire_index_count == 0 {
+                            continue;
+                        }
+                        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            mesh.wire_index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        pass.draw_indexed(0..mesh.wire_index_count, 0, 0..1);
+                    }
+                }
             }
         }
 
@@ -1293,7 +1326,9 @@ impl Pipeline {
         }
 
         // ── Pass 5b: 3DFACE edges (batched, possibly multiple chunks) ────
-        if !self.gpu_face3d_edges.is_empty() {
+        // FlatShaded / GouraudShaded hide the 3DFACE outline (the user
+        // chose a clean shaded look); every other mode keeps it.
+        if show_3d_edges && !self.gpu_face3d_edges.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("face3d_edges.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

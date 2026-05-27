@@ -107,12 +107,10 @@ pub struct Primitive {
     /// in `Wireframe2D` / `Wireframe3D`; on for every shaded variant. Set
     /// at the same point `view_wireframe` is computed so the two stay in
     /// lock-step for the gating logic in `prepare()`.
-    #[allow(dead_code)]
     pub(super) mesh_fill: bool,
     /// Whether the active render mode wants 3D mesh / face edges
     /// rendered on top of fills. Most shaded modes turn this off; the
     /// `*WithEdges` variants and the pure wireframes leave it on.
-    #[allow(dead_code)]
     pub(super) show_3d_edges: bool,
     /// HiddenLine routes 3D fills through a depth-only prepass so edges
     /// occluded by closer geometry are culled by the LessEqual depth
@@ -138,6 +136,11 @@ pub struct RenderModeFlags {
     pub mesh_fill: bool,
     pub show_3d_edges: bool,
     pub hidden_line: bool,
+    /// `true` for FlatShaded / FlatShadedWithEdges. The mesh shader
+    /// reads `Uniforms.flat_shade` and replaces the smooth per-vertex
+    /// normal with a per-triangle face normal so each triangle reads
+    /// as a single tone.
+    pub flat_shade: bool,
 }
 
 pub fn render_mode_flags(
@@ -150,24 +153,42 @@ pub fn render_mode_flags(
             mesh_fill: false,
             show_3d_edges: true,
             hidden_line: false,
+            flat_shade: false,
         },
         M::HiddenLine => RenderModeFlags {
             face3d_fill: true,
             mesh_fill: true,
             show_3d_edges: true,
             hidden_line: true,
+            flat_shade: false,
         },
-        M::FlatShaded | M::GouraudShaded => RenderModeFlags {
+        M::FlatShaded => RenderModeFlags {
             face3d_fill: true,
             mesh_fill: true,
             show_3d_edges: false,
             hidden_line: false,
+            flat_shade: true,
         },
-        M::FlatShadedWithEdges | M::GouraudShadedWithEdges => RenderModeFlags {
+        M::GouraudShaded => RenderModeFlags {
+            face3d_fill: true,
+            mesh_fill: true,
+            show_3d_edges: false,
+            hidden_line: false,
+            flat_shade: false,
+        },
+        M::FlatShadedWithEdges => RenderModeFlags {
             face3d_fill: true,
             mesh_fill: true,
             show_3d_edges: true,
             hidden_line: false,
+            flat_shade: true,
+        },
+        M::GouraudShadedWithEdges => RenderModeFlags {
+            face3d_fill: true,
+            mesh_fill: true,
+            show_3d_edges: true,
+            hidden_line: false,
+            flat_shade: false,
         },
     }
 }
@@ -267,6 +288,7 @@ impl shader::Primitive for Primitive {
             self.bg_color,
             mesh_wireframe,
             self.hidden_line,
+            self.show_3d_edges,
         );
         if self.show_viewcube {
             pipeline.viewcube.render(encoder, target, *clip);
@@ -455,6 +477,9 @@ impl Scene {
             self.paper_bg_color
         };
 
+        let mut uniforms = Uniforms::new(&cam, bounds, self.document.header.lineweight_display);
+        uniforms.flat_shade = if flags.flat_shade { 1.0 } else { 0.0 };
+
         Primitive {
             wires: all_wires,
             face3d_wires: Arc::new(face3d_wires),
@@ -462,7 +487,7 @@ impl Scene {
             wipeout_hatches: self.wipeout_models_arc(),
             images: self.images_arc(),
             meshes: self.meshes_arc(),
-            uniforms: Uniforms::new(&cam, bounds, self.document.header.lineweight_display),
+            uniforms,
             cam_rotation: cam.view_rotation_mat(),
             hover_region,
             bg_color,
@@ -478,14 +503,20 @@ impl Scene {
     }
 
     /// Build a Primitive that renders model-space content through a specific
-    /// paper-space viewport's camera, applying its layer-freeze list.
+    /// paper-space viewport's camera, applying its layer-freeze list. The
+    /// render mode is read from the viewport entity itself (each paper-space
+    /// viewport carries its own visual style) — the model-space pick_list
+    /// only governs the Model layout.
     pub(super) fn build_viewport_primitive(
         &self,
         vp_handle: Handle,
         hover_region: Option<usize>,
         bounds: Rectangle,
-        render_mode: acadrust::entities::ViewportRenderMode,
     ) -> Primitive {
+        let render_mode = match self.document.get_entity(vp_handle) {
+            Some(EntityType::Viewport(vp)) => vp.render_mode,
+            _ => acadrust::entities::ViewportRenderMode::Wireframe2D,
+        };
         let flags = render_mode_flags(render_mode);
         let view_wireframe = !flags.face3d_fill;
         let cam = match self.camera_for_viewport(vp_handle) {
@@ -506,6 +537,9 @@ impl Scene {
             Arc::new(v)
         };
 
+        let mut uniforms = Uniforms::new(&cam, bounds, self.document.header.lineweight_display);
+        uniforms.flat_shade = if flags.flat_shade { 1.0 } else { 0.0 };
+
         Primitive {
             wires: all_wires,
             face3d_wires: Arc::new(face3d_wires),
@@ -513,7 +547,7 @@ impl Scene {
             wipeout_hatches: self.wipeout_models_arc(),
             images: self.images_arc(),
             meshes: self.meshes_arc(),
-            uniforms: Uniforms::new(&cam, bounds, self.document.header.lineweight_display),
+            uniforms,
             cam_rotation: cam.view_rotation_mat(),
             hover_region,
             bg_color: self.bg_color,
@@ -535,10 +569,9 @@ impl Scene {
         vp_handle: Handle,
         hover_region: Option<usize>,
         bounds: Rectangle,
-        render_mode: acadrust::entities::ViewportRenderMode,
     ) -> PaperViewportPrimitive {
         PaperViewportPrimitive(
-            self.build_viewport_primitive(vp_handle, hover_region, bounds, render_mode),
+            self.build_viewport_primitive(vp_handle, hover_region, bounds),
         )
     }
 

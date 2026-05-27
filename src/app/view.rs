@@ -883,7 +883,7 @@ fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, M
             let w = rect.width.clamp(1.0, canvas_w - x);
             let h = rect.height.clamp(1.0, canvas_h - y);
 
-            let vp_widget = shader(PaperViewportPane::new(scene, vp_handle, tab.render_mode))
+            let vp_widget = shader(PaperViewportPane::new(scene, vp_handle))
                 .width(iced::Length::Fixed(w))
                 .height(iced::Length::Fixed(h));
 

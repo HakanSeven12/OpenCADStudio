@@ -912,8 +912,10 @@ impl OpenCADStudio {
 
         let qselect_layer: Element<'_, Message> = if let Some(state) = &self.qselect {
             let types = tab.scene.entity_type_names_in_layout();
-            let layers = tab.scene.entity_layers_in_layout();
-            qselect_overlay(state, &types, &layers)
+            let properties = tab
+                .scene
+                .qselect_properties(state.type_filter.as_deref());
+            qselect_overlay(state, &types, &properties)
         } else {
             iced::widget::Space::new().width(0).height(0).into()
         };
@@ -1516,17 +1518,19 @@ fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
 
 // ── Quick Select panel ─────────────────────────────────────────────────────
 
-const QSELECT_ANY: &str = "(Any)";
+const QSELECT_ANY_TYPE: &str = "(Any type)";
+const QSELECT_ANY_PROP: &str = "(Any property)";
 
-/// Floating panel for the Quick Select feature. Two pick_lists (object
-/// type, layer) filter the candidate set down to entities matching both;
-/// "(Any)" in either slot skips that filter. The panel returns to the
-/// stored state on every render, so editing one filter doesn't reset the
-/// other. Outside-click and Cancel both dismiss without applying.
+/// Floating panel for the Quick Select feature. Single-row filter:
+/// object type → property → operator → value, plus an "Append to current
+/// selection" checkbox. The property dropdown is type-aware — Common
+/// properties (Layer, Color, Linetype, Lineweight) are always shown;
+/// picking a specific Object type adds that type's `geometry_properties`
+/// fields (Start X, Length, Radius, …) so type-specific filtering works.
 fn qselect_overlay<'a>(
     state: &'a crate::app::QSelectState,
     types: &[&'static str],
-    layers: &[String],
+    properties: &[(String, String)],
 ) -> Element<'a, Message> {
     use iced::widget::{checkbox, pick_list};
     const BG: Color = Color { r: 0.12, g: 0.12, b: 0.12, a: 0.98 };
@@ -1537,19 +1541,43 @@ fn qselect_overlay<'a>(
     const BTN_BG: Color = Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 };
     const BTN_HOV: Color = Color { r: 0.30, g: 0.30, b: 0.30, a: 1.0 };
 
-    let mut type_options: Vec<String> = vec![QSELECT_ANY.to_string()];
+    let mut type_options: Vec<String> = vec![QSELECT_ANY_TYPE.to_string()];
     type_options.extend(types.iter().map(|s| (*s).to_string()));
-    let mut layer_options: Vec<String> = vec![QSELECT_ANY.to_string()];
-    layer_options.extend(layers.iter().cloned());
+
+    let mut prop_options: Vec<crate::app::QSelectPropertyChoice> =
+        vec![crate::app::QSelectPropertyChoice {
+            field: String::new(),
+            label: QSELECT_ANY_PROP.to_string(),
+        }];
+    prop_options.extend(properties.iter().map(|(field, label)| {
+        crate::app::QSelectPropertyChoice {
+            field: field.clone(),
+            label: label.clone(),
+        }
+    }));
+
+    let op_options: Vec<crate::app::QSelectOp> = vec![
+        crate::app::QSelectOp::Eq,
+        crate::app::QSelectOp::Neq,
+        crate::app::QSelectOp::Gt,
+        crate::app::QSelectOp::Lt,
+        crate::app::QSelectOp::Any,
+    ];
 
     let type_sel = state
         .type_filter
         .clone()
-        .unwrap_or_else(|| QSELECT_ANY.to_string());
-    let layer_sel = state
-        .layer_filter
-        .clone()
-        .unwrap_or_else(|| QSELECT_ANY.to_string());
+        .unwrap_or_else(|| QSELECT_ANY_TYPE.to_string());
+    let prop_sel = state.property.clone().unwrap_or(crate::app::QSelectPropertyChoice {
+        field: String::new(),
+        label: QSELECT_ANY_PROP.to_string(),
+    });
+
+    // The value field is disabled (visually de-emphasised; we still
+    // render the same widget) when no property is picked or the
+    // operator is "*Any value" — both of those skip the value test.
+    let value_enabled = state.property.is_some()
+        && !matches!(state.operator, crate::app::QSelectOp::Any);
 
     let label = |s: &'static str| text(s).size(12).color(TEXT).width(iced::Length::Fixed(90.0));
 
@@ -1575,13 +1603,18 @@ fn qselect_overlay<'a>(
             .padding([4, 14])
     };
 
+    let mut value_input = text_input("", &state.value).size(12);
+    if value_enabled {
+        value_input = value_input.on_input(Message::QSelectSetValue);
+    }
+
     let panel_body = column![
         text("Quick Select").size(14).color(TEXT),
         Space::new().height(10),
         row![
             label("Object type:"),
             pick_list(type_options, Some(type_sel), |s: String| {
-                if s == QSELECT_ANY {
+                if s == QSELECT_ANY_TYPE {
                     Message::QSelectSetType(None)
                 } else {
                     Message::QSelectSetType(Some(s))
@@ -1593,18 +1626,30 @@ fn qselect_overlay<'a>(
         .spacing(8),
         Space::new().height(6),
         row![
-            label("Layer:"),
-            pick_list(layer_options, Some(layer_sel), |s: String| {
-                if s == QSELECT_ANY {
-                    Message::QSelectSetLayer(None)
+            label("Property:"),
+            pick_list(prop_options, Some(prop_sel), |p: crate::app::QSelectPropertyChoice| {
+                if p.field.is_empty() {
+                    Message::QSelectSetProperty(None)
                 } else {
-                    Message::QSelectSetLayer(Some(s))
+                    Message::QSelectSetProperty(Some(p))
                 }
             })
             .width(Fill),
         ]
         .align_y(iced::Alignment::Center)
         .spacing(8),
+        Space::new().height(6),
+        row![
+            label("Operator:"),
+            pick_list(op_options, Some(state.operator), Message::QSelectSetOperator)
+                .width(Fill),
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(8),
+        Space::new().height(6),
+        row![label("Value:"), value_input,]
+            .align_y(iced::Alignment::Center)
+            .spacing(8),
         Space::new().height(10),
         row![
             checkbox(state.append)
@@ -1627,7 +1672,7 @@ fn qselect_overlay<'a>(
 
     let panel = container(panel_body)
         .padding(16)
-        .width(iced::Length::Fixed(360.0))
+        .width(iced::Length::Fixed(400.0))
         .style(|_: &Theme| container::Style {
             background: Some(Background::Color(BG)),
             border: Border {

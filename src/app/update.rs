@@ -3392,22 +3392,23 @@ impl OpenCADStudio {
             Message::QSelectOpen => {
                 let i = self.active_tab;
                 self.tabs[i].scene.selection.borrow_mut().context_menu = None;
-                // Seed filters from the first selected entity (if any) so
-                // a right-click → Quick Select on a known object pre-fills
-                // the panel — same idea as Select Similar but exposes the
-                // pairing for editing.
+                // Seed the type filter from the first selected entity so a
+                // right-click → Quick Select on a known object opens the
+                // panel pre-tuned to that entity's type. Property defaults
+                // to "(Any property)" so the user immediately picks what
+                // they want to compare.
                 let mut type_filter: Option<String> = None;
-                let mut layer_filter: Option<String> = None;
                 if let Some(&h) = self.tabs[i].scene.selected.iter().next() {
                     if let Some(e) = self.tabs[i].scene.document.get_entity(h) {
                         use crate::entities::traits::entity_type_name;
                         type_filter = Some(entity_type_name(e).to_string());
-                        layer_filter = Some(e.as_entity().layer().to_string());
                     }
                 }
                 self.qselect = Some(crate::app::QSelectState {
                     type_filter,
-                    layer_filter,
+                    property: None,
+                    operator: crate::app::QSelectOp::Eq,
+                    value: String::new(),
                     append: false,
                 });
                 Task::none()
@@ -3420,14 +3421,41 @@ impl OpenCADStudio {
 
             Message::QSelectSetType(t) => {
                 if let Some(state) = self.qselect.as_mut() {
+                    // Drop the property when it no longer applies to the
+                    // chosen type: type-specific fields like `start_x`
+                    // would otherwise stay selected but never match.
+                    let kept_property = state.property.clone().and_then(|p| {
+                        let i = self.active_tab;
+                        let props = self.tabs[i].scene.qselect_properties(t.as_deref());
+                        if props.iter().any(|(f, _)| f == &p.field) {
+                            Some(p)
+                        } else {
+                            None
+                        }
+                    });
                     state.type_filter = t;
+                    state.property = kept_property;
                 }
                 Task::none()
             }
 
-            Message::QSelectSetLayer(l) => {
+            Message::QSelectSetProperty(p) => {
                 if let Some(state) = self.qselect.as_mut() {
-                    state.layer_filter = l;
+                    state.property = p;
+                }
+                Task::none()
+            }
+
+            Message::QSelectSetOperator(op) => {
+                if let Some(state) = self.qselect.as_mut() {
+                    state.operator = op;
+                }
+                Task::none()
+            }
+
+            Message::QSelectSetValue(v) => {
+                if let Some(state) = self.qselect.as_mut() {
+                    state.value = v;
                 }
                 Task::none()
             }
@@ -3446,7 +3474,9 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let matched = self.tabs[i].scene.qselect(
                     state.type_filter.as_deref(),
-                    state.layer_filter.as_deref(),
+                    state.property.as_ref().map(|p| p.field.as_str()),
+                    state.operator,
+                    &state.value,
                     state.append,
                 );
                 self.command_line

@@ -56,13 +56,70 @@ pub struct GripPendingValue {
     pub label: &'static str,
 }
 
-/// Open Quick Select panel state. `type_filter` / `layer_filter` of
-/// `None` match every entity in that field; otherwise the filter is the
-/// literal name to compare against.
+/// Operator the Quick Select filter applies between an entity's
+/// property value and the user-typed test value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QSelectOp {
+    /// `*Any value` — the entity matches as long as the type filter
+    /// passes; the value column is ignored.
+    Any,
+    Eq,
+    Neq,
+    Gt,
+    Lt,
+}
+
+impl std::fmt::Display for QSelectOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            QSelectOp::Any => "* Any value",
+            QSelectOp::Eq => "= Equals",
+            QSelectOp::Neq => "!= Not equal",
+            QSelectOp::Gt => "> Greater than",
+            QSelectOp::Lt => "< Less than",
+        };
+        f.write_str(s)
+    }
+}
+
+/// One row in the Quick Select Properties pick_list. `field` is the
+/// stable identifier (`"layer"`, `"start_x"`, …) used to look up the
+/// value on each candidate entity; `label` is the human label rendered
+/// in the dropdown. Equality only compares `field` so the pick_list
+/// round-trips selection correctly even when labels are duplicated.
+#[derive(Clone, Debug)]
+pub struct QSelectPropertyChoice {
+    pub field: String,
+    pub label: String,
+}
+
+impl PartialEq for QSelectPropertyChoice {
+    fn eq(&self, other: &Self) -> bool {
+        self.field == other.field
+    }
+}
+
+impl Eq for QSelectPropertyChoice {}
+
+impl std::fmt::Display for QSelectPropertyChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+/// Open Quick Select panel state. The filter is one
+/// `(type, property, op, value)` row plus an Append-to-current-selection
+/// toggle, mirroring the classic QSELECT dialog: the panel filters
+/// candidate entities (entire layout) by type, then by the chosen
+/// property compared to the typed value using the operator.
 #[derive(Clone, Debug)]
 pub struct QSelectState {
+    /// `None` = "(Any type)".
     pub type_filter: Option<String>,
-    pub layer_filter: Option<String>,
+    /// `None` = no property filter; the type filter alone applies.
+    pub property: Option<QSelectPropertyChoice>,
+    pub operator: QSelectOp,
+    pub value: String,
     pub append: bool,
 }
 use crate::snap::Snapper;
@@ -652,8 +709,14 @@ pub enum Message {
     QSelectClose,
     /// Type filter — `None` means "any type".
     QSelectSetType(Option<String>),
-    /// Layer filter — `None` means "any layer".
-    QSelectSetLayer(Option<String>),
+    /// Property to compare. `None` means "no property filter — just type
+    /// filter applies"; the operator and value fields are ignored in
+    /// that case.
+    QSelectSetProperty(Option<QSelectPropertyChoice>),
+    /// Comparison operator.
+    QSelectSetOperator(QSelectOp),
+    /// Compare-against value (free-text input).
+    QSelectSetValue(String),
     /// Append-to-current-selection toggle.
     QSelectSetAppend(bool),
     /// Apply the current filter and close the panel.

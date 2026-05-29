@@ -3763,18 +3763,24 @@ impl Scene {
         added
     }
 
-    /// Replaces (or extends, when `append` is true) the current selection
-    /// with every entity in the active layout that matches the optional
-    /// `type_name` and `layer` filters. A `None` filter means "any".
-    /// Returns the number of matching entities (i.e. the post-call
-    /// selection size if `append` was false, or the new total if it was
-    /// true and previously-selected matches are not double-counted).
+    /// Replaces (or extends, when `append` is true) the current
+    /// selection with every entity in the active layout that matches
+    /// the filter. Returns the number of newly-matching entities.
+    ///
+    /// `type_name` of `None` means "any type". `property_field` of
+    /// `None` skips the property test (only the type filter applies).
+    /// The operator's `Any` variant also skips the property test.
+    /// Numeric operators (`Gt` / `Lt`) parse both sides as `f64` and
+    /// reject anything non-numeric.
     pub fn qselect(
         &mut self,
         type_name: Option<&str>,
-        layer: Option<&str>,
+        property_field: Option<&str>,
+        op: crate::app::QSelectOp,
+        value: &str,
         append: bool,
     ) -> usize {
+        use crate::app::QSelectOp;
         use crate::entities::traits::entity_type_name;
         if !append {
             self.selected.clear();
@@ -3785,9 +3791,37 @@ impl Scene {
             let Some(e) = self.document.get_entity(h) else {
                 continue;
             };
-            let type_ok = type_name.is_none_or(|t| entity_type_name(e) == t);
-            let layer_ok = layer.is_none_or(|l| e.as_entity().layer() == l);
-            if type_ok && layer_ok {
+            if let Some(t) = type_name {
+                if entity_type_name(e) != t {
+                    continue;
+                }
+            }
+            let prop_ok = match (property_field, op) {
+                (None, _) | (_, QSelectOp::Any) => true,
+                (Some(field), op) => {
+                    let Some(actual) = self.entity_property_value(e, field) else {
+                        continue;
+                    };
+                    match op {
+                        QSelectOp::Eq => actual.eq_ignore_ascii_case(value),
+                        QSelectOp::Neq => !actual.eq_ignore_ascii_case(value),
+                        QSelectOp::Gt | QSelectOp::Lt => {
+                            let (Ok(a), Ok(b)) =
+                                (actual.parse::<f64>(), value.parse::<f64>())
+                            else {
+                                continue;
+                            };
+                            if matches!(op, QSelectOp::Gt) {
+                                a > b
+                            } else {
+                                a < b
+                            }
+                        }
+                        QSelectOp::Any => true,
+                    }
+                }
+            };
+            if prop_ok {
                 self.selected.insert(h);
                 matched += 1;
             }
@@ -3811,18 +3845,112 @@ impl Scene {
         names.into_iter().collect()
     }
 
-    /// Returns the sorted set of layer names referenced by entities in
-    /// the active layout. Used to populate the Quick Select "Layer"
-    /// dropdown.
-    pub fn entity_layers_in_layout(&self) -> Vec<String> {
-        let mut names: std::collections::BTreeSet<String> =
-            std::collections::BTreeSet::new();
-        for h in self.current_layout_entity_handles() {
-            if let Some(e) = self.document.get_entity(h) {
-                names.insert(e.as_entity().layer().to_string());
+    /// Returns the list of `(field, label)` pairs the Quick Select
+    /// "Properties" dropdown should show given the current type filter:
+    ///
+    /// * Common properties (Layer, Color, Linetype, Lineweight) are
+    ///   always included.
+    /// * When `type_name` names a specific entity type present in the
+    ///   active layout, the first entity of that type contributes its
+    ///   `geometry_properties()` rows (Start X, Length, Radius, …) so
+    ///   type-specific filtering works.
+    pub fn qselect_properties(
+        &self,
+        type_name: Option<&str>,
+    ) -> Vec<(String, String)> {
+        use crate::entities::traits::{entity_type_name, EntityTypeOps};
+        let mut out: Vec<(String, String)> = vec![
+            ("layer".to_string(), "Layer".to_string()),
+            ("color".to_string(), "Color".to_string()),
+            ("linetype".to_string(), "Linetype".to_string()),
+            ("lineweight".to_string(), "Lineweight".to_string()),
+        ];
+        if let Some(t) = type_name {
+            let text_style_names: Vec<String> = self
+                .document
+                .text_styles
+                .iter()
+                .map(|s| s.name.clone())
+                .collect();
+            let sample = self
+                .current_layout_entity_handles()
+                .into_iter()
+                .filter_map(|h| self.document.get_entity(h))
+                .find(|e| entity_type_name(e) == t);
+            if let Some(sample) = sample {
+                if let Some(section) = sample.geometry_properties(&text_style_names) {
+                    for prop in section.props {
+                        // Skip rows that don't sensibly compare via
+                        // `entity_property_value` (read-only labels are
+                        // fine — users can still match against them).
+                        out.push((prop.field.to_string(), prop.label.clone()));
+                    }
+                }
             }
         }
-        names.into_iter().collect()
+        out
+    }
+
+    /// Reads a property value from an entity for QSELECT comparison.
+    /// Returns the canonical string used as the left-hand side of the
+    /// operator test. Common properties have hand-rolled formatting so
+    /// `"ByLayer"` / `"7"` / `"0.30mm"` are stable; everything else
+    /// goes through `geometry_properties()` and pulls the matching
+    /// row's value out.
+    pub fn entity_property_value(
+        &self,
+        entity: &acadrust::EntityType,
+        field: &str,
+    ) -> Option<String> {
+        use crate::entities::traits::EntityTypeOps;
+        use crate::scene::object::PropValue;
+        match field {
+            "layer" => Some(entity.common().layer.clone()),
+            "color" => Some(Self::format_color(entity.common().color)),
+            "linetype" => Some(entity.common().linetype.clone()),
+            "lineweight" => Some(Self::format_lineweight(entity.common().line_weight)),
+            _ => {
+                let text_style_names: Vec<String> = self
+                    .document
+                    .text_styles
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect();
+                let section = entity.geometry_properties(&text_style_names)?;
+                let prop = section.props.into_iter().find(|p| p.field == field)?;
+                Some(match prop.value {
+                    PropValue::ReadOnly(s) | PropValue::EditText(s) => s,
+                    PropValue::LayerChoice(s) => s,
+                    PropValue::Choice { selected, .. } => selected,
+                    PropValue::ColorChoice(c) => Self::format_color(c),
+                    PropValue::LwChoice(lw) => Self::format_lineweight(lw),
+                    PropValue::LinetypeChoice(s) => s,
+                    PropValue::HatchPatternChoice(s) => s,
+                    PropValue::BoolToggle { value, .. } => value.to_string(),
+                    PropValue::ColorVaries | PropValue::LwVaries => return None,
+                })
+            }
+        }
+    }
+
+    fn format_color(c: acadrust::types::Color) -> String {
+        use acadrust::types::Color;
+        match c {
+            Color::ByLayer => "ByLayer".to_string(),
+            Color::ByBlock => "ByBlock".to_string(),
+            Color::Index(i) => i.to_string(),
+            Color::Rgb { r, g, b } => format!("{},{},{}", r, g, b),
+        }
+    }
+
+    fn format_lineweight(lw: acadrust::types::LineWeight) -> String {
+        use acadrust::types::LineWeight;
+        match lw {
+            LineWeight::ByLayer => "ByLayer".to_string(),
+            LineWeight::ByBlock => "ByBlock".to_string(),
+            LineWeight::Default => "Default".to_string(),
+            LineWeight::Value(v) => format!("{:.2}mm", v as f64 / 100.0),
+        }
     }
 
     // ── Erase ─────────────────────────────────────────────────────────────

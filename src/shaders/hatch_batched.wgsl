@@ -253,4 +253,8 @@ fn check_family(
         }
     }
     discard;
+    // Unreachable: `discard` kills the fragment before this runs, but
+    // DX12/FXC reports E_FAIL X3507 ("not all control paths return a
+    // value") without an explicit return after every terminal discard.
+    return vec4<f32>(0.0);
 }

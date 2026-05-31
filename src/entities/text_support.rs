@@ -2,7 +2,7 @@ use acadrust::types::aci_table::aci_to_rgb;
 use acadrust::{CadDocument, EntityType};
 
 use crate::scene::acad_to_truck::TextStroke;
-use crate::scene::cxf;
+use crate::scene::lff;
 
 pub struct ResolvedTextStyle {
     pub font_name: String,
@@ -65,7 +65,7 @@ pub fn text_local_bounds(
         return None;
     }
 
-    let font = cxf::get_font(font_name);
+    let font = lff::get_font(font_name);
     let scale = height / 9.0;
     let wf = width_factor.abs().clamp(0.01, 100.0);
     let ob = oblique_angle.tan();
@@ -846,7 +846,7 @@ pub fn measure_word(
 ) -> f32 {
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
-    let font = cxf::get_font(font_name);
+    let font = lff::get_font(font_name);
     let mut w = 0.0_f32;
     for ch in text.chars() {
         w += match font.glyph(ch) {
@@ -860,7 +860,7 @@ pub fn measure_word(
 pub fn measure_space(state: &RunState, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
-    cxf::get_font(font_name).word_spacing * scale
+    lff::get_font(font_name).word_spacing * scale
 }
 
 pub fn atom_width(atom: &LayoutAtom, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
@@ -991,7 +991,7 @@ pub fn resolve_inline_color(c: &InlineColor) -> Option<[f32; 3]> {
     }
 }
 
-/// Wrap a run's glyph text with MTEXT decoration markers so cxf's
+/// Wrap a run's glyph text with MTEXT decoration markers so lff's
 /// `tessellate_text_run` emits the underline / overline / strikethrough
 /// strokes for us — keeps decoration geometry in one place rather than
 /// duplicating the y-position constants.
@@ -1115,7 +1115,7 @@ pub struct MTextLayout {
 /// text block.
 pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     let base_font_name = opts.style.font_name.clone();
-    let base_font = cxf::get_font(&base_font_name);
+    let base_font = lff::get_font(&base_font_name);
     let base_wf_abs = opts.style.width_factor.max(0.01);
     let base_wf = if opts.style.is_backward { -base_wf_abs } else { base_wf_abs };
     let base_oblique = opts.style.oblique_angle;
@@ -1353,7 +1353,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         ins_x + (line_base_x + world_dx) as f64,
                         ins_y + (line_base_y + world_dy) as f64,
                     ];
-                    let strokes = cxf::tessellate_text_run(
+                    let strokes = lff::tessellate_text_run(
                         [0.0, 0.0],
                         run_h,
                         rot,
@@ -1372,7 +1372,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         // Per-character boxes, advancing exactly as
                         // `measure_word` does so they track the glyphs.
                         let scale = run_scale(&atom.state, entity_h, base_wf);
-                        let font = cxf::get_font(font_name);
+                        let font = lff::get_font(font_name);
                         let mut cx = cursor_x;
                         for ch in text.chars() {
                             let adv = match font.glyph(ch) {

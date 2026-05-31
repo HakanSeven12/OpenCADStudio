@@ -15,7 +15,7 @@ use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckC
 use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::wire_model::SnapHint;
-use crate::scene::{cxf, transform};
+use crate::scene::{lff, transform};
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -273,7 +273,7 @@ fn build_attr_truck(input: AttrTextInputs<'_>, document: &acadrust::CadDocument)
             anchor_f64[0] - (anchor_local_x as f64 * cos_r - local_y_for_line as f64 * sin_r),
             anchor_f64[1] - (anchor_local_x as f64 * sin_r + local_y_for_line as f64 * cos_r),
         ];
-        let strokes = cxf::tessellate_text_ex(
+        let strokes = lff::tessellate_text_ex(
             [0.0, 0.0],
             input.height as f32,
             rotation,

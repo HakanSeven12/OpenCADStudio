@@ -1323,12 +1323,18 @@ fn position_canvas_overlay<'a>(
 
 // ── In-place MText editor overlay ───────────────────────────────────────────
 
-const MTEXT_FONTS: [&str; 5] = [
+// Stroke-font families the renderer ships (LibreCAD LFF; see scene/lff.rs).
+const MTEXT_FONTS: [&str; 10] = [
     "[Style default]",
-    "Arial",
-    "Times New Roman",
-    "Courier New",
-    "ISOCPEUR",
+    "Standard",
+    "ISO",
+    "Simplex",
+    "RomanS",
+    "RomanD",
+    "ItalicC",
+    "ScriptS",
+    "GothGBT",
+    "Cursive",
 ];
 /// (label, ACI). 256 = ByLayer.
 const MTEXT_COLORS: [(&str, u16); 8] = [
@@ -1348,8 +1354,8 @@ const MTEXT_COLORS: [(&str, u16); 8] = [
 const MTEXT_PREVIEW_PAD: f32 = 12.0;
 
 struct MTextPreview {
-    /// Disconnected polylines as (x, y) world points (NaN-split already done).
-    segments: Vec<Vec<(f32, f32)>>,
+    /// Disconnected polylines as (x, y) world points + colour (NaN-split done).
+    segments: Vec<(Vec<(f32, f32)>, Color)>,
     /// Per-visible-character boxes (world frame) for click-to-select.
     boxes: Vec<crate::entities::text_support::GlyphBox>,
     /// Current selection as a visible-char range.
@@ -1477,7 +1483,7 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 }
             }
         }
-        for seg in &self.segments {
+        for (seg, col) in &self.segments {
             if seg.len() < 2 {
                 continue;
             }
@@ -1487,31 +1493,35 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                     p.line_to(map(x, y));
                 }
             });
-            frame.stroke(
-                &path,
-                Stroke::default()
-                    .with_color(Color { r: 0.93, g: 0.93, b: 0.93, a: 1.0 })
-                    .with_width(1.4),
-            );
+            frame.stroke(&path, Stroke::default().with_color(*col).with_width(1.4));
         }
         vec![frame.into_geometry()]
     }
 }
 
-/// Split every preview WireModel into finite (x, y) polyline runs.
-fn mtext_preview_segments(ed: &super::mtext_editor::MTextEditorState) -> Vec<Vec<(f32, f32)>> {
-    let mut out: Vec<Vec<(f32, f32)>> = Vec::new();
+/// Split every preview WireModel into finite (x, y) polyline runs, each
+/// carrying its wire's colour so inline `\C` / the colour dropdown shows.
+fn mtext_preview_segments(
+    ed: &super::mtext_editor::MTextEditorState,
+) -> Vec<(Vec<(f32, f32)>, Color)> {
+    let mut out: Vec<(Vec<(f32, f32)>, Color)> = Vec::new();
     for w in &ed.preview_wires {
+        let col = Color {
+            r: w.color[0],
+            g: w.color[1],
+            b: w.color[2],
+            a: 1.0,
+        };
         let mut run: Vec<(f32, f32)> = Vec::new();
         for p in &w.points {
             if p[0].is_finite() && p[1].is_finite() {
                 run.push((p[0], p[1]));
             } else if !run.is_empty() {
-                out.push(std::mem::take(&mut run));
+                out.push((std::mem::take(&mut run), col));
             }
         }
         if !run.is_empty() {
-            out.push(run);
+            out.push((run, col));
         }
     }
     out
@@ -1690,7 +1700,7 @@ fn mtext_editor_overlay<'a>(
     let body: Element<'a, Message> = if ed.show_preview {
         let segments = mtext_preview_segments(ed);
         let (mut minx, mut miny, mut maxx, mut maxy) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-        for seg in &segments {
+        for (seg, _) in &segments {
             for &(x, y) in seg {
                 minx = minx.min(x);
                 miny = miny.min(y);

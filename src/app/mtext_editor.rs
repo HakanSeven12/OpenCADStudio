@@ -223,7 +223,7 @@ pub fn visible_spans(raw: &str) -> Vec<(usize, usize)> {
     let is_sp = |c: char| c == ' ' || c == '\u{00A0}';
     let mut result: Vec<(usize, usize)> = Vec::new();
     let mut para: Vec<(usize, usize, char)> = Vec::new();
-    let mut flush = |para: &mut Vec<(usize, usize, char)>, result: &mut Vec<(usize, usize)>| {
+    let flush = |para: &mut Vec<(usize, usize, char)>, result: &mut Vec<(usize, usize)>| {
         let s = para.iter().position(|t| !is_sp(t.2)).unwrap_or(para.len());
         let e = para.iter().rposition(|t| !is_sp(t.2)).map(|i| i + 1).unwrap_or(s);
         for t in &para[s..e] {
@@ -303,22 +303,6 @@ pub fn visible_spans(raw: &str) -> Vec<(usize, usize)> {
     }
     flush(&mut para, &mut result);
     result
-}
-
-/// Prefix/suffix inline codes for a character-level toggle. `Uppercase` /
-/// `Lowercase` return `None` (they transform the selected text instead).
-pub fn fmt_wrap(kind: MTextFmt) -> Option<(&'static str, &'static str)> {
-    match kind {
-        // Bold / italic ride on a font run; the renderer reads the `b`/`i`
-        // flags of a `\f...;` code. Use a neutral family so any styled font
-        // still picks up the flag.
-        MTextFmt::Bold => Some(("\\fArial|b1;", "\\fArial|b0;")),
-        MTextFmt::Italic => Some(("\\fArial|i1;", "\\fArial|i0;")),
-        MTextFmt::Underline => Some(("\\L", "\\l")),
-        MTextFmt::Overline => Some(("\\O", "\\o")),
-        MTextFmt::Strike => Some(("\\K", "\\k")),
-        MTextFmt::Uppercase | MTextFmt::Lowercase => None,
-    }
 }
 
 // ── App-side editor driver ──────────────────────────────────────────────────
@@ -432,26 +416,38 @@ impl super::OpenCADStudio {
     }
 
     /// Apply a character-format toggle to the preview selection (preferred) or
-    /// the Edit-box selection.
+    /// the Edit-box selection. The stroke-font renderer has no true bold /
+    /// italic, so Bold switches the run to the heavier Gothic stroke font and
+    /// Italic applies an oblique slant — both produce a visible effect.
     pub(super) fn mtext_apply_fmt(&mut self, kind: MTextFmt) {
-        let applied = match kind {
-            MTextFmt::Uppercase => self.mtext_splice_sel("", "", Some(true)),
-            MTextFmt::Lowercase => self.mtext_splice_sel("", "", Some(false)),
-            _ => {
-                let (pre, suf) = fmt_wrap(kind).unwrap();
-                self.mtext_splice_sel(pre, suf, None)
-            }
+        // Font to restore to after a Bold run (the current global font).
+        let restore = self
+            .mtext_editor
+            .as_ref()
+            .map(|e| {
+                if e.font.trim().is_empty() {
+                    "Standard".to_string()
+                } else {
+                    e.font.clone()
+                }
+            })
+            .unwrap_or_else(|| "Standard".to_string());
+        let (pre, suf, case): (String, String, Option<bool>) = match kind {
+            MTextFmt::Bold => ("\\fGothic;".into(), format!("\\f{restore};"), None),
+            MTextFmt::Italic => ("\\Q15;".into(), "\\Q0;".into(), None),
+            MTextFmt::Underline => ("\\L".into(), "\\l".into(), None),
+            MTextFmt::Overline => ("\\O".into(), "\\o".into(), None),
+            MTextFmt::Strike => ("\\K".into(), "\\k".into(), None),
+            MTextFmt::Uppercase => (String::new(), String::new(), Some(true)),
+            MTextFmt::Lowercase => (String::new(), String::new(), Some(false)),
         };
-        if !applied {
+        if !self.mtext_splice_sel(&pre, &suf, case) {
             if let Some(ed) = self.mtext_editor.as_mut() {
-                let sel = ed.content.selection();
-                let text = match kind {
-                    MTextFmt::Uppercase => sel.as_deref().unwrap_or("").to_uppercase(),
-                    MTextFmt::Lowercase => sel.as_deref().unwrap_or("").to_lowercase(),
-                    _ => {
-                        let (pre, suf) = fmt_wrap(kind).unwrap();
-                        format!("{pre}{}{suf}", sel.as_deref().unwrap_or(""))
-                    }
+                let sel = ed.content.selection().unwrap_or_default();
+                let text = match case {
+                    Some(true) => sel.to_uppercase(),
+                    Some(false) => sel.to_lowercase(),
+                    None => format!("{pre}{sel}{suf}"),
                 };
                 ed.content.perform(Action::Edit(Edit::Paste(Arc::new(text))));
             }

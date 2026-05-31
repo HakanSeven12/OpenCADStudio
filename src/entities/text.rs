@@ -8,7 +8,7 @@ use crate::entities::text_support::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
-use crate::scene::cxf;
+use crate::scene::lff;
 use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::wire_model::SnapHint;
 
@@ -131,7 +131,7 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
         anchor_f64[1] - (anchor_local_x as f64 * sin_r + anchor_local_y as f64 * cos_r),
     ];
     // Strokes are in glyph-local space (origin = [0,0]).
-    let strokes = cxf::tessellate_text_ex(
+    let strokes = lff::tessellate_text_ex(
         [0.0, 0.0],
         t.height as f32,
         rotation,

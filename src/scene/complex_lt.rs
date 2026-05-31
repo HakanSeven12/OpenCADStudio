@@ -8,7 +8,7 @@
 
 use crate::entities::text_support::resolve_dxf_special_chars;
 use crate::linetypes::{ComplexLt, LtSegment};
-use crate::scene::cxf;
+use crate::scene::lff;
 use crate::scene::wire_model::WireModel;
 
 // ── Public entry point ────────────────────────────────────────────────────
@@ -155,7 +155,7 @@ pub fn apply_along(
                     let insert = offset_pt(insert, fwd, perp, *x, *y);
                     let fwd_angle = fwd[1].atan2(fwd[0]) + rot_deg.to_radians();
                     let resolved = resolve_dxf_special_chars(text);
-                    let text_strokes = cxf::tessellate_text_ex(
+                    let text_strokes = lff::tessellate_text_ex(
                         [insert[0], insert[1]],
                         *tx_scale,
                         fwd_angle,
@@ -291,49 +291,16 @@ fn offset_pt(pt: [f32; 3], fwd: [f32; 3], perp: [f32; 3], dx: f32, dy: f32) -> [
     ]
 }
 
-/// Transform a CXF shape into world-space strokes.
+/// Embedded SHAPE elements in complex linetypes are no longer supported:
+/// the LFF font set ships no shape file (matching LibreCAD). Shape elements
+/// are skipped; text-in-linetype still renders via the LFF fonts.
 fn emit_shape(
-    name: &str,
-    insert: [f32; 3],
-    fwd: [f32; 3],
-    perp: [f32; 3],
-    scale: f32,
-    rot_deg: f32,
+    _name: &str,
+    _insert: [f32; 3],
+    _fwd: [f32; 3],
+    _perp: [f32; 3],
+    _scale: f32,
+    _rot_deg: f32,
 ) -> Vec<Vec<[f32; 3]>> {
-    // cxf::get() now returns Option<&CxfGlyph> — same .strokes field.
-    let shape = match cxf::get(name) {
-        Some(s) => s,
-        None => return vec![],
-    };
-
-    let rot_r = rot_deg.to_radians();
-    let (cos_r, sin_r) = (rot_r.cos(), rot_r.sin());
-
-    let rx = cos_r;
-    let ry = sin_r;
-    let sx = -sin_r;
-    let sy = cos_r;
-
-    shape
-        .strokes
-        .iter()
-        .map(|stroke| {
-            stroke
-                .iter()
-                .map(|&[lx, ly]| {
-                    let scaled_x = lx * scale;
-                    let scaled_y = ly * scale;
-
-                    let along_fwd = rx * scaled_x + sx * scaled_y;
-                    let along_perp = ry * scaled_x + sy * scaled_y;
-
-                    [
-                        insert[0] + fwd[0] * along_fwd + perp[0] * along_perp,
-                        insert[1] + fwd[1] * along_fwd + perp[1] * along_perp,
-                        insert[2] + fwd[2] * along_fwd + perp[2] * along_perp,
-                    ]
-                })
-                .collect()
-        })
-        .collect()
+    Vec::new()
 }

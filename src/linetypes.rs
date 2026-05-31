@@ -22,9 +22,10 @@ pub enum LtSegment {
     Space(f32),
     /// Draw a dot (zero-length element, rendered as a tiny mark).
     Dot,
-    /// Draw a CXF shape at the current pen position.
+    /// Draw a shape at the current pen position. Embedded SHAPE elements are
+    /// no longer rendered (the LFF font set ships no shape file).
     Shape {
-        /// Shape name — looked up in `scene::cxf`.
+        /// Shape name (retained for round-tripping; not drawn).
         name: String,
         /// X offset along the linetype direction (can be negative).
         x: f32,

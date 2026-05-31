@@ -7,7 +7,7 @@ use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckC
 use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
-use crate::scene::{cxf, transform};
+use crate::scene::{lff, transform};
 
 // ── GDT text parser ───────────────────────────────────────────────────────────
 
@@ -207,7 +207,7 @@ fn tessellate_tolerance(tol: &Tolerance) -> Vec<Vec<[f32; 2]>> {
                 let tx = cell_x + (cw - text_w) * 0.5;
                 // Tessellate text in local frame then transform
                 let local_strokes =
-                    cxf::tessellate_text_ex([0.0, 0.0], h, 0.0, 1.0, 0.0, "txt", cell);
+                    lff::tessellate_text_ex([0.0, 0.0], h, 0.0, 1.0, 0.0, "txt", cell);
                 for polyline in local_strokes {
                     let transformed: Vec<[f32; 2]> = polyline
                         .into_iter()

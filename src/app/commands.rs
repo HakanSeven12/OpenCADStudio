@@ -59,6 +59,14 @@ impl OpenCADStudio {
         }
 
         if crate::plugin::try_dispatch(self, i, cmd) {
+            // try_dispatch returns true for both finished commands and interactive
+            // commands that it just installed. If no command is now active, the
+            // tool was a one-shot and we must turn the ribbon highlight off here —
+            // normally apply_cmd_result does that, but plugin dispatch can return
+            // without producing a CmdResult.
+            if self.tabs[i].active_cmd.is_none() {
+                self.ribbon.deactivate_tool();
+            }
             return Task::none();
         }
 

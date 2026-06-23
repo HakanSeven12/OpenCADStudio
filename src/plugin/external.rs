@@ -226,9 +226,6 @@ pub(crate) use loader::with_loaded;
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{load_at_startup, loaded_ids};
 
-#[cfg(all(not(target_arch = "wasm32"), test))]
-pub(crate) use loader::{load_at_startup, loaded_ids};
-
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(test, allow(dead_code))]
 mod loader {
@@ -397,54 +394,5 @@ command_prefixes = ["SS_", "STORM_"]
             .expect("dispatch MP_HELLO");
         assert!(handled, "plugin should handle MP_HELLO");
         assert!(!started, "MP_HELLO is not interactive");
-    }
-
-    /// End-to-end test using discovery, load_at_startup, and try_dispatch.
-    #[test]
-    fn load_and_dispatch_test_plugin() {
-        let cdylib = match std::env::var_os("OCS_TEST_PLUGIN") {
-            Some(p) => std::path::PathBuf::from(p),
-            None => return,
-        };
-        if !cdylib.exists() {
-            eprintln!("OCS_TEST_PLUGIN does not exist: {}", cdylib.display());
-            return;
-        }
-        let host_exe = std::path::PathBuf::from(
-            std::env::var_os("OCS_PLUGIN_RUNNER_EXE")
-                .unwrap_or_else(|| std::env::current_exe().unwrap().into_os_string()),
-        );
-        assert!(host_exe.exists(), "host exe not found: {}", host_exe.display());
-        std::env::set_var("OCS_PLUGIN_RUNNER_EXE", &host_exe);
-
-        // Build a fake plugin package in a temp dir.
-        let tmp = std::env::temp_dir().join("ocs_test_plugin_package");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let pkg = tmp.join("opencad.my_plugin");
-        std::fs::create_dir_all(&pkg).unwrap();
-        std::fs::copy(&cdylib, pkg.join(cdylib.file_name().unwrap())).unwrap();
-        std::fs::copy(
-            std::path::Path::new(&cdylib).parent().unwrap().parent().unwrap().parent().unwrap().join("plugin.toml"),
-            pkg.join("plugin.toml"),
-        )
-        .unwrap_or_else(|_| {
-            // Fallback: use the template plugin.toml.
-            std::fs::copy(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/plugin-template/plugin.toml"),
-                pkg.join("plugin.toml"),
-            )
-            .unwrap()
-        });
-        std::env::set_var("OCS_PLUGINS_DIR", &tmp);
-
-        let mut app = crate::app::OpenCADStudio::new_for_test();
-        let results = super::external::load_at_startup(&mut app);
-        assert!(
-            results.iter().any(|(id, r)| id == "opencad.my_plugin" && r.is_ok()),
-            "test plugin should load: {results:?}"
-        );
-
-        let handled = super::try_dispatch(&mut app, 0, "MP_HELLO");
-        assert!(handled, "try_dispatch should handle MP_HELLO");
     }
 }

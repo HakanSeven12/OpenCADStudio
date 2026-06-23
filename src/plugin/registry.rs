@@ -24,16 +24,13 @@ pub fn ribbon_modules_enabled(
         let mut addons: Vec<(i32, Box<dyn CadModule>)> = Vec::new();
         crate::plugin::external::with_loaded(|loaded| {
             for lp in loaded {
-                if disabled.contains(lp.id.as_str()) {
+                if disabled.contains(lp.id.as_str()) || !lp.process.is_alive() {
                     continue;
                 }
-                // Guard the plugin's ribbon build so a panic there can't take
-                // down the host — the plugin just contributes no tab. (#145)
-                if let Some(entry) = crate::plugin::guard("ribbon", || {
-                    (lp.plugin().manifest().ribbon_order, lp.plugin().ribbon())
-                }) {
-                    addons.push(entry);
-                }
+                addons.push((
+                    lp.process.manifest().ribbon_order,
+                    Box::new(lp.module.clone()) as Box<dyn CadModule>,
+                ));
             }
         });
         addons.sort_by_key(|(order, _)| *order);
@@ -50,22 +47,52 @@ pub(crate) fn try_dispatch(app: &mut OpenCADStudio, tab: usize, cmd: &str) -> bo
     {
         use super::host::HostSession;
         let disabled = app.disabled_plugin_ids();
+        let mut started: Option<(u64, std::sync::Arc<ocs_plugin_api::process::PluginProcess>)> = None;
+        let mut dead_plugins: Vec<String> = Vec::new();
+        let mut dispatch_errors: Vec<(String, String)> = Vec::new();
         let handled = crate::plugin::external::with_loaded(|loaded| {
             let mut host = HostSession::new(app, tab);
             for lp in loaded {
                 if disabled.contains(lp.id.as_str()) {
                     continue;
                 }
-                // A panic inside the plugin's dispatch must not crash the host;
-                // treat a panicking plugin as "didn't handle it". (#145)
-                if crate::plugin::guard("dispatch", || lp.plugin().dispatch(&mut host, cmd))
-                    .unwrap_or(false)
-                {
-                    return true;
+                if !lp.process.is_alive() {
+                    dead_plugins.push(lp.id.clone());
+                    continue;
+                }
+                let process = std::sync::Arc::clone(&lp.process);
+                let mut start = |command_id: u64| {
+                    started = Some((command_id, std::sync::Arc::clone(&process)));
+                };
+                match crate::plugin::guard("dispatch", || lp.process.dispatch(&mut host, cmd, &mut start)) {
+                    Some(Ok(true)) => return true,
+                    Some(Ok(false)) => {}
+                    Some(Err(e)) => {
+                        eprintln!("[plugin] dispatch error for '{}': {e}", lp.id);
+                        dispatch_errors.push((lp.id.clone(), e.to_string()));
+                    }
+                    None => {
+                        // Panic already logged by guard.
+                    }
                 }
             }
             false
         });
+        for id in dead_plugins {
+            app.push_plugin_error(&format!("Plugin '{id}' process died; skipping dispatch"));
+        }
+        for (id, err) in dispatch_errors {
+            app.push_plugin_error(&format!("Plugin '{id}' dispatch error: {err}"));
+        }
+        if let Some((command_id, process)) = started {
+            app.set_active_command(
+                tab,
+                Box::new(crate::app::plugin_host::PluginProcessInteractiveAdapter::new(
+                    process,
+                    command_id,
+                )),
+            );
+        }
         if handled {
             return true;
         }

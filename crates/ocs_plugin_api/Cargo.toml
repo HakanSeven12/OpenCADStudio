@@ -9,9 +9,17 @@ license = "GPL-3.0-only"
 # Pulled in only by the `host` feature, which adds the `acadrust`-typed
 # `HostApi` runtime surface. The default crate stays dependency-free so engine
 # crates and external tooling can depend on the manifest/ribbon contract cheaply.
-acadrust = { version = "0.3.4", optional = true }
+acadrust = { version = "0.3.4", optional = true, features = ["serde"] }
+
+# Runtime IPC and serialization (host feature only).
+interprocess = { version = "2", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+bincode = { version = "1", optional = true }
+thiserror = { version = "1", optional = true }
+libloading = { version = "0.8", optional = true }
 
 [features]
-# Enables the runtime host surface (`HostApi` trait). The OpenCADStudio binary
-# turns this on; pure-data consumers leave it off.
-host = ["dep:acadrust"]
+# Enables the runtime host surface (`HostApi` trait) and the out-of-process
+# plugin runtime. The OpenCADStudio binary turns this on; pure-data consumers
+# leave it off.
+host = ["dep:acadrust", "dep:interprocess", "dep:serde", "dep:bincode", "dep:thiserror", "dep:libloading"]

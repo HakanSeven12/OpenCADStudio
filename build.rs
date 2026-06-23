@@ -101,9 +101,10 @@ fn main() {
 
     out.push_str("\t]\n}\n");
 
-    let out_path = mods_dir.join("registry.rs");
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
+    let out_path = Path::new(&out_dir).join("modules_registry.rs");
     let current = fs::read_to_string(&out_path).unwrap_or_default();
     if current != out {
-        fs::write(&out_path, &out).expect("failed to write registry.rs");
+        fs::write(&out_path, &out).expect("failed to write modules_registry.rs");
     }
 }

@@ -61,6 +61,8 @@ pub trait InteractiveCommand: Send {
 }
 
 /// The outcome of an [`InteractiveCommand`] step.
+#[derive(Debug)]
+#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
 pub enum CommandStep {
     /// Need another point; keep the command active.
     NeedPoint,

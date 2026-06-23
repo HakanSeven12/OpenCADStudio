@@ -1,9 +1,10 @@
 //! Plugin identity and capability declaration.
 
 /// Host plugin API version. Bump when the host runtime surface breaks
-/// compatibility. v2 added `HostApi::start_interactive` (the
-/// `InteractiveCommand` hook) — a vtable change, so v1 binaries are refused.
-pub const API_VERSION: u32 = 2;
+/// compatibility. v2 added `HostApi::start_interactive`. v3 changes
+/// `document()` / `document_mut()` to local cached copies for out-of-process
+/// plugins.
+pub const API_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ApiVersion {

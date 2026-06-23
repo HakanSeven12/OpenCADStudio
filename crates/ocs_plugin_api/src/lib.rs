@@ -23,7 +23,24 @@ pub mod ribbon;
 #[cfg(feature = "host")]
 pub mod host;
 
+/// Out-of-process plugin runtime — only built with the `host` feature.
+#[cfg(feature = "host")]
+pub mod ipc;
+
+/// Process management for out-of-process plugins — only built with the `host`
+/// feature.
+#[cfg(feature = "host")]
+pub mod process;
+
+/// Plugin runner implementation used by the host when it spawns itself in
+/// runner mode — only built with the `host` feature.
+#[cfg(feature = "host")]
+pub mod runner;
+
 pub use manifest::{ApiVersion, PluginManifest, API_VERSION};
 pub use ribbon::{
     CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef,
 };
+
+#[cfg(feature = "host")]
+pub use process::{PluginError, PluginProcess};

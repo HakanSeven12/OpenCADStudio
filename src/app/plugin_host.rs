@@ -260,6 +260,89 @@ impl crate::command::CadCommand for PluginInteractiveAdapter {
     }
 }
 
+/// Bridges an out-of-process plugin's interactive command to the host's
+/// `CadCommand`. Events are sent over IPC and the returned `CommandStep` is
+/// translated into a `CmdResult`. Prompt and object-pick mode are cached and
+/// refreshed after each event.
+pub(crate) struct PluginProcessInteractiveAdapter {
+    pub process: std::sync::Arc<ocs_plugin_api::process::PluginProcess>,
+    pub command_id: u64,
+    prompt: Option<String>,
+    needs_entity_pick: Option<bool>,
+}
+
+impl PluginProcessInteractiveAdapter {
+    pub(crate) fn new(
+        process: std::sync::Arc<ocs_plugin_api::process::PluginProcess>,
+        command_id: u64,
+    ) -> Self {
+        let prompt = process.get_prompt(command_id).ok();
+        let needs_entity_pick = process.needs_entity_pick(command_id).ok();
+        Self {
+            process,
+            command_id,
+            prompt,
+            needs_entity_pick,
+        }
+    }
+
+    fn refresh(&mut self) {
+        self.prompt = self.process.get_prompt(self.command_id).ok();
+        self.needs_entity_pick = self.process.needs_entity_pick(self.command_id).ok();
+    }
+}
+
+impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
+    fn name(&self) -> &'static str {
+        "PLUGIN"
+    }
+    fn prompt(&self) -> String {
+        self.prompt.clone().unwrap_or_default()
+    }
+    fn on_point(&mut self, pt: glam::Vec3) -> crate::command::CmdResult {
+        use ocs_plugin_api::ipc::protocol::InteractiveEvent;
+        let result = self
+            .process
+            .interactive_event(
+                self.command_id,
+                InteractiveEvent::Point([pt.x as f64, pt.y as f64, pt.z as f64]),
+            )
+            .map(plugin_step_to_result)
+            .unwrap_or(crate::command::CmdResult::Cancel);
+        self.refresh();
+        result
+    }
+    fn on_enter(&mut self) -> crate::command::CmdResult {
+        use ocs_plugin_api::ipc::protocol::InteractiveEvent;
+        let result = self
+            .process
+            .interactive_event(self.command_id, InteractiveEvent::Enter)
+            .map(plugin_step_to_result)
+            .unwrap_or(crate::command::CmdResult::Cancel);
+        self.refresh();
+        result
+    }
+    fn needs_entity_pick(&self) -> bool {
+        self.needs_entity_pick.unwrap_or(false)
+    }
+    fn on_entity_pick(&mut self, handle: Handle, pt: glam::Vec3) -> crate::command::CmdResult {
+        use ocs_plugin_api::ipc::protocol::InteractiveEvent;
+        let result = self
+            .process
+            .interactive_event(
+                self.command_id,
+                InteractiveEvent::ObjectPick {
+                    handle,
+                    pt: [pt.x as f64, pt.y as f64, pt.z as f64],
+                },
+            )
+            .map(plugin_step_to_result)
+            .unwrap_or(crate::command::CmdResult::Cancel);
+        self.refresh();
+        result
+    }
+}
+
 fn plugin_step_to_result(
     step: ocs_plugin_api::host::CommandStep,
 ) -> crate::command::CmdResult {

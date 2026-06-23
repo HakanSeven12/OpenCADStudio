@@ -30,8 +30,9 @@ engine crate, and user-installable packages from a curated index.
 
 ## Non-goals
 
-- Sandboxing or signature verification (installing a plugin runs native code; the
-  user trusts the repos they install from).
+- Signature verification (installing a plugin runs native code; the user trusts
+  the repos they install from). Process isolation limits the blast radius of a
+  buggy or malicious plugin, but it is not a security sandbox.
 - Cross-toolchain binary compatibility — see [Compatibility](#compatibility--abi).
 - Sandboxed scripting (Python/Lua); replacing the `acadrust` entity model.
 
@@ -44,12 +45,12 @@ engine crate, and user-installable packages from a curated index.
 │  Layer A — Host (OpenCADStudio)                                     │
 │  iced UI · Scene · Document · Undo · Command line                   │
 │  Core ribbon tabs: Home, Model, View, … (NOT plugins)              │
-│  Generic plugin runtime: discovery, libloading, dispatch           │
+│  Generic plugin runtime: discovery, spawn, dispatch                │
 └───────────────────────────────┬────────────────────────────────────┘
-                                │ &mut dyn HostApi  (ocs_plugin_api)
+                                │ IPC over local socket (ocs_plugin_api)
 ┌───────────────────────────────▼────────────────────────────────────┐
-│  Layer B — Plugin package  (external repo, cdylib)                  │
-│  Cargo.toml · plugin.toml · src/lib.rs                              │
+│  Layer B — Plugin process  (external repo, cdylib)                  │
+│  host spawns itself in runner mode · Cargo.toml · plugin.toml       │
 │  PluginManifest · CadModule ribbon · BuiltinPlugin · export_plugin! │
 └───────────────────────────────┬────────────────────────────────────┘
                                 │ pure Rust API
@@ -61,8 +62,8 @@ engine crate, and user-installable packages from a curated index.
 
 | Layer | Lives in | May depend on |
 |-------|----------|---------------|
-| **A — Host** | this repo: `src/`, `crates/ocs_plugin_api` | everything |
-| **B — Plugin** | a separate repo (cdylib) | `ocs_plugin_api` + optional engine |
+| **A — Host** | this repo: `src/`, `crates/ocs_plugin_api` runtime | everything |
+| **B — Plugin** | a separate repo (cdylib), spawned by the host in runner mode | `ocs_plugin_api` + optional engine |
 | **C — Engine** | the plugin's own crate or crates.io | `std` only (WASM/CLI-capable) |
 
 **Hard rules**
@@ -83,7 +84,8 @@ plugin compiles against. Two tiers:
   `IconKind`, `ModuleEvent`, `StyleKey`. Engine crates and tooling depend on this
   cheaply.
 - **`host` feature** (pulls `acadrust`): the runtime surface — the `HostApi`
-  trait, the `BuiltinPlugin` entry-point trait, and the `export_plugin!` macro.
+  trait, the `BuiltinPlugin` entry-point trait, the `export_plugin!` macro, and
+  the out-of-process plugin runtime (`PluginProcess`, `runner`).
 
 A plugin enables the `host` feature.
 
@@ -119,9 +121,9 @@ concrete types:
 
 | Category | Methods |
 |----------|---------|
-| Document | `document()`, `document_mut()`, `add_entity()`, `bump_geometry()` |
+| Document | `document()` / `document_mut()` return a **local cached copy** of the document (API v3); the first access in a dispatch clones the full `CadDocument` over IPC. Use `add_entity()` / `write_record()` for host-visible mutations. `add_entity()`, `bump_geometry()` |
 | XDATA | `read_record(handle, app)`, `write_record(handle, record)`, `remove_record(handle, app)` — keyed by entity handle; `write_record` registers the APPID so data round-trips through DWG/DXF |
-| Tab state | object-safe `plugin_state_any*`; use the `ocs_plugin_api::host::plugin_state` / `plugin_state_mut` / `ensure_plugin_state` helpers (keyed by `manifest.id`) |
+| Tab state | object-safe `plugin_state_any*` helpers exist for in-process use; out-of-process plugins should keep state inside the plugin crate because `dyn Any` is not serializable |
 | Command line | `push_info`, `push_output`, `push_error` |
 | Undo / dirty | `push_undo`, `set_dirty` |
 | Tab | `tab_index()` |
@@ -203,7 +205,7 @@ version = "0.1.0"
 description = "…"
 
 [opencad]
-api_version = 2
+api_version = 3
 ribbon_order = 50
 command_prefixes = ["EX_"]
 xdata_apps = []
@@ -292,16 +294,28 @@ On startup the host scans `<config>/OpenCADStudio/plugins/<id>/` for a
     libocs_example_plugin.so      # any name with the platform extension
 ```
 
-For each compatible package it `dlopen`s the library (`libloading`), calls
-`ocs_plugin_api_version` and refuses on mismatch, then `ocs_plugin_register` to
-obtain the boxed `BuiltinPlugin`. Loaded libraries stay **resident for the
-session** (ribbon tabs and dispatch hold their vtables, so they are never
-reloaded mid-session). External plugins merge into the same ribbon and
+For each compatible package the host spawns **itself** in runner mode
+(`--ocs-plugin-runner <socket> <cdylib>`). The child process loads the `cdylib`
+in its own address space and connects back to the host over an `interprocess`
+local socket. The runner checks `ocs_plugin_api_version` and refuses on
+mismatch, then calls `ocs_plugin_register` to obtain the boxed `BuiltinPlugin`.
+Each plugin runs in a separate OS process, so a plugin crash or memory
+corruption cannot affect the host or other plugins. Plugin processes stay
+**resident for the session**; external plugins merge into the same ribbon and
 `try_dispatch` path the host uses and honour the enable/disable set
 (`disabled_plugins` in `settings.txt`).
 
 `<config>` is `%APPDATA%` (Windows), `~/Library/Application Support` (macOS), or
 `$XDG_CONFIG_HOME` / `~/.config` (Linux).
+
+## Failure handling
+
+| Failure | Behavior |
+|---|---|
+| Plugin panics | Caught inside the plugin runner child; an error response is returned to the host and stays alive. |
+| Plugin crash / hang / malformed message | The host detects a dead process via `try_wait` on the next dispatch or ribbon rebuild; the tab is dropped and an error is logged. |
+| Spawn failure | Reported per-plugin during startup and surfaced in the Plugin Manager / command line. |
+| Oversized message | The length-framed transport rejects messages larger than 64 MiB. |
 
 ---
 
@@ -331,12 +345,13 @@ installs plugins from GitHub Releases:
 
 ## Compatibility & ABI
 
-Loading uses **approach B**: the plugin returns a boxed `BuiltinPlugin` across the
-`cdylib` boundary. This is sound only when the plugin was built with the **same
-Rust toolchain and `ocs_plugin_api` version** as the host. The
-`ocs_plugin_api_version` symbol gates the API version; it does **not** detect a
-toolchain mismatch. In practice CI built with current stable Rust matches a host
-built the same way.
+Plugins are loaded as `cdylib`s by a plugin-runner child process. The host spawns
+this child from its own executable (`--ocs-plugin-runner` mode), so the runner
+and host always share the same `ocs_plugin_api` build. The runner checks
+`ocs_plugin_api_version` before any plugin code runs. Each plugin runs in its
+own OS process, so the host is protected from plugin crashes and memory
+corruption. Process isolation removes the need for the host and plugin to share
+a Rust toolchain ABI beyond the stable `ocs_plugin_api` contract.
 
 A future hardening step is a `#[repr(C)]` vtable (a true C ABI) so binaries built
 by any toolchain interoperate — required before trusting prebuilt binaries from
@@ -350,15 +365,18 @@ Done:
 
 - [x] Stable `ocs_plugin_api` crate — dependency-free core + `host` feature
       (`HostApi` / `BuiltinPlugin` / `export_plugin!`).
-- [x] Runtime discovery + `libloading` loading with an `api_version` gate.
+- [x] Runtime discovery + out-of-process loading (host spawns itself in runner
+      mode) with an `api_version` gate and `interprocess` local-socket IPC.
 - [x] XDATA helpers, `ModuleEvent::PluginFileDialog`, per-tab plugin state.
 - [x] Marketplace — curated registry + manual repo link, install / upgrade /
       reinstall / uninstall, enable/disable.
+- [x] Interactive command round-trip over IPC (prompt, point/enter/object-pick).
 
 Next:
 
+- [ ] Incremental document snapshots instead of cloning `CadDocument` over IPC.
 - [ ] `#[repr(C)]` vtable / strict handshake for cross-toolchain binaries.
-- [ ] Trust: checksums / signatures before `dlopen`.
+- [ ] Trust: checksums / signatures before spawning plugin processes.
 - [ ] Interchange (LandXML / SWMM) and live `on_entity_committed` hooks.
 - [ ] External automation API (drive OCS headless from a process) — issue #29.
 
@@ -368,8 +386,11 @@ Next:
 
 | Piece | Location |
 |-------|----------|
-| Contract crate | [`crates/ocs_plugin_api`](../crates/ocs_plugin_api) |
-| Plugin runtime (host) | `src/plugin/`, `src/app/plugin_host.rs` |
+| Contract crate + runtime | [`crates/ocs_plugin_api`](../crates/ocs_plugin_api) |
+| Plugin runner implementation | [`crates/ocs_plugin_api/src/runner.rs`](../crates/ocs_plugin_api/src/runner.rs) |
+| Host spawn logic | [`crates/ocs_plugin_api/src/process.rs`](../crates/ocs_plugin_api/src/process.rs) |
+| Host plugin integration | `src/plugin/`, `src/app/plugin_host.rs` |
+| Core module registry generator | `build.rs` (writes to `OUT_DIR`, included by `src/modules/registry.rs`) |
 | Marketplace + registry | `src/plugin/marketplace.rs`, [`plugins/registry.json`](../plugins/registry.json) |
 | Template scaffold | [`docs/plugin-template/`](plugin-template) |
 | Live example plugin | [`opencad-example-plugin`](https://github.com/HakanSeven12/opencad-example-plugin) |

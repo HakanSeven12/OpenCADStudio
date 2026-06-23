@@ -7,7 +7,7 @@ author = "Your Name"
 license = "GPL-3.0-only"
 
 [opencad]
-api_version = 2
+api_version = 3
 ribbon_order = 60
 command_prefixes = ["MP_"]
 xdata_apps = ["MYPLUGIN_RECORD"]

@@ -63,6 +63,10 @@ pub struct Cli {
     /// Log level (error|warn|info|debug|trace). Also honours RUST_LOG.
     #[arg(long, value_name = "LEVEL")]
     pub log: Option<String>,
+
+    /// Internal: run as the plugin runner child process.
+    #[arg(long, value_names = ["SOCKET", "CDYLIB"], num_args = 2, hide = true)]
+    pub ocs_plugin_runner: Option<Vec<String>>,
 }
 
 /// GUI startup configuration, handed from `main` to `app::boot` out-of-band

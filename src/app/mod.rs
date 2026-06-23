@@ -1910,7 +1910,7 @@ impl OpenCADStudio {
         // their ribbon tabs into the ribbon. Skipped under test/wasm.
         #[cfg(all(not(target_arch = "wasm32"), not(test)))]
         {
-            for (id, res) in crate::plugin::external::load_at_startup() {
+            for (id, res) in crate::plugin::external::load_at_startup(&mut app) {
                 if let Err(e) = res {
                     app.command_line
                         .push_error(&format!("Plugin '{id}' failed to load: {e}"));
@@ -1928,6 +1928,22 @@ impl OpenCADStudio {
     #[cfg(test)]
     pub(crate) fn new_for_test() -> Self {
         Self::new()
+    }
+
+    /// Install `cmd` as the active interactive command for tab `tab`.
+    pub(crate) fn set_active_command(
+        &mut self,
+        tab: usize,
+        cmd: Box<dyn crate::command::CadCommand>,
+    ) {
+        if let Some(t) = self.tabs.get_mut(tab) {
+            t.active_cmd = Some(cmd);
+        }
+    }
+
+    /// Push an error message from the plugin runtime to the command line.
+    pub(crate) fn push_plugin_error(&mut self, msg: &str) {
+        self.command_line.push_error(msg);
     }
 
     #[cfg(test)]

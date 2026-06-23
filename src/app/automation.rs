@@ -560,7 +560,7 @@ mod tests {
     fn save_then_open_round_trips() {
         let mut app = OpenCADStudio::new_for_test();
         let path = std::env::temp_dir().join("ocs_automation_test.dxf");
-        let p = path.to_string_lossy();
+        let p = path.to_string_lossy().replace('\\', "\\\\");
         app.automation_op(r#"{"op":"new"}"#);
         assert_eq!(
             app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#))["ok"],

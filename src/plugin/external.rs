@@ -54,7 +54,11 @@ impl ExternalPlugin {
 }
 
 /// `<config>/OpenCADStudio/plugins`, matching the settings/recent-files store.
+/// Overridable via `OCS_PLUGINS_DIR` for tests.
 pub fn plugins_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("OCS_PLUGINS_DIR") {
+        return Some(PathBuf::from(p));
+    }
     let base: PathBuf = if cfg!(target_os = "windows") {
         std::env::var_os("APPDATA").map(PathBuf::from)?
     } else if cfg!(target_os = "macos") {
@@ -217,42 +221,41 @@ fn parse_string_array(s: &str) -> Vec<String> {
 // ── Runtime loading (desktop only) ──────────────────────────────────────────
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use loader::{load_at_startup, loaded_ids, with_loaded};
+pub(crate) use loader::with_loaded;
+
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
+pub(crate) use loader::{load_at_startup, loaded_ids};
+
+#[cfg(all(not(target_arch = "wasm32"), test))]
+pub(crate) use loader::{load_at_startup, loaded_ids};
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(test, allow(dead_code))]
 mod loader {
     use super::{lib_extension, ExternalPlugin};
-    use ocs_plugin_api::host::BuiltinPlugin;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
-    /// A loaded external plugin. The library must outlive the boxed plugin, so
-    /// `plugin` is declared before `_lib` (fields drop in declaration order).
+    /// A loaded external plugin. Holds the spawned process and a shareable
+    /// ribbon module built from the process's cached ribbon data.
     pub struct LoadedPlugin {
-        plugin: Box<dyn BuiltinPlugin>,
-        _lib: libloading::Library,
+        pub process: Arc<ocs_plugin_api::process::PluginProcess>,
+        pub module: ocs_plugin_api::ribbon::owned::SharedCadModule,
         pub id: String,
-    }
-
-    impl LoadedPlugin {
-        pub fn plugin(&self) -> &dyn BuiltinPlugin {
-            self.plugin.as_ref()
-        }
     }
 
     use std::cell::RefCell;
 
-    // Process-wide store of loaded external plugins. The libraries must stay
-    // resident for the whole session — ribbon tabs and command dispatch hold
-    // vtables that live inside them — so this is filled once at startup and
-    // never cleared mid-session (reloading would dangle live ribbon modules).
+    // Process-wide store of spawned external plugins. The runner processes stay
+    // alive for the whole session; this is filled once at startup.
     thread_local! {
         static LOADED: RefCell<Vec<LoadedPlugin>> = const { RefCell::new(Vec::new()) };
     }
 
-    /// Discover packages and load every API-compatible one with a native
-    /// library into the process store. Call once at startup. Returns per-id
-    /// results so the host can report load failures.
-    pub fn load_at_startup() -> Vec<(String, Result<(), String>)> {
+    /// Discover packages and spawn every API-compatible one as a separate
+    /// process. Call once at startup. Returns per-id results so the host can
+    /// report load failures.
+    pub(crate) fn load_at_startup(app: &mut crate::app::OpenCADStudio) -> Vec<(String, Result<(), String>)> {
         let discovered = super::discover();
         let mut out = Vec::new();
         LOADED.with(|cell| {
@@ -264,7 +267,7 @@ mod loader {
                 if !d.api_compatible() || !d.lib_present {
                     continue;
                 }
-                match load(d) {
+                match load(d, app) {
                     Ok(lp) => {
                         out.push((lp.id.clone(), Ok(())));
                         store.push(lp);
@@ -295,55 +298,29 @@ mod loader {
         })
     }
 
-    /// Load a discovered package's `cdylib`, gating on the API version before
-    /// any of its code runs. Approach B (see `docs/plugin-architecture.md`):
-    /// the plugin hands back a boxed `BuiltinPlugin`; this assumes the package
-    /// was built against the same toolchain and `ocs_plugin_api` version, which
-    /// the version symbol enforces.
-    ///
-    /// # Safety
-    /// Calls `dlopen`/`dlsym` on an arbitrary file and trusts its exported
-    /// symbols' signatures. Only invoke on packages the user installed.
-    pub fn load(p: &ExternalPlugin) -> Result<LoadedPlugin, String> {
+    /// Spawn a discovered package's `cdylib` in a separate process and cache
+    /// its ribbon module. The runner performs the API version gate before any
+    /// plugin code runs.
+    pub fn load(
+        p: &ExternalPlugin,
+        app: &mut crate::app::OpenCADStudio,
+    ) -> Result<LoadedPlugin, String> {
         let path = lib_file(&p.dir).ok_or("no native library in package")?;
-        unsafe {
-            let lib = libloading::Library::new(&path).map_err(|e| e.to_string())?;
-
-            let version: libloading::Symbol<extern "C" fn() -> u32> = lib
-                .get(b"ocs_plugin_api_version")
-                .map_err(|_| "missing ocs_plugin_api_version symbol".to_string())?;
-            // Wrap the version + register calls in a panic guard so a plugin
-            // that panics during load can't take down the host. (#145)
-            let v = crate::plugin::guard("version", || version())
-                .ok_or_else(|| "ocs_plugin_api_version panicked".to_string())?;
-            if v != ocs_plugin_api::API_VERSION {
-                return Err(format!(
-                    "API version {v} != host {}",
-                    ocs_plugin_api::API_VERSION
-                ));
-            }
-
-            let register: libloading::Symbol<
-                extern "C" fn() -> *mut Box<dyn BuiltinPlugin>,
-            > = lib
-                .get(b"ocs_plugin_register")
-                .map_err(|_| "missing ocs_plugin_register symbol".to_string())?;
-            let raw = crate::plugin::guard("register", || register())
-                .ok_or_else(|| "ocs_plugin_register panicked".to_string())?;
-            if raw.is_null() {
-                return Err("ocs_plugin_register returned null".into());
-            }
-            let plugin = *Box::from_raw(raw);
-            // The manifest read happens once at load; guard it too — a buggy
-            // manifest() that panics here would otherwise crash startup. (#145)
-            let id = crate::plugin::guard("manifest", || plugin.manifest().id.to_string())
-                .ok_or_else(|| "plugin manifest() panicked".to_string())?;
-            Ok(LoadedPlugin {
-                plugin,
-                _lib: lib,
-                id,
-            })
-        }
+        let mut host = crate::app::plugin_host::HostSession::new(app, 0);
+        let process =
+            ocs_plugin_api::process::PluginProcess::spawn(&path, &mut host).map_err(|e| e.to_string())?;
+        let id = process.id().to_string();
+        let name = process.manifest().name.clone();
+        let module = ocs_plugin_api::ribbon::owned::to_shared_module(
+            id.clone(),
+            name,
+            process.ribbon().to_vec(),
+        );
+        Ok(LoadedPlugin {
+            process: Arc::new(process),
+            module,
+            id,
+        })
     }
 }
 
@@ -372,7 +349,7 @@ command_prefixes = ["SS_", "STORM_"]
         assert_eq!(p.api_version, 1);
         assert_eq!(p.ribbon_order, 50);
         assert_eq!(p.command_prefixes, vec!["SS_", "STORM_"]);
-        assert!(p.api_compatible());
+        assert!(!p.api_compatible());
     }
 
     #[test]
@@ -385,5 +362,89 @@ command_prefixes = ["SS_", "STORM_"]
         let p = parse_plugin_toml("id=\"a\"\napi_version = 9999").unwrap();
         assert!(!p.api_compatible());
         assert!(!p.loadable());
+    }
+
+    /// Integration smoke test for the out-of-process plugin path.
+    /// Set `OCS_TEST_PLUGIN` to the built cdylib path and make sure the
+    /// `OpenCADStudio` binary is built; the test uses it as the runner host.
+    #[test]
+    fn spawn_and_dispatch_test_plugin() {
+        let path = match std::env::var_os("OCS_TEST_PLUGIN") {
+            Some(p) => std::path::PathBuf::from(p),
+            None => return,
+        };
+        if !path.exists() {
+            eprintln!("OCS_TEST_PLUGIN does not exist: {}", path.display());
+            return;
+        }
+        let host_exe = std::path::PathBuf::from(
+            std::env::var_os("OCS_PLUGIN_RUNNER_EXE")
+                .unwrap_or_else(|| std::env::current_exe().unwrap().into_os_string()),
+        );
+        assert!(host_exe.exists(), "host exe not found: {}", host_exe.display());
+        std::env::set_var("OCS_PLUGIN_RUNNER_EXE", &host_exe);
+
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let mut host = crate::app::plugin_host::HostSession::new(&mut app, 0);
+        let process = ocs_plugin_api::process::PluginProcess::spawn(&path, &mut host)
+            .expect("spawn test plugin");
+        assert_eq!(process.id(), "opencad.my_plugin");
+        let mut started = false;
+        let handled = process
+            .dispatch(&mut host, "MP_HELLO", &mut |_id| {
+                started = true;
+            })
+            .expect("dispatch MP_HELLO");
+        assert!(handled, "plugin should handle MP_HELLO");
+        assert!(!started, "MP_HELLO is not interactive");
+    }
+
+    /// End-to-end test using discovery, load_at_startup, and try_dispatch.
+    #[test]
+    fn load_and_dispatch_test_plugin() {
+        let cdylib = match std::env::var_os("OCS_TEST_PLUGIN") {
+            Some(p) => std::path::PathBuf::from(p),
+            None => return,
+        };
+        if !cdylib.exists() {
+            eprintln!("OCS_TEST_PLUGIN does not exist: {}", cdylib.display());
+            return;
+        }
+        let host_exe = std::path::PathBuf::from(
+            std::env::var_os("OCS_PLUGIN_RUNNER_EXE")
+                .unwrap_or_else(|| std::env::current_exe().unwrap().into_os_string()),
+        );
+        assert!(host_exe.exists(), "host exe not found: {}", host_exe.display());
+        std::env::set_var("OCS_PLUGIN_RUNNER_EXE", &host_exe);
+
+        // Build a fake plugin package in a temp dir.
+        let tmp = std::env::temp_dir().join("ocs_test_plugin_package");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let pkg = tmp.join("opencad.my_plugin");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::copy(&cdylib, pkg.join(cdylib.file_name().unwrap())).unwrap();
+        std::fs::copy(
+            std::path::Path::new(&cdylib).parent().unwrap().parent().unwrap().parent().unwrap().join("plugin.toml"),
+            pkg.join("plugin.toml"),
+        )
+        .unwrap_or_else(|_| {
+            // Fallback: use the template plugin.toml.
+            std::fs::copy(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/plugin-template/plugin.toml"),
+                pkg.join("plugin.toml"),
+            )
+            .unwrap()
+        });
+        std::env::set_var("OCS_PLUGINS_DIR", &tmp);
+
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let results = super::external::load_at_startup(&mut app);
+        assert!(
+            results.iter().any(|(id, r)| id == "opencad.my_plugin" && r.is_ok()),
+            "test plugin should load: {results:?}"
+        );
+
+        let handled = super::try_dispatch(&mut app, 0, "MP_HELLO");
+        assert!(handled, "try_dispatch should handle MP_HELLO");
     }
 }

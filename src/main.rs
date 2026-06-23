@@ -35,6 +35,23 @@ fn main() -> iced::Result {
         use clap::Parser;
         let args = cli::Cli::parse();
 
+        // Plugin runner mode: the host spawns itself with this hidden flag to
+        // load a plugin cdylib in an isolated process. Hand off immediately so
+        // the child never touches GUI state.
+        if let Some(runner_args) = &args.ocs_plugin_runner {
+            if runner_args.len() != 2 {
+                eprintln!("--ocs-plugin-runner expects <socket> <cdylib>");
+                std::process::exit(1);
+            }
+            let socket = &runner_args[0];
+            let cdylib = std::path::Path::new(&runner_args[1]);
+            if let Err(e) = ocs_plugin_api::runner::run(socket, cdylib) {
+                eprintln!("[runner] fatal: {e}");
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+
         // Opt-in logging. `--log LEVEL` seeds RUST_LOG; the subscriber then
         // surfaces wgpu / iced / winit diagnostics that are otherwise silent.
         if let Some(level) = &args.log {

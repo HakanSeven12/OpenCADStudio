@@ -1,10 +1,14 @@
 //! Ribbon description types — the plain-data vocabulary a [`CadModule`] uses to
 //! declare its tab. No UI-framework dependency: the host renders these.
 
+#[cfg(feature = "host")]
+pub mod owned;
+
 // ── Events ────────────────────────────────────────────────────────────────
 
 /// Events a module tool can emit to the host application.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
 pub enum ModuleEvent {
     /// Fire a named CAD command (e.g. "LINE", "CIRCLE").
     Command(String),
@@ -105,6 +109,7 @@ pub enum RibbonItem {
 
 /// Identifies which style list a `StyleComboGroup` refers to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
 pub enum StyleKey {
     TextStyle,
     DimStyle,
@@ -119,6 +124,7 @@ impl From<ToolDef> for RibbonItem {
 }
 
 /// A named group of tool buttons shown together in the ribbon.
+#[derive(Clone)]
 pub struct RibbonGroup {
     pub title: &'static str,
     pub tools: Vec<RibbonItem>,

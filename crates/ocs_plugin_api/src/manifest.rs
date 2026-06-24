@@ -28,6 +28,13 @@ impl ApiVersion {
     }
 }
 
+/// True when a plugin built against `plugin_major` can be loaded by this host.
+/// The host supports majors from `API_VERSION_MIN_SUPPORTED` up to
+/// `API_VERSION`.
+pub fn host_accepts_plugin_version(plugin_major: u32) -> bool {
+    plugin_major >= API_VERSION_MIN_SUPPORTED && plugin_major <= API_VERSION
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

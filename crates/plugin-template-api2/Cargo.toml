@@ -1,0 +1,13 @@
+[package]
+name = "plugin-template-api2"
+version = "0.1.0"
+edition = "2021"
+description = "API v2 compatibility fixture for the out-of-process plugin path."
+license = "GPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ocs_plugin_api = { path = "../ocs_plugin_api", features = ["host"] }
+acadrust = "0.3.4"

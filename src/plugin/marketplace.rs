@@ -57,7 +57,11 @@ impl Release {
         self.assets
             .iter()
             .find(|a| a.name.ends_with(&suffix))
-            .or_else(|| self.assets.iter().find(|a| a.name.ends_with(&format!(".{ext}"))))
+            .or_else(|| {
+                self.assets
+                    .iter()
+                    .find(|a| a.name.ends_with(&format!(".{ext}")))
+            })
     }
 
     fn toml_asset(&self) -> Option<&Asset> {
@@ -176,12 +180,12 @@ pub fn install(release: &Release) -> Result<String, String> {
     let toml = release.toml_asset().ok_or("release has no plugin.toml")?;
 
     let toml_text = download_string(&toml.url)?;
-    let manifest =
-        external::parse_plugin_toml(&toml_text).ok_or("plugin.toml is missing an id")?;
-    if manifest.api_version != ocs_plugin_api::API_VERSION {
+    let manifest = external::parse_plugin_toml(&toml_text).ok_or("plugin.toml is missing an id")?;
+    if !ocs_plugin_api::host_accepts_plugin_version(manifest.api_version) {
         return Err(format!(
-            "API version {} is incompatible (host is {})",
+            "API version {} is incompatible (host supports {}-{})",
             manifest.api_version,
+            ocs_plugin_api::API_VERSION_MIN_SUPPORTED,
             ocs_plugin_api::API_VERSION
         ));
     }

@@ -13,11 +13,16 @@ use super::OpenCADStudio;
 pub(crate) struct HostSession<'a> {
     app: &'a mut OpenCADStudio,
     tab: usize,
+    doc_store: Option<ocs_plugin_api::shm::DocumentSnapshotStore>,
 }
 
 impl<'a> HostSession<'a> {
     pub(crate) fn new(app: &'a mut OpenCADStudio, tab: usize) -> Self {
-        Self { app, tab }
+        Self {
+            app,
+            tab,
+            doc_store: None,
+        }
     }
 
     pub fn tab_index(&self) -> usize {
@@ -32,8 +37,36 @@ impl<'a> HostSession<'a> {
         &mut self.app.tabs[self.tab].scene.document
     }
 
+    pub fn document_view(&mut self) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
+        use ocs_plugin_api::shm::DocumentSnapshotStore;
+        if self.doc_store.is_none() {
+            let mut store = DocumentSnapshotStore::new(self.tab, 8 * 1024 * 1024).ok()?;
+            store.publish(self.document()).ok()?;
+            self.doc_store = Some(store);
+        }
+        let store = self.doc_store.as_ref()?;
+        Some(ocs_plugin_api::shm::DocumentViewInfo {
+            path: store.path().to_string_lossy().to_string(),
+            version: store.version(),
+        })
+    }
+
+    fn publish_document_view(&mut self) {
+        let doc = &self.app.tabs[self.tab].scene.document;
+        if let Some(store) = self.doc_store.as_mut() {
+            if let Err(e) = store.publish(doc) {
+                eprintln!(
+                    "[host] failed to publish document view for tab {}: {e}",
+                    self.tab
+                );
+            }
+        }
+    }
+
     pub fn add_entity(&mut self, entity: EntityType) -> Handle {
-        self.app.tabs[self.tab].scene.add_entity(entity)
+        let handle = self.app.tabs[self.tab].scene.add_entity(entity);
+        self.publish_document_view();
+        handle
     }
 
     pub fn bump_geometry(&mut self) {
@@ -77,6 +110,7 @@ impl<'a> HostSession<'a> {
             xd.add_record(r);
         }
         xd.add_record(record);
+        self.publish_document_view();
         true
     }
 
@@ -100,6 +134,7 @@ impl<'a> HostSession<'a> {
         for r in kept {
             xd.add_record(r);
         }
+        self.publish_document_view();
         true
     }
 
@@ -131,7 +166,6 @@ impl<'a> HostSession<'a> {
     pub fn push_error(&mut self, msg: &str) {
         self.app.command_line.push_error(msg);
     }
-
 }
 
 /// The stable contract a plugin's `dispatch` sees. Each method forwards to the
@@ -179,10 +213,7 @@ impl HostApi for HostSession<'_> {
     fn push_error(&mut self, msg: &str) {
         self.push_error(msg)
     }
-    fn start_interactive(
-        &mut self,
-        command: Box<dyn ocs_plugin_api::host::InteractiveCommand>,
-    ) {
+    fn start_interactive(&mut self, command: Box<dyn ocs_plugin_api::host::InteractiveCommand>) {
         self.app.tabs[self.tab].active_cmd =
             Some(Box::new(PluginInteractiveAdapter { inner: command }));
     }
@@ -192,10 +223,7 @@ impl HostApi for HostSession<'_> {
             .get(plugin_id)
             .map(|b| b.as_ref())
     }
-    fn plugin_state_any_mut(
-        &mut self,
-        plugin_id: &str,
-    ) -> Option<&mut (dyn Any + Send + Sync)> {
+    fn plugin_state_any_mut(&mut self, plugin_id: &str) -> Option<&mut (dyn Any + Send + Sync)> {
         self.app.tabs[self.tab]
             .plugin_state
             .get_mut(plugin_id)
@@ -211,6 +239,12 @@ impl HostApi for HostSession<'_> {
             .entry(plugin_id)
             .or_insert_with(|| init())
             .as_mut()
+    }
+    fn document_reader(&self) -> Box<dyn ocs_plugin_api::host::DocumentReader + '_> {
+        Box::new(ocs_plugin_api::host::CadDocumentReader(self.document()))
+    }
+    fn document_view(&mut self) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
+        self.document_view()
     }
 }
 
@@ -343,9 +377,7 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
     }
 }
 
-fn plugin_step_to_result(
-    step: ocs_plugin_api::host::CommandStep,
-) -> crate::command::CmdResult {
+fn plugin_step_to_result(step: ocs_plugin_api::host::CommandStep) -> crate::command::CmdResult {
     use crate::command::CmdResult;
     use ocs_plugin_api::host::CommandStep;
     match step {
@@ -362,6 +394,7 @@ mod tests {
     use crate::app::OpenCADStudio;
     use acadrust::entities::Point;
     use acadrust::xdata::XDataValue;
+    use ocs_plugin_api::host::DocumentReader;
 
     #[test]
     fn xdata_record_round_trips_and_registers_appid() {
@@ -403,9 +436,15 @@ mod tests {
         assert!(host::plugin_state::<u32>(&*host, "opencad.demo").is_none());
         // Insert via ensure, then mutate.
         *host::ensure_plugin_state(host, "opencad.demo", || 7u32) += 1;
-        assert_eq!(*host::plugin_state::<u32>(&*host, "opencad.demo").unwrap(), 8);
+        assert_eq!(
+            *host::plugin_state::<u32>(&*host, "opencad.demo").unwrap(),
+            8
+        );
         *host::plugin_state_mut::<u32>(host, "opencad.demo").unwrap() = 100;
-        assert_eq!(*host::plugin_state::<u32>(&*host, "opencad.demo").unwrap(), 100);
+        assert_eq!(
+            *host::plugin_state::<u32>(&*host, "opencad.demo").unwrap(),
+            100
+        );
     }
 
     /// A plugin command: second point commits a Point and ends.
@@ -439,12 +478,18 @@ mod tests {
             host.start_interactive(Box::new(PlacePoint { got_first: false }));
         }
         assert!(app.tabs[0].active_cmd.is_some());
-        for pt in [glam::Vec3::new(0.0, 0.0, 0.0), glam::Vec3::new(5.0, 5.0, 0.0)] {
+        for pt in [
+            glam::Vec3::new(0.0, 0.0, 0.0),
+            glam::Vec3::new(5.0, 5.0, 0.0),
+        ] {
             let r = app.tabs[0].active_cmd.as_mut().unwrap().on_point(pt);
             let _ = app.apply_cmd_result(r);
         }
         assert_eq!(app.tabs[0].scene.document.entities().count(), 1);
-        assert!(app.tabs[0].active_cmd.is_none(), "command should have ended");
+        assert!(
+            app.tabs[0].active_cmd.is_none(),
+            "command should have ended"
+        );
     }
 
     /// A plugin command that picks an existing object, then marks it.
@@ -464,9 +509,8 @@ mod tests {
             _handle: acadrust::Handle,
             pt: [f64; 3],
         ) -> ocs_plugin_api::host::CommandStep {
-            let p = acadrust::entities::Point::at(acadrust::types::Vector3::new(
-                pt[0], pt[1], pt[2],
-            ));
+            let p =
+                acadrust::entities::Point::at(acadrust::types::Vector3::new(pt[0], pt[1], pt[2]));
             ocs_plugin_api::host::CommandStep::CommitAndEnd(acadrust::EntityType::Point(p))
         }
     }
@@ -477,18 +521,14 @@ mod tests {
         app.tabs[0].is_start = false;
         let target = {
             let mut host = HostSession::new(&mut app, 0);
-            let h = host.add_entity(acadrust::EntityType::Point(
-                acadrust::entities::Point::at(acadrust::types::Vector3::new(3.0, 4.0, 0.0)),
-            ));
+            let h = host.add_entity(acadrust::EntityType::Point(acadrust::entities::Point::at(
+                acadrust::types::Vector3::new(3.0, 4.0, 0.0),
+            )));
             host.start_interactive(Box::new(PickThenMark));
             h
         };
         // The command requested an entity pick, not a free point.
-        assert!(app.tabs[0]
-            .active_cmd
-            .as_ref()
-            .unwrap()
-            .needs_entity_pick());
+        assert!(app.tabs[0].active_cmd.as_ref().unwrap().needs_entity_pick());
         let r = app.tabs[0]
             .active_cmd
             .as_mut()
@@ -497,5 +537,102 @@ mod tests {
         let _ = app.apply_cmd_result(r);
         // Original point + the mark the command committed.
         assert_eq!(app.tabs[0].scene.document.entities().count(), 2);
+    }
+
+    #[test]
+    fn host_document_reader_sees_entities() {
+        use ocs_plugin_api::host::ReaderEntityKind;
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+        host.add_entity(acadrust::EntityType::Point(acadrust::entities::Point::at(
+            acadrust::types::Vector3::new(7.0, 8.0, 0.0),
+        )));
+        let reader = host.document_reader();
+        assert_eq!(reader.entity_count(), 1);
+        let mut kinds = Vec::new();
+        reader.for_each_entity(&mut |e| kinds.push(e.kind));
+        assert_eq!(kinds, vec![ReaderEntityKind::Point]);
+    }
+
+    #[test]
+    fn host_document_view_publish_and_read_shared() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+        let info = host.document_view().unwrap();
+        let reader =
+            ocs_plugin_api::shm::SharedDocumentReader::open(std::path::Path::new(&info.path))
+                .unwrap();
+        assert_eq!(reader.entity_count(), 0);
+
+        host.add_entity(acadrust::EntityType::Point(acadrust::entities::Point::at(
+            acadrust::types::Vector3::new(1.0, 2.0, 0.0),
+        )));
+
+        assert_eq!(reader.entity_count(), 1);
+    }
+
+    /// Read an entity handle from the live document, write XDATA for that
+    /// handle, read it back, and remove it.
+    #[test]
+    fn document_reader_to_xdata_roundtrip() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+        let h = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
+            7.0, 8.0, 0.0,
+        ))));
+
+        {
+            let reader = host.document_reader();
+            assert_eq!(reader.entity_count(), 1);
+            let mut handles = Vec::new();
+            reader.for_each_entity(&mut |e| handles.push(e.handle));
+            assert_eq!(handles, vec![h]);
+        }
+
+        let mut rec = ExtendedDataRecord::new("ROUNDTRIP");
+        rec.add_value(XDataValue::String("from-reader".to_string()));
+        assert!(host.write_record(h, rec));
+
+        let got = host.read_record(h, "ROUNDTRIP").expect("record missing");
+        assert_eq!(got.values.len(), 1);
+        assert!(matches!(got.values[0], XDataValue::String(ref s) if s == "from-reader"));
+
+        assert!(host.remove_record(h, "ROUNDTRIP"));
+        assert!(host.read_record(h, "ROUNDTRIP").is_none());
+    }
+
+    /// Publish a shared document view, read the entity handle from shared
+    /// memory, then write and read-back XDATA through the normal HostApi RPCs.
+    #[test]
+    fn shared_document_view_read_then_write_xdata_roundtrip() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+        let info = host.document_view().unwrap();
+        let reader =
+            ocs_plugin_api::shm::SharedDocumentReader::open(std::path::Path::new(&info.path))
+                .unwrap();
+
+        let h = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
+            1.0, 2.0, 0.0,
+        ))));
+        assert_eq!(reader.entity_count(), 1);
+
+        let mut handles = Vec::new();
+        reader.for_each_entity(&mut |e| handles.push(e.handle));
+        assert_eq!(handles, vec![h]);
+
+        let mut rec = ExtendedDataRecord::new("SHM_ROUNDTRIP");
+        rec.add_value(XDataValue::Integer32(123));
+        assert!(host.write_record(h, rec));
+
+        let got = host
+            .read_record(h, "SHM_ROUNDTRIP")
+            .expect("record missing");
+        assert_eq!(got.values.len(), 1);
+        assert!(matches!(got.values[0], XDataValue::Integer32(123)));
     }
 }

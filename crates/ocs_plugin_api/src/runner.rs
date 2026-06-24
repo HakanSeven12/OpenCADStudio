@@ -152,7 +152,7 @@ unsafe fn load_plugin(path: &Path) -> Result<Box<dyn BuiltinPlugin>, Box<dyn std
         .get(b"ocs_plugin_api_version")
         .map_err(|_| "missing ocs_plugin_api_version symbol")?;
     let v = version();
-    if v < crate::API_VERSION_MIN_SUPPORTED || v > crate::API_VERSION {
+    if !crate::host_accepts_plugin_version(v) {
         return Err(format!(
             "API version {v} is incompatible (host supports {}-{})",
             crate::API_VERSION_MIN_SUPPORTED,

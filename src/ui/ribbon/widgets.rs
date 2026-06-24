@@ -324,7 +324,7 @@ pub(super) fn render_small<'a>(
             let active = active_tool.as_deref() == Some(id)
                 || items
                     .iter()
-                    .any(|(cmd, _, _)| active_tool.as_deref() == Some(cmd));
+                    .any(|(cmd, _, _)| active_tool.as_deref() == Some(*cmd));
             let dd_open = open_dd.as_deref() == Some(id);
             let last = last_cmd.get(id).copied().unwrap_or(default);
             let cur_icon = last_cmd
@@ -464,7 +464,7 @@ pub(super) fn render_large<'a>(
             let active = active_tool.as_deref() == Some(id)
                 || items
                     .iter()
-                    .any(|(cmd, _, _)| active_tool.as_deref() == Some(cmd));
+                    .any(|(cmd, _, _)| active_tool.as_deref() == Some(*cmd));
             let dd_open = open_dd.as_deref() == Some(id);
             let last = last_cmd.get(id).copied().unwrap_or(default);
             let cur_icon = last_cmd

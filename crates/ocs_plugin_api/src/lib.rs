@@ -41,7 +41,9 @@ pub mod shm;
 #[cfg(feature = "host")]
 pub mod runner;
 
-pub use manifest::{ApiVersion, PluginManifest, API_VERSION, API_VERSION_MIN_SUPPORTED};
+pub use manifest::{
+    host_accepts_plugin_version, ApiVersion, PluginManifest, API_VERSION, API_VERSION_MIN_SUPPORTED,
+};
 pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
 
 #[cfg(feature = "host")]

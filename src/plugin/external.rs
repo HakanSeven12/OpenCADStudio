@@ -8,9 +8,9 @@
 //! Layout (mirrors the spec in `docs/plugin-architecture.md`):
 //! ```text
 //! <config>/OpenCADStudio/plugins/
-//!   opencad.storm_sewer/
+//!   <plugin-id>/
 //!     plugin.toml
-//!     <libopencad_storm_sewer.so | .dll | .dylib>
+//!     <lib<name>.so | .dll | .dylib>
 //! ```
 
 use std::path::PathBuf;
@@ -40,9 +40,9 @@ pub struct ExternalPlugin {
 }
 
 impl ExternalPlugin {
-    /// True when the package's API version matches the host ABI major.
+    /// True when the package's API version is supported by this host.
     pub fn api_compatible(&self) -> bool {
-        self.api_version == ocs_plugin_api::API_VERSION
+        ocs_plugin_api::host_accepts_plugin_version(self.api_version)
     }
 
     /// True when the package can be loaded today: compatible API *and* a native
@@ -85,7 +85,9 @@ pub fn plugins_dir() -> Option<PathBuf> {
 /// session (the library is resident); the removal takes effect on next start.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn uninstall(id: &str) -> Result<(), String> {
-    let dir = plugins_dir().ok_or("cannot locate the plugins folder")?.join(id);
+    let dir = plugins_dir()
+        .ok_or("cannot locate the plugins folder")?
+        .join(id);
     if dir.is_dir() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
@@ -254,7 +256,10 @@ mod loader {
                 continue;
             }
             let Some(path) = lib_file(&d.dir) else {
-                out.push((d.id.clone(), Err("no native library in package".to_string())));
+                out.push((
+                    d.id.clone(),
+                    Err("no native library in package".to_string()),
+                ));
                 continue;
             };
             let mut host = crate::app::plugin_host::HostSession::new(app, 0);
@@ -309,27 +314,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_documented_keys() {
+    fn api_v2_plugin_from_template_is_compatible() {
         let toml = r#"
 [plugin]
-id = "opencad.storm_sewer"
-name = "Storm Sewer"
-version = "0.2.0"
-description = "Gravity storm-drain design"
+id = "opencad.my_plugin"
+name = "My Plugin"
+version = "0.1.0"
+description = "Template plugin"
 
 [opencad]
-api_version = 1
-ribbon_order = 50
-command_prefixes = ["SS_", "STORM_"]
+api_version = 2
+ribbon_order = 60
+command_prefixes = ["MP_"]
+xdata_apps = ["MYPLUGIN_RECORD"]
 "#;
         let p = parse_plugin_toml(toml).expect("parsed");
-        assert_eq!(p.id, "opencad.storm_sewer");
-        assert_eq!(p.name, "Storm Sewer");
-        assert_eq!(p.version, "0.2.0");
-        assert_eq!(p.api_version, 1);
-        assert_eq!(p.ribbon_order, 50);
-        assert_eq!(p.command_prefixes, vec!["SS_", "STORM_"]);
-        assert!(!p.api_compatible());
+        assert_eq!(p.api_version, 2);
+        assert!(p.command_prefixes.contains(&"MP_".to_string()));
+        assert!(p.api_compatible(), "API v2 plugins must run on API v3 host");
     }
 
     #[test]
@@ -361,7 +363,11 @@ command_prefixes = ["SS_", "STORM_"]
             std::env::var_os("OCS_PLUGIN_RUNNER_EXE")
                 .unwrap_or_else(|| std::env::current_exe().unwrap().into_os_string()),
         );
-        assert!(host_exe.exists(), "host exe not found: {}", host_exe.display());
+        assert!(
+            host_exe.exists(),
+            "host exe not found: {}",
+            host_exe.display()
+        );
         std::env::set_var("OCS_PLUGIN_RUNNER_EXE", &host_exe);
 
         let mut app = crate::app::OpenCADStudio::new_for_test();

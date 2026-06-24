@@ -3,6 +3,7 @@
 use std::any::Any;
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
 
 use acadrust::xdata::ExtendedDataRecord;
@@ -10,11 +11,12 @@ use acadrust::{CadDocument, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 
-use crate::host::{HostApi, InteractiveCommand};
+use crate::host::{DocumentReader, HostApi, InteractiveCommand, ReaderEntity};
 use crate::ipc::protocol::{
     HostResponse, HostToPlugin, PluginRequest, PluginResponse, PluginToHost,
 };
 use crate::ipc::transport::{recv, send};
+use crate::shm::{DocumentViewInfo, SharedDocumentReader};
 
 /// Shared registry of active interactive commands, keyed by host-assigned id.
 pub type InteractiveRegistry = Rc<RefCell<HashMap<u64, Box<dyn InteractiveCommand>>>>;
@@ -77,6 +79,9 @@ pub struct PluginHostApi {
     /// stable references without leaking on every call. Each distinct record is
     /// leaked once per plugin dispatch/interactive session.
     record_cache: RefCell<HashMap<(Handle, String), &'static ExtendedDataRecord>>,
+    /// Shared-memory document view information, lazily fetched on first
+    /// `document_reader()` access.
+    doc_view: RefCell<Option<DocumentViewInfo>>,
 }
 
 impl PluginHostApi {
@@ -88,6 +93,7 @@ impl PluginHostApi {
             interactive,
             next_command_id: Cell::new(1),
             record_cache: RefCell::new(HashMap::new()),
+            doc_view: RefCell::new(None),
         }
     }
 
@@ -179,9 +185,7 @@ impl HostApi for PluginHostApi {
         {
             Ok(PluginResponse::Bool(b)) => {
                 if b {
-                    self.record_cache
-                        .borrow_mut()
-                        .remove(&(handle, app));
+                    self.record_cache.borrow_mut().remove(&(handle, app));
                 }
                 b
             }
@@ -221,10 +225,9 @@ impl HostApi for PluginHostApi {
     }
 
     fn push_undo(&mut self, label: &str) {
-        if let Err(e) = self
-            .client
-            .request(PluginRequest::PushUndo { label: label.to_string() })
-        {
+        if let Err(e) = self.client.request(PluginRequest::PushUndo {
+            label: label.to_string(),
+        }) {
             eprintln!("[plugin] push_undo failed: {e}");
         }
     }
@@ -236,19 +239,28 @@ impl HostApi for PluginHostApi {
     }
 
     fn push_info(&mut self, msg: &str) {
-        if let Err(e) = self.client.request(PluginRequest::PushInfo(msg.to_string())) {
+        if let Err(e) = self
+            .client
+            .request(PluginRequest::PushInfo(msg.to_string()))
+        {
             eprintln!("[plugin] push_info failed: {e}");
         }
     }
 
     fn push_output(&mut self, msg: &str) {
-        if let Err(e) = self.client.request(PluginRequest::PushOutput(msg.to_string())) {
+        if let Err(e) = self
+            .client
+            .request(PluginRequest::PushOutput(msg.to_string()))
+        {
             eprintln!("[plugin] push_output failed: {e}");
         }
     }
 
     fn push_error(&mut self, msg: &str) {
-        if let Err(e) = self.client.request(PluginRequest::PushError(msg.to_string())) {
+        if let Err(e) = self
+            .client
+            .request(PluginRequest::PushError(msg.to_string()))
+        {
             eprintln!("[plugin] push_error failed: {e}");
         }
     }
@@ -285,6 +297,54 @@ impl HostApi for PluginHostApi {
         // state contract to work across processes.
         panic!("ensure_plugin_state is not supported for out-of-process plugins; keep state in the plugin crate")
     }
+
+    fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
+        {
+            let mut view = self.doc_view.borrow_mut();
+            if view.is_none() {
+                match self.client.request(PluginRequest::OpenDocumentView) {
+                    Ok(PluginResponse::DocumentView { path, version }) => {
+                        *view = Some(DocumentViewInfo { path, version });
+                    }
+                    Ok(other) => {
+                        eprintln!("[plugin] unexpected OpenDocumentView response: {other:?}");
+                    }
+                    Err(e) => {
+                        eprintln!("[plugin] OpenDocumentView request failed: {e}");
+                    }
+                }
+            }
+        }
+        match self.doc_view.borrow().as_ref() {
+            Some(info) => match SharedDocumentReader::open(Path::new(&info.path)) {
+                Ok(reader) => Box::new(reader),
+                Err(e) => {
+                    eprintln!(
+                        "[plugin] failed to open document view at {}: {e}",
+                        info.path
+                    );
+                    Box::new(EmptyDocumentReader)
+                }
+            },
+            None => Box::new(EmptyDocumentReader),
+        }
+    }
+}
+
+/// Sentinel reader used when the shared-memory view could not be initialized.
+struct EmptyDocumentReader;
+
+impl DocumentReader for EmptyDocumentReader {
+    fn entity_count(&self) -> usize {
+        0
+    }
+    fn for_each_entity(&self, _f: &mut dyn FnMut(ReaderEntity<'_>)) {}
+    fn layer_name(&self, _handle: Handle) -> Option<&str> {
+        None
+    }
+    fn app_id_name(&self, _handle: Handle) -> Option<&str> {
+        None
+    }
 }
 
 #[cfg(all(test, feature = "host"))]
@@ -292,8 +352,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
 
-    use acadrust::{EntityType, Handle};
     use acadrust::entities::Point;
+    use acadrust::{EntityType, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,

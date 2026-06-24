@@ -41,7 +41,9 @@ pub enum OwnedRibbonItem {
         row2: Vec<OwnedToolDef>,
         row3: Vec<OwnedToolDef>,
     },
-    PropertiesGroup { match_prop: OwnedToolDef },
+    PropertiesGroup {
+        match_prop: OwnedToolDef,
+    },
     StyleComboGroup {
         style_key: StyleKey,
         combo_id: String,
@@ -114,17 +116,34 @@ impl From<RibbonItem> for OwnedRibbonItem {
         match item {
             RibbonItem::Tool(t) => OwnedRibbonItem::Tool(t.into()),
             RibbonItem::LargeTool(t) => OwnedRibbonItem::LargeTool(t.into()),
-            RibbonItem::Dropdown { id, icon, items, default } => OwnedRibbonItem::Dropdown {
+            RibbonItem::Dropdown {
+                id,
+                icon,
+                items,
+                default,
+            } => OwnedRibbonItem::Dropdown {
                 id: id.to_string(),
                 icon: icon.into(),
-                items: items.into_iter().map(|(a, b, i)| (a.to_string(), b.to_string(), i.into())).collect(),
+                items: items
+                    .into_iter()
+                    .map(|(a, b, i)| (a.to_string(), b.to_string(), i.into()))
+                    .collect(),
                 default: default.to_string(),
             },
-            RibbonItem::LargeDropdown { id, label, icon, items, default } => OwnedRibbonItem::LargeDropdown {
+            RibbonItem::LargeDropdown {
+                id,
+                label,
+                icon,
+                items,
+                default,
+            } => OwnedRibbonItem::LargeDropdown {
                 id: id.to_string(),
                 label: label.to_string(),
                 icon: icon.into(),
-                items: items.into_iter().map(|(a, b, i)| (a.to_string(), b.to_string(), i.into())).collect(),
+                items: items
+                    .into_iter()
+                    .map(|(a, b, i)| (a.to_string(), b.to_string(), i.into()))
+                    .collect(),
                 default: default.to_string(),
             },
             RibbonItem::LayerComboGroup { row2, row3 } => OwnedRibbonItem::LayerComboGroup {
@@ -134,11 +153,19 @@ impl From<RibbonItem> for OwnedRibbonItem {
             RibbonItem::PropertiesGroup { match_prop } => OwnedRibbonItem::PropertiesGroup {
                 match_prop: match_prop.into(),
             },
-            RibbonItem::StyleComboGroup { style_key, combo_id, manager_cmd, rows } => OwnedRibbonItem::StyleComboGroup {
+            RibbonItem::StyleComboGroup {
+                style_key,
+                combo_id,
+                manager_cmd,
+                rows,
+            } => OwnedRibbonItem::StyleComboGroup {
                 style_key,
                 combo_id: combo_id.to_string(),
                 manager_cmd: manager_cmd.map(|s| s.to_string()),
-                rows: rows.into_iter().map(|r| r.into_iter().map(Into::into).collect()).collect(),
+                rows: rows
+                    .into_iter()
+                    .map(|r| r.into_iter().map(Into::into).collect())
+                    .collect(),
             },
         }
     }
@@ -149,17 +176,46 @@ impl OwnedRibbonItem {
         match self {
             OwnedRibbonItem::Tool(t) => RibbonItem::Tool(t.to_static()),
             OwnedRibbonItem::LargeTool(t) => RibbonItem::LargeTool(t.to_static()),
-            OwnedRibbonItem::Dropdown { id, icon, items, default } => RibbonItem::Dropdown {
+            OwnedRibbonItem::Dropdown {
+                id,
+                icon,
+                items,
+                default,
+            } => RibbonItem::Dropdown {
                 id: &*Box::leak(id.into_boxed_str()),
                 icon: icon.to_static(),
-                items: items.into_iter().map(|(a, b, i)| (&*Box::leak(a.into_boxed_str()), &*Box::leak(b.into_boxed_str()), i.to_static())).collect(),
+                items: items
+                    .into_iter()
+                    .map(|(a, b, i)| {
+                        (
+                            &*Box::leak(a.into_boxed_str()),
+                            &*Box::leak(b.into_boxed_str()),
+                            i.to_static(),
+                        )
+                    })
+                    .collect(),
                 default: &*Box::leak(default.into_boxed_str()),
             },
-            OwnedRibbonItem::LargeDropdown { id, label, icon, items, default } => RibbonItem::LargeDropdown {
+            OwnedRibbonItem::LargeDropdown {
+                id,
+                label,
+                icon,
+                items,
+                default,
+            } => RibbonItem::LargeDropdown {
                 id: &*Box::leak(id.into_boxed_str()),
                 label: &*Box::leak(label.into_boxed_str()),
                 icon: icon.to_static(),
-                items: items.into_iter().map(|(a, b, i)| (&*Box::leak(a.into_boxed_str()), &*Box::leak(b.into_boxed_str()), i.to_static())).collect(),
+                items: items
+                    .into_iter()
+                    .map(|(a, b, i)| {
+                        (
+                            &*Box::leak(a.into_boxed_str()),
+                            &*Box::leak(b.into_boxed_str()),
+                            i.to_static(),
+                        )
+                    })
+                    .collect(),
                 default: &*Box::leak(default.into_boxed_str()),
             },
             OwnedRibbonItem::LayerComboGroup { row2, row3 } => RibbonItem::LayerComboGroup {
@@ -169,11 +225,19 @@ impl OwnedRibbonItem {
             OwnedRibbonItem::PropertiesGroup { match_prop } => RibbonItem::PropertiesGroup {
                 match_prop: match_prop.to_static(),
             },
-            OwnedRibbonItem::StyleComboGroup { style_key, combo_id, manager_cmd, rows } => RibbonItem::StyleComboGroup {
+            OwnedRibbonItem::StyleComboGroup {
+                style_key,
+                combo_id,
+                manager_cmd,
+                rows,
+            } => RibbonItem::StyleComboGroup {
                 style_key,
                 combo_id: &*Box::leak(combo_id.into_boxed_str()),
                 manager_cmd: manager_cmd.map(|s| &*Box::leak(s.into_boxed_str())),
-                rows: rows.into_iter().map(|r| r.into_iter().map(|t| t.to_static()).collect()).collect(),
+                rows: rows
+                    .into_iter()
+                    .map(|r| r.into_iter().map(|t| t.to_static()).collect())
+                    .collect(),
             },
         }
     }
@@ -198,11 +262,7 @@ impl OwnedRibbonGroup {
 }
 
 /// Convert owned ribbon groups into a `CadModule` by leaking the strings once.
-pub fn to_module(
-    id: String,
-    title: String,
-    groups: Vec<OwnedRibbonGroup>,
-) -> Box<dyn CadModule> {
+pub fn to_module(id: String, title: String, groups: Vec<OwnedRibbonGroup>) -> Box<dyn CadModule> {
     struct M {
         id: &'static str,
         title: &'static str,
@@ -224,7 +284,10 @@ pub fn to_module(
     Box::new(M {
         id,
         title,
-        groups: groups.into_iter().map(OwnedRibbonGroup::to_static).collect(),
+        groups: groups
+            .into_iter()
+            .map(OwnedRibbonGroup::to_static)
+            .collect(),
     })
 }
 

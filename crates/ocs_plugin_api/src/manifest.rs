@@ -3,8 +3,14 @@
 /// Host plugin API version. Bump when the host runtime surface breaks
 /// compatibility. v2 added `HostApi::start_interactive`. v3 changes
 /// `document()` / `document_mut()` to local cached copies for out-of-process
-/// plugins.
+/// plugins and appends `document_reader` / `document_view` at the end of the
+/// vtable so API v2 plugins keep working.
 pub const API_VERSION: u32 = 3;
+
+/// Oldest plugin API major the current host still loads. This keeps previously
+/// compiled cdylibs usable as long as their vtable layout is a prefix of the
+/// current `HostApi` trait.
+pub const API_VERSION_MIN_SUPPORTED: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ApiVersion {
@@ -14,8 +20,11 @@ pub struct ApiVersion {
 impl ApiVersion {
     pub const CURRENT: Self = Self { major: API_VERSION };
 
-    pub fn is_compatible_with(host: ApiVersion) -> bool {
-        Self::CURRENT.major == host.major
+    /// True when this plugin version can run on `host`. A plugin is compatible
+    /// with any host whose API major is the same or newer (new host methods are
+    /// appended at the end of the vtable, so old plugins ignore them).
+    pub fn is_compatible_with(&self, host: ApiVersion) -> bool {
+        self.major <= host.major
     }
 }
 
@@ -30,10 +39,20 @@ mod tests {
 
     #[test]
     fn same_major_is_compatible() {
-        assert!(ApiVersion::is_compatible_with(ApiVersion::CURRENT));
-        assert!(!ApiVersion::is_compatible_with(ApiVersion {
+        assert!(ApiVersion::CURRENT.is_compatible_with(ApiVersion::CURRENT));
+        assert!(!ApiVersion::CURRENT.is_compatible_with(ApiVersion {
+            major: API_VERSION - 1,
+        }));
+        // Forward compatibility: a plugin compiled today runs on a future host
+        // that only appends new vtable entries.
+        assert!(ApiVersion::CURRENT.is_compatible_with(ApiVersion {
             major: API_VERSION + 1,
         }));
+    }
+
+    #[test]
+    fn api_v2_plugin_runs_on_api_v3_host() {
+        assert!(ApiVersion { major: 2 }.is_compatible_with(ApiVersion { major: 3 }));
     }
 }
 

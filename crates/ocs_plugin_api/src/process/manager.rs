@@ -40,7 +40,9 @@ pub struct DispatchResult {
 impl PluginManager {
     /// Create an empty manager.
     pub fn new() -> Self {
-        Self { plugins: Vec::new() }
+        Self {
+            plugins: Vec::new(),
+        }
     }
 
     /// Spawn `cdylib_path` as a separate plugin process, build its ribbon
@@ -165,6 +167,20 @@ mod tests {
 
     #[test]
     fn dispatch_with_no_plugins_is_not_handled() {
+        struct EmptyReader;
+        impl crate::host::DocumentReader for EmptyReader {
+            fn entity_count(&self) -> usize {
+                0
+            }
+            fn for_each_entity(&self, _f: &mut dyn FnMut(crate::host::ReaderEntity<'_>)) {}
+            fn layer_name(&self, _handle: acadrust::Handle) -> Option<&str> {
+                None
+            }
+            fn app_id_name(&self, _handle: acadrust::Handle) -> Option<&str> {
+                None
+            }
+        }
+
         struct DummyHost;
         impl HostApi for DummyHost {
             fn tab_index(&self) -> usize {
@@ -175,6 +191,9 @@ mod tests {
             }
             fn document_mut(&mut self) -> &mut acadrust::CadDocument {
                 panic!("not used")
+            }
+            fn document_reader(&self) -> Box<dyn crate::host::DocumentReader + '_> {
+                Box::new(EmptyReader)
             }
             fn add_entity(&mut self, _entity: acadrust::EntityType) -> acadrust::Handle {
                 panic!("not used")
@@ -194,11 +213,7 @@ mod tests {
             ) -> bool {
                 false
             }
-            fn remove_record(
-                &mut self,
-                _handle: acadrust::Handle,
-                _app_name: &str,
-            ) -> bool {
+            fn remove_record(&mut self, _handle: acadrust::Handle, _app_name: &str) -> bool {
                 false
             }
             fn push_undo(&mut self, _label: &str) {}
@@ -206,11 +221,7 @@ mod tests {
             fn push_info(&mut self, _msg: &str) {}
             fn push_output(&mut self, _msg: &str) {}
             fn push_error(&mut self, _msg: &str) {}
-            fn start_interactive(
-                &mut self,
-                _command: Box<dyn crate::host::InteractiveCommand>,
-            ) {
-            }
+            fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
             fn plugin_state_any(
                 &self,
                 _plugin_id: &str,

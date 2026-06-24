@@ -32,15 +32,17 @@ pub mod ipc;
 #[cfg(feature = "host")]
 pub mod process;
 
+/// Shared-memory document view — only built with the `host` feature.
+#[cfg(feature = "host")]
+pub mod shm;
+
 /// Plugin runner implementation used by the host when it spawns itself in
 /// runner mode — only built with the `host` feature.
 #[cfg(feature = "host")]
 pub mod runner;
 
-pub use manifest::{ApiVersion, PluginManifest, API_VERSION};
-pub use ribbon::{
-    CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef,
-};
+pub use manifest::{ApiVersion, PluginManifest, API_VERSION, API_VERSION_MIN_SUPPORTED};
+pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
 
 #[cfg(feature = "host")]
 pub use process::{DispatchResult, PluginError, PluginManager, PluginProcess};

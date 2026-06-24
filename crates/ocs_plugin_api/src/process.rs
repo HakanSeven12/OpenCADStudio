@@ -61,22 +61,21 @@ pub struct PluginProcess {
 
 impl PluginProcess {
     /// Spawn the plugin cdylib in a separate process and connect to it.
-    pub fn spawn(
-        cdylib_path: &Path,
-        host: &mut dyn HostApi,
-    ) -> Result<Self, PluginError> {
+    pub fn spawn(cdylib_path: &Path, host: &mut dyn HostApi) -> Result<Self, PluginError> {
         let socket_name = generate_socket_name();
         let socket_name_ref: interprocess::local_socket::Name = socket_name
             .clone()
             .to_ns_name::<GenericNamespaced>()
             .expect("valid namespaced name");
         let runner_path = runner_executable()?;
-        eprintln!("[plugin] spawning runner {} for {}", runner_path.display(), cdylib_path.display());
+        eprintln!(
+            "[plugin] spawning runner {} for {}",
+            runner_path.display(),
+            cdylib_path.display()
+        );
 
         // Create the listener before spawning so the runner can connect immediately.
-        let listener = ListenerOptions::new()
-            .name(socket_name_ref)
-            .create_sync()?;
+        let listener = ListenerOptions::new().name(socket_name_ref).create_sync()?;
 
         let mut child = Command::new(&runner_path)
             .arg("--ocs-plugin-runner")
@@ -387,11 +386,15 @@ fn distinct_runner_path(host: &Path) -> PathBuf {
     let mut runner = host.as_os_str().to_owned();
     if let Some(ext) = host.extension().and_then(|s| s.to_str()) {
         let base = host.file_stem().unwrap_or_default();
-        runner = std::ffi::OsString::from(format!("{}-plugin-runner.{}", base.to_string_lossy(), ext));
+        runner =
+            std::ffi::OsString::from(format!("{}-plugin-runner.{}", base.to_string_lossy(), ext));
     } else {
         runner.push("-plugin-runner");
     }
-    let mut path = host.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+    let mut path = host
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
     path.push(runner);
     path
 }
@@ -411,7 +414,10 @@ mod tests {
     fn distinct_runner_path_appends_suffix() {
         let host = PathBuf::from("/app/OpenCADStudio.exe");
         let runner = distinct_runner_path(&host);
-        assert_eq!(runner, PathBuf::from("/app/OpenCADStudio-plugin-runner.exe"));
+        assert_eq!(
+            runner,
+            PathBuf::from("/app/OpenCADStudio-plugin-runner.exe")
+        );
     }
 
     #[test]

@@ -35,9 +35,7 @@ pub fn handle_plugin_request(
         ReadRecord { handle, app_name } => {
             PluginResponse::Record(host.read_record(handle, &app_name).cloned())
         }
-        WriteRecord { handle, record } => {
-            PluginResponse::Bool(host.write_record(handle, record))
-        }
+        WriteRecord { handle, record } => PluginResponse::Bool(host.write_record(handle, record)),
         RemoveRecord { handle, app_name } => {
             PluginResponse::Bool(host.remove_record(handle, &app_name))
         }
@@ -54,5 +52,12 @@ pub fn handle_plugin_request(
             PluginResponse::Ok
         }
         DocumentSnapshot => PluginResponse::Document(host.document().clone()),
+        OpenDocumentView => match host.document_view() {
+            Some(info) => PluginResponse::DocumentView {
+                path: info.path,
+                version: info.version,
+            },
+            None => PluginResponse::Error("shared document view unavailable".to_string()),
+        },
     }
 }

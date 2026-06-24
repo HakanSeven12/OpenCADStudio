@@ -12,7 +12,9 @@ use std::rc::Rc;
 
 use crate::host::{BuiltinPlugin, InteractiveCommand};
 use crate::ipc::client::{InteractiveRegistry, IpcClient, PluginHostApi};
-use crate::ipc::protocol::{HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost};
+use crate::ipc::protocol::{
+    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost,
+};
 use crate::ipc::transport::{recv, send};
 use crate::ribbon::owned::OwnedRibbonGroup;
 
@@ -86,14 +88,13 @@ fn handle_host_request(
                 Err(_) => HostResponse::Error("plugin dispatch panicked".to_string()),
             }
         }
-        HostRequest::InteractiveEvent {
-            command_id,
-            event,
-        } => {
+        HostRequest::InteractiveEvent { command_id, event } => {
             let step = {
                 let mut registry = interactive.borrow_mut();
                 let Some(cmd) = registry.get_mut(&command_id) else {
-                    return HostResponse::Error(format!("unknown interactive command {command_id}"));
+                    return HostResponse::Error(format!(
+                        "unknown interactive command {command_id}"
+                    ));
                 };
                 let cmd_ref: &mut dyn InteractiveCommand = cmd.as_mut();
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match event {
@@ -126,7 +127,9 @@ fn handle_host_request(
             let result = {
                 let registry = interactive.borrow();
                 registry.get(&command_id).map(|cmd| {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.needs_object_pick()))
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        cmd.needs_object_pick()
+                    }))
                 })
             };
             match result {
@@ -142,18 +145,17 @@ fn handle_host_request(
     }
 }
 
-unsafe fn load_plugin(
-    path: &Path,
-) -> Result<Box<dyn BuiltinPlugin>, Box<dyn std::error::Error>> {
+unsafe fn load_plugin(path: &Path) -> Result<Box<dyn BuiltinPlugin>, Box<dyn std::error::Error>> {
     let lib = libloading::Library::new(path)?;
 
     let version: libloading::Symbol<extern "C" fn() -> u32> = lib
         .get(b"ocs_plugin_api_version")
         .map_err(|_| "missing ocs_plugin_api_version symbol")?;
     let v = version();
-    if v != crate::API_VERSION {
+    if v < crate::API_VERSION_MIN_SUPPORTED || v > crate::API_VERSION {
         return Err(format!(
-            "API version {v} != host {}",
+            "API version {v} is incompatible (host supports {}-{})",
+            crate::API_VERSION_MIN_SUPPORTED,
             crate::API_VERSION
         )
         .into());

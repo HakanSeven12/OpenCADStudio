@@ -42,8 +42,7 @@ mod tests {
             .create_sync()
             .expect("create listener");
         let client = thread::spawn(move || {
-            StreamTrait::connect(name.to_ns_name::<GenericNamespaced>().unwrap())
-                .expect("connect")
+            StreamTrait::connect(name.to_ns_name::<GenericNamespaced>().unwrap()).expect("connect")
         });
         let server = listener.accept().expect("accept");
         let client = client.join().expect("client thread");

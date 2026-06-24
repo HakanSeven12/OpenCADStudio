@@ -17,9 +17,11 @@ serde = { version = "1", features = ["derive"], optional = true }
 bincode = { version = "1", optional = true }
 thiserror = { version = "1", optional = true }
 libloading = { version = "0.8", optional = true }
+memmap2 = { version = "0.9", optional = true }
+rkyv = { version = "0.7", features = ["validation", "std"], optional = true }
 
 [features]
 # Enables the runtime host surface (`HostApi` trait) and the out-of-process
 # plugin runtime. The OpenCADStudio binary turns this on; pure-data consumers
 # leave it off.
-host = ["dep:acadrust", "dep:interprocess", "dep:serde", "dep:bincode", "dep:thiserror", "dep:libloading"]
+host = ["dep:acadrust", "dep:interprocess", "dep:serde", "dep:bincode", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv"]

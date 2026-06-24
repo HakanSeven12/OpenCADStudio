@@ -112,6 +112,7 @@ pub trait HostApi {
     // ── Document ────────────────────────────────────────────────────────────
     fn document(&self) -> &CadDocument;
     fn document_mut(&mut self) -> &mut CadDocument;
+
     /// Add an entity to the active document, returning its handle.
     fn add_entity(&mut self, entity: EntityType) -> Handle;
     /// Mark the scene geometry dirty so it is re-tessellated next frame.
@@ -143,14 +144,143 @@ pub trait HostApi {
 
     // ── Per-tab plugin state (object-safe; use the typed helpers below) ──────
     fn plugin_state_any(&self, plugin_id: &str) -> Option<&(dyn Any + Send + Sync)>;
-    fn plugin_state_any_mut(&mut self, plugin_id: &str)
-        -> Option<&mut (dyn Any + Send + Sync)>;
+    fn plugin_state_any_mut(&mut self, plugin_id: &str) -> Option<&mut (dyn Any + Send + Sync)>;
     /// Get the state for `plugin_id`, inserting `init()`'s result if absent.
     fn ensure_plugin_state_any(
         &mut self,
         plugin_id: &'static str,
         init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
     ) -> &mut (dyn Any + Send + Sync);
+
+    // ── DocumentReader (added in API v3; appended at the end to keep vtable
+    // indices stable for API v2 plugins) ─────────────────────────────────────
+
+    /// Read-only, zero-copy view of the active document. For out-of-process
+    /// plugins this is backed by host-owned shared memory; for in-process
+    /// plugins it wraps `document()`.
+    fn document_reader(&self) -> Box<dyn DocumentReader + '_>;
+
+    /// Open (or refresh) the host-side shared document view and return the
+    /// information the plugin needs to map it. In-process hosts implement this;
+    /// out-of-process plugin proxies return `None`.
+    fn document_view(&mut self) -> Option<crate::shm::DocumentViewInfo> {
+        None
+    }
+}
+
+/// Simplified, read-only entity kind exposed by [`DocumentReader`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReaderEntityKind {
+    Point,
+    Line,
+    Circle,
+    Arc,
+    Polyline,
+    Text,
+    Other,
+}
+
+/// A 3D point returned by [`DocumentReader`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReaderPoint {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+/// A read-only view of one entity, borrowed from a [`DocumentReader`].
+pub struct ReaderEntity<'a> {
+    /// Entity handle in the host document.
+    pub handle: Handle,
+    /// Simplified entity type.
+    pub kind: ReaderEntityKind,
+    /// Name of the layer the entity lives on.
+    pub layer_name: &'a str,
+    /// If the entity is a point, its coordinates.
+    pub point: Option<ReaderPoint>,
+}
+
+/// Read-only, zero-copy view of a CAD document.
+///
+/// For out-of-process plugins this is backed by host-owned shared memory. The
+/// plugin receives only references into that mapping, so the document model is
+/// not copied into the plugin's heap.
+pub trait DocumentReader {
+    /// Total number of entities in the document.
+    fn entity_count(&self) -> usize;
+
+    /// Iterate over all entities without allocating a full `CadDocument`.
+    fn for_each_entity(&self, f: &mut dyn FnMut(ReaderEntity<'_>));
+
+    /// Look up a layer name by handle.
+    fn layer_name(&self, handle: Handle) -> Option<&str>;
+
+    /// Look up an APPID name by handle.
+    fn app_id_name(&self, handle: Handle) -> Option<&str>;
+}
+
+impl ReaderEntityKind {
+    /// Map a concrete `EntityType` to the simplified reader kind.
+    pub fn from_entity(entity: &EntityType) -> Self {
+        match entity {
+            EntityType::Point(_) => ReaderEntityKind::Point,
+            EntityType::Line(_) => ReaderEntityKind::Line,
+            EntityType::Circle(_) => ReaderEntityKind::Circle,
+            EntityType::Arc(_) => ReaderEntityKind::Arc,
+            EntityType::Polyline(_)
+            | EntityType::Polyline2D(_)
+            | EntityType::Polyline3D(_)
+            | EntityType::LwPolyline(_) => ReaderEntityKind::Polyline,
+            EntityType::Text(_) | EntityType::MText(_) => ReaderEntityKind::Text,
+            _ => ReaderEntityKind::Other,
+        }
+    }
+}
+
+/// In-process `DocumentReader` implementation that wraps a borrowed `CadDocument`.
+pub struct CadDocumentReader<'a>(pub &'a CadDocument);
+
+impl<'a> DocumentReader for CadDocumentReader<'a> {
+    fn entity_count(&self) -> usize {
+        self.0.entities().count()
+    }
+
+    fn for_each_entity(&self, f: &mut dyn FnMut(ReaderEntity<'_>)) {
+        for entity in self.0.entities() {
+            let kind = ReaderEntityKind::from_entity(entity);
+            let layer_name = entity.common().layer.as_str();
+            let point = match entity {
+                EntityType::Point(p) => Some(ReaderPoint {
+                    x: p.location.x,
+                    y: p.location.y,
+                    z: p.location.z,
+                }),
+                _ => None,
+            };
+            f(ReaderEntity {
+                handle: entity.common().handle,
+                kind,
+                layer_name,
+                point,
+            });
+        }
+    }
+
+    fn layer_name(&self, handle: Handle) -> Option<&str> {
+        self.0
+            .layers
+            .iter()
+            .find(|layer| layer.handle == handle)
+            .map(|layer| layer.name.as_str())
+    }
+
+    fn app_id_name(&self, handle: Handle) -> Option<&str> {
+        self.0
+            .app_ids
+            .iter()
+            .find(|app_id| app_id.handle == handle)
+            .map(|app_id| app_id.name.as_str())
+    }
 }
 
 /// Typed read of per-tab plugin state stored under `plugin_id`.

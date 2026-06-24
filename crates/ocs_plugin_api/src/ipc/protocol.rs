@@ -11,8 +11,8 @@ use crate::host::CommandStep;
 use crate::manifest::ApiVersion;
 use crate::ribbon::owned::{OwnedPluginManifest, OwnedRibbonGroup};
 
-pub use acadrust::{CadDocument, EntityType, Handle};
 pub use acadrust::xdata::ExtendedDataRecord;
+pub use acadrust::{CadDocument, EntityType, Handle};
 
 /// Events the host forwards to an active plugin `InteractiveCommand`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,10 +27,19 @@ pub enum InteractiveEvent {
 pub enum HostRequest {
     GetManifest,
     GetRibbon,
-    Dispatch { cmd: String },
-    InteractiveEvent { command_id: u64, event: InteractiveEvent },
-    GetPrompt { command_id: u64 },
-    NeedsEntityPick { command_id: u64 },
+    Dispatch {
+        cmd: String,
+    },
+    InteractiveEvent {
+        command_id: u64,
+        event: InteractiveEvent,
+    },
+    GetPrompt {
+        command_id: u64,
+    },
+    NeedsEntityPick {
+        command_id: u64,
+    },
     Shutdown,
 }
 
@@ -53,13 +62,29 @@ pub enum PluginRequest {
     PushError(String),
     AddEntity(EntityType),
     BumpGeometry,
-    ReadRecord { handle: Handle, app_name: String },
-    WriteRecord { handle: Handle, record: ExtendedDataRecord },
-    RemoveRecord { handle: Handle, app_name: String },
-    PushUndo { label: String },
+    ReadRecord {
+        handle: Handle,
+        app_name: String,
+    },
+    WriteRecord {
+        handle: Handle,
+        record: ExtendedDataRecord,
+    },
+    RemoveRecord {
+        handle: Handle,
+        app_name: String,
+    },
+    PushUndo {
+        label: String,
+    },
     SetDirty,
-    StartInteractive { command_id: u64 },
+    StartInteractive {
+        command_id: u64,
+    },
     DocumentSnapshot,
+    /// Ask the host to create/refresh a shared-memory document view and return
+    /// the file path + current version.
+    OpenDocumentView,
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -71,6 +96,11 @@ pub enum PluginResponse {
     Record(Option<ExtendedDataRecord>),
     Document(CadDocument),
     Error(String),
+    /// Path to the memory-mapped file and the current snapshot version.
+    DocumentView {
+        path: String,
+        version: u64,
+    },
 }
 
 /// Messages sent from the host to the plugin runner.

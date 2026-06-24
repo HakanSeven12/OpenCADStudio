@@ -221,7 +221,7 @@ fn parse_string_array(s: &str) -> Vec<String> {
 // ── Runtime loading (desktop only) ──────────────────────────────────────────
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use loader::with_manager;
+pub(crate) use loader::{shutdown_plugins, with_manager};
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{load_at_startup, loaded_ids};
@@ -283,6 +283,15 @@ mod loader {
             let empty = PluginManager::new();
             f(&empty)
         })
+    }
+
+    /// Eagerly shut down all plugin runner processes.
+    pub fn shutdown_plugins() {
+        MANAGER.with(|m| {
+            if let Some(mut manager) = m.borrow_mut().take() {
+                manager.shutdown_all();
+            }
+        });
     }
 
     /// Path to the native library beside `plugin.toml`, if any.

@@ -1,6 +1,7 @@
 //! Process manager for out-of-process plugins.
 
 use std::path::Path;
+use std::process::Child;
 use std::sync::Arc;
 
 use crate::host::HostApi;
@@ -120,10 +121,27 @@ impl PluginManager {
     }
 
     /// Begin asynchronous shutdown of every plugin process.
+    ///
+    /// Kills every child synchronously on the calling thread and moves the
+    /// blocking `wait()` calls into a single detached reaper thread, so host
+    /// shutdown is fast regardless of how many plugins are loaded.
     pub fn shutdown_all(&mut self) {
         let plugins = std::mem::take(&mut self.plugins);
+        let mut children: Vec<Child> = Vec::with_capacity(plugins.len());
         for p in plugins {
-            p.process.shutdown();
+            let (stream, child) = p.process.take_resources();
+            drop(stream);
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                children.push(child);
+            }
+        }
+        if !children.is_empty() {
+            std::thread::spawn(move || {
+                for mut child in children {
+                    let _ = child.wait();
+                }
+            });
         }
     }
 }

@@ -2069,6 +2069,16 @@ pub fn run() -> iced::Result {
     .run()
 }
 
+impl Drop for OpenCADStudio {
+    fn drop(&mut self) {
+        // Kill plugin runner processes as soon as the application state is
+        // dropped, instead of waiting for the thread-local manager destructor.
+        // This makes host shutdown deterministic and fast on every exit path.
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::plugin::external::shutdown_plugins();
+    }
+}
+
 /// Single-window entry for the web (wasm) build. Uses `iced::application`
 /// instead of `iced::daemon`: the browser canvas is the only window, so the
 /// main-window view is rendered directly and the manager/dialog windows are

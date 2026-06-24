@@ -43,4 +43,4 @@ pub use ribbon::{
 };
 
 #[cfg(feature = "host")]
-pub use process::{PluginError, PluginProcess};
+pub use process::{DispatchResult, PluginError, PluginManager, PluginProcess};

@@ -18,6 +18,11 @@ use crate::ipc::server::handle_plugin_request;
 use crate::ipc::transport::{recv, send};
 use crate::ribbon::owned::{OwnedPluginManifest, OwnedRibbonGroup as OwnedRibbonGroupAlias};
 
+use serde::de::DeserializeOwned;
+
+mod manager;
+pub use manager::{DispatchResult, PluginManager};
+
 /// Maximum time to wait for the plugin runner to connect back to the host.
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -47,8 +52,8 @@ pub enum PluginError {
 
 /// One spawned plugin process.
 pub struct PluginProcess {
-    stream: Mutex<Stream>,
-    child: Mutex<Child>,
+    stream: Mutex<Option<Stream>>,
+    child: Mutex<Option<Child>>,
     id: String,
     manifest: OwnedPluginManifest,
     ribbon: Vec<OwnedRibbonGroupAlias>,
@@ -88,7 +93,7 @@ impl PluginProcess {
         let stream = match rx.recv_timeout(spawn_timeout()) {
             Ok(Ok(stream)) => {
                 eprintln!("[plugin] runner connected");
-                Mutex::new(stream)
+                Mutex::new(Some(stream))
             }
             Ok(Err(e)) => return Err(e.into()),
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -116,7 +121,7 @@ impl PluginProcess {
         let id = manifest.id.clone();
         Ok(Self {
             stream,
-            child: Mutex::new(child),
+            child: Mutex::new(Some(child)),
             id,
             manifest,
             ribbon,
@@ -165,12 +170,9 @@ impl PluginProcess {
         command_id: u64,
         event: InteractiveEvent,
     ) -> Result<CommandStep, PluginError> {
-        send(
-            &mut self.stream.lock().unwrap(),
-            &HostToPlugin::Request(HostRequest::InteractiveEvent { command_id, event }),
-        )?;
+        self.send_request(HostRequest::InteractiveEvent { command_id, event })?;
         loop {
-            match recv::<PluginToHost>(&mut self.stream.lock().unwrap())? {
+            match self.recv_response::<PluginToHost>()? {
                 PluginToHost::Response(HostResponse::CommandStep(s)) => return Ok(s),
                 PluginToHost::Response(other) => {
                     return Err(PluginError::UnexpectedResponse(other))
@@ -179,7 +181,7 @@ impl PluginProcess {
                     let resp = crate::ipc::protocol::PluginResponse::Error(format!(
                         "unexpected nested request during interactive event: {req:?}"
                     ));
-                    send(&mut self.stream.lock().unwrap(), &HostToPlugin::Response(resp))?;
+                    self.send_response(resp)?;
                 }
             }
         }
@@ -187,12 +189,9 @@ impl PluginProcess {
 
     /// Ask the plugin process for the current prompt of an interactive command.
     pub fn get_prompt(&self, command_id: u64) -> Result<String, PluginError> {
-        send(
-            &mut self.stream.lock().unwrap(),
-            &HostToPlugin::Request(HostRequest::GetPrompt { command_id }),
-        )?;
+        self.send_request(HostRequest::GetPrompt { command_id })?;
         loop {
-            match recv::<PluginToHost>(&mut self.stream.lock().unwrap())? {
+            match self.recv_response::<PluginToHost>()? {
                 PluginToHost::Response(HostResponse::Text(s)) => return Ok(s),
                 PluginToHost::Response(other) => {
                     return Err(PluginError::UnexpectedResponse(other))
@@ -201,7 +200,7 @@ impl PluginProcess {
                     let resp = crate::ipc::protocol::PluginResponse::Error(format!(
                         "unexpected nested request during get_prompt: {req:?}"
                     ));
-                    send(&mut self.stream.lock().unwrap(), &HostToPlugin::Response(resp))?;
+                    self.send_response(resp)?;
                 }
             }
         }
@@ -209,12 +208,9 @@ impl PluginProcess {
 
     /// Ask the plugin process whether an interactive command wants object picks.
     pub fn needs_entity_pick(&self, command_id: u64) -> Result<bool, PluginError> {
-        send(
-            &mut self.stream.lock().unwrap(),
-            &HostToPlugin::Request(HostRequest::NeedsEntityPick { command_id }),
-        )?;
+        self.send_request(HostRequest::NeedsEntityPick { command_id })?;
         loop {
-            match recv::<PluginToHost>(&mut self.stream.lock().unwrap())? {
+            match self.recv_response::<PluginToHost>()? {
                 PluginToHost::Response(HostResponse::Bool(b)) => return Ok(b),
                 PluginToHost::Response(other) => {
                     return Err(PluginError::UnexpectedResponse(other))
@@ -223,61 +219,103 @@ impl PluginProcess {
                     let resp = crate::ipc::protocol::PluginResponse::Error(format!(
                         "unexpected nested request during needs_entity_pick: {req:?}"
                     ));
-                    send(&mut self.stream.lock().unwrap(), &HostToPlugin::Response(resp))?;
+                    self.send_response(resp)?;
                 }
             }
         }
     }
 
     pub fn is_alive(&self) -> bool {
-        match self.child.lock().unwrap().try_wait() {
-            Ok(None) => true,
-            Ok(Some(_)) | Err(_) => false,
+        let mut guard = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        match guard.as_mut() {
+            Some(child) => match child.try_wait() {
+                Ok(None) => true,
+                Ok(Some(_)) | Err(_) => false,
+            },
+            None => false,
         }
     }
 
-    pub fn kill(&self) -> std::io::Result<()> {
-        let _ = call_no_host(&self.stream, HostRequest::Shutdown);
-        self.child.lock().unwrap().kill()
+    /// Tear down the plugin process without blocking the caller. The stream is
+    /// closed and the child is killed and reaped in a detached background thread.
+    pub fn shutdown(&self) {
+        let stream = self.stream.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let child = self.child.lock().unwrap_or_else(|e| e.into_inner()).take();
+        std::thread::spawn(move || {
+            drop(stream);
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        });
     }
 }
 
 impl Drop for PluginProcess {
     fn drop(&mut self) {
-        let _ = self.kill();
+        self.shutdown();
     }
+}
+
+impl PluginProcess {
+    fn send_request(&self, req: HostRequest) -> Result<(), PluginError> {
+        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+        send(stream, &HostToPlugin::Request(req)).map_err(Into::into)
+    }
+
+    fn send_response(&self, resp: crate::ipc::protocol::PluginResponse) -> Result<(), PluginError> {
+        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+        send(stream, &HostToPlugin::Response(resp)).map_err(Into::into)
+    }
+
+    fn recv_response<T: DeserializeOwned>(&self) -> Result<T, PluginError> {
+        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+        recv(stream).map_err(Into::into)
+    }
+}
+
+fn shutdown_error() -> PluginError {
+    PluginError::Io(std::io::Error::new(
+        std::io::ErrorKind::NotConnected,
+        "plugin process has been shut down",
+    ))
 }
 
 /// Send a host request and wait for the response, handling any nested plugin
 /// requests inline using the supplied `HostApi`.
 fn call(
-    stream: &Mutex<Stream>,
+    stream: &Mutex<Option<Stream>>,
     host: &mut dyn HostApi,
     req: HostRequest,
     on_start_interactive: &mut dyn FnMut(u64),
 ) -> Result<HostResponse, PluginError> {
     eprintln!("[plugin] host -> runner: {req:?}");
-    send(&mut stream.lock().unwrap(), &HostToPlugin::Request(req))?;
+    {
+        let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
+        let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+        send(stream, &HostToPlugin::Request(req))?;
+    }
     loop {
-        let msg = recv::<PluginToHost>(&mut stream.lock().unwrap())?;
+        let msg = {
+            let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
+            let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+            recv::<PluginToHost>(stream)?
+        };
         eprintln!("[plugin] runner -> host: {msg:?}");
         match msg {
             PluginToHost::Response(resp) => return Ok(resp),
             PluginToHost::Request(plugin_req) => {
                 let resp = handle_plugin_request(host, plugin_req, on_start_interactive);
                 eprintln!("[plugin] host -> runner response: {resp:?}");
-                send(&mut stream.lock().unwrap(), &HostToPlugin::Response(resp))?;
+                let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
+                let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+                send(stream, &HostToPlugin::Response(resp))?;
             }
         }
     }
-}
-
-/// Best-effort shutdown request that does not wait for a response.
-fn call_no_host(
-    stream: &Mutex<Stream>,
-    req: HostRequest,
-) -> Result<(), crate::ipc::transport::TransportError> {
-    send(&mut stream.lock().unwrap(), &HostToPlugin::Request(req))
 }
 
 /// Locate the executable to spawn for running a plugin.

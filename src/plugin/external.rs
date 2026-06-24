@@ -221,7 +221,7 @@ fn parse_string_array(s: &str) -> Vec<String> {
 // ── Runtime loading (desktop only) ──────────────────────────────────────────
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use loader::with_loaded;
+pub(crate) use loader::with_manager;
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{load_at_startup, loaded_ids};
@@ -229,61 +229,60 @@ pub(crate) use loader::{load_at_startup, loaded_ids};
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(test, allow(dead_code))]
 mod loader {
-    use super::{lib_extension, ExternalPlugin};
-    use std::path::{Path, PathBuf};
-    use std::sync::Arc;
-
-    /// A loaded external plugin. Holds the spawned process and a shareable
-    /// ribbon module built from the process's cached ribbon data.
-    pub struct LoadedPlugin {
-        pub process: Arc<ocs_plugin_api::process::PluginProcess>,
-        pub module: ocs_plugin_api::ribbon::owned::SharedCadModule,
-        pub id: String,
-    }
-
+    use super::lib_extension;
+    use ocs_plugin_api::process::PluginManager;
     use std::cell::RefCell;
+    use std::path::{Path, PathBuf};
 
-    // Process-wide store of spawned external plugins. The runner processes stay
-    // alive for the whole session; this is filled once at startup.
+    // Process-wide plugin manager. Drop kills every runner process asynchronously
+    // so host shutdown is never delayed by a plugin.
     thread_local! {
-        static LOADED: RefCell<Vec<LoadedPlugin>> = const { RefCell::new(Vec::new()) };
+        static MANAGER: RefCell<Option<PluginManager>> = const { RefCell::new(None) };
     }
 
     /// Discover packages and spawn every API-compatible one as a separate
     /// process. Call once at startup. Returns per-id results so the host can
     /// report load failures.
-    pub(crate) fn load_at_startup(app: &mut crate::app::OpenCADStudio) -> Vec<(String, Result<(), String>)> {
+    pub(crate) fn load_at_startup(
+        app: &mut crate::app::OpenCADStudio,
+    ) -> Vec<(String, Result<(), String>)> {
         let discovered = super::discover();
+        let mut manager = PluginManager::new();
         let mut out = Vec::new();
-        LOADED.with(|cell| {
-            let mut store = cell.borrow_mut();
-            if !store.is_empty() {
-                return; // already loaded this session
+        for d in &discovered {
+            if !d.api_compatible() || !d.lib_present {
+                continue;
             }
-            for d in &discovered {
-                if !d.api_compatible() || !d.lib_present {
-                    continue;
-                }
-                match load(d, app) {
-                    Ok(lp) => {
-                        out.push((lp.id.clone(), Ok(())));
-                        store.push(lp);
-                    }
-                    Err(e) => out.push((d.id.clone(), Err(e))),
-                }
+            let Some(path) = lib_file(&d.dir) else {
+                out.push((d.id.clone(), Err("no native library in package".to_string())));
+                continue;
+            };
+            let mut host = crate::app::plugin_host::HostSession::new(app, 0);
+            match manager.load(&path, &mut host) {
+                Ok(id) => out.push((id, Ok(()))),
+                Err(e) => out.push((d.id.clone(), Err(e.to_string()))),
             }
-        });
+        }
+        MANAGER.with(|m| *m.borrow_mut() = Some(manager));
         out
     }
 
     /// Ids of the plugins currently loaded in the process store.
     pub fn loaded_ids() -> Vec<String> {
-        LOADED.with(|c| c.borrow().iter().map(|lp| lp.id.clone()).collect())
+        MANAGER.with(|m| m.borrow().as_ref().map(|mgr| mgr.ids()).unwrap_or_default())
     }
 
-    /// Run `f` over the loaded plugins (borrowing the store).
-    pub fn with_loaded<R>(f: impl FnOnce(&[LoadedPlugin]) -> R) -> R {
-        LOADED.with(|c| f(&c.borrow()))
+    /// Run `f` with a reference to the loaded plugin manager.
+    pub fn with_manager<R>(f: impl FnOnce(&PluginManager) -> R) -> R {
+        MANAGER.with(|m| {
+            let guard = m.borrow();
+            if let Some(manager) = guard.as_ref() {
+                return f(manager);
+            }
+            drop(guard);
+            let empty = PluginManager::new();
+            f(&empty)
+        })
     }
 
     /// Path to the native library beside `plugin.toml`, if any.
@@ -292,31 +291,6 @@ mod loader {
         std::fs::read_dir(dir).ok()?.flatten().find_map(|e| {
             let p = e.path();
             (p.extension().and_then(|s| s.to_str()) == Some(ext)).then_some(p)
-        })
-    }
-
-    /// Spawn a discovered package's `cdylib` in a separate process and cache
-    /// its ribbon module. The runner performs the API version gate before any
-    /// plugin code runs.
-    pub fn load(
-        p: &ExternalPlugin,
-        app: &mut crate::app::OpenCADStudio,
-    ) -> Result<LoadedPlugin, String> {
-        let path = lib_file(&p.dir).ok_or("no native library in package")?;
-        let mut host = crate::app::plugin_host::HostSession::new(app, 0);
-        let process =
-            ocs_plugin_api::process::PluginProcess::spawn(&path, &mut host).map_err(|e| e.to_string())?;
-        let id = process.id().to_string();
-        let name = process.manifest().name.clone();
-        let module = ocs_plugin_api::ribbon::owned::to_shared_module(
-            id.clone(),
-            name,
-            process.ribbon().to_vec(),
-        );
-        Ok(LoadedPlugin {
-            process: Arc::new(process),
-            module,
-            id,
         })
     }
 }

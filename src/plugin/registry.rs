@@ -17,24 +17,15 @@ pub fn ribbon_modules_enabled(
 ) -> Vec<Box<dyn CadModule>> {
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut core = core_registry::all_modules();
-    // Dynamically-loaded external plugins contribute tabs (their libraries stay
-    // resident for the session, so these vtables remain valid).
+    // Dynamically-loaded external plugins contribute tabs via the crate manager.
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let mut addons: Vec<(i32, Box<dyn CadModule>)> = Vec::new();
-        crate::plugin::external::with_loaded(|loaded| {
-            for lp in loaded {
-                if disabled.contains(lp.id.as_str()) || !lp.process.is_alive() {
-                    continue;
-                }
-                addons.push((
-                    lp.process.manifest().ribbon_order,
-                    Box::new(lp.module.clone()) as Box<dyn CadModule>,
-                ));
-            }
+        crate::plugin::external::with_manager(|manager| {
+            let addons = manager.ribbon_modules(|id| disabled.contains(id));
+            core.extend(addons.into_iter().map(|(_, module)| {
+                Box::new(module) as Box<dyn CadModule>
+            }));
         });
-        addons.sort_by_key(|(order, _)| *order);
-        core.extend(addons.into_iter().map(|(_, ribbon)| ribbon));
     }
     let _ = disabled;
     core
@@ -47,44 +38,20 @@ pub(crate) fn try_dispatch(app: &mut OpenCADStudio, tab: usize, cmd: &str) -> bo
     {
         use super::host::HostSession;
         let disabled = app.disabled_plugin_ids();
-        let mut started: Option<(u64, std::sync::Arc<ocs_plugin_api::process::PluginProcess>)> = None;
-        let mut dead_plugins: Vec<String> = Vec::new();
-        let mut dispatch_errors: Vec<(String, String)> = Vec::new();
-        let handled = crate::plugin::external::with_loaded(|loaded| {
+        let result = {
             let mut host = HostSession::new(app, tab);
-            for lp in loaded {
-                if disabled.contains(lp.id.as_str()) {
-                    continue;
-                }
-                if !lp.process.is_alive() {
-                    dead_plugins.push(lp.id.clone());
-                    continue;
-                }
-                let process = std::sync::Arc::clone(&lp.process);
-                let mut start = |command_id: u64| {
-                    started = Some((command_id, std::sync::Arc::clone(&process)));
-                };
-                match crate::plugin::guard("dispatch", || lp.process.dispatch(&mut host, cmd, &mut start)) {
-                    Some(Ok(true)) => return true,
-                    Some(Ok(false)) => {}
-                    Some(Err(e)) => {
-                        eprintln!("[plugin] dispatch error for '{}': {e}", lp.id);
-                        dispatch_errors.push((lp.id.clone(), e.to_string()));
-                    }
-                    None => {
-                        // Panic already logged by guard.
-                    }
-                }
-            }
-            false
-        });
-        for id in dead_plugins {
+            crate::plugin::external::with_manager(|manager| {
+                manager.dispatch(&mut host, cmd, |id| disabled.contains(id))
+            })
+        };
+
+        for id in result.dead_plugins {
             app.push_plugin_error(&format!("Plugin '{id}' process died; skipping dispatch"));
         }
-        for (id, err) in dispatch_errors {
+        for (id, err) in result.errors {
             app.push_plugin_error(&format!("Plugin '{id}' dispatch error: {err}"));
         }
-        if let Some((command_id, process)) = started {
+        if let Some((process, command_id)) = result.started {
             app.set_active_command(
                 tab,
                 Box::new(crate::app::plugin_host::PluginProcessInteractiveAdapter::new(
@@ -93,12 +60,13 @@ pub(crate) fn try_dispatch(app: &mut OpenCADStudio, tab: usize, cmd: &str) -> bo
                 )),
             );
         }
-        if handled {
-            return true;
-        }
+        return result.handled;
     }
-    let _ = (app, tab, cmd);
-    false
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (app, tab, cmd);
+        false
+    }
 }
 
 #[cfg(test)]

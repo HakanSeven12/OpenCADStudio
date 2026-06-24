@@ -182,14 +182,72 @@ fn resolve_image_file(raw: &str, base_dir: Option<&Path>) -> Option<String> {
 
 // ── Directory listing (used by the custom Save As dialog) ────────────────
 
+/// Sentinel path standing in for the Windows "This PC" drives root — the
+/// pseudo-folder above every drive letter, whose children are the volumes.
+/// A real filesystem path is never empty, so an empty path is a safe marker.
+pub fn drives_root() -> PathBuf {
+    PathBuf::new()
+}
+
+/// True if `p` is the drives-root sentinel (see [`drives_root`]).
+pub fn is_drives_root(p: &Path) -> bool {
+    p.as_os_str().is_empty()
+}
+
+/// The folder one level above `dir`, or `None` if already at the top.
+///
+/// On Windows the chain reaches past a drive root into the drives list, so the
+/// Save As dialog can switch volumes: `…\sub` → `C:\` → This PC → `None`.
+/// Without this, `Path::parent()` returns `None` at `C:\` and navigation
+/// dead-ends on the starting drive (issue #170).
+pub fn parent_folder(dir: &Path) -> Option<PathBuf> {
+    if is_drives_root(dir) {
+        return None; // already at the top
+    }
+    if let Some(parent) = dir.parent() {
+        return Some(parent.to_path_buf());
+    }
+    // No parent: we're at a filesystem root (e.g. `C:\`).
+    #[cfg(windows)]
+    {
+        Some(drives_root())
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// Enumerate the accessible Windows volumes as directory entries.
+/// Probes `A:\`–`Z:\` by stat rather than calling into the Win32 API, so it
+/// needs no extra dependency. Drives with no inserted media are skipped.
+#[cfg(windows)]
+fn available_drives() -> Vec<(String, bool, PathBuf)> {
+    let mut out: Vec<(String, bool, PathBuf)> = Vec::new();
+    for letter in b'A'..=b'Z' {
+        let root = format!("{}:\\", letter as char);
+        let path = PathBuf::from(&root);
+        if path.is_dir() {
+            out.push((root, true, path));
+        }
+    }
+    out
+}
+
 /// Read `dir` and return sorted entries: `(display_name, is_dir, full_path)`.
 /// Directories come first, then files.  Hidden entries (`.`) are skipped.
 pub fn read_dir_entries(dir: &std::path::Path) -> Vec<(String, bool, PathBuf)> {
+    // Windows "This PC": list the available volumes instead of reading a dir.
+    #[cfg(windows)]
+    if is_drives_root(dir) {
+        return available_drives();
+    }
+
     let mut dirs: Vec<(String, bool, PathBuf)> = Vec::new();
     let mut files: Vec<(String, bool, PathBuf)> = Vec::new();
 
-    if let Some(parent) = dir.parent() {
-        dirs.push(("..".to_string(), true, parent.to_path_buf()));
+    if let Some(parent) = parent_folder(dir) {
+        dirs.push(("..".to_string(), true, parent));
     }
     if let Ok(rd) = std::fs::read_dir(dir) {
         for entry in rd.flatten() {

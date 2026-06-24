@@ -3264,8 +3264,12 @@ fn save_as_dialog_window<'a>(
     };
 
     // ── Path bar ─────────────────────────────────────────────────────────
-    let path_str = folder.to_string_lossy().into_owned();
-    let up_path = folder.parent().map(|p| p.to_path_buf());
+    let path_str = if crate::io::is_drives_root(folder) {
+        "This PC".to_string()
+    } else {
+        folder.to_string_lossy().into_owned()
+    };
+    let up_path = crate::io::parent_folder(folder);
     let path_bar = row![
         {
             let up_msg = up_path.map(Message::SaveDialogNavigate);

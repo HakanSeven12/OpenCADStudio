@@ -305,17 +305,6 @@ corruption cannot affect the host or other plugins. Plugin processes stay
 `try_dispatch` path the host uses and honour the enable/disable set
 (`disabled_plugins` in `settings.txt`).
 
-Two timeouts protect the host from a stuck runner:
-
-| Timeout | Env var | Default | Floor |
-|---|---|---|---|
-| Spawn (connection) | `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` | 10 s | — |
-| Per-call | `OCS_PLUGIN_CALL_TIMEOUT_SECS` | 30 s | `GetManifest`/`GetRibbon` ≥ 5 s, `Dispatch` ≥ 10 s, interactive events/prompt/pick ≥ 2 s |
-
-A call timeout covers the full round-trip, including any nested plugin→host
-requests handled inline. When it fires the host kills the runner, marks the
-plugin dead, and reports a `CallTimeout` error via the normal plugin error path.
-
 `<config>` is `%APPDATA%` (Windows), `~/Library/Application Support` (macOS), or
 `$XDG_CONFIG_HOME` / `~/.config` (Linux).
 
@@ -325,7 +314,6 @@ plugin dead, and reports a `CallTimeout` error via the normal plugin error path.
 |---|---|
 | Plugin panics | Caught inside the plugin runner child; an error response is returned to the host and stays alive. |
 | Plugin crash / hang / malformed message | The host detects a dead process via `try_wait` on the next dispatch or ribbon rebuild; the tab is dropped and an error is logged. |
-| Slow or non-responsive call | The per-call timeout (`OCS_PLUGIN_CALL_TIMEOUT_SECS`) fires, kills the runner, and surfaces a `CallTimeout` error. |
 | Spawn failure | Reported per-plugin during startup and surfaced in the Plugin Manager / command line. |
 | Oversized message | The length-framed transport rejects messages larger than 64 MiB. |
 
@@ -383,7 +371,6 @@ Done:
 - [x] Marketplace — curated registry + manual repo link, install / upgrade /
       reinstall / uninstall, enable/disable.
 - [x] Interactive command round-trip over IPC (prompt, point/enter/object-pick).
-- [x] Spawn and per-call IPC timeouts so a stuck runner cannot freeze the host.
 
 Next:
 

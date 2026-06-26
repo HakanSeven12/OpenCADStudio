@@ -5,7 +5,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use interprocess::local_socket::traits::Listener;
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Stream, ToNsName};
@@ -34,42 +34,6 @@ fn spawn_timeout() -> Duration {
         .unwrap_or(SPAWN_TIMEOUT)
 }
 
-/// Default maximum time to wait for a plugin call to respond.
-const CALL_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
-
-fn call_timeout() -> Duration {
-    std::env::var("OCS_PLUGIN_CALL_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(CALL_TIMEOUT_DEFAULT)
-}
-
-/// Per-request-kind timeout floors. The user-configured default is raised to
-/// these minima so that no request kind can be configured into an unsafe value.
-fn request_timeout(kind: &'static str) -> Duration {
-    let base = call_timeout();
-    let floor = match kind {
-        "GetManifest" | "GetRibbon" => Duration::from_secs(5),
-        "Dispatch" => Duration::from_secs(10),
-        "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" => Duration::from_secs(2),
-        _ => Duration::from_secs(1),
-    };
-    base.max(floor)
-}
-
-fn request_kind(req: &HostRequest) -> &'static str {
-    match req {
-        HostRequest::GetManifest => "GetManifest",
-        HostRequest::GetRibbon => "GetRibbon",
-        HostRequest::Dispatch { .. } => "Dispatch",
-        HostRequest::InteractiveEvent { .. } => "InteractiveEvent",
-        HostRequest::GetPrompt { .. } => "GetPrompt",
-        HostRequest::NeedsEntityPick { .. } => "NeedsEntityPick",
-        HostRequest::Shutdown => "Shutdown",
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum PluginError {
     #[error("IO error: {0}")]
@@ -80,11 +44,6 @@ pub enum PluginError {
     Runner(String),
     #[error("spawn timeout: runner did not connect within {0:?}")]
     SpawnTimeout(Duration),
-    #[error("call timeout: {request} did not respond within {duration:?}")]
-    CallTimeout {
-        request: &'static str,
-        duration: Duration,
-    },
     #[error("runner exited before connecting")]
     RunnerExited,
     #[error("unexpected response: {0:?}")]
@@ -126,7 +85,6 @@ impl PluginProcess {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()?;
-        let child = Mutex::new(Some(child));
 
         // Accept the runner connection with a timeout so a hung/crashed runner
         // does not block the host indefinitely.
@@ -141,15 +99,11 @@ impl PluginProcess {
             }
             Ok(Err(e)) => return Err(e.into()),
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    reap(child);
-                }
+                reap(child);
                 return Err(PluginError::SpawnTimeout(spawn_timeout()));
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    reap(child);
-                }
+                reap(child);
                 return Err(PluginError::RunnerExited);
             }
         };
@@ -157,11 +111,11 @@ impl PluginProcess {
         // The runner first answers GetManifest and GetRibbon so the host can
         // build the UI without keeping the plugin object alive.
         let no_op = &mut |_| {};
-        let manifest = match call(&stream, &child, host, HostRequest::GetManifest, no_op)? {
+        let manifest = match call(&stream, host, HostRequest::GetManifest, no_op)? {
             HostResponse::Manifest(m) => m,
             other => return Err(PluginError::UnexpectedResponse(other)),
         };
-        let ribbon = match call(&stream, &child, host, HostRequest::GetRibbon, no_op)? {
+        let ribbon = match call(&stream, host, HostRequest::GetRibbon, no_op)? {
             HostResponse::Ribbon(r) => r,
             other => return Err(PluginError::UnexpectedResponse(other)),
         };
@@ -169,7 +123,7 @@ impl PluginProcess {
         let id = manifest.id.clone();
         Ok(Self {
             stream,
-            child,
+            child: Mutex::new(Some(child)),
             id,
             manifest,
             ribbon,
@@ -197,7 +151,6 @@ impl PluginProcess {
         eprintln!("[plugin] dispatching {cmd}");
         let result = match call(
             &self.stream,
-            &self.child,
             host,
             HostRequest::Dispatch {
                 cmd: cmd.to_string(),
@@ -220,17 +173,8 @@ impl PluginProcess {
         event: InteractiveEvent,
     ) -> Result<CommandStep, PluginError> {
         self.send_request(HostRequest::InteractiveEvent { command_id, event })?;
-        let kind = "InteractiveEvent";
-        let timeout = request_timeout(kind);
-        let deadline = Instant::now() + timeout;
         loop {
-            match recv_with_deadline::<PluginToHost>(
-                &self.stream,
-                &self.child,
-                deadline,
-                timeout,
-                kind,
-            )? {
+            match self.recv_response::<PluginToHost>()? {
                 PluginToHost::Response(HostResponse::CommandStep(s)) => return Ok(s),
                 PluginToHost::Response(other) => {
                     return Err(PluginError::UnexpectedResponse(other))
@@ -248,17 +192,8 @@ impl PluginProcess {
     /// Ask the plugin process for the current prompt of an interactive command.
     pub fn get_prompt(&self, command_id: u64) -> Result<String, PluginError> {
         self.send_request(HostRequest::GetPrompt { command_id })?;
-        let kind = "GetPrompt";
-        let timeout = request_timeout(kind);
-        let deadline = Instant::now() + timeout;
         loop {
-            match recv_with_deadline::<PluginToHost>(
-                &self.stream,
-                &self.child,
-                deadline,
-                timeout,
-                kind,
-            )? {
+            match self.recv_response::<PluginToHost>()? {
                 PluginToHost::Response(HostResponse::Text(s)) => return Ok(s),
                 PluginToHost::Response(other) => {
                     return Err(PluginError::UnexpectedResponse(other))
@@ -276,17 +211,8 @@ impl PluginProcess {
     /// Ask the plugin process whether an interactive command wants object picks.
     pub fn needs_entity_pick(&self, command_id: u64) -> Result<bool, PluginError> {
         self.send_request(HostRequest::NeedsEntityPick { command_id })?;
-        let kind = "NeedsEntityPick";
-        let timeout = request_timeout(kind);
-        let deadline = Instant::now() + timeout;
         loop {
-            match recv_with_deadline::<PluginToHost>(
-                &self.stream,
-                &self.child,
-                deadline,
-                timeout,
-                kind,
-            )? {
+            match self.recv_response::<PluginToHost>()? {
                 PluginToHost::Response(HostResponse::Bool(b)) => return Ok(b),
                 PluginToHost::Response(other) => {
                     return Err(PluginError::UnexpectedResponse(other))
@@ -350,6 +276,12 @@ impl PluginProcess {
         let stream = guard.as_mut().ok_or_else(shutdown_error)?;
         send(stream, &HostToPlugin::Response(resp)).map_err(Into::into)
     }
+
+    fn recv_response<T: DeserializeOwned>(&self) -> Result<T, PluginError> {
+        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+        recv(stream).map_err(Into::into)
+    }
 }
 
 /// Kill a child process and reap it without blocking the caller. The blocking
@@ -369,84 +301,14 @@ fn shutdown_error() -> PluginError {
     ))
 }
 
-/// Take the stream and child away from a process and kill the child without
-/// blocking the caller. After this the process is considered dead and any
-/// further IPC will fail.
-fn mark_dead(stream: &Mutex<Option<Stream>>, child: &Mutex<Option<Child>>) {
-    let _ = stream.lock().unwrap_or_else(|e| e.into_inner()).take();
-    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-        reap(child);
-    }
-}
-
-/// Receive one message from the plugin runner with a deadline.
-///
-/// A short-lived reader thread performs the blocking `recv` so that the main
-/// thread can time it out. If the deadline passes, the process is marked dead
-/// (stream closed, child killed) so that subsequent dispatch attempts are
-/// skipped.
-fn recv_with_deadline<T: DeserializeOwned + Send + 'static>(
-    stream: &Mutex<Option<Stream>>,
-    child: &Mutex<Option<Child>>,
-    deadline: Instant,
-    timeout: Duration,
-    request: &'static str,
-) -> Result<T, PluginError> {
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    if remaining.is_zero() {
-        mark_dead(stream, child);
-        return Err(PluginError::CallTimeout {
-            request,
-            duration: timeout,
-        });
-    }
-
-    let (tx, rx) = mpsc::channel::<(Result<T, PluginError>, Option<Stream>)>();
-    let stream_to_thread = stream.lock().unwrap_or_else(|e| e.into_inner()).take();
-
-    std::thread::spawn(move || {
-        let result = match stream_to_thread {
-            Some(mut stream) => match recv::<T>(&mut stream) {
-                Ok(msg) => (Ok(msg), Some(stream)),
-                Err(e) => (Err(PluginError::from(e)), Some(stream)),
-            },
-            None => (Err(shutdown_error()), None),
-        };
-        let _ = tx.send(result);
-    });
-
-    match rx.recv_timeout(remaining) {
-        Ok((Ok(msg), stream_opt)) => {
-            *stream.lock().unwrap_or_else(|e| e.into_inner()) = stream_opt;
-            Ok(msg)
-        }
-        Ok((Err(e), stream_opt)) => {
-            *stream.lock().unwrap_or_else(|e| e.into_inner()) = stream_opt;
-            Err(e)
-        }
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            mark_dead(stream, child);
-            Err(PluginError::CallTimeout {
-                request,
-                duration: timeout,
-            })
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(shutdown_error()),
-    }
-}
-
 /// Send a host request and wait for the response, handling any nested plugin
 /// requests inline using the supplied `HostApi`.
 fn call(
     stream: &Mutex<Option<Stream>>,
-    child: &Mutex<Option<Child>>,
     host: &mut dyn HostApi,
     req: HostRequest,
     on_start_interactive: &mut dyn FnMut(u64),
 ) -> Result<HostResponse, PluginError> {
-    let kind = request_kind(&req);
-    let timeout = request_timeout(kind);
-    let deadline = Instant::now() + timeout;
     eprintln!("[plugin] host -> runner: {req:?}");
     {
         let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
@@ -454,7 +316,11 @@ fn call(
         send(stream, &HostToPlugin::Request(req))?;
     }
     loop {
-        let msg = recv_with_deadline::<PluginToHost>(stream, child, deadline, timeout, kind)?;
+        let msg = {
+            let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
+            let stream = guard.as_mut().ok_or_else(shutdown_error)?;
+            recv::<PluginToHost>(stream)?
+        };
         eprintln!("[plugin] runner -> host: {msg:?}");
         match msg {
             PluginToHost::Response(resp) => return Ok(resp),
@@ -566,269 +432,5 @@ mod tests {
         let host = PathBuf::from("/app/OpenCADStudio");
         let runner = distinct_runner_path(&host);
         assert_eq!(runner, PathBuf::from("/app/OpenCADStudio-plugin-runner"));
-    }
-}
-
-#[cfg(all(test, feature = "host"))]
-mod timeout_tests {
-    use super::*;
-    use crate::host::{DocumentReader, HostApi, ReaderEntity};
-    use crate::ipc::protocol::{
-        HostRequest, HostResponse, HostToPlugin, PluginRequest, PluginResponse, PluginToHost,
-    };
-    use crate::ipc::transport::{recv, send};
-    use crate::ribbon::owned::OwnedPluginManifest;
-    use acadrust::xdata::ExtendedDataRecord;
-    use acadrust::{CadDocument, EntityType, Handle};
-    use interprocess::local_socket::{
-        traits::{Listener, Stream as StreamTrait},
-        GenericNamespaced, ListenerOptions, Stream, ToNsName,
-    };
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex as StdMutex;
-    use std::thread;
-    use std::time::Instant;
-
-    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
-
-    struct EmptyReader;
-
-    impl DocumentReader for EmptyReader {
-        fn entity_count(&self) -> usize {
-            0
-        }
-        fn for_each_entity(&self, _f: &mut dyn FnMut(ReaderEntity<'_>)) {}
-        fn layer_name(&self, _handle: Handle) -> Option<&str> {
-            None
-        }
-        fn app_id_name(&self, _handle: Handle) -> Option<&str> {
-            None
-        }
-    }
-
-    struct DummyHost {
-        doc: CadDocument,
-    }
-
-    impl HostApi for DummyHost {
-        fn tab_index(&self) -> usize {
-            0
-        }
-        fn document(&self) -> &CadDocument {
-            &self.doc
-        }
-        fn document_mut(&mut self) -> &mut CadDocument {
-            &mut self.doc
-        }
-        fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
-            Box::new(EmptyReader)
-        }
-        fn add_entity(&mut self, _entity: EntityType) -> Handle {
-            panic!("not used")
-        }
-        fn bump_geometry(&mut self) {}
-        fn read_record(&self, _handle: Handle, _app_name: &str) -> Option<&ExtendedDataRecord> {
-            None
-        }
-        fn write_record(&mut self, _handle: Handle, _record: ExtendedDataRecord) -> bool {
-            false
-        }
-        fn remove_record(&mut self, _handle: Handle, _app_name: &str) -> bool {
-            false
-        }
-        fn push_undo(&mut self, _label: &str) {}
-        fn set_dirty(&mut self) {}
-        fn push_info(&mut self, _msg: &str) {}
-        fn push_output(&mut self, _msg: &str) {}
-        fn push_error(&mut self, _msg: &str) {}
-        fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
-        fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn std::any::Any + Send + Sync)> {
-            None
-        }
-        fn plugin_state_any_mut(
-            &mut self,
-            _plugin_id: &str,
-        ) -> Option<&mut (dyn std::any::Any + Send + Sync)> {
-            None
-        }
-        fn ensure_plugin_state_any(
-            &mut self,
-            _plugin_id: &'static str,
-            _init: &mut dyn FnMut() -> Box<dyn std::any::Any + Send + Sync>,
-        ) -> &mut (dyn std::any::Any + Send + Sync) {
-            panic!("not used")
-        }
-    }
-
-    fn unique_socket_name() -> String {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("ocs_plugin_timeout_test_{}_{}", std::process::id(), n)
-    }
-
-    fn connected_pair() -> (Stream, Stream) {
-        let name = unique_socket_name();
-        let name_ref = name
-            .clone()
-            .to_ns_name::<GenericNamespaced>()
-            .expect("valid name");
-        let listener = ListenerOptions::new()
-            .name(name_ref)
-            .create_sync()
-            .expect("listener");
-        let client_name = name.clone();
-        let client_thread = thread::spawn(move || {
-            StreamTrait::connect(client_name.to_ns_name::<GenericNamespaced>().unwrap())
-                .expect("connect")
-        });
-        let server = listener.accept().expect("accept");
-        let client = client_thread.join().expect("client thread");
-        (server, client)
-    }
-
-    fn sleepy_child() -> Child {
-        #[cfg(windows)]
-        {
-            std::process::Command::new("cmd")
-                .arg("/c")
-                .arg("ping -n 30 127.0.0.1")
-                .stdout(std::process::Stdio::null())
-                .spawn()
-                .expect("spawn sleep")
-        }
-        #[cfg(not(windows))]
-        {
-            std::process::Command::new("sleep")
-                .arg("30")
-                .spawn()
-                .expect("spawn sleep")
-        }
-    }
-
-    fn fake_manifest() -> OwnedPluginManifest {
-        OwnedPluginManifest {
-            id: "test.plugin".to_string(),
-            name: "Test Plugin".to_string(),
-            version: "0.1.0".to_string(),
-            description: "test".to_string(),
-            api_version: 1,
-            ribbon_order: 0,
-            xdata_apps: vec![],
-            command_prefixes: vec![],
-        }
-    }
-
-    fn fake_process() -> (PluginProcess, Stream) {
-        let (host_stream, runner_stream) = connected_pair();
-        let process = PluginProcess {
-            stream: Mutex::new(Some(host_stream)),
-            child: Mutex::new(Some(sleepy_child())),
-            id: "test.plugin".to_string(),
-            manifest: fake_manifest(),
-            ribbon: vec![],
-        };
-        (process, runner_stream)
-    }
-
-    #[test]
-    fn dispatch_call_timeout_marks_process_dead() {
-        let _env_guard = ENV_LOCK.lock().expect("env lock");
-        let prev = std::env::var("OCS_PLUGIN_CALL_TIMEOUT_SECS").ok();
-        std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", "1");
-        let (process, runner_stream) = fake_process();
-
-        let _runner = thread::spawn(move || {
-            let mut peer = runner_stream;
-            let req = recv::<HostToPlugin>(&mut peer).expect("read dispatch");
-            assert!(
-                matches!(req, HostToPlugin::Request(HostRequest::Dispatch { ref cmd }) if cmd == "HANG")
-            );
-            // Block until the host closes the connection after the timeout.
-            let _ = recv::<HostToPlugin>(&mut peer);
-        });
-
-        let mut host = DummyHost {
-            doc: CadDocument::default(),
-        };
-        let start = Instant::now();
-        let result = process.dispatch(&mut host, "HANG", &mut |_| {});
-        let elapsed = start.elapsed();
-
-        assert!(
-            matches!(
-                result,
-                Err(PluginError::CallTimeout {
-                    request: "Dispatch",
-                    ..
-                })
-            ),
-            "expected Dispatch timeout, got {result:?}"
-        );
-        assert!(
-            elapsed >= Duration::from_secs(10),
-            "timeout should respect the 10 s Dispatch floor: {elapsed:?}"
-        );
-        assert!(
-            elapsed < Duration::from_secs(12),
-            "timed out too slowly: {elapsed:?}"
-        );
-        assert!(!process.is_alive(), "process should be marked dead");
-
-        // Do not join the fake runner thread: it blocks until the host closes
-        // the socket. In production the killed child process closes its end of
-        // the socket and the reader thread exits; this test uses a local thread
-        // instead, so we let it be reaped with the test process.
-        match prev {
-            Some(v) => std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", v),
-            None => std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS"),
-        }
-    }
-
-    #[test]
-    fn dispatch_succeeds_with_nested_request_within_deadline() {
-        let _env_guard = ENV_LOCK.lock().expect("env lock");
-        let prev = std::env::var("OCS_PLUGIN_CALL_TIMEOUT_SECS").ok();
-        std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", "2");
-        let (process, runner_stream) = fake_process();
-
-        let runner = thread::spawn(move || {
-            let mut peer = runner_stream;
-            let req = recv::<HostToPlugin>(&mut peer).expect("read dispatch");
-            assert!(
-                matches!(req, HostToPlugin::Request(HostRequest::Dispatch { ref cmd }) if cmd == "NESTED")
-            );
-            send(
-                &mut peer,
-                &PluginToHost::Request(PluginRequest::PushInfo("hello".to_string())),
-            )
-            .expect("send nested request");
-            let resp = recv::<HostToPlugin>(&mut peer).expect("read nested response");
-            assert!(matches!(resp, HostToPlugin::Response(PluginResponse::Ok)));
-            send(&mut peer, &PluginToHost::Response(HostResponse::Bool(true)))
-                .expect("send final response");
-        });
-
-        let mut host = DummyHost {
-            doc: CadDocument::default(),
-        };
-        let result = process.dispatch(&mut host, "NESTED", &mut |_| {});
-        assert!(result.expect("dispatch succeeds"));
-        assert!(process.is_alive(), "process should still be alive");
-
-        // Clean up the helper child so it does not outlive the test.
-        if let Some(mut child) = process
-            .child
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-        {
-            let _ = child.kill();
-        }
-
-        runner.join().expect("runner thread");
-        match prev {
-            Some(v) => std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", v),
-            None => std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS"),
-        }
     }
 }

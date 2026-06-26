@@ -4076,42 +4076,16 @@ impl Scene {
         }
     }
 
-    /// Return the handle of the user viewport whose bounding rectangle contains
-    /// the given paper-space point, or `None` if no viewport matches. When
-    /// viewports overlap (e.g. a large viewport that runs off-screen spanning
-    /// smaller ones), pick the SMALLEST-area match — the topmost one the user
-    /// actually sees and means to click, not the first in document order.
-    pub fn viewport_at_paper_point(&self, px: f32, py: f32) -> Option<Handle> {
-        let layout_block = self.current_layout_block_handle();
-        self.document
-            .entities()
-            .filter_map(|e| {
-                let EntityType::Viewport(vp) = e else {
-                    return None;
-                };
-                if !self.is_content_viewport_in_layout(vp, layout_block) || !vp.status.is_on {
-                    return None;
-                }
-                let hw = (vp.width / 2.0) as f32;
-                let hh = (vp.height / 2.0) as f32;
-                let cx = vp.center.x as f32;
-                let cy = vp.center.y as f32;
-                if px >= cx - hw && px <= cx + hw && py >= cy - hh && py <= cy + hh {
-                    Some((vp.common.handle, (vp.width * vp.height).abs()))
-                } else {
-                    None
-                }
-            })
-            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(h, _)| h)
-    }
-
-    /// Like [`viewport_at_paper_point`] but tested against each viewport's
-    /// *visible* on-screen rectangle (clamped to the canvas), in screen pixels.
+    /// Return the handle of the user viewport whose *visible* on-screen rectangle
+    /// (clamped to the canvas) contains the given screen-space point, or `None`
+    /// if no viewport matches. When viewports overlap, pick the SMALLEST-area
+    /// match — the topmost one the user actually sees and means to click, not
+    /// the first in document order.
+    ///
     /// Viewport activation goes through this so a click only enters a viewport
-    /// when it lands on the part the user can actually see — clicking the empty
-    /// area beside a viewport that runs off-screen no longer matches its full
-    /// (partly off-canvas) paper rect and switches to it by mistake.
+    /// when it lands on the part it can actually see — clicking the empty area
+    /// beside a viewport that runs off-screen no longer matches its full (partly
+    /// off-canvas) paper rect and switches to it by mistake.
     pub fn viewport_at_screen_point(
         &self,
         px: f32,

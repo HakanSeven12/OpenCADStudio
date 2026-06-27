@@ -1449,7 +1449,11 @@ impl OpenCADStudio {
                         text,
                         ..
                     }) => {
-                        let ctrl = modifiers.control();
+                        // Platform-aware accelerator modifier: Cmd on macOS,
+                        // Ctrl on Windows/Linux. Using `command()` rather than
+                        // `control()` makes Cmd+C/V/S/Z etc. work on Mac, per
+                        // the platform's keyboard conventions.
+                        let accel = modifiers.command();
                         let shift = modifiers.shift();
                         // Any key that produces a printable glyph types it,
                         // even when its logical key resolves to navigation
@@ -1459,7 +1463,7 @@ impl OpenCADStudio {
                         // those numpad digits aren't swallowed as history
                         // navigation. Whitespace / control text (Space,
                         // Enter, Tab) falls through to the named handlers.
-                        if !ctrl && status == Status::Ignored {
+                        if !accel && status == Status::Ignored {
                             if let Some(t) = text.as_deref() {
                                 if !t.is_empty()
                                     && t.chars().all(|c| !c.is_control() && !c.is_whitespace())
@@ -1543,7 +1547,7 @@ impl OpenCADStudio {
                             keyboard::Key::Named(keyboard::key::Named::F12) => {
                                 Some(Message::ToggleDynInput)
                             }
-                            keyboard::Key::Character(c) if ctrl => match c.as_str() {
+                            keyboard::Key::Character(c) if accel => match c.as_str() {
                                 "n" => Some(Message::TabNew),
                                 "o" => Some(Message::OpenFile),
                                 "s" if !shift => Some(Message::SaveFile),

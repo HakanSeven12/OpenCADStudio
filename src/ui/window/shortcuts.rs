@@ -3,6 +3,16 @@
 use crate::app::Message;
 use iced::widget::{column, container, row, scrollable, text, Space};
 use iced::{Background, Color, Element, Fill, Theme};
+use std::borrow::Cow;
+
+/// Display name of the primary accelerator modifier on this platform.
+/// Mirrors the runtime binding in `app::view`, which uses
+/// `Modifiers::command()` — the Cmd key on macOS, Ctrl elsewhere — so the
+/// reference window shows the key the user actually presses.
+#[cfg(target_os = "macos")]
+const MOD: &str = "Cmd";
+#[cfg(not(target_os = "macos"))]
+const MOD: &str = "Ctrl";
 
 const TB: Color = Color {
     r: 0.13,
@@ -52,9 +62,12 @@ fn hdivider<'a>() -> Element<'a, Message> {
         .into()
 }
 
-fn shortcut_row<'a>(key: &'static str, action: &'static str) -> Element<'a, Message> {
+fn shortcut_row<'a>(
+    key: impl Into<Cow<'static, str>>,
+    action: &'static str,
+) -> Element<'a, Message> {
     row![
-        text(key)
+        text(key.into())
             .size(11)
             .color(KEY)
             .font(iced::Font::MONOSPACE)
@@ -67,8 +80,8 @@ fn shortcut_row<'a>(key: &'static str, action: &'static str) -> Element<'a, Mess
     .into()
 }
 
-fn section<'a>(title: &'static str) -> Element<'a, Message> {
-    container(text(title).size(11).color(DIM))
+fn section<'a>(title: impl Into<Cow<'static, str>>) -> Element<'a, Message> {
+    container(text(title.into()).size(11).color(DIM))
         .padding(iced::Padding {
             top: 6.0,
             right: 0.0,
@@ -107,16 +120,18 @@ pub fn view_window<'a>(
         shortcut_row("F10", "Toggle Polar Tracking"),
         shortcut_row("F11", "Toggle Object Snap Tracking"),
         shortcut_row("F12", "Toggle Dynamic Input"),
-        section("── Ctrl Shortcuts ──────────────────────────────────────"),
-        shortcut_row("Ctrl+N", "New Drawing"),
-        shortcut_row("Ctrl+O", "Open File"),
-        shortcut_row("Ctrl+S", "Save"),
-        shortcut_row("Ctrl+Shift+S", "Save As"),
-        shortcut_row("Ctrl+Z", "Undo"),
-        shortcut_row("Ctrl+Shift+Z / Ctrl+Y", "Redo"),
-        shortcut_row("Ctrl+C", "Copy to Clipboard"),
-        shortcut_row("Ctrl+X", "Cut to Clipboard"),
-        shortcut_row("Ctrl+V", "Paste from Clipboard"),
+        section(format!(
+            "── {MOD} Shortcuts ──────────────────────────────────────"
+        )),
+        shortcut_row(format!("{MOD}+N"), "New Drawing"),
+        shortcut_row(format!("{MOD}+O"), "Open File"),
+        shortcut_row(format!("{MOD}+S"), "Save"),
+        shortcut_row(format!("{MOD}+Shift+S"), "Save As"),
+        shortcut_row(format!("{MOD}+Z"), "Undo"),
+        shortcut_row(format!("{MOD}+Shift+Z / {MOD}+Y"), "Redo"),
+        shortcut_row(format!("{MOD}+C"), "Copy to Clipboard"),
+        shortcut_row(format!("{MOD}+X"), "Cut to Clipboard"),
+        shortcut_row(format!("{MOD}+V"), "Paste from Clipboard"),
         section("── Other Keys ──────────────────────────────────────────"),
         shortcut_row("Enter / Space", "Finalize command / Repeat last"),
         shortcut_row("Escape", "Cancel active command"),

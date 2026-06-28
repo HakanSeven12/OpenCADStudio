@@ -13,7 +13,7 @@ use std::rc::Rc;
 use crate::host::{BuiltinPlugin, InteractiveCommand};
 use crate::ipc::client::{InteractiveRegistry, IpcClient, PluginHostApi};
 use crate::ipc::protocol::{
-    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost,
+    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost, PLUGIN_TOKEN_ENV,
 };
 use crate::ipc::transport::{recv, send};
 use crate::ribbon::owned::OwnedRibbonGroup;
@@ -29,8 +29,17 @@ pub fn run(socket_name: &str, cdylib_path: &Path) -> Result<(), Box<dyn std::err
     let plugin = unsafe { load_plugin(cdylib_path)? };
     let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
 
+    let token = match std::env::var(PLUGIN_TOKEN_ENV) {
+        Ok(t) => t,
+        Err(_) => {
+            eprintln!("[runner] missing {PLUGIN_TOKEN_ENV}; exiting");
+            std::process::exit(1);
+        }
+    };
+
     let client = IpcClient::connect(socket_name)?;
     eprintln!("[runner] connected to host");
+    client.send_handshake(&token)?;
 
     loop {
         let msg: HostToPlugin = recv(&mut client.stream_ref())?;

@@ -22,6 +22,20 @@ pub enum InteractiveEvent {
     ObjectPick { handle: Handle, pt: [f64; 3] },
 }
 
+/// Initial handshake sent by the plugin runner immediately after connecting.
+///
+/// The runner proves it was spawned by this host by presenting a pre-shared
+/// token delivered through the `OCS_PLUGIN_TOKEN` environment variable. A
+/// mismatch causes the host to close the connection.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum RunnerHandshake {
+    Token(String),
+}
+
+/// Environment variable through which the host passes the pre-shared
+/// authentication token to the plugin runner child process.
+pub const PLUGIN_TOKEN_ENV: &str = "OCS_PLUGIN_TOKEN";
+
 /// Requests the host sends to the plugin runner.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum HostRequest {

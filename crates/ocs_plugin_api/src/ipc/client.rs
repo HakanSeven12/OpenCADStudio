@@ -13,7 +13,7 @@ use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 
 use crate::host::{DocumentReader, HostApi, InteractiveCommand, ReaderEntity};
 use crate::ipc::protocol::{
-    HostResponse, HostToPlugin, PluginRequest, PluginResponse, PluginToHost,
+    HostResponse, HostToPlugin, PluginRequest, PluginResponse, PluginToHost, RunnerHandshake,
 };
 use crate::ipc::transport::{recv, send};
 use crate::shm::{DocumentViewInfo, SharedDocumentReader};
@@ -44,6 +44,14 @@ impl IpcClient {
 
     pub fn stream_ref(&self) -> std::cell::RefMut<'_, Stream> {
         self.stream.borrow_mut()
+    }
+
+    /// Send the initial runner handshake presenting the pre-shared token.
+    pub fn send_handshake(&self, token: &str) -> Result<(), crate::ipc::transport::TransportError> {
+        send(
+            &mut self.stream.borrow_mut(),
+            &RunnerHandshake::Token(token.to_string()),
+        )
     }
 
     /// Send a plugin request and wait for the matching response. Any nested

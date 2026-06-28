@@ -12,7 +12,8 @@ use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Stream, ToN
 
 use crate::host::{CommandStep, HostApi};
 use crate::ipc::protocol::{
-    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost,
+    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost, RunnerHandshake,
+    PLUGIN_TOKEN_ENV,
 };
 use crate::ipc::server::handle_plugin_request;
 use crate::ipc::transport::{recv, send};
@@ -36,6 +37,9 @@ fn spawn_timeout() -> Duration {
 
 /// Default maximum time to wait for a plugin call to respond.
 const CALL_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
+
+/// Length of the random pre-shared token used to authenticate the runner.
+const PLUGIN_TOKEN_LEN: usize = 32;
 
 fn call_timeout() -> Duration {
     std::env::var("OCS_PLUGIN_CALL_TIMEOUT_SECS")
@@ -128,6 +132,8 @@ impl PluginProcess {
             cdylib_path.display()
         );
 
+        let token = generate_token()?;
+
         // Create the listener before spawning so the runner can connect immediately.
         let listener = ListenerOptions::new().name(socket_name_ref).create_sync()?;
 
@@ -135,6 +141,7 @@ impl PluginProcess {
             .arg("--ocs-plugin-runner")
             .arg(&socket_name)
             .arg(cdylib_path)
+            .env(PLUGIN_TOKEN_ENV, &token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -166,6 +173,19 @@ impl PluginProcess {
                 return Err(PluginError::RunnerExited);
             }
         };
+
+        // Verify the runner presented the token it received through the
+        // environment before allowing any host→runner requests.
+        let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
+        let handshake_stream = guard.as_mut().ok_or_else(shutdown_error)?;
+        if let Err(e) = verify_runner_handshake(handshake_stream, &token) {
+            drop(guard);
+            if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                reap(child);
+            }
+            return Err(e);
+        }
+        drop(guard);
 
         // The runner first answers GetManifest and GetRibbon so the host can
         // build the UI without keeping the plugin object alive.
@@ -559,11 +579,40 @@ fn distinct_runner_path(host: &Path) -> PathBuf {
     path
 }
 
+/// Verify that the runner on the other end of `stream` presents `expected_token`.
+fn verify_runner_handshake(
+    stream: &mut Stream,
+    expected_token: &str,
+) -> Result<(), PluginError> {
+    match recv::<RunnerHandshake>(stream) {
+        Ok(RunnerHandshake::Token(ref presented)) if presented == expected_token => {
+            eprintln!("[plugin] runner authenticated");
+            Ok(())
+        }
+        Ok(RunnerHandshake::Token(_)) => Err(PluginError::Runner("authentication failed".into())),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Generate a unique local socket name.
 fn generate_socket_name() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("ocs_plugin_{}_{}", std::process::id(), n)
+}
+
+/// Generate a 32-byte random token for runner authentication.
+fn generate_token() -> Result<String, PluginError> {
+    let mut bytes = [0u8; PLUGIN_TOKEN_LEN];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|e| PluginError::Runner(format!("token generation failed: {e}")))?;
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -594,6 +643,7 @@ mod timeout_tests {
     use crate::host::{DocumentReader, HostApi, ReaderEntity};
     use crate::ipc::protocol::{
         HostRequest, HostResponse, HostToPlugin, PluginRequest, PluginResponse, PluginToHost,
+        RunnerHandshake,
     };
     use crate::ipc::transport::{recv, send};
     use crate::ribbon::owned::OwnedPluginManifest;
@@ -857,5 +907,33 @@ mod timeout_tests {
             Some(v) => std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", v),
             None => std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS"),
         }
+    }
+
+    #[test]
+    fn runner_handshake_wrong_token_is_rejected() {
+        let (mut host_stream, runner_stream) = connected_pair();
+        let _runner = thread::spawn(move || {
+            let mut peer = runner_stream;
+            send(&mut peer, &RunnerHandshake::Token("wrong-token".to_string()))
+                .expect("send handshake");
+        });
+        let result = verify_runner_handshake(&mut host_stream, "expected-token");
+        assert!(
+            matches!(result, Err(PluginError::Runner(ref s)) if s == "authentication failed"),
+            "expected authentication failure, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn runner_handshake_correct_token_is_accepted() {
+        let (mut host_stream, runner_stream) = connected_pair();
+        let token = "correct-token".to_string();
+        let expected = token.clone();
+        let _runner = thread::spawn(move || {
+            let mut peer = runner_stream;
+            send(&mut peer, &RunnerHandshake::Token(token)).expect("send handshake");
+        });
+        let result = verify_runner_handshake(&mut host_stream, &expected);
+        assert!(result.is_ok(), "expected authentication success, got {result:?}");
     }
 }

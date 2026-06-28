@@ -175,17 +175,23 @@ impl PluginProcess {
         };
 
         // Verify the runner presented the token it received through the
-        // environment before allowing any host→runner requests.
-        let mut guard = stream.lock().unwrap_or_else(|e| e.into_inner());
-        let handshake_stream = guard.as_mut().ok_or_else(shutdown_error)?;
-        if let Err(e) = verify_runner_handshake(handshake_stream, &token) {
-            drop(guard);
-            if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                reap(child);
-            }
+        // environment before allowing any host→runner requests. The read is
+        // bounded by a deadline: `accept` above guards the connect, and this
+        // guards the first frame, so a process that connects but never sends —
+        // or a runner that dies mid-handshake — cannot block the host forever.
+        let handshake_timeout = spawn_timeout();
+        let handshake_deadline = Instant::now() + handshake_timeout;
+        let handshake = recv_with_deadline::<RunnerHandshake>(
+            &stream,
+            &child,
+            handshake_deadline,
+            handshake_timeout,
+            "Handshake",
+        )?;
+        if let Err(e) = verify_runner_handshake(handshake, &token) {
+            mark_dead(&stream, &child);
             return Err(e);
         }
-        drop(guard);
 
         // The runner first answers GetManifest and GetRibbon so the host can
         // build the UI without keeping the plugin object alive.
@@ -579,18 +585,17 @@ fn distinct_runner_path(host: &Path) -> PathBuf {
     path
 }
 
-/// Verify that the runner on the other end of `stream` presents `expected_token`.
+/// Verify that the runner's `handshake` presents `expected_token`.
 fn verify_runner_handshake(
-    stream: &mut Stream,
+    handshake: RunnerHandshake,
     expected_token: &str,
 ) -> Result<(), PluginError> {
-    match recv::<RunnerHandshake>(stream) {
-        Ok(RunnerHandshake::Token(ref presented)) if presented == expected_token => {
+    match handshake {
+        RunnerHandshake::Token(ref presented) if presented == expected_token => {
             eprintln!("[plugin] runner authenticated");
             Ok(())
         }
-        Ok(RunnerHandshake::Token(_)) => Err(PluginError::Runner("authentication failed".into())),
-        Err(e) => Err(e.into()),
+        RunnerHandshake::Token(_) => Err(PluginError::Runner("authentication failed".into())),
     }
 }
 
@@ -911,13 +916,10 @@ mod timeout_tests {
 
     #[test]
     fn runner_handshake_wrong_token_is_rejected() {
-        let (mut host_stream, runner_stream) = connected_pair();
-        let _runner = thread::spawn(move || {
-            let mut peer = runner_stream;
-            send(&mut peer, &RunnerHandshake::Token("wrong-token".to_string()))
-                .expect("send handshake");
-        });
-        let result = verify_runner_handshake(&mut host_stream, "expected-token");
+        let result = verify_runner_handshake(
+            RunnerHandshake::Token("wrong-token".to_string()),
+            "expected-token",
+        );
         assert!(
             matches!(result, Err(PluginError::Runner(ref s)) if s == "authentication failed"),
             "expected authentication failure, got {result:?}"
@@ -926,14 +928,10 @@ mod timeout_tests {
 
     #[test]
     fn runner_handshake_correct_token_is_accepted() {
-        let (mut host_stream, runner_stream) = connected_pair();
-        let token = "correct-token".to_string();
-        let expected = token.clone();
-        let _runner = thread::spawn(move || {
-            let mut peer = runner_stream;
-            send(&mut peer, &RunnerHandshake::Token(token)).expect("send handshake");
-        });
-        let result = verify_runner_handshake(&mut host_stream, &expected);
+        let result = verify_runner_handshake(
+            RunnerHandshake::Token("correct-token".to_string()),
+            "correct-token",
+        );
         assert!(result.is_ok(), "expected authentication success, got {result:?}");
     }
 }

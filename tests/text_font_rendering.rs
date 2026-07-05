@@ -3,6 +3,7 @@ use acadrust::tables::{BlockRecord, TextStyle};
 use acadrust::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
 use OpenCADStudio::scene::cache::block_cache::{expand_insert, BlockCache};
+use OpenCADStudio::scene::view::render::InheritStyle;
 use OpenCADStudio::scene::WireModel;
 
 fn drawable_point_count(wires: &[WireModel]) -> usize {
@@ -51,6 +52,14 @@ fn expand_block_mtext(
         0.0,
         [0.0; 8],
         1.0,
+        // The INSERT sits on layer "0" which resolves to the white/Continuous
+        // fallback — matching the resolved style passed above.
+        InheritStyle {
+            color: [1.0, 1.0, 1.0, 1.0],
+            pat_len: 0.0,
+            pat: [0.0; 8],
+            lw_px: 1.0,
+        },
         false,
         1.0,
         None,

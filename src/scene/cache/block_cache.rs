@@ -467,6 +467,13 @@ fn tessellate_sub_local(
         );
         let is_fill_only = wire.points.is_empty() && !wire.fill_tris.is_empty();
 
+        // A wire whose colour differs from the entity's resolved base colour
+        // carries an explicit per-segment override (e.g. an MTEXT `\C1;` inline
+        // colour). ByBlock / layer-0 inheritance only applies to wires still on
+        // the base colour — folding explicit segments into the inherited colour
+        // collapses colour-split text to one colour.
+        let wire_on_base_color = wire.color == sub_color;
+
         result.push(LocalWire {
             points: wire.points,
             points_low: wire.points_low,
@@ -482,10 +489,10 @@ fn tessellate_sub_local(
             line_weight_px: lw_px,
             plinegen: wire.plinegen,
             is_fill_only,
-            color_is_byblock,
+            color_is_byblock: color_is_byblock && wire_on_base_color,
             lt_is_byblock,
             lw_is_byblock,
-            color_l0,
+            color_l0: color_l0 && wire_on_base_color,
             lt_l0,
             lw_l0,
             aabb_local,

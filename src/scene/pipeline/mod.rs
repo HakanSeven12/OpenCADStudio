@@ -1585,8 +1585,13 @@ impl Pipeline {
             self.gpu_hatch_batched = None;
             return;
         };
-        let renderable: Vec<HatchModel> =
-            hatches.iter().filter(|h| h.boundary.len() >= 3).cloned().collect();
+        // Skip hatches offloaded to CPU line-wire rendering (too many families
+        // for the GPU family shader) — their pattern is drawn as wires. (#313)
+        let renderable: Vec<HatchModel> = hatches
+            .iter()
+            .filter(|h| h.boundary.len() >= 3 && !h.needs_wire_offload())
+            .cloned()
+            .collect();
         self.gpu_hatch_batched =
             hatch_batched_gpu::HatchBatchedGpu::build(device, bgl1, &renderable);
     }

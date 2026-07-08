@@ -85,6 +85,15 @@ pub struct HatchModel {
 }
 
 impl HatchModel {
+    /// True when the pattern has more line families than the GPU shader holds.
+    pub fn needs_wire_offload(&self) -> bool {
+        matches!(
+            &self.pattern,
+            HatchPattern::Pattern(f)
+                if f.len() > crate::scene::pipeline::hatch_gpu::MAX_FAMILIES
+        )
+    }
+
     /// CPU-side rasteriser for `HatchPattern::Pattern` — produces the line
     /// segments inside the boundary so non-GPU consumers (PDF export,
     /// `paper_canvas`, print preview) can draw the actual pattern instead

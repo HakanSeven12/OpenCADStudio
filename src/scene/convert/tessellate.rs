@@ -126,7 +126,16 @@ pub fn tessellate(
     // dominant wire-instance cost on hatch-heavy drawings (issue #131). Picking
     // is unaffected: hatches are caught by their fill area through the existing
     // `pick::hit_test::click_hit_hatch` path, not this outline.
-    if matches!(entity, EntityType::Hatch(_)) {
+    //
+    // A pattern with more line families than the GPU shader holds renders
+    // truncated as a fill, so rasterise it to line wires on the CPU instead
+    // (the GPU fill is skipped for these in `upload_hatches`). (#313)
+    if let EntityType::Hatch(dxf) = entity {
+        if let Some(model) = crate::scene::Scene::hatch_model_from_dxf(dxf, entity_color) {
+            if model.needs_wire_offload() {
+                return hatch_offload_wires(&model, handle, color);
+            }
+        }
         return vec![];
     }
 
@@ -949,6 +958,27 @@ pub(crate) enum ArrowKind {
     Origin { size: f32 },
     Box_ { size: f32, filled: bool },
     Datum { size: f32, filled: bool },
+}
+
+/// Rasterise a many-family hatch pattern to line-segment wires (issue #313).
+/// `pattern_segments` already returns segments in the offset-relative WCS, so
+/// pack them into one WireModel with NaN sentinels between disjoint segments.
+fn hatch_offload_wires(
+    model: &crate::scene::model::hatch_model::HatchModel,
+    handle: Handle,
+    color: [f32; 4],
+) -> Vec<WireModel> {
+    let segs = model.pattern_segments();
+    if segs.is_empty() {
+        return vec![];
+    }
+    let mut pts: Vec<[f64; 3]> = Vec::with_capacity(segs.len() * 3);
+    for seg in &segs {
+        pts.push([seg[0][0] as f64, seg[0][1] as f64, 0.0]);
+        pts.push([seg[1][0] as f64, seg[1][1] as f64, 0.0]);
+        pts.push([f64::NAN, f64::NAN, f64::NAN]);
+    }
+    vec![WireModel::solid_f64(handle.value().to_string(), pts, color, false)]
 }
 
 pub(crate) fn arrow_from_block(

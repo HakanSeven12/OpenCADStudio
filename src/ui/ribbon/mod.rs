@@ -37,6 +37,14 @@ pub struct Ribbon {
     pub ortho_mode: bool,
     /// ViewCube (NAVVCUBE) visibility — drives the View Cube button highlight.
     pub show_viewcube: bool,
+    /// UCS icon (UCSICON) visibility — drives the UCS Icon button highlight.
+    pub show_ucs_icon: bool,
+    /// Properties panel (PROPERTIES) visibility — drives the Properties button highlight.
+    pub show_properties: bool,
+    /// File tabs (FILETAB) visibility — drives the File Tabs button highlight.
+    pub show_file_tabs: bool,
+    /// Layout tabs (LAYOUTTAB) visibility — drives the Layout Tabs button highlight.
+    pub show_layout_tabs: bool,
     pub open_dropdown: Option<String>,
     /// Title of the collapsed panel whose flyout is currently open, if any.
     pub collapsed_open: Option<String>,
@@ -136,6 +144,10 @@ impl Ribbon {
             wireframe: false,
             ortho_mode: true,
             show_viewcube: true,
+            show_ucs_icon: true,
+            show_properties: true,
+            show_file_tabs: true,
+            show_layout_tabs: true,
             open_dropdown: None,
             collapsed_open: None,
             last_panel_tool: HashMap::default(),
@@ -279,6 +291,31 @@ impl Ribbon {
     }
     pub fn set_viewcube(&mut self, on: bool) {
         self.show_viewcube = on;
+    }
+    pub fn set_ucs_icon(&mut self, on: bool) {
+        self.show_ucs_icon = on;
+    }
+    pub fn set_properties(&mut self, on: bool) {
+        self.show_properties = on;
+    }
+    pub fn set_file_tabs(&mut self, on: bool) {
+        self.show_file_tabs = on;
+    }
+    pub fn set_layout_tabs(&mut self, on: bool) {
+        self.show_layout_tabs = on;
+    }
+    /// Snapshot of every ribbon toggle's live state, for the render path.
+    fn toggle_state(&self) -> widgets::ToggleState {
+        use widgets::ToggleState;
+        ToggleState {
+            wireframe: self.wireframe,
+            ortho_mode: self.ortho_mode,
+            show_viewcube: self.show_viewcube,
+            show_ucs_icon: self.show_ucs_icon,
+            show_properties: self.show_properties,
+            show_file_tabs: self.show_file_tabs,
+            show_layout_tabs: self.show_layout_tabs,
+        }
     }
 
     pub fn toggle_dropdown(&mut self, id: &str) {
@@ -532,7 +569,9 @@ impl Ribbon {
                 // button. See `CollapsePanels`.
                 let panels: Vec<Panel<'_>> = groups
                     .iter()
-                    .map(|g| Panel {
+                    .map(|g| {
+                        let ts = self.toggle_state();
+                        Panel {
                         id: g.title.to_string(),
                         full: render_group(
                             false,
@@ -540,9 +579,7 @@ impl Ribbon {
                             &self.active_tool,
                             &self.open_dropdown,
                             &self.last_cmd,
-                            self.wireframe,
-                            self.ortho_mode,
-                            self.show_viewcube,
+                            ts,
                             &self.layer_infos,
                             &self.active_layer,
                             self.active_color,
@@ -556,9 +593,7 @@ impl Ribbon {
                             &self.active_tool,
                             &self.open_dropdown,
                             &self.last_cmd,
-                            self.wireframe,
-                            self.ortho_mode,
-                            self.show_viewcube,
+                            ts,
                             &self.layer_infos,
                             &self.active_layer,
                             self.active_color,
@@ -572,9 +607,7 @@ impl Ribbon {
                             &self.active_tool,
                             &self.open_dropdown,
                             &self.last_cmd,
-                            self.wireframe,
-                            self.ortho_mode,
-                            self.show_viewcube,
+                            ts,
                             &self.layer_infos,
                             &self.active_layer,
                             self.active_color,
@@ -589,9 +622,7 @@ impl Ribbon {
                             &self.active_tool,
                             &self.open_dropdown,
                             &self.last_cmd,
-                            self.wireframe,
-                            self.ortho_mode,
-                            self.show_viewcube,
+                            ts,
                             &self.layer_infos,
                             &self.active_layer,
                             self.active_color,
@@ -606,9 +637,7 @@ impl Ribbon {
                             &self.active_tool,
                             &self.open_dropdown,
                             &self.last_cmd,
-                            self.wireframe,
-                            self.ortho_mode,
-                            self.show_viewcube,
+                            ts,
                             &self.layer_infos,
                             &self.active_layer,
                             self.active_color,
@@ -626,6 +655,7 @@ impl Ribbon {
                             ..Default::default()
                         })
                         .into(),
+                    }
                     })
                     .collect();
                 CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H, BORDER_DARK)
@@ -1300,9 +1330,7 @@ fn render_group<'a>(
     active_tool: &Option<String>,
     open_dd: &Option<String>,
     last_cmd: &HashMap<&'static str, &'static str>,
-    wireframe: bool,
-    ortho_mode: bool,
-    show_viewcube: bool,
+    state: widgets::ToggleState,
     layer_infos: &'a [LayerInfo],
     active_layer: &'a str,
     active_color: AcadColor,
@@ -1329,9 +1357,7 @@ fn render_group<'a>(
                 active_tool,
                 open_dd,
                 last_cmd,
-                wireframe,
-                ortho_mode,
-                show_viewcube,
+                state,
                 layer_infos,
                 active_layer,
                 active_color,
@@ -1346,9 +1372,7 @@ fn render_group<'a>(
                 active_tool,
                 open_dd,
                 last_cmd,
-                wireframe,
-                ortho_mode,
-                show_viewcube,
+                state,
             ));
             if small_buf.len() == 3 {
                 flush_small_col(&mut small_buf, &mut items_row);
@@ -1426,9 +1450,7 @@ fn collapse_button<'a>(
     active_tool: &Option<String>,
     open_dd: &Option<String>,
     last_cmd: &HashMap<&'static str, &'static str>,
-    wireframe: bool,
-    ortho_mode: bool,
-    show_viewcube: bool,
+    state: widgets::ToggleState,
     layer_infos: &'a [LayerInfo],
     active_layer: &'a str,
     active_color: AcadColor,
@@ -1494,9 +1516,7 @@ fn collapse_button<'a>(
             active_tool,
             open_dd,
             last_cmd,
-            wireframe,
-            ortho_mode,
-            show_viewcube,
+            state,
             layer_infos,
             active_layer,
             active_color,
@@ -1510,9 +1530,7 @@ fn collapse_button<'a>(
             active_tool,
             open_dd,
             last_cmd,
-            wireframe,
-            ortho_mode,
-            show_viewcube,
+            state,
             layer_infos,
             active_layer,
             active_color,

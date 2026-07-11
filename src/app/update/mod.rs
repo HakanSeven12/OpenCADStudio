@@ -1567,14 +1567,17 @@ impl OpenCADStudio {
             }
             Message::ToggleProperties => {
                 self.show_properties ^= true;
+                self.ribbon.set_properties(self.show_properties);
                 Task::none()
             }
             Message::ToggleFileTabs => {
                 self.show_file_tabs ^= true;
+                self.ribbon.set_file_tabs(self.show_file_tabs);
                 Task::none()
             }
             Message::ToggleLayoutTabs => {
                 self.show_layout_tabs ^= true;
+                self.ribbon.set_layout_tabs(self.show_layout_tabs);
                 Task::none()
             }
             Message::ToggleOTrack => {

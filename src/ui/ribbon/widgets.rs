@@ -19,6 +19,21 @@ use crate::ui::properties::{acad_color_display, LwItem};
 
 use super::LayerInfo;
 
+/// Live on/off state of every ribbon toggle button. Passed as a single value
+/// through the render path so adding a new toggle only touches `is_active_tool`
+/// plus the `Ribbon::toggle_state` builder — not every render-function signature
+/// and call site.
+#[derive(Clone, Copy)]
+pub(super) struct ToggleState {
+    pub wireframe: bool,
+    pub ortho_mode: bool,
+    pub show_viewcube: bool,
+    pub show_ucs_icon: bool,
+    pub show_properties: bool,
+    pub show_file_tabs: bool,
+    pub show_layout_tabs: bool,
+}
+
 // ── Layout constants (single source of truth: ROW_H from ui::mod) ─────────
 
 use crate::ui::ROW_H;
@@ -287,16 +302,18 @@ pub(super) fn make_icon(icon: IconKind, size: f32) -> Element<'static, Message> 
 pub(super) fn is_active_tool(
     id: &str,
     active_tool: &Option<String>,
-    wireframe: bool,
-    ortho_mode: bool,
-    show_viewcube: bool,
+    state: &ToggleState,
 ) -> bool {
     match id {
-        "WIREFRAME" => wireframe,
-        "SOLID" => !wireframe,
-        "ORTHO" => ortho_mode,
-        "PERSP" => !ortho_mode,
-        "NAVVCUBE" => show_viewcube,
+        "WIREFRAME" => state.wireframe,
+        "SOLID" => !state.wireframe,
+        "ORTHO" => state.ortho_mode,
+        "PERSP" => !state.ortho_mode,
+        "NAVVCUBE" => state.show_viewcube,
+        "UCSICON" => state.show_ucs_icon,
+        "PROPERTIES" => state.show_properties,
+        "FILETAB" => state.show_file_tabs,
+        "LAYOUTTAB" => state.show_layout_tabs,
         id => active_tool.as_deref() == Some(id),
     }
 }
@@ -349,15 +366,13 @@ pub(super) fn render_small<'a>(
     active_tool: &Option<String>,
     open_dd: &Option<String>,
     last_cmd: &HashMap<&'static str, &'static str>,
-    wireframe: bool,
-    ortho_mode: bool,
-    show_viewcube: bool,
+    state: ToggleState,
 ) -> Element<'a, Message> {
     match item {
         // Large variants render small too, so the ribbon can shrink a panel of
         // large buttons to icon-only columns when the width is tight.
         RibbonItem::Tool(t) | RibbonItem::LargeTool(t) => {
-            let active = is_active_tool(t.id, active_tool, wireframe, ortho_mode, show_viewcube);
+            let active = is_active_tool(t.id, active_tool, &state);
             let event = t.event.clone();
             let tool_id = t.id.to_string();
             let tip_text = format!("{}\nCommand: {}", t.label, t.id);
@@ -585,9 +600,7 @@ pub(super) fn render_large<'a>(
     active_tool: &Option<String>,
     open_dd: &Option<String>,
     last_cmd: &HashMap<&'static str, &'static str>,
-    wireframe: bool,
-    ortho_mode: bool,
-    show_viewcube: bool,
+    state: ToggleState,
     layer_infos: &'a [LayerInfo],
     active_layer: &'a str,
     active_color: AcadColor,
@@ -601,7 +614,7 @@ pub(super) fn render_large<'a>(
         // A plain Tool renders large too, so a collapsed panel can show its
         // representative tool as a big icon.
         RibbonItem::LargeTool(t) | RibbonItem::Tool(t) => {
-            let active = is_active_tool(t.id, active_tool, wireframe, ortho_mode, show_viewcube);
+            let active = is_active_tool(t.id, active_tool, &state);
             let event = t.event.clone();
             let tool_id = t.id.to_string();
             let tip_text = format!("{}\nCommand: {}", t.label, t.id);
@@ -785,12 +798,10 @@ pub(super) fn render_large<'a>(
                     active_tool,
                     open_dd,
                     last_cmd,
-                    wireframe,
-                    ortho_mode,
-                    show_viewcube,
+                    state,
                 )
             } else {
-                let mp_active = is_active_tool(match_prop.id, active_tool, wireframe, ortho_mode, show_viewcube);
+                let mp_active = is_active_tool(match_prop.id, active_tool, &state);
                 let mp_event = match_prop.event.clone();
                 let mp_id = match_prop.id.to_string();
                 let mp_tip = format!("{}\nCommand: {}", match_prop.label, match_prop.id);

@@ -81,6 +81,7 @@ impl OpenCADStudio {
                         let at_origin = sub == "ORIGIN";
                         // Update model-space icon flags.
                         self.show_ucs_icon = visible;
+                        self.ribbon.set_ucs_icon(visible);
                         if sub == "NOORIGIN" || sub == "ORIGIN" {
                             self.ucs_icon_at_origin = at_origin;
                         }
@@ -104,6 +105,7 @@ impl OpenCADStudio {
                         self.push_undo_snapshot(i, "UCSICON");
                         let visible = !self.show_ucs_icon;
                         self.show_ucs_icon = visible;
+                        self.ribbon.set_ucs_icon(visible);
                         for entity in self.tabs[i].scene.document.entities_mut() {
                             if let acadrust::EntityType::Viewport(vp) = entity {
                                 vp.status.ucs_icon_visible = visible;

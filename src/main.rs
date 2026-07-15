@@ -19,6 +19,9 @@ mod snap;
 mod ui;
 mod par;
 mod sys;
+// Windows-only: stamp the taskbar (ICON_BIG) icon iced leaves unset.
+#[cfg(windows)]
+mod win_taskbar;
 
 fn main() -> iced::Result {
     // Web (wasm) uses the single-window entry; native uses the multi-window
@@ -152,6 +155,11 @@ fn main() -> iced::Result {
         // it only points a `.thumbnailer` at this same binary's `--dwg-thumbnail`
         // mode. Silently ignored on failure or non-Linux.
         io::file_association::install_thumbnailer();
+
+        // Windows: iced only sets the title-bar icon (ICON_SMALL); the taskbar
+        // button (ICON_BIG) is left blank. Stamp it once the window is up.
+        #[cfg(windows)]
+        win_taskbar::install_taskbar_icon();
 
         app::run()
     }

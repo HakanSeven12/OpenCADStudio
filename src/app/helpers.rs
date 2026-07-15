@@ -367,7 +367,7 @@ pub(super) fn title_case_word(value: &str) -> String {
 
 /// Builds a 32×32 RGBA icon: red background with OCS drawn in white pixels.
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn build_window_icon() -> Vec<u8> {
+pub(crate) fn build_window_icon() -> Vec<u8> {
     const W: usize = 32;
     const SZ: usize = W * W * 4;
 

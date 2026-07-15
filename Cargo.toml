@@ -86,7 +86,7 @@ lyon_tessellation = "1.0.20"
 #                       (IApplicationAssociationRegistrationUI dialog).
 # Win32_System_Registry — HKCU registration that lists the app under
 #                       "Open with" for the portable .exe.
-windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Registry", "Win32_Foundation"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Registry", "Win32_Foundation", "Win32_Graphics_Gdi"] }
 
 [patch.crates-io]
 # The `acadrust` crate now tracks the OpenAEC-Foundation/acadifc fork's main

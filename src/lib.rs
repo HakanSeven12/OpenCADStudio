@@ -15,3 +15,5 @@ pub mod snap;
 pub mod ui;
 pub mod par;
 pub mod sys;
+#[cfg(windows)]
+pub mod win_taskbar;

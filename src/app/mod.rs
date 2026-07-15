@@ -8,7 +8,7 @@ mod command_driver;
 mod commands;
 mod document;
 mod expr_eval;
-mod helpers;
+pub(crate) mod helpers;
 mod history;
 mod layers;
 mod model_ops;

@@ -33,6 +33,14 @@
             <key>QLSupportedContentTypes</key>
             <array>
                 <string>com.autodesk.dwg</string>
+                <!-- QuickLook matches these against the UTI the *system*
+                     resolves for a .dwg file, which is whatever the
+                     highest-precedence installed declaration says. With
+                     AutoCAD installed that is its exported UTI below — list
+                     it too or thumbnails never render on those machines
+                     (#365). Other CAD apps' exported UTIs (e.g. BricsCAD's)
+                     can be appended here as they are identified. -->
+                <string>com.autodesk.autocad.dwg</string>
             </array>
             <key>QLThumbnailMinimumDimension</key>
             <integer>0</integer>

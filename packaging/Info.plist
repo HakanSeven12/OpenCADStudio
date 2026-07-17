@@ -40,6 +40,10 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.autodesk.dwg</string>
+                <!-- AutoCAD exports its own DWG UTI; when it is installed,
+                     .dwg files bind to this identifier instead, so claim it
+                     too or OCS never appears under "Open with". -->
+                <string>com.autodesk.autocad.dwg</string>
             </array>
             <key>LSHandlerRank</key>
             <string>Alternate</string>
@@ -54,9 +58,61 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.autodesk.dxf</string>
+                <string>com.autodesk.autocad.dxf</string>
             </array>
             <key>LSHandlerRank</key>
             <string>Alternate</string>
+        </dict>
+    </array>
+    <!-- Declare (import) the DWG/DXF UTIs we claim above. Without a
+         declaration Launch Services cannot map the .dwg/.dxf filename
+         extensions to these identifiers on systems where no other CAD app
+         declares them, so "Open with", default-handler binding and the
+         QuickLook thumbnail extension all silently fail (#365). An *import*
+         declaration defers to any app that *exports* the same UTI. -->
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.autodesk.dwg</string>
+            <key>UTTypeDescription</key>
+            <string>AutoCAD Drawing</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>dwg</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>image/vnd.dwg</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.autodesk.dxf</string>
+            <key>UTTypeDescription</key>
+            <string>AutoCAD DXF</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>dxf</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>image/vnd.dxf</string>
+                </array>
+            </dict>
         </dict>
     </array>
 </dict>

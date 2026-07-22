@@ -1718,6 +1718,14 @@ impl OpenCADStudio {
         let single_instance = crate::io::single_instance::subscribe().map(Message::OpenExternal);
         #[cfg(target_arch = "wasm32")]
         let single_instance = Subscription::none();
+        // Liveness ping for the hang watchdog (#120): a timer message the UI
+        // thread can only process while its event loop is actually pumping,
+        // so an idle-but-healthy app keeps beating.
+        #[cfg(target_os = "windows")]
+        let watchdog = iced::time::every(std::time::Duration::from_secs(5))
+            .map(|_| Message::WatchdogBeat);
+        #[cfg(not(target_os = "windows"))]
+        let watchdog = Subscription::none();
         iced::Subscription::batch([
             frames,
             history_tick,
@@ -1728,6 +1736,7 @@ impl OpenCADStudio {
             web_fonts,
             autosave,
             single_instance,
+            watchdog,
             event::listen_with(|ev, status, win_id| {
                 use iced::event::Status;
                 match ev {

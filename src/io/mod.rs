@@ -4,6 +4,8 @@
 // Default save format: DWG (AC1032 / R2018+).
 
 pub mod file_association;
+#[cfg(target_os = "windows")]
+pub mod hang_watchdog;
 pub mod obj;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod single_instance;

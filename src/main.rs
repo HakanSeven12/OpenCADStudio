@@ -94,6 +94,13 @@ fn main() -> iced::Result {
             std::env::set_var("WGPU_BACKEND", "dx12,vulkan");
         }
 
+        // Hang watchdog (#120): captures a minidump when the UI thread
+        // stops pumping, so unreproducible Windows freezes become
+        // debuggable. Started before the event loop; headless modes below
+        // don't mind the extra parked thread.
+        #[cfg(target_os = "windows")]
+        io::hang_watchdog::start();
+
         // Headless modes exit without ever creating a window.
         if args.serve {
             // `app::serve` reads --port itself from the raw args.

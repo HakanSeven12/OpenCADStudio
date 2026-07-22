@@ -118,6 +118,12 @@ impl OpenCADStudio {
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
+        // Every processed message proves the UI thread is alive (#120).
+        #[cfg(target_os = "windows")]
+        crate::io::hang_watchdog::beat();
+        if matches!(msg, Message::WatchdogBeat) {
+            return Task::none();
+        }
         // A modal dialog must capture the keyboard the same way it already
         // captures the mouse. Otherwise keystrokes from the global key
         // subscription leak past the modal into the command line and fire as
@@ -2396,6 +2402,10 @@ impl OpenCADStudio {
                 self.mtext_caret_move(d);
                 Task::none()
             }
+            // Handled (and returned) in `update` before dispatch; kept for
+            // match exhaustiveness.
+            Message::WatchdogBeat => Task::none(),
+
             Message::MTextCaretBlink => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.caret_blink_on = !ed.caret_blink_on;

@@ -1922,6 +1922,9 @@ pub enum Message {
     MTextCaretMove(i32),
     /// Timer tick toggling the preview caret's blink phase.
     MTextCaretBlink,
+    /// Periodic liveness ping for the hang watchdog (#120): processed = the
+    /// UI thread is pumping messages.
+    WatchdogBeat,
     /// Commit the editor: create or update the MText entity.
     MTextOk,
     /// Apply the buffer to the entity but leave the editor open (the button).

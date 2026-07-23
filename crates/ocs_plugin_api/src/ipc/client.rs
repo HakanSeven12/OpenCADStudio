@@ -139,7 +139,12 @@ impl HostApi for PluginHostApi {
 
     fn add_entity(&mut self, entity: EntityType) -> Handle {
         match self.client.request(PluginRequest::AddEntity(entity)) {
-            Ok(PluginResponse::Handle(h)) => h,
+            Ok(PluginResponse::Handle(h)) => {
+                // The cached snapshot is now stale; drop it so a later
+                // document() re-fetches the host's post-edit truth.
+                self.document_cache = OnceCell::new();
+                h
+            }
             Ok(other) => {
                 eprintln!("[plugin] unexpected AddEntity response: {other:?}");
                 Handle::default()

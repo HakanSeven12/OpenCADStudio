@@ -1,11 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="11" y="4" width="9" height="16" rx="1" stroke="#e0e0e0" stroke-width="1.5" stroke-dasharray="3 2"/>
-  <rect x="3" y="2" width="7" height="20" rx="1" stroke="#4cc9f0" stroke-width="1.5"/>
-  <rect x="3" y="2" width="7" height="4" rx="1" fill="#4cc9f0" fill-opacity="0.3" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="5" y1="9" x2="8" y2="9" stroke="#e0e0e0" stroke-width="1.5"/>
-  <rect x="4" y="7" width="2" height="2" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="5" y1="14" x2="8" y2="14" stroke="#e0e0e0" stroke-width="1.5"/>
-  <rect x="4" y="12" width="2" height="2" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="5" y1="19" x2="8" y2="19" stroke="#e0e0e0" stroke-width="1.5"/>
-  <rect x="4" y="17" width="2" height="2" stroke="#e0e0e0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Tool Palettes">
+  <rect x="3" y="4" width="18" height="16" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="10" y1="4" x2="10" y2="20" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="6.5" cy="8" r="1.2" stroke="none" fill="#6DB7ED"/>
+  <rect x="5" y="12" width="3" height="3" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="13" y1="8" x2="18" y2="8" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="13" y1="12" x2="18" y2="12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="13" y1="16" x2="17" y2="16" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

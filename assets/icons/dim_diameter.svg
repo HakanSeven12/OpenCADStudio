@@ -1,10 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <!-- Circle -->
-  <circle cx="12" cy="12" r="8" stroke="#e0e0e0" stroke-width="1.5" fill="none"/>
-  <!-- Diameter line with arrows -->
-  <line x1="4" y1="12" x2="20" y2="12" stroke="#4cc9f0" stroke-width="1.5" stroke-linecap="round"/>
-  <polygon points="4,12 7,10.5 7,13.5" fill="#4cc9f0"/>
-  <polygon points="20,12 17,10.5 17,13.5" fill="#4cc9f0"/>
-  <!-- Ø label -->
-  <text x="9" y="8.5" font-size="4.5" fill="#4cc9f0" font-family="monospace">⌀</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Dim Diameter">
+  <circle cx="12" cy="12" r="7" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="6" y1="18" x2="18" y2="6" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="7,14 6,18 10,17" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

@@ -1,3 +1,3 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#4ccf6f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M5 13 l4 4 l10 -11"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Mt Ok">
+  <polyline points="4,12 9,17 20,6" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

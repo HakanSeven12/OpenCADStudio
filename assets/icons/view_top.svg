@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="4" y="6" width="16" height="16" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="12" y1="6" x2="12" y2="22" stroke="#e0e0e0" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <line x1="4" y1="14" x2="20" y2="14" stroke="#e0e0e0" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <polyline points="9,3 12,6 15,3" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="12" y1="2" x2="12" y2="6" stroke="#4cc9f0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="View Top">
+  <polygon points="12.0,5 19,9 12.0,13 5,9" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="5,9 5,17 12.0,21 12.0,13" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="19,9 19,17 12.0,21" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="3" x2="12" y2="10" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="9,6 12,3 15,6" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

@@ -1,8 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <line x1="4" y1="18" x2="14" y2="18" stroke="#4cc9f0" stroke-width="1.5"/>
-  <polyline points="11,15 14,18 11,21" stroke="#4cc9f0" stroke-width="1.5"/>
-  <text x="15" y="21" font-size="5" fill="#4cc9f0" stroke="none">X</text>
-  <line x1="4" y1="18" x2="4" y2="6" stroke="#e0e0e0" stroke-width="1.5"/>
-  <polyline points="1,9 4,6 7,9" stroke="#e0e0e0" stroke-width="1.5"/>
-  <text x="1" y="5" font-size="5" fill="#e0e0e0" stroke="none">Y</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Ucs Icon">
+  <line x1="6" y1="18" x2="19" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="6" y1="18" x2="6" y2="5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="6" y1="18" x2="19" y2="18" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="19" y1="18" x2="17.09087686895899" y2="19.28267255000026" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="19" y1="18" x2="17.09087686895899" y2="16.71732744999974" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="6" y1="18" x2="6" y2="5" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="6" y1="5" x2="7.2826725500002585" y2="6.909123131041011" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="6" y1="5" x2="4.717327449999741" y2="6.90912313104101" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="6" y1="18" x2="13" y2="11" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="6" cy="18" r="1.2" stroke="none" fill="#6DB7ED"/>
 </svg>

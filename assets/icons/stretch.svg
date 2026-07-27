@@ -1,68 +1,7 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg
-   viewBox="0 0 24 24"
-   width="64"
-   height="64"
-   version="1.1"
-   id="svg5"
-   sodipodi:docname="stretch.svg"
-   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs5" />
-  <sodipodi:namedview
-     id="namedview5"
-     pagecolor="#505050"
-     bordercolor="#eeeeee"
-     borderopacity="1"
-     inkscape:showpageshadow="0"
-     inkscape:pageopacity="0"
-     inkscape:pagecheckerboard="0"
-     inkscape:deskcolor="#505050"
-     inkscape:zoom="12.762909"
-     inkscape:cx="33.926435"
-     inkscape:cy="28.010856"
-     inkscape:window-width="1920"
-     inkscape:window-height="939"
-     inkscape:window-x="0"
-     inkscape:window-y="0"
-     inkscape:window-maximized="1"
-     inkscape:current-layer="svg5"
-     showgrid="true">
-    <inkscape:grid
-       id="grid1"
-       units="px"
-       originx="0"
-       originy="0"
-       spacingx="0.375"
-       spacingy="0.375"
-       empcolor="#0099e5"
-       empopacity="0.30196078"
-       color="#0099e5"
-       opacity="0.14901961"
-       empspacing="5"
-       enabled="true"
-       visible="true" />
-  </sodipodi:namedview>
-  <rect
-     style="fill:none;stroke:#e0e0e0;stroke-width:2.25;stroke-dasharray:none"
-     id="rect5"
-     width="12.75"
-     height="14.25"
-     x="1.125"
-     y="4.875"
-     ry="0" />
-  <!-- Original right edge (ghost, dashed) -->
-  <!-- Left/top/bottom of rect (static part, solid gray) -->
-  <!-- Stretched right edge (new position, blue) -->
-  <!-- Top line extension (stretched, blue) -->
-  <!-- Stretch arrow -->
-  <path
-     style="fill:none;stroke:#4bc8f0;stroke-width:2.25;stroke-dasharray:none;stroke-opacity:1"
-     d="m 15,4.875 h 7.875 v 14.25 H 15"
-     id="path8"
-     sodipodi:nodetypes="cccc" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Stretch">
+  <rect x="5" y="7" width="10" height="10" stroke-dasharray="2 2" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="12" x2="21" y2="12" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="21" y1="12" x2="19.09087686895899" y2="13.282672550000258" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="21" y1="12" x2="19.09087686895899" y2="10.717327449999742" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="19.5" y="10.5" width="3" height="3" stroke="none" fill="#6DB7ED"/>
 </svg>

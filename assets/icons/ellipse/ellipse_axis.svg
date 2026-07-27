@@ -1,14 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <!-- Full ellipse -->
-  <ellipse cx="12" cy="12" rx="9" ry="5.5" stroke="#e0e0e0" stroke-width="2" fill="none"/>
-  <!-- Major axis line (dashed) -->
-  <line x1="3" y1="12" x2="21" y2="12" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <!-- Minor distance line -->
-  <line x1="12" y1="12" x2="12" y2="6.5" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <!-- Axis endpoint 1 -->
-  <circle cx="3"  cy="12"  r="2"   fill="#4cc9f0"/>
-  <!-- Axis endpoint 2 -->
-  <circle cx="21" cy="12"  r="2"   fill="#4cc9f0"/>
-  <!-- Minor axis point -->
-  <circle cx="12" cy="6.5" r="1.5" fill="#4cc9f0"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Ellipse Axis">
+  <ellipse cx="12" cy="12" rx="8.5" ry="5.5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="3.5" y1="12" x2="20.5" y2="12" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="6.5" x2="12" y2="17.5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

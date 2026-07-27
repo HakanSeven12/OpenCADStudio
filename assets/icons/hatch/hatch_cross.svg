@@ -1,21 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <defs>
-    <clipPath id="sq2">
-      <rect x="4" y="4" width="16" height="16"/>
-    </clipPath>
-  </defs>
-  <!-- ANSI32: 45° + 135° crosshatch -->
-  <g clip-path="url(#sq2)">
-    <!-- 45° lines -->
-    <line x1="-2" y1="22" x2="22" y2="-2"   stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="-7" y1="17" x2="17" y2="-7"   stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="3"  y1="27" x2="27" y2="3"    stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="8"  y1="32" x2="32" y2="8"    stroke="#4cc9f0" stroke-width="1.2"/>
-    <!-- 135° lines -->
-    <line x1="2"  y1="-2" x2="26" y2="22"   stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="-3" y1="3"  x2="21" y2="27"   stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="7"  y1="-7" x2="31" y2="17"   stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="-8" y1="8"  x2="16" y2="32"   stroke="#4cc9f0" stroke-width="1.2"/>
-  </g>
-  <rect x="4" y="4" width="16" height="16" stroke="#e0e0e0" stroke-width="1.5" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Hatch Cross">
+  <rect x="4" y="4" width="16" height="16" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="4" x2="20" y2="20" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="4" x2="20" y2="20" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="8" x2="16" y2="20" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="12" x2="12" y2="20" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="20" x2="16" y2="4" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="20" x2="20" y2="4" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="8" y1="20" x2="20" y2="4" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="20" x2="20" y2="4" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

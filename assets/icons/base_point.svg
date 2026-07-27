@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <line x1="12" y1="2" x2="12" y2="22" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="2" y1="12" x2="22" y2="12" stroke="#e0e0e0" stroke-width="1.5"/>
-  <circle cx="12" cy="12" r="2.5" fill="#4cc9f0" fill-opacity="0.4" stroke="#4cc9f0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Base Point">
+  <line x1="4" y1="12" x2="20" y2="12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="4" x2="12" y2="20" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="12" cy="12" r="2" stroke="none" fill="#6DB7ED"/>
 </svg>

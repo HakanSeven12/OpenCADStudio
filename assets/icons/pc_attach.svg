@@ -1,8 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="3" y="5" width="14" height="14" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <circle cx="8" cy="10" r="1.5" fill="#e0e0e0"/>
-  <circle cx="12" cy="14" r="1.5" fill="#e0e0e0"/>
-  <line x1="8" y1="10" x2="12" y2="14" stroke="#e0e0e0" stroke-width="1" stroke-dasharray="2 2"/>
-  <line x1="18" y1="9" x2="21" y2="9" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="19.5" y1="7.5" x2="19.5" y2="10.5" stroke="#4cc9f0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Pc Attach">
+  <circle cx="5" cy="7" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="9" cy="5" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="13" cy="8" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="18" cy="6" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="6" cy="14" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="11" cy="12" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="16" cy="15" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="19" cy="11" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="9" cy="19" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <circle cx="15" cy="19" r="0.8" stroke="none" fill="#B4B6B9"/>
+  <rect x="4" y="4" width="16" height="16" stroke-dasharray="2 2" rx="1" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

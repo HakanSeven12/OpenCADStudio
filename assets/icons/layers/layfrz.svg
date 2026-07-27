@@ -1,76 +1,9 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg
-   viewBox="0 0 24 24"
-   width="64"
-   height="64"
-   version="1.1"
-   id="svg12"
-   sodipodi:docname="layfrz.svg"
-   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs12" />
-  <sodipodi:namedview
-     id="namedview12"
-     pagecolor="#505050"
-     bordercolor="#eeeeee"
-     borderopacity="1"
-     inkscape:showpageshadow="0"
-     inkscape:pageopacity="0"
-     inkscape:pagecheckerboard="0"
-     inkscape:deskcolor="#505050"
-     inkscape:zoom="6.6990751"
-     inkscape:cx="7.3144426"
-     inkscape:cy="37.393222"
-     inkscape:window-width="1920"
-     inkscape:window-height="939"
-     inkscape:window-x="0"
-     inkscape:window-y="0"
-     inkscape:window-maximized="1"
-     inkscape:current-layer="svg12" />
-  <!-- Snowflake: 3 main axes -->
-  <line
-     x1="12.000001"
-     y1="1.1189922"
-     x2="12.000001"
-     y2="22.881008"
-     stroke="#4cc9f0"
-     stroke-width="2.20091"
-     stroke-linecap="round"
-     id="line1"
-     style="stroke-width:2.25;stroke-dasharray:none" />
-  <line
-     x1="1.1189922"
-     y1="12.000001"
-     x2="22.881008"
-     y2="12.000001"
-     stroke="#4cc9f0"
-     stroke-width="2.20091"
-     stroke-linecap="round"
-     id="line2"
-     style="stroke-width:2.25;stroke-dasharray:none" />
-  <line
-     x1="4.1414943"
-     y1="4.1414943"
-     x2="19.858505"
-     y2="19.858505"
-     stroke="#4cc9f0"
-     stroke-width="2.17621"
-     stroke-linecap="round"
-     id="line3" />
-  <line
-     x1="19.858505"
-     y1="4.1414943"
-     x2="4.1414943"
-     y2="19.858505"
-     stroke="#4cc9f0"
-     stroke-width="2.20091"
-     stroke-linecap="round"
-     id="line4"
-     style="stroke-width:2.25;stroke-dasharray:none" />
-  <!-- Branches on vertical axis -->
-  <!-- Branches on horizontal axis -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Layfrz">
+  <polygon points="4,7 12,3.5 20,7 12,10.5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="4,11 12,14.5 20,11" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="4,15 12,18.5 20,15" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="15.0" y1="6.0" x2="21.0" y2="6.0" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="15.878679656440358" y1="3.8786796564403576" x2="20.121320343559642" y2="8.121320343559642" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="18.0" y1="3.0" x2="18.0" y2="9.0" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="20.121320343559642" y1="3.878679656440357" x2="15.878679656440358" y2="8.121320343559642" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

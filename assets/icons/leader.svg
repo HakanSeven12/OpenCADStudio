@@ -1,9 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <!-- Leader lines (bent) -->
-  <line x1="4" y1="19" x2="12" y2="10" stroke="#4cc9f0" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="12" y1="10" x2="20" y2="10" stroke="#4cc9f0" stroke-width="1.5" stroke-linecap="round"/>
-  <!-- Arrowhead -->
-  <polygon points="4,19 7.5,18 6.5,15.5" fill="#4cc9f0"/>
-  <!-- Simple text label -->
-  <text x="12" y="8.5" font-size="4" fill="#e0e0e0" font-family="monospace">text</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Leader">
+  <polyline points="4,18 10,12 18,12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polygon points="3.5,18.5 6.5,17.5 4.5,15.5" stroke="none" fill="#6DB7ED"/>
+  <line x1="14" y1="8" x2="20" y2="8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

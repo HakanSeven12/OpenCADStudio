@@ -1,87 +1,15 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg
-   viewBox="0 0 24 24"
-   width="64"
-   height="64"
-   version="1.1"
-   id="svg8"
-   sodipodi:docname="explode.svg"
-   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs8" />
-  <sodipodi:namedview
-     id="namedview8"
-     pagecolor="#505050"
-     bordercolor="#eeeeee"
-     borderopacity="1"
-     inkscape:showpageshadow="0"
-     inkscape:pageopacity="0"
-     inkscape:pagecheckerboard="0"
-     inkscape:deskcolor="#505050"
-     inkscape:zoom="11.265625"
-     inkscape:cx="31.955617"
-     inkscape:cy="32"
-     inkscape:window-width="1920"
-     inkscape:window-height="939"
-     inkscape:window-x="0"
-     inkscape:window-y="0"
-     inkscape:window-maximized="1"
-     inkscape:current-layer="svg8" />
-  <rect
-     x="5.7189393"
-     y="5.3194952"
-     width="12.961565"
-     height="12.961565"
-     rx="1.0801305"
-     stroke="#e0e0e0"
-     stroke-width="3.74687"
-     fill="none"
-     stroke-dasharray="2, 1.5"
-     id="rect1"
-     style="stroke-width:1.94586;stroke-dasharray:none;stroke-dashoffset:0" />
-  <line
-     x1="1.8566483"
-     y1="18.006786"
-     x2="1.8566483"
-     y2="5.5709181"
-     stroke="#4cc9f0"
-     stroke-width="2.65612"
-     stroke-linecap="round"
-     marker-end="url(#a)"
-     id="line1"
-     style="stroke-width:2.00392;stroke-dasharray:none" />
-  <line
-     x1="22.127558"
-     y1="5.6829486"
-     x2="22.127558"
-     y2="18.31908"
-     stroke="#4cc9f0"
-     stroke-width="2.60601"
-     stroke-linecap="round"
-     id="line2"
-     style="stroke-width:2.05883;stroke-dasharray:none" />
-  <line
-     x1="18.441927"
-     y1="1.8828073"
-     x2="6.0011086"
-     y2="1.8828073"
-     stroke="#4cc9f0"
-     stroke-width="2.61074"
-     stroke-linecap="round"
-     id="line3"
-     style="stroke-width:2.03916;stroke-dasharray:none" />
-  <line
-     x1="6.0847116"
-     y1="22.120726"
-     x2="19.621193"
-     y2="22.120726"
-     stroke="#4cc9f0"
-     stroke-width="2.57629"
-     stroke-linecap="round"
-     id="line4"
-     style="stroke-width:2.15549;stroke-dasharray:none" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Explode">
+  <rect x="9" y="9" width="6" height="6" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="9" y1="9" x2="4" y2="4" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="4" x2="6.256940370226216" y2="4.442967453932169" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="4" x2="4.442967453932168" y2="6.256940370226216" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="15" y1="9" x2="20" y2="4" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="20" y1="4" x2="19.55703254606783" y2="6.256940370226216" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="20" y1="4" x2="17.743059629773782" y2="4.442967453932169" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="9" y1="15" x2="4" y2="20" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="20" x2="4.442967453932168" y2="17.743059629773782" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="20" x2="6.256940370226216" y2="19.55703254606783" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="15" y1="15" x2="20" y2="20" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="20" y1="20" x2="17.743059629773782" y2="19.55703254606783" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="20" y1="20" x2="19.55703254606783" y2="17.743059629773782" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

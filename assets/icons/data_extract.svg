@@ -1,9 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="3" y="5" width="13" height="14" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="6" y1="9" x2="13" y2="9" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="6" y1="12" x2="13" y2="12" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="6" y1="15" x2="10" y2="15" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="17" y1="8" x2="21" y2="12" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="21" y1="12" x2="17" y2="16" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="15" y1="12" x2="21" y2="12" stroke="#4cc9f0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Data Extract">
+  <rect x="4" y="4" width="13" height="14" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="10.5" y1="4" x2="10.5" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="11.0" x2="17" y2="11.0" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="19" x2="21" y2="19" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="21" y1="19" x2="19.09087686895899" y2="20.28267255000026" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="21" y1="19" x2="19.09087686895899" y2="17.71732744999974" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

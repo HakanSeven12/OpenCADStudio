@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M9 3 H5 a1 1 0 0 0 -1 1 v16 a1 1 0 0 0 1 1 h14 a1 1 0 0 0 1 -1 V4 a1 1 0 0 0 -1 -1 h-4" stroke="#e0e0e0" stroke-width="1.5"/>
-  <rect x="9" y="1" width="6" height="4" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <polyline points="7,12 10,15 17,9" stroke="#4cc9f0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Audit">
+  <circle cx="10" cy="10" r="5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="14.3" y1="14.3" x2="20" y2="20" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="7,10 9.5,12.5 13,8" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

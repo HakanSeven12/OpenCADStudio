@@ -1,12 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <line x1="2" y1="6" x2="2" y2="20" stroke="#4cc9f0" stroke-width="1.4"/>
-  <line x1="2" y1="8" x2="9" y2="8" stroke="#4cc9f0" stroke-width="1.2"/>
-  <polygon points="2,8 4,6 4,10" fill="#4cc9f0"/>
-  <rect x="9" y="5" width="7" height="5" fill="none" stroke="#e0e0e0" stroke-width="1.0"/>
-  <line x1="2" y1="13" x2="9" y2="13" stroke="#4cc9f0" stroke-width="1.2"/>
-  <polygon points="2,13 4,11 4,15" fill="#4cc9f0"/>
-  <rect x="9" y="10" width="7" height="5" fill="none" stroke="#e0e0e0" stroke-width="1.0"/>
-  <line x1="2" y1="18" x2="9" y2="18" stroke="#4cc9f0" stroke-width="1.2"/>
-  <polygon points="2,18 4,16 4,20" fill="#4cc9f0"/>
-  <rect x="9" y="15" width="7" height="5" fill="none" stroke="#e0e0e0" stroke-width="1.0"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Mleader Align">
+  <polyline points="4,18 10,12 18,12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polygon points="3.5,18.5 6.5,17.5 4.5,15.5" stroke="none" fill="#6DB7ED"/>
+  <line x1="14" y1="8" x2="20" y2="8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="14" y1="5" x2="19" y2="5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="14" y1="6" x2="21" y2="6" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="14" y1="10" x2="21" y2="10" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="3" y="4" width="18" height="16" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <path d="M9 14 A4 4 0 1 1 15 14" stroke="#4cc9f0" stroke-width="1.5"/>
-  <polyline points="15,11 15,14 18,14" stroke="#4cc9f0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Vports Restore">
+  <rect x="3" y="4" width="18" height="16" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M7 15 C7 10 12 7 17 9" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="14,6 17,9 14,12" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

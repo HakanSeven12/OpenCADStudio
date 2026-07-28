@@ -1,4 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Dyn">
-  <path d="M5 17 L10 7 L14 17 L19 7" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="19" cy="7" r="1.2" stroke="none" fill="#6DB7ED"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Dynamic Input">
+  <path d="M3.2 12h5.2M5.8 9.4v5.2" stroke="#B4B6B9" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="5.8" cy="12" r="1.05" fill="#6DB7ED"/>
+  <path d="M7.2 10.6 10 8.5" stroke="#6DB7ED" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="10" y="5.2" width="10.7" height="5.2" rx=".8" fill="none" stroke="#6DB7ED" stroke-width="1.625"/>
+  <path d="M12 7.8h6.7" stroke="#6DB7ED" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="11.8" y="13.4" width="9" height="5.2" rx=".8" stroke="#B4B6B9" stroke-width="1.625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M13.7 16h5.2" stroke="#B4B6B9" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
 </svg>

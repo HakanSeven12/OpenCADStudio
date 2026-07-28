@@ -1,13 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Pc Attach">
-  <circle cx="5" cy="7" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="9" cy="5" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="13" cy="8" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="18" cy="6" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="6" cy="14" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="11" cy="12" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="16" cy="15" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="19" cy="11" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="9" cy="19" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <circle cx="15" cy="19" r="0.8" stroke="none" fill="#B4B6B9"/>
-  <rect x="4" y="4" width="16" height="16" stroke-dasharray="2 2" rx="1" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Point Cloud Attach">
+  <circle cx="4.5" cy="14.8" r=".85" fill="#B4B6B9"/>
+  <circle cx="6.7" cy="10.8" r=".85" fill="#B4B6B9"/>
+  <circle cx="8.6" cy="16.9" r=".85" fill="#B4B6B9"/>
+  <circle cx="9.1" cy="7.6" r=".85" fill="#B4B6B9"/>
+  <circle cx="11.2" cy="13.5" r=".85" fill="#B4B6B9"/>
+  <circle cx="12.6" cy="9.4" r=".85" fill="#B4B6B9"/>
+  <circle cx="14.6" cy="16.3" r=".85" fill="#B4B6B9"/>
+  <circle cx="15.7" cy="12.2" r=".85" fill="#B4B6B9"/>
+  <circle cx="18.2" cy="15.1" r=".85" fill="#B4B6B9"/>
+  <circle cx="18.3" cy="8.4" r=".85" fill="#B4B6B9"/>
+  <path d="M18.7 3.2v6M15.7 6.2h6" stroke="#6DB7ED" stroke-width="1.625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M20.2 10.7v3.1h-3.1" stroke="#6DB7ED" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
 </svg>

@@ -1,7 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Xadjust">
-  <rect x="4" y="4" width="14" height="14" stroke-dasharray="2 2" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="7" y1="7" x2="15" y2="15" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="15" y1="7" x2="7" y2="15" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="14" y1="19" x2="21" y2="19" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="17" cy="19" r="1.3" stroke="none" fill="#6DB7ED"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Adjust Raster Reference">
+  <rect x="2.5" y="4" width="11.5" height="13.2" rx="1" stroke="#B4B6B9" stroke-width="1.625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="5.5" cy="7.2" r="1.15" stroke="#6DB7ED" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4.1 15 7.2 10.8l2.2 2.4 2-2.7 1.5 2.1" stroke="#B4B6B9" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M15.6 6.4h6M15.6 11h6M15.6 15.6h6" stroke="#B4B6B9" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="18" cy="6.4" r="1.15" fill="#6DB7ED"/>
+  <circle cx="20.2" cy="11" r="1.15" fill="#6DB7ED"/>
+  <circle cx="17.2" cy="15.6" r="1.15" fill="#6DB7ED"/>
+
 </svg>

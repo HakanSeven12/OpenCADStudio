@@ -1,5 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Mview Block">
-  <rect x="3" y="4" width="18" height="16" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <rect x="6" y="7" width="12" height="10" rx="0.7" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="12" cy="12" r="2" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Multi View Block">
+  <rect x="2.5" y="3" width="7" height="6.5" rx=".7" stroke="#B4B6B9" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4.1 6.2h3.8M6 4.6v3.2" stroke="#B4B6B9" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="2.5" y="14.4" width="7" height="6.5" rx=".7" stroke="#B4B6B9" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4.1 17.7h3.8M4.1 19.2h2.4" stroke="#B4B6B9" stroke-width="1.17" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m13.1 7.3 5.2-2.7 3.2 2.1-5.2 2.8z" stroke="#B4B6B9" stroke-width="1.625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m13.1 7.3 3.2 2.2v8.8l-3.2-2.3z" stroke="#B4B6B9" stroke-width="1.625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m16.3 9.5 5.2-2.8v8.9l-5.2 2.7z" fill="#6DB7ED" fill-opacity=".18" stroke="#6DB7ED" stroke-width="1.625" stroke-linejoin="round"/>
+  <circle cx="13.1" cy="16" r="1.05" fill="#6DB7ED"/>
+
 </svg>

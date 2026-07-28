@@ -3702,9 +3702,8 @@ impl OpenCADStudio {
         self.tabs[i].scene.sync_camera_to_document();
         self.tabs[i].last_synced_camera_gen = self.tabs[i].scene.camera_generation;
         let sync_ms = perf_phase.elapsed().as_secs_f64() * 1000.0;
-        // Cancel any pending rename/context-menu and active viewport when switching.
+        // Cancel any pending rename and active viewport when switching.
         self.layout_rename_state = None;
-        self.layout_context_menu = None;
         self.tabs[i].scene.active_viewport = None;
         let perf_phase = Instant::now();
         self.tabs[i].scene.set_current_layout(name.clone());

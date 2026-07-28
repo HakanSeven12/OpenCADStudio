@@ -12,7 +12,7 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap as HashMap;
 
 use acadrust::types::{Color as AcadColor, LineWeight};
-use iced::widget::{button, column, container, mouse_area, row, scrollable, svg, text};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
@@ -419,58 +419,41 @@ impl Ribbon {
 
                 let is_active = i == self.active;
                 let is_contextual = module.id() == "layout";
-                let accent = if is_contextual {
-                    ACCENT_GOLD
-                } else {
-                    ACCENT_BLUE
-                };
-                let text_inactive = if is_contextual {
-                    Color {
-                        r: 0.90,
-                        g: 0.72,
-                        b: 0.30,
-                        a: 1.0,
-                    }
-                } else {
-                    Color {
-                        r: 0.75,
-                        g: 0.75,
-                        b: 0.75,
-                        a: 1.0,
-                    }
-                };
-                let hover_bg = if is_contextual {
-                    Color {
-                        r: 0.28,
-                        g: 0.24,
-                        b: 0.12,
-                        a: 1.0,
-                    }
-                } else {
-                    Color {
-                        r: 0.25,
-                        g: 0.25,
-                        b: 0.25,
-                        a: 1.0,
-                    }
-                };
                 let btn = container(
                     button(text(module.title()).size(12))
                         .on_press(Message::RibbonSelectTab(i))
-                        .style(move |_: &Theme, status| button::Style {
-                            background: Some(Background::Color(match (is_active, status) {
-                                (true, _) => RIBBON_BG,
-                                (false, button::Status::Hovered) => hover_bg,
-                                _ => Color::TRANSPARENT,
-                            })),
-                            text_color: if is_active {
-                                Color::WHITE
+                        .style(move |theme: &Theme, status| {
+                            let palette = theme.extended_palette();
+                            let accent = if is_contextual {
+                                palette.warning.base
                             } else {
-                                text_inactive
+                                palette.primary.base
+                            };
+                            let pair = match (is_active, status) {
+                                (true, _) => palette.background.weakest,
+                                (false, button::Status::Hovered) => {
+                                    if is_contextual {
+                                        palette.warning.weak
+                                    } else {
+                                        palette.background.weak
+                                    }
+                                }
+                                _ => palette.background.base,
+                            };
+                            button::Style {
+                            background: (is_active
+                                || matches!(status, button::Status::Hovered))
+                                .then_some(Background::Color(pair.color)),
+                            text_color: if is_active {
+                                pair.text
+                            } else if is_contextual {
+                                accent.color
+                            } else {
+                                palette.background.base.text.scale_alpha(0.72)
                             },
                             border: Border {
                                 color: if is_active {
-                                    accent
+                                    accent.color
                                 } else {
                                     Color::TRANSPARENT
                                 },
@@ -479,13 +462,18 @@ impl Ribbon {
                             },
                             shadow: iced::Shadow::default(),
                             snap: false,
+                            }
                         })
                         .padding([5, 14]),
                 )
-                .style(move |_: &Theme| container::Style {
+                .style(move |theme: &Theme| container::Style {
                     border: Border {
                         color: if is_active {
-                            accent
+                            if is_contextual {
+                                theme.extended_palette().warning.base.color
+                            } else {
+                                theme.extended_palette().primary.base.color
+                            }
                         } else {
                             Color::TRANSPARENT
                         },
@@ -514,9 +502,11 @@ impl Ribbon {
         // persisted (see `Ribbon::set_collapse_mode`). It hides itself once the
         // tool row is tight, giving the cramped tab row its space back.
         let dd_open = self.open_dropdown.as_deref() == Some(COLLAPSE_MODE_ID);
-        let mode_btn = button(crate::ui::icons::arrow_down(10.0, ARROW_COLOR))
+        let mode_btn = button(crate::ui::icons::themed_arrow_down(10.0))
             .on_press(Message::ToggleRibbonDropdown(COLLAPSE_MODE_ID.to_string()))
-            .style(move |_: &Theme, status| top_hist_btn_style(true, dd_open, status))
+            .style(move |theme: &Theme, status| {
+                top_hist_btn_style(theme, true, dd_open, status)
+            })
             .height(24)
             .padding([2, 8]);
         let mode_dd = PosReport::new(COLLAPSE_MODE_ID, mode_btn);
@@ -534,8 +524,10 @@ impl Ribbon {
         }
 
         let tab_bar = container(tab_row)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(TOPBAR_BG)),
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    theme.extended_palette().background.base.color,
+                )),
                 ..Default::default()
             })
             .padding(Padding {
@@ -653,10 +645,12 @@ impl Ribbon {
                             self.active_lineweight,
                             &style_ctx,
                         ))
-                        .style(|_: &Theme| container::Style {
-                            background: Some(Background::Color(RIBBON_BG)),
+                        .style(|theme: &Theme| container::Style {
+                            background: Some(Background::Color(
+                                theme.extended_palette().background.weakest.color,
+                            )),
                             border: Border {
-                                color: BORDER_DARK,
+                                color: theme.extended_palette().background.neutral.color,
                                 width: 1.0,
                                 radius: 0.0.into(),
                             },
@@ -666,7 +660,7 @@ impl Ribbon {
                     }
                     })
                     .collect();
-                CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H, BORDER_DARK)
+                CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
                     .report_height(self.tool_bar_h.clone())
                     .report_tight(self.collapse_tight.clone())
                     .mode(self.collapse_mode)
@@ -676,10 +670,12 @@ impl Ribbon {
             };
 
         let tool_bar = container(tool_area)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(RIBBON_BG)),
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    theme.extended_palette().background.weakest.color,
+                )),
                 border: Border {
-                    color: BORDER_DARK,
+                    color: theme.extended_palette().background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -712,19 +708,13 @@ impl Ribbon {
                 .enumerate()
                 .map(|(idx, label)| {
                     let step = idx + 1;
-                    button(text(label.clone()).size(11).color(LABEL_ON))
+                    button(text(label.clone()).size(11))
                         .on_press(if is_undo {
                             Message::UndoMany(step)
                         } else {
                             Message::RedoMany(step)
                         })
-                        .style(|_: &Theme, status| button::Style {
-                            background: Some(Background::Color(match status {
-                                button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                                _ => Color::TRANSPARENT,
-                            })),
-                            ..Default::default()
-                        })
+                        .style(popup_row_style)
                         .width(Fill)
                         .padding([5, 10])
                         .into()
@@ -732,15 +722,7 @@ impl Ribbon {
                 .collect();
 
             let panel = container(column(rows))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(PANEL_BG)),
-                    border: Border {
-                        color: PANEL_BORDER,
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                })
+                .style(popup_panel_style)
                 .width(Length::Fixed(170.0));
 
             let (align_right, h_pad, top) = self.dd_anchor(open_id, 170.0, win.0);
@@ -755,27 +737,16 @@ impl Ribbon {
             let rows: Vec<Element<Message>> = CollapseMode::ALL
                 .iter()
                 .map(|&m| {
-                    let mark: Element<Message> = if m == current {
-                        crate::ui::icons::tinted(crate::ui::icons::CHECK, 11.0, CHECK_COLOR)
-                    } else {
-                        iced::widget::Space::new().width(0).into()
-                    };
                     button(
                         row![
-                            container(mark).width(Length::Fixed(16.0)),
-                            text(m.label()).size(11).color(LABEL_ON),
+                            crate::ui::icons::themed_check_cell(m == current),
+                            text(m.label()).size(11),
                         ]
                         .spacing(4)
                         .align_y(iced::Center),
                     )
                     .on_press(Message::SetRibbonCollapseMode(m))
-                    .style(|_: &Theme, status| button::Style {
-                        background: Some(Background::Color(match status {
-                            button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                            _ => Color::TRANSPARENT,
-                        })),
-                        ..Default::default()
-                    })
+                    .style(popup_row_style)
                     .width(Fill)
                     .padding([5, 10])
                     .into()
@@ -783,15 +754,7 @@ impl Ribbon {
                 .collect();
 
             let panel = container(column(rows))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(PANEL_BG)),
-                    border: Border {
-                        color: PANEL_BORDER,
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                })
+                .style(popup_panel_style)
                 .width(Length::Fixed(W));
 
             let (align_right, h_pad, top) = self.dd_anchor(open_id, W, win.0);
@@ -852,28 +815,25 @@ impl Ribbon {
             .iter()
             .map(|(cmd, label, item_icon)| {
                 let is_current = *cmd == last_cmd;
-                let checkmark: Element<'_, Message> = container(if is_current {
-                    crate::ui::icons::tinted(crate::ui::icons::CHECK, 11.0, CHECK_COLOR)
-                } else {
-                    iced::widget::Space::new().width(0).into()
-                })
-                .width(Length::Fixed(14.0))
-                .into();
-                let icon_el: Element<Message> = match *item_icon {
-                    IconKind::Glyph(s) => text(s)
-                        .size(13)
-                        .color(ICON_COLOR)
+                let checkmark: Element<'_, Message> =
+                    crate::ui::icons::themed_check_cell(is_current);
+                let icon_el: Element<Message> =
+                    container(make_icon(*item_icon, 20.0))
                         .width(Length::Fixed(20.0))
-                        .into(),
-                    IconKind::Svg(bytes) => {
-                        let handle = svg::Handle::from_memory(bytes);
-                        svg(handle).width(20).height(20).into()
-                    }
-                };
+                        .into();
                 let label_el =
                     text(*label)
                         .size(11)
-                        .color(if is_current { LABEL_ON } else { LABEL_OFF });
+                        .style(move |theme: &Theme| iced::widget::text::Style {
+                            color: (!is_current).then_some(
+                                theme
+                                    .extended_palette()
+                                    .background
+                                    .base
+                                    .text
+                                    .scale_alpha(0.72),
+                            ),
+                        });
 
                 button(
                     row![checkmark, icon_el, label_el]
@@ -884,13 +844,7 @@ impl Ribbon {
                     dropdown_id: dd_id,
                     cmd: *cmd,
                 })
-                .style(|_: &Theme, status| button::Style {
-                    background: Some(Background::Color(match status {
-                        button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                        _ => Color::TRANSPARENT,
-                    })),
-                    ..Default::default()
-                })
+                .style(popup_row_style)
                 .width(Fill)
                 .padding([4, 10])
                 .into()
@@ -898,15 +852,7 @@ impl Ribbon {
             .collect();
 
         let panel = container(column(rows))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(PANEL_BG)),
-                border: Border {
-                    color: PANEL_BORDER,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(popup_panel_style)
             .width(Length::Fixed(190.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(open_id, 190.0, win.0);
@@ -923,15 +869,9 @@ impl Ribbon {
         // on it flips that state instead of bubbling up to the row's
         // make-active handler (#133).
         let icon_btn = |bytes: &'static [u8], msg: Message| -> Element<'_, Message> {
-            button(crate::ui::icons::raw(bytes, 14.0))
+            button(crate::ui::icons::semantic(bytes, 14.0))
                 .on_press(msg)
-                .style(|_: &Theme, status| button::Style {
-                    background: Some(Background::Color(match status {
-                        button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                        _ => Color::TRANSPARENT,
-                    })),
-                    ..Default::default()
-                })
+                .style(popup_row_style)
                 .padding([2, 4])
                 .into()
         };
@@ -952,10 +892,10 @@ impl Ribbon {
                 let name = info.name.clone();
 
                 let swatch = container(text(""))
-                    .style(move |_: &Theme| container::Style {
+                    .style(move |theme: &Theme| container::Style {
                         background: Some(Background::Color(lc)),
                         border: Border {
-                            color: SWATCH_BORDER,
+                            color: theme.extended_palette().background.strong.color,
                             width: 1.0,
                             radius: 1.0.into(),
                         },
@@ -976,29 +916,27 @@ impl Ribbon {
                     crate::ui::icons::layer_lock(ll),
                     Message::LayerToggleLock(index),
                 );
-                let checkmark: Element<'_, Message> = container(if is_active {
-                    crate::ui::icons::tinted(crate::ui::icons::CHECK, 11.0, CHECK_COLOR)
-                } else {
-                    iced::widget::Space::new().width(0).into()
-                })
-                .width(Length::Fixed(14.0))
-                .into();
+                let checkmark: Element<'_, Message> =
+                    crate::ui::icons::themed_check_cell(is_active);
                 let label =
                     text(&info.name)
                         .size(11)
-                        .color(if is_active { LABEL_ON } else { LABEL_OFF });
+                        .style(move |theme: &Theme| iced::widget::text::Style {
+                            color: (!is_active).then_some(
+                                theme
+                                    .extended_palette()
+                                    .background
+                                    .base
+                                    .text
+                                    .scale_alpha(0.72),
+                            ),
+                        });
 
                 // The swatch + label area selects the layer as active; the
                 // icon buttons above handle their own toggles.
                 let select = button(row![swatch, label].spacing(5).align_y(iced::Center))
                     .on_press(Message::RibbonLayerChanged(name))
-                    .style(|_: &Theme, status| button::Style {
-                        background: Some(Background::Color(match status {
-                            button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                            _ => Color::TRANSPARENT,
-                        })),
-                        ..Default::default()
-                    })
+                    .style(popup_row_style)
                     .width(Fill)
                     .padding([4, 4]);
 
@@ -1021,34 +959,7 @@ impl Ribbon {
         let search = iced::widget::text_input("Search layers…", &self.layer_filter)
             .on_input(Message::RibbonLayerFilterChanged)
             .size(11)
-            .padding([4, 6])
-            .style(|_: &Theme, _| iced::widget::text_input::Style {
-                background: Background::Color(Color {
-                    r: 0.10,
-                    g: 0.10,
-                    b: 0.10,
-                    a: 1.0,
-                }),
-                border: Border {
-                    color: PANEL_BORDER,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                icon: Color::WHITE,
-                placeholder: Color {
-                    r: 0.45,
-                    g: 0.45,
-                    b: 0.45,
-                    a: 1.0,
-                },
-                value: Color::WHITE,
-                selection: Color {
-                    r: 0.20,
-                    g: 0.44,
-                    b: 0.72,
-                    a: 0.5,
-                },
-            });
+            .padding([4, 6]);
         let panel = container(
             column![
                 container(search).padding([4, 4]),
@@ -1056,15 +967,7 @@ impl Ribbon {
             ]
             .spacing(2),
         )
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(PANEL_BG)),
-                border: Border {
-                    color: PANEL_BORDER,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(popup_panel_style)
             .width(Length::Fixed(220.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(LAYER_COMBO_ID, 220.0, win.0);
@@ -1113,35 +1016,29 @@ impl Ribbon {
         };
         let active = ctx.active_for(style_key).to_string();
 
-        let row_style = |_: &Theme, status: button::Status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                _ => Color::TRANSPARENT,
-            })),
-            ..Default::default()
-        };
-
         let mut rows: Vec<Element<Message>> = ctx
             .names_for(style_key)
             .iter()
             .map(|name| {
                 let is_sel = name.as_str() == active.as_str();
                 let n = name.clone();
-                let checkmark: Element<Message> = container(if is_sel {
-                    crate::ui::icons::tinted(crate::ui::icons::CHECK, 11.0, CHECK_COLOR)
-                } else {
-                    iced::widget::Space::new().width(0).into()
-                })
-                .width(Length::Fixed(14.0))
-                .into();
+                let checkmark: Element<Message> =
+                    crate::ui::icons::themed_check_cell(is_sel);
                 button(
                     row![
                         checkmark,
-                        text(name.clone()).size(11).color(if is_sel {
-                            LABEL_ON
-                        } else {
-                            LABEL_OFF
-                        }),
+                        text(name.clone())
+                            .size(11)
+                            .style(move |theme: &Theme| iced::widget::text::Style {
+                                color: (!is_sel).then_some(
+                                    theme
+                                        .extended_palette()
+                                        .background
+                                        .base
+                                        .text
+                                        .scale_alpha(0.72),
+                                ),
+                            }),
                     ]
                     .spacing(4)
                     .align_y(iced::Center),
@@ -1150,7 +1047,7 @@ impl Ribbon {
                     key: style_key,
                     name: n,
                 })
-                .style(row_style)
+                .style(popup_row_style)
                 .width(Fill)
                 .padding([4, 10])
                 .into()
@@ -1159,9 +1056,9 @@ impl Ribbon {
 
         if let Some(mgr) = manager_cmd {
             rows.push(
-                button(text("Manage…").size(11).color(LABEL_ON))
+                button(text("Manage…").size(11))
                     .on_press(Message::Command(mgr.to_string()))
-                    .style(row_style)
+                    .style(popup_row_style)
                     .width(Fill)
                     .padding([4, 10])
                     .into(),
@@ -1169,15 +1066,7 @@ impl Ribbon {
         }
 
         let panel = container(column(rows))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(PANEL_BG)),
-                border: Border {
-                    color: PANEL_BORDER,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(popup_panel_style)
             .width(Length::Fixed(LARGE_W * 2.3));
 
         let (align_right, h_pad, top) = self.dd_anchor(open_id, LARGE_W * 2.3, win.0);
@@ -1200,15 +1089,7 @@ impl Ribbon {
         );
 
         let panel = container(picker)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(PANEL_BG)),
-                border: Border {
-                    color: PANEL_BORDER,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(popup_panel_style)
             .width(Length::Fixed(200.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(PROP_COLOR_ID, 200.0, win.0);
@@ -1243,23 +1124,22 @@ impl Ribbon {
             .into_iter()
             .map(|lt| {
                 let is_cur = lt.name == *active_lt;
-                let check: Element<'_, Message> = container(if is_cur {
-                    crate::ui::icons::tinted(crate::ui::icons::CHECK, 11.0, CHECK_COLOR)
-                } else {
-                    iced::widget::Space::new().width(0).into()
-                })
-                .width(Length::Fixed(14.0))
-                .into();
+                let check: Element<'_, Message> =
+                    crate::ui::icons::themed_check_cell(is_cur);
                 let name_col = text(lt.name.clone())
                     .size(11)
-                    .color(if is_cur { LABEL_ON } else { LABEL_OFF })
+                    .style(move |theme: &Theme| iced::widget::text::Style {
+                        color: (!is_cur).then_some(
+                            theme
+                                .extended_palette()
+                                .background
+                                .base
+                                .text
+                                .scale_alpha(0.72),
+                        ),
+                    })
                     .width(Length::Fixed(90.0));
-                let art_col = text(lt.art.clone()).size(9).color(Color {
-                    r: 0.55,
-                    g: 0.55,
-                    b: 0.55,
-                    a: 1.0,
-                });
+                let art_col = text(lt.art.clone()).size(9).style(muted_text_style);
                 let name = lt.name.clone();
                 button(
                     row![check, name_col, art_col]
@@ -1267,13 +1147,7 @@ impl Ribbon {
                         .align_y(iced::Center),
                 )
                 .on_press(Message::RibbonLinetypeChanged(name))
-                .style(|_: &Theme, status| button::Style {
-                    background: Some(Background::Color(match status {
-                        button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                        _ => Color::TRANSPARENT,
-                    })),
-                    ..Default::default()
-                })
+                .style(popup_row_style)
                 .width(Fill)
                 .padding([4, 6])
                 .into()
@@ -1281,15 +1155,7 @@ impl Ribbon {
             .collect();
 
         let list = container(scrollable(column(rows)).height(Length::Fixed(200.0)))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(PANEL_BG)),
-                border: Border {
-                    color: PANEL_BORDER,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(popup_panel_style)
             .width(Length::Fixed(220.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(PROP_LINETYPE_ID, 220.0, win.0);
@@ -1308,31 +1174,29 @@ impl Ribbon {
             .map(|item| {
                 let is_cur = item.0 == active_lw;
                 let label = item.to_string();
-                let check: Element<'_, Message> = container(if is_cur {
-                    crate::ui::icons::tinted(crate::ui::icons::CHECK, 11.0, CHECK_COLOR)
-                } else {
-                    iced::widget::Space::new().width(0).into()
-                })
-                .width(Length::Fixed(14.0))
-                .into();
+                let check: Element<'_, Message> =
+                    crate::ui::icons::themed_check_cell(is_cur);
                 button(
                     row![
                         check,
                         text(label)
                             .size(11)
-                            .color(if is_cur { LABEL_ON } else { LABEL_OFF })
+                            .style(move |theme: &Theme| iced::widget::text::Style {
+                                color: (!is_cur).then_some(
+                                    theme
+                                        .extended_palette()
+                                        .background
+                                        .base
+                                        .text
+                                        .scale_alpha(0.72),
+                                ),
+                            })
                     ]
                     .spacing(5)
                     .align_y(iced::Center),
                 )
                 .on_press(Message::RibbonLineweightChanged(item.0))
-                .style(|_: &Theme, status| button::Style {
-                    background: Some(Background::Color(match status {
-                        button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                        _ => Color::TRANSPARENT,
-                    })),
-                    ..Default::default()
-                })
+                .style(popup_row_style)
                 .width(Fill)
                 .padding([4, 8])
                 .into()
@@ -1350,15 +1214,7 @@ impl Ribbon {
         win: (f32, f32),
     ) -> Option<Element<'a, Message>> {
         let panel = container(column(rows))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(PANEL_BG)),
-                border: Border {
-                    color: PANEL_BORDER,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(popup_panel_style)
             .width(Length::Fixed(width));
 
         let (align_right, h_pad, top) = self.dd_anchor(dd_id, width, win.0);
@@ -1439,7 +1295,7 @@ fn render_group<'a>(
 
     column![
         tools_el,
-        container(text(group.title).size(9).color(GROUP_LABEL)).padding([1, 4]),
+        container(text(group.title).size(9).style(muted_text_style)).padding([1, 4]),
     ]
     .align_x(iced::Center)
     .spacing(0)
@@ -1526,8 +1382,8 @@ fn collapse_button<'a>(
             column![
                 icon,
                 row![
-                    text(title.to_string()).size(9).color(GROUP_LABEL),
-                    crate::ui::icons::arrow_down(8.0, GROUP_LABEL),
+                    text(title.to_string()).size(9).style(muted_text_style),
+                    crate::ui::icons::themed_secondary_arrow_down(8.0),
                 ]
                 .spacing(3)
                 .align_y(iced::Center),
@@ -1536,22 +1392,7 @@ fn collapse_button<'a>(
             .spacing(2),
         )
         .on_press(Message::ToggleRibbonPanel(title.to_string()))
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered => Color {
-                    r: 0.25,
-                    g: 0.25,
-                    b: 0.25,
-                    a: 1.0,
-                },
-                _ => Color::TRANSPARENT,
-            })),
-            border: Border {
-                radius: 2.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
+        .style(button::subtle)
         .padding([3, 5])
         .into();
     }
@@ -1594,29 +1435,14 @@ fn collapse_button<'a>(
 
     let opener = button(
         row![
-            text(title.to_string()).size(9).color(GROUP_LABEL),
-            crate::ui::icons::arrow_down(8.0, GROUP_LABEL),
+            text(title.to_string()).size(9).style(muted_text_style),
+            crate::ui::icons::themed_secondary_arrow_down(8.0),
         ]
         .spacing(3)
         .align_y(iced::Center),
     )
     .on_press(Message::ToggleRibbonPanel(title.to_string()))
-    .style(|_: &Theme, status| button::Style {
-        background: Some(Background::Color(match status {
-            button::Status::Hovered => Color {
-                r: 0.25,
-                g: 0.25,
-                b: 0.25,
-                a: 1.0,
-            },
-            _ => Color::TRANSPARENT,
-        })),
-        border: Border {
-            radius: 2.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    .style(button::subtle)
     .padding([1, 4]);
 
     // The large face fills a fixed slot so a collapsed panel is shorter than a full

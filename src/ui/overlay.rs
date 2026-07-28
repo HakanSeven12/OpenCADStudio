@@ -292,7 +292,7 @@ struct SelectionCanvas {
     hover_locked: bool,
 }
 
-fn draw_grip_marker(frame: &mut canvas::Frame, grip: &GripMarker) {
+fn draw_grip_marker(frame: &mut canvas::Frame, grip: &GripMarker, theme: &Theme) {
     let sp = grip.pos;
     let h = crate::scene::pick::grip::GRIP_HALF_PX;
     let path = match grip.shape {
@@ -332,30 +332,13 @@ fn draw_grip_marker(frame: &mut canvas::Frame, grip: &GripMarker) {
     };
 
     if grip.is_hot {
-        frame.fill(
-            &path,
-            Color {
-                r: 1.0,
-                g: 0.15,
-                b: 0.10,
-                a: 1.0,
-            },
-        );
+        frame.fill(&path, theme.extended_palette().danger.base.color);
     } else {
-        let color = Color {
-            r: 0.10,
-            g: 0.45,
-            b: 0.90,
-            a: 1.0,
-        };
+        let palette = theme.extended_palette();
+        let color = palette.primary.base.color;
         frame.fill(
             &path,
-            Color {
-                r: 0.10,
-                g: 0.10,
-                b: 0.20,
-                a: 0.7,
-            },
+            palette.background.base.color.scale_alpha(0.7),
         );
         frame.stroke(
             &path,
@@ -442,7 +425,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         &self,
         _state: &(),
         renderer: &iced::Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: iced::Rectangle,
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
@@ -452,18 +435,13 @@ impl canvas::Program<Message> for SelectionCanvas {
         // Filled bars in the pane_grid spacing gaps, so adjacent panes read as
         // distinct viewports. Drawn first so all other overlays sit on top.
         if !self.dividers.is_empty() {
-            const DIVIDER: Color = Color {
-                r: 0.46,
-                g: 0.52,
-                b: 0.62,
-                a: 1.0,
-            };
+            let divider = theme.extended_palette().background.neutral.color;
             for d in &self.dividers {
                 let bar = canvas::Path::rectangle(
                     Point::new(d.x, d.y),
                     iced::Size::new(d.width.max(1.0), d.height.max(1.0)),
                 );
-                frame.fill(&bar, DIVIDER);
+                frame.fill(&bar, divider);
             }
         }
 
@@ -472,23 +450,13 @@ impl canvas::Program<Message> for SelectionCanvas {
         // under the cursor, and drag a translucent ghost card along the cursor
         // so the pane is visibly "moving".
         if let Some(src) = self.pane_move_rect {
-            let accent = Color {
-                r: 0.30,
-                g: 0.62,
-                b: 1.0,
-                a: 1.0,
-            };
+            let accent = theme.extended_palette().primary.base.color;
             // Source pane: dimmed + dashed-feel outline (it has been lifted).
             let src_path =
                 canvas::Path::rectangle(Point::new(src.x, src.y), iced::Size::new(src.width, src.height));
             frame.fill(
                 &src_path,
-                Color {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                    a: 0.28,
-                },
+                theme.extended_palette().background.strong.color.scale_alpha(0.28),
             );
             frame.stroke(
                 &src_path,
@@ -539,18 +507,20 @@ impl canvas::Program<Message> for SelectionCanvas {
         // Draw a selection marquee (green crossing / blue window) as a filled,
         // stroked rectangle between two canvas points. Shared by the live
         // box-selection and the preview-only window marquee (#291).
-        fn draw_marquee(frame: &mut canvas::Frame, a: Point, b: Point, crossing: bool) {
-            let (fill, stroke) = if crossing {
-                (
-                    Color { r: 0.20, g: 0.72, b: 0.44, a: 0.12 },
-                    Color { r: 0.20, g: 0.72, b: 0.44, a: 0.9 },
-                )
+        fn draw_marquee(
+            frame: &mut canvas::Frame,
+            a: Point,
+            b: Point,
+            crossing: bool,
+            theme: &Theme,
+        ) {
+            let base = if crossing {
+                theme.extended_palette().success.base.color
             } else {
-                (
-                    Color { r: 0.20, g: 0.44, b: 0.72, a: 0.12 },
-                    Color { r: 0.20, g: 0.44, b: 0.72, a: 0.9 },
-                )
+                theme.extended_palette().primary.base.color
             };
+            let fill = base.scale_alpha(0.12);
+            let stroke = base.scale_alpha(0.9);
             let x0 = a.x.min(b.x);
             let y0 = a.y.min(b.y);
             let w = (a.x - b.x).abs();
@@ -568,45 +538,21 @@ impl canvas::Program<Message> for SelectionCanvas {
         }
 
         if let (Some(a), Some(b)) = (self.selection.box_anchor, self.selection.box_current) {
-            draw_marquee(&mut frame, a, b, self.selection.box_crossing);
+            draw_marquee(&mut frame, a, b, self.selection.box_crossing, theme);
         }
         // Preview marquee for point-picked windows (STRETCH) — same look, no pick.
         if let Some((a, b, crossing)) = self.selection.preview_box {
-            draw_marquee(&mut frame, a, b, crossing);
+            draw_marquee(&mut frame, a, b, crossing, theme);
         }
 
         if self.selection.poly_active && self.selection.poly_points.len() > 1 {
-            let (fill, stroke) = if self.selection.poly_crossing {
-                (
-                    Color {
-                        r: 0.20,
-                        g: 0.72,
-                        b: 0.44,
-                        a: 0.12,
-                    },
-                    Color {
-                        r: 0.20,
-                        g: 0.72,
-                        b: 0.44,
-                        a: 0.9,
-                    },
-                )
+            let base = if self.selection.poly_crossing {
+                theme.extended_palette().success.base.color
             } else {
-                (
-                    Color {
-                        r: 0.20,
-                        g: 0.44,
-                        b: 0.72,
-                        a: 0.12,
-                    },
-                    Color {
-                        r: 0.20,
-                        g: 0.44,
-                        b: 0.72,
-                        a: 0.9,
-                    },
-                )
+                theme.extended_palette().primary.base.color
             };
+            let fill = base.scale_alpha(0.12);
+            let stroke = base.scale_alpha(0.9);
             if let Some(cur) = self.selection.last_move_pos {
                 let start = self.selection.poly_points[0];
                 let fill_path = canvas::Path::new(|p| {
@@ -667,7 +613,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             };
             frame.with_clip(grip_clip, |frame| {
                 for grip in &self.grips {
-                    draw_grip_marker(frame, grip);
+                    draw_grip_marker(frame, grip, theme);
                 }
             });
         }
@@ -962,12 +908,12 @@ impl canvas::Program<Message> for SelectionCanvas {
         // PAN mode replaces the crosshair with a hand cursor.
         if !over_viewcube && !over_divider && !self.pan_mode && !self.suppressed {
             if let Some(cp) = self.selection.last_move_pos {
-                let color = Color {
-                    r: 0.85,
-                    g: 0.85,
-                    b: 0.85,
-                    a: 0.90,
-                };
+                let color = theme
+                    .extended_palette()
+                    .background
+                    .base
+                    .text
+                    .scale_alpha(0.90);
                 let stroke = canvas::Stroke {
                     width: 1.0,
                     style: canvas::Style::Solid(color),
@@ -1010,8 +956,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                 // the hovered object sits on a locked layer (issue: locked
                 // objects are visible + snappable but not selectable/editable).
                 if self.hover_locked {
-                    let amber = Color { r: 0.96, g: 0.76, b: 0.26, a: 0.98 };
-                    let dark = Color { r: 0.12, g: 0.10, b: 0.04, a: 1.0 };
+                    let warning = theme.extended_palette().warning.base;
+                    let amber = warning.color.scale_alpha(0.98);
+                    let dark = warning.text;
                     let bx = cp.x + sq + 7.0;
                     let by = cp.y - sq - 13.0;
                     // Lock body (filled).
@@ -1058,12 +1005,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         }
 
         // ── Object Snap Tracking ─────────────────────────────────────────────
-        let track_color = Color {
-            r: 0.15,
-            g: 0.85,
-            b: 0.95,
-            a: 0.7,
-        };
+        let track_color = theme.extended_palette().primary.base.color.scale_alpha(0.7);
         // The alignment line the cursor is currently locked to — drawn at its
         // real angle from the acquired point through the lock and a little
         // beyond, dashed so it reads as a construction guide. This covers the
@@ -2142,10 +2084,12 @@ struct DynInputCanvas {
 }
 
 impl DynInputCanvas {
-    fn dotted() -> canvas::Stroke<'static> {
+    fn dotted(theme: &Theme) -> canvas::Stroke<'static> {
         canvas::Stroke {
             width: 1.0,
-            style: canvas::Style::Solid(Color { r: 0.55, g: 0.55, b: 0.58, a: 0.9 }),
+            style: canvas::Style::Solid(
+                theme.extended_palette().background.neutral.color.scale_alpha(0.9)
+            ),
             line_dash: canvas::LineDash { segments: &[2.0, 3.0], offset: 0 },
             ..Default::default()
         }
@@ -2160,13 +2104,19 @@ impl DynInputCanvas {
     }
 
     /// Draw a value box centred at `center`, clamped inside `bounds`.
-    fn draw_box(frame: &mut canvas::Frame, b: &DynBox, center: Point, bounds: iced::Rectangle) {
+    fn draw_box(
+        frame: &mut canvas::Frame,
+        b: &DynBox,
+        center: Point,
+        bounds: iced::Rectangle,
+        theme: &Theme,
+    ) {
         let content = Self::box_content(b);
         let w = (content.len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0;
         let x = (center.x - w * 0.5).clamp(0.0, (bounds.width - w).max(0.0));
         let y = (center.y - DYN_BOX_H * 0.5).clamp(0.0, (bounds.height - DYN_BOX_H).max(0.0));
         let rect = canvas::Path::rectangle(Point { x, y }, Size { width: w, height: DYN_BOX_H });
-        let (fill, border) = Self::box_colors(b);
+        let (fill, border, text) = Self::box_colors(b, theme);
         frame.fill(&rect, fill);
         frame.stroke(
             &rect,
@@ -2177,7 +2127,7 @@ impl DynInputCanvas {
         frame.fill_text(canvas::Text {
             content,
             position: Point { x: x + DYN_PAD, y: y + DYN_PAD },
-            color: Color { r: 0.92, g: 0.92, b: 0.92, a: 1.0 },
+            color: text,
             size: iced::Pixels(DYN_FONT),
             // Force Advanced shaping: the default `Auto` uses Basic shaping for
             // ASCII-only strings, which the web (wgpu/webgl) backend fails to
@@ -2188,43 +2138,48 @@ impl DynInputCanvas {
         });
     }
 
-    fn box_colors(b: &DynBox) -> (Color, Color) {
+    fn box_colors(b: &DynBox, theme: &Theme) -> (Color, Color, Color) {
+        let palette = theme.extended_palette();
         if b.active {
             (
-                Color { r: 0.12, g: 0.18, b: 0.30, a: 0.95 },
-                Color { r: 0.45, g: 0.70, b: 1.0, a: 1.0 },
+                palette.primary.weak.color,
+                palette.primary.base.color,
+                palette.primary.weak.text,
             )
         } else if b.locked {
             (
-                Color { r: 0.05, g: 0.05, b: 0.12, a: 0.9 },
-                Color { r: 0.95, g: 0.75, b: 0.30, a: 0.9 },
+                palette.warning.weak.color,
+                palette.warning.base.color,
+                palette.warning.weak.text,
             )
         } else {
             (
-                Color { r: 0.05, g: 0.05, b: 0.12, a: 0.9 },
-                Color { r: 0.35, g: 0.55, b: 0.90, a: 0.9 },
+                palette.background.weak.color,
+                palette.background.neutral.color,
+                palette.background.weak.text,
             )
         }
     }
 
     /// Prompt pill at `pos`.
-    fn draw_prompt(&self, frame: &mut canvas::Frame, pos: Point) {
+    fn draw_prompt(&self, frame: &mut canvas::Frame, pos: Point, theme: &Theme) {
         if self.prompt.is_empty() {
             return;
         }
+        let palette = theme.extended_palette();
         let pw = (self.prompt.len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0;
         let rect = canvas::Path::rectangle(pos, Size { width: pw, height: DYN_BOX_H });
-        frame.fill(&rect, Color { r: 0.10, g: 0.10, b: 0.12, a: 1.0 });
+        frame.fill(&rect, palette.background.strong.color);
         frame.stroke(
             &rect,
             canvas::Stroke::default()
-                .with_color(Color { r: 0.35, g: 0.55, b: 0.90, a: 0.9 })
+                .with_color(palette.primary.base.color.scale_alpha(0.9))
                 .with_width(1.0),
         );
         frame.fill_text(canvas::Text {
             content: self.prompt.clone(),
             position: Point { x: pos.x + DYN_PAD, y: pos.y + DYN_PAD },
-            color: Color { r: 0.70, g: 0.85, b: 0.70, a: 1.0 },
+            color: palette.background.strong.text,
             size: iced::Pixels(DYN_FONT),
             shaping: iced::advanced::text::Shaping::Advanced,
             ..Default::default()
@@ -2233,7 +2188,13 @@ impl DynInputCanvas {
 
     /// Guided layout: draw the guide geometry anchored at `base`, then place
     /// each box according to its role.
-    fn draw_guided(&self, frame: &mut canvas::Frame, bounds: iced::Rectangle, base: Point) {
+    fn draw_guided(
+        &self,
+        frame: &mut canvas::Frame,
+        bounds: iced::Rectangle,
+        base: Point,
+        theme: &Theme,
+    ) {
         let cursor_raw = self.cursor_screen;
         let (vx, vy) = (cursor_raw.x - base.x, cursor_raw.y - base.y);
         let raw_len = (vx * vx + vy * vy).sqrt().max(1.0);
@@ -2308,7 +2269,7 @@ impl DynInputCanvas {
                         y: base.y + a_ref.sin() * len,
                     });
                 });
-                frame.stroke(&href, Self::dotted());
+                frame.stroke(&href, Self::dotted(theme));
                 let arc = canvas::Path::new(|p| {
                     let steps = 48;
                     for k in 0..=steps {
@@ -2324,14 +2285,14 @@ impl DynInputCanvas {
                         }
                     }
                 });
-                frame.stroke(&arc, Self::dotted());
+                frame.stroke(&arc, Self::dotted(theme));
             }
             DynGuide::Radius => {
                 let line = canvas::Path::new(|p| {
                     p.move_to(base);
                     p.line_to(cursor);
                 });
-                frame.stroke(&line, Self::dotted());
+                frame.stroke(&line, Self::dotted(theme));
             }
             DynGuide::Perp => {
                 if let Some((end, _, _)) = perp_info {
@@ -2340,7 +2301,7 @@ impl DynInputCanvas {
                         p.move_to(base);
                         p.line_to(end);
                     });
-                    frame.stroke(&line, Self::dotted());
+                    frame.stroke(&line, Self::dotted(theme));
                 }
             }
             DynGuide::PerpDim => {
@@ -2351,14 +2312,14 @@ impl DynInputCanvas {
                         p.move_to(ob);
                         p.line_to(oe);
                     });
-                    frame.stroke(&dim, Self::dotted());
+                    frame.stroke(&dim, Self::dotted(theme));
                     let ext = canvas::Path::new(|p| {
                         p.move_to(base);
                         p.line_to(ob);
                         p.move_to(end);
                         p.line_to(oe);
                     });
-                    frame.stroke(&ext, Self::dotted());
+                    frame.stroke(&ext, Self::dotted(theme));
                 }
             }
             DynGuide::AxisDelta | DynGuide::RectSides => {
@@ -2368,7 +2329,7 @@ impl DynInputCanvas {
                     p.line_to(corner);
                     p.line_to(cursor);
                 });
-                frame.stroke(&legs, Self::dotted());
+                frame.stroke(&legs, Self::dotted(theme));
                 if self.guide == DynGuide::RectSides {
                     // Close the rectangle so both side pairs read as a box.
                     let rest = canvas::Path::new(|p| {
@@ -2376,7 +2337,7 @@ impl DynInputCanvas {
                         p.line_to(Point { x: base.x, y: cursor.y });
                         p.line_to(cursor);
                     });
-                    frame.stroke(&rest, Self::dotted());
+                    frame.stroke(&rest, Self::dotted(theme));
                 }
             }
             DynGuide::None => {}
@@ -2423,12 +2384,12 @@ impl DynInputCanvas {
                     y: base.y + dy * len * 0.5 + ny * 16.0,
                 },
             };
-            Self::draw_box(frame, b, center, bounds);
+            Self::draw_box(frame, b, center, bounds, theme);
         }
     }
 
     /// Fallback row layout near the cursor (no anchor / `None` guide).
-    fn draw_row(&self, frame: &mut canvas::Frame, bounds: iced::Rectangle) {
+    fn draw_row(&self, frame: &mut canvas::Frame, bounds: iced::Rectangle, theme: &Theme) {
         let texts: Vec<String> = self
             .boxes
             .iter()
@@ -2466,7 +2427,7 @@ impl DynInputCanvas {
             py = (by - pad - DYN_BOX_H).max(0.0);
         }
         if has_prompt {
-            self.draw_prompt(frame, Point { x: bx, y: py });
+            self.draw_prompt(frame, Point { x: bx, y: py }, theme);
         }
 
         let mut x = bx;
@@ -2474,7 +2435,7 @@ impl DynInputCanvas {
             let w = widths[i];
             let rect =
                 canvas::Path::rectangle(Point { x, y: by }, Size { width: w, height: DYN_BOX_H });
-            let (fill, border) = Self::box_colors(b);
+            let (fill, border, text) = Self::box_colors(b, theme);
             frame.fill(&rect, fill);
             frame.stroke(
                 &rect,
@@ -2485,7 +2446,7 @@ impl DynInputCanvas {
             frame.fill_text(canvas::Text {
                 content: texts[i].clone(),
                 position: Point { x: x + DYN_PAD, y: by + DYN_PAD },
-                color: Color { r: 0.92, g: 0.92, b: 0.92, a: 1.0 },
+                color: text,
                 size: iced::Pixels(DYN_FONT),
                 shaping: iced::advanced::text::Shaping::Advanced,
                 ..Default::default()
@@ -2511,7 +2472,7 @@ impl canvas::Program<Message> for DynInputCanvas {
         &self,
         _state: &(),
         renderer: &iced::Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: iced::Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
@@ -2529,15 +2490,15 @@ impl canvas::Program<Message> for DynInputCanvas {
                 if py + DYN_BOX_H > bounds.height {
                     py = (self.cursor_screen.y - DYN_BOX_H - 4.0).max(0.0);
                 }
-                self.draw_prompt(&mut frame, Point { x: px, y: py });
+                self.draw_prompt(&mut frame, Point { x: px, y: py }, theme);
             }
             return vec![frame.into_geometry()];
         }
 
         // Guided layouts need the anchor; without it fall back to a cursor row.
         match (self.guide, self.base_screen) {
-            (DynGuide::None, _) | (_, None) => self.draw_row(&mut frame, bounds),
-            (_, Some(base)) => self.draw_guided(&mut frame, bounds, base),
+            (DynGuide::None, _) | (_, None) => self.draw_row(&mut frame, bounds, theme),
+            (_, Some(base)) => self.draw_guided(&mut frame, bounds, base, theme),
         }
         vec![frame.into_geometry()]
     }

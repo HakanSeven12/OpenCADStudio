@@ -9,6 +9,7 @@ pub mod entities;
 pub mod io;
 pub mod modules;
 pub mod patreon;
+pub mod discussions;
 pub mod videos;
 pub mod plugin;
 pub mod perf;

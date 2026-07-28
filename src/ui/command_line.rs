@@ -370,11 +370,14 @@ impl CommandLine {
         let history_rows = visible[start..]
             .iter()
             .fold(column![].spacing(0), |col, entry| {
-                let color = match entry.kind {
-                    EntryKind::Command => CMD_COLOR,
-                    EntryKind::Output => OUT_COLOR,
-                    EntryKind::Error => ERR_COLOR,
-                    EntryKind::Info => INFO_COLOR,
+                let kind = entry.kind.clone();
+                let entry_text = |value: String| {
+                    text(value).size(11).style({
+                        let kind = kind.clone();
+                        move |theme: &Theme| iced::widget::text::Style {
+                            color: Some(history_color(theme, &kind)),
+                        }
+                    })
                 };
                 // The current step's prompt is the single pinned line. When the
                 // step offers options, render them as clickable buttons inline
@@ -384,31 +387,28 @@ impl CommandLine {
                 // listing is dropped here (the history log keeps the full text).
                 if entry.pinned && !self.step_options.is_empty() {
                     let shown = strip_option_listing(&entry.text);
-                    let mut r = row![text(shown).size(11).color(color)]
+                    let mut r = row![entry_text(shown)]
                         .spacing(6)
                         .align_y(iced::Center);
                     for opt in &self.step_options {
-                        let btn = button(
-                            text(opt.label.to_uppercase()).size(11).color(CMD_COLOR),
-                        )
+                        let btn = button(text(opt.label.to_uppercase()).size(11))
                         .on_press(Message::CommandOptionPick(opt.keyword.clone()))
                         .padding([1, 6])
-                        .style(|_: &Theme, status| {
-                            let bg = if matches!(status, button::Status::Hovered) {
-                                Color {
-                                    r: 0.28,
-                                    g: 0.40,
-                                    b: 0.56,
-                                    a: 1.0,
-                                }
+                        .style(|theme: &Theme, status| {
+                            let palette = theme.extended_palette();
+                            let pair = if matches!(
+                                status,
+                                button::Status::Hovered | button::Status::Pressed
+                            ) {
+                                palette.primary.weak
                             } else {
-                                INPUT_ROW_BG
+                                palette.background.weakest
                             };
                             button::Style {
-                                background: Some(Background::Color(bg)),
-                                text_color: Color::WHITE,
+                                background: Some(Background::Color(pair.color)),
+                                text_color: pair.text,
                                 border: Border {
-                                    color: BORDER_COLOR,
+                                    color: palette.background.neutral.color,
                                     width: 1.0,
                                     radius: 3.0.into(),
                                 },
@@ -419,46 +419,41 @@ impl CommandLine {
                     }
                     col.push(container(r).padding([1, 8]))
                 } else {
-                    col.push(container(text(&entry.text).size(11).color(color)).padding([1, 8]))
+                    col.push(container(entry_text(entry.text.clone())).padding([1, 8]))
                 }
             });
-        let prompt = container(text("Command:").size(11).color(PROMPT_COLOR)).padding([5, 8]);
+        let prompt = container(
+            text("Command:").size(11).style(|theme: &Theme| iced::widget::text::Style {
+                color: Some(theme.extended_palette().success.base.color),
+            }),
+        )
+        .padding([5, 8]);
         // Literal-space toggle: while active, every line behaves as if it
         // started with `>` — Space stays in the line instead of submitting, so
         // arguments with spaces (text strings, paths, `UCS Z 90` as one line)
         // can be typed. Persists until toggled off; a hand-typed leading `>`
         // lights the button too (same mode, one line only).
         let literal_active = self.literal_spaces || self.input.starts_with('>');
-        let literal_btn = button(text(">").size(11).color(if literal_active {
-            Color::WHITE
-        } else {
-            PROMPT_COLOR
-        }))
+        let literal_btn = button(text(">").size(11))
         .on_press(Message::CommandLiteralToggle)
         .padding([2, 6])
-        .style(move |_: &Theme, status| {
-            let bg = if literal_active {
-                Color {
-                    r: 0.28,
-                    g: 0.40,
-                    b: 0.56,
-                    a: 1.0,
-                }
-            } else if matches!(status, button::Status::Hovered) {
-                Color {
-                    r: 0.22,
-                    g: 0.30,
-                    b: 0.42,
-                    a: 1.0,
-                }
+        .style(move |theme: &Theme, status| {
+            let palette = theme.extended_palette();
+            let pair = if literal_active {
+                palette.primary.weak
+            } else if matches!(
+                status,
+                button::Status::Hovered | button::Status::Pressed
+            ) {
+                palette.background.weak
             } else {
-                INPUT_ROW_BG
+                palette.background.weakest
             };
             button::Style {
-                background: Some(Background::Color(bg)),
-                text_color: Color::WHITE,
+                background: Some(Background::Color(pair.color)),
+                text_color: pair.text,
                 border: Border {
-                    color: BORDER_COLOR,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 3.0.into(),
                 },
@@ -467,19 +462,10 @@ impl CommandLine {
         });
         let literal_tip = container(
             text("Literal spaces: Space stays in the line instead of running the command (same as typing a leading '>'). Stays on until toggled off.")
-                .size(11)
-                .color(Color::WHITE),
+                .size(11),
         )
         .padding([3, 6])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(PANEL_BG)),
-            border: Border {
-                color: BORDER_COLOR,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
+        .style(container::bordered_box);
         let literal_btn = tooltip(literal_btn, literal_tip, tooltip::Position::Top).gap(4);
         // While dynamic input is capturing keystrokes, the command-line
         // text field is left without an `on_input` handler so it can't
@@ -492,33 +478,6 @@ impl CommandLine {
                 .on_submit(Message::CommandSubmit);
         }
         let input = input
-            .style(|_: &Theme, _| text_input::Style {
-                background: Background::Color(INPUT_BG),
-                border: Border {
-                    color: Color {
-                        r: 0.40,
-                        g: 0.60,
-                        b: 0.90,
-                        a: 1.0,
-                    },
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                icon: Color::WHITE,
-                placeholder: Color {
-                    r: 0.4,
-                    g: 0.4,
-                    b: 0.4,
-                    a: 1.0,
-                },
-                value: Color::WHITE,
-                selection: Color {
-                    r: 0.20,
-                    g: 0.44,
-                    b: 0.72,
-                    a: 0.5,
-                },
-            })
             .size(11)
             .padding([4, 6]);
         // Autocomplete suggestions panel, shown above the input row
@@ -537,31 +496,25 @@ impl CommandLine {
                 let mut col = column![].spacing(0).width(Length::Fill);
                 for (idx, cmd) in matches.iter().enumerate() {
                     let is_selected = cursor == idx;
-                    let row = button(text(cmd.clone()).size(11).color(CMD_COLOR))
+                    let row = button(text(cmd.clone()).size(11))
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)
                         .padding([2, 8])
-                        .style(move |_: &Theme, status| {
-                            let bg = if is_selected {
-                                Color {
-                                    r: 0.28,
-                                    g: 0.40,
-                                    b: 0.56,
-                                    a: 1.0,
-                                }
-                            } else if matches!(status, button::Status::Hovered) {
-                                Color {
-                                    r: 0.22,
-                                    g: 0.30,
-                                    b: 0.42,
-                                    a: 1.0,
-                                }
+                        .style(move |theme: &Theme, status| {
+                            let palette = theme.extended_palette();
+                            let pair = if is_selected {
+                                palette.primary.weak
+                            } else if matches!(
+                                status,
+                                button::Status::Hovered | button::Status::Pressed
+                            ) {
+                                palette.background.weak
                             } else {
-                                PANEL_BG
+                                palette.background.base
                             };
                             button::Style {
-                                background: Some(Background::Color(bg)),
-                                text_color: Color::WHITE,
+                                background: Some(Background::Color(pair.color)),
+                                text_color: pair.text,
                                 border: Border::default(),
                                 ..Default::default()
                             }
@@ -569,15 +522,7 @@ impl CommandLine {
                     col = col.push(row);
                 }
                 container(col)
-                    .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(PANEL_BG)),
-                        border: Border {
-                            color: BORDER_COLOR,
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    })
+                    .style(container::bordered_box)
                     .width(Length::Fill)
                     .into()
             }
@@ -590,22 +535,13 @@ impl CommandLine {
         // user can recover anything that has already faded off the
         // overlay.
         let dropdown_icon = if self.history_open {
-            crate::ui::icons::arrow_down(11.0, PROMPT_COLOR)
+            crate::ui::icons::themed_arrow_down(11.0)
         } else {
-            crate::ui::icons::arrow_right(11.0, PROMPT_COLOR)
+            crate::ui::icons::themed_arrow_right(11.0)
         };
         let dropdown_btn = button(dropdown_icon)
             .on_press(Message::CommandHistoryToggle)
-        .style(|_: &Theme, _status| button::Style {
-            background: Some(Background::Color(INPUT_ROW_BG)),
-            text_color: Color::WHITE,
-            border: Border {
-                color: BORDER_COLOR,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(button::subtle)
         .padding([2, 6]);
         let input_row = row![prompt, literal_btn, input, dropdown_btn]
             .spacing(4)
@@ -625,23 +561,21 @@ impl CommandLine {
                 .size(11)
                 .padding([2, 8])
                 .max_height(180.0)
-                .style(|_: &Theme, _status| text_editor::Style {
-                    background: Background::Color(PANEL_BG),
-                    border: Border::default(),
-                    placeholder: OUT_COLOR,
-                    value: CMD_COLOR,
-                    selection: Color {
-                        r: 0.20,
-                        g: 0.44,
-                        b: 0.72,
-                        a: 0.5,
-                    },
+                .style(|theme: &Theme, _status| {
+                    let palette = theme.extended_palette();
+                    text_editor::Style {
+                        background: Background::Color(palette.background.base.color),
+                        border: Border::default(),
+                        placeholder: palette.background.base.text.scale_alpha(0.72),
+                        value: palette.background.base.text,
+                        selection: palette.primary.base.color.scale_alpha(0.5),
+                    }
                 });
             // Header strip: a Copy-all and a Clear button pinned above the log.
             let copy_btn = button(
                 row![
-                    crate::ui::icons::tinted(crate::ui::icons::COPY, 11.0, PROMPT_COLOR),
-                    text("Copy").size(11).color(CMD_COLOR),
+                    crate::ui::icons::themed_success(crate::ui::icons::COPY, 11.0),
+                    text("Copy").size(11),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -651,8 +585,8 @@ impl CommandLine {
             .padding([2, 6]);
             let clear_btn = button(
                 row![
-                    crate::ui::icons::tinted(crate::ui::icons::TRASH, 11.0, ERR_COLOR),
-                    text("Clear").size(11).color(CMD_COLOR),
+                    crate::ui::icons::themed_warning(crate::ui::icons::TRASH, 11.0),
+                    text("Clear").size(11),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -668,15 +602,7 @@ impl CommandLine {
             .width(Length::Fill)
             .padding([2, 6]);
             let panel = container(column![header, log])
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(PANEL_BG)),
-                    border: Border {
-                        color: BORDER_COLOR,
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
+                .style(container::bordered_box)
                 .width(Length::Fill)
                 .padding([4, 0]);
             opaque(panel).into()
@@ -688,35 +614,43 @@ impl CommandLine {
             autocomplete,
             dropdown,
             container(history_rows)
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(HISTORY_BG)),
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(
+                        theme.extended_palette().background.base.color,
+                    )),
                     ..Default::default()
                 })
                 .width(Length::Fill)
                 .padding([2, 0]),
             container(input_row)
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(INPUT_ROW_BG)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.weakest.color)),
                     border: Border {
-                        color: BORDER_COLOR,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 3.0.into()
                     },
                     ..Default::default()
+                    }
                 })
                 .width(Length::Fill)
                 // Match the drawing tab bar / status bar height, and vertically
                 // centre the prompt/input/dropdown within it (issue #216).
                 .center_y(Length::Fixed(30.0)),
         ])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(PANEL_BG)),
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(palette.background.base.color)),
             border: Border {
-                color: BORDER_COLOR,
+                color: palette.background.neutral.color,
                 width: 1.0,
                 radius: 4.0.into(),
             },
             ..Default::default()
+            }
         })
         .width(Length::Fixed(720.0))
         .into()
@@ -780,22 +714,18 @@ pub fn ranked_matches(
 
 /// Flat button style for the history dropdown's Copy / Clear strip: a subtle
 /// filled pill that brightens on hover.
-fn header_btn_style(_: &Theme, status: button::Status) -> button::Style {
-    let bg = if matches!(status, button::Status::Hovered) {
-        Color {
-            r: 0.24,
-            g: 0.24,
-            b: 0.24,
-            a: 1.0,
-        }
+fn header_btn_style(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let pair = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+        palette.background.weak
     } else {
-        INPUT_ROW_BG
+        palette.background.weakest
     };
     button::Style {
-        background: Some(Background::Color(bg)),
-        text_color: Color::WHITE,
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
         border: Border {
-            color: BORDER_COLOR,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 3.0.into(),
         },
@@ -803,66 +733,15 @@ fn header_btn_style(_: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-const PANEL_BG: Color = Color {
-    r: 0.15,
-    g: 0.15,
-    b: 0.15,
-    a: 1.0,
-};
-const HISTORY_BG: Color = Color {
-    r: 0.15,
-    g: 0.15,
-    b: 0.15,
-    a: 1.0,
-};
-const INPUT_ROW_BG: Color = Color {
-    r: 0.18,
-    g: 0.18,
-    b: 0.18,
-    a: 1.0,
-};
-const INPUT_BG: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
-const BORDER_COLOR: Color = Color {
-    r: 0.30,
-    g: 0.30,
-    b: 0.30,
-    a: 1.0,
-};
-const PROMPT_COLOR: Color = Color {
-    r: 0.55,
-    g: 0.78,
-    b: 0.55,
-    a: 1.0,
-};
-const CMD_COLOR: Color = Color {
-    r: 0.80,
-    g: 0.80,
-    b: 0.80,
-    a: 1.0,
-};
-const OUT_COLOR: Color = Color {
-    r: 0.65,
-    g: 0.65,
-    b: 0.65,
-    a: 1.0,
-};
-const ERR_COLOR: Color = Color {
-    r: 0.90,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-const INFO_COLOR: Color = Color {
-    r: 0.50,
-    g: 0.70,
-    b: 0.90,
-    a: 1.0,
-};
+fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
+    let palette = theme.extended_palette();
+    match kind {
+        EntryKind::Command => palette.background.base.text,
+        EntryKind::Output => palette.background.base.text.scale_alpha(0.72),
+        EntryKind::Error => palette.danger.base.color,
+        EntryKind::Info => palette.primary.base.color,
+    }
+}
 
 #[cfg(test)]
 mod tests {

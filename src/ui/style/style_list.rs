@@ -10,32 +10,13 @@
 
 use crate::app::{Message, StyleKind};
 use iced::widget::{container, mouse_area, row, text, text_input};
-use iced::{Background, Color, Element, Fill, Theme};
+use iced::{Background, Element, Fill, Theme};
 
 /// Shared id for the inline rename field, so the rename-start handler can focus
 /// it the moment the row turns editable.
 pub fn rename_input_id() -> iced::widget::Id {
     iced::widget::Id::new("style-rename-input")
 }
-
-const TEXT: Color = Color {
-    r: 0.88,
-    g: 0.88,
-    b: 0.88,
-    a: 1.0,
-};
-const ACTIVE: Color = Color {
-    r: 0.20,
-    g: 0.40,
-    b: 0.70,
-    a: 1.0,
-};
-const CURRENT_CHECK: Color = Color {
-    r: 0.30,
-    g: 0.82,
-    b: 0.36,
-    a: 1.0,
-};
 
 /// One row of the style list. Renders an editable `text_input` when `name` is
 /// the style being renamed (`rename_active`), otherwise a selectable row whose
@@ -61,16 +42,19 @@ pub fn item<'a>(
     } else {
         // Fixed-width ✓ column keeps every name left-aligned whether or not the
         // row is current.
-        let check = crate::ui::icons::check_cell(is_current, CURRENT_CHECK);
-        let label = row![check, text(name.to_string()).size(11).color(TEXT)]
+        let check = crate::ui::icons::themed_check_cell(is_current);
+        let label = row![check, text(name.to_string()).size(11)]
             .align_y(iced::Center);
         let cell = container(label)
             .padding([4, 8])
             .width(Fill)
-            .style(move |_: &Theme| container::Style {
-                background: is_selected.then_some(Background::Color(ACTIVE)),
-                text_color: Some(TEXT),
+            .style(move |theme: &Theme| {
+                let pair = theme.extended_palette().primary.strong;
+                container::Style {
+                background: is_selected.then_some(Background::Color(pair.color)),
+                text_color: is_selected.then_some(pair.text),
                 ..Default::default()
+                }
             });
         mouse_area(cell)
             .on_press(on_select)

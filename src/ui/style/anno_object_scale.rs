@@ -7,16 +7,9 @@
 //! the style / scale managers' frame so it looks consistent.
 
 use crate::app::Message;
-use crate::ui::style::style_manager::{hdivider, tb_button, BG, BORDER, DIM, LIST, TB, TEXT};
+use crate::ui::style::style_manager::{hdivider, muted_text_style, tb_button};
 use iced::widget::{column, container, mouse_area, row, scrollable, text, Space};
-use iced::{Background, Border, Color, Element, Fill, Theme};
-
-const MEMBER_CHECK: Color = Color {
-    r: 0.30,
-    g: 0.82,
-    b: 0.36,
-    a: 1.0,
-};
+use iced::{Background, Border, Element, Fill, Theme};
 
 /// `scales` is `(name, "paper:drawing" ratio, is_member)`. Every label is cloned
 /// into the widget tree, so the returned element borrows nothing from the args.
@@ -26,17 +19,17 @@ pub fn view_window(
 ) -> Element<'static, Message> {
     let toolbar = container(
         row![
-            text(format!("Object: {object_label}"))
-                .size(11)
-                .color(TEXT),
+            text(format!("Object: {object_label}")).size(11),
             Space::new().width(Fill),
             tb_button("Close", Message::CloseModal, true),
         ]
         .spacing(4)
         .align_y(iced::Center),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(TB)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.weak.color
+        )),
         ..Default::default()
     })
     .width(Fill)
@@ -45,21 +38,17 @@ pub fn view_window(
     let rows: Vec<Element<'_, Message>> = scales
         .iter()
         .map(|(name, ratio, member)| {
-            let check = crate::ui::icons::check_cell(*member, MEMBER_CHECK);
+            let check = crate::ui::icons::themed_check_cell(*member);
             let label = row![
                 check,
-                text(name.clone()).size(11).color(TEXT).width(Fill),
-                text(ratio.clone()).size(10).color(DIM),
+                text(name.clone()).size(11).width(Fill),
+                text(ratio.clone()).size(10).style(muted_text_style),
             ]
             .spacing(4)
             .align_y(iced::Center);
             let cell = container(label)
                 .padding([4, 8])
-                .width(Fill)
-                .style(move |_: &Theme| container::Style {
-                    text_color: Some(TEXT),
-                    ..Default::default()
-                });
+                .width(Fill);
             mouse_area(cell)
                 .on_press(Message::AnnoObjectScaleToggle(name.clone()))
                 .into()
@@ -67,14 +56,17 @@ pub fn view_window(
         .collect();
 
     let list = container(scrollable(column(rows).spacing(1)).height(Fill))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(LIST)),
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(palette.background.weak.color)),
             border: Border {
-                color: BORDER,
+                color: palette.background.neutral.color,
                 width: 1.0,
                 radius: 3.0.into(),
             },
             ..Default::default()
+            }
         })
         .width(Fill)
         .height(Fill)
@@ -84,7 +76,7 @@ pub fn view_window(
         column![
             text("Click a scale to add or remove the object's representation for it.")
                 .size(10)
-                .color(DIM),
+                .style(muted_text_style),
             list,
         ]
         .spacing(6)
@@ -95,8 +87,10 @@ pub fn view_window(
     .padding(12);
 
     container(column![toolbar, hdivider(), body])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color
+            )),
             ..Default::default()
         })
         .width(Fill)

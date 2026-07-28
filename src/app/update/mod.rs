@@ -930,9 +930,7 @@ impl OpenCADStudio {
             }
 
             Message::TabSwitch(idx) => {
-                self.doc_tab_context_menu = None;
                 self.layout_list_open = false;
-                self.layout_context_menu = None;
                 self.layout_rename_state = None;
                 if idx < self.tabs.len() {
                     if idx != self.active_tab {
@@ -991,35 +989,14 @@ impl OpenCADStudio {
                 if let Some(index) = self.tabs.iter().position(|tab| tab.id == active_id) {
                     self.active_tab = index;
                 }
-                self.doc_tab_context_menu = None;
                 Task::none()
             }
 
-            Message::TabClose(idx) => {
-                self.doc_tab_context_menu = None;
-                self.on_tab_close(idx)
-            }
+            Message::TabClose(idx) => self.on_tab_close(idx),
 
-            Message::DocTabContextMenu(idx) => {
-                if self.tabs.get(idx).is_some_and(|tab| !tab.is_start) {
-                    self.layout_context_menu = None;
-                    self.doc_tab_context_menu = Some(idx);
-                }
-                Task::none()
-            }
-
-            Message::DocTabContextMenuClose => {
-                self.doc_tab_context_menu = None;
-                Task::none()
-            }
-
-            Message::DocTabSaveAll => {
-                self.doc_tab_context_menu = None;
-                self.dispatch_command("SAVEALL")
-            }
+            Message::DocTabSaveAll => self.dispatch_command("SAVEALL"),
 
             Message::DocTabCloseAll => {
-                self.doc_tab_context_menu = None;
                 let ids = self
                     .tabs
                     .iter()
@@ -1030,7 +1007,6 @@ impl OpenCADStudio {
             }
 
             Message::DocTabCloseOthers(idx) => {
-                self.doc_tab_context_menu = None;
                 let Some(keep_id) = self.tabs.get(idx).filter(|tab| !tab.is_start).map(|t| t.id)
                 else {
                     return Task::none();
@@ -1046,7 +1022,6 @@ impl OpenCADStudio {
             }
 
             Message::DocTabCopyFullPath(idx) => {
-                self.doc_tab_context_menu = None;
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     let Some(path) = self.tabs.get(idx).and_then(|tab| tab.current_path.clone())
@@ -1078,7 +1053,6 @@ impl OpenCADStudio {
             }
 
             Message::DocTabOpenFileLocation(idx) => {
-                self.doc_tab_context_menu = None;
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     let Some(path) = self.tabs.get(idx).and_then(|tab| tab.current_path.clone())
@@ -2098,12 +2072,9 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::TogglePolarPopup => {
-                self.polar_popup_open ^= true;
-                if self.polar_popup_open {
-                    // Start the custom field empty each time; picking a preset or
-                    // typing a value is what actually enables polar tracking.
-                    self.polar_custom_input.clear();
-                }
+                // MenuBar owns its open state. Reset only the transient field
+                // whenever the caret starts a fresh interaction.
+                self.polar_custom_input.clear();
                 Task::none()
             }
             Message::ClosePolarPopup => {
@@ -3386,7 +3357,6 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, "LAYOUT REORDER");
                 self.tabs[i].scene.set_layout_tab_order(&paper);
                 self.tabs[i].dirty = true;
-                self.layout_context_menu = None;
                 Task::none()
             }
 
@@ -3396,7 +3366,6 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 self.push_undo_snapshot(i, "LAYOUT DEL");
                 if self.tabs[i].scene.delete_layout(&name) {
-                    self.layout_context_menu = None;
                     self.layout_rename_state = None;
                     self.command_line
                         .push_output(&format!("Layout \"{name}\" silindi"));
@@ -3408,7 +3377,6 @@ impl OpenCADStudio {
             Message::LayoutRenameStart(name) => {
                 if name != "Model" {
                     self.layout_rename_state = Some((name.clone(), name));
-                    self.layout_context_menu = None;
                     // Focus the inline field so the user types into it
                     // directly instead of the command line (issue #86).
                     return iced::widget::operation::focus(iced::widget::Id::new(
@@ -3430,26 +3398,6 @@ impl OpenCADStudio {
 
             Message::LayoutRenameCancel => {
                 self.layout_rename_state = None;
-                Task::none()
-            }
-
-            Message::LayoutContextMenu(name) => {
-                // No menu on the transient BEDIT block tab: Rename/Delete are
-                // layout operations and don't apply to it.
-                let is_block_tab = self.tabs[self.active_tab]
-                    .block_edit
-                    .as_ref()
-                    .map(|be| be.block_name == name)
-                    .unwrap_or(false);
-                if name != "Model" && !is_block_tab {
-                    self.doc_tab_context_menu = None;
-                    self.layout_context_menu = Some(name);
-                }
-                Task::none()
-            }
-
-            Message::LayoutContextMenuClose => {
-                self.layout_context_menu = None;
                 Task::none()
             }
 
@@ -3603,7 +3551,12 @@ impl OpenCADStudio {
             }
 
             Message::SetTheme(theme) => {
+                self.ui_theme.name = theme.to_string();
+                self.ui_theme.palette =
+                    crate::app::config::UiThemePalette::from_iced(theme.palette());
+                self.theme_color_inputs = self.ui_theme.palette.hex_values();
                 self.active_theme = theme;
+                self.persist_settings_if_changed();
                 Task::none()
             }
 
@@ -3672,6 +3625,37 @@ impl OpenCADStudio {
             Message::DefaultSaveFormatChanged(format) => {
                 self.default_save_format =
                     crate::io::canonical_save_format(&format).to_string();
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::OptionsThemeChanged(name) => {
+                self.ui_theme.name = name;
+                if let Some(theme) =
+                    crate::app::config::builtin_theme(&self.ui_theme.name)
+                {
+                    self.ui_theme.palette =
+                        crate::app::config::UiThemePalette::from_iced(theme.palette());
+                    self.theme_color_inputs = self.ui_theme.palette.hex_values();
+                    self.active_theme = theme;
+                } else {
+                    self.ui_theme.name = "Custom".to_string();
+                    self.active_theme = self.ui_theme.to_iced();
+                }
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::OptionsThemeColorChanged(index, value) => {
+                if index >= self.theme_color_inputs.len() {
+                    return Task::none();
+                }
+                self.theme_color_inputs[index] = value.clone();
+                if self.ui_theme.palette.set_hex(index, &value) {
+                    self.ui_theme.name = "Custom".to_string();
+                    self.active_theme = self.ui_theme.to_iced();
+                    self.persist_settings_if_changed();
+                }
                 Task::none()
             }
 
@@ -3975,6 +3959,16 @@ impl OpenCADStudio {
                 self.videos_loading = false;
                 Task::none()
             }
+            Message::DiscussionsFetched(Ok(discussions)) => {
+                self.discussions_loading = false;
+                self.discussions = discussions;
+                Task::none()
+            }
+            // Offline: keep the native cache (web leaves the panel empty).
+            Message::DiscussionsFetched(Err(_)) => {
+                self.discussions_loading = false;
+                Task::none()
+            }
             Message::RecentThumbsLoaded(thumbs) => {
                 for (path, handle) in thumbs {
                     self.recent_thumbs.insert(path, handle);
@@ -4169,6 +4163,13 @@ impl OpenCADStudio {
             }
 
             Message::Noop => Task::none(),
+            Message::StatusMenuTooltipHidden(hidden) => {
+                self.status_menu_tooltip_hidden = hidden;
+                if hidden {
+                    self.polar_custom_input.clear();
+                }
+                Task::none()
+            }
 
             // ── Unsaved-changes dialog ────────────────────────────────────
             Message::UnsavedDialogCancel => {

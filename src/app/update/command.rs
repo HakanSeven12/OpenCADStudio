@@ -561,7 +561,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.refresh_properties();
                     return Task::none();
                 }
-                // Cancel layout rename / context menus first, then fall through.
+                // Cancel layout rename first, then fall through.
                 let i_e = self.active_tab;
                 if self.qselect.take().is_some() {
                     return Task::none();
@@ -573,10 +573,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         return Task::none();
                     }
                 }
-                if self.layout_rename_state.take().is_some()
-                    || self.layout_context_menu.take().is_some()
-                    || self.doc_tab_context_menu.take().is_some()
-                {
+                if self.layout_rename_state.take().is_some() {
                     return Task::none();
                 }
                 // Typed text on the command line cancels first — one

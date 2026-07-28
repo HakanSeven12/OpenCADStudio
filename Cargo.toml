@@ -1,6 +1,6 @@
 [package]
 name = "OpenCADStudio"
-version = "0.8.8"
+version = "0.8.9"
 edition = "2021"
 build = "build.rs"
 
@@ -48,6 +48,7 @@ serde = { version = "1", features = ["derive"] }
 # the binary self-contained on every platform.
 lzma-sys = { version = "0.1", features = ["static"], optional = true }
 iced = { version = "0.14", features = ["image", "svg", "advanced", "canvas", "smol"] }
+iced_aw = { version = "0.14.1", features = ["menu"] }
 bytemuck = { version = "1.25", features = ["derive"] }
 glam = { version = "0.33", features = ["bytemuck"] }
 truck-modeling = "0.6"

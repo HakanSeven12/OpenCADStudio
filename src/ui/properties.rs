@@ -208,9 +208,11 @@ impl PropertiesPanel {
 
     pub fn view(&self) -> Element<'_, Message> {
         // ── Header ──────────────────────────────────────────────────────────
-        let header = container(text("Properties").size(12).color(Color::WHITE))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(HEADER_BG)),
+        let header = container(text("Properties").size(12))
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    theme.extended_palette().background.weak.color,
+                )),
                 ..Default::default()
             })
             .width(Length::Fill)
@@ -218,7 +220,10 @@ impl PropertiesPanel {
 
         // ── Title bar (entity type / "No Selection") ─────────────────────
         let title_content: Element<'_, Message> = if self.selection_groups.is_empty() {
-            text(crate::ui::text_util::elide(&self.title, 34)).size(FONT_SZ).color(SECTION_LABEL).into()
+            text(crate::ui::text_util::elide(&self.title, 34))
+                .size(FONT_SZ)
+                .style(muted_text_style)
+                .into()
         } else {
             combo_box(
                 &self.selection_group_combo,
@@ -235,14 +240,17 @@ impl PropertiesPanel {
         };
 
         let title_bar = container(title_content)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(SECTION_BG)),
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                background: Some(Background::Color(palette.background.weakest.color)),
                 border: Border {
-                    color: BORDER,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
+                }
             })
             .width(Length::Fill)
             .padding([4, 10]);
@@ -252,7 +260,7 @@ impl PropertiesPanel {
             container(
                 text("Select an object to view properties")
                     .size(10)
-                    .color(HINT_COLOR),
+                    .style(hint_text_style),
             )
             .padding([10, 10])
             .into()
@@ -265,14 +273,17 @@ impl PropertiesPanel {
         };
 
         container(column![header, title_bar, content])
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(PANEL_BG)),
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                background: Some(Background::Color(palette.background.base.color)),
                 border: Border {
-                    color: BORDER,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
+                }
             })
             .width(250)
             .height(Length::Fill)
@@ -286,15 +297,22 @@ impl PropertiesPanel {
         if self.sections.is_empty() {
             return None;
         }
-        let title = container(text(crate::ui::text_util::elide(&self.title, 34)).size(FONT_SZ).color(SECTION_LABEL))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(SECTION_BG)),
+        let title = container(
+            text(crate::ui::text_util::elide(&self.title, 34))
+                .size(FONT_SZ)
+                .style(muted_text_style),
+        )
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                background: Some(Background::Color(palette.background.weakest.color)),
                 border: Border {
-                    color: BORDER,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
+                }
             })
             .width(Length::Fill)
             .padding([4, 10]);
@@ -306,14 +324,17 @@ impl PropertiesPanel {
 
         Some(
             container(col)
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(PANEL_BG)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.base.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 3.0.into(),
                     },
                     ..Default::default()
+                    }
                 })
                 .width(230)
                 .into(),
@@ -324,15 +345,18 @@ impl PropertiesPanel {
 
     fn render_section<'a>(&'a self, section: &'a PropSection) -> Element<'a, Message> {
         // Section header
-        let hdr = container(text(&section.title).size(10).color(Color::WHITE))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(SECTION_HDR_BG)),
+        let hdr = container(text(&section.title).size(10))
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                background: Some(Background::Color(palette.background.weak.color)),
                 border: Border {
-                    color: BORDER,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
+                }
             })
             .width(Length::Fill)
             .padding([3, 8]);
@@ -508,31 +532,25 @@ impl PropertiesPanel {
     fn render_color_varies_row<'a>(&'a self, label: &'a str) -> Element<'a, Message> {
         let color_btn = button(
             row![
-                container(text("?").size(10).color(VALUE_COLOR))
-                    .style(move |_: &Theme| container::Style {
-                        background: Some(Background::Color(Color {
-                            r: 0.32,
-                            g: 0.32,
-                            b: 0.32,
-                            a: 1.0,
-                        })),
+                container(text("?").size(10))
+                    .style(move |theme: &Theme| {
+                        let palette = theme.extended_palette();
+                        container::Style {
+                        background: Some(Background::Color(palette.background.strong.color)),
                         border: Border {
-                            color: Color {
-                                r: 0.0,
-                                g: 0.0,
-                                b: 0.0,
-                                a: 0.5
-                            },
+                            color: palette.background.neutral.color,
                             width: 1.0,
                             radius: 2.0.into()
                         },
+                        text_color: Some(palette.background.strong.text),
                         ..Default::default()
+                        }
                     })
                     .width(SWATCH_SZ)
                     .height(SWATCH_SZ)
                     .align_x(iced::Center)
                     .align_y(iced::Center),
-                text(VARIES_LABEL).size(FONT_SZ).color(VALUE_COLOR),
+                text(VARIES_LABEL).size(FONT_SZ),
             ]
             .spacing(4)
             .align_y(iced::Center),
@@ -724,7 +742,7 @@ impl PropertiesPanel {
             .on_input(move |v| Message::PropGeomInput { field, value: v })
             .on_submit(Message::PropGeomCommit(field))
             .size(FONT_SZ)
-            .style(|_: &Theme, status| text_input::Style {
+            .style(|theme: &Theme, status| text_input::Style {
                 // The wrapping container draws the border; keep the input flat
                 // so field + caret read as one control.
                 border: Border {
@@ -732,33 +750,32 @@ impl PropertiesPanel {
                     width: 0.0,
                     radius: 0.0.into(),
                 },
-                ..text_input_style(&Theme::Dark, status)
+                ..text_input_style(theme, status)
             })
             .padding([3, 6])
             .width(Length::Fill);
         let caret = button(
-            container(crate::ui::icons::arrow_toggle(
-                self.edit_choice_open,
-                FONT_SZ,
-                VALUE_COLOR,
-            ))
+            container(if self.edit_choice_open {
+                crate::ui::icons::themed_arrow_up(FONT_SZ)
+            } else {
+                crate::ui::icons::themed_arrow_down(FONT_SZ)
+            })
             .height(Length::Fill)
             .align_y(iced::Center),
         )
         .on_press(Message::PropEditChoiceToggle)
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered | button::Status::Pressed => Color {
-                    r: 0.28,
-                    g: 0.28,
-                    b: 0.28,
-                    a: 1.0,
-                },
-                _ => VALUE_BG,
-            })),
-            text_color: VALUE_COLOR,
+        .style(|theme: &Theme, status| {
+            let palette = theme.extended_palette();
+            let pair = match status {
+                button::Status::Hovered | button::Status::Pressed => palette.background.weak,
+                _ => palette.background.base,
+            };
+            button::Style {
+            background: Some(Background::Color(pair.color)),
+            text_color: pair.text,
             border: Border::default(),
             ..Default::default()
+            }
         })
         .padding(Padding {
             top: 0.0,
@@ -768,14 +785,17 @@ impl PropertiesPanel {
         })
         .height(Length::Fixed(ROW_H - 6.0));
         let head = container(row![input, caret].align_y(iced::Center))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(VALUE_BG)),
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                background: Some(Background::Color(palette.background.base.color)),
                 border: Border {
-                    color: BORDER,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 2.0.into(),
                 },
                 ..Default::default()
+                }
             })
             .width(Length::Fill);
 
@@ -794,39 +814,15 @@ impl PropertiesPanel {
             }
             let value = opt.clone();
             list = list.push(
-                button(text(opt.as_str()).size(FONT_SZ).color(VALUE_COLOR))
+                button(text(opt.as_str()).size(FONT_SZ))
                     .on_press(Message::PropGeomChoiceChanged { field, value })
-                    .style(|_: &Theme, status| button::Style {
-                        background: matches!(status, button::Status::Hovered).then_some(
-                            Background::Color(Color {
-                                r: 0.25,
-                                g: 0.45,
-                                b: 0.70,
-                                a: 1.0,
-                            }),
-                        ),
-                        text_color: VALUE_COLOR,
-                        ..Default::default()
-                    })
+                    .style(button::subtle)
                     .padding([2, 6])
                     .width(Length::Fill),
             );
         }
         let popup = container(scrollable(list).height(Length::Shrink))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color {
-                    r: 0.17,
-                    g: 0.17,
-                    b: 0.17,
-                    a: 1.0,
-                })),
-                border: Border {
-                    color: BORDER,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(container::bordered_box)
             .padding(2)
             .width(200)
             .max_height(220.0);
@@ -940,13 +936,13 @@ pub fn color_picker_dropdown<'a>(
             r.push(
                 button(text("").width(18).height(18))
                     .on_press(msg)
-                    .style(move |_: &Theme, status| button::Style {
+                    .style(move |theme: &Theme, status| button::Style {
                         background: Some(Background::Color(bg)),
                         border: Border {
                             color: if matches!(status, button::Status::Hovered) {
-                                Color::WHITE
+                                theme.extended_palette().primary.base.color
                             } else {
-                                Color::BLACK
+                                theme.extended_palette().background.neutral.color
                             },
                             width: if matches!(status, button::Status::Hovered) {
                                 1.5
@@ -955,6 +951,7 @@ pub fn color_picker_dropdown<'a>(
                             },
                             radius: 2.0.into(),
                         },
+                        text_color: theme.extended_palette().background.base.text,
                         ..Default::default()
                     })
                     .padding(0),
@@ -965,20 +962,20 @@ pub fn color_picker_dropdown<'a>(
     // "More Colors…" toggle button
     let more_btn = button(
         row![
-            crate::ui::icons::arrow_toggle(palette_open, 9.0, HINT_COLOR),
+            if palette_open {
+                crate::ui::icons::themed_arrow_up(9.0)
+            } else {
+                crate::ui::icons::themed_arrow_down(9.0)
+            },
             text(if palette_open { "Less" } else { "More Colors…" })
                 .size(10)
-                .color(HINT_COLOR),
+                .style(hint_text_style),
         ]
         .spacing(4)
         .align_y(iced::Center),
     )
     .on_press(palette_toggle_msg)
-    .style(|_: &Theme, _| button::Style {
-        background: Some(Background::Color(PICKER_BG)),
-        text_color: HINT_COLOR,
-        ..Default::default()
-    })
+    .style(button::subtle)
     .padding([2, 6])
     .width(Length::Fill);
 
@@ -989,14 +986,17 @@ pub fn color_picker_dropdown<'a>(
     };
 
     let mut col = column![container(inner)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(PICKER_BG)),
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(palette.background.base.color)),
             border: Border {
-                color: BORDER,
+                color: palette.background.neutral.color,
                 width: 1.0,
                 radius: 0.0.into()
             },
             ..Default::default()
+            }
         })
         .padding([6, 8])
         .width(Length::Fill)]
@@ -1019,18 +1019,13 @@ pub fn color_picker_dropdown<'a>(
                 r = r.push(
                     button(text("").width(12).height(12))
                         .on_press(msg)
-                        .style(move |_: &Theme, status| button::Style {
+                        .style(move |theme: &Theme, status| button::Style {
                             background: Some(Background::Color(bg)),
                             border: Border {
                                 color: if matches!(status, button::Status::Hovered) {
-                                    Color::WHITE
+                                    theme.extended_palette().primary.base.color
                                 } else {
-                                    Color {
-                                        r: 0.0,
-                                        g: 0.0,
-                                        b: 0.0,
-                                        a: 0.4,
-                                    }
+                                    theme.extended_palette().background.neutral.color
                                 },
                                 width: if matches!(status, button::Status::Hovered) {
                                     1.5
@@ -1039,6 +1034,7 @@ pub fn color_picker_dropdown<'a>(
                                 },
                                 radius: 1.0.into(),
                             },
+                            text_color: theme.extended_palette().background.base.text,
                             ..Default::default()
                         })
                         .padding(0),
@@ -1049,14 +1045,17 @@ pub fn color_picker_dropdown<'a>(
         }
         col = col.push(
             container(scrollable(rows).height(160))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(PICKER_BG)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.base.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 0.0.into(),
                     },
                     ..Default::default()
+                    }
                 })
                 .padding([4, 6])
                 .width(Length::Fill),
@@ -1071,22 +1070,23 @@ pub fn color_picker_dropdown<'a>(
 /// A boolean toggle button row (for "Invisible" etc.).
 fn render_stepper_row<'a>(label: &'a str, display: &'a str) -> Element<'a, Message> {
     let arrow = |glyph: &'static str, delta: i8| {
-        button(text(glyph).size(FONT_SZ).color(VALUE_COLOR))
+        button(text(glyph).size(FONT_SZ))
             .on_press(Message::PropVertexStep(delta))
             .padding([0, 6])
-            .style(|_: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => HOVER_BG,
-                    _ => VALUE_BG,
+            .style(|theme: &Theme, status| {
+                let palette = theme.extended_palette();
+                let pair = match status {
+                    button::Status::Hovered | button::Status::Pressed => palette.background.weak,
+                    _ => palette.background.base,
                 };
                 button::Style {
-                    background: Some(Background::Color(bg)),
+                    background: Some(Background::Color(pair.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 2.0.into(),
                     },
-                    text_color: VALUE_COLOR,
+                    text_color: pair.text,
                     ..Default::default()
                 }
             })
@@ -1095,7 +1095,6 @@ fn render_stepper_row<'a>(label: &'a str, display: &'a str) -> Element<'a, Messa
         arrow("◀", -1),
         text(display)
             .size(FONT_SZ)
-            .color(VALUE_COLOR)
             .width(Length::Fill)
             .align_x(iced::Center),
         arrow("▶", 1),
@@ -1111,22 +1110,29 @@ fn render_bool_row<'a>(label: &'a str, field: &'static str, value: bool) -> Elem
         button(
             text(btn_label)
                 .size(FONT_SZ)
-                .color(if value { WARN_COLOR } else { VALUE_COLOR }),
+                .style(move |theme: &Theme| iced::widget::text::Style {
+                    color: value.then_some(theme.extended_palette().warning.base.color),
+                }),
         )
         .on_press(Message::PropBoolToggle(field))
-        .style(move |_: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => HOVER_BG,
-                _ => VALUE_BG,
+        .style(move |theme: &Theme, status| {
+            let palette = theme.extended_palette();
+            let pair = match status {
+                button::Status::Hovered | button::Status::Pressed => palette.background.weak,
+                _ => palette.background.base,
             };
             button::Style {
-                background: Some(Background::Color(bg)),
+                background: Some(Background::Color(pair.color)),
                 border: Border {
-                    color: BORDER,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 2.0.into(),
                 },
-                text_color: if value { WARN_COLOR } else { VALUE_COLOR },
+                text_color: if value {
+                    palette.warning.base.color
+                } else {
+                    pair.text
+                },
                 ..Default::default()
             }
         })
@@ -1211,10 +1217,14 @@ fn render_group_row(
     let label_btn = button(
         container(
             row![
-                crate::ui::icons::arrow_toggle(expanded, FONT_SZ, LABEL_COLOR),
+                if expanded {
+                    crate::ui::icons::themed_arrow_down(FONT_SZ)
+                } else {
+                    crate::ui::icons::themed_arrow_right(FONT_SZ)
+                },
                 text(crate::ui::text_util::elide(base, 16))
                     .size(FONT_SZ)
-                    .color(LABEL_COLOR),
+                    .style(muted_text_style),
             ]
             .spacing(4)
             .align_y(iced::Center),
@@ -1223,20 +1233,7 @@ fn render_group_row(
         .align_y(iced::Center),
     )
     .on_press(Message::PropGroupToggle(key))
-    .style(|_: &Theme, status| button::Style {
-        background: Some(Background::Color(match status {
-            button::Status::Hovered | button::Status::Pressed => Color {
-                r: 0.24,
-                g: 0.24,
-                b: 0.24,
-                a: 1.0,
-            },
-            _ => LABEL_BG,
-        })),
-        text_color: LABEL_COLOR,
-        border: Border::default(),
-        ..Default::default()
-    })
+    .style(button::subtle)
     .padding(Padding {
         top: 0.0,
         bottom: 0.0,
@@ -1246,8 +1243,10 @@ fn render_group_row(
     .width(Length::Fill)
     .height(Length::Fixed(ROW_H));
     let label_col = container(label_btn)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(LABEL_BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.weakest.color,
+            )),
             ..Default::default()
         })
         .width(Length::FillPortion(5))
@@ -1262,8 +1261,10 @@ fn render_group_row(
         .padding([3, 6])
         .width(Length::Fill);
     let value_col = container(value_field)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(VALUE_BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color,
+            )),
             ..Default::default()
         })
         .width(Length::FillPortion(6))
@@ -1278,9 +1279,9 @@ fn render_group_row(
 
     container(row![label_col, value_col])
         .height(Length::Fixed(ROW_H))
-        .style(|_: &Theme| container::Style {
+        .style(|theme: &Theme| container::Style {
             border: Border {
-                color: BORDER,
+                color: theme.extended_palette().background.neutral.color,
                 width: 1.0,
                 radius: 0.0.into(),
             },
@@ -1305,9 +1306,15 @@ fn render_ro_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {
 
 /// Build a label | widget property row.
 fn prop_row_widget<'a>(label: &'a str, widget: Element<'a, Message>) -> Element<'a, Message> {
-    let label_col = container(text(crate::ui::text_util::elide(label, 18)).size(FONT_SZ).color(LABEL_COLOR))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(LABEL_BG)),
+    let label_col = container(
+        text(crate::ui::text_util::elide(label, 18))
+            .size(FONT_SZ)
+            .style(muted_text_style),
+    )
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.weakest.color,
+            )),
             ..Default::default()
         })
         .width(Length::FillPortion(5))
@@ -1320,8 +1327,10 @@ fn prop_row_widget<'a>(label: &'a str, widget: Element<'a, Message>) -> Element<
             right: 6.0,
         });
     let value_col = container(widget)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(VALUE_BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color,
+            )),
             ..Default::default()
         })
         .width(Length::FillPortion(6))
@@ -1335,9 +1344,9 @@ fn prop_row_widget<'a>(label: &'a str, widget: Element<'a, Message>) -> Element<
         });
     container(row![label_col, value_col])
         .height(Length::Fixed(ROW_H))
-        .style(|_: &Theme| container::Style {
+        .style(|theme: &Theme| container::Style {
             border: Border {
-                color: BORDER,
+                color: theme.extended_palette().background.neutral.color,
                 width: 1.0,
                 radius: 0.0.into(),
             },
@@ -1348,18 +1357,9 @@ fn prop_row_widget<'a>(label: &'a str, widget: Element<'a, Message>) -> Element<
 
 /// A plain text button used inside the color picker for ByLayer / ByBlock.
 fn picker_text_btn(label: &str, msg: Message) -> Element<'_, Message> {
-    button(text(label).size(FONT_SZ).color(VALUE_COLOR))
+    button(text(label).size(FONT_SZ))
         .on_press(msg)
-        .style(|_: &Theme, _| button::Style {
-            background: Some(Background::Color(LABEL_BG)),
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            text_color: VALUE_COLOR,
-            ..Default::default()
-        })
+        .style(button::secondary)
         .padding([2, 8])
         .into()
 }
@@ -1419,49 +1419,41 @@ fn aci_label(idx: u8) -> &'static str {
 
 // ── Widget style helpers ──────────────────────────────────────────────────
 
-fn combo_btn_style(_theme: &Theme, status: button::Status) -> button::Style {
-    let bg = match status {
-        button::Status::Hovered | button::Status::Pressed => HOVER_BG,
-        _ => VALUE_BG,
+fn combo_btn_style(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let pair = match status {
+        button::Status::Hovered | button::Status::Pressed => palette.background.weak,
+        _ => palette.background.base,
     };
     button::Style {
-        background: Some(Background::Color(bg)),
+        background: Some(Background::Color(pair.color)),
         border: Border {
-            color: BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 2.0.into(),
         },
-        text_color: VALUE_COLOR,
+        text_color: pair.text,
         ..Default::default()
     }
 }
 
-fn text_input_style(_theme: &Theme, status: text_input::Status) -> text_input::Style {
+fn text_input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
     let border_color = match status {
-        text_input::Status::Focused { .. } => Color {
-            r: 0.3,
-            g: 0.6,
-            b: 1.0,
-            a: 1.0,
-        },
-        _ => BORDER,
+        text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
     };
     text_input::Style {
-        background: Background::Color(VALUE_BG),
+        background: Background::Color(palette.background.base.color),
         border: Border {
             color: border_color,
             width: 1.0,
             radius: 2.0.into(),
         },
         icon: Color::TRANSPARENT,
-        placeholder: HINT_COLOR,
-        value: VALUE_COLOR,
-        selection: Color {
-            r: 0.2,
-            g: 0.4,
-            b: 0.8,
-            a: 0.5,
-        },
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
     }
 }
 
@@ -1472,109 +1464,30 @@ fn combo_input_style(theme: &Theme, status: text_input::Status) -> text_input::S
 /// Style for a read-only-but-selectable value field: flat (no input box or
 /// focus highlight, so it reads as plain text, unlike the bordered editable
 /// fields) yet with a visible selection colour so Ctrl+C copy is discoverable.
-fn ro_input_style(_theme: &Theme, _status: text_input::Status) -> text_input::Style {
+fn ro_input_style(theme: &Theme, _status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
     text_input::Style {
-        background: Background::Color(VALUE_BG),
+        background: Background::Color(palette.background.base.color),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
             radius: 0.0.into(),
         },
         icon: Color::TRANSPARENT,
-        placeholder: HINT_COLOR,
-        value: VALUE_COLOR,
-        selection: Color {
-            r: 0.2,
-            g: 0.4,
-            b: 0.8,
-            a: 0.5,
-        },
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
     }
 }
 
-// ── Colour constants ──────────────────────────────────────────────────────
+fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.72)),
+    }
+}
 
-const PANEL_BG: Color = Color {
-    r: 0.19,
-    g: 0.19,
-    b: 0.19,
-    a: 1.0,
-};
-const HEADER_BG: Color = Color {
-    r: 0.24,
-    g: 0.24,
-    b: 0.24,
-    a: 1.0,
-};
-const SECTION_BG: Color = Color {
-    r: 0.21,
-    g: 0.21,
-    b: 0.21,
-    a: 1.0,
-};
-const SECTION_HDR_BG: Color = Color {
-    r: 0.26,
-    g: 0.26,
-    b: 0.28,
-    a: 1.0,
-};
-const LABEL_BG: Color = Color {
-    r: 0.22,
-    g: 0.22,
-    b: 0.22,
-    a: 1.0,
-};
-const VALUE_BG: Color = Color {
-    r: 0.18,
-    g: 0.18,
-    b: 0.18,
-    a: 1.0,
-};
-const HOVER_BG: Color = Color {
-    r: 0.25,
-    g: 0.25,
-    b: 0.28,
-    a: 1.0,
-};
-const PICKER_BG: Color = Color {
-    r: 0.16,
-    g: 0.16,
-    b: 0.18,
-    a: 1.0,
-};
-const LABEL_COLOR: Color = Color {
-    r: 0.70,
-    g: 0.70,
-    b: 0.70,
-    a: 1.0,
-};
-const VALUE_COLOR: Color = Color {
-    r: 0.90,
-    g: 0.90,
-    b: 0.90,
-    a: 1.0,
-};
-const HINT_COLOR: Color = Color {
-    r: 0.45,
-    g: 0.45,
-    b: 0.50,
-    a: 1.0,
-};
-const SECTION_LABEL: Color = Color {
-    r: 0.75,
-    g: 0.75,
-    b: 0.75,
-    a: 1.0,
-};
-const BORDER: Color = Color {
-    r: 0.32,
-    g: 0.32,
-    b: 0.32,
-    a: 1.0,
-};
-const WARN_COLOR: Color = Color {
-    r: 1.00,
-    g: 0.60,
-    b: 0.10,
-    a: 1.0,
-};
+fn hint_text_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.48)),
+    }
+}

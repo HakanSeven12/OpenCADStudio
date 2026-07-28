@@ -576,6 +576,7 @@ impl ViewCubeText {
         vp_w: u32,
         vp_h: u32,
         cube_px: u32,
+        text_color: [f32; 4],
     ) {
         let (vw, vh) = (vp_w as f32, vp_h as f32);
         let cube_half = cube_px as f32 * VIEWCUBE_SCALE;
@@ -637,7 +638,12 @@ impl ViewCubeText {
                 continue;
             }
             let alpha = ((dot - 0.12) / 0.88).clamp(0.0, 1.0);
-            let color = [1.0, 1.0, 1.0, alpha];
+            let color = [
+                text_color[0],
+                text_color[1],
+                text_color[2],
+                text_color[3] * alpha,
+            ];
             let u = Vec3::from(FACE_U[fi]);
             let v = Vec3::from(FACE_V[fi]);
             let center = face_n; // unit normal = face surface centre (distance E)
@@ -714,7 +720,12 @@ impl ViewCubeText {
             } else {
                 0.5
             };
-            let color = [1.0, 1.0, 1.0, alpha];
+            let color = [
+                text_color[0],
+                text_color[1],
+                text_color[2],
+                text_color[3] * alpha,
+            ];
             let (u0, v0, u1, v1) = glyph_uv(gi, self.atlas_w, self.atlas_h);
             let corner = |lx: f32, ly: f32| center + Vec3::X * lx + Vec3::Y * ly;
             let tl = project_world(corner(-CARD_GW * 0.5, CARD_GH * 0.5));
@@ -1232,6 +1243,7 @@ impl ViewCubePipeline {
         vp_w: u32,
         vp_h: u32,
         hover: Option<usize>,
+        text_color: [f32; 4],
     ) {
         queue.write_buffer(
             &self.uniform_buffer,
@@ -1245,7 +1257,15 @@ impl ViewCubePipeline {
             )),
         );
         self.text
-            .update(queue, cam_rotation, compass_rotation, vp_w, vp_h, self.cube_px);
+            .update(
+                queue,
+                cam_rotation,
+                compass_rotation,
+                vp_w,
+                vp_h,
+                self.cube_px,
+                text_color,
+            );
     }
 
     pub fn ensure_depth_texture(&mut self, device: &wgpu::Device, size: Size<u32>) {

@@ -47,6 +47,35 @@ const COMBO_PAD_V: f32 = (ROW_H - FONT_SZ * 1.3 - 2.0) / 2.0;
 /// scrolled into view after it is added (#271).
 pub const LAYER_TABLE_SCROLL_ID: &str = "layer-manager-table-scroll";
 
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
+
+fn table_input_style(
+    theme: &Theme,
+    status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    let palette = theme.extended_palette();
+    let border = match status {
+        iced::widget::text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
+    };
+    iced::widget::text_input::Style {
+        background: Background::Color(palette.background.base.color),
+        border: Border {
+            color: border,
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        icon: palette.background.base.text,
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
+    }
+}
+
 // ── Layer data ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -313,39 +342,15 @@ impl LayerPanel {
                     .size(FONT_SZ)
                     .padding([3, 6])
                     .width(Length::Fixed(180.0))
-                    .style(|_: &Theme, _| iced::widget::text_input::Style {
-                        background: Background::Color(Color {
-                            r: 0.10,
-                            g: 0.10,
-                            b: 0.10,
-                            a: 1.0,
-                        }),
-                        border: Border {
-                            color: BORDER_COLOR,
-                            width: 1.0,
-                            radius: 2.0.into(),
-                        },
-                        icon: Color::WHITE,
-                        placeholder: Color {
-                            r: 0.45,
-                            g: 0.45,
-                            b: 0.45,
-                            a: 1.0,
-                        },
-                        value: Color::WHITE,
-                        selection: Color {
-                            r: 0.20,
-                            g: 0.44,
-                            b: 0.72,
-                            a: 0.5,
-                        },
-                    }),
+                    .style(table_input_style),
             ]
             .spacing(2)
             .align_y(iced::Center),
         )
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(TOOLBAR_BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.weak.color
+            )),
             ..Default::default()
         })
         .width(Fill)
@@ -355,13 +360,15 @@ impl LayerPanel {
         let sc = self.sort_col;
         let sa = self.sort_asc;
         let mut header_row = row![
-            text("Status").size(10).color(DIM).width(50),
+            text("Status").size(10).style(muted_style).width(50),
             sortable_header("Name", LayerSortCol::Name, Length::Fixed(name_col_w), sc, sa),
             // Draggable divider: adjusts the Name column width (#359).
             iced::widget::mouse_area(
                 container(iced::widget::Space::new().width(2).height(14)).style(
-                    |_: &Theme| container::Style {
-                        background: Some(Background::Color(BORDER_COLOR)),
+                    |theme: &Theme| container::Style {
+                        background: Some(Background::Color(
+                            theme.extended_palette().background.neutral.color
+                        )),
                         ..Default::default()
                     },
                 ),
@@ -390,20 +397,23 @@ impl LayerPanel {
             header_row = header_row.push(
                 text(vp.label.as_str())
                     .size(10)
-                    .color(DIM)
+                    .style(muted_style)
                     .width(Length::Fixed(COL_ICON)),
             );
         }
 
         let col_header = container(header_row)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(COL_HEADER_BG)),
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                background: Some(Background::Color(palette.background.weak.color)),
                 border: Border {
-                    color: BORDER_COLOR,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
+                }
             })
             .padding([4, 8])
             .width(Fill);
@@ -451,8 +461,10 @@ impl LayerPanel {
 
         // ── Full-window frame ─────────────────────────────────────────────
         container(column![toolbar, col_header, table].spacing(0))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(PANEL_BG)),
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    theme.extended_palette().background.base.color
+                )),
                 ..Default::default()
             })
             .width(Fill)
@@ -462,6 +474,48 @@ impl LayerPanel {
 }
 
 // ── Sorting helpers ─────────────────────────────────────────────────────────
+
+fn layer_cell_button_style(
+    theme: &Theme,
+    status: button::Status,
+    is_selected: bool,
+    index: usize,
+) -> button::Style {
+    let palette = theme.extended_palette();
+    let highlighted = matches!(status, button::Status::Hovered);
+    let pair = if highlighted {
+        palette.background.strong
+    } else if is_selected {
+        palette.primary.weak
+    } else if index % 2 == 0 {
+        palette.background.base
+    } else {
+        palette.background.weak
+    };
+    button::Style {
+        background: highlighted.then_some(Background::Color(pair.color)),
+        text_color: pair.text,
+        ..Default::default()
+    }
+}
+
+fn layer_header_button_style(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let highlighted = matches!(
+        status,
+        button::Status::Hovered | button::Status::Pressed
+    );
+    let pair = if highlighted {
+        palette.background.strong
+    } else {
+        palette.background.weak
+    };
+    button::Style {
+        background: highlighted.then_some(Background::Color(pair.color)),
+        text_color: pair.text,
+        ..Default::default()
+    }
+}
 
 /// Packed RGB key for ordering colours deterministically by hue-ish bytes.
 fn color_sort_key(c: Color) -> u32 {
@@ -478,30 +532,19 @@ fn sortable_header<'a>(
     active: Option<LayerSortCol>,
     asc: bool,
 ) -> Element<'a, Message> {
-    let mut content = row![text(label).size(10).color(DIM)]
+    let mut content = row![text(label).size(10).style(muted_style)]
         .spacing(3)
         .align_y(iced::Center);
     if active == Some(col) {
         content = content.push(if asc {
-            crate::ui::icons::arrow_up(8.0, DIM)
+            crate::ui::icons::themed_arrow_up(8.0)
         } else {
-            crate::ui::icons::arrow_down(8.0, DIM)
+            crate::ui::icons::themed_arrow_down(8.0)
         });
     }
     button(content)
         .on_press(Message::LayerSort(col))
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered | button::Status::Pressed => Color {
-                    r: 0.30,
-                    g: 0.30,
-                    b: 0.30,
-                    a: 1.0,
-                },
-                _ => Color::TRANSPARENT,
-            })),
-            ..Default::default()
-        })
+        .style(layer_header_button_style)
         .padding(Padding {
             top: 0.0,
             bottom: 0.0,
@@ -517,41 +560,31 @@ fn sortable_header<'a>(
 fn toolbar_btn<'a>(icon: &'static [u8], label: &'a str, msg: Message) -> Element<'a, Message> {
     button(
         row![
-            crate::ui::icons::tinted(icon, 12.0, Color::WHITE),
-            text(label).size(11).color(Color::WHITE),
+            crate::ui::icons::themed(icon, 12.0),
+            text(label).size(11),
         ]
         .spacing(5)
         .align_y(iced::Center),
     )
     .on_press(msg)
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered => Color {
-                    r: 0.32,
-                    g: 0.32,
-                    b: 0.32,
-                    a: 1.0,
-                },
-                button::Status::Pressed => Color {
-                    r: 0.25,
-                    g: 0.25,
-                    b: 0.25,
-                    a: 1.0,
-                },
-                _ => Color {
-                    r: 0.26,
-                    g: 0.26,
-                    b: 0.26,
-                    a: 1.0,
-                },
-            })),
+        .style(|theme: &Theme, status| {
+            let palette = theme.extended_palette();
+            let pair = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    palette.background.strong
+                }
+                _ => palette.background.weak,
+            };
+            button::Style {
+            background: Some(Background::Color(pair.color)),
             border: Border {
                 radius: 3.0.into(),
-                color: BORDER_COLOR,
+                color: palette.background.neutral.color,
                 width: 1.0,
             },
-            text_color: Color::WHITE,
+            text_color: pair.text,
             ..Default::default()
+            }
         })
         .padding([4, 10])
         .into()
@@ -563,46 +596,46 @@ fn toolbar_btn_cond<'a>(
     msg: Message,
     enabled: bool,
 ) -> Element<'a, Message> {
-    let fg = if enabled {
-        Color::WHITE
-    } else {
-        Color {
-            r: 0.45,
-            g: 0.45,
-            b: 0.45,
-            a: 1.0,
-        }
-    };
     let mut b = button(
         row![
-            crate::ui::icons::tinted(icon, 12.0, fg),
-            text(label).size(11).color(fg),
+            if enabled {
+                crate::ui::icons::themed(icon, 12.0)
+            } else {
+                crate::ui::icons::themed_disabled(icon, 12.0)
+            },
+            if enabled {
+                text(label).size(11)
+            } else {
+                text(label).size(11).style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(
+                        theme.extended_palette().background.base.text.scale_alpha(0.42)
+                    ),
+                })
+            },
         ]
         .spacing(5)
         .align_y(iced::Center),
     )
-    .style(|_: &Theme, status| button::Style {
-        background: Some(Background::Color(match status {
-            button::Status::Hovered => Color {
-                r: 0.32,
-                g: 0.32,
-                b: 0.32,
-                a: 1.0,
-            },
-            _ => Color {
-                r: 0.26,
-                g: 0.26,
-                b: 0.26,
-                a: 1.0,
-            },
-        })),
+    .style(move |theme: &Theme, status| {
+        let palette = theme.extended_palette();
+        let pair = match status {
+            button::Status::Hovered if enabled => palette.background.strong,
+            _ => palette.background.weak,
+        };
+        button::Style {
+        background: Some(Background::Color(pair.color)),
         border: Border {
             radius: 3.0.into(),
-            color: BORDER_COLOR,
+            color: palette.background.neutral.color,
             width: 1.0,
         },
-        text_color: Color::WHITE,
+        text_color: if enabled {
+            pair.text
+        } else {
+            pair.text.scale_alpha(0.42)
+        },
         ..Default::default()
+        }
     })
     .padding([4, 10]);
     if enabled {
@@ -616,21 +649,25 @@ fn toolbar_btn_cond<'a>(
 #[allow(clippy::too_many_arguments)]
 /// Hover popup showing a layer's full name when the cell truncates it.
 fn name_tip<'a>(name: &'a str) -> Element<'a, Message> {
-    container(text(name).size(FONT_SZ).color(ROW_TEXT))
+    container(text(name).size(FONT_SZ))
         .padding(Padding {
             top: 3.0,
             bottom: 3.0,
             left: 7.0,
             right: 7.0,
         })
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(PANEL_BG)),
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(palette.background.strong.color)),
             border: Border {
-                color: BORDER_COLOR,
+                color: palette.background.neutral.color,
                 width: 1.0,
                 radius: 3.0.into(),
             },
+            text_color: Some(palette.background.strong.text),
             ..Default::default()
+            }
         })
         .into()
 }
@@ -649,23 +686,10 @@ fn layer_row<'a>(
     name_col_w: f32,
 ) -> Element<'a, Message> {
     let svg_btn = |bytes: &'static [u8], on_press: Message| -> Element<'a, Message> {
-        button(
-            iced::widget::svg(iced::widget::svg::Handle::from_memory(bytes))
-                .width(ICON_SZ)
-                .height(ICON_SZ),
-        )
+        button(crate::ui::icons::semantic(bytes, ICON_SZ))
         .on_press(on_press)
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered => Color {
-                    r: 0.35,
-                    g: 0.35,
-                    b: 0.35,
-                    a: 1.0,
-                },
-                _ => Color::TRANSPARENT,
-            })),
-            ..Default::default()
+        .style(move |theme: &Theme, status| {
+            layer_cell_button_style(theme, status, is_selected, index)
         })
         .padding(Padding {
             top: COMBO_PAD_V,
@@ -682,27 +706,9 @@ fn layer_row<'a>(
     let lck_svg = crate::ui::icons::layer_lock(layer.locked);
 
     let status_dot: Element<'_, Message> = if is_current {
-        crate::ui::icons::tinted(
-            crate::ui::icons::CHECK,
-            13.0,
-            Color {
-                r: 0.25,
-                g: 0.85,
-                b: 0.45,
-                a: 1.0,
-            },
-        )
+        crate::ui::icons::themed_success(crate::ui::icons::CHECK, 13.0)
     } else {
-        crate::ui::icons::tinted(
-            crate::ui::icons::DOT,
-            9.0,
-            Color {
-                r: 0.55,
-                g: 0.55,
-                b: 0.55,
-                a: 1.0,
-            },
-        )
+        crate::ui::icons::themed_secondary(crate::ui::icons::DOT, 9.0)
     };
 
     // Name cell
@@ -717,38 +723,7 @@ fn layer_row<'a>(
                 left: 4.0,
                 right: 4.0,
             })
-            .style(|_: &Theme, _| iced::widget::text_input::Style {
-                background: iced::Background::Color(Color {
-                    r: 0.12,
-                    g: 0.12,
-                    b: 0.12,
-                    a: 1.0,
-                }),
-                border: Border {
-                    radius: 2.0.into(),
-                    width: 1.0,
-                    color: Color {
-                        r: 0.45,
-                        g: 0.65,
-                        b: 0.90,
-                        a: 1.0,
-                    },
-                },
-                icon: Color::WHITE,
-                placeholder: Color {
-                    r: 0.4,
-                    g: 0.4,
-                    b: 0.4,
-                    a: 1.0,
-                },
-                value: Color::WHITE,
-                selection: Color {
-                    r: 0.25,
-                    g: 0.45,
-                    b: 0.75,
-                    a: 0.5,
-                },
-            })
+            .style(table_input_style)
             .width(Length::Fixed(name_col_w))
             .into()
     } else {
@@ -756,21 +731,11 @@ fn layer_row<'a>(
         let name_budget = ((name_col_w / 6.0) as usize).max(8);
         let name_btn = button(
             text(crate::ui::text_util::elide(&layer.name, name_budget))
-                .size(FONT_SZ)
-                .color(ROW_TEXT),
+                .size(FONT_SZ),
         )
         .on_press(Message::LayerRenameStart(index))
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered => Color {
-                    r: 0.30,
-                    g: 0.30,
-                    b: 0.30,
-                    a: 1.0,
-                },
-                _ => Color::TRANSPARENT,
-            })),
-            ..Default::default()
+        .style(move |theme: &Theme, status| {
+            layer_cell_button_style(theme, status, is_selected, index)
         })
         .padding(Padding {
             top: COMBO_PAD_V,
@@ -837,7 +802,7 @@ fn layer_row<'a>(
     } else {
         text(layer.linetype.as_str())
             .size(FONT_SZ)
-            .color(DIM)
+            .style(muted_style)
             .width(Length::Fixed(COL_LT))
             .into()
     };
@@ -861,7 +826,7 @@ fn layer_row<'a>(
     } else {
         text(cur_lw_item.to_string())
             .size(FONT_SZ)
-            .color(DIM)
+            .style(muted_style)
             .width(Length::Fixed(COL_LW))
             .into()
     };
@@ -877,32 +842,12 @@ fn layer_row<'a>(
             left: 4.0,
             right: 4.0,
         })
-        .style(|_: &Theme, _| iced::widget::text_input::Style {
-            background: iced::Background::Color(Color::TRANSPARENT),
-            border: Border {
-                radius: 2.0.into(),
-                width: 1.0,
-                color: BORDER_COLOR,
-            },
-            icon: Color::WHITE,
-            placeholder: DIM,
-            value: ROW_TEXT,
-            selection: Color {
-                r: 0.25,
-                g: 0.45,
-                b: 0.75,
-                a: 0.5,
-            },
+        .style(|theme: &Theme, status| {
+            let mut style = table_input_style(theme, status);
+            style.background = iced::Background::Color(Color::TRANSPARENT);
+            style
         })
         .width(Length::Fixed(COL_TRANS));
-
-    let bg = if is_selected {
-        ROW_SEL
-    } else if index % 2 == 0 {
-        ROW_EVEN
-    } else {
-        ROW_ODD
-    };
 
     let mut row_content = row![
         container(status_dot)
@@ -945,9 +890,20 @@ fn layer_row<'a>(
 
     mouse_area(
         container(row_content)
-            .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(bg)),
+            .style(move |theme: &Theme| {
+                let palette = theme.extended_palette();
+                let pair = if is_selected {
+                    palette.primary.weak
+                } else if index % 2 == 0 {
+                    palette.background.base
+                } else {
+                    palette.background.weak
+                };
+                container::Style {
+                background: Some(Background::Color(pair.color)),
+                text_color: Some(pair.text),
                 ..Default::default()
+                }
             })
             .padding(Padding {
                 top: 0.0,
@@ -965,31 +921,10 @@ fn layer_row<'a>(
 // ── Combo style ────────────────────────────────────────────────────────────
 
 fn combo_input_style(
-    _theme: &Theme,
-    _status: iced::widget::text_input::Status,
+    theme: &Theme,
+    status: iced::widget::text_input::Status,
 ) -> iced::widget::text_input::Style {
-    iced::widget::text_input::Style {
-        background: iced::Background::Color(Color {
-            r: 0.13,
-            g: 0.13,
-            b: 0.13,
-            a: 1.0,
-        }),
-        border: Border {
-            radius: 2.0.into(),
-            width: 1.0,
-            color: BORDER_COLOR,
-        },
-        icon: Color::WHITE,
-        placeholder: DIM,
-        value: Color::WHITE,
-        selection: Color {
-            r: 0.25,
-            g: 0.45,
-            b: 0.75,
-            a: 0.5,
-        },
-    }
+    table_input_style(theme, status)
 }
 
 // ── Display helpers ───────────────────────────────────────────────────────
@@ -1054,67 +989,3 @@ const COL_COLOR: f32 = 90.0;
 const COL_LT: f32 = 110.0;
 const COL_LW: f32 = 90.0;
 const COL_TRANS: f32 = 80.0;
-
-// ── Colors ────────────────────────────────────────────────────────────────
-
-const PANEL_BG: Color = Color {
-    r: 0.18,
-    g: 0.18,
-    b: 0.18,
-    a: 1.0,
-};
-const TOOLBAR_BG: Color = Color {
-    r: 0.20,
-    g: 0.20,
-    b: 0.20,
-    a: 1.0,
-};
-const COL_HEADER_BG: Color = Color {
-    r: 0.21,
-    g: 0.21,
-    b: 0.21,
-    a: 1.0,
-};
-const ROW_EVEN: Color = Color {
-    r: 0.18,
-    g: 0.18,
-    b: 0.18,
-    a: 1.0,
-};
-const ROW_ODD: Color = Color {
-    r: 0.21,
-    g: 0.21,
-    b: 0.21,
-    a: 1.0,
-};
-const ROW_SEL: Color = Color {
-    r: 0.18,
-    g: 0.32,
-    b: 0.52,
-    a: 1.0,
-};
-const ROW_TEXT: Color = Color {
-    r: 0.85,
-    g: 0.85,
-    b: 0.85,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.50,
-    g: 0.50,
-    b: 0.50,
-    a: 1.0,
-};
-const BORDER_COLOR: Color = Color {
-    r: 0.30,
-    g: 0.30,
-    b: 0.30,
-    a: 1.0,
-};
-#[allow(dead_code)]
-const ICON_COLOR: Color = Color {
-    r: 0.80,
-    g: 0.80,
-    b: 0.80,
-    a: 1.0,
-};

@@ -4,44 +4,7 @@ use crate::app::{ColorPickTarget, DsField, Message};
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };
-use iced::{Background, Border, Color, Element, Fill, Theme};
-
-const BORDER: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-const TEXT: Color = Color {
-    r: 0.88,
-    g: 0.88,
-    b: 0.88,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.25,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
-const ACTIVE: Color = Color {
-    r: 0.20,
-    g: 0.40,
-    b: 0.70,
-    a: 1.0,
-};
-const FIELD: Color = Color {
-    r: 0.10,
-    g: 0.10,
-    b: 0.10,
-    a: 1.0,
-};
+use iced::{Background, Border, Element, Fill, Theme};
 
 /// All DimStyle field values needed by the view.
 pub struct DimStyleValues<'a> {
@@ -131,44 +94,57 @@ pub struct DimStyleValues<'a> {
 }
 
 fn tab_btn_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_: &Theme, st| button::Style {
-        background: Some(Background::Color(match (active, st) {
-            (true, _) => ACTIVE,
-            (false, button::Status::Hovered | button::Status::Pressed) => Color {
-                r: 0.28,
-                g: 0.28,
-                b: 0.28,
-                a: 1.0,
-            },
-            _ => Color {
-                r: 0.20,
-                g: 0.20,
-                b: 0.20,
-                a: 1.0,
-            },
-        })),
-        text_color: TEXT,
+    move |theme: &Theme, st| {
+        let palette = theme.extended_palette();
+        let pair = match (active, st) {
+            (true, _) => palette.primary.strong,
+            (false, button::Status::Hovered | button::Status::Pressed) => {
+                palette.background.strong
+            }
+            _ => palette.background.weak,
+        };
+        button::Style {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
         border: Border {
-            color: BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 3.0.into(),
         },
         ..Default::default()
+        }
     }
 }
 
-fn field_style(_: &Theme, _: text_input::Status) -> text_input::Style {
+fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
+    let border = match status {
+        text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
+    };
     text_input::Style {
-        background: Background::Color(FIELD),
+        background: Background::Color(palette.background.base.color),
         border: Border {
-            color: BORDER,
+            color: border,
             width: 1.0,
             radius: 3.0.into(),
         },
-        icon: TEXT,
-        placeholder: DIM,
-        value: TEXT,
-        selection: ACCENT,
+        icon: palette.background.base.text,
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
+    }
+}
+
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
+
+fn primary_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().primary.base.color),
     }
 }
 
@@ -176,8 +152,10 @@ fn hdivider<'a>() -> Element<'a, Message> {
     container(Space::new().width(Fill).height(1))
         .width(Fill)
         .height(1)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()
@@ -221,7 +199,7 @@ pub fn view_window<'a>(
     ]
     .spacing(2);
 
-    let lbl = |s: &'static str| text(s).size(11).color(DIM).width(180);
+    let lbl = |s: &'static str| text(s).size(11).style(muted_style).width(180);
 
     let mk_field = |fld: DsField, val: &'a str| -> Element<'a, Message> {
         text_input("", val)
@@ -338,7 +316,7 @@ pub fn view_window<'a>(
 
     let tab_content: Element<'_, Message> = match tab {
         0 => column![
-            text("Dimension Line").size(11).color(ACCENT),
+            text("Dimension Line").size(11).style(primary_style),
             row![
                 lbl("Extension (DIMDLE)"),
                 mk_field(DsField::Dimdle, vals.dimdle)
@@ -359,7 +337,7 @@ pub fn view_window<'a>(
             .align_y(iced::Center),
             chk("Suppress 1st line (DIMSD1)", vals.dimsd1, DsField::Dimsd1),
             chk("Suppress 2nd line (DIMSD2)", vals.dimsd2, DsField::Dimsd2),
-            text("Extension Line").size(11).color(ACCENT),
+            text("Extension Line").size(11).style(primary_style),
             row![
                 lbl("Extension (DIMEXE)"),
                 mk_field(DsField::Dimexe, vals.dimexe)
@@ -421,7 +399,7 @@ pub fn view_window<'a>(
         .spacing(7)
         .into(),
         1 => column![
-            text("Arrows").size(11).color(ACCENT),
+            text("Arrows").size(11).style(primary_style),
             hrow(
                 "Arrowhead (DIMBLK)",
                 vals.block_opts.clone(),
@@ -485,7 +463,7 @@ pub fn view_window<'a>(
         .spacing(7)
         .into(),
         2 => column![
-            text("Text").size(11).color(ACCENT),
+            text("Text").size(11).style(primary_style),
             row![
                 lbl("Height (DIMTXT)"),
                 mk_field(DsField::Dimtxt, vals.dimtxt)
@@ -551,7 +529,7 @@ pub fn view_window<'a>(
         .spacing(7)
         .into(),
         3 => column![
-            text("Scale").size(11).color(ACCENT),
+            text("Scale").size(11).style(primary_style),
             chk("Annotative", vals.annotative, DsField::Annotative),
             row![
                 lbl("Overall scale (DIMSCALE)"),
@@ -565,7 +543,7 @@ pub fn view_window<'a>(
             ]
             .spacing(8)
             .align_y(iced::Center),
-            text("Units").size(11).color(ACCENT),
+            text("Units").size(11).style(primary_style),
             enum_field("Format (DIMLUNIT)", DsField::Dimlunit, vals.dimlunit, OPT_LUNIT),
             row![
                 lbl("Decimals (DIMDEC)"),
@@ -636,7 +614,7 @@ pub fn view_window<'a>(
                     ("3", "Leading & trailing"),
                 ],
             ),
-            text("Fit").size(11).color(ACCENT),
+            text("Fit").size(11).style(primary_style),
             enum_field(
                 "Fit (DIMATFIT)",
                 DsField::Dimatfit,
@@ -680,7 +658,7 @@ pub fn view_window<'a>(
         .spacing(7)
         .into(),
         5 => column![
-            text("Alternate Units").size(11).color(ACCENT),
+            text("Alternate Units").size(11).style(primary_style),
             chk(
                 "Enable alternate units (DIMALT)",
                 vals.dimalt,
@@ -728,7 +706,7 @@ pub fn view_window<'a>(
         .spacing(7)
         .into(),
         _ => column![
-            text("Tolerances").size(11).color(ACCENT),
+            text("Tolerances").size(11).style(primary_style),
             chk("Generate tolerances (DIMTOL)", vals.dimtol, DsField::Dimtol),
             chk("Limits generation (DIMLIM)", vals.dimlim, DsField::Dimlim),
             row![
@@ -773,7 +751,7 @@ pub fn view_window<'a>(
     // content container instead of the panel padding.
     let right_panel = container(
         column![
-            text(format!("Editing: {selected}")).size(11).color(DIM),
+            text(format!("Editing: {selected}")).size(11).style(muted_style),
             tabs,
             hdivider(),
             scrollable(container(tab_content).padding([12, 12]).width(Fill))

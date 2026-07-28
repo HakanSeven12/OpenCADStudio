@@ -1,6 +1,6 @@
 use super::super::{Message, OpenCADStudio};
 use iced::widget::{button, column, container, pick_list, row, text, Space};
-use iced::{Background, Border, Color, Element, Fill, Theme};
+use iced::{Background, Element, Fill, Theme};
 
 impl OpenCADStudio {
     /// Title shown in the active modal's title bar, left of the move/close
@@ -63,9 +63,13 @@ impl OpenCADStudio {
                 sized(crate::ui::window::alias_editor::view_window(&self.alias_editor_rows), 480, 520)
             }
             super::super::ModalKind::Options => sized(
-                crate::ui::window::options::view_window(&self.default_save_format),
-                480,
-                190,
+                crate::ui::window::options::view_window(
+                    &self.default_save_format,
+                    &self.ui_theme,
+                    &self.theme_color_inputs,
+                ),
+                520,
+                500,
             ),
             super::super::ModalKind::PluginManager => sized(
                 crate::ui::window::plugin_manager::view_window(
@@ -712,125 +716,56 @@ impl OpenCADStudio {
     }
 }
 
+fn dialog_button(
+    label: &'static str,
+    message: Message,
+    style: fn(&Theme, button::Status) -> button::Style,
+) -> Element<'static, Message> {
+    button(text(label).size(13))
+        .on_press(message)
+        .style(style)
+        .padding([6, 18])
+        .into()
+}
+
+fn dialog_body_style(theme: &Theme) -> container::Style {
+    let palette = theme.extended_palette();
+    container::Style {
+        background: Some(Background::Color(palette.background.base.color)),
+        text_color: Some(palette.background.base.text),
+        ..Default::default()
+    }
+}
+
+fn dialog_muted_text_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
+
 /// Compact Save-As options dialog: pick the format/version and a default file
 /// name. The destination folder and overwrite confirmation come from the
 /// native OS save dialog (native) or the browser download (web) that follows.
 fn save_as_dialog_window<'a>(filename: &'a str, format: &'a str) -> Element<'a, Message> {
-    const BG: Color = Color {
-        r: 0.15,
-        g: 0.15,
-        b: 0.17,
-        a: 1.0,
-    };
-    const BORDER: Color = Color {
-        r: 0.32,
-        g: 0.32,
-        b: 0.36,
-        a: 1.0,
-    };
-    const TEXT: Color = Color {
-        r: 0.90,
-        g: 0.90,
-        b: 0.90,
-        a: 1.0,
-    };
-    const DIM: Color = Color {
-        r: 0.58,
-        g: 0.58,
-        b: 0.62,
-        a: 1.0,
-    };
-    const BTN_OK: Color = Color {
-        r: 0.20,
-        g: 0.46,
-        b: 0.80,
-        a: 1.0,
-    };
-    const BTN_HOV: Color = Color {
-        r: 0.26,
-        g: 0.55,
-        b: 0.92,
-        a: 1.0,
-    };
-    const BTN_GREY: Color = Color {
-        r: 0.26,
-        g: 0.26,
-        b: 0.29,
-        a: 1.0,
-    };
-    const BTN_GHOV: Color = Color {
-        r: 0.34,
-        g: 0.34,
-        b: 0.38,
-        a: 1.0,
-    };
-
-    let btn = |lbl: &'static str, msg: Message, base: Color, hov: Color| {
-        button(text(lbl).size(12).color(TEXT))
-            .on_press(msg)
-            .style(move |_: &Theme, st| button::Style {
-                background: Some(Background::Color(
-                    if matches!(st, button::Status::Hovered | button::Status::Pressed) {
-                        hov
-                    } else {
-                        base
-                    },
-                )),
-                text_color: TEXT,
-                border: Border {
-                    color: BORDER,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .padding([4, 12])
-    };
-
     let sel_fmt = crate::io::SAVE_FORMAT_OPTIONS
         .iter()
         .copied()
         .find(|&s| s == format);
-    let label = |s: &'static str| text(s).size(11).color(DIM);
+    let label = |s: &'static str| text(s).size(11).style(dialog_muted_text_style);
 
     let mut items: Vec<Element<'a, Message>> = Vec::new();
-    items.push(text("Save Drawing As").size(14).color(TEXT).into());
+    items.push(text("Save Drawing As").size(14).into());
     items.push(Space::new().height(12).into());
 
     // Web has no native file dialog, so the file name is typed here. On native
     // the OS save dialog collects the name, so this field is omitted.
     #[cfg(target_arch = "wasm32")]
     {
-        const INPUT_BG: Color = Color {
-            r: 0.10,
-            g: 0.10,
-            b: 0.12,
-            a: 1.0,
-        };
-        let input_sty =
-            |_: &Theme, _: iced::widget::text_input::Status| iced::widget::text_input::Style {
-                background: Background::Color(INPUT_BG),
-                border: Border {
-                    color: BORDER,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                icon: TEXT,
-                placeholder: DIM,
-                value: TEXT,
-                selection: Color {
-                    r: 0.20,
-                    g: 0.46,
-                    b: 0.80,
-                    a: 0.45,
-                },
-            };
         items.push(
             row![
                 label("File name:").width(70),
                 iced::widget::text_input("drawing.dwg", filename)
                     .on_input(Message::SaveDialogFilenameChanged)
-                    .style(input_sty)
                     .size(13)
                     .padding([5, 8])
                     .width(Fill),
@@ -860,9 +795,9 @@ fn save_as_dialog_window<'a>(filename: &'a str, format: &'a str) -> Element<'a, 
     items.push(
         row![
             Space::new().width(Fill),
-            btn("Save as...", Message::SaveDialogConfirm, BTN_OK, BTN_HOV),
+            dialog_button("Save as...", Message::SaveDialogConfirm, button::primary),
             Space::new().width(8),
-            btn("Cancel", Message::SaveDialogCancel, BTN_GREY, BTN_GHOV),
+            dialog_button("Cancel", Message::SaveDialogCancel, button::secondary),
         ]
         .into(),
     );
@@ -870,10 +805,7 @@ fn save_as_dialog_window<'a>(filename: &'a str, format: &'a str) -> Element<'a, 
     let body = column(items).spacing(0);
 
     container(body)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BG)),
-            ..Default::default()
-        })
+        .style(dialog_body_style)
         .padding([14, 16])
         .width(Fill)
         .height(Fill)
@@ -881,89 +813,23 @@ fn save_as_dialog_window<'a>(filename: &'a str, format: &'a str) -> Element<'a, 
 }
 
 fn unsaved_changes_dialog_window(name: &str) -> Element<'static, Message> {
-    const BG: Color = Color {
-        r: 0.18,
-        g: 0.18,
-        b: 0.20,
-        a: 1.0,
-    };
-    const BORDER_COL: Color = Color {
-        r: 0.38,
-        g: 0.38,
-        b: 0.42,
-        a: 1.0,
-    };
-    const TEXT_COL: Color = Color {
-        r: 0.90,
-        g: 0.90,
-        b: 0.90,
-        a: 1.0,
-    };
-    const BTN_SAVE: Color = Color {
-        r: 0.20,
-        g: 0.46,
-        b: 0.80,
-        a: 1.0,
-    };
-    const BTN_HOVER: Color = Color {
-        r: 0.26,
-        g: 0.55,
-        b: 0.92,
-        a: 1.0,
-    };
-    const BTN_DISC: Color = Color {
-        r: 0.28,
-        g: 0.28,
-        b: 0.30,
-        a: 1.0,
-    };
-    const BTN_DHOV: Color = Color {
-        r: 0.36,
-        g: 0.36,
-        b: 0.40,
-        a: 1.0,
-    };
-
     let body_text = format!("Do you want to save changes to \"{}\"?", name);
-
-    let btn = |label: &'static str, msg: Message, base: Color, hov: Color| {
-        button(text(label).size(13).color(TEXT_COL))
-            .on_press(msg)
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => hov,
-                    _ => base,
-                })),
-                text_color: TEXT_COL,
-                border: Border {
-                    color: BORDER_COL,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                shadow: iced::Shadow::default(),
-                snap: false,
-            })
-            .padding([6, 18])
-    };
 
     container(
         column![
-            text(body_text).size(13).color(TEXT_COL),
+            text(body_text).size(13),
             iced::widget::Space::new().height(20),
             row![
-                btn("Save", Message::UnsavedDialogSave, BTN_SAVE, BTN_HOVER),
+                dialog_button("Save", Message::UnsavedDialogSave, button::primary),
                 iced::widget::Space::new().width(8),
-                btn("Discard", Message::UnsavedDialogDiscard, BTN_DISC, BTN_DHOV),
+                dialog_button("Discard", Message::UnsavedDialogDiscard, button::danger),
                 iced::widget::Space::new().width(8),
-                btn("Cancel", Message::UnsavedDialogCancel, BTN_DISC, BTN_DHOV),
+                dialog_button("Cancel", Message::UnsavedDialogCancel, button::secondary),
             ],
         ]
         .spacing(0),
     )
-    .style(move |_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
-        ..Default::default()
-    })
+    .style(dialog_body_style)
     .center(Fill)
     .padding([24, 28])
     .into()
@@ -971,55 +837,6 @@ fn unsaved_changes_dialog_window(name: &str) -> Element<'static, Message> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn file_in_use_dialog_window(path: &str, error: &str) -> Element<'static, Message> {
-    const BG: Color = Color {
-        r: 0.18,
-        g: 0.18,
-        b: 0.20,
-        a: 1.0,
-    };
-    const BORDER_COL: Color = Color {
-        r: 0.38,
-        g: 0.38,
-        b: 0.42,
-        a: 1.0,
-    };
-    const TEXT_COL: Color = Color {
-        r: 0.90,
-        g: 0.90,
-        b: 0.90,
-        a: 1.0,
-    };
-    const DIM_COL: Color = Color {
-        r: 0.62,
-        g: 0.62,
-        b: 0.66,
-        a: 1.0,
-    };
-    const BTN_PRIMARY: Color = Color {
-        r: 0.20,
-        g: 0.46,
-        b: 0.80,
-        a: 1.0,
-    };
-    const BTN_PRIMARY_HOVER: Color = Color {
-        r: 0.26,
-        g: 0.55,
-        b: 0.92,
-        a: 1.0,
-    };
-    const BTN_SECONDARY: Color = Color {
-        r: 0.28,
-        g: 0.28,
-        b: 0.30,
-        a: 1.0,
-    };
-    const BTN_SECONDARY_HOVER: Color = Color {
-        r: 0.36,
-        g: 0.36,
-        b: 0.40,
-        a: 1.0,
-    };
-
     let file_name = std::path::Path::new(path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -1027,70 +844,45 @@ fn file_in_use_dialog_window(path: &str, error: &str) -> Element<'static, Messag
     let heading = format!("\"{file_name}\" could not be saved.");
     let path_line = format!("Path: {path}");
     let details = format!("Details: {error}");
-    let btn = |label: &'static str, msg: Message, base: Color, hover: Color| {
-        button(text(label).size(13).color(TEXT_COL))
-            .on_press(msg)
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => hover,
-                    _ => base,
-                })),
-                text_color: TEXT_COL,
-                border: Border {
-                    color: BORDER_COL,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .padding([6, 18])
-    };
 
     container(
         column![
-            text(heading).size(14).color(TEXT_COL),
+            text(heading).size(14),
             Space::new().height(8),
             text(
                 "The file is open or being used by another application. \
                  Close it there and retry, or save this drawing under a different name."
             )
             .size(13)
-            .color(TEXT_COL)
             .width(Fill),
             Space::new().height(12),
-            text(path_line).size(11).color(DIM_COL).width(Fill),
+            text(path_line).size(11).style(dialog_muted_text_style).width(Fill),
             Space::new().height(4),
-            text(details).size(11).color(DIM_COL).width(Fill),
+            text(details).size(11).style(dialog_muted_text_style).width(Fill),
             Space::new().height(18),
             row![
-                btn(
+                dialog_button(
                     "Retry",
                     Message::SaveFileInUseRetry,
-                    BTN_PRIMARY,
-                    BTN_PRIMARY_HOVER
+                    button::primary
                 ),
                 Space::new().width(8),
-                btn(
+                dialog_button(
                     "Save As",
                     Message::SaveFileInUseSaveAs,
-                    BTN_SECONDARY,
-                    BTN_SECONDARY_HOVER
+                    button::secondary
                 ),
                 Space::new().width(8),
-                btn(
+                dialog_button(
                     "Cancel",
                     Message::SaveFileInUseCancel,
-                    BTN_SECONDARY,
-                    BTN_SECONDARY_HOVER
+                    button::secondary
                 ),
             ],
         ]
         .spacing(0),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
-        ..Default::default()
-    })
+    .style(dialog_body_style)
     .padding([18, 20])
     .width(Fill)
     .height(Fill)
@@ -1099,142 +891,55 @@ fn file_in_use_dialog_window(path: &str, error: &str) -> Element<'static, Messag
 
 #[cfg(not(target_arch = "wasm32"))]
 fn external_change_dialog_window(path: &str) -> Element<'static, Message> {
-    const BG: Color = Color {
-        r: 0.18,
-        g: 0.18,
-        b: 0.20,
-        a: 1.0,
-    };
-    const BORDER_COL: Color = Color {
-        r: 0.38,
-        g: 0.38,
-        b: 0.42,
-        a: 1.0,
-    };
-    const TEXT_COL: Color = Color {
-        r: 0.90,
-        g: 0.90,
-        b: 0.90,
-        a: 1.0,
-    };
-    const DIM_COL: Color = Color {
-        r: 0.62,
-        g: 0.62,
-        b: 0.66,
-        a: 1.0,
-    };
-    const BTN_PRIMARY: Color = Color {
-        r: 0.20,
-        g: 0.46,
-        b: 0.80,
-        a: 1.0,
-    };
-    const BTN_PRIMARY_HOVER: Color = Color {
-        r: 0.26,
-        g: 0.55,
-        b: 0.92,
-        a: 1.0,
-    };
-    const BTN_SECONDARY: Color = Color {
-        r: 0.28,
-        g: 0.28,
-        b: 0.30,
-        a: 1.0,
-    };
-    const BTN_SECONDARY_HOVER: Color = Color {
-        r: 0.36,
-        g: 0.36,
-        b: 0.40,
-        a: 1.0,
-    };
-    const BTN_DANGER: Color = Color {
-        r: 0.62,
-        g: 0.31,
-        b: 0.14,
-        a: 1.0,
-    };
-    const BTN_DANGER_HOVER: Color = Color {
-        r: 0.78,
-        g: 0.39,
-        b: 0.17,
-        a: 1.0,
-    };
-
     let file_name = std::path::Path::new(path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Drawing".to_string());
     let heading = format!("\"{file_name}\" was changed by another application.");
     let path_line = format!("Path: {path}");
-    let btn = |label: &'static str, msg: Message, base: Color, hover: Color| {
-        button(text(label).size(13).color(TEXT_COL))
-            .on_press(msg)
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => hover,
-                    _ => base,
-                })),
-                text_color: TEXT_COL,
-                border: Border {
-                    color: BORDER_COL,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .padding([6, 14])
-    };
 
     container(
         column![
-            text(heading).size(14).color(TEXT_COL),
+            text(heading).size(14),
             Space::new().height(8),
             text(
                 "Saving now could destroy those external changes. Reload the disk copy, \
                  save your local work elsewhere, or explicitly overwrite it."
             )
             .size(13)
-            .color(TEXT_COL)
             .width(Fill),
             Space::new().height(12),
-            text(path_line).size(11).color(DIM_COL).width(Fill),
+            text(path_line).size(11).style(dialog_muted_text_style).width(Fill),
             Space::new().height(18),
             row![
-                btn(
+                dialog_button(
                     "Reload from Disk",
                     Message::ExternalChangeReload,
-                    BTN_PRIMARY,
-                    BTN_PRIMARY_HOVER
+                    button::primary
                 ),
                 Space::new().width(8),
-                btn(
+                dialog_button(
                     "Save As",
                     Message::ExternalChangeSaveAs,
-                    BTN_SECONDARY,
-                    BTN_SECONDARY_HOVER
+                    button::secondary
                 ),
                 Space::new().width(8),
-                btn(
+                dialog_button(
                     "Overwrite",
                     Message::ExternalChangeOverwrite,
-                    BTN_DANGER,
-                    BTN_DANGER_HOVER
+                    button::danger
                 ),
                 Space::new().width(8),
-                btn(
+                dialog_button(
                     "Cancel",
                     Message::ExternalChangeCancel,
-                    BTN_SECONDARY,
-                    BTN_SECONDARY_HOVER
+                    button::secondary
                 ),
             ],
         ]
         .spacing(0),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
-        ..Default::default()
-    })
+    .style(dialog_body_style)
     .padding([18, 20])
     .width(Fill)
     .height(Fill)
@@ -1246,58 +951,31 @@ fn external_change_dialog_window(path: &str) -> Element<'static, Message> {
 /// bytes, so saving to a different version or to DXF would drop them. Offers to
 /// save in the source version (keep them) or proceed (drop them).
 fn aec_drop_dialog_window(count: usize, target: &str, src_version: &str) -> Element<'static, Message> {
-    const BG: Color = Color { r: 0.18, g: 0.18, b: 0.20, a: 1.0 };
-    const BORDER_COL: Color = Color { r: 0.38, g: 0.38, b: 0.42, a: 1.0 };
-    const TEXT_COL: Color = Color { r: 0.90, g: 0.90, b: 0.90, a: 1.0 };
-    const BTN_SAVE: Color = Color { r: 0.20, g: 0.46, b: 0.80, a: 1.0 };
-    const BTN_HOVER: Color = Color { r: 0.26, g: 0.55, b: 0.92, a: 1.0 };
-    const BTN_DISC: Color = Color { r: 0.28, g: 0.28, b: 0.30, a: 1.0 };
-    const BTN_DHOV: Color = Color { r: 0.36, g: 0.36, b: 0.40, a: 1.0 };
-
     let body_text = format!(
         "This drawing contains {count} AEC/Civil objects that \"{target}\" \
          cannot store, so they will not be saved.\n\n\
          To keep them, save in the source version ({src_version})."
     );
 
-    let btn = |label: &'static str, msg: Message, base: Color, hov: Color| {
-        button(text(label).size(13).color(TEXT_COL))
-            .on_press(msg)
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => hov,
-                    _ => base,
-                })),
-                text_color: TEXT_COL,
-                border: Border {
-                    color: BORDER_COL,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                shadow: iced::Shadow::default(),
-                snap: false,
-            })
-            .padding([6, 14])
-    };
-
     container(
         column![
-            text(body_text).size(13).color(TEXT_COL),
+            text(body_text).size(13),
             iced::widget::Space::new().height(20),
             row![
-                btn("Save in source version", Message::AecDropSameVersion, BTN_SAVE, BTN_HOVER),
+                dialog_button(
+                    "Save in source version",
+                    Message::AecDropSameVersion,
+                    button::primary
+                ),
                 iced::widget::Space::new().width(8),
-                btn("Save anyway", Message::AecDropProceed, BTN_DISC, BTN_DHOV),
+                dialog_button("Save anyway", Message::AecDropProceed, button::warning),
                 iced::widget::Space::new().width(8),
-                btn("Back", Message::AecDropBack, BTN_DISC, BTN_DHOV),
+                dialog_button("Back", Message::AecDropBack, button::secondary),
             ],
         ]
         .spacing(0),
     )
-    .style(move |_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
-        ..Default::default()
-    })
+    .style(dialog_body_style)
     .center(Fill)
     .padding([24, 28])
     .into()
@@ -1308,14 +986,6 @@ fn aec_drop_dialog_window(count: usize, target: &str, src_version: &str) -> Elem
 /// Confirm deleting layer(s) that still have objects on them. "Delete Objects"
 /// erases them and removes the layers; "Cancel" leaves everything.
 fn layer_delete_warning_window(names: &[String], count: usize) -> Element<'static, Message> {
-    const BG: Color = Color { r: 0.18, g: 0.18, b: 0.20, a: 1.0 };
-    const BORDER_COL: Color = Color { r: 0.38, g: 0.38, b: 0.42, a: 1.0 };
-    const TEXT_COL: Color = Color { r: 0.90, g: 0.90, b: 0.90, a: 1.0 };
-    const BTN_DEL: Color = Color { r: 0.72, g: 0.26, b: 0.24, a: 1.0 };
-    const BTN_DEL_HOV: Color = Color { r: 0.84, g: 0.32, b: 0.30, a: 1.0 };
-    const BTN_CANCEL: Color = Color { r: 0.28, g: 0.28, b: 0.30, a: 1.0 };
-    const BTN_CANCEL_HOV: Color = Color { r: 0.36, g: 0.36, b: 0.40, a: 1.0 };
-
     let obj = if count == 1 { "object" } else { "objects" };
     let subject = if names.len() == 1 {
         format!("Layer \"{}\"", names[0])
@@ -1328,38 +998,23 @@ fn layer_delete_warning_window(names: &[String], count: usize) -> Element<'stati
         if count == 1 { "that object" } else { "those objects" }
     );
 
-    let btn = |label: &'static str, msg: Message, base: Color, hov: Color| {
-        button(text(label).size(13).color(TEXT_COL))
-            .on_press(msg)
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => hov,
-                    _ => base,
-                })),
-                text_color: TEXT_COL,
-                border: Border { color: BORDER_COL, width: 1.0, radius: 4.0.into() },
-                shadow: iced::Shadow::default(),
-                snap: false,
-            })
-            .padding([6, 18])
-    };
-
     container(
         column![
-            text(body_text).size(13).color(TEXT_COL),
+            text(body_text).size(13),
             iced::widget::Space::new().height(20),
             row![
-                btn("Delete Objects", Message::LayerDeleteConfirm, BTN_DEL, BTN_DEL_HOV),
+                dialog_button(
+                    "Delete Objects",
+                    Message::LayerDeleteConfirm,
+                    button::danger
+                ),
                 iced::widget::Space::new().width(8),
-                btn("Cancel", Message::CloseModal, BTN_CANCEL, BTN_CANCEL_HOV),
+                dialog_button("Cancel", Message::CloseModal, button::secondary),
             ],
         ]
         .spacing(0),
     )
-    .style(move |_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
-        ..Default::default()
-    })
+    .style(dialog_body_style)
     .center(Fill)
     .padding([24, 28])
     .into()
@@ -1370,99 +1025,30 @@ fn layer_delete_warning_window(names: &[String], count: usize) -> Element<'stati
 /// just dismisses. Either answer flips the persisted `default_assoc_prompted`
 /// flag so the dialog never reappears.
 fn default_assoc_dialog_window() -> Element<'static, Message> {
-    const BG: Color = Color {
-        r: 0.18,
-        g: 0.18,
-        b: 0.20,
-        a: 1.0,
-    };
-    const BORDER_COL: Color = Color {
-        r: 0.38,
-        g: 0.38,
-        b: 0.42,
-        a: 1.0,
-    };
-    const TEXT_COL: Color = Color {
-        r: 0.90,
-        g: 0.90,
-        b: 0.90,
-        a: 1.0,
-    };
-    const DIM_COL: Color = Color {
-        r: 0.62,
-        g: 0.62,
-        b: 0.66,
-        a: 1.0,
-    };
-    const BTN_YES: Color = Color {
-        r: 0.20,
-        g: 0.46,
-        b: 0.80,
-        a: 1.0,
-    };
-    const BTN_YHOV: Color = Color {
-        r: 0.26,
-        g: 0.55,
-        b: 0.92,
-        a: 1.0,
-    };
-    const BTN_NO: Color = Color {
-        r: 0.28,
-        g: 0.28,
-        b: 0.30,
-        a: 1.0,
-    };
-    const BTN_NHOV: Color = Color {
-        r: 0.36,
-        g: 0.36,
-        b: 0.40,
-        a: 1.0,
-    };
-
-    let btn = |label: &'static str, msg: Message, base: Color, hov: Color| {
-        button(text(label).size(13).color(TEXT_COL))
-            .on_press(msg)
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => hov,
-                    _ => base,
-                })),
-                text_color: TEXT_COL,
-                border: Border {
-                    color: BORDER_COL,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                shadow: iced::Shadow::default(),
-                snap: false,
-            })
-            .padding([6, 18])
-    };
-
     container(
         column![
             text("Make Open CAD Studio your default CAD app?")
-                .size(15)
-                .color(TEXT_COL),
+                .size(15),
             iced::widget::Space::new().height(10),
             text("Open .dwg and .dxf drawings in Open CAD Studio by default. You can change this later in your system settings.")
                 .size(12)
-                .color(DIM_COL),
+                .style(dialog_muted_text_style),
             iced::widget::Space::new().height(22),
             row![
                 iced::widget::Space::new().width(Fill),
-                btn("Not now", Message::AssocPromptNo, BTN_NO, BTN_NHOV),
+                dialog_button("Not now", Message::AssocPromptNo, button::secondary),
                 iced::widget::Space::new().width(8),
-                btn("Yes, set as default", Message::AssocPromptYes, BTN_YES, BTN_YHOV),
+                dialog_button(
+                    "Yes, set as default",
+                    Message::AssocPromptYes,
+                    button::primary
+                ),
             ]
             .align_y(iced::Center),
         ]
         .spacing(0),
     )
-    .style(move |_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
-        ..Default::default()
-    })
+    .style(dialog_body_style)
     .center(Fill)
     .padding([24, 28])
     .into()

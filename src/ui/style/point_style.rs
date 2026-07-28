@@ -7,15 +7,7 @@
 
 use crate::app::Message;
 use iced::widget::{button, canvas, column, container, radio, row, text, text_input, Space};
-use iced::{mouse, Background, Border, Color, Element, Length, Point, Rectangle, Size, Theme};
-
-const BG: Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-const WHITE: Color = Color { r: 0.92, g: 0.92, b: 0.92, a: 1.0 };
-const DIM: Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-const ACCENT: Color = Color { r: 0.30, g: 0.62, b: 0.95, a: 1.0 };
-const CELL: Color = Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 };
-const CELL_SEL: Color = Color { r: 0.30, g: 0.62, b: 0.95, a: 1.0 };
-const GLYPH: Color = Color { r: 0.90, g: 0.90, b: 0.90, a: 1.0 };
+use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Size, Theme};
 
 const CELL_PX: f32 = 44.0;
 
@@ -37,22 +29,23 @@ impl canvas::Program<Message> for GlyphCanvas {
         &self,
         _state: &(),
         renderer: &iced::Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let glyph = theme.extended_palette().background.base.text;
         let (cx, cy) = (bounds.width * 0.5, bounds.height * 0.5);
         let r = bounds.width.min(bounds.height) * 0.30;
         let stroke = canvas::Stroke {
             width: 1.4,
-            style: canvas::Style::Solid(GLYPH),
+            style: canvas::Style::Solid(glyph),
             ..Default::default()
         };
         let line = |a: Point, b: Point| canvas::Path::line(a, b);
 
         match self.mode & 0x0F {
-            0 => frame.fill(&canvas::Path::circle(Point::new(cx, cy), 2.4), GLYPH),
+            0 => frame.fill(&canvas::Path::circle(Point::new(cx, cy), 2.4), glyph),
             1 => {}
             2 => {
                 frame.stroke(&line(Point::new(cx - r, cy), Point::new(cx + r, cy)), stroke.clone());
@@ -89,39 +82,52 @@ fn cell<'a>(value: i16, selected: bool) -> Element<'a, Message> {
     button(glyph)
         .padding(0)
         .on_press(Message::PointStyleSetMode(value))
-        .style(move |_: &Theme, status| {
-            let bg = if selected {
-                CELL_SEL
+        .style(move |theme: &Theme, status| {
+            let palette = theme.extended_palette();
+            let pair = if selected {
+                palette.primary.strong
             } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
+                palette.background.strong
             } else {
-                CELL
+                palette.background.weak
             };
             button::Style {
-                background: Some(Background::Color(bg)),
+                background: Some(Background::Color(pair.color)),
                 border: Border {
-                    color: Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 },
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 3.0.into(),
                 },
+                text_color: pair.text,
                 ..Default::default()
             }
         })
         .into()
 }
 
-fn field_style(_: &Theme, _: text_input::Status) -> text_input::Style {
+fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
+    let border = match status {
+        text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
+    };
     text_input::Style {
-        background: Background::Color(Color { r: 0.1, g: 0.1, b: 0.1, a: 1.0 }),
+        background: Background::Color(palette.background.base.color),
         border: Border {
-            color: Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 },
+            color: border,
             width: 1.0,
             radius: 4.0.into(),
         },
-        icon: DIM,
-        placeholder: DIM,
-        value: WHITE,
-        selection: ACCENT,
+        icon: palette.background.base.text,
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
+    }
+}
+
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
     }
 }
 
@@ -138,7 +144,7 @@ pub fn view_window<'a>(pdmode: i16, relative: bool, size_buf: &str) -> Element<'
     }
 
     let size_row = row![
-        text("Point Size:").size(13).color(WHITE),
+        text("Point Size:").size(13),
         Space::new().width(10),
         text_input("0", size_buf)
             .on_input(Message::PointStyleSizeInput)
@@ -147,7 +153,7 @@ pub fn view_window<'a>(pdmode: i16, relative: bool, size_buf: &str) -> Element<'
             .size(13)
             .width(110),
         Space::new().width(6),
-        text(if relative { "%" } else { "units" }).size(12).color(DIM),
+        text(if relative { "%" } else { "units" }).size(12).style(muted_style),
     ]
     .align_y(iced::Center);
 
@@ -171,26 +177,14 @@ pub fn view_window<'a>(pdmode: i16, relative: bool, size_buf: &str) -> Element<'
     ]
     .spacing(6);
 
-    let ok = button(text("OK").size(13).color(WHITE))
+    let ok = button(text("OK").size(13))
         .padding([5, 22])
         .on_press(Message::PointStyleOk)
-        .style(|_: &Theme, status| {
-            let bg = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                Color { r: 0.32, g: 0.55, b: 0.85, a: 1.0 }
-            } else {
-                ACCENT
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                text_color: WHITE,
-                border: Border { radius: 4.0.into(), ..Default::default() },
-                ..Default::default()
-            }
-        });
+        .style(button::primary);
 
     container(
         column![
-            text("Point Style").size(18).color(WHITE),
+            text("Point Style").size(18),
             Space::new().height(6),
             grid,
             Space::new().height(12),
@@ -203,8 +197,10 @@ pub fn view_window<'a>(pdmode: i16, relative: bool, size_buf: &str) -> Element<'
         .spacing(4)
         .padding(20),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.base.color
+        )),
         ..Default::default()
     })
     .into()

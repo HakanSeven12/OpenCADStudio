@@ -15,7 +15,7 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{mouse, overlay, renderer, Clipboard, Renderer as _, Shell};
 use iced::{
-    Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size,
+    Background, Border, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size,
     Theme, Vector,
 };
 
@@ -113,8 +113,6 @@ pub struct CollapsePanels<'a> {
     open: Option<String>,
     /// Fallback row height, used only when there are no panels to measure.
     row_h: f32,
-    /// Colour of the 1px divider drawn between panels.
-    divider: Color,
     /// Chosen degradation level per panel; set during layout.
     levels: RefCell<Vec<u8>>,
     /// If set, the measured row height is written here each layout (read when
@@ -129,13 +127,12 @@ pub struct CollapsePanels<'a> {
 }
 
 impl<'a> CollapsePanels<'a> {
-    pub fn new(panels: Vec<Panel<'a>>, open: Option<String>, row_h: f32, divider: Color) -> Self {
+    pub fn new(panels: Vec<Panel<'a>>, open: Option<String>, row_h: f32) -> Self {
         let n = panels.len();
         Self {
             panels,
             open,
             row_h,
-            divider,
             levels: RefCell::new(vec![FULL; n]),
             height_out: None,
             tight_out: None,
@@ -480,7 +477,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                     shadow: Shadow::default(),
                     snap: true,
                 },
-                Background::Color(self.divider),
+                Background::Color(theme.extended_palette().background.neutral.color),
             );
         }
     }

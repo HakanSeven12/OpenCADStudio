@@ -6,53 +6,36 @@
 //! messages instead of the StyleKind machinery.
 
 use crate::app::Message;
-use crate::ui::style::style_manager::{hdivider, tb_button, vsep, BG, BORDER, DIM, LIST, TB, TEXT};
+use crate::ui::style::style_manager::{
+    hdivider, muted_text_style, tb_button, vsep,
+};
 use iced::widget::{
     column, container, mouse_area, row, scrollable, text, text_input, Space,
 };
-use iced::{Background, Border, Color, Element, Fill, Theme};
+use iced::{Background, Border, Element, Fill, Theme};
 
 /// Inline-rename text-input id, so the rename-start handler can focus it.
 pub fn rename_input_id() -> iced::widget::Id {
     iced::widget::Id::new("scale-rename-input")
 }
 
-const INPUT_BG: Color = Color {
-    r: 0.10,
-    g: 0.10,
-    b: 0.10,
-    a: 1.0,
-};
-const ACTIVE: Color = Color {
-    r: 0.20,
-    g: 0.40,
-    b: 0.70,
-    a: 1.0,
-};
-const CURRENT_CHECK: Color = Color {
-    r: 0.30,
-    g: 0.82,
-    b: 0.36,
-    a: 1.0,
-};
-
-fn field_style(_: &Theme, _: text_input::Status) -> text_input::Style {
+fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
+    let border = match status {
+        text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
+    };
     text_input::Style {
-        background: Background::Color(INPUT_BG),
+        background: Background::Color(palette.background.base.color),
         border: Border {
-            color: BORDER,
+            color: border,
             width: 1.0,
             radius: 4.0.into(),
         },
-        icon: TEXT,
-        placeholder: DIM,
-        value: TEXT,
-        selection: Color {
-            r: 0.20,
-            g: 0.46,
-            b: 0.80,
-            a: 0.45,
-        },
+        icon: palette.background.base.text,
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
     }
 }
 
@@ -80,8 +63,10 @@ pub fn view_window<'a, 'b>(
         .spacing(4)
         .align_y(iced::Center),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(TB)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.weak.color
+        )),
         ..Default::default()
     })
     .width(Fill)
@@ -105,21 +90,24 @@ pub fn view_window<'a, 'b>(
             }
             let is_sel = name.as_str() == selected;
             let is_cur = name.eq_ignore_ascii_case(current);
-            let check = crate::ui::icons::check_cell(is_cur, CURRENT_CHECK);
+            let check = crate::ui::icons::themed_check_cell(is_cur);
             let label = row![
                 check,
-                text(name.clone()).size(11).color(TEXT).width(Fill),
-                text(ratio.clone()).size(10).color(DIM),
+                text(name.clone()).size(11).width(Fill),
+                text(ratio.clone()).size(10).style(muted_text_style),
             ]
             .spacing(4)
             .align_y(iced::Center);
             let cell = container(label)
                 .padding([4, 8])
                 .width(Fill)
-                .style(move |_: &Theme| container::Style {
-                    background: is_sel.then_some(Background::Color(ACTIVE)),
-                    text_color: Some(TEXT),
+                .style(move |theme: &Theme| {
+                    let pair = theme.extended_palette().primary.strong;
+                    container::Style {
+                    background: is_sel.then_some(Background::Color(pair.color)),
+                    text_color: is_sel.then_some(pair.text),
                     ..Default::default()
+                    }
                 });
             mouse_area(cell)
                 .on_press(Message::ScaleManagerSelect(name.clone()))
@@ -130,16 +118,19 @@ pub fn view_window<'a, 'b>(
 
     let list_panel = container(
         column![
-            text("Scales").size(10).color(DIM),
+            text("Scales").size(10).style(muted_text_style),
             container(scrollable(column(rows).spacing(1)).height(Fill))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(LIST)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.weak.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 3.0.into()
                     },
                     ..Default::default()
+                    }
                 })
                 .width(Fill)
                 .height(Fill)
@@ -161,7 +152,7 @@ pub fn view_window<'a, 'b>(
     let field =
         |label: &'static str, ph: &'static str, value: &str, on: fn(String) -> Message| {
             row![
-                text(label).size(11).color(DIM).width(96),
+                text(label).size(11).style(muted_text_style).width(96),
                 text_input(ph, value)
                     .on_input(on)
                     .style(field_style)
@@ -175,13 +166,13 @@ pub fn view_window<'a, 'b>(
 
     let editor = container(
         column![
-            text("Scale").size(10).color(DIM),
+            text("Scale").size(10).style(muted_text_style),
             field("Paper units", "1", paper_buf, Message::ScaleManagerPaperBuf),
             field("Drawing units", "50", drawing_buf, Message::ScaleManagerDrawingBuf),
             Space::new().height(6),
             text("Double-click a scale to rename it; edit its paper : drawing ratio here. New / Copy add a scale. Changes are kept only if you click Apply before closing.")
                 .size(10)
-                .color(DIM),
+                .style(muted_text_style),
         ]
         .spacing(8),
     )
@@ -192,8 +183,10 @@ pub fn view_window<'a, 'b>(
     let body = row![list_panel, vsep(), editor].height(Fill);
 
     container(column![toolbar, hdivider(), body])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color
+            )),
             ..Default::default()
         })
         .width(Fill)

@@ -7,10 +7,13 @@ run-name: ${{ github.event.release.tag_name || github.ref_name }} Web
 on:
   release:
     types: [published]
+  discussion:
+    types: [created, edited, deleted, transferred, pinned, unpinned, labeled, unlabeled, locked, unlocked, category_changed, answered, unanswered]
   workflow_dispatch:
 
 permissions:
   contents: read
+  discussions: read
   pages: write
   id-token: write
 
@@ -78,6 +81,58 @@ jobs:
                 | sort_by(-.cents)' \
             > dist/supporters.json || echo '[]' > dist/supporters.json
           echo "supporters: $(jq 'length' dist/supporters.json)"
+
+      # GitHub's Discussions API is authenticated GraphQL. Generate a public,
+      # token-free snapshot next to the web app; discussion activity (including
+      # pin/unpin) triggers this workflow so pinned entries stay at the top.
+      - name: Generate discussions.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          QUERY='
+            query($owner: String!, $name: String!) {
+              repository(owner: $owner, name: $name) {
+                pinnedDiscussions(first: 10) {
+                  nodes {
+                    discussion {
+                      number title url updatedAt
+                      author { login }
+                    }
+                  }
+                }
+                discussions(first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
+                  nodes {
+                    number title url updatedAt
+                    author { login }
+                  }
+                }
+              }
+            }'
+          gh api graphql \
+            -f query="$QUERY" \
+            -F owner="$GITHUB_REPOSITORY_OWNER" \
+            -F name="${GITHUB_REPOSITORY#*/}" \
+            | jq -c '
+                .data.repository as $repo
+                | [$repo.pinnedDiscussions.nodes[].discussion.number] as $pinned
+                | (
+                    [$repo.pinnedDiscussions.nodes[].discussion + {pinned: true}]
+                    + [
+                        $repo.discussions.nodes[]
+                        | select((.number as $number | $pinned | index($number)) == null)
+                        | . + {pinned: false}
+                      ]
+                  )
+                | map({
+                    number,
+                    title,
+                    url,
+                    author: (.author.login // ""),
+                    updated_at: .updatedAt,
+                    pinned
+                  })' \
+            > dist/discussions.json
+          echo "discussions: $(jq 'length' dist/discussions.json)"
 
       - uses: actions/upload-pages-artifact@v3
         with:

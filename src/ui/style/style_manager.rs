@@ -10,52 +10,7 @@
 use crate::app::{Message, StyleKind};
 use iced::widget::button::{Status, Style};
 use iced::widget::{button, column, container, row, scrollable, text, Space};
-use iced::{Background, Border, Color, Element, Fill, Theme};
-
-// Shared palette — also reused by the scale manager so it matches the style
-// managers exactly ([[feedback_shared_infra]]).
-pub(crate) const TB: Color = Color {
-    r: 0.13,
-    g: 0.13,
-    b: 0.13,
-    a: 1.0,
-};
-pub(crate) const BG: Color = Color {
-    r: 0.15,
-    g: 0.15,
-    b: 0.15,
-    a: 1.0,
-};
-pub(crate) const BORDER: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-pub(crate) const TEXT: Color = Color {
-    r: 0.88,
-    g: 0.88,
-    b: 0.88,
-    a: 1.0,
-};
-pub(crate) const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.25,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
-pub(crate) const LIST: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
+use iced::{Background, Border, Element, Fill, Theme};
 
 /// Everything the shared frame needs. The per-manager `editor` element is the
 /// only bespoke part.
@@ -103,8 +58,10 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
     .spacing(4)
     .align_y(iced::Center);
     let toolbar = container(bar)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(TB)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.weak.color
+            )),
             ..Default::default()
         })
         .width(Fill)
@@ -131,16 +88,19 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
 
     let list_panel = container(
         column![
-            text("Styles").size(10).color(DIM),
+            text("Styles").size(10).style(muted_text_style),
             container(scrollable(column(rows).spacing(1)).height(Fill))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(LIST)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.weak.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 3.0.into()
                     },
                     ..Default::default()
+                    }
                 })
                 .width(Fill)
                 .height(Fill)
@@ -161,8 +121,10 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
     let body = row![list_panel, vsep(), s.editor].height(Fill);
 
     container(column![toolbar, hdivider(), body])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color
+            )),
             ..Default::default()
         })
         .width(Fill)
@@ -182,35 +144,30 @@ pub(crate) fn tb_button<'a>(label: &'a str, msg: Message, accent: bool) -> Eleme
 }
 
 fn btn_s(accent: bool) -> impl Fn(&Theme, Status) -> Style {
-    move |_: &Theme, st| Style {
-        background: Some(Background::Color(match (accent, st) {
-            (true, Status::Hovered | Status::Pressed) => Color {
-                r: 0.20,
-                g: 0.42,
-                b: 0.72,
-                a: 1.0,
-            },
-            (false, Status::Hovered | Status::Pressed) => Color {
-                r: 0.28,
-                g: 0.28,
-                b: 0.28,
-                a: 1.0,
-            },
-            (true, _) => ACCENT,
-            _ => Color {
-                r: 0.22,
-                g: 0.22,
-                b: 0.22,
-                a: 1.0,
-            },
-        })),
-        text_color: TEXT,
+    move |theme: &Theme, st| {
+        let palette = theme.extended_palette();
+        let pair = match (accent, st) {
+            (true, Status::Hovered | Status::Pressed) => palette.primary.strong,
+            (false, Status::Hovered | Status::Pressed) => palette.background.strong,
+            (true, _) => palette.primary.base,
+            _ => palette.background.weak,
+        };
+        Style {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
         border: Border {
-            color: BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 4.0.into(),
         },
         ..Default::default()
+        }
+    }
+}
+
+pub(crate) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
     }
 }
 
@@ -218,8 +175,10 @@ pub(crate) fn hdivider<'a>() -> Element<'a, Message> {
     container(Space::new().width(Fill).height(1))
         .width(Fill)
         .height(1)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()
@@ -229,8 +188,10 @@ pub(crate) fn vsep<'a>() -> Element<'a, Message> {
     container(Space::new().width(1).height(Fill))
         .width(1)
         .height(Fill)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()

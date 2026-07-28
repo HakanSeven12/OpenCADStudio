@@ -1,7 +1,7 @@
 mod alias;
 #[cfg(not(target_arch = "wasm32"))]
 mod automation;
-mod config;
+pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub use automation::{export_headless, serve};
 mod command_driver;
@@ -226,6 +226,7 @@ pub enum StartSection {
     Videos,
     #[default]
     Welcome,
+    Discussions,
     Supporters,
 }
 
@@ -259,6 +260,10 @@ pub(super) struct OpenCADStudio {
     video_thumbs: std::collections::HashMap<String, iced::widget::image::Handle>,
     /// True while the boot-time playlist fetch is still in flight.
     videos_loading: bool,
+    /// GitHub Discussions shown on the Start page, with pinned entries first.
+    discussions: Vec<crate::discussions::DiscussionEntry>,
+    /// True while the boot-time Discussions refresh is still in flight.
+    discussions_loading: bool,
     /// Block references whose properties panel shows per-axis Scale X/Y/Z even
     /// though the three factors are currently equal — the user unchecked the
     /// "Uniform scale" box for them (#427). Keyed by entity handle.
@@ -266,6 +271,9 @@ pub(super) struct OpenCADStudio {
     /// Which Start-page section is shown when the page is too narrow for all
     /// three side by side and falls back to a tab bar.
     start_section: StartSection,
+    /// Widest natural single-row width of the Start-page action buttons,
+    /// measured by `WrapFlow` so side lists collapse before those buttons wrap.
+    start_action_w: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// When the window is too narrow the properties panel collapses to a
     /// vertical bar; this is the user's toggle to expand it back out.
     props_expanded: bool,
@@ -295,6 +303,9 @@ pub(super) struct OpenCADStudio {
     isolate_popup_open: bool,
     /// True while the selection-filter type picker is open.
     selection_filter_popup_open: bool,
+    /// Hide a status-menu tooltip after its root is clicked; reset when the
+    /// pointer leaves the root for the opened menu.
+    status_menu_tooltip_hidden: bool,
     /// Clean-screen mode: hide ribbon and side panels for a full canvas.
     clean_screen: bool,
     /// Quick Properties: show a compact floating property panel on selection.
@@ -570,10 +581,6 @@ pub(super) struct OpenCADStudio {
     mtext_editor: Option<mtext_editor::MTextEditorState>,
     /// Open in-place single-line TEXT editor (plain text-entry box), if any.
     text_inline: Option<text_inline::TextInlineState>,
-    /// Which layout tab has its context menu open (None = closed).
-    layout_context_menu: Option<String>,
-    /// Which drawing tab has its context menu open (None = closed).
-    doc_tab_context_menu: Option<usize>,
     /// Cursor-anchored one-shot snap override menu (Shift+RMB): the canvas
     /// point it opened at, or `None` when closed (#337).
     snap_override_popup: Option<iced::Point>,
@@ -689,6 +696,8 @@ pub(super) struct OpenCADStudio {
 
     // ── Color Scheme ──────────────────────────────────────────────────────
     active_theme: Theme,
+    ui_theme: config::UiThemeConfig,
+    theme_color_inputs: [String; 6],
 
     // ── Keyboard Shortcut Editor ──────────────────────────────────────────
     /// User-defined function-key overrides: "F3" → command string.
@@ -1475,6 +1484,10 @@ pub enum Message {
     OptionsOpen,
     /// Set the default type/version used when first saving a new drawing.
     DefaultSaveFormatChanged(String),
+    /// Select one of Iced's built-in themes or the editable Custom theme.
+    OptionsThemeChanged(String),
+    /// Edit one of Custom theme's six base colours as #RRGGBB.
+    OptionsThemeColorChanged(usize, String),
     ClearScene,
     SetWireframe(bool),
     /// Set the active tab's render mode (one of acadrust's seven visual
@@ -1512,9 +1525,6 @@ pub enum Message {
     },
     /// Close the given tab index.
     TabClose(usize),
-    /// Open/close the right-click menu for a drawing tab.
-    DocTabContextMenu(usize),
-    DocTabContextMenuClose,
     /// Save every drawing that already has a file path.
     DocTabSaveAll,
     /// Close every non-Start drawing tab.
@@ -1965,10 +1975,6 @@ pub enum Message {
     LayoutRenameCommit,
     /// Cancel an in-progress rename (Escape).
     LayoutRenameCancel,
-    /// Open the right-click context menu for the given layout tab.
-    LayoutContextMenu(String),
-    /// Close the layout context menu.
-    LayoutContextMenuClose,
     // ── Layout Manager Panel ────────────────────────────────────────────
     LayoutManagerOpen,
     #[allow(dead_code)]
@@ -2058,6 +2064,8 @@ pub enum Message {
     PatronsFetched(Result<Vec<(String, i64)>, String>),
     /// Tutorial-playlist videos fetched at boot for the Start page.
     VideosFetched(Result<Vec<crate::videos::VideoEntry>, String>),
+    /// GitHub Discussions fetched at boot for the Start page.
+    DiscussionsFetched(Result<Vec<crate::discussions::DiscussionEntry>, String>),
     /// Recent-file DWG preview thumbnails decoded on a background thread.
     RecentThumbsLoaded(
         Vec<(std::path::PathBuf, Option<iced::widget::image::Handle>)>,
@@ -2177,6 +2185,8 @@ pub enum Message {
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.
     Noop,
+    /// Suppress menu-root tooltips between clicking the root and leaving it.
+    StatusMenuTooltipHidden(bool),
     /// GitHub releases API returned a result. `Some(version)` means a
     /// newer release exists; we open the update-notice window.
     UpdateCheckResult(Option<crate::io::update_check::UpdateInfo>),
@@ -2483,8 +2493,11 @@ impl OpenCADStudio {
             videos: Vec::new(),
             video_thumbs: std::collections::HashMap::new(),
             videos_loading: false,
+            discussions: Vec::new(),
+            discussions_loading: false,
             props_asym_scale: std::collections::HashSet::new(),
             start_section: StartSection::default(),
+            start_action_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             props_expanded: false,
             history_content: iced::widget::text_editor::Content::new(),
             status_bar: StatusBar::new(),
@@ -2501,6 +2514,7 @@ impl OpenCADStudio {
             units_popup_open: false,
             isolate_popup_open: false,
             selection_filter_popup_open: false,
+            status_menu_tooltip_hidden: false,
             statusbar_config: crate::ui::statusbar::statusbar_config::StatusBarConfig::default(),
             last_saved_config: None,
             otrack_active: None,
@@ -2593,8 +2607,6 @@ impl OpenCADStudio {
             cont_anchor: None,
             mtext_editor: None,
             text_inline: None,
-            layout_context_menu: None,
-            doc_tab_context_menu: None,
             snap_override_popup: None,
             axis_lock_dir: None,
             layout_rename_state: None,
@@ -2631,8 +2643,10 @@ impl OpenCADStudio {
             default_save_format: crate::io::DEFAULT_SAVE_FORMAT.to_string(),
             // Plot style
             active_plot_style: None,
-            // Color scheme (default: dark CAD-style)
-            active_theme: Theme::Dark,
+            // Color scheme (default: Oxocarbon)
+            active_theme: Theme::Oxocarbon,
+            ui_theme: config::UiThemeConfig::default(),
+            theme_color_inputs: config::UiThemePalette::default().hex_values(),
             // Keyboard shortcuts
             shortcut_overrides: rustc_hash::FxHashMap::default(),
             // Command aliases (populated from ocad.pgp just after construction)
@@ -2946,6 +2960,26 @@ impl OpenCADStudio {
         };
         #[cfg(target_arch = "wasm32")]
         let videos_fetch = Task::none();
+        // GitHub Discussions: seed from the last successful fetch, then refresh
+        // the public feed and pinned section on a background thread.
+        #[cfg(not(target_arch = "wasm32"))]
+        let discussions_fetch = {
+            s.discussions = crate::discussions::load_cached();
+            s.discussions_loading = true;
+            let (tx, rx) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::discussions::fetch_discussions());
+            });
+            Task::perform(
+                async move {
+                    rx.await
+                        .unwrap_or_else(|_| Err("discussion fetch thread died".into()))
+                },
+                Message::DiscussionsFetched,
+            )
+        };
+        #[cfg(target_arch = "wasm32")]
+        let discussions_fetch = Task::none();
         // Recent-file thumbnails: decoded off-thread — parsing every recent
         // DWG's preview on the boot path held the first frame back.
         let thumbs_fetch = s.refresh_recent_thumbs();
@@ -2960,6 +2994,7 @@ impl OpenCADStudio {
                 assoc_prompt,
                 patrons_fetch,
                 videos_fetch,
+                discussions_fetch,
                 thumbs_fetch,
             ]),
         )
@@ -2979,7 +3014,12 @@ impl OpenCADStudio {
             crate::patreon::fetch_patrons_web(),
             Message::PatronsFetched,
         );
-        (s, Task::batch([focus, patrons]))
+        s.discussions_loading = true;
+        let discussions = Task::perform(
+            crate::discussions::fetch_discussions_web(),
+            Message::DiscussionsFetched,
+        );
+        (s, Task::batch([focus, patrons, discussions]))
     }
 }
 

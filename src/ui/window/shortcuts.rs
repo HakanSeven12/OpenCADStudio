@@ -2,7 +2,7 @@
 
 use crate::app::Message;
 use iced::widget::{column, container, row, scrollable, text, Space};
-use iced::{Background, Color, Element, Fill, Theme};
+use iced::{Background, Element, Fill, Theme};
 use std::borrow::Cow;
 
 /// Display name of the primary accelerator modifier on this platform.
@@ -14,49 +14,26 @@ const MOD: &str = "Cmd";
 #[cfg(not(target_os = "macos"))]
 const MOD: &str = "Ctrl";
 
-const TB: Color = Color {
-    r: 0.13,
-    g: 0.13,
-    b: 0.13,
-    a: 1.0,
-};
-const BG: Color = Color {
-    r: 0.15,
-    g: 0.15,
-    b: 0.15,
-    a: 1.0,
-};
-const BORDER: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.25,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
-const KEY: Color = Color {
-    r: 0.40,
-    g: 0.70,
-    b: 1.00,
-    a: 1.0,
-};
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
+
+fn primary_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().primary.base.color),
+    }
+}
 
 fn hdivider<'a>() -> Element<'a, Message> {
     container(Space::new().width(Fill).height(1))
         .width(Fill)
         .height(1)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color,
+            )),
             ..Default::default()
         })
         .into()
@@ -69,7 +46,7 @@ fn shortcut_row<'a>(
     row![
         text(key.into())
             .size(11)
-            .color(KEY)
+            .style(primary_style)
             .font(iced::Font::MONOSPACE)
             .width(160),
         text(action).size(11),
@@ -81,7 +58,7 @@ fn shortcut_row<'a>(
 }
 
 fn section<'a>(title: impl Into<Cow<'static, str>>) -> Element<'a, Message> {
-    container(text(title.into()).size(11).color(DIM))
+    container(text(title.into()).size(11).style(muted_style))
         .padding(iced::Padding {
             top: 6.0,
             right: 0.0,
@@ -99,12 +76,14 @@ pub fn view_window<'a>(
         row![
             text("Type  SHORTCUTS SET <key> <cmd>  to add custom shortcuts.")
                 .size(10)
-                .color(DIM),
+                .style(muted_style),
         ]
         .align_y(iced::Center),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(TB)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.weakest.color,
+        )),
         ..Default::default()
     })
     .width(Fill)
@@ -147,7 +126,7 @@ pub fn view_window<'a>(
         rows.push(
             text("  (none — use: SHORTCUTS SET <key> <command>)")
                 .size(11)
-                .color(DIM)
+                .style(muted_style)
                 .into(),
         );
     } else {
@@ -158,7 +137,7 @@ pub fn view_window<'a>(
                 row![
                     text(key.as_str())
                         .size(11)
-                        .color(KEY)
+                        .style(primary_style)
                         .font(iced::Font::MONOSPACE)
                         .width(160),
                     text(cmd.as_str()).size(11),
@@ -179,26 +158,25 @@ pub fn view_window<'a>(
     // ── Header row with accent ────────────────────────────────────────────
     let header = container(
         row![
-            text("Key").size(10).color(ACCENT).width(160),
-            text("Action").size(10).color(ACCENT),
+            text("Key").size(10).style(primary_style).width(160),
+            text("Action").size(10).style(primary_style),
         ]
         .spacing(8)
         .padding([4, 16]),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(Color {
-            r: 0.13,
-            g: 0.13,
-            b: 0.18,
-            a: 1.0,
-        })),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().primary.weak.color,
+        )),
         ..Default::default()
     })
     .width(Fill);
 
     container(column![toolbar, hdivider(), header, hdivider(), content].spacing(0))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color,
+            )),
             ..Default::default()
         })
         .width(Fill)

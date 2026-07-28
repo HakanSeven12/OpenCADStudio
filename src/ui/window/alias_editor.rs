@@ -6,7 +6,7 @@
 
 use crate::app::Message;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
-use iced::{Background, Border, Color, Element, Fill, Length, Theme};
+use iced::{Background, Element, Fill, Length, Theme};
 
 /// Which column of an alias row a text edit targets.
 #[derive(Clone, Copy, Debug)]
@@ -18,33 +18,21 @@ pub enum AliasField {
 /// Right-hand lane reserved for the scrollbar so it never overlaps the ✕ column.
 const GUTTER: f32 = 16.0;
 
-const BG: Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-const FIELD_BG: Color = Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 };
-const BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-const DIM: Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-const WHITE: Color = Color { r: 0.85, g: 0.85, b: 0.85, a: 1.0 };
-const ADD_C: Color = Color { r: 0.20, g: 0.40, b: 0.62, a: 1.0 };
-
-fn field_style(_: &Theme, _s: text_input::Status) -> text_input::Style {
-    text_input::Style {
-        background: Background::Color(FIELD_BG),
-        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-        icon: WHITE,
-        placeholder: DIM,
-        value: WHITE,
-        selection: Color { r: 0.25, g: 0.40, b: 0.60, a: 1.0 },
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
     }
 }
 
 /// Build the alias editor content. `rows` is the live working buffer.
 pub fn view_window(rows: &[(String, String)]) -> Element<'_, Message> {
-    let title = text("Command Aliases").size(15).color(WHITE);
+    let title = text("Command Aliases").size(15);
     let hint = text(
         "Type an alias and the command it runs (e.g. L → LINE). \
          Apply to save to ocad.pgp; closing discards unapplied edits.",
     )
     .size(11)
-    .color(DIM);
+    .style(muted_style);
 
     // Right gutter reserved so the scrollbar has its own lane and never sits on
     // top of the row delete (✕) buttons. Applied to both the header and the
@@ -53,8 +41,8 @@ pub fn view_window(rows: &[(String, String)]) -> Element<'_, Message> {
 
     let head = container(
         row![
-            container(text("Alias").size(11).color(DIM)).width(Length::Fixed(120.0)),
-            container(text("Command").size(11).color(DIM)).width(Fill),
+            container(text("Alias").size(11).style(muted_style)).width(Length::Fixed(120.0)),
+            container(text("Command").size(11).style(muted_style)).width(Fill),
             Space::new().width(Length::Fixed(30.0)),
         ]
         .spacing(8),
@@ -65,31 +53,18 @@ pub fn view_window(rows: &[(String, String)]) -> Element<'_, Message> {
     for (idx, (alias, cmd)) in rows.iter().enumerate() {
         let alias_box = text_input("alias", alias)
             .on_input(move |v| Message::AliasEditorInput { idx, field: AliasField::Alias, value: v })
-            .style(field_style)
             .size(13)
             .padding([3, 6])
             .width(Length::Fixed(120.0));
         let cmd_box = text_input("command", cmd)
             .on_input(move |v| Message::AliasEditorInput { idx, field: AliasField::Command, value: v })
-            .style(field_style)
             .size(13)
             .padding([3, 6])
             .width(Fill);
-        let del = button(crate::ui::icons::tinted(crate::ui::icons::CLOSE, 12.0, WHITE))
+        let del = button(crate::ui::icons::themed_danger(crate::ui::icons::CLOSE, 12.0))
             .on_press(Message::AliasEditorRemove(idx))
             .padding([2, 6])
-            .style(|_: &Theme, status| {
-                let bg = if matches!(status, button::Status::Hovered) {
-                    Color { r: 0.45, g: 0.22, b: 0.22, a: 1.0 }
-                } else {
-                    Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 }
-                };
-                button::Style {
-                    background: Some(Background::Color(bg)),
-                    border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-                    ..Default::default()
-                }
-            });
+            .style(button::danger);
         list = list.push(
             row![alias_box, cmd_box, del]
                 .spacing(8)
@@ -97,40 +72,16 @@ pub fn view_window(rows: &[(String, String)]) -> Element<'_, Message> {
         );
     }
 
-    let add = button(text("+ Add alias").size(12).color(WHITE))
+    let add = button(text("+ Add alias").size(12))
         .on_press(Message::AliasEditorAdd)
         .padding([4, 10])
-        .style(|_: &Theme, status| {
-            let bg = if matches!(status, button::Status::Hovered) {
-                Color { r: 0.30, g: 0.30, b: 0.30, a: 1.0 }
-            } else {
-                Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 }
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                text_color: WHITE,
-                border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-                ..Default::default()
-            }
-        });
+        .style(button::secondary);
 
     // Apply — primary action; commits the rows to ocad.pgp and stays open.
-    let apply = button(text("Apply").size(12).color(WHITE))
+    let apply = button(text("Apply").size(12))
         .on_press(Message::AliasEditorApply)
         .padding([4, 16])
-        .style(|_: &Theme, status| {
-            let bg = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                Color { r: 0.24, g: 0.46, b: 0.74, a: 1.0 }
-            } else {
-                ADD_C
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                text_color: WHITE,
-                border: Border { radius: 4.0.into(), ..Default::default() },
-                ..Default::default()
-            }
-        });
+        .style(button::primary);
 
     container(
         column![
@@ -149,8 +100,10 @@ pub fn view_window(rows: &[(String, String)]) -> Element<'_, Message> {
     .padding(12)
     .width(Fill)
     .height(Fill)
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.base.color,
+        )),
         ..Default::default()
     })
     .into()

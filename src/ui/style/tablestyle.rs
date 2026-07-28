@@ -4,63 +4,41 @@ use crate::app::Message;
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Column,
 };
-use iced::{Background, Border, Color, Element, Fill, Theme};
-
-const BORDER: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-const TEXT: Color = Color {
-    r: 0.88,
-    g: 0.88,
-    b: 0.88,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.25,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
+use iced::{Background, Border, Element, Fill, Theme};
 
 fn btn_s(accent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_: &Theme, st| button::Style {
-        background: Some(Background::Color(match (accent, st) {
-            (true, button::Status::Hovered | button::Status::Pressed) => Color {
-                r: 0.20,
-                g: 0.42,
-                b: 0.72,
-                a: 1.0,
-            },
-            (false, button::Status::Hovered | button::Status::Pressed) => Color {
-                r: 0.28,
-                g: 0.28,
-                b: 0.28,
-                a: 1.0,
-            },
-            (true, _) => ACCENT,
-            _ => Color {
-                r: 0.22,
-                g: 0.22,
-                b: 0.22,
-                a: 1.0,
-            },
-        })),
-        text_color: TEXT,
+    move |theme: &Theme, st| {
+        let palette = theme.extended_palette();
+        let pair = match (accent, st) {
+            (true, button::Status::Hovered | button::Status::Pressed) => palette.primary.strong,
+            (false, button::Status::Hovered | button::Status::Pressed) => {
+                palette.background.strong
+            }
+            (true, _) => palette.primary.base,
+            _ => palette.background.weak,
+        };
+        button::Style {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
         border: Border {
-            color: BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 4.0.into(),
         },
         ..Default::default()
+        }
+    }
+}
+
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
+
+fn primary_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().primary.base.color),
     }
 }
 
@@ -89,7 +67,7 @@ pub fn view_window<'a>(
     // ── Right: Details panel ──────────────────────────────────────────────
     let info_row = |label: &'static str, val: String| -> Element<'_, Message> {
         row![
-            text(label).size(11).color(DIM).width(160),
+            text(label).size(11).style(muted_style).width(160),
             text(val).size(11),
         ]
         .spacing(8)
@@ -108,7 +86,7 @@ pub fn view_window<'a>(
                        field: &'static str|
          -> Element<'a, Message> {
             row![
-                text(label).size(11).color(DIM).width(150),
+                text(label).size(11).style(muted_style).width(150),
                 text_input(placeholder, value)
                     .on_input(move |v| Message::TableStyleCellEdit {
                         row,
@@ -142,14 +120,14 @@ pub fn view_window<'a>(
                 Message::TableColorMore(row, field),
                 Message::OpenColorWindow(crate::app::ColorPickTarget::Table(row, field)),
             );
-            row![text(label).size(11).color(DIM).width(150), selector]
+            row![text(label).size(11).style(muted_style).width(150), selector]
                 .spacing(8)
                 .align_y(iced::Center)
                 .into()
         };
         let mut col = Column::new()
             .spacing(3)
-            .push(text(row_label).size(11).color(ACCENT))
+            .push(text(row_label).size(11).style(primary_style))
             .push(cell_in(
                 "  Text style:",
                 "Standard",
@@ -161,7 +139,7 @@ pub fn view_window<'a>(
             .push(cell_color("  Fill color:", &cell_fillcolor[r], "fillcolor"))
             .push(
                 row![
-                    text("  Alignment:").size(11).color(DIM).width(150),
+                    text("  Alignment:").size(11).style(muted_style).width(150),
                     pick_list(
                         [
                             "TopLeft",
@@ -199,7 +177,7 @@ pub fn view_window<'a>(
             .push(
                 text("  Borders  (type / weight / color / spacing / hidden)")
                     .size(10)
-                    .color(DIM),
+                    .style(muted_style),
             );
 
         let borders: [(&'static str, &acadrust::objects::TableCellBorder); 6] = [
@@ -214,7 +192,7 @@ pub fn view_window<'a>(
             let bu = b as u8;
             col = col.push(
                 row![
-                    text(format!("   {bname}")).size(11).color(DIM).width(28),
+                    text(format!("   {bname}")).size(11).style(muted_style).width(28),
                     pick_list(
                         ["Single", "Double"]
                             .iter()
@@ -282,7 +260,7 @@ pub fn view_window<'a>(
             column![
                 info_row("Name:", s.name.clone()),
                 row![
-                    text("Description:").size(11).color(DIM).width(160),
+                    text("Description:").size(11).style(muted_style).width(160),
                     text_input("", description_buf)
                         .on_input(|v| Message::TableStyleEdit {
                             field: "description",
@@ -294,7 +272,7 @@ pub fn view_window<'a>(
                 .spacing(8)
                 .align_y(iced::Center),
                 row![
-                    text("Flow direction:").size(11).color(DIM).width(160),
+                    text("Flow direction:").size(11).style(muted_style).width(160),
                     pick_list(
                         ["Down", "Up"]
                             .iter()
@@ -314,7 +292,7 @@ pub fn view_window<'a>(
                     .size(14)
                     .text_size(11),
                 row![
-                    text("H Margin:").size(11).color(DIM).width(160),
+                    text("H Margin:").size(11).style(muted_style).width(160),
                     text_input("1.5", hmargin_buf)
                         .on_input(|v| Message::TableStyleEdit {
                             field: "hmargin",
@@ -326,7 +304,7 @@ pub fn view_window<'a>(
                 .spacing(8)
                 .align_y(iced::Center),
                 row![
-                    text("V Margin:").size(11).color(DIM).width(160),
+                    text("V Margin:").size(11).style(muted_style).width(160),
                     text_input("1.5", vmargin_buf)
                         .on_input(|v| Message::TableStyleEdit {
                             field: "vmargin",
@@ -362,7 +340,7 @@ pub fn view_window<'a>(
         .height(Fill)
         .into()
     } else {
-        container(text("Select a style to view details.").size(11).color(DIM))
+        container(text("Select a style to view details.").size(11).style(muted_style))
             .padding([12, 12])
             .into()
     };

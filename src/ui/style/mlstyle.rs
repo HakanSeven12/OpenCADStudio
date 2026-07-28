@@ -2,14 +2,13 @@
 
 use crate::app::Message;
 use iced::widget::{column, container, row, scrollable, text};
-use iced::{Color, Element, Fill};
+use iced::{Element, Fill, Theme};
 
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
 
 pub fn view_window<'a>(
     styles: Vec<String>,
@@ -22,7 +21,7 @@ pub fn view_window<'a>(
     // ── Right: Details panel ──────────────────────────────────────────────
     let info_row = |label: &'static str, val: String| -> Element<'_, Message> {
         row![
-            text(label).size(11).color(DIM).width(120),
+            text(label).size(11).style(muted_style).width(120),
             text(val).size(11),
         ]
         .spacing(8)
@@ -49,7 +48,7 @@ pub fn view_window<'a>(
                     &e.linetype
                 };
                 row![
-                    text(format!("  {idx}:")).size(10).color(DIM).width(24),
+                    text(format!("  {idx}:")).size(10).style(muted_style).width(24),
                     text(format!("{:+.3}", e.offset)).size(10).width(70),
                     text(color_str).size(10).width(90),
                     text(lt).size(10),
@@ -65,7 +64,7 @@ pub fn view_window<'a>(
             info_row("Elements:", s.elements.len().to_string()),
             text("  Off   Color        Ltype")
                 .size(10)
-                .color(DIM)
+                .style(muted_style)
                 .into(),
         ];
         col_items.extend(elem_rows);
@@ -73,7 +72,7 @@ pub fn view_window<'a>(
             .height(Fill)
             .into()
     } else {
-        container(text("Select a style to view details.").size(11).color(DIM))
+        container(text("Select a style to view details.").size(11).style(muted_style))
             .padding([12, 12])
             .into()
     };

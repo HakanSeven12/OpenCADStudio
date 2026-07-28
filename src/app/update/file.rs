@@ -320,6 +320,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn current_config(&self) -> crate::app::config::AppConfig {
         crate::app::config::AppConfig {
             settings: self.current_settings(),
+            theme: self.ui_theme.clone(),
             recent: crate::app::config::RecentConfig {
                 files: self
                     .recent_files
@@ -342,6 +343,9 @@ impl OpenCADStudio {
     /// Distribute a loaded config into live app state (called once at startup).
     pub(in crate::app) fn apply_config(&mut self, cfg: crate::app::config::AppConfig) {
         self.apply_settings(&cfg.settings);
+        self.ui_theme = cfg.theme.clone();
+        self.active_theme = self.ui_theme.to_iced();
+        self.theme_color_inputs = self.ui_theme.palette.hex_values();
         self.recent_files = cfg
             .recent
             .files

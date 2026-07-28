@@ -4,7 +4,7 @@ use super::super::Message;
 use iced::widget::{
     button, container, mouse_area, row,
 };
-use iced::{Background, Border, Color, Element, Theme};
+use iced::{Background, Border, Element, Theme};
 
 pub(super) fn viewport_controls<'a>(
     render_mode: acadrust::entities::ViewportRenderMode,
@@ -23,64 +23,58 @@ pub(super) fn viewport_controls<'a>(
         RenderModeChoice(M::FlatShadedWithEdges),
         RenderModeChoice(M::GouraudShadedWithEdges),
     ];
-    let light = Color { r: 0.85, g: 0.85, b: 0.85, a: 1.0 };
-    let accent = Color { r: 0.45, g: 0.70, b: 1.0, a: 1.0 };
-    let green = Color { r: 0.36, g: 0.80, b: 0.45, a: 1.0 };
-    let red = Color { r: 0.92, g: 0.38, b: 0.38, a: 1.0 };
-
-    // Fixed-colour icon button (close = red); colour stays on hover.
-    let tinted_btn = move |bytes: &'static [u8], color: Color, msg: Message| {
-        button(crate::ui::icons::tinted(bytes, 15.0, color))
+    let danger_btn = move |bytes: &'static [u8], msg: Message| {
+        button(crate::ui::icons::themed_danger(bytes, 15.0))
             .on_press(msg)
             .padding([4, 6])
-            .style(move |_: &Theme, status| iced::widget::button::Style {
-                background: Some(Background::Color(match status {
+            .style(move |theme: &Theme, status| iced::widget::button::Style {
+                background: matches!(
+                    status,
                     iced::widget::button::Status::Hovered
-                    | iced::widget::button::Status::Pressed => Color {
-                        r: 0.25,
-                        g: 0.25,
-                        b: 0.25,
-                        a: 0.9,
-                    },
-                    _ => Color::TRANSPARENT,
-                })),
+                        | iced::widget::button::Status::Pressed
+                )
+                .then_some(Background::Color(
+                    theme.extended_palette().danger.weak.color
+                )),
                 border: Border {
                     radius: 3.0.into(),
                     ..Default::default()
                 },
-                text_color: color,
+                text_color: theme.extended_palette().danger.base.color,
                 ..Default::default()
             })
     };
 
     // Borderless icon button; an `active` toggle gets an accent tint + fill.
     let icon_btn = move |bytes: &'static [u8], active: bool, msg: Message| {
-        let tint = if active { accent } else { light };
-        button(crate::ui::icons::tinted(bytes, 15.0, tint))
+        let icon = if active {
+            crate::ui::icons::themed_primary(bytes, 15.0)
+        } else {
+            crate::ui::icons::themed(bytes, 15.0)
+        };
+        button(icon)
             .on_press(msg)
             .padding([4, 6])
-            .style(move |_: &Theme, status| iced::widget::button::Style {
-                background: Some(Background::Color(match (active, status) {
-                    (_, iced::widget::button::Status::Hovered) => Color {
-                        r: 0.25,
-                        g: 0.25,
-                        b: 0.25,
-                        a: 0.9,
-                    },
-                    (true, _) => Color {
-                        r: 0.16,
-                        g: 0.22,
-                        b: 0.32,
-                        a: 0.9,
-                    },
-                    (false, _) => Color::TRANSPARENT,
-                })),
+            .style(move |theme: &Theme, status| {
+                let palette = theme.extended_palette();
+                let pair = match (active, status) {
+                    (_, iced::widget::button::Status::Hovered) => {
+                        Some(palette.background.strong)
+                    }
+                    (true, _) => Some(palette.primary.weak),
+                    (false, _) => None,
+                };
+                iced::widget::button::Style {
+                background: pair.map(|p| Background::Color(p.color)),
                 border: Border {
                     radius: 3.0.into(),
                     ..Default::default()
                 },
-                text_color: tint,
+                text_color: pair
+                    .map(|p| p.text)
+                    .unwrap_or(palette.background.base.text),
                 ..Default::default()
+                }
             })
     };
 
@@ -92,27 +86,27 @@ pub(super) fn viewport_controls<'a>(
     )
     .text_size(11)
     .padding([4, 6])
-    .style(move |_: &Theme, _| iced::widget::pick_list::Style {
-        background: Background::Color(Color::TRANSPARENT),
+    .style(move |theme: &Theme, _| {
+        let text = theme.extended_palette().background.base.text;
+        iced::widget::pick_list::Style {
+        background: Background::Color(iced::Color::TRANSPARENT),
         border: Border {
             radius: 3.0.into(),
             ..Default::default()
         },
-        text_color: light,
-        placeholder_color: light,
-        handle_color: light,
+        text_color: text,
+        placeholder_color: text.scale_alpha(0.68),
+        handle_color: text,
+        }
     });
 
     // Thin vertical divider between control groups.
     let sep = || {
-        container(iced::widget::Space::new().width(1.0).height(16.0)).style(|_: &Theme| {
+        container(iced::widget::Space::new().width(1.0).height(16.0)).style(|theme: &Theme| {
             iced::widget::container::Style {
-                background: Some(Background::Color(Color {
-                    r: 0.45,
-                    g: 0.45,
-                    b: 0.45,
-                    a: 0.7,
-                })),
+                background: Some(Background::Color(
+                    theme.extended_palette().background.neutral.color.scale_alpha(0.7)
+                )),
                 ..Default::default()
             }
         })
@@ -139,7 +133,7 @@ pub(super) fn viewport_controls<'a>(
         // would only fire on release). Placed just left of Close.
         if tile_count > 1 {
             let drag = mouse_area(
-                container(crate::ui::icons::tinted(crate::ui::icons::MOVE, 15.0, green))
+                container(crate::ui::icons::themed_success(crate::ui::icons::MOVE, 15.0))
                     .padding([4, 6])
                     .style(|_: &Theme| iced::widget::container::Style {
                         border: Border {
@@ -155,30 +149,25 @@ pub(super) fn viewport_controls<'a>(
                 .push(sep())
                 .push(drag)
                 .push(sep())
-                .push(tinted_btn(crate::ui::icons::CLOSE, red, Message::CloseModelViewport));
+                .push(danger_btn(crate::ui::icons::CLOSE, Message::CloseModelViewport));
         }
     }
 
     container(bar)
         .padding(2)
-        .style(|_: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color {
-                r: 0.10,
-                g: 0.10,
-                b: 0.10,
-                a: 0.75,
-            })),
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            iced::widget::container::Style {
+            background: Some(Background::Color(
+                palette.background.weak.color.scale_alpha(0.92)
+            )),
             border: Border {
-                color: Color {
-                    r: 0.35,
-                    g: 0.35,
-                    b: 0.35,
-                    a: 1.0,
-                },
+                color: palette.background.neutral.color,
                 width: 1.0,
                 radius: 4.0.into(),
             },
             ..Default::default()
+            }
         })
         .into()
 }

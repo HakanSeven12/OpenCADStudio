@@ -7,7 +7,7 @@
 use crate::app::Message;
 use crate::plugin::external::{ExternalPlugin, RegistryEntry};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input, Space};
-use iced::{Background, Border, Color, Element, Fill, Theme};
+use iced::{Background, Border, Element, Fill, Theme};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Marketplace state passed to the Plugin Manager view.
@@ -25,124 +25,105 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &["PLUGINS", "PLUGINMANAGER"]
 });
 
-const BG: Color = Color {
-    r: 0.15,
-    g: 0.15,
-    b: 0.15,
-    a: 1.0,
-};
-const CARD: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
-const BORDER: Color = Color {
-    r: 0.30,
-    g: 0.30,
-    b: 0.30,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.30,
-    g: 0.62,
-    b: 0.95,
-    a: 1.0,
-};
-const WHITE: Color = Color {
-    r: 0.92,
-    g: 0.92,
-    b: 0.92,
-    a: 1.0,
-};
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
+
+fn primary_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().primary.base.color),
+    }
+}
 
 fn badge<'a>(label: String) -> Element<'a, Message> {
-    container(text(label).size(11).color(WHITE))
+    container(text(label).size(11))
         .padding([2, 8])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color {
-                r: 0.20,
-                g: 0.34,
-                b: 0.52,
-                a: 1.0,
-            })),
+        .style(|theme: &Theme| {
+            let pair = theme.extended_palette().primary.weak;
+            container::Style {
+            background: Some(Background::Color(pair.color)),
+            text_color: Some(pair.text),
             border: Border {
                 radius: 4.0.into(),
                 ..Default::default()
             },
             ..Default::default()
+            }
         })
         .into()
 }
 
 fn toggle_button<'a>(id: &str, disabled: bool) -> Element<'a, Message> {
     // Label shows the action the click performs.
-    let (label, on, off) = if disabled {
-        ("Enable", Color { r: 0.18, g: 0.5, b: 0.25, a: 1.0 }, Color { r: 0.22, g: 0.6, b: 0.3, a: 1.0 })
+    let label = if disabled {
+        "Enable"
     } else {
-        ("Disable", Color { r: 0.4, g: 0.22, b: 0.22, a: 1.0 }, Color { r: 0.55, g: 0.28, b: 0.28, a: 1.0 })
+        "Disable"
     };
     let want_enabled = disabled; // clicking flips the state
     let id_owned = id.to_string();
-    button(text(label).size(12).color(WHITE))
+    button(text(label).size(12))
         .padding([3, 12])
         .on_press(Message::SetPluginEnabled(id_owned, want_enabled))
-        .style(move |_: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => off,
-                _ => on,
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                text_color: WHITE,
-                border: Border { radius: 4.0.into(), ..Default::default() },
-                ..Default::default()
-            }
-        })
+        .style(if disabled { button::success } else { button::danger })
         .into()
 }
 
+#[derive(Clone, Copy)]
+enum StatusKind {
+    Muted,
+    Success,
+    Danger,
+    Warning,
+}
+
 /// Coloured status pill for a discovered external package.
-fn status_badge<'a>(label: &str, color: Color) -> Element<'a, Message> {
-    container(text(label.to_string()).size(11).color(WHITE))
+fn status_badge<'a>(label: &str, kind: StatusKind) -> Element<'a, Message> {
+    container(text(label.to_string()).size(11))
         .padding([2, 8])
-        .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(color)),
+        .style(move |theme: &Theme| {
+            let palette = theme.extended_palette();
+            let pair = match kind {
+                StatusKind::Muted => palette.background.weak,
+                StatusKind::Success => palette.success.weak,
+                StatusKind::Danger => palette.danger.weak,
+                StatusKind::Warning => palette.warning.weak,
+            };
+            container::Style {
+            background: Some(Background::Color(pair.color)),
+            text_color: Some(pair.text),
             border: Border {
                 radius: 4.0.into(),
                 ..Default::default()
             },
             ..Default::default()
+            }
         })
         .into()
 }
 
 fn external_card<'a>(p: &ExternalPlugin, loaded: bool, disabled: bool) -> Element<'a, Message> {
-    let (status, color) = if loaded && disabled {
-        ("Disabled", Color { r: 0.45, g: 0.45, b: 0.45, a: 1.0 })
+    let (status, kind) = if loaded && disabled {
+        ("Disabled", StatusKind::Muted)
     } else if loaded {
-        ("Loaded", Color { r: 0.2, g: 0.5, b: 0.3, a: 1.0 })
+        ("Loaded", StatusKind::Success)
     } else if !p.api_compatible() {
-        ("API incompatible", Color { r: 0.55, g: 0.28, b: 0.28, a: 1.0 })
+        ("API incompatible", StatusKind::Danger)
     } else if !p.lib_present {
-        ("No library", Color { r: 0.5, g: 0.42, b: 0.2, a: 1.0 })
+        ("No library", StatusKind::Warning)
     } else {
-        ("Restart to load", Color { r: 0.5, g: 0.42, b: 0.2, a: 1.0 })
+        ("Restart to load", StatusKind::Warning)
     };
     let mut header = row![
-        text(p.name.clone()).size(15).color(WHITE),
+        text(p.name.clone()).size(15),
         Space::new().width(8),
         badge(format!("v{}", p.version)),
         Space::new().width(8),
         badge(format!("API {}", p.api_version)),
         Space::new().width(Fill),
-        status_badge(status, color),
+        status_badge(status, kind),
     ]
     .align_y(iced::Center);
     // A loaded plugin can be turned off (drops its ribbon tab + dispatch).
@@ -154,74 +135,51 @@ fn external_card<'a>(p: &ExternalPlugin, loaded: bool, disabled: bool) -> Elemen
     header = header.push(pill_button(
         "Uninstall",
         Message::PluginUninstall(p.id.clone()),
-        Color { r: 0.4, g: 0.25, b: 0.25, a: 1.0 },
+        button::danger,
     ));
 
-    let id_line = text(p.id.clone()).size(11).color(ACCENT);
+    let id_line = text(p.id.clone()).size(11).style(primary_style);
     let mut body = column![header, id_line].spacing(5);
     if !p.description.is_empty() {
-        body = body.push(text(p.description.clone()).size(12).color(DIM));
+        body = body.push(text(p.description.clone()).size(12).style(muted_style));
     }
     if !p.command_prefixes.is_empty() {
         body = body.push(
             text(format!("Commands: {}", p.command_prefixes.join(", ")))
                 .size(11)
-                .color(DIM),
+                .style(muted_style),
         );
     }
     container(body.padding([12, 14]))
         .width(Fill)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(CARD)),
-            border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
-            ..Default::default()
-        })
+        .style(container::bordered_box)
         .into()
 }
 
-fn pill_button<'a>(label: &str, msg: Message, bg: Color) -> Element<'a, Message> {
-    button(text(label.to_string()).size(12).color(WHITE))
+fn pill_button<'a>(
+    label: &str,
+    msg: Message,
+    style: fn(&Theme, button::Status) -> button::Style,
+) -> Element<'a, Message> {
+    button(text(label.to_string()).size(12))
         .padding([4, 12])
         .on_press(msg)
-        .style(move |_: &Theme, status| {
-            let c = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                Color { r: bg.r + 0.08, g: bg.g + 0.08, b: bg.b + 0.08, a: 1.0 }
-            } else {
-                bg
-            };
-            button::Style {
-                background: Some(Background::Color(c)),
-                text_color: WHITE,
-                border: Border { radius: 4.0.into(), ..Default::default() },
-                ..Default::default()
-            }
-        })
+        .style(style)
         .into()
 }
 
 /// Square icon variant of [`pill_button`] for glyph-free actions (e.g. remove).
-fn pill_icon_button<'a>(icon: &'static [u8], msg: Message, bg: Color) -> Element<'a, Message> {
-    button(crate::ui::icons::tinted(icon, 11.0, WHITE))
+fn pill_icon_button<'a>(
+    icon: &'static [u8],
+    msg: Message,
+    style: fn(&Theme, button::Status) -> button::Style,
+) -> Element<'a, Message> {
+    button(crate::ui::icons::themed(icon, 11.0))
         .padding([5, 9])
         .on_press(msg)
-        .style(move |_: &Theme, status| {
-            let c = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                Color { r: bg.r + 0.08, g: bg.g + 0.08, b: bg.b + 0.08, a: 1.0 }
-            } else {
-                bg
-            };
-            button::Style {
-                background: Some(Background::Color(c)),
-                text_color: WHITE,
-                border: Border { radius: 4.0.into(), ..Default::default() },
-                ..Default::default()
-            }
-        })
+        .style(style)
         .into()
 }
-
-const GREEN: Color = Color { r: 0.2, g: 0.45, b: 0.28, a: 1.0 };
-const RED: Color = Color { r: 0.4, g: 0.25, b: 0.25, a: 1.0 };
 
 /// Release dropdown + Install (+ optional unlink) for one repo.
 fn install_controls<'a>(
@@ -232,7 +190,7 @@ fn install_controls<'a>(
 ) -> Element<'a, Message> {
     let repo_s = repo.to_string();
     let picker: Element<'_, Message> = if tags.is_empty() {
-        text("no releases").size(11).color(DIM).into()
+        text("no releases").size(11).style(muted_style).into()
     } else {
         let r = repo_s.clone();
         pick_list(tags, selected, move |tag| {
@@ -244,7 +202,11 @@ fn install_controls<'a>(
     let mut controls = row![
         picker,
         Space::new().width(8),
-        pill_button("Install", Message::PluginInstall(repo_s.clone()), GREEN),
+        pill_button(
+            "Install",
+            Message::PluginInstall(repo_s.clone()),
+            button::success,
+        ),
     ]
     .align_y(iced::Center)
     .spacing(4);
@@ -253,7 +215,7 @@ fn install_controls<'a>(
         controls = controls.push(pill_icon_button(
             crate::ui::icons::CLOSE,
             Message::PluginRepoRemove(repo_s),
-            RED,
+            button::danger,
         ));
     }
     controls.into()
@@ -262,37 +224,33 @@ fn install_controls<'a>(
 fn market_card<'a>(body: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
     container(body.spacing(4).padding([10, 12]))
         .width(Fill)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(CARD)),
-            border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
-            ..Default::default()
-        })
+        .style(container::bordered_box)
         .into()
 }
 
 fn marketplace_section<'a>(m: &MarketView) -> Element<'a, Message> {
-    let mut col = column![text("Available plugins").size(13).color(ACCENT)].spacing(6);
+    let mut col = column![text("Available plugins").size(13).style(primary_style)].spacing(6);
 
     // Curated registry entries (from the OpenCADStudio repo).
     for e in m.registry {
         let tags = m.release_tags.get(&e.repo).cloned().unwrap_or_default();
         let selected = m.selected_tag.get(&e.repo).cloned();
         let header = row![
-            text(e.name.clone()).size(14).color(WHITE),
+            text(e.name.clone()).size(14),
             Space::new().width(Fill),
             install_controls(&e.repo, tags, selected, false),
         ]
         .align_y(iced::Center);
-        let mut body = column![header, text(e.repo.clone()).size(11).color(ACCENT)];
+        let mut body = column![header, text(e.repo.clone()).size(11).style(primary_style)];
         if !e.description.is_empty() {
-            body = body.push(text(e.description.clone()).size(12).color(DIM));
+            body = body.push(text(e.description.clone()).size(12).style(muted_style));
         }
         col = col.push(market_card(body));
     }
 
     // Manual: link any repo by owner/repo.
     col = col.push(Space::new().height(6));
-    col = col.push(text("Add a repository").size(12).color(DIM));
+    col = col.push(text("Add a repository").size(12).style(muted_style));
     col = col.push(
         row![
             text_input("owner/repo", m.input)
@@ -301,7 +259,7 @@ fn marketplace_section<'a>(m: &MarketView) -> Element<'a, Message> {
                 .size(13)
                 .width(Fill),
             Space::new().width(8),
-            pill_button("Add", Message::PluginRepoAdd, Color { r: 0.2, g: 0.4, b: 0.62, a: 1.0 }),
+            pill_button("Add", Message::PluginRepoAdd, button::primary),
         ]
         .align_y(iced::Center),
     );
@@ -309,7 +267,7 @@ fn marketplace_section<'a>(m: &MarketView) -> Element<'a, Message> {
         let tags = m.release_tags.get(repo).cloned().unwrap_or_default();
         let selected = m.selected_tag.get(repo).cloned();
         let header = row![
-            text(repo.clone()).size(13).color(WHITE),
+            text(repo.clone()).size(13),
             Space::new().width(Fill),
             install_controls(repo, tags, selected, true),
         ]
@@ -318,7 +276,7 @@ fn marketplace_section<'a>(m: &MarketView) -> Element<'a, Message> {
     }
 
     if !m.status.is_empty() {
-        col = col.push(text(m.status.to_string()).size(11).color(DIM));
+        col = col.push(text(m.status.to_string()).size(11).style(muted_style));
     }
     col.into()
 }
@@ -329,17 +287,17 @@ pub fn view_window<'a>(
     loaded: &FxHashSet<String>,
     market: MarketView,
 ) -> Element<'a, Message> {
-    let title = text("Plugins").size(20).color(WHITE);
+    let title = text("Plugins").size(20);
     let subtitle = text("Add-ons load from the plugins folder. Install from a repository below.")
         .size(12)
-        .color(DIM);
+        .style(muted_style);
 
     let mut list = column![].spacing(10);
     // Installed external packages (from the plugins folder).
     if externals.is_empty() {
-        list = list.push(text("No plugins installed yet.").size(13).color(DIM));
+        list = list.push(text("No plugins installed yet.").size(13).style(muted_style));
     } else {
-        list = list.push(text("Installed").size(13).color(ACCENT));
+        list = list.push(text("Installed").size(13).style(primary_style));
         for p in externals {
             list = list.push(external_card(
                 p,
@@ -360,8 +318,10 @@ pub fn view_window<'a>(
             .width(Fill)
             .height(Fill),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.base.color,
+        )),
         ..Default::default()
     })
     .width(Fill)

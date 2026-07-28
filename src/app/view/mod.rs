@@ -13,6 +13,7 @@ use iced::widget::{
 };
 use iced::window;
 use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
+use iced_aw::ContextMenu;
 
 mod controls;
 mod modal;
@@ -21,8 +22,8 @@ mod viewcube;
 
 use controls::{dyn_component_value, viewport_controls};
 use overlay::{
-    doc_tab_context_menu_overlay, layout_context_menu_overlay, mtext_editor_overlay,
-    position_canvas_overlay, qselect_overlay, text_inline_overlay, viewport_context_menu_overlay,
+    mtext_editor_overlay, position_canvas_overlay, qselect_overlay, text_inline_overlay,
+    viewport_context_menu_overlay,
 };
 use viewcube::{viewcube_nav_controls, viewcube_ucs_picker, UCS_PICKER_W};
 
@@ -80,6 +81,13 @@ impl OpenCADStudio {
     pub fn view_main(&self) -> Element<'_, Message> {
         let i = self.active_tab;
         let tab = &self.tabs[i];
+        let theme_text = self.active_theme.extended_palette().background.base.text;
+        let viewcube_text_color = [
+            theme_text.r,
+            theme_text.g,
+            theme_text.b,
+            theme_text.a,
+        ];
         let is_paper = tab.scene.current_layout != "Model";
         // Adaptive corner widgets: the ViewCube shows only while the active
         // viewport is wide enough to hold it *beside* the render-mode bar, whose
@@ -120,11 +128,14 @@ impl OpenCADStudio {
                     &self.videos,
                     self.videos_loading,
                     &self.video_thumbs,
+                    &self.discussions,
+                    self.discussions_loading,
                     &self.recent_files,
                     &self.recent_thumbs,
                     self.recent_limit,
                     &self.recent_limit_input,
                     size.width,
+                    self.start_action_w.clone(),
                     self.start_section,
                 )
             })
@@ -134,6 +145,7 @@ impl OpenCADStudio {
                 &tab.scene,
                 viewcube_visible,
                 tab.render_mode,
+                viewcube_text_color,
             ))
             .width(Fill)
             .height(Fill)
@@ -169,6 +181,7 @@ impl OpenCADStudio {
                             show_viewcube,
                             render_mode,
                             idx,
+                            viewcube_text_color,
                         ))
                         .width(Fill)
                         .height(Fill),
@@ -742,18 +755,12 @@ impl OpenCADStudio {
             ])
             .report_width0(self.render_bar_w.clone())
             .into();
-            // Position the bar at the active model tile's top-left corner so it
-            // follows the active panel in a tiled layout (full canvas when a
-            // single tile fills the window). Leading Spaces offset it.
-            let bar_layer = column![
-                Space::new().height(iced::Length::Fixed(rect.y.max(0.0))),
-                row![
-                    Space::new().width(iced::Length::Fixed(rect.x.max(0.0))),
-                    container(adaptive).width(iced::Length::Fixed(rect.width.max(1.0))),
-                ],
-            ]
-            .width(Fill)
-            .height(Fill);
+            // Pin the bar to the active model tile's top-left corner so it
+            // follows the active panel in a tiled layout.
+            let bar_layer = crate::ui::pin_at(
+                iced::Point::new(rect.x, rect.y),
+                container(adaptive).width(iced::Length::Fixed(rect.width.max(1.0))),
+            );
             viewport_stack = viewport_stack.push(bar_layer);
         }
 
@@ -802,12 +809,7 @@ impl OpenCADStudio {
                 },
                 ..Default::default()
             });
-            let border_layer = column![
-                Space::new().height(iced::Length::Fixed(y)),
-                row![Space::new().width(iced::Length::Fixed(x)), border_frame,],
-            ]
-            .width(Fill)
-            .height(Fill);
+            let border_layer = crate::ui::pin_at(iced::Point::new(x, y), border_frame);
             viewport_stack = viewport_stack.push(border_layer);
 
             let vp_mode = tab
@@ -833,15 +835,10 @@ impl OpenCADStudio {
             ])
             .report_width0(self.render_bar_w.clone())
             .into();
-            let picker_layer = column![
-                Space::new().height(iced::Length::Fixed(y + 4.0)),
-                row![
-                    Space::new().width(iced::Length::Fixed(x + 4.0)),
-                    container(adaptive).width(iced::Length::Fixed(rect.width.max(1.0))),
-                ],
-            ]
-            .width(Fill)
-            .height(Fill);
+            let picker_layer = crate::ui::pin_at(
+                iced::Point::new(x + 4.0, y + 4.0),
+                container(adaptive).width(iced::Length::Fixed(rect.width.max(1.0))),
+            );
             viewport_stack = viewport_stack.push(picker_layer);
 
             // Hide the ViewCube first — before the render bar — when they collide.
@@ -849,15 +846,10 @@ impl OpenCADStudio {
                 let cube_x = (rect.x + rect.width - VIEWCUBE_HIT_SIZE - VIEWCUBE_PAD).max(0.0);
                 let cube_y = (rect.y + VIEWCUBE_PAD).max(0.0);
 
-                let controls = column![
-                    Space::new().height(iced::Length::Fixed(cube_y)),
-                    row![
-                        Space::new().width(iced::Length::Fixed(cube_x)),
-                        viewcube_nav_controls(),
-                    ],
-                ]
-                .width(Fill)
-                .height(Fill);
+                let controls = crate::ui::pin_at(
+                    iced::Point::new(cube_x, cube_y),
+                    viewcube_nav_controls(),
+                );
                 viewport_stack = viewport_stack.push(controls);
 
                 let ucs_current = tab
@@ -873,16 +865,13 @@ impl OpenCADStudio {
                     .map(|u| u.name.clone())
                     .filter(|n| !n.is_empty())
                     .collect();
-                let picker = column![
-                    Space::new().height(iced::Length::Fixed(cube_y + VIEWCUBE_HIT_SIZE + 6.0)),
-                    row![
-                        Space::new()
-                            .width(iced::Length::Fixed(cube_x + VIEWCUBE_HIT_SIZE * 0.5 - UCS_PICKER_W * 0.5)),
-                        iced::widget::opaque(viewcube_ucs_picker(ucs_current, ucs_names)),
-                    ],
-                ]
-                .width(Fill)
-                .height(Fill);
+                let picker = crate::ui::pin_at(
+                    iced::Point::new(
+                        cube_x + VIEWCUBE_HIT_SIZE * 0.5 - UCS_PICKER_W * 0.5,
+                        cube_y + VIEWCUBE_HIT_SIZE + 6.0,
+                    ),
+                    iced::widget::opaque(viewcube_ucs_picker(ucs_current, ucs_names)),
+                );
                 viewport_stack = viewport_stack.push(picker);
             }
         }
@@ -897,15 +886,10 @@ impl OpenCADStudio {
             let cube_y = (rect.y + VIEWCUBE_PAD).max(0.0);
 
             // Cube hit area + nav controls (home / roll / nudge) as one layer.
-            let controls = column![
-                Space::new().height(iced::Length::Fixed(cube_y)),
-                row![
-                    Space::new().width(iced::Length::Fixed(cube_x)),
-                    viewcube_nav_controls(),
-                ],
-            ]
-            .width(Fill)
-            .height(Fill);
+            let controls = crate::ui::pin_at(
+                iced::Point::new(cube_x, cube_y),
+                viewcube_nav_controls(),
+            );
             viewport_stack = viewport_stack.push(controls);
 
             // WCS / named-UCS selector under the cube.
@@ -922,15 +906,13 @@ impl OpenCADStudio {
                 .map(|u| u.name.clone())
                 .filter(|n| !n.is_empty())
                 .collect();
-            let picker = column![
-                Space::new().height(iced::Length::Fixed(cube_y + VIEWCUBE_HIT_SIZE + 6.0)),
-                row![
-                    Space::new().width(iced::Length::Fixed(cube_x + VIEWCUBE_HIT_SIZE * 0.5 - UCS_PICKER_W * 0.5)),
-                    iced::widget::opaque(viewcube_ucs_picker(ucs_current, ucs_names)),
-                ],
-            ]
-            .width(Fill)
-            .height(Fill);
+            let picker = crate::ui::pin_at(
+                iced::Point::new(
+                    cube_x + VIEWCUBE_HIT_SIZE * 0.5 - UCS_PICKER_W * 0.5,
+                    cube_y + VIEWCUBE_HIT_SIZE + 6.0,
+                ),
+                iced::widget::opaque(viewcube_ucs_picker(ucs_current, ucs_names)),
+            );
             viewport_stack = viewport_stack.push(picker);
         }
 
@@ -960,56 +942,47 @@ impl OpenCADStudio {
                 for (idx, item) in popup.items.iter().enumerate() {
                     let is_sel = idx == popup.selected;
                     let label = item.label;
-                    let btn = button(text(label).size(12).color(Color::WHITE))
+                    let btn = button(text(label).size(12))
                         .on_press(Message::GripMenuPick(idx))
                         .padding([3, 10])
                         .width(Fill)
-                        .style(move |_: &Theme, status| iced::widget::button::Style {
-                            background: Some(Background::Color(match (is_sel, status) {
-                                (true, _) => Color {
-                                    r: 0.20,
-                                    g: 0.45,
-                                    b: 0.95,
-                                    a: 1.0,
-                                },
-                                (_, iced::widget::button::Status::Hovered) => Color {
-                                    r: 0.22,
-                                    g: 0.22,
-                                    b: 0.22,
-                                    a: 1.0,
-                                },
-                                _ => Color::TRANSPARENT,
-                            })),
+                        .style(move |theme: &Theme, status| {
+                            let palette = theme.extended_palette();
+                            let pair = match (is_sel, status) {
+                                (true, _) => Some(palette.primary.strong),
+                                (_, iced::widget::button::Status::Hovered) => {
+                                    Some(palette.background.strong)
+                                }
+                                _ => None,
+                            };
+                            iced::widget::button::Style {
+                            background: pair.map(|p| Background::Color(p.color)),
                             border: Border {
                                 color: Color::TRANSPARENT,
                                 width: 0.0,
                                 radius: 0.0.into(),
                             },
-                            text_color: Color::WHITE,
+                            text_color: pair
+                                .map(|p| p.text)
+                                .unwrap_or(palette.background.base.text),
                             ..Default::default()
+                            }
                         });
                     col = col.push(btn);
                 }
                 let menu_panel = container(col)
                     .padding(2)
-                    .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(Color {
-                            r: 0.10,
-                            g: 0.10,
-                            b: 0.10,
-                            a: 0.95,
-                        })),
+                    .style(|theme: &Theme| {
+                        let palette = theme.extended_palette();
+                        container::Style {
+                        background: Some(Background::Color(palette.background.weak.color)),
                         border: Border {
-                            color: Color {
-                                r: 0.40,
-                                g: 0.40,
-                                b: 0.40,
-                                a: 1.0,
-                            },
+                            color: palette.background.neutral.color,
                             width: 1.0,
                             radius: 3.0.into(),
                         },
                         ..Default::default()
+                        }
                     });
                 // Offset the menu by 12 px so the cursor doesn't land on
                 // the first item immediately, matching the right-click
@@ -1035,14 +1008,14 @@ impl OpenCADStudio {
                 for (idx, name) in popup.items.iter().enumerate() {
                     let is_cur = popup.current == Some(idx);
                     let mark: Element<'_, Message> = if is_cur {
-                        crate::ui::icons::tinted(crate::ui::icons::CHECK, 11.0, Color::WHITE)
+                        crate::ui::icons::themed_check_cell(true)
                     } else {
                         Space::new().width(11).into()
                     };
                     let btn = button(
                         row![
                             container(mark).width(16),
-                            text(name).size(12).color(Color::WHITE),
+                            text(name).size(12),
                         ]
                         .spacing(2)
                         .align_y(iced::Center),
@@ -1050,47 +1023,39 @@ impl OpenCADStudio {
                     .on_press(Message::VisibilityPick(idx))
                         .padding([3, 10])
                         .width(Fill)
-                        .style(move |_: &Theme, status| iced::widget::button::Style {
-                            background: Some(Background::Color(match status {
-                                iced::widget::button::Status::Hovered => Color {
-                                    r: 0.20,
-                                    g: 0.45,
-                                    b: 0.95,
-                                    a: 1.0,
-                                },
-                                _ => Color::TRANSPARENT,
-                            })),
+                        .style(move |theme: &Theme, status| {
+                            let palette = theme.extended_palette();
+                            iced::widget::button::Style {
+                            background: matches!(
+                                status,
+                                iced::widget::button::Status::Hovered
+                            )
+                            .then_some(Background::Color(palette.primary.weak.color)),
                             border: Border {
                                 color: Color::TRANSPARENT,
                                 width: 0.0,
                                 radius: 0.0.into(),
                             },
-                            text_color: Color::WHITE,
+                            text_color: palette.background.base.text,
                             ..Default::default()
+                            }
                         });
                     col = col.push(btn);
                 }
                 let panel = container(iced::widget::scrollable(col).height(iced::Length::Shrink))
                     .max_height(360.0)
                     .padding(2)
-                    .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(Color {
-                            r: 0.10,
-                            g: 0.10,
-                            b: 0.10,
-                            a: 0.95,
-                        })),
+                    .style(|theme: &Theme| {
+                        let palette = theme.extended_palette();
+                        container::Style {
+                        background: Some(Background::Color(palette.background.weak.color)),
                         border: Border {
-                            color: Color {
-                                r: 0.40,
-                                g: 0.40,
-                                b: 0.40,
-                                a: 1.0,
-                            },
+                            color: palette.background.neutral.color,
                             width: 1.0,
                             radius: 3.0.into(),
                         },
                         ..Default::default()
+                        }
                     });
                 let anchor = iced::Point::new(popup.anchor.x + 12.0, popup.anchor.y + 12.0);
                 viewport_stack =
@@ -1157,42 +1122,27 @@ impl OpenCADStudio {
             } else {
                 trace
             };
-            let perf_button_style = |_: &Theme, status: button::Status| button::Style {
-                background: Some(Background::Color(if matches!(status, button::Status::Hovered) {
-                    Color {
-                        r: 0.24,
-                        g: 0.24,
-                        b: 0.24,
-                        a: 1.0,
-                    }
+            let perf_button_style = |theme: &Theme, status: button::Status| {
+                let palette = theme.extended_palette();
+                let pair = if matches!(status, button::Status::Hovered) {
+                    palette.background.strong
                 } else {
-                    Color {
-                        r: 0.14,
-                        g: 0.14,
-                        b: 0.14,
-                        a: 1.0,
-                    }
-                })),
-                text_color: Color::WHITE,
+                    palette.background.weak
+                };
+                button::Style {
+                background: Some(Background::Color(pair.color)),
+                text_color: pair.text,
                 border: Border {
-                    color: Color {
-                        r: 0.35,
-                        g: 0.35,
-                        b: 0.35,
-                        a: 1.0,
-                    },
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 3.0.into(),
                 },
                 ..Default::default()
+                }
             };
             let copy_btn = button(
                 row![
-                    crate::ui::icons::tinted(
-                        crate::ui::icons::COPY,
-                        11.0,
-                        Color::from_rgb(0.7, 0.85, 1.0),
-                    ),
+                    crate::ui::icons::themed_primary(crate::ui::icons::COPY, 11.0),
                     text("Copy").size(11),
                 ]
                 .spacing(4)
@@ -1203,11 +1153,7 @@ impl OpenCADStudio {
             .padding([2, 6]);
             let clear_btn = button(
                 row![
-                    crate::ui::icons::tinted(
-                        crate::ui::icons::TRASH,
-                        11.0,
-                        Color::from_rgb(1.0, 0.55, 0.55),
-                    ),
+                    crate::ui::icons::themed_danger(crate::ui::icons::TRASH, 11.0),
                     text("Clear").size(11),
                 ]
                 .spacing(4)
@@ -1217,20 +1163,24 @@ impl OpenCADStudio {
             .style(perf_button_style)
             .padding([2, 6]);
             let header = row![
-                text("PERF").size(12).color(Color::from_rgb(0.6, 1.0, 0.6)),
+                text("PERF").size(12).style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(theme.extended_palette().success.base.color),
+                }),
                 Space::new().width(iced::Length::Fill),
                 copy_btn,
                 clear_btn,
             ]
             .spacing(6)
             .align_y(iced::Center);
-            let log = scrollable(text(trace).size(11).color(Color::from_rgb(0.8, 0.9, 0.8)))
+            let log = scrollable(text(trace).size(11))
                 .height(iced::Length::Fixed(220.0))
                 .width(iced::Length::Fill);
             let panel = container(
                 column![
                     header,
-                    text(summary).size(11).color(Color::from_rgb(0.6, 1.0, 0.6)),
+                    text(summary).size(11).style(|theme: &Theme| iced::widget::text::Style {
+                        color: Some(theme.extended_palette().success.base.color),
+                    }),
                     log,
                 ]
                 .spacing(5),
@@ -1429,13 +1379,26 @@ impl OpenCADStudio {
                     if let Some(be) = &tab.block_edit {
                         displayed_layouts.push(be.block_name.clone());
                     }
+                    let status_menu_data = crate::ui::statusbar::StatusMenuData {
+                        layout_names: layout_names.clone(),
+                        polar_custom_input: &self.polar_custom_input,
+                        scale_is_model: is_model,
+                        scale_list: tab.scene.scale_list(),
+                        has_selection: !tab.scene.selected.is_empty(),
+                        selection_types: tab
+                            .scene
+                            .entity_type_names_in_layout()
+                            .into_iter()
+                            .map(|name| name.to_string())
+                            .collect(),
+                        selection_filter: &tab.scene.selection_filter,
+                        tooltip_hidden: self.status_menu_tooltip_hidden,
+                    };
                     self.status_bar.view(
                         &self.snapper,
-                        self.snap_popup_open,
                         self.ortho_mode,
                         self.polar_mode,
                         self.polar_increment_deg,
-                        self.polar_popup_open,
                         self.dyn_input,
                         self.snapper.otrack_enabled,
                         displayed_layouts,
@@ -1451,7 +1414,6 @@ impl OpenCADStudio {
                         tab.scene.active_viewport.is_some(),
                         self.show_layout_tabs,
                         tab.scene.annotation_scale,
-                        self.scale_popup_open,
                         scale_pill_enabled,
                         tab.scene.document.header.lineweight_display,
                         cursor_coord,
@@ -1460,126 +1422,26 @@ impl OpenCADStudio {
                         picking,
                         self.clean_screen,
                         tab.scene.document.header.insertion_units,
-                        self.units_popup_open,
                         tab.scene.is_isolation_active(),
                         tab.scene.transparency_display,
                         self.quick_properties,
                         tab.scene.selection_filter_active(),
                         self.selection_cycling,
                         &self.statusbar_config,
+                        status_menu_data,
                     )
                 })
                 .width(Fill)
                 .height(Fill)
         })
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color {
-                r: 0.11,
-                g: 0.11,
-                b: 0.11,
-                a: 1.0,
-            })),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color
+            )),
             ..Default::default()
         })
         .width(Fill)
         .height(Fill);
-
-        let win = self.win_size;
-        let sb_pill = crate::ui::wrap_bar::dropdown_bounds;
-
-        let snap_layer: Element<'_, Message> = if self.snap_popup_open {
-            crate::ui::popup::snap_popup::snap_popup_overlay(
-                &self.snapper,
-                sb_pill(crate::ui::statusbar::SB_OSNAP_ID),
-                win,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let scale_layer: Element<'_, Message> = if self.scale_popup_open {
-            let is_model = tab.scene.current_layout == "Model";
-            crate::ui::popup::scale_popup::scale_popup_overlay(
-                is_model,
-                tab.scene.annotation_scale,
-                tab.scene.first_viewport_scale(),
-                tab.scene.scale_list(),
-                sb_pill(crate::ui::statusbar::SB_SCALE_ID),
-                win,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let polar_layer: Element<'_, Message> = if self.polar_popup_open {
-            crate::ui::popup::polar_popup::polar_popup_overlay(
-                self.polar_increment_deg,
-                &self.polar_custom_input,
-                sb_pill(crate::ui::statusbar::SB_POLAR_ID),
-                win,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let statusbar_menu_layer: Element<'_, Message> = if self.statusbar_menu_open {
-            crate::ui::statusbar::statusbar_menu::statusbar_menu_overlay(
-                &self.statusbar_config,
-                sb_pill(crate::ui::statusbar::SB_MENU_ID),
-                win,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let layout_list_layer: Element<'_, Message> = if self.layout_list_open && !tab.is_start {
-            crate::ui::statusbar::statusbar_menu::layout_list_overlay(
-                &tab.scene.layout_names(),
-                &tab.scene.current_layout,
-                sb_pill(crate::ui::statusbar::SB_LAYOUTLIST_ID),
-                win,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let units_layer: Element<'_, Message> = if self.units_popup_open {
-            crate::ui::popup::units_popup::units_popup_overlay(
-                tab.scene.document.header.insertion_units,
-                sb_pill(crate::ui::statusbar::SB_UNITS_ID),
-                win,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let isolate_layer: Element<'_, Message> = if self.isolate_popup_open {
-            crate::ui::popup::isolate_popup::isolate_popup_overlay(
-                !tab.scene.selected.is_empty(),
-                tab.scene.is_isolation_active(),
-                sb_pill(crate::ui::statusbar::SB_ISOLATE_ID),
-                win,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let sel_filter_layer: Element<'_, Message> = if self.selection_filter_popup_open {
-            let types: Vec<String> = tab
-                .scene
-                .entity_type_names_in_layout()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect();
-            crate::ui::popup::selection_filter_popup::selection_filter_popup_overlay(
-                types,
-                &tab.scene.selection_filter,
-                sb_pill(crate::ui::statusbar::SB_FILTER_ID),
-                win,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
 
         let dropdown_layer: Element<'_, Message> = self
             .ribbon
@@ -1589,33 +1451,6 @@ impl OpenCADStudio {
                 self.win_size,
             )
             .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
-
-        let layout_ctx_layer: Element<'_, Message> = if let Some(name) = &self.layout_context_menu {
-            layout_context_menu_overlay(name, win)
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let doc_tab_ctx_layer: Element<'_, Message> =
-            if let Some(idx) = self.doc_tab_context_menu {
-                if let Some(context_tab) = self.tabs.get(idx) {
-                    let has_other_drawings = self
-                        .tabs
-                        .iter()
-                        .enumerate()
-                        .any(|(other_idx, tab)| other_idx != idx && !tab.is_start);
-                    doc_tab_context_menu_overlay(
-                        idx,
-                        context_tab.current_path.as_deref(),
-                        has_other_drawings,
-                        win,
-                    )
-                } else {
-                    iced::widget::Space::new().width(0).height(0).into()
-                }
-            } else {
-                iced::widget::Space::new().width(0).height(0).into()
-            };
 
         let snap_override_layer: Element<'_, Message> =
             if let Some(pos) = self.snap_override_popup {
@@ -1640,17 +1475,7 @@ impl OpenCADStudio {
 
         let composed = stack![
             main_ui,
-            snap_layer,
-            scale_layer,
-            polar_layer,
-            statusbar_menu_layer,
-            layout_list_layer,
-            units_layer,
-            isolate_layer,
-            sel_filter_layer,
             dropdown_layer,
-            layout_ctx_layer,
-            doc_tab_ctx_layer,
             qselect_layer,
             snap_override_layer,
             open_progress_layer,
@@ -2041,57 +1866,54 @@ impl OpenCADStudio {
 
 // ── Document tab bar ───────────────────────────────────────────────────────
 
-pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Element<'a, Message> {
-    const BAR_BG: Color = Color {
-        r: 0.13,
-        g: 0.13,
-        b: 0.13,
-        a: 1.0,
-    };
-    const TAB_ACTIVE: Color = Color {
-        r: 0.22,
-        g: 0.22,
-        b: 0.22,
-        a: 1.0,
-    };
-    const TAB_HOVER: Color = Color {
-        r: 0.18,
-        g: 0.18,
-        b: 0.18,
-        a: 1.0,
-    };
-    const TAB_INACTIVE: Color = Color {
-        r: 0.13,
-        g: 0.13,
-        b: 0.13,
-        a: 1.0,
-    };
-    const ACCENT: Color = Color {
-        r: 0.20,
-        g: 0.55,
-        b: 0.90,
-        a: 1.0,
-    };
-    const TEXT_ACTIVE: Color = Color::WHITE;
-    const TEXT_INACTIVE: Color = Color {
-        r: 0.60,
-        g: 0.60,
-        b: 0.60,
-        a: 1.0,
-    };
-    const CLOSE_HOVER: Color = Color {
-        r: 0.70,
-        g: 0.22,
-        b: 0.22,
-        a: 1.0,
-    };
-    const BORDER_COLOR: Color = Color {
-        r: 0.25,
-        g: 0.25,
-        b: 0.25,
-        a: 1.0,
+/// Right-click actions for a drawing tab. `ContextMenu` owns opening,
+/// cursor-relative placement, boundary clamping, and dismissal.
+fn doc_tab_context_menu(
+    tab_idx: usize,
+    has_current_path: bool,
+    has_other_drawings: bool,
+) -> Element<'static, Message> {
+    const MENU_W: f32 = 210.0;
+
+    let item = |label: &'static str, msg: Option<Message>| {
+        let mut item = button(text(label).size(12))
+        .style(button::subtle)
+        .padding([4, 12])
+        .width(Fill);
+        if let Some(msg) = msg {
+            item = item.on_press(msg);
+        }
+        item
     };
 
+    let native_path_actions = cfg!(not(target_arch = "wasm32")) && has_current_path;
+    container(
+        column![
+            item("Save All", Some(Message::DocTabSaveAll)),
+            item("Close All", Some(Message::DocTabCloseAll)),
+            item(
+                "Close All Other Drawings",
+                has_other_drawings.then_some(Message::DocTabCloseOthers(tab_idx)),
+            ),
+            item(
+                "Copy Full File Path",
+                native_path_actions.then_some(Message::DocTabCopyFullPath(tab_idx)),
+            ),
+            item(
+                "Open File Location",
+                native_path_actions.then_some(Message::DocTabOpenFileLocation(tab_idx)),
+            ),
+        ]
+        .spacing(0)
+        .width(MENU_W),
+    )
+    .style(container::bordered_box)
+    .padding([4, 0])
+    .width(iced::Length::Fixed(MENU_W))
+    .into()
+}
+
+pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Element<'a, Message> {
     // Document tabs live in a flex-wrap flow so they spill onto lower rows when
     // there are more tabs than the width can hold on one line.
     let mut items: Vec<Element<'_, Message>> = Vec::new();
@@ -2107,16 +1929,7 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
         let name = crate::ui::text_util::elide(&tab.tab_display_name(), 24);
         let title_inner: Element<'_, Message> = if tab.dirty {
             row![
-                crate::ui::icons::tinted(
-                    crate::ui::icons::DOT,
-                    7.0,
-                    Color {
-                        r: 0.90,
-                        g: 0.75,
-                        b: 0.30,
-                        a: 1.0,
-                    },
-                ),
+                crate::ui::icons::themed_warning(crate::ui::icons::DIRTY_DOT, 14.0),
                 text(name).size(12),
             ]
             .spacing(5)
@@ -2128,29 +1941,27 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
 
         let title_btn = button(title_inner)
             .on_press(Message::TabSwitch(idx))
-            .padding([5, 12])
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match (is_active, status) {
-                    (true, _) => TAB_ACTIVE,
-                    (false, button::Status::Hovered) => TAB_HOVER,
-                    _ => TAB_INACTIVE,
-                })),
-                text_color: if is_active {
-                    TEXT_ACTIVE
-                } else {
-                    TEXT_INACTIVE
-                },
-                border: Border {
-                    color: if is_active {
-                        ACCENT
+            .height(Fill)
+            .padding([4, 12])
+            .style(move |theme: &Theme, status| {
+                let palette = theme.extended_palette();
+                let background = match (is_active, status) {
+                    (false, button::Status::Hovered) => {
+                        Some(Background::Color(palette.background.weak.color))
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background,
+                    text_color: if is_active {
+                        palette.primary.weak.text
                     } else {
-                        Color::TRANSPARENT
+                        palette.background.base.text.scale_alpha(0.72)
                     },
-                    width: if is_active { 1.0 } else { 0.0 },
-                    radius: 0.0.into(),
-                },
-                shadow: iced::Shadow::default(),
-                snap: false,
+                    border: Border::default(),
+                    shadow: iced::Shadow::default(),
+                    snap: false,
+                }
             });
         let title_btn: Element<'_, Message> = if tab.is_start {
             title_btn.into()
@@ -2167,90 +1978,83 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
         let row_inner: Row<'_, Message> = if tab.is_start {
             row![title_btn].spacing(0).align_y(iced::Center)
         } else {
-            let close_btn = button(crate::ui::icons::tinted(
-                crate::ui::icons::CLOSE,
-                10.0,
-                Color {
-                    r: 0.55,
-                    g: 0.55,
-                    b: 0.55,
-                    a: 1.0,
-                },
-            ))
-            .on_press(Message::TabClose(idx))
-            .padding([3, 5])
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered => CLOSE_HOVER,
-                    _ => {
-                        if is_active {
-                            TAB_ACTIVE
-                        } else {
-                            TAB_INACTIVE
-                        }
-                    }
-                })),
-                border: Border {
-                    radius: 3.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
-            row![title_btn, close_btn].spacing(0).align_y(iced::Center)
+            let close_btn = button(text("×").size(12))
+                .on_press(Message::TabClose(idx))
+                .height(Fill)
+                .padding([4, 8])
+                .style(button::subtle);
+            row![title_btn, close_btn]
+                .spacing(0)
+                .height(Fill)
+                .align_y(iced::Center)
         };
 
-        let tab_container = container(row_inner).style(move |_: &Theme| container::Style {
-            border: Border {
-                color: if is_active {
-                    BORDER_COLOR
-                } else {
-                    Color::TRANSPARENT
-                },
-                width: if is_active { 1.0 } else { 0.0 },
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        let tab_container = container(row_inner)
+            .height(iced::Length::Fixed(23.0))
+            .style(move |theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                    background: Some(Background::Color(if is_active {
+                        palette.primary.weak.color
+                    } else {
+                        palette.background.base.color
+                    })),
+                    border: Border {
+                        color: if is_active {
+                            palette.primary.base.color
+                        } else {
+                            Color::TRANSPARENT
+                        },
+                        width: if is_active { 1.0 } else { 0.0 },
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
 
         let tab_element: Element<'_, Message> = if tab.is_start {
             tab_container.into()
         } else {
+            let has_current_path = tab.current_path.is_some();
+            let has_other_drawings = drag_targets.len() > 1;
+            let tab_target: Element<'_, Message> = if let Some(path) = &tab.current_path {
+                iced::widget::tooltip(
+                    tab_container,
+                    container(text(path.to_string_lossy().into_owned()).size(11))
+                        .style(container::bordered_box)
+                        .padding([4, 8]),
+                    iced::widget::tooltip::Position::Bottom,
+                )
+                .gap(4)
+                .into()
+            } else {
+                tab_container.into()
+            };
             crate::ui::wrap_bar::PosReport::owned(
                 format!("DOC_TAB:{idx}"),
-                mouse_area(tab_container).on_right_press(Message::DocTabContextMenu(idx)),
+                ContextMenu::new(tab_target, move || {
+                    doc_tab_context_menu(idx, has_current_path, has_other_drawings)
+                }),
             )
             .into()
         };
         items.push(tab_element);
     }
 
-    let new_btn = button(text("+").size(14).color(Color {
-        r: 0.65,
-        g: 0.65,
-        b: 0.65,
-        a: 1.0,
-    }))
-    .on_press(Message::TabNew)
-    .padding([4, 10])
-    .style(|_: &Theme, status| button::Style {
-        background: Some(Background::Color(match status {
-            button::Status::Hovered => TAB_HOVER,
-            _ => Color::TRANSPARENT,
-        })),
-        border: Border {
-            radius: 0.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+    let new_btn = button(text("+").size(14))
+        .on_press(Message::TabNew)
+        .padding([4, 10])
+        .style(button::subtle);
 
     items.push(new_btn.into());
 
     container(WrapFlow::new(items).spacing_x(0.0).row_h(30.0))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BAR_BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color,
+            )),
             border: Border {
-                color: BORDER_COLOR,
+                color: theme.extended_palette().background.neutral.color,
                 width: 1.0,
                 radius: 0.0.into(),
             },
@@ -2279,21 +2083,17 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
 // fixed Start tab (`DocumentTab::is_start`). English-only by design — this
 // is the public welcome screen and stays consistent across locales.
 //
-// The page picks up the application icon's red-brown (#B03020) as a tint so
-// it visually belongs to OpenCADStudio without overpowering the dark workspace.
+fn start_muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
 
-const BRAND: Color = Color {
-    r: 0.690,
-    g: 0.188,
-    b: 0.125,
-    a: 1.0,
-}; // #B03020
-const BRAND_DARK: Color = Color {
-    r: 0.45,
-    g: 0.12,
-    b: 0.08,
-    a: 1.0,
-};
+fn start_primary_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().primary.base.color),
+    }
+}
 
 /// Transparent input layer for one Model pane: a `mouse_area` filling the pane
 /// that emits pane-tagged viewport events (`idx` = the pane's tile index). The
@@ -2315,7 +2115,6 @@ fn pane_mouse_area<'a>(idx: usize) -> Element<'a, Message> {
 /// Canvas that draws a label rotated 90° (for a collapsed panel's bar).
 struct VBarLabel {
     text: String,
-    color: Color,
 }
 
 impl canvas::Program<Message> for VBarLabel {
@@ -2325,7 +2124,7 @@ impl canvas::Program<Message> for VBarLabel {
         &self,
         _state: &(),
         renderer: &iced::Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: iced::Rectangle,
         _cursor: iced::advanced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
@@ -2336,7 +2135,7 @@ impl canvas::Program<Message> for VBarLabel {
             frame.fill_text(canvas::Text {
                 content: self.text.clone(),
                 position: iced::Point::ORIGIN,
-                color: self.color,
+                color: theme.extended_palette().background.base.text.scale_alpha(0.72),
                 size: iced::Pixels(13.0),
                 align_x: iced::advanced::text::Alignment::Center,
                 align_y: iced::alignment::Vertical::Center,
@@ -2351,28 +2150,8 @@ impl canvas::Program<Message> for VBarLabel {
 /// A collapsed panel rendered as a tall narrow bar with its name written along
 /// it, rotated 90°. Pressing it emits `on_press`.
 pub(super) fn collapse_bar<'a>(name: &str, on_press: Message) -> Element<'a, Message> {
-    const LABEL: Color = Color {
-        r: 0.72,
-        g: 0.72,
-        b: 0.74,
-        a: 1.0,
-    };
-    const BAR_BG: Color = Color {
-        r: 0.13,
-        g: 0.13,
-        b: 0.14,
-        a: 1.0,
-    };
-    const BAR_BORDER: Color = Color {
-        r: 0.22,
-        g: 0.22,
-        b: 0.24,
-        a: 1.0,
-    };
-
     let label = canvas(VBarLabel {
         text: name.to_string(),
-        color: LABEL,
     })
     .width(Fill)
     .height(Fill);
@@ -2381,10 +2160,12 @@ pub(super) fn collapse_bar<'a>(name: &str, on_press: Message) -> Element<'a, Mes
         container(label)
             .width(iced::Length::Fixed(26.0))
             .height(Fill)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(BAR_BG)),
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    theme.extended_palette().background.base.color,
+                )),
                 border: Border {
-                    color: BAR_BORDER,
+                    color: theme.extended_palette().background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -2401,6 +2182,8 @@ pub(super) fn start_page_view<'a>(
     videos: &'a [crate::videos::VideoEntry],
     videos_loading: bool,
     video_thumbs: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    discussions: &'a [crate::discussions::DiscussionEntry],
+    discussions_loading: bool,
     recents: &'a [std::path::PathBuf],
     thumbs: &'a std::collections::HashMap<
         std::path::PathBuf,
@@ -2409,70 +2192,41 @@ pub(super) fn start_page_view<'a>(
     recent_limit: usize,
     recent_limit_input: &'a str,
     avail_w: f32,
+    action_width_out: std::sync::Arc<std::sync::atomic::AtomicU32>,
     active: super::StartSection,
 ) -> Element<'a, Message> {
-    const TEXT: Color = Color {
-        r: 0.94,
-        g: 0.93,
-        b: 0.92,
-        a: 1.0,
-    };
-    const CARD_BG: Color = Color {
-        r: 0.12,
-        g: 0.12,
-        b: 0.13,
-        a: 1.0,
-    };
-    const CARD_BORDER: Color = Color {
-        r: 0.20,
-        g: 0.20,
-        b: 0.22,
-        a: 1.0,
-    };
-
-    let headline = text("Open CAD Studio").size(40).color(BRAND);
+    let headline = text("Open CAD Studio").size(40).style(start_primary_style);
 
     // Plain outlined button (Open / New / Help / Contribute).
     let outline_btn = |label: &'static str, msg: Message| {
-        button(text(label).size(14).color(TEXT))
+        button(text(label).size(14))
             .on_press(msg)
             .padding([10, 22])
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered => Color {
-                        r: 0.18,
-                        g: 0.18,
-                        b: 0.20,
-                        a: 1.0,
-                    },
-                    _ => Color {
-                        r: 0.13,
-                        g: 0.13,
-                        b: 0.15,
-                        a: 1.0,
-                    },
-                })),
-                text_color: TEXT,
+            .style(move |theme: &Theme, status| {
+                let palette = theme.extended_palette();
+                let pair = match status {
+                    button::Status::Hovered => palette.background.strong,
+                    _ => palette.background.weak,
+                };
+                button::Style {
+                background: Some(Background::Color(pair.color)),
+                text_color: pair.text,
                 border: Border {
-                    color: Color {
-                        r: 0.30,
-                        g: 0.30,
-                        b: 0.33,
-                        a: 1.0,
-                    },
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 6.0.into(),
                 },
                 ..Default::default()
+                }
             })
     };
 
-    // Donate — the prominent call-to-action. Solid brand fill, white text.
+    // Donate — the prominent call-to-action, using the theme's danger role.
     let donate_btn = {
         button(
             row![
-                crate::ui::icons::tinted(crate::ui::icons::HEART, 14.0, Color::WHITE),
-                text("Donate").size(14).color(Color::WHITE),
+                crate::ui::icons::themed_danger_text(crate::ui::icons::HEART, 14.0),
+                text("Donate").size(14),
             ]
             .spacing(5)
             .align_y(iced::Center),
@@ -2482,29 +2236,7 @@ pub(super) fn start_page_view<'a>(
             event: crate::modules::ModuleEvent::Command("DONATE".to_string()),
         })
         .padding([12, 28])
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered => BRAND_DARK,
-                _ => BRAND,
-            })),
-            text_color: Color::WHITE,
-            border: Border {
-                color: BRAND_DARK,
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            shadow: iced::Shadow {
-                color: Color {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                    a: 0.4,
-                },
-                offset: iced::Vector::new(0.0, 2.0),
-                blur_radius: 6.0,
-            },
-            ..Default::default()
-        })
+        .style(button::danger)
     };
 
     let primary_row = WrapFlow::new(vec![
@@ -2513,7 +2245,8 @@ pub(super) fn start_page_view<'a>(
         donate_btn.into(),
     ])
     .spacing_x(12.0)
-    .row_h(48.0);
+    .row_h(48.0)
+    .report_natural_width(action_width_out.clone());
 
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut secondary_items: Vec<Element<'a, Message>> = vec![
@@ -2532,80 +2265,28 @@ pub(super) fn start_page_view<'a>(
     // link to the web version.
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // Bright ribbon blue (matches the active-tool accent), filled.
+        // Filled with the active theme's primary colour.
         secondary_items.push(
-            button(text("OCS Web").size(14).color(Color::WHITE))
+            button(text("OCS Web").size(14))
                 .on_press(Message::RibbonToolClick {
                     tool_id: "WEBVERSION".to_string(),
                     event: crate::modules::ModuleEvent::Command("WEBVERSION".to_string()),
                 })
                 .padding([10, 22])
-                .style(|_: &Theme, status| button::Style {
-                    background: Some(Background::Color(match status {
-                        button::Status::Hovered => Color {
-                            r: 0.15,
-                            g: 0.45,
-                            b: 0.78,
-                            a: 1.0,
-                        },
-                        _ => Color {
-                            r: 0.20,
-                            g: 0.55,
-                            b: 0.90,
-                            a: 1.0,
-                        },
-                    })),
-                    text_color: Color::WHITE,
-                    border: Border {
-                        color: Color {
-                            r: 0.20,
-                            g: 0.55,
-                            b: 0.90,
-                            a: 1.0,
-                        },
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    ..Default::default()
-                })
+                .style(button::primary)
                 .into(),
         );
     }
     let secondary_row = WrapFlow::new(secondary_items)
         .spacing_x(12.0)
-        .row_h(44.0);
-
-    // Buttons sit on a transparent container with a large, brand-tinted
-    // ambient shadow (offset = 0, big blur) — produces a soft halo behind
-    // the action row, matching the Thunderbird coloured-glow look against
-    // the dark page.
-    let primary_glow = container(primary_row)
-        .padding(iced::Padding {
-            top: 4.0,
-            right: 8.0,
-            bottom: 4.0,
-            left: 8.0,
-        })
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color::TRANSPARENT)),
-            shadow: iced::Shadow {
-                color: Color {
-                    r: BRAND.r,
-                    g: BRAND.g,
-                    b: BRAND.b,
-                    a: 0.45,
-                },
-                offset: iced::Vector::ZERO,
-                blur_radius: 80.0,
-            },
-            ..Default::default()
-        });
+        .row_h(44.0)
+        .report_natural_width(action_width_out.clone());
 
     let content = column![
         Space::new().height(iced::Length::Fixed(28.0)),
         container(headline).center_x(Fill),
         Space::new().height(iced::Length::Fixed(22.0)),
-        container(primary_glow).center_x(Fill),
+        container(primary_row).center_x(Fill),
         Space::new().height(iced::Length::Fixed(10.0)),
         container(secondary_row).center_x(Fill),
         Space::new().height(Fill),
@@ -2614,34 +2295,27 @@ pub(super) fn start_page_view<'a>(
     .width(Fill)
     .height(Fill);
 
-    // Page background reverts to plain dark — the glow alone provides the
-    // brand colour cue, the rest of the page stays neutral so it reads as
-    // "workspace area" not "advertising banner".
-    const PAGE_BG: Color = Color {
-        r: 0.08,
-        g: 0.08,
-        b: 0.085,
-        a: 1.0,
-    };
     // Collapse side panels one at a time as width shrinks: Tutorials first,
-    // then Supporters, and Recent Documents last. The previous all-or-nothing
-    // threshold reserved a videos-sized empty margin on both sides of the
-    // centred Welcome block and hid every panel around 1664 px.
+    // then Discussions, Supporters, and Recent Documents last.
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum StartLayout {
         AllPanels,
         WithoutVideos,
+        WithoutVideosAndDiscussions,
         RecentAndWelcome,
         Compact,
     }
-    let recent_w = 280.0f32;
-    let videos_w = 300.0f32;
-    let sup_w = 240.0f32;
-    let welcome_wide_min = 360.0f32;
+    let panel_w = 280.0f32;
+    const VIDEO_PANEL_PADDING: f32 = 16.0;
+    const VIDEO_SCROLL_GUTTER: f32 = 14.0;
+    let measured_action_w = f32::from_bits(
+        action_width_out.load(std::sync::atomic::Ordering::Relaxed)
+    );
+    let welcome_wide_min = measured_action_w.max(360.0);
     let avail = (avail_w - 16.0).max(0.0); // minus the page's l/r padding
-    let panel_widths = [recent_w, videos_w, sup_w];
-    let mut panel_visible = [true, true, true];
-    let required_width = |visible: &[bool; 3]| {
+    let panel_widths = [panel_w; 4];
+    let mut panel_visible = [true, true, true, true];
+    let required_width = |visible: &[bool; 4]| {
         let visible_panels = visible.iter().filter(|&&shown| shown).count();
         welcome_wide_min
             + panel_widths
@@ -2653,16 +2327,17 @@ pub(super) fn start_page_view<'a>(
     };
     // Re-measure after every collapse. There are no independent breakpoints:
     // the available width and the panels' preferred widths decide the state.
-    for panel in [1usize, 2, 0] {
+    for panel in [1usize, 2, 3, 0] {
         if required_width(&panel_visible) <= avail {
             break;
         }
         panel_visible[panel] = false;
     }
     let start_layout = match panel_visible {
-        [true, true, true] => StartLayout::AllPanels,
-        [true, false, true] => StartLayout::WithoutVideos,
-        [true, false, false] => StartLayout::RecentAndWelcome,
+        [true, true, true, true] => StartLayout::AllPanels,
+        [true, false, true, true] => StartLayout::WithoutVideos,
+        [true, false, false, true] => StartLayout::WithoutVideosAndDiscussions,
+        [true, false, false, false] => StartLayout::RecentAndWelcome,
         _ => StartLayout::Compact,
     };
 
@@ -2674,7 +2349,8 @@ pub(super) fn start_page_view<'a>(
         match start_layout {
             StartLayout::AllPanels
             | StartLayout::WithoutVideos
-            | StartLayout::RecentAndWelcome => iced::Length::Fixed(recent_w),
+            | StartLayout::WithoutVideosAndDiscussions
+            | StartLayout::RecentAndWelcome => iced::Length::Fixed(panel_w),
             StartLayout::Compact => iced::Length::Fill,
         },
     );
@@ -2683,20 +2359,16 @@ pub(super) fn start_page_view<'a>(
     // Tutorial-videos rail: the official playlist, fetched at boot (cached on
     // disk) — thumbnail card + title per video, click opens the browser.
     let videos_panel: Element<'a, Message> = {
-        const NAME_COLOR: Color = Color {
-            r: 0.80,
-            g: 0.80,
-            b: 0.82,
-            a: 1.0,
-        };
-        // Inner width = panel 300 − padding 2×16 − scrollbar gutter 14.
-        const THUMB_H: f32 = (300.0 - 32.0 - 14.0) * 9.0 / 16.0;
-        let mut list = column![text("Tutorials").size(15).color(TEXT)]
+        // Derive the 16:9 cover box from the actual shared list width so the
+        // whole thumbnail remains visible when that width changes.
+        let thumb_h =
+            (panel_w - VIDEO_PANEL_PADDING * 2.0 - VIDEO_SCROLL_GUTTER) * 9.0 / 16.0;
+        let mut list = column![text("Tutorials").size(15)]
             .spacing(10)
             .width(Fill)
             // Keep the scrollbar off the thumbnails.
             .padding(iced::Padding {
-                right: 14.0,
+                right: VIDEO_SCROLL_GUTTER,
                 ..iced::Padding::ZERO
             });
         for v in videos {
@@ -2706,14 +2378,14 @@ pub(super) fn start_page_view<'a>(
                     container(
                         iced::widget::image(handle.clone())
                             .width(Fill)
-                            .height(iced::Length::Fixed(THUMB_H))
-                            .content_fit(iced::ContentFit::Cover),
+                            .height(iced::Length::Fixed(thumb_h))
+                            .content_fit(iced::ContentFit::Contain),
                     )
                     .width(Fill)
-                    .height(iced::Length::Fixed(THUMB_H))
-                    .style(|_: &Theme| container::Style {
+                    .height(iced::Length::Fixed(thumb_h))
+                    .style(|theme: &Theme| container::Style {
                         border: Border {
-                            color: CARD_BORDER,
+                            color: theme.extended_palette().background.neutral.color,
                             width: 1.0,
                             radius: 6.0.into(),
                         },
@@ -2722,7 +2394,7 @@ pub(super) fn start_page_view<'a>(
                     .clip(true),
                 );
             }
-            card = card.push(text(v.title.clone()).size(12).color(NAME_COLOR));
+            card = card.push(text(v.title.clone()).size(12).style(start_muted_style));
             list = list.push(
                 mouse_area(card)
                     .interaction(iced::mouse::Interaction::Pointer)
@@ -2735,28 +2407,25 @@ pub(super) fn start_page_view<'a>(
             } else {
                 "Videos load from the internet."
             };
-            list = list.push(text(note).size(12).color(NAME_COLOR));
+            list = list.push(text(note).size(12).style(start_muted_style));
         }
         let playlist_btn = mouse_area(
-            container(
-                text("Open playlist on YouTube").size(12).color(Color::WHITE),
-            )
+            container(text("Open playlist on YouTube").size(12))
             .padding([6, 10])
             .width(Fill)
             .center_x(Fill)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color {
-                    r: 0.85,
-                    g: 0.15,
-                    b: 0.15,
-                    a: 1.0,
-                })),
+            .style(|theme: &Theme| {
+                let pair = theme.extended_palette().danger.base;
+                container::Style {
+                background: Some(Background::Color(pair.color)),
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
                     radius: 6.0.into(),
                 },
+                text_color: Some(pair.text),
                 ..Default::default()
+                }
             }),
         )
         .interaction(iced::mouse::Interaction::Pointer)
@@ -2767,21 +2436,144 @@ pub(super) fn start_page_view<'a>(
             playlist_btn,
         ])
         .width(match start_layout {
-            StartLayout::AllPanels => iced::Length::Fixed(videos_w),
+            StartLayout::AllPanels => iced::Length::Fixed(panel_w),
             StartLayout::WithoutVideos
+            | StartLayout::WithoutVideosAndDiscussions
+            | StartLayout::RecentAndWelcome
+            | StartLayout::Compact => iced::Length::Fill,
+        })
+        .height(Fill)
+        .padding(VIDEO_PANEL_PADDING)
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(palette.background.weak.color)),
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+            }
+        })
+        .into()
+    };
+
+    // GitHub Discussions rail. Native builds refresh from GitHub's public feed;
+    // web builds read the CI-generated snapshot. Both sources mark pinned
+    // discussions and sort them before the rest of the list.
+    let discussions_panel: Element<'a, Message> = {
+        let mut list = column![text("Discussions").size(15)]
+            .spacing(8)
+            .width(Fill);
+        for discussion in discussions {
+            let mut meta = iced::widget::row![
+                text(format!("#{}", discussion.number))
+                    .size(10)
+                    .style(start_muted_style),
+            ]
+            .spacing(6)
+            .align_y(iced::Center);
+            if discussion.pinned {
+                meta = meta.push(
+                    text("Pinned")
+                        .size(10)
+                        .style(start_primary_style),
+                );
+            }
+            if !discussion.author.is_empty() {
+                meta = meta.push(
+                    text(format!("@{}", discussion.author))
+                        .size(10)
+                        .style(start_muted_style),
+                );
+            }
+            let card = container(
+                column![
+                    text(discussion.title.clone()).size(12),
+                    meta,
+                ]
+                .spacing(4),
+            )
+            .padding([8, 10])
+            .width(Fill)
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                    background: Some(Background::Color(
+                        palette.background.base.color.scale_alpha(0.42),
+                    )),
+                    border: Border {
+                        color: palette.background.neutral.color,
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+            list = list.push(
+                mouse_area(card)
+                    .interaction(iced::mouse::Interaction::Pointer)
+                    .on_press(Message::OpenUrl(discussion.url.clone())),
+            );
+        }
+        if discussions.is_empty() {
+            let note = if discussions_loading {
+                "Loading discussions…"
+            } else {
+                "Discussions load from GitHub."
+            };
+            list = list.push(text(note).size(12).style(start_muted_style));
+        }
+        let open_btn = mouse_area(
+            container(text("Open Discussions on GitHub").size(12))
+                .padding([6, 10])
+                .width(Fill)
+                .center_x(Fill)
+                .style(|theme: &Theme| {
+                    let pair = theme.extended_palette().primary.base;
+                    container::Style {
+                        background: Some(Background::Color(pair.color)),
+                        border: Border {
+                            color: Color::TRANSPARENT,
+                            width: 0.0,
+                            radius: 6.0.into(),
+                        },
+                        text_color: Some(pair.text),
+                        ..Default::default()
+                    }
+                }),
+        )
+        .interaction(iced::mouse::Interaction::Pointer)
+        .on_press(Message::OpenUrl(
+            crate::discussions::DISCUSSIONS_URL.to_string(),
+        ));
+        container(column![
+            iced::widget::scrollable(list).height(Fill),
+            Space::new().height(iced::Length::Fixed(12.0)),
+            open_btn,
+        ])
+        .width(match start_layout {
+            StartLayout::AllPanels | StartLayout::WithoutVideos => {
+                iced::Length::Fixed(panel_w)
+            }
+            StartLayout::WithoutVideosAndDiscussions
             | StartLayout::RecentAndWelcome
             | StartLayout::Compact => iced::Length::Fill,
         })
         .height(Fill)
         .padding(16)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(CARD_BG)),
-            border: Border {
-                color: CARD_BORDER,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.weak.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            }
         })
         .into()
     };
@@ -2790,14 +2582,8 @@ pub(super) fn start_page_view<'a>(
     // (no token configured / offline) only the "Support on Patreon" button
     // shows, so the rail always invites support.
     let supporters: Element<'a, Message> = {
-        const NAME_COLOR: Color = Color {
-            r: 0.78,
-            g: 0.78,
-            b: 0.80,
-            a: 1.0,
-        };
         let mut list = column![
-            text("Supporters").size(15).color(TEXT),
+            text("Supporters").size(15),
             Space::new().height(iced::Length::Fixed(12.0)),
         ]
         .spacing(6)
@@ -2808,8 +2594,8 @@ pub(super) fn start_page_view<'a>(
             let amount = format!("${:.2}", *cents as f64 / 100.0);
             list = list.push(
                 iced::widget::row![
-                    text(name).size(12).color(NAME_COLOR).width(Fill),
-                    text(amount).size(12).color(NAME_COLOR),
+                    text(name).size(12).style(start_muted_style).width(Fill),
+                    text(amount).size(12).style(start_muted_style),
                 ]
                 .spacing(6),
             );
@@ -2817,8 +2603,8 @@ pub(super) fn start_page_view<'a>(
         let support_btn = mouse_area(
             container(
                 iced::widget::row![
-                    crate::ui::icons::tinted(crate::ui::icons::HEART, 13.0, Color::WHITE),
-                    text("Support on Patreon").size(12).color(Color::WHITE),
+                    crate::ui::icons::themed_danger_text(crate::ui::icons::HEART, 13.0),
+                    text("Support on Patreon").size(12),
                 ]
                 .spacing(6)
                 .align_y(iced::Center),
@@ -2826,19 +2612,18 @@ pub(super) fn start_page_view<'a>(
             .padding([6, 10])
             .width(Fill)
             .center_x(Fill)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color {
-                    r: 0.90,
-                    g: 0.28,
-                    b: 0.30,
-                    a: 1.0,
-                })),
+            .style(|theme: &Theme| {
+                let pair = theme.extended_palette().danger.base;
+                container::Style {
+                background: Some(Background::Color(pair.color)),
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
                     radius: 6.0.into(),
                 },
+                text_color: Some(pair.text),
                 ..Default::default()
+                }
             }),
         )
         .interaction(iced::mouse::Interaction::Pointer)
@@ -2851,22 +2636,27 @@ pub(super) fn start_page_view<'a>(
             support_btn,
         ])
         .width(match start_layout {
-            StartLayout::AllPanels | StartLayout::WithoutVideos => {
-                iced::Length::Fixed(sup_w)
+            StartLayout::AllPanels
+            | StartLayout::WithoutVideos
+            | StartLayout::WithoutVideosAndDiscussions => {
+                iced::Length::Fixed(panel_w)
             }
             StartLayout::RecentAndWelcome
             | StartLayout::Compact => iced::Length::Fill,
         })
         .height(Fill)
         .padding(20)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(CARD_BG)),
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(palette.background.weak.color)),
             border: Border {
-                color: CARD_BORDER,
+                color: palette.background.neutral.color,
                 width: 1.0,
                 radius: 8.0.into(),
             },
             ..Default::default()
+            }
         })
         .into()
     };
@@ -2876,12 +2666,19 @@ pub(super) fn start_page_view<'a>(
             recent,
             videos_panel,
             welcome,
+            discussions_panel,
             supporters,
         ]
         .spacing(16)
         .height(Fill)
         .into(),
         StartLayout::WithoutVideos => {
+            iced::widget::row![recent, welcome, discussions_panel, supporters]
+                .spacing(16)
+                .height(Fill)
+                .into()
+        }
+        StartLayout::WithoutVideosAndDiscussions => {
             iced::widget::row![recent, welcome, supporters]
                 .spacing(16)
                 .height(Fill)
@@ -2897,44 +2694,38 @@ pub(super) fn start_page_view<'a>(
                 button(text(label).size(14))
                     .on_press(Message::StartSectionSelect(section))
                     .padding([8, 18])
-                    .style(move |_: &Theme, status| button::Style {
-                        background: Some(Background::Color(match (is_active, status) {
-                            (true, _) => Color {
-                                r: 0.18,
-                                g: 0.18,
-                                b: 0.20,
-                                a: 1.0,
-                            },
-                            (false, button::Status::Hovered) => Color {
-                                r: 0.14,
-                                g: 0.14,
-                                b: 0.16,
-                                a: 1.0,
-                            },
-                            _ => Color::TRANSPARENT,
-                        })),
-                        text_color: if is_active {
-                            TEXT
-                        } else {
-                            Color {
-                                r: 0.62,
-                                g: 0.62,
-                                b: 0.62,
-                                a: 1.0,
+                    .style(move |theme: &Theme, status| {
+                        let palette = theme.extended_palette();
+                        let pair = match (is_active, status) {
+                            (true, _) => Some(palette.primary.weak),
+                            (false, button::Status::Hovered) => {
+                                Some(palette.background.strong)
                             }
-                        },
+                            _ => None,
+                        };
+                        button::Style {
+                        background: pair.map(|p| Background::Color(p.color)),
+                        text_color: pair
+                            .map(|p| p.text)
+                            .unwrap_or(palette.background.base.text.scale_alpha(0.68)),
                         border: Border {
-                            color: if is_active { BRAND } else { Color::TRANSPARENT },
+                            color: if is_active {
+                                palette.primary.base.color
+                            } else {
+                                Color::TRANSPARENT
+                            },
                             width: if is_active { 1.0 } else { 0.0 },
                             radius: 6.0.into(),
                         },
                         ..Default::default()
+                        }
                     })
             };
             let tab_bar = WrapFlow::new(vec![
                 tab_btn("Recent Files", super::StartSection::Recent).into(),
                 tab_btn("Videos", super::StartSection::Videos).into(),
                 tab_btn("Welcome", super::StartSection::Welcome).into(),
+                tab_btn("Discussions", super::StartSection::Discussions).into(),
                 tab_btn("Supporters", super::StartSection::Supporters).into(),
             ])
             .spacing_x(6.0)
@@ -2951,6 +2742,11 @@ pub(super) fn start_page_view<'a>(
                     .center_x(Fill)
                     .into(),
                 super::StartSection::Welcome => welcome.into(),
+                super::StartSection::Discussions => container(discussions_panel)
+                    .width(Fill)
+                    .height(Fill)
+                    .center_x(Fill)
+                    .into(),
                 super::StartSection::Supporters => container(supporters)
                     .width(Fill)
                     .height(Fill)
@@ -2969,8 +2765,10 @@ pub(super) fn start_page_view<'a>(
     };
 
     container(body)
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PAGE_BG)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.base.color
+        )),
         ..Default::default()
     })
     .padding(iced::Padding {
@@ -3000,44 +2798,16 @@ pub(super) fn recent_files_panel<'a>(
     limit_input: &'a str,
     width: iced::Length,
 ) -> Element<'a, Message> {
-    // Card chrome matches the Supporters rail (the canonical start-page card).
-    const PANEL_BG: Color = Color {
-        r: 0.12,
-        g: 0.12,
-        b: 0.13,
-        a: 1.0,
-    };
-    const PANEL_BORDER: Color = Color {
-        r: 0.20,
-        g: 0.20,
-        b: 0.22,
-        a: 1.0,
-    };
-    const ITEM_HOVER: Color = Color {
-        r: 0.16,
-        g: 0.16,
-        b: 0.18,
-        a: 1.0,
-    };
-    const TEXT: Color = Color {
-        r: 0.94,
-        g: 0.93,
-        b: 0.92,
-        a: 1.0,
-    };
-    const MUTED: Color = Color {
-        r: 0.60,
-        g: 0.60,
-        b: 0.62,
-        a: 1.0,
-    };
-
     // Title mirrors the Supporters rail: size 15 in the bright text colour,
     // followed by a 12px gap before the content.
-    let title = text("Recent Documents").size(15).color(TEXT);
+    let title = text("Recent Documents").size(15);
 
     let body: Element<'a, Message> = if recents.is_empty() {
-        container(text("Files you open will show up here.").size(12).color(MUTED))
+        container(
+            text("Files you open will show up here.")
+                .size(12)
+                .style(start_muted_style)
+        )
             .height(Fill)
             .into()
     } else {
@@ -3078,11 +2848,10 @@ pub(super) fn recent_files_panel<'a>(
                     thumb,
                     column![
                         text(crate::ui::text_util::elide(&name, 28))
-                            .size(12)
-                            .color(TEXT),
+                            .size(12),
                         text(crate::ui::text_util::elide(&dir, 38))
                             .size(10)
-                            .color(MUTED),
+                            .style(start_muted_style),
                     ]
                     .spacing(2),
                 ]
@@ -3092,41 +2861,42 @@ pub(super) fn recent_files_panel<'a>(
             .on_press(Message::OpenRecent(path_for_open))
             .padding([6, 12])
             .width(Fill)
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered => ITEM_HOVER,
-                    _ => Color::TRANSPARENT,
-                })),
-                text_color: TEXT,
+            .style(move |theme: &Theme, status| {
+                let palette = theme.extended_palette();
+                button::Style {
+                background: matches!(status, button::Status::Hovered).then_some(
+                    Background::Color(palette.background.strong.color)
+                ),
+                text_color: palette.background.base.text,
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
+                }
             });
 
             let path_for_remove = path.clone();
-            let remove_btn = button(crate::ui::icons::tinted(crate::ui::icons::CLOSE, 11.0, MUTED))
+            let remove_btn = button(crate::ui::icons::themed_secondary(
+                crate::ui::icons::CLOSE,
+                11.0,
+            ))
                 .on_press(Message::RecentRemove(path_for_remove))
                 .padding([4, 8])
-                .style(|_: &Theme, status| button::Style {
-                    background: Some(Background::Color(match status {
-                        button::Status::Hovered => Color {
-                            r: 0.45,
-                            g: 0.15,
-                            b: 0.15,
-                            a: 1.0,
-                        },
-                        _ => Color::TRANSPARENT,
-                    })),
-                    text_color: MUTED,
+                .style(|theme: &Theme, status| {
+                    let palette = theme.extended_palette();
+                    button::Style {
+                    background: matches!(status, button::Status::Hovered)
+                        .then_some(Background::Color(palette.danger.weak.color)),
+                    text_color: palette.background.base.text.scale_alpha(0.68),
                     border: Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
                         radius: 3.0.into(),
                     },
                     ..Default::default()
+                    }
                 });
 
             col = col.push(row![open_btn, remove_btn].spacing(0).align_y(iced::Center));
@@ -3139,18 +2909,20 @@ pub(super) fn recent_files_panel<'a>(
     // update handler clamps to [MIN, MAX] and persists (see `set_recent_limit`),
     // so an over-max entry snaps to the max.
     const STEP: usize = 5;
-    let step_style = |_: &Theme, status: button::Status| button::Style {
-        background: Some(Background::Color(match status {
-            button::Status::Hovered => ITEM_HOVER,
-            _ => Color::TRANSPARENT,
-        })),
-        text_color: TEXT,
+    let step_style = |theme: &Theme, status: button::Status| {
+        let palette = theme.extended_palette();
+        button::Style {
+        background: matches!(status, button::Status::Hovered).then_some(
+            Background::Color(palette.background.strong.color)
+        ),
+        text_color: palette.background.base.text,
         border: Border {
-            color: PANEL_BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 4.0.into(),
         },
         ..Default::default()
+        }
     };
     // +/- step from whatever is currently shown in the box (mid-edit included).
     let shown = limit_input.parse::<usize>().unwrap_or(limit);
@@ -3161,19 +2933,19 @@ pub(super) fn recent_files_panel<'a>(
         .padding([2, 6])
         .width(iced::Length::Fixed(46.0));
     let limit_row = row![
-        text("Keep recent files").size(11).color(MUTED).width(Fill),
-        button(crate::ui::icons::tinted(crate::ui::icons::MINUS, 11.0, TEXT))
+        text("Keep recent files").size(11).style(start_muted_style).width(Fill),
+        button(crate::ui::icons::themed(crate::ui::icons::MINUS, 11.0))
             .on_press(Message::SetRecentLimit(shown.saturating_sub(STEP)))
             .padding([3, 6])
             .style(step_style),
         count_box,
-        button(crate::ui::icons::tinted(crate::ui::icons::PLUS, 11.0, TEXT))
+        button(crate::ui::icons::themed(crate::ui::icons::PLUS, 11.0))
             .on_press(Message::SetRecentLimit(shown + STEP))
             .padding([3, 6])
             .style(step_style),
         text(format!("/ {}", super::recent::RECENT_MAX))
             .size(11)
-            .color(MUTED),
+            .style(start_muted_style),
     ]
     .spacing(6)
     .align_y(iced::Center);
@@ -3191,14 +2963,17 @@ pub(super) fn recent_files_panel<'a>(
     .width(width)
     .height(Fill)
     .padding(20)
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL_BG)),
+    .style(|theme: &Theme| {
+        let palette = theme.extended_palette();
+        container::Style {
+        background: Some(Background::Color(palette.background.weak.color)),
         border: Border {
-            color: PANEL_BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 8.0.into(),
         },
         ..Default::default()
+        }
     })
     .into()
 }

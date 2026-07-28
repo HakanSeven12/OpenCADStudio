@@ -2,108 +2,55 @@
 
 use crate::app::Message;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
-use iced::{Background, Border, Color, Element, Fill, Theme};
-
-const TB: Color = Color {
-    r: 0.13,
-    g: 0.13,
-    b: 0.13,
-    a: 1.0,
-};
-const BG: Color = Color {
-    r: 0.15,
-    g: 0.15,
-    b: 0.15,
-    a: 1.0,
-};
-const BORDER: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-const TEXT: Color = Color {
-    r: 0.88,
-    g: 0.88,
-    b: 0.88,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.25,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
-const ACTIVE: Color = Color {
-    r: 0.20,
-    g: 0.40,
-    b: 0.70,
-    a: 1.0,
-};
-const FIELD: Color = Color {
-    r: 0.10,
-    g: 0.10,
-    b: 0.10,
-    a: 1.0,
-};
-const LIST: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
+use iced::{Background, Border, Element, Fill, Theme};
 
 fn btn_s(accent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_: &Theme, st| button::Style {
-        background: Some(Background::Color(match (accent, st) {
-            (true, button::Status::Hovered | button::Status::Pressed) => Color {
-                r: 0.20,
-                g: 0.42,
-                b: 0.72,
-                a: 1.0,
-            },
-            (false, button::Status::Hovered | button::Status::Pressed) => Color {
-                r: 0.28,
-                g: 0.28,
-                b: 0.28,
-                a: 1.0,
-            },
-            (true, _) => ACCENT,
-            _ => Color {
-                r: 0.22,
-                g: 0.22,
-                b: 0.22,
-                a: 1.0,
-            },
-        })),
-        text_color: TEXT,
+    move |theme: &Theme, st| {
+        let palette = theme.extended_palette();
+        let pair = match (accent, st) {
+            (true, button::Status::Hovered | button::Status::Pressed) => palette.primary.strong,
+            (false, button::Status::Hovered | button::Status::Pressed) => {
+                palette.background.strong
+            }
+            (true, _) => palette.primary.base,
+            _ => palette.background.weak,
+        };
+        button::Style {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
         border: Border {
-            color: BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 4.0.into(),
         },
         ..Default::default()
+        }
     }
 }
 
-fn field_style(_: &Theme, _: text_input::Status) -> text_input::Style {
+fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
+    let border = match status {
+        text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
+    };
     text_input::Style {
-        background: Background::Color(FIELD),
+        background: Background::Color(palette.background.base.color),
         border: Border {
-            color: BORDER,
+            color: border,
             width: 1.0,
             radius: 3.0.into(),
         },
-        icon: TEXT,
-        placeholder: DIM,
-        value: TEXT,
-        selection: ACCENT,
+        icon: palette.background.base.text,
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
+    }
+}
+
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
     }
 }
 
@@ -111,8 +58,10 @@ fn hdivider<'a>() -> Element<'a, Message> {
     container(Space::new().width(Fill).height(1))
         .width(Fill)
         .height(1)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()
@@ -122,8 +71,10 @@ fn vsep<'a>() -> Element<'a, Message> {
     container(Space::new().width(1).height(Fill))
         .width(1)
         .height(Fill)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()
@@ -156,13 +107,15 @@ pub fn view_window<'a>(
                 .style(btn_s(false))
                 .padding([4, 10]),
             Space::new().width(Fill),
-            text(table_name).size(10).color(DIM),
+            text(table_name).size(10).style(muted_style),
         ]
         .spacing(4)
         .align_y(iced::Center),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(TB)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.weak.color
+        )),
         ..Default::default()
     })
     .width(Fill)
@@ -199,19 +152,22 @@ pub fn view_window<'a>(
             };
             button(text(label).size(10).font(iced::Font::MONOSPACE))
                 .on_press(Message::PlotStylePanelSelectAci(aci))
-                .style(move |_: &Theme, st| button::Style {
-                    background: Some(Background::Color(match (is_sel, st) {
-                        (true, _) => ACTIVE,
-                        (false, button::Status::Hovered | button::Status::Pressed) => Color {
-                            r: 0.26,
-                            g: 0.26,
-                            b: 0.26,
-                            a: 1.0,
-                        },
-                        _ => Color::TRANSPARENT,
-                    })),
-                    text_color: TEXT,
+                .style(move |theme: &Theme, st| {
+                    let palette = theme.extended_palette();
+                    let pair = match (is_sel, st) {
+                        (true, _) => Some(palette.primary.strong),
+                        (false, button::Status::Hovered | button::Status::Pressed) => {
+                            Some(palette.background.strong)
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                    background: pair.map(|p| Background::Color(p.color)),
+                    text_color: pair
+                        .map(|p| p.text)
+                        .unwrap_or(palette.background.base.text),
                     ..Default::default()
+                    }
                 })
                 .padding([2, 8])
                 .width(Fill)
@@ -221,16 +177,19 @@ pub fn view_window<'a>(
 
     let aci_list = container(
         column![
-            text("ACI Color Index").size(10).color(DIM),
+            text("ACI Color Index").size(10).style(muted_style),
             container(scrollable(column(aci_items).spacing(1)).height(Fill))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(LIST)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.weak.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 3.0.into()
                     },
                     ..Default::default()
+                    }
                 })
                 .width(Fill)
                 .height(Fill)
@@ -269,12 +228,12 @@ pub fn view_window<'a>(
         .map(|e| format!("{}%", e.screening))
         .unwrap_or_else(|| "—".into());
 
-    let lbl = |s: &'static str| text(s).size(11).color(DIM);
+    let lbl = |s: &'static str| text(s).size(11).style(muted_style);
 
     let edit_panel = container(
         column![
             row![
-                text("ACI:").size(11).color(DIM).width(100),
+                text("ACI:").size(11).style(muted_style).width(100),
                 text(format!("{selected_aci}")).size(11),
             ]
             .spacing(8)
@@ -298,7 +257,7 @@ pub fn view_window<'a>(
                 .size(11)
                 .padding([4, 8]),
             Space::new().height(8),
-            text("Current values:").size(10).color(DIM),
+            text("Current values:").size(10).style(muted_style),
             text(format!("  Color: {cur_color}")).size(10),
             text(format!("  Lineweight: {cur_lw}")).size(10),
             text(format!("  Screening: {cur_scr}")).size(10),
@@ -318,8 +277,10 @@ pub fn view_window<'a>(
     let body = row![aci_list, vsep(), edit_panel].height(Fill);
 
     container(column![toolbar, hdivider(), body].spacing(0))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color
+            )),
             ..Default::default()
         })
         .width(Fill)

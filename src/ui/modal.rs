@@ -7,34 +7,7 @@
 
 use crate::app::Message;
 use iced::widget::{button, column, container, mouse_area, opaque, row, stack};
-use iced::{Background, Border, Color, Element, Length, Padding, Theme, Vector};
-
-const PANEL: Color = Color {
-    r: 0.13,
-    g: 0.13,
-    b: 0.13,
-    a: 1.0,
-};
-const BORDER_C: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-/// Title-bar background.
-const TITLE_C: Color = Color {
-    r: 0.18,
-    g: 0.18,
-    b: 0.18,
-    a: 1.0,
-};
-/// Drag-handle arrow — bright green so the move affordance stands out.
-const GRIP_C: Color = Color {
-    r: 0.2,
-    g: 1.0,
-    b: 0.3,
-    a: 1.0,
-};
+use iced::{Background, Border, Element, Length, Padding, Theme, Vector};
 
 /// Stack `content` over `base` behind a dimmed backdrop, framed with a
 /// draggable title bar (the ✕ close button at its right end). The backdrop only
@@ -52,15 +25,9 @@ pub fn modal<'a>(
     offset: Vector,
     resizable: bool,
 ) -> Element<'a, Message> {
-    let close = button(crate::ui::icons::tinted(
+    let close = button(crate::ui::icons::themed_danger(
         crate::ui::icons::CLOSE,
         13.0,
-        Color {
-            r: 0.85,
-            g: 0.85,
-            b: 0.85,
-            a: 1.0,
-        },
     ))
     .on_press(on_close)
     .padding([1, 7])
@@ -71,10 +38,12 @@ pub fn modal<'a>(
     // screen width — the dialog stays sized to its content. Pressing the grip
     // starts a drag (handled in `update`).
     let grip = mouse_area(
-        container(crate::ui::icons::tinted(crate::ui::icons::MOVE, 14.0, GRIP_C))
+        container(crate::ui::icons::themed_primary(crate::ui::icons::MOVE, 14.0))
             .padding([1, 7])
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(TITLE_C)),
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    theme.extended_palette().background.weakest.color,
+                )),
                 border: Border {
                     radius: 4.0.into(),
                     ..Default::default()
@@ -89,12 +58,7 @@ pub fn modal<'a>(
     // overlaid at the right edge. The bar takes an explicit `title_width`
     // (the caller's content width) instead of `Fill` — a Fill child inside
     // the Shrink frame would blow the dialog out to the full screen.
-    let title_text = iced::widget::text(title).size(15).color(Color {
-        r: 0.88,
-        g: 0.88,
-        b: 0.88,
-        a: 1.0,
-    });
+    let title_text = iced::widget::text(title).size(15);
     let title_bar = stack![
         container(title_text)
             .width(Length::Fixed(title_width))
@@ -108,10 +72,12 @@ pub fn modal<'a>(
             .align_y(iced::alignment::Vertical::Center),
     ];
 
-    let panel_style = |_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL)),
+    let panel_style = |theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.base.color,
+        )),
         border: Border {
-            color: BORDER_C,
+            color: theme.extended_palette().background.neutral.color,
             width: 1.0,
             radius: 6.0.into(),
         },
@@ -125,7 +91,7 @@ pub fn modal<'a>(
     // top-right above the content either way (`align_x(Right)`).
     let body = if resizable {
         let resize = mouse_area(
-            container(crate::ui::icons::tinted(crate::ui::icons::RESIZE, 15.0, GRIP_C))
+            container(crate::ui::icons::themed_primary(crate::ui::icons::RESIZE, 15.0))
                 .padding([0, 2]),
         )
         .on_press(Message::ModalResizeGrab)
@@ -157,11 +123,15 @@ pub fn modal<'a>(
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .padding(pad)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color {
-                    a: 0.55,
-                    ..Color::BLACK
-                })),
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    theme
+                        .extended_palette()
+                        .background
+                        .strongest
+                        .color
+                        .scale_alpha(0.55),
+                )),
                 ..Default::default()
             }),
     )
@@ -177,24 +147,15 @@ pub fn modal<'a>(
     .into()
 }
 
-fn close_style(_: &Theme, status: button::Status) -> button::Style {
-    let bg = match status {
-        button::Status::Hovered | button::Status::Pressed => Color {
-            r: 0.7,
-            g: 0.2,
-            b: 0.2,
-            a: 1.0,
-        },
-        _ => Color {
-            r: 0.25,
-            g: 0.25,
-            b: 0.25,
-            a: 1.0,
-        },
+fn close_style(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let pair = match status {
+        button::Status::Hovered | button::Status::Pressed => palette.danger.strong,
+        _ => palette.background.weakest,
     };
     button::Style {
-        background: Some(Background::Color(bg)),
-        text_color: Color::WHITE,
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
         border: Border {
             radius: 4.0.into(),
             ..Default::default()

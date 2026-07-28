@@ -10,17 +10,7 @@ use iced::widget::{
     button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
     Space,
 };
-use iced::{Background, Border, Color, Element, Fill, Length, Theme};
-
-const TB: Color = Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 };
-const BG: Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-const BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-const TEXT: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-const DIM: Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-const ACCENT: Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
-const FIELD: Color = Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 };
-const ACTIVE: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
-const LIST: Color = Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 };
+use iced::{Background, Border, Element, Fill, Length, Theme};
 
 /// Sentinel entries in the printer dropdown (not real printer names).
 pub const OUT_DEFAULT: &str = "System default printer";
@@ -221,32 +211,49 @@ impl PlotDialogState {
 }
 
 fn btn(accent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_: &Theme, st| button::Style {
-        background: Some(Background::Color(match (accent, st) {
-            (true, button::Status::Hovered | button::Status::Pressed) => {
-                Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 }
-            }
+    move |theme: &Theme, st| {
+        let palette = theme.extended_palette();
+        let pair = match (accent, st) {
+            (true, button::Status::Hovered | button::Status::Pressed) => palette.primary.strong,
             (false, button::Status::Hovered | button::Status::Pressed) => {
-                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
+                palette.background.strong
             }
-            (true, _) => ACCENT,
-            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
-        })),
-        text_color: TEXT,
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+            (true, _) => palette.primary.base,
+            _ => palette.background.weak,
+        };
+        button::Style {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
+        border: Border {
+            color: palette.background.neutral.color,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
         shadow: iced::Shadow::default(),
         snap: false,
+        }
     }
 }
 
-fn field_style(_: &Theme, _: text_input::Status) -> text_input::Style {
+fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
+    let border = match status {
+        text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
+    };
     text_input::Style {
-        background: Background::Color(FIELD),
-        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-        icon: TEXT,
-        placeholder: DIM,
-        value: TEXT,
-        selection: ACCENT,
+        background: Background::Color(palette.background.base.color),
+        border: Border { color: border, width: 1.0, radius: 3.0.into() },
+        icon: palette.background.base.text,
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
+    }
+}
+
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
     }
 }
 
@@ -254,23 +261,27 @@ fn hdivider<'a>() -> Element<'a, Message> {
     container(Space::new().width(Fill).height(1))
         .width(Fill)
         .height(1)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()
 }
 
 fn section_label<'a>(s: &'static str) -> Element<'a, Message> {
-    text(s).size(11).color(DIM).into()
+    text(s).size(11).style(muted_style).into()
 }
 
 fn vsep<'a>() -> Element<'a, Message> {
     container(Space::new().width(1).height(Fill))
         .width(1)
         .height(Fill)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()
@@ -295,13 +306,16 @@ fn setup_row<'a>(
             .into();
     }
     let is_sel = name == selected;
-    let cell = container(text(name.to_string()).size(11).color(TEXT))
+    let cell = container(text(name.to_string()).size(11))
         .padding([4, 8])
         .width(Fill)
-        .style(move |_: &Theme| container::Style {
-            background: is_sel.then_some(Background::Color(ACTIVE)),
-            text_color: Some(TEXT),
+        .style(move |theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: is_sel.then_some(Background::Color(palette.primary.strong.color)),
+            text_color: is_sel.then_some(palette.primary.strong.text),
             ..Default::default()
+            }
         });
     mouse_area(cell)
         .on_press(Message::PlotDlg(PlotDlgMsg::SelectSetup(name.to_string())))
@@ -321,7 +335,7 @@ fn drop_row<'a>(
         .text_size(12)
         .padding([3, 6])
         .width(Length::Fill);
-    row![text(label).size(11).color(DIM).width(92), pl]
+    row![text(label).size(11).style(muted_style).width(92), pl]
         .spacing(8)
         .align_y(iced::Center)
         .into()
@@ -335,7 +349,7 @@ fn field_row<'a>(
     width: u16,
 ) -> Element<'a, Message> {
     row![
-        text(label).size(11).color(DIM).width(92),
+        text(label).size(11).style(muted_style).width(92),
         text_input("", value)
             .on_input(move |s| Message::PlotDlg(ctor(s)))
             .style(field_style)
@@ -413,8 +427,10 @@ pub fn view_window(s: &PlotDialogState) -> Element<'_, Message> {
         ]
         .align_y(iced::Center),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(TB)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.weak.color
+        )),
         ..Default::default()
     })
     .width(Fill)
@@ -445,7 +461,7 @@ pub fn view_window(s: &PlotDialogState) -> Element<'_, Message> {
         .map(|name| setup_row(name, &s.selected_setup, renaming, rename_buf))
         .collect();
     let list_body: Element<'_, Message> = if rows.is_empty() {
-        container(text("(no page setups)").size(11).color(DIM))
+        container(text("(no page setups)").size(11).style(muted_style))
             .padding([6, 8])
             .into()
     } else {
@@ -453,16 +469,19 @@ pub fn view_window(s: &PlotDialogState) -> Element<'_, Message> {
     };
     let list_panel = container(
         column![
-            text("Page setups").size(10).color(DIM),
+            text("Page setups").size(10).style(muted_style),
             container(list_body)
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(LIST)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.weak.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 3.0.into(),
                     },
                     ..Default::default()
+                    }
                 })
                 .width(Fill)
                 .height(Fill)
@@ -550,11 +569,18 @@ pub fn view_window(s: &PlotDialogState) -> Element<'_, Message> {
         hdivider(),
         section_label("Plot style table (pen assignments)"),
         row![
-            container(text(style_label).size(12).color(TEXT))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(FIELD)),
-                    border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+            container(text(style_label).size(12))
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.base.color)),
+                    border: Border {
+                        color: palette.background.neutral.color,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
                     ..Default::default()
+                    }
                 })
                 .padding([4, 8])
                 .width(Fill),
@@ -583,7 +609,7 @@ pub fn view_window(s: &PlotDialogState) -> Element<'_, Message> {
                 .width(Length::Fill)
             )
             .width(Fill),
-            text("DPI").size(11).color(DIM),
+            text("DPI").size(11).style(muted_style),
             text_input("", &s.dpi)
                 .on_input(move |v| Message::PlotDlg(PlotDlgMsg::Dpi(v)))
                 .style(field_style)
@@ -631,8 +657,10 @@ pub fn view_window(s: &PlotDialogState) -> Element<'_, Message> {
     let body = row![list_panel, vsep(), detail].height(Fill);
 
     container(column![toolbar, hdivider(), body].spacing(0))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color
+            )),
             ..Default::default()
         })
         .width(Fill)

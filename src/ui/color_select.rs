@@ -20,25 +20,6 @@ pub struct ColorExtras {
     pub by_block: bool,
 }
 
-const PICKER_BG: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
-const BORDER: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-const TEXT: Color = Color {
-    r: 0.88,
-    g: 0.88,
-    b: 0.88,
-    a: 1.0,
-};
-
 /// Encode a colour as the ACI integer string the style editors store
 /// (ByBlock=0, ByLayer=256, indexed 1-255; RGB has no ACI slot → ByLayer).
 pub fn color_to_aci_string(c: AcadColor) -> String {
@@ -85,15 +66,10 @@ pub fn color_display_name(c: AcadColor) -> String {
 /// A small colour square.
 fn swatch<'a>(bg: Color) -> Element<'a, Message> {
     container(text("").width(13).height(13))
-        .style(move |_: &Theme| container::Style {
+        .style(move |theme: &Theme| container::Style {
             background: Some(Background::Color(bg)),
             border: Border {
-                color: Color {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                    a: 0.5,
-                },
+                color: theme.extended_palette().background.neutral.color,
                 width: 1.0,
                 radius: 2.0.into(),
             },
@@ -126,8 +102,8 @@ pub fn color_selector<'a>(
     let head = button(
         row![
             swatch(cur_bg),
-            text(cur_name).size(11).color(TEXT),
-            crate::ui::icons::arrow_toggle(open, 9.0, TEXT),
+            text(cur_name).size(11),
+            crate::ui::icons::themed_arrow_toggle(open, 9.0),
         ]
         .spacing(5)
         .align_y(iced::Center),
@@ -141,14 +117,17 @@ pub fn color_selector<'a>(
     }
 
     let popup = container(color_list(extras, on_select, on_more))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(PICKER_BG)),
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(palette.background.weak.color)),
             border: Border {
-                color: BORDER,
+                color: palette.background.neutral.color,
                 width: 1.0,
                 radius: 2.0.into(),
             },
             ..Default::default()
+            }
         })
         .padding(5)
         .width(220);
@@ -159,6 +138,21 @@ pub fn color_selector<'a>(
         base: head.into(),
         popup: popup.into(),
     })
+}
+
+fn list_row_style(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let hovered = matches!(status, button::Status::Hovered);
+    let text_color = if hovered {
+        palette.background.strong.text
+    } else {
+        palette.background.base.text
+    };
+    button::Style {
+        background: hovered.then_some(Background::Color(palette.background.strong.color)),
+        text_color,
+        ..Default::default()
+    }
 }
 
 /// The colour list shown inside a picker popup: named ACI colours (with
@@ -172,21 +166,12 @@ pub fn color_list<'a>(
     let named_row = |color: AcadColor| -> Element<'a, Message> {
         let (bg, name) = acad_color_display(color);
         button(
-            row![swatch(bg), text(name).size(11).color(TEXT)]
+            row![swatch(bg), text(name).size(11)]
                 .spacing(5)
                 .align_y(iced::Center),
         )
         .on_press(on_select(color))
-        .style(|_: &Theme, status| button::Style {
-            background: matches!(status, button::Status::Hovered)
-                .then_some(Background::Color(Color {
-                    r: 0.25,
-                    g: 0.25,
-                    b: 0.30,
-                    a: 1.0,
-                })),
-            ..Default::default()
-        })
+        .style(list_row_style)
         .padding([2, 4])
         .width(Length::Fill)
         .into()
@@ -203,18 +188,9 @@ pub fn color_list<'a>(
         list = list.push(named_row(AcadColor::Index(i)));
     }
     list = list.push(
-        button(text("More…").size(11).color(TEXT))
+        button(text("More…").size(11))
             .on_press(on_more)
-            .style(|_: &Theme, status| button::Style {
-                background: matches!(status, button::Status::Hovered)
-                    .then_some(Background::Color(Color {
-                        r: 0.25,
-                        g: 0.25,
-                        b: 0.30,
-                        a: 1.0,
-                    })),
-                ..Default::default()
-            })
+            .style(list_row_style)
             .padding([2, 4])
             .width(Length::Fill),
     );
@@ -227,7 +203,7 @@ pub fn color_grid_window(on_pick: impl Fn(AcadColor) -> Message) -> Element<'sta
     let chip = |color: AcadColor, label: &'static str| -> Element<'static, Message> {
         let (bg, _) = acad_color_display(color);
         button(
-            row![swatch(bg), text(label).size(11).color(TEXT)]
+            row![swatch(bg), text(label).size(11)]
                 .spacing(5)
                 .align_y(iced::Center),
         )
@@ -250,18 +226,13 @@ pub fn color_grid_window(on_pick: impl Fn(AcadColor) -> Message) -> Element<'sta
             r = r.push(
                 button(text("").width(18).height(18))
                     .on_press(on_pick(AcadColor::Index(ci)))
-                    .style(move |_: &Theme, status| button::Style {
+                    .style(move |theme: &Theme, status| button::Style {
                         background: Some(Background::Color(bg)),
                         border: Border {
                             color: if matches!(status, button::Status::Hovered) {
-                                Color::WHITE
+                                theme.extended_palette().primary.base.color
                             } else {
-                                Color {
-                                    r: 0.0,
-                                    g: 0.0,
-                                    b: 0.0,
-                                    a: 0.4,
-                                }
+                                theme.extended_palette().background.neutral.color
                             },
                             width: if matches!(status, button::Status::Hovered) {
                                 1.5
@@ -270,6 +241,7 @@ pub fn color_grid_window(on_pick: impl Fn(AcadColor) -> Message) -> Element<'sta
                             },
                             radius: 1.0.into(),
                         },
+                        text_color: theme.extended_palette().background.base.text,
                         ..Default::default()
                     })
                     .padding(0),
@@ -281,14 +253,16 @@ pub fn color_grid_window(on_pick: impl Fn(AcadColor) -> Message) -> Element<'sta
 
     container(
         column![
-            text("Select Color").size(13).color(TEXT),
+            text("Select Color").size(13),
             row![chip(AcadColor::ByLayer, "ByLayer"), chip(AcadColor::ByBlock, "ByBlock")].spacing(6),
             scrollable(grid).height(Length::Fill),
         ]
         .spacing(8),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PICKER_BG)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.weak.color
+        )),
         ..Default::default()
     })
     .padding(10)

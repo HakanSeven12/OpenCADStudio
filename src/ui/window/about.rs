@@ -1,48 +1,16 @@
 use crate::app::Message;
 use iced::widget::{button, column, container, row, text};
-use iced::{Background, Border, Color, Element, Theme};
-
-const BG: Color = Color {
-    r: 0.15,
-    g: 0.15,
-    b: 0.15,
-    a: 1.0,
-};
-const PANEL: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
-const BORDER: Color = Color {
-    r: 0.30,
-    g: 0.30,
-    b: 0.30,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.25,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
-const WHITE: Color = Color {
-    r: 0.92,
-    g: 0.92,
-    b: 0.92,
-    a: 1.0,
-};
+use iced::{Background, Element, Theme};
 
 fn info_row<'a>(label: &'static str, value: String) -> Element<'a, Message> {
     row![
-        text(label).size(11).color(DIM).width(100),
-        text(value).size(11).color(WHITE),
+        text(label)
+            .size(11)
+            .style(|theme: &Theme| iced::widget::text::Style {
+                color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+            })
+            .width(100),
+        text(value).size(11),
     ]
     .spacing(8)
     .align_y(iced::Center)
@@ -57,10 +25,16 @@ pub fn view_window<'a>() -> Element<'a, Message> {
 
     let logo = container(
         column![
-            text("Open CAD Studio").size(32).color(ACCENT),
+            text("Open CAD Studio")
+                .size(32)
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(theme.extended_palette().primary.base.color),
+                }),
             text("CAD application for Architecture & Engineering")
                 .size(11)
-                .color(DIM),
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+                }),
         ]
         .spacing(4)
         .align_x(iced::Center),
@@ -82,35 +56,11 @@ pub fn view_window<'a>() -> Element<'a, Message> {
         .spacing(2)
         .padding([12, 16]),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL)),
-        border: Border {
-            color: BORDER,
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        ..Default::default()
-    });
+    .style(container::bordered_box);
 
     let copy_btn = button(text("Copy Info").size(11))
         .on_press(Message::AboutCopyInfo)
-        .style(|_: &Theme, st| button::Style {
-            background: Some(Background::Color(match st {
-                button::Status::Hovered | button::Status::Pressed => Color {
-                    r: 0.20,
-                    g: 0.42,
-                    b: 0.72,
-                    a: 1.0,
-                },
-                _ => ACCENT,
-            })),
-            text_color: WHITE,
-            border: Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
+        .style(button::primary)
         .padding([6, 16]);
 
     let footer = row![copy_btn]
@@ -132,8 +82,10 @@ pub fn view_window<'a>() -> Element<'a, Message> {
                 left: 20.0,
             }),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.base.color,
+        )),
         ..Default::default()
     })
     .into()

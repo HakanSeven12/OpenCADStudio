@@ -1,60 +1,33 @@
 use crate::app::Message;
 use iced::widget::{button, column, container, row, scrollable, text, Space};
-use iced::{Background, Border, Color, Element, Fill, Theme};
+use iced::{Background, Border, Element, Fill, Theme};
 
-const BG: Color = Color {
-    r: 0.15,
-    g: 0.15,
-    b: 0.15,
-    a: 1.0,
-};
-const PANEL: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
-const BORDER: Color = Color {
-    r: 0.30,
-    g: 0.30,
-    b: 0.30,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.25,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
-const WHITE: Color = Color {
-    r: 0.92,
-    g: 0.92,
-    b: 0.92,
-    a: 1.0,
-};
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
+
+fn primary_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().primary.base.color),
+    }
+}
 
 /// Renders one of the two "Installed" / "Latest" cards. The `highlight`
 /// flag tints the border + label with the accent colour, making the new
 /// version the visual anchor of the row.
 fn version_card<'a>(label: &'static str, value: String, highlight: bool) -> Element<'a, Message> {
-    let label_color = if highlight { ACCENT } else { DIM };
-    let value_color = WHITE;
-    let border_color = if highlight { ACCENT } else { BORDER };
-    let bg = if highlight {
-        Color { r: 0.10, g: 0.16, b: 0.22, a: 1.0 } // accent-tinted dark
-    } else {
-        PANEL
-    };
     container(
         column![
-            text(label).size(10).color(label_color),
-            text(value).size(20).color(value_color),
+            text(label)
+                .size(10)
+                .style(move |theme: &Theme| if highlight {
+                    primary_style(theme)
+                } else {
+                    muted_style(theme)
+                }),
+            text(value).size(20),
         ]
         .spacing(4)
         .align_x(iced::Center),
@@ -67,14 +40,26 @@ fn version_card<'a>(label: &'static str, value: String, highlight: bool) -> Elem
         left: 12.0,
     })
     .align_x(iced::Center)
-    .style(move |_: &Theme| container::Style {
-        background: Some(Background::Color(bg)),
+    .style(move |theme: &Theme| {
+        let palette = theme.extended_palette();
+        let pair = if highlight {
+            palette.primary.weak
+        } else {
+            palette.background.base
+        };
+        container::Style {
+        background: Some(Background::Color(pair.color)),
         border: Border {
-            color: border_color,
+            color: if highlight {
+                palette.primary.base.color
+            } else {
+                palette.background.neutral.color
+            },
             width: 1.0,
             radius: 6.0.into(),
         },
         ..Default::default()
+        }
     })
     .into()
 }
@@ -98,24 +83,23 @@ fn render_notes_line<'a>(raw: &str) -> Element<'a, Message> {
     if let Some(rest) = trimmed.strip_prefix("## ") {
         return text(strip_inline_md(rest))
             .size(13)
-            .color(ACCENT)
+            .style(primary_style)
             .into();
     }
     if let Some(rest) = trimmed.strip_prefix("### ") {
         return text(strip_inline_md(rest))
             .size(12)
-            .color(WHITE)
             .into();
     }
     if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
         return row![
-            container(crate::ui::icons::tinted(crate::ui::icons::DOT, 5.0, DIM)).width(14),
-            text(strip_inline_md(rest)).size(11).color(WHITE),
+            container(crate::ui::icons::themed_secondary(crate::ui::icons::DOT, 5.0)).width(14),
+            text(strip_inline_md(rest)).size(11),
         ]
         .spacing(4)
         .into();
     }
-    text(strip_inline_md(trimmed)).size(11).color(WHITE).into()
+    text(strip_inline_md(trimmed)).size(11).into()
 }
 
 /// Drop `**…**` and `` `…` `` markers without preserving emphasis (iced 0.14
@@ -139,10 +123,10 @@ fn strip_inline_md(s: &str) -> String {
 pub fn view_window<'a>(latest: &'a str, body: &'a str) -> Element<'a, Message> {
     let header = container(
         column![
-            text("New Release Available").size(20).color(ACCENT),
+            text("New Release Available").size(20).style(primary_style),
             text("A newer Open CAD Studio version is published on GitHub.")
                 .size(11)
-                .color(DIM),
+                .style(muted_style),
         ]
         .spacing(4)
         .align_x(iced::Center),
@@ -165,10 +149,9 @@ pub fn view_window<'a>(latest: &'a str, body: &'a str) -> Element<'a, Message> {
         false,
     );
     let latest_card = version_card("Latest", format!("v{}", latest), true);
-    let arrow = container(crate::ui::icons::tinted(
+    let arrow = container(crate::ui::icons::themed_secondary(
         crate::ui::icons::ARROW_LONG_RIGHT,
         20.0,
-        DIM,
     ))
     .width(iced::Length::Fixed(32.0))
         .height(Fill)
@@ -181,50 +164,12 @@ pub fn view_window<'a>(latest: &'a str, body: &'a str) -> Element<'a, Message> {
 
     let later_btn = button(text("Later").size(11))
         .on_press(Message::UpdateNoticeClose)
-        .style(|_: &Theme, st| button::Style {
-            background: Some(Background::Color(match st {
-                button::Status::Hovered | button::Status::Pressed => Color {
-                    r: 0.22,
-                    g: 0.22,
-                    b: 0.22,
-                    a: 1.0,
-                },
-                _ => Color {
-                    r: 0.18,
-                    g: 0.18,
-                    b: 0.18,
-                    a: 1.0,
-                },
-            })),
-            text_color: WHITE,
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(button::secondary)
         .padding([6, 16]);
 
     let open_btn = button(text("Open Release Page").size(11))
         .on_press(Message::UpdateNoticeOpenRelease)
-        .style(|_: &Theme, st| button::Style {
-            background: Some(Background::Color(match st {
-                button::Status::Hovered | button::Status::Pressed => Color {
-                    r: 0.20,
-                    g: 0.42,
-                    b: 0.72,
-                    a: 1.0,
-                },
-                _ => ACCENT,
-            })),
-            text_color: WHITE,
-            border: Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
+        .style(button::primary)
         .padding([6, 16]);
 
     let footer = row![Space::new().width(Fill), later_btn, open_btn]
@@ -240,7 +185,7 @@ pub fn view_window<'a>(latest: &'a str, body: &'a str) -> Element<'a, Message> {
     // Release notes panel. Rendered as a light-markdown column inside a
     // bordered scrollable so long bodies stay contained and don't
     // explode the window. Empty body → "No release notes provided."
-    let notes_heading = container(text("What's new").size(11).color(DIM))
+    let notes_heading = container(text("What's new").size(11).style(muted_style))
         .padding(iced::Padding {
             top: 10.0,
             right: 0.0,
@@ -251,7 +196,7 @@ pub fn view_window<'a>(latest: &'a str, body: &'a str) -> Element<'a, Message> {
     let notes_body: Element<'a, Message> = if body.trim().is_empty() {
         text("No release notes provided.")
             .size(11)
-            .color(DIM)
+            .style(muted_style)
             .into()
     } else {
         let mut col = column![].spacing(4);
@@ -264,15 +209,7 @@ pub fn view_window<'a>(latest: &'a str, body: &'a str) -> Element<'a, Message> {
     let notes_block = container(notes_body)
         .width(Fill)
         .height(Fill)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(PANEL)),
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        });
+        .style(container::bordered_box);
 
     // Wrap notes_block in a Fill-height container outside the column so it
     // greedily claims every pixel left over after the fixed-height rows
@@ -294,8 +231,10 @@ pub fn view_window<'a>(latest: &'a str, body: &'a str) -> Element<'a, Message> {
                 left: 20.0,
             }),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.base.color,
+        )),
         ..Default::default()
     })
     .width(Fill)

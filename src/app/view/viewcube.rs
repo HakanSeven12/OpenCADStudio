@@ -1,10 +1,9 @@
 use super::super::Message;
 use crate::scene::{VIEWCUBE_PX, VIEWCUBE_REGION_PX};
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, row, stack,
-    Space,
+    button, container, mouse_area, pick_list, stack, Space,
 };
-use iced::{Background, Border, Color, Element, Fill, Theme};
+use iced::{Background, Border, Element, Theme};
 
 // ── Render-mode picker ──────────────────────────────────────────────────────
 
@@ -15,15 +14,9 @@ use iced::{Background, Border, Color, Element, Fill, Theme};
 /// state and emit `ToggleGrid` / `ToggleGridSnap`.
 // ── ViewCube navigation controls (home / roll / nudge / UCS) ───────────────
 
-/// Place `el` at pixel offset (x, y) inside a Fill layer (top-left origin).
+/// Place `el` at pixel offset (x, y) inside a fill layer (top-left origin).
 fn vc_place<'a>(x: f32, y: f32, el: Element<'a, Message>) -> Element<'a, Message> {
-    column![
-        Space::new().height(iced::Length::Fixed(y.max(0.0))),
-        row![Space::new().width(iced::Length::Fixed(x.max(0.0))), el],
-    ]
-    .width(Fill)
-    .height(Fill)
-    .into()
+    crate::ui::pin_at(iced::Point::new(x, y), el)
 }
 
 /// Borderless square icon button used by the ViewCube nav controls.
@@ -37,20 +30,19 @@ fn vc_btn<'a>(content: Element<'a, Message>, size: f32, msg: Message) -> Element
     )
     .padding(0)
     .on_press(msg)
-    .style(|_: &Theme, status| iced::widget::button::Style {
-        background: Some(Background::Color(match status {
-            iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed => Color {
-                r: 0.45,
-                g: 0.62,
-                b: 0.95,
-                a: 0.30,
-            },
-            _ => Color::TRANSPARENT,
-        })),
+    .style(|theme: &Theme, status| iced::widget::button::Style {
+        background: matches!(
+            status,
+            iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+        )
+        .then_some(Background::Color(
+            theme.extended_palette().primary.weak.color
+        )),
         border: Border {
             radius: 3.0.into(),
             ..Default::default()
         },
+        text_color: theme.extended_palette().background.base.text,
         ..Default::default()
     })
     .into()
@@ -61,12 +53,6 @@ fn vc_btn<'a>(content: Element<'a, Message>, size: f32, msg: Message) -> Element
 pub(super) fn viewcube_nav_controls<'a>() -> Element<'a, Message> {
     use crate::scene::NudgeDir;
     use crate::ui::icons;
-    let tint = Color {
-        r: 0.86,
-        g: 0.89,
-        b: 0.96,
-        a: 1.0,
-    };
     let r = VIEWCUBE_REGION_PX;
     let c = r * 0.5;
     let cube_half = VIEWCUBE_PX as f32 * 0.36; // VIEWCUBE_PX * VIEWCUBE_SCALE
@@ -101,23 +87,23 @@ pub(super) fn viewcube_nav_controls<'a>() -> Element<'a, Message> {
         vc_place(
             3.0,
             3.0,
-            vc_btn(icons::home(13.0, tint), BTN, Message::ViewCubeHome)
+            vc_btn(icons::themed_home(13.0), BTN, Message::ViewCubeHome)
         ),
         vc_place(
             rax,
             ray,
-            vc_btn(icons::undo(12.0, tint), BTN, Message::ViewCubeRoll(false))
+            vc_btn(icons::themed_undo(12.0, true), BTN, Message::ViewCubeRoll(false))
         ),
         vc_place(
             rbx,
             rby,
-            vc_btn(icons::redo(12.0, tint), BTN, Message::ViewCubeRoll(true))
+            vc_btn(icons::themed_redo(12.0, true), BTN, Message::ViewCubeRoll(true))
         ),
         vc_place(
             tux,
             tuy,
             vc_btn(
-                icons::arrow_down(8.0, tint),
+                icons::themed_arrow_down(8.0),
                 TRI,
                 Message::ViewCubeNudge(NudgeDir::Up)
             )
@@ -126,7 +112,7 @@ pub(super) fn viewcube_nav_controls<'a>() -> Element<'a, Message> {
             tdx,
             tdy,
             vc_btn(
-                icons::arrow_up(8.0, tint),
+                icons::themed_arrow_up(8.0),
                 TRI,
                 Message::ViewCubeNudge(NudgeDir::Down)
             )
@@ -135,7 +121,7 @@ pub(super) fn viewcube_nav_controls<'a>() -> Element<'a, Message> {
             tlx,
             tly,
             vc_btn(
-                icons::arrow_right(8.0, tint),
+                icons::themed_arrow_right(8.0),
                 TRI,
                 Message::ViewCubeNudge(NudgeDir::Left)
             )
@@ -144,7 +130,7 @@ pub(super) fn viewcube_nav_controls<'a>() -> Element<'a, Message> {
             trx,
             try_,
             vc_btn(
-                icons::arrow_left(8.0, tint),
+                icons::themed_arrow_left(8.0),
                 TRI,
                 Message::ViewCubeNudge(NudgeDir::Right)
             )
@@ -162,12 +148,6 @@ pub(super) const UCS_PICKER_W: f32 = 84.0;
 
 /// The WCS / named-UCS selector shown under the cube.
 pub(super) fn viewcube_ucs_picker<'a>(current: String, names: Vec<String>) -> Element<'a, Message> {
-    let light = Color {
-        r: 0.85,
-        g: 0.87,
-        b: 0.93,
-        a: 1.0,
-    };
     let mut options = vec!["WCS".to_string()];
     options.extend(names);
     let selected = if current.is_empty() {
@@ -181,21 +161,20 @@ pub(super) fn viewcube_ucs_picker<'a>(current: String, names: Vec<String>) -> El
         // Fixed width so the caller can centre it under the cube centre with a
         // simple half-width offset (content-sized width would drift off-centre).
         .width(iced::Length::Fixed(UCS_PICKER_W))
-        .style(move |_: &Theme, _| iced::widget::pick_list::Style {
-            background: Background::Color(Color {
-                r: 0.16,
-                g: 0.17,
-                b: 0.20,
-                a: 0.92,
-            }),
+        .style(move |theme: &Theme, _| {
+            let palette = theme.extended_palette();
+            iced::widget::pick_list::Style {
+            background: Background::Color(palette.background.weak.color),
             border: Border {
                 radius: 3.0.into(),
+                color: palette.background.neutral.color,
+                width: 1.0,
                 ..Default::default()
             },
-            text_color: light,
-            placeholder_color: light,
-            handle_color: light,
+            text_color: palette.background.base.text,
+            placeholder_color: palette.background.base.text.scale_alpha(0.68),
+            handle_color: palette.background.base.text,
+            }
         })
         .into()
 }
-

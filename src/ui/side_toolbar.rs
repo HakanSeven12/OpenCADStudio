@@ -7,15 +7,12 @@
 //! module's tools can drive it. First used for paper-space viewport / plot
 //! actions; reusable for any future context action set.
 
-use iced::widget::{button, column, container, svg, text, tooltip};
-use iced::{Background, Border, Color, Element, Length, Theme};
+use iced::widget::{button, column, container, text, tooltip};
+use iced::{Background, Border, Element, Length, Theme};
 
 use crate::app::Message;
 use crate::modules::{IconKind, ToolDef};
 
-const PANEL_BG: Color = Color { r: 0.13, g: 0.13, b: 0.13, a: 0.96 };
-const PANEL_BORDER: Color = Color { r: 0.32, g: 0.32, b: 0.32, a: 1.0 };
-const BTN_HOVER: Color = Color { r: 0.24, g: 0.24, b: 0.24, a: 1.0 };
 const ICON_SIZE: f32 = 22.0;
 const BTN_SIZE: f32 = 38.0;
 /// Gap between the toolbar and the right edge of the canvas.
@@ -23,25 +20,26 @@ const EDGE_MARGIN: f32 = 8.0;
 
 fn icon_el(icon: IconKind) -> Element<'static, Message> {
     match icon {
-        IconKind::Glyph(s) => text(s).size(ICON_SIZE * 0.85).color(Color::WHITE).into(),
-        IconKind::Svg(bytes) => svg(svg::Handle::from_memory(bytes))
-            .width(Length::Fixed(ICON_SIZE))
-            .height(Length::Fixed(ICON_SIZE))
-            .into(),
+        IconKind::Glyph(s) => text(s).size(ICON_SIZE * 0.85).into(),
+        IconKind::Svg(bytes) => crate::ui::icons::semantic(bytes, ICON_SIZE),
     }
 }
 
 fn tip_panel(label: &'static str) -> Element<'static, Message> {
-    container(text(label).size(11).color(Color::WHITE))
+    container(text(label).size(11))
         .padding([2, 6])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(PANEL_BG)),
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(palette.background.strong.color)),
             border: Border {
-                color: PANEL_BORDER,
+                color: palette.background.neutral.color,
                 width: 1.0,
                 radius: 3.0.into(),
             },
+            text_color: Some(palette.background.strong.text),
             ..Default::default()
+            }
         })
         .into()
 }
@@ -63,17 +61,22 @@ pub fn view(tools: &[ToolDef]) -> Option<Element<'static, Message>> {
             })
             .width(Length::Fixed(BTN_SIZE))
             .height(Length::Fixed(BTN_SIZE))
-            .style(|_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => BTN_HOVER,
-                    _ => Color::TRANSPARENT,
-                })),
+            .style(|theme: &Theme, status| {
+                let palette = theme.extended_palette();
+                let hovered = matches!(
+                    status,
+                    button::Status::Hovered | button::Status::Pressed
+                );
+                button::Style {
+                background: hovered
+                    .then_some(Background::Color(palette.background.strong.color)),
                 border: Border {
                     radius: 3.0.into(),
                     ..Default::default()
                 },
-                text_color: Color::WHITE,
+                text_color: palette.background.base.text,
                 ..Default::default()
+                }
             });
         // Label tooltip on the left so it never runs off the right edge.
         col = col.push(
@@ -81,14 +84,17 @@ pub fn view(tools: &[ToolDef]) -> Option<Element<'static, Message>> {
         );
     }
 
-    let panel = container(col).padding(4).style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL_BG)),
+    let panel = container(col).padding(4).style(|theme: &Theme| {
+        let palette = theme.extended_palette();
+        container::Style {
+        background: Some(Background::Color(palette.background.weak.color)),
         border: Border {
-            color: PANEL_BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 5.0.into(),
         },
         ..Default::default()
+        }
     });
 
     // Fill the canvas, pin the panel to the right edge and centre it

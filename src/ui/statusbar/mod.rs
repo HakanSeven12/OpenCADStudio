@@ -2,12 +2,14 @@
 
 pub mod statusbar_config;
 pub mod statusbar_menu;
+pub mod status_menu;
 
 use iced::widget::tooltip::Position as TipPos;
 use iced::widget::{
-    button, container, mouse_area, row, text, text_input, tooltip,
+    button, column, container, mouse_area, row, text, text_input, tooltip,
 };
 use iced::{Background, Border, Color, Element, Length, Theme};
+use iced_aw::ContextMenu;
 use std::sync::Arc;
 
 /// Scrollable id of the status-bar layout-tab strip (retained so the existing
@@ -22,17 +24,19 @@ pub const LAYOUT_RENAME_INPUT_ID: &str = "layout_rename_input";
 use crate::app::Message;
 use crate::snap::Snapper;
 use crate::ui::statusbar::statusbar_config::{StatusBarConfig, StatusPill};
-use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
+use crate::ui::statusbar::status_menu::Entry as StatusMenuEntry;
+use crate::ui::wrap_bar::{WrapBar, WrapFlow};
 
-// PosReport ids for anchoring each status-bar popup directly to its pill.
-pub const SB_OSNAP_ID: &str = "SB_OSNAP";
-pub const SB_SCALE_ID: &str = "SB_SCALE";
-pub const SB_UNITS_ID: &str = "SB_UNITS";
-pub const SB_ISOLATE_ID: &str = "SB_ISOLATE";
-pub const SB_FILTER_ID: &str = "SB_FILTER";
-pub const SB_MENU_ID: &str = "SB_MENU";
-pub const SB_LAYOUTLIST_ID: &str = "SB_LAYOUTLIST";
-pub const SB_POLAR_ID: &str = "SB_POLAR";
+pub struct StatusMenuData<'a> {
+    pub layout_names: Vec<String>,
+    pub polar_custom_input: &'a str,
+    pub scale_is_model: bool,
+    pub scale_list: Vec<(String, f32, f64)>,
+    pub has_selection: bool,
+    pub selection_types: Vec<String>,
+    pub selection_filter: &'a rustc_hash::FxHashSet<String>,
+    pub tooltip_hidden: bool,
+}
 
 #[derive(Clone, Default)]
 pub struct StatusBar {
@@ -50,12 +54,9 @@ impl StatusBar {
     pub fn view<'a>(
         &'a self,
         snapper: &'a Snapper,
-        popup_open: bool,
         ortho_mode: bool,
         polar_mode: bool,
         polar_increment_deg: f32,
-        // True while the polar-angle picker popup is open.
-        polar_popup_open: bool,
         dyn_input: bool,
         otrack: bool,
         layouts: Vec<String>,
@@ -75,8 +76,6 @@ impl StatusBar {
         show_layout_tabs: bool,
         // Current annotation scale for model space (1.0 = 1:1, 50.0 = 1:50, etc.).
         annotation_scale: f32,
-        // True when the scale picker popup is open.
-        scale_popup_open: bool,
         // True when the scale pill is interactive (always model space; paper space only when a viewport is active/selected).
         scale_pill_enabled: bool,
         // LWDISPLAY header flag — controls lineweight visibility in the viewport.
@@ -94,8 +93,6 @@ impl StatusBar {
         clean_screen: bool,
         // Drawing units (INSUNITS) for the units pill.
         insertion_units: i16,
-        // True while the drawing-units picker is open.
-        units_popup_open: bool,
         // True when objects are hidden by Isolate / Hide.
         isolation_active: bool,
         // Whether entity transparency is shown (Transparency pill state).
@@ -108,25 +105,28 @@ impl StatusBar {
         selection_cycling: bool,
         // Which pills the user has chosen to show on the bar.
         config: &'a StatusBarConfig,
+        menu_data: StatusMenuData<'a>,
     ) -> Element<'a, Message> {
+        let StatusMenuData {
+            layout_names,
+            polar_custom_input,
+            scale_is_model,
+            scale_list,
+            has_selection,
+            selection_types,
+            selection_filter,
+            tooltip_hidden,
+        } = menu_data;
+
         // Leftmost hamburger: opens a dropdown listing Model + every layout, so
         // a layout can be picked directly even when the tab strip is scrolled.
-        let menu_button = button(crate::ui::icons::tinted(
-            crate::ui::icons::MENU,
-            16.0,
-            if is_start { DISABLED_COLOR } else { ICON_COLOR },
-        ))
-            .style(|_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered => PILL_BG,
-                    _ => Color::TRANSPARENT,
-                })),
-                border: Border {
-                    radius: 3.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+        let menu_icon = if is_start {
+            crate::ui::icons::themed_disabled(crate::ui::icons::MENU, 16.0)
+        } else {
+            crate::ui::icons::themed_secondary(crate::ui::icons::MENU, 16.0)
+        };
+        let menu_button = button(menu_icon)
+            .style(button::subtle)
             .padding([4, 8]);
         let menu_btn = if is_start {
             tip(
@@ -134,18 +134,21 @@ impl StatusBar {
                 "Open or create a drawing to manage layouts.",
             )
         } else {
-            menu_button.on_press(Message::ToggleLayoutList).into()
+            status_menu::menu_bar(
+                menu_tip(
+                    menu_button
+                        .on_press(Message::StatusMenuTooltipHidden(true))
+                        .into(),
+                    "Model and layout list",
+                    tooltip_hidden,
+                ),
+                statusbar_menu::layout_entries(&layout_names, &current_layout),
+                200.0,
+            )
         };
 
-        let add_button = button(text("+").size(12).color(if is_start {
-            DISABLED_COLOR
-        } else {
-            ICON_COLOR
-        }))
-            .style(|_: &Theme, _| button::Style {
-                background: Some(Background::Color(Color::TRANSPARENT)),
-                ..Default::default()
-            })
+        let add_button = button(text("+").size(12))
+            .style(button::subtle)
             .padding([4, 8]);
         let add_btn = if is_start {
             tip(
@@ -173,9 +176,19 @@ impl StatusBar {
             format_scale(viewport_scale)
         };
         let scale_element: Element<'_, Message> = if scale_pill_enabled {
-            tip(
-                popup_pill(&scale_label, scale_popup_open, Message::ToggleScalePopup),
-                "Annotation / Viewport Scale\nClick to change",
+            status_menu::menu_bar(
+                menu_tip(
+                    popup_pill(&scale_label),
+                    "Annotation / Viewport Scale\nClick to change",
+                    tooltip_hidden,
+                ),
+                crate::ui::popup::scale_popup::menu_entries(
+                    scale_is_model,
+                    annotation_scale,
+                    viewport_scale,
+                    scale_list,
+                ),
+                if scale_is_model { 150.0 } else { 120.0 },
             )
         } else {
             status_pill(scale_label).into()
@@ -189,7 +202,7 @@ impl StatusBar {
             let coords_label = format_coords(cursor_world, last_point, coords_mode, picking);
             pills.push(
                 tip(
-                    popup_pill(&coords_label, false, Message::CycleCoordsMode),
+                    action_pill(&coords_label, Message::CycleCoordsMode),
                     "Cursor coordinates ($COORDS)\nClick to cycle: static / live / polar",
                 )
                 .into(),
@@ -215,9 +228,14 @@ impl StatusBar {
         }
         if vis(StatusPill::Polar) {
             pills.push(
-                PosReport::new(
-                    SB_POLAR_ID,
-                    polar_pill(polar_mode, polar_increment_deg, polar_popup_open),
+                polar_pill(
+                    polar_mode,
+                    polar_increment_deg,
+                    tooltip_hidden,
+                    crate::ui::popup::polar_popup::menu_entries(
+                        polar_increment_deg,
+                        polar_custom_input,
+                    ),
                 )
                 .into(),
             );
@@ -242,9 +260,11 @@ impl StatusBar {
         }
         if vis(StatusPill::Osnap) {
             pills.push(
-                PosReport::new(
-                    SB_OSNAP_ID,
-                    osnap_btn(osnap_active, snapper.snap_enabled, popup_open),
+                osnap_btn(
+                    osnap_active,
+                    snapper.snap_enabled,
+                    tooltip_hidden,
+                    crate::ui::popup::snap_popup::menu_entries(snapper),
                 )
                 .into(),
             );
@@ -259,20 +279,18 @@ impl StatusBar {
             );
         }
         if vis(StatusPill::Scale) {
-            pills.push(PosReport::new(SB_SCALE_ID, scale_element).into());
+            pills.push(scale_element);
         }
         if vis(StatusPill::Units) {
             pills.push(
-                PosReport::new(
-                    SB_UNITS_ID,
-                    tip(
-                        popup_pill(
-                            crate::ui::popup::units_popup::unit_short(insertion_units),
-                            units_popup_open,
-                            Message::ToggleUnitsPopup,
-                        ),
+                status_menu::menu_bar(
+                    menu_tip(
+                        popup_pill(crate::ui::popup::units_popup::unit_short(insertion_units)),
                         "Drawing Units (INSUNITS)\nClick to change",
+                        tooltip_hidden,
                     ),
+                    crate::ui::popup::units_popup::menu_entries(insertion_units),
+                    140.0,
                 )
                 .into(),
             );
@@ -292,12 +310,21 @@ impl StatusBar {
         }
         if vis(StatusPill::Isolate) {
             pills.push(
-                PosReport::new(
-                    SB_ISOLATE_ID,
-                    tip(
-                        toggle_pill(crate::ui::icons::ST_ISOLATE, isolation_active, Message::ToggleIsolatePopup),
+                status_menu::menu_bar(
+                    menu_tip(
+                        toggle_pill(
+                            crate::ui::icons::ST_ISOLATE,
+                            isolation_active,
+                            Message::StatusMenuTooltipHidden(true),
+                        ),
                         "Isolate Objects\nClick for Isolate / Hide / End",
+                        tooltip_hidden,
                     ),
+                    crate::ui::popup::isolate_popup::menu_entries(
+                        has_selection,
+                        isolation_active,
+                    ),
+                    160.0,
                 )
                 .into(),
             );
@@ -313,16 +340,21 @@ impl StatusBar {
         }
         if vis(StatusPill::SelFilter) {
             pills.push(
-                PosReport::new(
-                    SB_FILTER_ID,
-                    tip(
+                status_menu::menu_bar(
+                    menu_tip(
                         toggle_pill(
                             crate::ui::icons::ST_FILTER,
                             selection_filter_active,
-                            Message::ToggleSelectionFilterPopup,
+                            Message::StatusMenuTooltipHidden(true),
                         ),
                         "Selection Filtering\nLimit which object types can be picked",
+                        tooltip_hidden,
                     ),
+                    crate::ui::popup::selection_filter_popup::menu_entries(
+                        selection_types,
+                        selection_filter,
+                    ),
+                    180.0,
                 )
                 .into(),
             );
@@ -356,12 +388,14 @@ impl StatusBar {
         }
         // Customization handle: opens the pill show/hide menu.
         pills.push(
-            PosReport::new(
-                SB_MENU_ID,
-                tip(
+            status_menu::menu_bar(
+                menu_tip(
                     customize_btn(),
                     "Customization\nShow or hide status-bar items",
+                    tooltip_hidden,
                 ),
+                statusbar_menu::customization_entries(config),
+                200.0,
             )
             .into(),
         );
@@ -375,7 +409,7 @@ impl StatusBar {
         // use the remaining space on the final tab row when they fit; otherwise
         // WrapBar adds another right-aligned row.
         let mut left: Vec<Element<'_, Message>> = Vec::new();
-        left.push(PosReport::new(SB_LAYOUTLIST_ID, menu_btn).into());
+        left.push(menu_btn);
         if show_layout_tabs {
             let reorderable_layouts: Arc<[String]> = reorderable_layouts.into();
             for name in layouts {
@@ -403,14 +437,17 @@ impl StatusBar {
             .justify_end(true);
 
         container(wrap)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(BAR_BG)),
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                background: Some(Background::Color(palette.background.base.color)),
                 border: Border {
-                    color: BORDER_COLOR,
+                    color: palette.background.neutral.color,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
+                }
             })
             .width(Length::Fill)
             // One row matches the drawing (document) tab bar height so the three
@@ -451,19 +488,9 @@ fn format_coords(cursor: glam::DVec3, last: Option<glam::DVec3>, mode: i16, pick
 // ── Customization handle ──────────────────────────────────────────────────
 
 fn customize_btn() -> Element<'static, Message> {
-    button(crate::ui::icons::tinted(crate::ui::icons::MENU, 16.0, ICON_COLOR))
-        .on_press(Message::ToggleStatusBarMenu)
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered => PILL_BG,
-                _ => Color::TRANSPARENT,
-            })),
-            border: Border {
-                radius: 3.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
+    button(crate::ui::icons::themed_secondary(crate::ui::icons::MENU, 16.0))
+        .on_press(Message::StatusMenuTooltipHidden(true))
+        .style(button::subtle)
         .padding([4, 8])
         .into()
 }
@@ -471,7 +498,25 @@ fn customize_btn() -> Element<'static, Message> {
 // ── Tooltip helper ────────────────────────────────────────────────────────
 
 fn tip<'a>(content: Element<'a, Message>, label: &'static str) -> Element<'a, Message> {
-    tip_node(content, text(label).size(11).color(Color::WHITE).into())
+    tip_node(content, text(label).size(11).into())
+}
+
+/// A menu root shows its tooltip until clicked. Moving from the root into the
+/// opened menu resets suppression for the next hover without covering the menu.
+fn menu_tip<'a>(
+    content: Element<'a, Message>,
+    label: &'static str,
+    hidden: bool,
+) -> Element<'a, Message> {
+    let content = if hidden {
+        content
+    } else {
+        tip(content, label)
+    };
+
+    mouse_area(content)
+        .on_exit(Message::StatusMenuTooltipHidden(false))
+        .into()
 }
 
 /// Like [`tip`] but the tooltip body is any element — used to embed an SVG
@@ -481,26 +526,7 @@ fn tip_node<'a>(content: Element<'a, Message>, body: Element<'a, Message>) -> El
     tooltip(
         content,
         container(body)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color {
-                    r: 0.13,
-                    g: 0.13,
-                    b: 0.13,
-                    a: 0.97,
-                })),
-                border: Border {
-                    color: Color {
-                        r: 0.35,
-                        g: 0.35,
-                        b: 0.35,
-                        a: 1.0,
-                    },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                text_color: Some(Color::WHITE),
-                ..Default::default()
-            })
+            .style(container::bordered_box)
             .padding([4, 8]),
         TipPos::Top,
     )
@@ -513,24 +539,26 @@ fn tip_node<'a>(content: Element<'a, Message>, body: Element<'a, Message>) -> El
 /// text labels were too small to read). The name lives in the tooltip each
 /// call site already wraps it with.
 fn toggle_pill(icon: &'static [u8], active: bool, msg: Message) -> Element<'static, Message> {
-    let color = if active { OSNAP_ON_TEXT } else { OSNAP_OFF_TEXT };
-    button(crate::ui::icons::tinted(icon, 17.0, color))
+    let icon = if active {
+        crate::ui::icons::themed_primary(icon, 17.0)
+    } else {
+        crate::ui::icons::themed_secondary(icon, 17.0)
+    };
+    button(icon)
         .on_press(msg)
-        .style(move |_: &Theme, status| button::Style {
-            background: Some(Background::Color(match (active, status) {
-                (true, button::Status::Hovered) => SNAP_ON_HOVER,
-                (true, _) => SNAP_ON_BG,
-                (false, button::Status::Hovered) => SNAP_OFF_HOVER,
-                (false, _) => SNAP_OFF_BG,
-            })),
-            border: Border {
-                color: if active { SNAP_BORDER_ON } else { BORDER_COLOR },
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            text_color: color,
-            shadow: iced::Shadow::default(),
-            snap: false,
+        .style(move |theme: &Theme, status| {
+            let mut style = button::subtle(theme, status);
+            if active {
+                let palette = theme.extended_palette();
+                style.background = Some(Background::Color(match status {
+                    button::Status::Hovered => palette.primary.base.color,
+                    _ => palette.primary.weak.color,
+                }));
+                style.text_color = palette.primary.weak.text;
+                style.border.color = palette.primary.base.color;
+                style.border.width = 1.0;
+            }
+            style
         })
         .padding([4, 7])
         .into()
@@ -543,49 +571,33 @@ fn toggle_pill(icon: &'static [u8], active: bool, msg: Message) -> Element<'stat
 // and a dropdown caret, so both halves read as a single integrated control and
 // the border / background / caret / sizing live in exactly ONE place.
 
-/// Pill text/icon tint for the lit vs. dim state — shared so `main` (built by
-/// the caller) and the caret always match.
-fn pill_text_color(active: bool) -> Color {
-    if active {
-        OSNAP_ON_TEXT
-    } else {
-        OSNAP_OFF_TEXT
-    }
-}
-
-/// Wrap a caller-built, already-click-wired `main` element together with a
-/// dropdown caret that emits `caret_msg`. `active` lights the pill; `open`
-/// highlights the border while its popup is showing.
-fn split_pill(
+/// Wrap a caller-built, already-click-wired `main` element together with its
+/// menu-bearing dropdown caret.
+fn split_pill<'a>(
     main: Element<'static, Message>,
-    caret_msg: Message,
+    caret: Element<'a, Message>,
     active: bool,
-    open: bool,
-) -> Element<'static, Message> {
-    let color = pill_text_color(active);
-    let bg = if active { SNAP_ON_BG } else { SNAP_OFF_BG };
-    let border_color = if open {
-        ACCENT
-    } else if active {
-        SNAP_BORDER_ON
-    } else {
-        BORDER_COLOR
-    };
-
-    let caret = mouse_area(
-        container(crate::ui::icons::arrow_down(9.0, color)).padding([0, 1]),
-    )
-    .on_press(caret_msg);
-
+) -> Element<'a, Message> {
     container(row![main, caret].spacing(3).align_y(iced::Center))
-        .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(bg)),
+        .style(move |theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+            background: Some(Background::Color(if active {
+                palette.primary.weak.color
+            } else {
+                palette.background.weakest.color
+            })),
             border: Border {
-                color: border_color,
+                color: if active {
+                    palette.primary.base.color
+                } else {
+                    palette.background.neutral.color
+                },
                 width: 1.0,
                 radius: 2.0.into(),
             },
             ..Default::default()
+            }
         })
         .padding([4, 6])
         .into()
@@ -596,12 +608,16 @@ fn split_pill(
 // Main: left-click toggles polar on/off; right-click cycles the increment.
 // Caret: opens the angle picker.
 
-fn polar_pill(active: bool, increment_deg: f32, open: bool) -> Element<'static, Message> {
+fn polar_pill<'a>(
+    active: bool,
+    increment_deg: f32,
+    tooltip_hidden: bool,
+    entries: Vec<StatusMenuEntry<'a>>,
+) -> Element<'a, Message> {
     let angle = crate::ui::popup::polar_popup::angle_label(increment_deg);
     let tooltip_text = format!(
         "Polar Tracking ({angle})\nF10 — left-click on/off\nRight-click cycles · ▾ picks angle",
     );
-    let color = pill_text_color(active);
 
     // Right-click quick-cycles through the same increments the picker lists.
     const CYCLE: &[f32] = &[90.0, 45.0, 30.0, 22.5, 18.0, 15.0, 10.0, 5.0, 1.0];
@@ -610,65 +626,128 @@ fn polar_pill(active: bool, increment_deg: f32, open: bool) -> Element<'static, 
         None => 45.0,
     };
 
+    let polar_icon = if active {
+        crate::ui::icons::themed_primary(crate::ui::icons::ST_POLAR, 17.0)
+    } else {
+        crate::ui::icons::themed_secondary(crate::ui::icons::ST_POLAR, 17.0)
+    };
     let main = mouse_area(
         row![
-            crate::ui::icons::tinted(crate::ui::icons::ST_POLAR, 17.0, color),
-            text(angle).size(11).color(color),
+            polar_icon,
+            text(angle).size(11).style(move |theme: &Theme| {
+                let palette = theme.extended_palette();
+                text::Style {
+                    color: Some(if active {
+                        palette.primary.base.color
+                    } else {
+                        palette.background.base.text.scale_alpha(0.72)
+                    }),
+                }
+            }),
         ]
         .spacing(2)
         .align_y(iced::Center),
     )
     .on_press(Message::TogglePolar)
     .on_right_press(Message::SetPolarAngle(next_angle));
-
-    tooltip(
-        split_pill(main.into(), Message::TogglePolarPopup, active, open),
-        container(text(tooltip_text).size(11).color(Color::WHITE))
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color {
-                    r: 0.13,
-                    g: 0.13,
-                    b: 0.13,
-                    a: 0.95,
-                })),
-                border: Border {
-                    color: Color {
-                        r: 0.35,
-                        g: 0.35,
-                        b: 0.35,
-                        a: 1.0,
-                    },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            })
+    let main = tooltip(
+        main,
+        container(text(tooltip_text).size(11))
+            .style(container::bordered_box)
             .padding([4, 8]),
         TipPos::Top,
-    )
-    .into()
+    );
+
+    let caret = status_menu::menu_bar(
+        menu_tip(
+            mouse_area(
+                container(if active {
+                    crate::ui::icons::themed_primary_arrow_down(9.0)
+                } else {
+                    crate::ui::icons::themed_secondary_arrow_down(9.0)
+                })
+                .padding([4, 7]),
+            )
+            .on_press(Message::StatusMenuTooltipHidden(true))
+            .into(),
+            "Polar angle\nClick to choose",
+            tooltip_hidden,
+        ),
+        entries,
+        120.0,
+    );
+
+    split_pill(main.into(), caret, active)
 }
 
 // ── OSNAP pill ─────────────────────────────────────────────────────────────
 //
 // Main: toggles the global snap on/off. Caret: opens the snap-type dropdown.
 
-fn osnap_btn(active: bool, snap_enabled: bool, open: bool) -> Element<'static, Message> {
+fn osnap_btn<'a>(
+    active: bool,
+    snap_enabled: bool,
+    tooltip_hidden: bool,
+    entries: Vec<StatusMenuEntry<'a>>,
+) -> Element<'a, Message> {
     let on = active || snap_enabled;
-    let main = mouse_area(crate::ui::icons::tinted(
-        crate::ui::icons::ST_OSNAP,
-        17.0,
-        pill_text_color(on),
-    ))
-    .on_press(Message::ToggleSnapEnabled);
+    let snap_icon = if on {
+        crate::ui::icons::themed_primary(crate::ui::icons::ST_OSNAP, 17.0)
+    } else {
+        crate::ui::icons::themed_secondary(crate::ui::icons::ST_OSNAP, 17.0)
+    };
+    let main = tip(
+        mouse_area(snap_icon)
+        .on_press(Message::ToggleSnapEnabled)
+        .into(),
+        "Object Snap: toggle on/off\nF3",
+    );
 
-    tip(
-        split_pill(main.into(), Message::ToggleSnapPopup, on, open),
-        "Object Snap: toggle on/off · ▾ opens the snap list\nF3",
-    )
+    let caret = status_menu::menu_bar(
+        menu_tip(
+            mouse_area(
+                container(if on {
+                    crate::ui::icons::themed_primary_arrow_down(9.0)
+                } else {
+                    crate::ui::icons::themed_secondary_arrow_down(9.0)
+                })
+                .padding([4, 7]),
+            )
+            .on_press(Message::StatusMenuTooltipHidden(true))
+            .into(),
+            "Object Snap list\nClick to choose snap types",
+            tooltip_hidden,
+        ),
+        entries,
+        210.0,
+    );
+
+    split_pill(main, caret, on)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+fn layout_tab_context_menu(name: String) -> Element<'static, Message> {
+    let item = |label: &'static str, msg: Message| {
+        button(text(label).size(12))
+            .on_press(msg)
+            .style(button::subtle)
+            .padding([4, 12])
+            .width(Length::Fill)
+    };
+
+    container(
+        column![
+            item("Rename", Message::LayoutRenameStart(name.clone())),
+            item("Delete", Message::LayoutDelete(name)),
+        ]
+        .spacing(0)
+        .width(160),
+    )
+    .style(container::bordered_box)
+    .padding([4, 0])
+    .into()
+}
 
 /// A layout tab button.
 ///
@@ -682,46 +761,34 @@ fn space_tab<'a>(
     enabled: bool,
     reorderable_layouts: Arc<[String]>,
 ) -> Element<'a, Message> {
-    let bg = move |is_active: bool, hovered: bool| {
-        if is_active {
-            TAB_ACTIVE
-        } else if hovered {
-            TAB_HOVER
+    let tab_style = move |theme: &Theme| {
+        let palette = theme.extended_palette();
+        let text_color = if !enabled {
+            palette.background.base.text.scale_alpha(0.42)
+        } else if is_active {
+            palette.primary.weak.text
         } else {
-            Color::TRANSPARENT
-        }
-    };
-
-    let border = Border {
-        color: if is_active {
-            ACCENT
-        } else {
-            Color::TRANSPARENT
-        },
-        width: if is_active { 1.0 } else { 0.0 },
-        radius: 2.0.into(),
-    };
-
-    let text_color = if !enabled {
-        DISABLED_COLOR
-    } else if is_active {
-        Color::WHITE
-    } else {
-        Color {
-            r: 0.65,
-            g: 0.65,
-            b: 0.65,
-            a: 1.0,
+            palette.background.base.text.scale_alpha(0.72)
+        };
+        container::Style {
+            background: is_active.then_some(Background::Color(palette.primary.weak.color)),
+            border: Border {
+                color: if is_active {
+                    palette.primary.base.color
+                } else {
+                    Color::TRANSPARENT
+                },
+                width: if is_active { 1.0 } else { 0.0 },
+                radius: 2.0.into(),
+            },
+            text_color: Some(text_color),
+            ..Default::default()
         }
     };
 
     if !enabled {
-        let display = container(text(label.clone()).size(12).color(text_color))
-            .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(bg(is_active, false))),
-                border,
-                ..Default::default()
-            })
+        let display = container(text(label.clone()).size(12))
+            .style(tab_style)
             .padding([4, 10]);
         crate::ui::wrap_bar::PosReport::owned(
             format!("SB_LAYOUT_TAB:{label}"),
@@ -738,49 +805,15 @@ fn space_tab<'a>(
             .on_input(Message::LayoutRenameEdit)
             .on_submit(Message::LayoutRenameCommit)
             .size(12)
-            .style(|_: &Theme, _| text_input::Style {
-                background: Background::Color(TAB_ACTIVE),
-                border: Border {
-                    color: ACCENT,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                icon: Color::WHITE,
-                placeholder: Color {
-                    r: 0.5,
-                    g: 0.5,
-                    b: 0.5,
-                    a: 1.0,
-                },
-                value: Color::WHITE,
-                selection: Color {
-                    r: 0.20,
-                    g: 0.55,
-                    b: 0.90,
-                    a: 0.4,
-                },
-            })
             .padding([3, 6])
             .width(Length::Fixed(90.0));
 
-        let cancel_btn = button(crate::ui::icons::tinted(
+        let cancel_btn = button(crate::ui::icons::themed_secondary(
             crate::ui::icons::CLOSE,
             10.0,
-            Color {
-                r: 0.65,
-                g: 0.65,
-                b: 0.65,
-                a: 1.0,
-            },
         ))
         .on_press(Message::LayoutRenameCancel)
-        .style(|_: &Theme, _| button::Style {
-            background: Some(Background::Color(Color::TRANSPARENT)),
-            border: Border::default(),
-            shadow: iced::Shadow::default(),
-            snap: false,
-            ..Default::default()
-        })
+        .style(button::subtle)
         .padding([4, 4]);
 
         row![input, cancel_btn]
@@ -788,26 +821,17 @@ fn space_tab<'a>(
             .align_y(iced::Center)
             .into()
     } else {
-        // Normal clickable tab — left click switches, right click opens context menu.
-        let display = container(text(label.clone()).size(12).color(text_color))
-            .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(bg(is_active, false))),
-                border,
-                ..Default::default()
-            })
+        // Normal clickable tab — left click switches. Paper-layout tabs are
+        // wrapped in `ContextMenu`, which owns right-click handling.
+        let display = container(text(label.clone()).size(12))
+            .style(tab_style)
             .padding([4, 10]);
 
         let switch_msg = Message::LayoutSwitch(label.clone());
-        let ctx_msg = Message::LayoutContextMenu(label.clone());
-
-        // Use mouse_area so we can capture right-click for the context menu.
-        // PosReport records the tab's screen bounds so the context menu can
-        // anchor next to the clicked tab instead of the screen's left edge
-        // (#428).
-        let tab = mouse_area(display)
-            .on_press(switch_msg)
-            .on_right_press(ctx_msg);
-        let tab: Element<'a, Message> = if reorderable_layouts.contains(&label) {
+        let has_context_menu = reorderable_layouts.contains(&label);
+        let report_key = format!("SB_LAYOUT_TAB:{label}");
+        let tab = mouse_area(display).on_press(switch_msg);
+        let tab: Element<'a, Message> = if has_context_menu {
             crate::ui::wrap_bar::ReorderTab::layout(
                 label.clone(),
                 reorderable_layouts,
@@ -818,8 +842,13 @@ fn space_tab<'a>(
             tab.into()
         };
 
+        let tab = if has_context_menu {
+            ContextMenu::new(tab, move || layout_tab_context_menu(label.clone())).into()
+        } else {
+            tab
+        };
         crate::ui::wrap_bar::PosReport::owned(
-            format!("SB_LAYOUT_TAB:{label}"),
+            report_key,
             tab,
         )
         .into()
@@ -845,34 +874,21 @@ fn space_mode_btn(current_layout: &str, in_mspace: bool) -> Element<'static, Mes
         ("PAPER", false, Some(Message::MspaceCommand))
     };
 
-    let text_color = if active {
-        SNAP_BORDER_ON
-    } else {
-        OSNAP_OFF_TEXT
-    };
-    let bg_normal = if active { SNAP_ON_BG } else { SNAP_OFF_BG };
-    let bg_hover = if active {
-        SNAP_ON_HOVER
-    } else {
-        SNAP_OFF_HOVER
-    };
-    let border_color = if active { SNAP_BORDER_ON } else { BORDER_COLOR };
-
     let clickable = on_press.is_some();
-    let mut btn = button(text(label).size(12).color(text_color))
-        .style(move |_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered if clickable => bg_hover,
-                _ => bg_normal,
-            })),
-            border: Border {
-                color: border_color,
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            text_color,
-            shadow: iced::Shadow::default(),
-            snap: false,
+    let mut btn = button(text(label).size(12))
+        .style(move |theme: &Theme, status| {
+            let mut style = button::subtle(theme, status);
+            if active {
+                let palette = theme.extended_palette();
+                style.background = Some(Background::Color(match status {
+                    button::Status::Hovered if clickable => palette.primary.base.color,
+                    _ => palette.primary.weak.color,
+                }));
+                style.text_color = palette.primary.weak.text;
+                style.border.color = palette.primary.base.color;
+                style.border.width = 1.0;
+            }
+            style
         })
         .padding([4, 7]);
 
@@ -884,148 +900,24 @@ fn space_mode_btn(current_layout: &str, in_mspace: bool) -> Element<'static, Mes
 }
 
 fn status_pill(label: impl Into<String>) -> Element<'static, Message> {
-    container(text(label.into()).size(12).color(Color {
-        r: 0.65,
-        g: 0.65,
-        b: 0.65,
-        a: 1.0,
-    }))
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PILL_BG)),
-        border: Border {
-            color: BORDER_COLOR,
-            width: 1.0,
-            radius: 2.0.into(),
-        },
-        ..Default::default()
-    })
+    container(text(label.into()).size(12))
+    .style(container::bordered_box)
     .padding([4, 8])
     .into()
 }
 
-// ── Colours ───────────────────────────────────────────────────────────────
-
-const BAR_BG: Color = Color {
-    r: 0.14,
-    g: 0.14,
-    b: 0.14,
-    a: 1.0,
-};
-const TAB_ACTIVE: Color = Color {
-    r: 0.25,
-    g: 0.25,
-    b: 0.25,
-    a: 1.0,
-};
-const TAB_HOVER: Color = Color {
-    r: 0.20,
-    g: 0.20,
-    b: 0.20,
-    a: 1.0,
-};
-const PILL_BG: Color = Color {
-    r: 0.19,
-    g: 0.19,
-    b: 0.19,
-    a: 1.0,
-};
-const BORDER_COLOR: Color = Color {
-    r: 0.28,
-    g: 0.28,
-    b: 0.28,
-    a: 1.0,
-};
-const ICON_COLOR: Color = Color {
-    r: 0.70,
-    g: 0.70,
-    b: 0.70,
-    a: 1.0,
-};
-const DISABLED_COLOR: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.20,
-    g: 0.55,
-    b: 0.90,
-    a: 1.0,
-};
-
-const OSNAP_ON_TEXT: Color = Color {
-    r: 0.35,
-    g: 0.75,
-    b: 1.00,
-    a: 1.0,
-};
-const OSNAP_OFF_TEXT: Color = Color {
-    r: 0.42,
-    g: 0.42,
-    b: 0.42,
-    a: 1.0,
-};
-const SNAP_ON_BG: Color = Color {
-    r: 0.10,
-    g: 0.20,
-    b: 0.32,
-    a: 1.0,
-};
-const SNAP_ON_HOVER: Color = Color {
-    r: 0.14,
-    g: 0.27,
-    b: 0.42,
-    a: 1.0,
-};
-const SNAP_BORDER_ON: Color = Color {
-    r: 0.20,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
-const SNAP_OFF_BG: Color = Color {
-    r: 0.17,
-    g: 0.17,
-    b: 0.17,
-    a: 1.0,
-};
-const SNAP_OFF_HOVER: Color = Color {
-    r: 0.22,
-    g: 0.22,
-    b: 0.22,
-    a: 1.0,
-};
-
 // ── Scale popup button ────────────────────────────────────────────────────
 
-/// A labelled status-bar pill that opens a picker popup on click (units,
-/// scale, …). Lit + accent-bordered while its popup is `open`. Shared so the
-/// popup-opening pills don't each re-declare the same button chrome.
-fn popup_pill(label: &str, open: bool, msg: Message) -> Element<'static, Message> {
+/// Shared visual root for labelled status-bar menus (units, scale, …).
+fn popup_pill(label: &str) -> Element<'static, Message> {
+    action_pill(label, Message::StatusMenuTooltipHidden(true))
+}
+
+fn action_pill(label: &str, msg: Message) -> Element<'static, Message> {
     let label = label.to_string();
-    button(
-        text(label)
-            .size(12)
-            .color(if open { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT }),
-    )
+    button(text(label).size(12))
     .on_press(msg)
-    .style(move |_: &Theme, status| button::Style {
-        background: Some(Background::Color(match (open, status) {
-            (true, button::Status::Hovered) => SNAP_ON_HOVER,
-            (true, _) => SNAP_ON_BG,
-            (false, button::Status::Hovered) => SNAP_OFF_HOVER,
-            (false, _) => SNAP_OFF_BG,
-        })),
-        border: Border {
-            color: if open { SNAP_BORDER_ON } else { BORDER_COLOR },
-            width: 1.0,
-            radius: 2.0.into(),
-        },
-        text_color: if open { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT },
-        shadow: iced::Shadow::default(),
-        snap: false,
-    })
+    .style(button::subtle)
     .padding([4, 7])
     .into()
 }

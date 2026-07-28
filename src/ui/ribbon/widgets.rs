@@ -8,7 +8,7 @@ use acadrust::types::{Color as AcadColor, LineWeight};
 // Ribbon tooltips anchor to the right of their button so the cursor — which
 // rests on the button itself — never covers the tip text. (#143)
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, column, container, row, svg, text, tooltip};
+use iced::widget::{button, column, container, row, text, tooltip};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
@@ -77,175 +77,6 @@ pub(super) const PROP_COLOR_ID: &str = "PROP_COLOR";
 pub(super) const PROP_LINETYPE_ID: &str = "PROP_LINETYPE";
 pub(super) const PROP_LW_ID: &str = "PROP_LW";
 
-// ── Colours ────────────────────────────────────────────────────────────────
-
-/// Light chrome grey for the quick-access file-command icons on the top strip.
-pub(super) const QA_ICON_COLOR: Color = Color {
-    r: 0.82,
-    g: 0.83,
-    b: 0.85,
-    a: 1.0,
-};
-pub(super) const TOPBAR_BG: Color = Color {
-    r: 0.17,
-    g: 0.17,
-    b: 0.17,
-    a: 1.0,
-};
-pub(super) const RIBBON_BG: Color = Color {
-    r: 0.22,
-    g: 0.22,
-    b: 0.22,
-    a: 1.0,
-};
-pub(super) const BORDER_DARK: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
-pub(super) const ACCENT_BLUE: Color = Color {
-    r: 0.20,
-    g: 0.55,
-    b: 0.90,
-    a: 1.0,
-};
-pub(super) const ACCENT_GOLD: Color = Color {
-    r: 0.90,
-    g: 0.65,
-    b: 0.10,
-    a: 1.0,
-};
-pub(super) const LABEL_COLOR: Color = Color {
-    r: 0.82,
-    g: 0.82,
-    b: 0.82,
-    a: 1.0,
-};
-pub(super) const GROUP_LABEL: Color = Color {
-    r: 0.50,
-    g: 0.50,
-    b: 0.50,
-    a: 1.0,
-};
-pub(super) const TOOL_HOVER: Color = Color {
-    r: 0.32,
-    g: 0.32,
-    b: 0.32,
-    a: 1.0,
-};
-pub(super) const TOOL_ACTIVE: Color = Color {
-    r: 0.18,
-    g: 0.42,
-    b: 0.70,
-    a: 1.0,
-};
-pub(super) const ARROW_COLOR: Color = Color {
-    r: 0.65,
-    g: 0.65,
-    b: 0.65,
-    a: 1.0,
-};
-pub(super) const PANEL_BG: Color = Color {
-    r: 0.16,
-    g: 0.16,
-    b: 0.16,
-    a: 0.98,
-};
-pub(super) const PANEL_BORDER: Color = Color {
-    r: 0.32,
-    g: 0.32,
-    b: 0.32,
-    a: 1.0,
-};
-pub(super) const ROW_HOVER: Color = Color {
-    r: 0.24,
-    g: 0.24,
-    b: 0.24,
-    a: 1.0,
-};
-pub(super) const CHECK_COLOR: Color = Color {
-    r: 0.20,
-    g: 0.75,
-    b: 0.35,
-    a: 1.0,
-};
-pub(super) const ICON_COLOR: Color = Color {
-    r: 0.25,
-    g: 0.75,
-    b: 0.45,
-    a: 1.0,
-};
-pub(super) const LABEL_ON: Color = Color {
-    r: 0.92,
-    g: 0.92,
-    b: 0.92,
-    a: 1.0,
-};
-pub(super) const LABEL_OFF: Color = Color {
-    r: 0.72,
-    g: 0.72,
-    b: 0.72,
-    a: 1.0,
-};
-
-// ── Combo / dropdown colors ───────────────────────────────────────────────
-
-pub(super) const COMBO_BG: Color = Color {
-    r: 0.18,
-    g: 0.18,
-    b: 0.18,
-    a: 1.0,
-};
-pub(super) const COMBO_HOVER_BG: Color = Color {
-    r: 0.26,
-    g: 0.26,
-    b: 0.26,
-    a: 1.0,
-};
-pub(super) const COMBO_OPEN_BG: Color = Color {
-    r: 0.14,
-    g: 0.14,
-    b: 0.14,
-    a: 1.0,
-};
-pub(super) const COMBO_BORDER: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-pub(super) const COMBO_ACTIVE_BORDER: Color = Color {
-    r: 0.45,
-    g: 0.65,
-    b: 0.90,
-    a: 1.0,
-};
-pub(super) const COMBO_ARROW: Color = Color {
-    r: 0.70,
-    g: 0.70,
-    b: 0.70,
-    a: 1.0,
-};
-pub(super) const SWATCH_BORDER: Color = Color {
-    r: 0.0,
-    g: 0.0,
-    b: 0.0,
-    a: 0.5,
-};
-pub(super) const TIP_BG: Color = Color {
-    r: 0.13,
-    g: 0.13,
-    b: 0.13,
-    a: 0.97,
-};
-pub(super) const HIST_INACTIVE_BG: Color = Color {
-    r: 0.20,
-    g: 0.20,
-    b: 0.20,
-    a: 1.0,
-};
-
 // ── Style context (passed from Ribbon to render_large) ────────────────────
 
 pub(super) struct StyleContext {
@@ -294,11 +125,8 @@ pub(super) fn flush_small_col<'a>(
 
 pub(super) fn make_icon(icon: IconKind, size: f32) -> Element<'static, Message> {
     match icon {
-        IconKind::Glyph(s) => text(s).size(size * 0.7).color(Color::WHITE).into(),
-        IconKind::Svg(bytes) => {
-            let handle = svg::Handle::from_memory(bytes);
-            svg(handle).width(size).height(size).into()
-        }
+        IconKind::Glyph(s) => text(s).size(size * 0.7).into(),
+        IconKind::Svg(bytes) => icons::semantic(bytes, size),
     }
 }
 
@@ -309,22 +137,19 @@ pub(super) fn start_dimmed(state: &ToggleState, event: &ModuleEvent) -> bool {
         && !matches!(event, ModuleEvent::Command(c) if crate::app::commands::start_allowed(c))
 }
 
-/// Label / glyph color for a possibly-dimmed tool.
-pub(super) const DIM_TOOL: Color = Color {
-    r: 0.42,
-    g: 0.42,
-    b: 0.45,
-    a: 1.0,
-};
-
-/// `make_icon`, greyed out when `dim` (SVGs render monochrome via tint).
+/// `make_icon`, faded when `dim` without flattening multi-colour SVGs.
 pub(super) fn make_icon_dim(icon: IconKind, size: f32, dim: bool) -> Element<'static, Message> {
     if !dim {
         return make_icon(icon, size);
     }
     match icon {
-        IconKind::Glyph(s) => text(s).size(size * 0.7).color(DIM_TOOL).into(),
-        IconKind::Svg(bytes) => icons::tinted(bytes, size, DIM_TOOL),
+        IconKind::Glyph(s) => text(s)
+            .size(size * 0.7)
+            .style(|theme: &Theme| iced::widget::text::Style {
+                color: Some(theme.extended_palette().background.base.text.scale_alpha(0.42)),
+            })
+            .into(),
+        IconKind::Svg(bytes) => icons::semantic_disabled(bytes, size),
     }
 }
 
@@ -349,15 +174,24 @@ pub(super) fn is_active_tool(
 
 // ── Button style ───────────────────────────────────────────────────────────
 
-pub(super) fn tool_btn_style(is_active: bool, status: button::Status) -> button::Style {
+pub(super) fn tool_btn_style(
+    theme: &Theme,
+    is_active: bool,
+    status: button::Status,
+) -> button::Style {
+    let palette = theme.extended_palette();
+    let pair = match (is_active, status) {
+        (true, _) => palette.primary.weak,
+        (_, button::Status::Hovered) => palette.background.weak,
+        (_, button::Status::Pressed) => palette.primary.weak,
+        _ => palette.background.base,
+    };
     button::Style {
-        background: Some(Background::Color(match (is_active, status) {
-            (true, _) => TOOL_ACTIVE,
-            (_, button::Status::Hovered) => TOOL_HOVER,
-            (_, button::Status::Pressed) => TOOL_ACTIVE,
-            _ => Color::TRANSPARENT,
-        })),
-        text_color: Color::WHITE,
+        background: is_active
+            .then_some(Background::Color(pair.color))
+            .or_else(|| matches!(status, button::Status::Hovered | button::Status::Pressed)
+                .then_some(Background::Color(pair.color))),
+        text_color: pair.text,
         border: Border {
             radius: 3.0.into(),
             color: Color::TRANSPARENT,
@@ -368,21 +202,93 @@ pub(super) fn tool_btn_style(is_active: bool, status: button::Status) -> button:
     }
 }
 
-// ── Tooltip helpers ────────────────────────────────────────────────────────
-
-pub(super) fn make_tip(tip: String) -> Element<'static, Message> {
-    text(tip).size(11).color(Color::WHITE).into()
+pub(super) fn combo_btn_style(
+    theme: &Theme,
+    is_open: bool,
+    status: button::Status,
+    radius: f32,
+) -> button::Style {
+    let palette = theme.extended_palette();
+    let pair = if is_open {
+        palette.primary.weak
+    } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+        palette.background.weak
+    } else {
+        palette.background.weakest
+    };
+    button::Style {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
+        border: Border {
+            radius: radius.into(),
+            width: 1.0,
+            color: if is_open {
+                palette.primary.base.color
+            } else {
+                palette.background.neutral.color
+            },
+        },
+        ..Default::default()
+    }
 }
 
-pub(super) fn tip_style(_theme: &Theme) -> container::Style {
+pub(super) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let pair = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+        palette.background.weak
+    } else {
+        palette.background.base
+    };
+    button::Style {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
+        ..Default::default()
+    }
+}
+
+pub(super) fn popup_panel_style(theme: &Theme) -> container::Style {
+    let palette = theme.extended_palette();
     container::Style {
-        background: Some(Background::Color(TIP_BG)),
+        background: Some(Background::Color(palette.background.base.color)),
         border: Border {
-            color: COMBO_BORDER,
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 3.0.into(),
         },
-        text_color: Some(Color::WHITE),
+        ..Default::default()
+    }
+}
+
+pub(super) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.72)),
+    }
+}
+
+pub(super) fn tool_label_style(theme: &Theme, dim: bool) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: dim.then_some(
+            theme.extended_palette().background.base.text.scale_alpha(0.42),
+        ),
+    }
+}
+
+// ── Tooltip helpers ────────────────────────────────────────────────────────
+
+pub(super) fn make_tip(tip: String) -> Element<'static, Message> {
+    text(tip).size(11).into()
+}
+
+pub(super) fn tip_style(theme: &Theme) -> container::Style {
+    let palette = theme.extended_palette();
+    container::Style {
+        background: Some(Background::Color(palette.background.strong.color)),
+        border: Border {
+            color: palette.background.neutral.color,
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        text_color: Some(palette.background.strong.text),
         ..Default::default()
     }
 }
@@ -408,7 +314,7 @@ pub(super) fn render_small<'a>(
             let tip_text = format!("{}\nCommand: {}", t.label, t.id);
             let btn = button(make_icon_dim(t.icon, SMALL_ICON, dim))
                 .on_press(Message::RibbonToolClick { tool_id, event })
-                .style(move |_: &Theme, status| tool_btn_style(active, status))
+                .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
                 .width(Length::Fixed(SMALL_W))
                 .height(ROW_H)
                 .padding([4, 4]);
@@ -474,31 +380,22 @@ pub(super) fn render_small<'a>(
                     tool_id: last.to_string(),
                     event: ModuleEvent::Command(last.to_string()),
                 })
-                .style(move |_: &Theme, status| tool_btn_style(active, status))
+                .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
                 .width(Length::Fixed(SMALL_W))
                 .height(ROW_H)
                 .padding([4, 4]);
 
             let arr_tip = format!("{} options", cur_label);
             let arr_btn = button(
-                container(icons::arrow_down(8.0, ARROW_COLOR))
+                container(icons::themed_arrow_down(8.0))
                     .width(Fill)
                     .height(Fill)
                     .align_x(iced::Center)
                     .align_y(iced::Center),
             )
             .on_press(Message::ToggleRibbonDropdown(id.to_string()))
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => TOOL_HOVER,
-                    _ if dd_open => TOOL_ACTIVE,
-                    _ => Color::TRANSPARENT,
-                })),
-                border: Border {
-                    radius: 2.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
+            .style(move |theme: &Theme, status| {
+                tool_btn_style(theme, dd_open, status)
             })
             .width(Length::Fixed(ARROW_W))
             .height(ROW_H)
@@ -569,7 +466,9 @@ pub(super) fn render_large_dropdown<'a>(
     let top_btn = button(
         column![
             make_icon_dim(cur_icon, LARGE_ICON, dim),
-            text(label.to_string()).size(10).color(if dim { DIM_TOOL } else { LABEL_COLOR }),
+            text(label.to_string())
+                .size(10)
+                .style(move |theme: &Theme| tool_label_style(theme, dim)),
         ]
         .align_x(iced::Center)
         .spacing(3),
@@ -578,7 +477,7 @@ pub(super) fn render_large_dropdown<'a>(
         tool_id: last.to_string(),
         event: ModuleEvent::Command(last.to_string()),
     })
-    .style(move |_: &Theme, status| tool_btn_style(active, status))
+    .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
     .width(Length::Fixed(LARGE_W))
     .height(Fill)
     .padding(Padding {
@@ -589,24 +488,15 @@ pub(super) fn render_large_dropdown<'a>(
     });
 
     let arr_btn = button(
-        container(icons::arrow_down(9.0, ARROW_COLOR))
+        container(icons::themed_arrow_down(9.0))
             .width(Fill)
             .height(Fill)
             .align_x(iced::Center)
             .align_y(iced::Center),
     )
     .on_press(Message::ToggleRibbonDropdown(id.to_string()))
-    .style(move |_: &Theme, status| button::Style {
-        background: Some(Background::Color(match status {
-            button::Status::Hovered | button::Status::Pressed => TOOL_HOVER,
-            _ if dd_open => TOOL_ACTIVE,
-            _ => Color::TRANSPARENT,
-        })),
-        border: Border {
-            radius: 3.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
+    .style(move |theme: &Theme, status| {
+        tool_btn_style(theme, dd_open, status)
     })
     .width(Length::Fixed(LARGE_W))
     .height(LARGE_ARR)
@@ -659,13 +549,15 @@ pub(super) fn render_large<'a>(
             let btn = button(
                 column![
                     make_icon_dim(t.icon, LARGE_ICON, dim),
-                    text(t.label).size(10).color(if dim { DIM_TOOL } else { LABEL_COLOR }),
+                    text(t.label)
+                        .size(10)
+                        .style(move |theme: &Theme| tool_label_style(theme, dim)),
                 ]
                 .align_x(iced::Center)
                 .spacing(3),
             )
             .on_press(Message::RibbonToolClick { tool_id, event })
-            .style(move |_: &Theme, status| tool_btn_style(active, status))
+            .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
             .width(Length::Fixed(LARGE_W))
             .height(Fill)
             .padding(Padding {
@@ -733,14 +625,14 @@ pub(super) fn render_large<'a>(
             let ll = info.map(|l| l.locked).unwrap_or(false);
             let is_open = open_dd.as_deref() == Some(LAYER_COMBO_ID);
 
-            let vis_icon = icons::raw(icons::layer_visible(lv), 14.0);
-            let freeze_icon = icons::raw(icons::layer_freeze(lf), 14.0);
-            let lock_icon = icons::raw(icons::layer_lock(ll), 14.0);
+            let vis_icon = icons::semantic(icons::layer_visible(lv), 14.0);
+            let freeze_icon = icons::semantic(icons::layer_freeze(lf), 14.0);
+            let lock_icon = icons::semantic(icons::layer_lock(ll), 14.0);
             let swatch = container(text(""))
-                .style(move |_: &Theme| container::Style {
+                .style(move |theme: &Theme| container::Style {
                     background: Some(Background::Color(lc)),
                     border: Border {
-                        color: SWATCH_BORDER,
+                        color: theme.extended_palette().background.strong.color,
                         width: 1.0,
                         radius: 1.0.into(),
                     },
@@ -758,27 +650,17 @@ pub(super) fn render_large<'a>(
                     freeze_icon,
                     lock_icon,
                     swatch,
-                    container(text(active_layer).size(11).color(Color::WHITE))
+                    container(text(active_layer).size(11))
                         .width(name_w)
                         .clip(true),
-                    icons::arrow_down(9.0, COMBO_ARROW),
+                    icons::themed_arrow_down(9.0),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
             )
             .on_press(Message::ToggleRibbonDropdown(LAYER_COMBO_ID.to_string()))
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match (is_open, status) {
-                    (true, _) => COMBO_OPEN_BG,
-                    (_, button::Status::Hovered) => COMBO_HOVER_BG,
-                    _ => COMBO_BG,
-                })),
-                border: Border {
-                    radius: 3.0.into(),
-                    width: 1.0,
-                    color: COMBO_BORDER,
-                },
-                ..Default::default()
+            .style(move |theme: &Theme, status| {
+                combo_btn_style(theme, is_open, status, 3.0)
             })
             .padding([3, 8])
             .width(Fill);
@@ -793,20 +675,16 @@ pub(super) fn render_large<'a>(
                         let event = t.event.clone();
                         let icon_el: Element<Message> = if dim {
                             make_icon_dim(t.icon, 16.0, true)
-                        } else { match t.icon {
-                            IconKind::Glyph(g) => text(g).size(13).color(Color::WHITE).into(),
-                            IconKind::Svg(bytes) => {
-                                iced::widget::svg(iced::widget::svg::Handle::from_memory(bytes))
-                                    .width(16)
-                                    .height(16)
-                                    .into()
-                            }
-                        } };
+                        } else {
+                            make_icon(t.icon, 16.0)
+                        };
                         let msg = module_event_to_message(event);
                         tooltip(
                             button(icon_el)
                                 .on_press(msg)
-                                .style(move |_: &Theme, status| tool_btn_style(is_active, status))
+                                .style(move |theme: &Theme, status| {
+                                    tool_btn_style(theme, is_active, status)
+                                })
                                 .padding([2, 5]),
                             make_tip(tip.to_string()),
                             TipPos::Right,
@@ -864,7 +742,9 @@ pub(super) fn render_large<'a>(
                 let mp_btn = button(
                     column![
                         make_icon_dim(match_prop.icon, LARGE_ICON, mp_dim),
-                        text(match_prop.label).size(10).color(if mp_dim { DIM_TOOL } else { LABEL_COLOR }),
+                        text(match_prop.label)
+                            .size(10)
+                            .style(move |theme: &Theme| tool_label_style(theme, mp_dim)),
                     ]
                     .align_x(iced::Center)
                     .spacing(3),
@@ -873,7 +753,7 @@ pub(super) fn render_large<'a>(
                     tool_id: mp_id,
                     event: mp_event,
                 })
-                .style(move |_: &Theme, status| tool_btn_style(mp_active, status))
+                .style(move |theme: &Theme, status| tool_btn_style(theme, mp_active, status))
                 .width(Length::Fixed(LARGE_W))
                 .height(Fill)
                 .padding(Padding {
@@ -895,10 +775,10 @@ pub(super) fn render_large<'a>(
                 let is_open = open_dd.as_deref() == Some(dd_id);
                 let swatch_el: Element<'a, Message> = if let Some(c) = swatch {
                     container(text(""))
-                        .style(move |_: &Theme| container::Style {
+                        .style(move |theme: &Theme| container::Style {
                             background: Some(Background::Color(c)),
                             border: Border {
-                                color: SWATCH_BORDER,
+                                color: theme.extended_palette().background.strong.color,
                                 width: 1.0,
                                 radius: 1.0.into(),
                             },
@@ -913,40 +793,21 @@ pub(super) fn render_large<'a>(
                 button(
                     row![
                         swatch_el,
-                        container(text(label).size(10).color(Color::WHITE))
+                        container(text(label).size(10))
                             .width(Fill)
                             .clip(true),
-                        icons::arrow_toggle(
-                            is_open,
-                            8.0,
-                            Color {
-                                r: 0.6,
-                                g: 0.6,
-                                b: 0.6,
-                                a: 1.0,
-                            },
-                        ),
+                        if is_open {
+                            icons::themed_arrow_up(8.0)
+                        } else {
+                            icons::themed_arrow_down(8.0)
+                        },
                     ]
                     .spacing(4)
                     .align_y(iced::Center),
                 )
                 .on_press(Message::ToggleRibbonDropdown(dd_id.to_string()))
-                .style(move |_: &Theme, status| button::Style {
-                    background: Some(Background::Color(match (is_open, status) {
-                        (true, _) => COMBO_OPEN_BG,
-                        (_, button::Status::Hovered) => COMBO_HOVER_BG,
-                        _ => COMBO_BG,
-                    })),
-                    border: Border {
-                        radius: 2.0.into(),
-                        width: 1.0,
-                        color: if is_open {
-                            COMBO_ACTIVE_BORDER
-                        } else {
-                            COMBO_BORDER
-                        },
-                    },
-                    ..Default::default()
+                .style(move |theme: &Theme, status| {
+                    combo_btn_style(theme, is_open, status, 2.0)
                 })
                 .padding([3, 8])
                 .width(Length::Fixed(PROP_W))
@@ -999,31 +860,21 @@ pub(super) fn render_large<'a>(
             // ── combo button ──
             let combo_btn = button(
                 row![
-                    container(text(active.clone()).size(11).color(Color::WHITE))
+                    container(text(active.clone()).size(11))
                         .width(Fill)
                         .clip(true),
-                    icons::arrow_toggle(is_open, 9.0, COMBO_ARROW),
+                    if is_open {
+                        icons::themed_arrow_up(9.0)
+                    } else {
+                        icons::themed_arrow_down(9.0)
+                    },
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
             )
             .on_press(Message::ToggleRibbonDropdown(combo_id.to_string()))
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match (is_open, status) {
-                    (true, _) => COMBO_OPEN_BG,
-                    (_, button::Status::Hovered) => COMBO_HOVER_BG,
-                    _ => COMBO_BG,
-                })),
-                border: Border {
-                    radius: 3.0.into(),
-                    width: 1.0,
-                    color: if is_open {
-                        COMBO_ACTIVE_BORDER
-                    } else {
-                        COMBO_BORDER
-                    },
-                },
-                ..Default::default()
+            .style(move |theme: &Theme, status| {
+                combo_btn_style(theme, is_open, status, 3.0)
             })
             .padding([3, 8])
             .width(Fill);
@@ -1045,20 +896,16 @@ pub(super) fn render_large<'a>(
                         let event = t.event.clone();
                         let icon_el: Element<Message> = if dim {
                             make_icon_dim(t.icon, 16.0, true)
-                        } else { match t.icon {
-                            IconKind::Glyph(g) => text(g).size(13).color(Color::WHITE).into(),
-                            IconKind::Svg(bytes) => {
-                                iced::widget::svg(iced::widget::svg::Handle::from_memory(bytes))
-                                    .width(16)
-                                    .height(16)
-                                    .into()
-                            }
-                        } };
+                        } else {
+                            make_icon(t.icon, 16.0)
+                        };
                         let msg = module_event_to_message(event);
                         tooltip(
                             button(icon_el)
                                 .on_press(msg)
-                                .style(move |_: &Theme, status| tool_btn_style(is_active, status))
+                                .style(move |theme: &Theme, status| {
+                                    tool_btn_style(theme, is_active, status)
+                                })
                                 .padding([2, 5]),
                             make_tip(tip.to_string()),
                             TipPos::Right,
@@ -1128,7 +975,11 @@ pub(super) fn quick_access_btn<'a>(
     // they read on the dark top strip (raw black is invisible there).
     // On the Start tab, commands the start gate refuses render dimmed.
     let dim = is_start && !crate::app::commands::start_allowed(cmd);
-    let icon = icons::tinted(icon_bytes, 16.0, if dim { DIM_TOOL } else { QA_ICON_COLOR });
+    let icon = if dim {
+        icons::themed_disabled(icon_bytes, 16.0)
+    } else {
+        icons::themed(icon_bytes, 16.0)
+    };
     let btn = button(
         container(icon)
             .width(Fill)
@@ -1137,22 +988,7 @@ pub(super) fn quick_access_btn<'a>(
             .align_y(iced::Center),
     )
     .on_press(Message::Command(cmd.to_string()))
-    .style(|_: &Theme, status| button::Style {
-        background: Some(Background::Color(match status {
-            button::Status::Hovered | button::Status::Pressed => Color {
-                r: 0.30,
-                g: 0.30,
-                b: 0.30,
-                a: 1.0,
-            },
-            _ => Color::TRANSPARENT,
-        })),
-        border: Border {
-            radius: 2.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    .style(button::subtle)
     .width(Length::Fixed(TOP_HIST_W))
     .height(24)
     .padding([2, 0]);
@@ -1171,13 +1007,12 @@ pub(super) fn render_history_control<'a>(
 ) -> Element<'a, Message> {
     let dd_open = open_dropdown.as_deref() == Some(dropdown_id);
     let active = count > 0;
-    let icon_color = if active { Color::WHITE } else { LABEL_OFF };
 
     let main_btn = {
         let glyph = if dropdown_id == UNDO_HISTORY_ID {
-            icons::undo(15.0, icon_color)
+            icons::themed_undo(15.0, active)
         } else {
-            icons::redo(15.0, icon_color)
+            icons::themed_redo(15.0, active)
         };
         let btn = button(
             container(glyph)
@@ -1186,7 +1021,9 @@ pub(super) fn render_history_control<'a>(
                 .align_x(iced::Center)
                 .align_y(iced::Center),
         )
-        .style(move |_: &Theme, status| top_hist_btn_style(active, dd_open, status))
+        .style(move |theme: &Theme, status| {
+            top_hist_btn_style(theme, active, dd_open, status)
+        })
         .width(Length::Fixed(TOP_HIST_W))
         .height(24)
         .padding([2, 0]);
@@ -1211,16 +1048,19 @@ pub(super) fn render_history_control<'a>(
 
     let arrow_btn = {
         let btn = button(
-            container(icons::arrow_down(
-                8.0,
-                if active { ARROW_COLOR } else { LABEL_OFF },
-            ))
+            container(if active {
+                icons::themed_arrow_down(8.0)
+            } else {
+                icons::themed_disabled_arrow_down(8.0)
+            })
             .width(Fill)
             .height(Fill)
             .align_x(iced::Center)
             .align_y(iced::Center),
         )
-        .style(move |_: &Theme, status| top_hist_btn_style(active, dd_open, status))
+        .style(move |theme: &Theme, status| {
+            top_hist_btn_style(theme, active, dd_open, status)
+        })
         .width(Length::Fixed(TOP_ARR_W))
         .height(24)
         .padding(0);
@@ -1243,19 +1083,26 @@ pub(super) fn render_history_control<'a>(
 }
 
 pub(super) fn top_hist_btn_style(
+    theme: &Theme,
     active: bool,
     open: bool,
     status: button::Status,
 ) -> button::Style {
+    let palette = theme.extended_palette();
+    let pair = match (active, open, status) {
+        (false, _, _) => palette.background.weakest,
+        (_, true, _) => palette.primary.weak,
+        (_, _, button::Status::Hovered) => palette.background.weak,
+        (_, _, button::Status::Pressed) => palette.primary.weak,
+        _ => palette.background.base,
+    };
     button::Style {
-        background: Some(Background::Color(match (active, open, status) {
-            (false, _, _) => HIST_INACTIVE_BG,
-            (_, true, _) => TOOL_ACTIVE,
-            (_, _, button::Status::Hovered) => TOOL_HOVER,
-            (_, _, button::Status::Pressed) => TOOL_ACTIVE,
-            _ => Color::TRANSPARENT,
-        })),
-        text_color: Color::WHITE,
+        background: (!active || open || matches!(
+            status,
+            button::Status::Hovered | button::Status::Pressed
+        ))
+        .then_some(Background::Color(pair.color)),
+        text_color: pair.text,
         border: Border {
             radius: 3.0.into(),
             color: Color::TRANSPARENT,

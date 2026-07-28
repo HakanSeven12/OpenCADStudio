@@ -2,6 +2,17 @@
 /// Change this to scale the ribbon, layer manager rows, and property panel rows uniformly.
 pub const ROW_H: f32 = 26.0;
 
+/// Place `content` at fixed top-left coordinates inside a fill-sized layer.
+/// Negative coordinates clamp to the layer edge.
+pub fn pin_at<'a, Message: 'a>(
+    position: iced::Point,
+    content: impl Into<iced::Element<'a, Message>>,
+) -> iced::Element<'a, Message> {
+    iced::widget::pin(content)
+        .position(iced::Point::new(position.x.max(0.0), position.y.max(0.0)))
+        .into()
+}
+
 pub mod color_select;
 pub mod command_line;
 pub mod icons;

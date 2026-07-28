@@ -5,7 +5,7 @@
 
 use iced::time::Instant;
 use iced::widget::{button, column, container, row, stack, text, Space};
-use iced::{Background, Border, Color, Element, Fill, Length, Theme};
+use iced::{Background, Border, Element, Fill, Length, Theme};
 use std::sync::atomic::Ordering;
 
 use crate::app::{
@@ -60,13 +60,10 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
             .width(Length::Fixed(fill_width))
             .height(Length::Fixed(BAR_TRACK_HEIGHT)),
     )
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color {
-                r: 0.30,
-                g: 0.62,
-                b: 0.95,
-                a: 1.0,
-            })),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().primary.base.color
+            )),
             border: Border {
                 radius: 3.0.into(),
                 ..Default::default()
@@ -86,13 +83,10 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
     let bar_track: Element<'_, Message> = container(
         stack![
             container(Space::new().width(Length::Fixed(BAR_TRACK_WIDTH)).height(Length::Fixed(BAR_TRACK_HEIGHT)))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(Color {
-                        r: 0.18,
-                        g: 0.18,
-                        b: 0.18,
-                        a: 1.0,
-                    })),
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(
+                        theme.extended_palette().background.strong.color
+                    )),
                     border: Border {
                         radius: 3.0.into(),
                         ..Default::default()
@@ -107,9 +101,7 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
     .into();
 
     // ── Card body ────────────────────────────────────────────────────────
-    let title = text("Opening file")
-        .size(15)
-        .color(Color::WHITE);
+    let title = text("Opening file").size(15);
 
     let name_line = text(format!(
         "{}  ({})",
@@ -117,11 +109,8 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
         format_size(progress.size_bytes)
     ))
     .size(13)
-    .color(Color {
-        r: 0.82,
-        g: 0.82,
-        b: 0.82,
-        a: 1.0,
+    .style(|theme: &Theme| iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.82)),
     });
 
     let phase_line = text(format!(
@@ -130,52 +119,13 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
         basis_points as f32 / 100.0
     ))
         .size(12)
-        .color(Color {
-            r: 0.70,
-            g: 0.80,
-            b: 0.95,
-            a: 1.0,
+        .style(|theme: &Theme| iced::widget::text::Style {
+            color: Some(theme.extended_palette().primary.base.color),
         });
 
-    let cancel_btn: Element<'_, Message> = button(text("Cancel").size(12).color(Color::WHITE))
+    let cancel_btn: Element<'_, Message> = button(text("Cancel").size(12))
         .on_press(Message::OpenCancel)
-        .style(|_: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered => Color {
-                    r: 0.32,
-                    g: 0.32,
-                    b: 0.32,
-                    a: 1.0,
-                },
-                button::Status::Pressed => Color {
-                    r: 0.42,
-                    g: 0.18,
-                    b: 0.18,
-                    a: 1.0,
-                },
-                _ => Color {
-                    r: 0.22,
-                    g: 0.22,
-                    b: 0.22,
-                    a: 1.0,
-                },
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                border: Border {
-                    color: Color {
-                        r: 0.40,
-                        g: 0.40,
-                        b: 0.40,
-                        a: 1.0,
-                    },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                text_color: Color::WHITE,
-                ..Default::default()
-            }
-        })
+        .style(button::danger)
         .padding([4, 14])
         .into();
 
@@ -187,35 +137,25 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
             .width(Length::Fixed(CARD_WIDTH)),
     )
     .padding([18, 22])
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(Color {
-            r: 0.13,
-            g: 0.13,
-            b: 0.13,
-            a: 0.98,
-        })),
+    .style(|theme: &Theme| {
+        let palette = theme.extended_palette();
+        container::Style {
+        background: Some(Background::Color(palette.background.weak.color)),
         border: Border {
-            color: Color {
-                r: 0.45,
-                g: 0.45,
-                b: 0.45,
-                a: 1.0,
-            },
+            color: palette.background.neutral.color,
             width: 1.0,
             radius: 6.0.into(),
         },
         ..Default::default()
+        }
     });
 
     // ── Backdrop (click-blocker + dim) ────────────────────────────────────
     let backdrop: Element<'_, Message> = container(Space::new().width(Fill).height(Fill))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 0.55,
-            })),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.strong.color.scale_alpha(0.72)
+            )),
             ..Default::default()
         })
         .width(Fill)

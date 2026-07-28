@@ -19,22 +19,9 @@ use acadrust::types::{Color as AcadColor, LineWeight};
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };
-use iced::{Background, Border, Color, Element, Length, Theme};
+use iced::{Background, Border, Element, Length, Theme};
 
 use crate::ui::properties::{lw_options, LwItem};
-
-// Palette shared with the style-manager windows so the editor reads as one of
-// them: toolbar (TB) on top, BG panels, ACTIVE for the selected tab / row.
-const TB: Color = Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 };
-const BG: Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-const WHITE: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-const DIM: Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-const ACCENT: Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
-const FIELD_BG: Color = Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 };
-const BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-const ACTIVE: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
-const ROW_SEL: Color = ACTIVE;
-const ROW_BG: Color = Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 };
 
 const LABEL_W: f32 = 120.0;
 
@@ -146,28 +133,25 @@ pub fn color_from_label(label: &str) -> Option<AcadColor> {
     })
 }
 
-fn field_style(_t: &Theme, _s: text_input::Status) -> text_input::Style {
-    text_input::Style {
-        background: Background::Color(FIELD_BG),
-        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-        icon: WHITE,
-        placeholder: DIM,
-        value: WHITE,
-        selection: ACCENT,
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
     }
 }
 
-fn accent_btn(_t: &Theme, status: button::Status) -> button::Style {
-    let bg = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 }
-    } else {
-        ACCENT
+fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
+    let border = match status {
+        text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
     };
-    button::Style {
-        background: Some(Background::Color(bg)),
-        text_color: WHITE,
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-        ..Default::default()
+    text_input::Style {
+        background: Background::Color(palette.background.base.color),
+        border: Border { color: border, width: 1.0, radius: 3.0.into() },
+        icon: palette.background.base.text,
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
     }
 }
 
@@ -176,8 +160,10 @@ fn hdivider<'a>() -> Element<'a, Message> {
     container(Space::new().width(Length::Fill).height(1))
         .width(Length::Fill)
         .height(1)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()
@@ -186,7 +172,7 @@ fn hdivider<'a>() -> Element<'a, Message> {
 /// One `label : widget` row with a fixed-width label column.
 fn field_row<'a>(label: &'a str, widget: Element<'a, Message>) -> Element<'a, Message> {
     row![
-        container(text(label).size(12).color(DIM)).width(LABEL_W),
+        container(text(label).size(12).style(muted_style)).width(LABEL_W),
         widget,
     ]
     .spacing(8)
@@ -226,20 +212,28 @@ fn pick_field<'a>(
 
 fn tab_button<'a>(label: &'a str, this: AttrTab, active: AttrTab) -> Element<'a, Message> {
     let is_active = this == active;
-    button(text(label).size(11).color(WHITE))
+    button(text(label).size(11))
         .padding([4, 12])
         .on_press(Message::AttrEditorTab(this))
-        .style(move |_t: &Theme, status| button::Style {
-            background: Some(Background::Color(match (is_active, status) {
-                (true, _) => ACTIVE,
+        .style(move |theme: &Theme, status| {
+            let palette = theme.extended_palette();
+            let pair = match (is_active, status) {
+                (true, _) => palette.primary.strong,
                 (false, button::Status::Hovered | button::Status::Pressed) => {
-                    Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
+                    palette.background.strong
                 }
-                _ => Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 },
-            })),
-            text_color: WHITE,
-            border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+                _ => palette.background.weak,
+            };
+            button::Style {
+            background: Some(Background::Color(pair.color)),
+            text_color: pair.text,
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
             ..Default::default()
+            }
         })
         .into()
 }
@@ -259,20 +253,22 @@ pub fn view_window<'a>(
 ) -> Element<'a, Message> {
     // ── Top toolbar: block name on the left, Apply on the right ───────────
     // Mirrors the style-manager windows (actions left, primary action right).
-    let apply = button(text("Apply").size(11).color(WHITE))
+    let apply = button(text("Apply").size(11))
         .padding([4, 14])
         .on_press(Message::AttrEditorApply)
-        .style(accent_btn);
+        .style(button::primary);
     let toolbar = container(
         row![
-            text(format!("Block:  {block}")).size(12).color(DIM),
+            text(format!("Block:  {block}")).size(12).style(muted_style),
             Space::new().width(Length::Fill),
             apply,
         ]
         .align_y(iced::Center),
     )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(TB)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.extended_palette().background.weak.color
+        )),
         ..Default::default()
     })
     .width(Length::Fill)
@@ -286,7 +282,7 @@ pub fn view_window<'a>(
     .spacing(2);
 
     let body: Element<'_, Message> = if rows.is_empty() {
-        text("This block has no attributes.").size(13).color(DIM).into()
+        text("This block has no attributes.").size(13).style(muted_style).into()
     } else {
         match tab {
             AttrTab::Attribute => attribute_tab(rows, selected),
@@ -303,8 +299,10 @@ pub fn view_window<'a>(
         .padding(12);
 
     container(column![toolbar, hdivider(), content])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BG)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.base.color
+            )),
             ..Default::default()
         })
         .width(Length::Fill)
@@ -315,9 +313,9 @@ pub fn view_window<'a>(
 /// Attribute tab: tag / prompt / value list with row-select, plus a value box.
 fn attribute_tab<'a>(rows: &'a [AttrRow], selected: usize) -> Element<'a, Message> {
     let head = row![
-        container(text("Tag").size(11).color(DIM)).width(130),
-        container(text("Prompt").size(11).color(DIM)).width(Length::Fill),
-        container(text("Value").size(11).color(DIM)).width(140),
+        container(text("Tag").size(11).style(muted_style)).width(130),
+        container(text("Prompt").size(11).style(muted_style)).width(Length::Fill),
+        container(text("Value").size(11).style(muted_style)).width(140),
     ]
     .spacing(6);
 
@@ -325,27 +323,28 @@ fn attribute_tab<'a>(rows: &'a [AttrRow], selected: usize) -> Element<'a, Messag
     for (idx, r) in rows.iter().enumerate() {
         let is_sel = idx == selected;
         let line = row![
-            container(text(r.tag.as_str()).size(12).color(WHITE)).width(130),
-            container(text(r.prompt.as_str()).size(12).color(DIM)).width(Length::Fill),
-            container(text(r.value.as_str()).size(12).color(WHITE)).width(140),
+            container(text(r.tag.as_str()).size(12)).width(130),
+            container(text(r.prompt.as_str()).size(12).style(muted_style)).width(Length::Fill),
+            container(text(r.value.as_str()).size(12)).width(140),
         ]
         .spacing(6);
         let btn = button(line)
             .on_press(Message::AttrEditorSelect(idx))
             .padding([3, 4])
             .width(Length::Fill)
-            .style(move |_t: &Theme, status| {
+            .style(move |theme: &Theme, status| {
+                let palette = theme.extended_palette();
                 let hovered = matches!(status, button::Status::Hovered);
-                let bg = if is_sel {
-                    ROW_SEL
+                let pair = if is_sel {
+                    palette.primary.strong
                 } else if hovered {
-                    Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 }
+                    palette.background.strong
                 } else {
-                    ROW_BG
+                    palette.background.weak
                 };
                 button::Style {
-                    background: Some(Background::Color(bg)),
-                    text_color: WHITE,
+                    background: Some(Background::Color(pair.color)),
+                    text_color: pair.text,
                     border: Border::default(),
                     ..Default::default()
                 }

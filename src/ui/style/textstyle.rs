@@ -5,7 +5,7 @@ use crate::app::StyleKind;
 use iced::widget::{
     button, canvas, checkbox, column, container, row, scrollable, text, text_input, Space,
 };
-use iced::{mouse, Background, Border, Color, Element, Fill, Length, Point, Rectangle, Theme};
+use iced::{mouse, Background, Border, Element, Fill, Length, Point, Rectangle, Theme};
 
 /// View-model for the Text Style editor window.
 pub struct TextStyleView<'a> {
@@ -28,49 +28,6 @@ pub struct TextStyleView<'a> {
     pub rename_buf: &'a str,
 }
 
-const BORDER: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-const TEXT: Color = Color {
-    r: 0.88,
-    g: 0.88,
-    b: 0.88,
-    a: 1.0,
-};
-const DIM: Color = Color {
-    r: 0.55,
-    g: 0.55,
-    b: 0.55,
-    a: 1.0,
-};
-const ACCENT: Color = Color {
-    r: 0.25,
-    g: 0.50,
-    b: 0.85,
-    a: 1.0,
-};
-const ACTIVE: Color = Color {
-    r: 0.20,
-    g: 0.40,
-    b: 0.70,
-    a: 1.0,
-};
-const FIELD: Color = Color {
-    r: 0.10,
-    g: 0.10,
-    b: 0.10,
-    a: 1.0,
-};
-const LIST: Color = Color {
-    r: 0.12,
-    g: 0.12,
-    b: 0.12,
-    a: 1.0,
-};
-
 const BUILTIN_FONTS: &[&str] = &[
     "Standard", "ISO", "Simplex", "RomanS", "RomanD", "RomanC", "RomanT", "ItalicC", "ItalicT",
     "ScriptS", "ScriptC", "GothGBT", "GothGRT", "GothITT", "GreekC", "Symbol",
@@ -78,34 +35,52 @@ const BUILTIN_FONTS: &[&str] = &[
 ];
 
 fn list_item(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_: &Theme, st| button::Style {
-        background: Some(Background::Color(match (active, st) {
-            (true, _) => ACTIVE,
-            (false, button::Status::Hovered | button::Status::Pressed) => Color {
-                r: 0.26,
-                g: 0.26,
-                b: 0.26,
-                a: 1.0,
-            },
-            _ => Color::TRANSPARENT,
-        })),
-        text_color: TEXT,
+    move |theme: &Theme, st| {
+        let palette = theme.extended_palette();
+        let pair = match (active, st) {
+            (true, _) => Some(palette.primary.strong),
+            (false, button::Status::Hovered | button::Status::Pressed) => {
+                Some(palette.background.strong)
+            }
+            _ => None,
+        };
+        button::Style {
+        background: pair.map(|p| Background::Color(p.color)),
+        text_color: pair.map(|p| p.text).unwrap_or(palette.background.base.text),
         ..Default::default()
+        }
     }
 }
 
-fn field_style(_: &Theme, _: text_input::Status) -> text_input::Style {
+fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let palette = theme.extended_palette();
+    let border = match status {
+        text_input::Status::Focused { .. } => palette.primary.base.color,
+        _ => palette.background.neutral.color,
+    };
     text_input::Style {
-        background: Background::Color(FIELD),
+        background: Background::Color(palette.background.base.color),
         border: Border {
-            color: BORDER,
+            color: border,
             width: 1.0,
             radius: 3.0.into(),
         },
-        icon: TEXT,
-        placeholder: DIM,
-        value: TEXT,
-        selection: ACCENT,
+        icon: palette.background.base.text,
+        placeholder: palette.background.base.text.scale_alpha(0.48),
+        value: palette.background.base.text,
+        selection: palette.primary.base.color.scale_alpha(0.5),
+    }
+}
+
+fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.68)),
+    }
+}
+
+fn primary_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(theme.extended_palette().primary.base.color),
     }
 }
 
@@ -113,8 +88,10 @@ fn vsep<'a>() -> Element<'a, Message> {
     container(Space::new().width(1).height(Fill))
         .width(1)
         .height(Fill)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER)),
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                theme.extended_palette().background.neutral.color
+            )),
             ..Default::default()
         })
         .into()
@@ -143,7 +120,7 @@ impl canvas::Program<Message> for TextPreviewCanvas {
         &self,
         _state: &(),
         renderer: &iced::Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
@@ -185,7 +162,7 @@ impl canvas::Program<Message> for TextPreviewCanvas {
         };
         let stroke = canvas::Stroke {
             width: 1.4,
-            style: canvas::Style::Solid(TEXT),
+            style: canvas::Style::Solid(theme.extended_palette().background.base.text),
             ..Default::default()
         };
         for s in &strokes {
@@ -237,16 +214,19 @@ pub fn view_window<'a>(v: TextStyleView<'a>) -> Element<'a, Message> {
 
     let font_panel = container(
         column![
-            text("Font File").size(10).color(DIM),
+            text("Font File").size(10).style(muted_style),
             container(scrollable(column(font_items).spacing(1)).height(Fill))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(LIST)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.weak.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 3.0.into()
                     },
                     ..Default::default()
+                    }
                 })
                 .width(Fill)
                 .height(Fill)
@@ -275,7 +255,7 @@ pub fn view_window<'a>(v: TextStyleView<'a>) -> Element<'a, Message> {
         field: &'static str,
     ) -> Element<'a, Message> {
         row![
-            text(label).size(11).color(DIM).width(120),
+            text(label).size(11).style(muted_style).width(120),
             text_input(ph, buf)
                 .on_input(move |v| Message::TextStyleEdit { field, value: v })
                 .style(field_style)
@@ -312,7 +292,7 @@ pub fn view_window<'a>(v: TextStyleView<'a>) -> Element<'a, Message> {
     // ── Right: Properties ─────────────────────────────────────────────────
     let props_panel = container(
         column![
-            text("Properties").size(11).color(ACCENT),
+            text("Properties").size(11).style(primary_style),
             frow("Big Font:", "big-font file…", bigfont_buf, "bigfont"),
             frow("TrueType Font:", "e.g. Arial", ttf_buf, "ttf"),
             frow("Fixed Height:", "0 = variable", height_buf, "height"),
@@ -337,16 +317,19 @@ pub fn view_window<'a>(v: TextStyleView<'a>) -> Element<'a, Message> {
                 .size(15)
                 .text_size(11),
             Space::new().height(8),
-            text("Preview").size(10).color(DIM),
+            text("Preview").size(10).style(muted_style),
             container(preview)
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(FIELD)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.base.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 4.0.into()
                     },
                     ..Default::default()
+                    }
                 })
                 .padding(8)
                 .width(Fill),
@@ -382,16 +365,19 @@ pub fn view_window<'a>(v: TextStyleView<'a>) -> Element<'a, Message> {
 
     let ttf_panel = container(
         column![
-            text("TrueType (system)").size(10).color(DIM),
+            text("TrueType (system)").size(10).style(muted_style),
             container(scrollable(column(ttf_items).spacing(1)).height(Fill))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(LIST)),
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                    background: Some(Background::Color(palette.background.weak.color)),
                     border: Border {
-                        color: BORDER,
+                        color: palette.background.neutral.color,
                         width: 1.0,
                         radius: 3.0.into()
                     },
                     ..Default::default()
+                    }
                 })
                 .width(Fill)
                 .height(Fill)

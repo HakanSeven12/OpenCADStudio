@@ -152,6 +152,8 @@ pub struct Primitive {
     pub(in crate::scene) viewports: Vec<ViewportData>,
     /// Background color used to clear each viewport's MSAA buffer.
     pub(in crate::scene) bg_color: [f32; 4],
+    /// Active Iced theme text colour for GPU-rendered ViewCube labels.
+    pub(in crate::scene) viewcube_text_color: [f32; 4],
     /// One input-to-render sample, carried only when PERF tracing is enabled.
     pub(in crate::scene) nav_perf: Option<NavPerfSample>,
 }
@@ -327,6 +329,7 @@ impl shader::Primitive for Primitive {
                         (vp.screen_rect.width * bounds.width) as u32,
                         (vp.screen_rect.height * bounds.height) as u32,
                         vp.hover_region,
+                        self.viewcube_text_color,
                     );
                 }
                 continue;
@@ -874,6 +877,7 @@ impl shader::Primitive for Primitive {
                     (vp.screen_rect.width * bounds.width) as u32,
                     (vp.screen_rect.height * bounds.height) as u32,
                     vp.hover_region,
+                    self.viewcube_text_color,
                 );
             }
         }
@@ -1689,6 +1693,7 @@ impl Scene {
         model_render_mode: acadrust::entities::ViewportRenderMode,
         _hover_region: Option<usize>,
         show_viewcube: bool,
+        viewcube_text_color: [f32; 4],
     ) -> Primitive {
         let nav_build_started = iced::time::Instant::now();
         let perf_nav = self.take_nav_perf();
@@ -1720,6 +1725,7 @@ impl Scene {
         Primitive {
             viewports,
             bg_color,
+            viewcube_text_color,
             nav_perf: perf_nav,
         }
     }
@@ -1736,6 +1742,7 @@ impl Scene {
         tile_idx: usize,
         model_render_mode: acadrust::entities::ViewportRenderMode,
         show_viewcube: bool,
+        viewcube_text_color: [f32; 4],
     ) -> Primitive {
         let hover_region = self.viewcube_hover.get();
         let canvas = (bounds.width.max(1.0), bounds.height.max(1.0));
@@ -1745,6 +1752,7 @@ impl Scene {
             return Primitive {
                 viewports: vec![],
                 bg_color,
+                viewcube_text_color,
                 nav_perf: None,
             };
         };
@@ -1792,6 +1800,7 @@ impl Scene {
         Primitive {
             viewports,
             bg_color,
+            viewcube_text_color,
             nav_perf: perf_nav,
         }
     }

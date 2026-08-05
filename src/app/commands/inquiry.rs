@@ -5,6 +5,7 @@ impl OpenCADStudio {
         match cmd {
             "3DORBIT" => {
                 self.tabs[i].orbit_mode = true;
+                self.clear_navigation_hover(i);
             }
 
             // ── Selection utilities ───────────────────────────────────────

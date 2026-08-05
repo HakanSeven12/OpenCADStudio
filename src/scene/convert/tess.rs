@@ -442,7 +442,7 @@ pub(crate) fn tessellate_entity(
                             // footprint doesn't drift when the camera
                             // crosses the LOD threshold. See #19.
                             let (entity_color, _, _, _, aci_idx) =
-                                view::render::render_style_for(document, e);
+                                view::render::render_style_for_viewport(document, e, active_viewport);
                             let entity_color = view::render::adapt_to_bg(entity_color, bg_color);
                             let entity_color = fade_if_locked(document, e, entity_color, bg_color);
                             if is_3d_entity {
@@ -529,11 +529,11 @@ pub(crate) fn tessellate_entity(
     }
 
     let (entity_color, pattern_length, pattern, line_weight_px, aci) =
-        view::render::render_style_for(document, e);
+        view::render::render_style_for_viewport(document, e, active_viewport);
     let entity_color = view::render::adapt_to_bg(entity_color, bg_color);
     let entity_color = fade_if_locked(document, e, entity_color, bg_color);
     let lt_scale = document.header.linetype_scale as f32 * e.common().linetype_scale as f32;
-    let lt_name = view::render::linetype_name_for(document, e);
+    let lt_name = view::render::linetype_name_for_viewport(document, e, active_viewport);
     // Paper-space linetype scaling belongs to the viewport uniform. Keeping
     // resident geometry at its model-space scale prevents every MSPACE wheel
     // tick from rebuilding and uploading the viewport's complete wire set.
@@ -931,12 +931,16 @@ pub(crate) fn tessellate_entity(
     if let EntityType::Insert(ins) = e {
         // Resolve the INSERT's own style so ByBlock sub-entities can inherit it.
         let (ins_color, ins_pat_len, ins_pat, ins_lw_px, _) =
-            view::render::render_style_for(document, e);
+            view::render::render_style_for_viewport(document, e, active_viewport);
         let ins_color = view::render::adapt_to_bg(ins_color, bg_color);
         // Resolve the INSERT's *layer* style — the layer-0 inheritance target
         // for sub-entities on layer "0" with ByLayer properties (#221).
         let ins_layer = {
-            let mut s = view::render::layer_render_style(document, &ins.common.layer);
+            let mut s = view::render::layer_render_style_viewport(
+                document,
+                &ins.common.layer,
+                active_viewport,
+            );
             s.color = view::render::adapt_to_bg(s.color, bg_color);
             s
         };
@@ -986,6 +990,7 @@ pub(crate) fn tessellate_entity(
                     annotation_scale_handle,
                     true,
                     bg_color,
+                    active_viewport,
                     &fallback_depths,
                 );
                 &fallback_cache

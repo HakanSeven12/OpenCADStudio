@@ -183,6 +183,7 @@ impl BlockCache {
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
         bg_color: [f32; 4],
+        viewport: Option<Handle>,
         // Scene draw-depth map ([depth, half] per handle) — source of each
         // block child's in-block rank, shared by cached wires and graph leaves.
         depth_map: &HashMap<u64, [f32; 2]>,
@@ -220,6 +221,7 @@ impl BlockCache {
                         annotation_scale_handle,
                         all_visible,
                         bg_color,
+                        viewport,
                         depth_map,
                     )),
                 )
@@ -238,6 +240,7 @@ impl BlockCache {
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
         bg_color: [f32; 4],
+        viewport: Option<Handle>,
         depth_map: &HashMap<u64, [f32; 2]>,
     ) -> Self {
         use crate::par::prelude::*;
@@ -255,6 +258,7 @@ impl BlockCache {
                         annotation_scale_handle,
                         all_visible,
                         bg_color,
+                        viewport,
                         depth_map,
                     )),
                 )
@@ -396,6 +400,7 @@ fn build_defn(
     annotation_scale_handle: Option<Handle>,
     all_visible: bool,
     bg_color: [f32; 4],
+    viewport: Option<Handle>,
     depth_map: &HashMap<u64, [f32; 2]>,
 ) -> BlockDefn {
     let br = match doc.block_records.get(block_name) {
@@ -461,7 +466,7 @@ fn build_defn(
             }
             EntityType::Insert(nested_ins) => {
                 subs.push(LocalSub::Nested(build_nested_ref(
-                    nested_ins, doc, bg_color, depth_map,
+                    nested_ins, doc, bg_color, viewport, depth_map,
                 )));
             }
             EntityType::Dimension(_) => {
@@ -471,6 +476,7 @@ fn build_defn(
                     anno_scale,
                     annotation_scale_handle,
                     bg_color,
+                    viewport,
                     depth_map,
                 ) {
                     subs.push(LocalSub::Wire(wire));
@@ -504,7 +510,8 @@ fn build_defn(
                         annotation_scale_handle,
                         all_visible,
                         depth_map,
-                    );
+                    )
+                    .with_viewport(viewport);
                     graph.walk_insert(
                         &insert,
                         table.common.handle,
@@ -518,6 +525,7 @@ fn build_defn(
                                 anno_scale,
                                 annotation_scale_handle,
                                 bg_color,
+                                viewport,
                                 depth_map,
                             ) {
                                 subs.push(LocalSub::Wire(wire));
@@ -531,6 +539,7 @@ fn build_defn(
                         anno_scale,
                         annotation_scale_handle,
                         bg_color,
+                        viewport,
                         depth_map,
                     ) {
                         subs.push(LocalSub::Wire(wire));
@@ -544,6 +553,7 @@ fn build_defn(
                             &insert,
                             doc,
                             bg_color,
+                            viewport,
                             depth_map,
                         )));
                     }
@@ -560,6 +570,7 @@ fn build_defn(
                     anno_scale,
                     annotation_scale_handle,
                     bg_color,
+                    viewport,
                     depth_map,
                 ) {
                     subs.push(LocalSub::Wire(lw));
@@ -579,6 +590,7 @@ fn build_nested_ref(
     nested_ins: &acadrust::entities::Insert,
     doc: &CadDocument,
     bg_color: [f32; 4],
+    viewport: Option<Handle>,
     depth_map: &HashMap<u64, [f32; 2]>,
 ) -> NestedRef {
     let _ = bg_color;
@@ -595,7 +607,7 @@ fn build_nested_ref(
     NestedRef {
         block_name: nested_ins.block_name.clone(),
         xform,
-        style: crate::scene::render_graph::InsertStyleSpec::new(doc, nested_ins),
+        style: crate::scene::render_graph::InsertStyleSpec::new(doc, nested_ins, viewport),
         instance_offsets: crate::scene::render_graph::array_offsets(nested_ins),
         clip_poly,
         local_rank: depth_map
@@ -610,6 +622,7 @@ fn tessellate_sub_local(
     anno_scale: f32,
     annotation_scale_handle: Option<Handle>,
     bg_color: [f32; 4],
+    viewport: Option<Handle>,
     depth_map: &HashMap<u64, [f32; 2]>,
 ) -> Vec<LocalWire> {
     let h = sub.common().handle;
@@ -626,7 +639,8 @@ fn tessellate_sub_local(
     // with the per-render bg, so the cache no longer has to rebuild on
     // BACKGROUND / layout-switch — the dynamic adaptation tracks the
     // live bg at render time.
-    let (sub_color, pat_len, pat, lw_px, aci) = crate::scene::view::render::render_style_for(doc, sub);
+    let (sub_color, pat_len, pat, lw_px, aci) =
+        crate::scene::view::render::render_style_for_viewport(doc, sub, viewport);
     let _ = bg_color;
 
     let has_book_color =

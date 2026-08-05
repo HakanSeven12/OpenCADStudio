@@ -1471,6 +1471,12 @@ struct SceneLight {
     attenuation_type: f32,
     attenuation_start: f32,
     attenuation_end: f32,
+    cast_shadows: bool,
+    shadow_softness: f32,
+    shadow_map_size: u32,
+    web_profile: [f32; 8],
+    web_rotation: [f32; 3],
+    web_enabled: bool,
 }
 
 pub struct Scene {
@@ -2078,6 +2084,7 @@ impl Scene {
         &self,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
+        viewport: Option<Handle>,
     ) -> Arc<cache::block_cache::BlockCache> {
         let bg = if self.current_layout == "Model" {
             self.bg_color
@@ -2089,6 +2096,7 @@ impl Scene {
             key = key.rotate_left(13) ^ component.to_bits() as u64;
         }
         key = key.rotate_left(13) ^ all_visible as u64;
+        key = key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0);
         {
             let cache = self.block_defn_cache.borrow();
             if let Some((epoch, arc)) = cache.get(&key) {
@@ -2107,6 +2115,7 @@ impl Scene {
             annotation_scale_handle,
             all_visible,
             bg,
+            viewport,
             &self.draw_depth_map(),
         );
         let arc = Arc::new(built);
@@ -2133,6 +2142,7 @@ impl Scene {
             None,
             scale,
             self.annotation_all_visible(),
+            None,
             None,
         );
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
@@ -4634,7 +4644,7 @@ impl Scene {
             &self.document,
             &self.document.header.current_annotation_scale,
         );
-        self.resident_wires_for(block, None, scale, None)
+        self.resident_wires_for(block, None, scale, None, None)
     }
 
     /// Unified static-hold wire builder — the ONE tessellation path every
@@ -4682,6 +4692,7 @@ impl Scene {
         anno_scale_override: Option<f32>,
         annotation_scale_handle: Option<Handle>,
         frozen_layers: Option<&HashSet<Handle>>,
+        style_viewport: Option<Handle>,
     ) -> Arc<Vec<WireModel>> {
         // Normalize an inert anno override away so distinct viewport scales
         // share one resident set when annotation can't change the wires.
@@ -4705,6 +4716,7 @@ impl Scene {
             annotation_scale_handle,
             all_visible,
             frozen_layers,
+            style_viewport,
         );
         {
             let sets = self.resident_wire_sets.borrow();
@@ -4728,6 +4740,7 @@ impl Scene {
                 annotation_scale_handle,
                 all_visible,
                 frozen_layers,
+                style_viewport,
             )
         {
             return arc;
@@ -4744,6 +4757,7 @@ impl Scene {
                 anno_scale_override,
                 annotation_scale_handle,
                 all_visible,
+                style_viewport,
             );
         // Synthesized nonprint markers (geo-location daisy) live in model space
         // only and are derived from document objects, not entities — append them
@@ -4791,6 +4805,7 @@ impl Scene {
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
         frozen_layers: Option<&HashSet<Handle>>,
+        style_viewport: Option<Handle>,
     ) -> u64 {
         let mut key: u64 = 0xcbf2_9ce4_8422_2325;
         let mut mix =
@@ -4804,6 +4819,7 @@ impl Scene {
             .unwrap_or(u64::MAX));
         mix(annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0));
         mix(all_visible as u64);
+        mix(style_viewport.map(|handle| handle.value()).unwrap_or(0));
         match frozen_layers {
             Some(frozen) => {
                 let mut signature = 0u64;
@@ -4903,7 +4919,11 @@ impl Scene {
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
         frozen_layers: Option<&HashSet<Handle>>,
+        style_viewport: Option<Handle>,
     ) -> Option<Arc<Vec<WireModel>>> {
+        if style_viewport.is_some() {
+            return None;
+        }
         let perf = crate::perf::enabled();
         let t_patch = iced::time::Instant::now();
         // The entry must exist, be stale, and be uniquely held so we can move
@@ -4951,7 +4971,7 @@ impl Scene {
         } else {
             1.0
         };
-        let blk = self.block_cache_arc_for(annotation_scale_handle, all_visible);
+        let blk = self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
         let empty_sel: HashSet<Handle> = HashSet::default();
         let mut new_runs: HashMap<Handle, Vec<WireModel>> = HashMap::default();
         let mut memo_updates: Vec<(Handle, Arc<Vec<WireModel>>)> = Vec::new();
@@ -4976,7 +4996,7 @@ impl Scene {
             let raw = tessellate_entity(
                 &self.document,
                 &empty_sel,
-                self.active_viewport,
+                style_viewport.or(self.active_viewport),
                 bg,
                 anno,
                 annotation_scale_handle,
@@ -5265,7 +5285,7 @@ impl Scene {
         }
         let layout_block = self.current_layout_block_handle();
         let scale = self.paper_annotation_scale_handle();
-        let base = self.resident_wires_for(layout_block, None, scale, None);
+        let base = self.resident_wires_for(layout_block, None, scale, None, None);
         let mut wires = (*base).clone();
         // The overall "sheet" viewport now IS the paper view itself, so its own
         // border rectangle must not be drawn as an entity on the sheet.
@@ -5650,6 +5670,7 @@ impl Scene {
             None,
             scale,
             self.annotation_all_visible(),
+            None,
         ));
         self.hatch_cache.borrow_mut().insert(
             key,
@@ -5796,7 +5817,8 @@ impl Scene {
             annotation_scale_handle,
             all_visible,
             depth_map.as_ref(),
-        );
+        )
+        .with_viewport(viewport);
         let mut models = Vec::new();
         let root = if self.block_edit_block.is_none() {
             viewport.map(|viewport| render_graph::SceneRoot::Viewport {
@@ -5923,6 +5945,7 @@ impl Scene {
             None,
             scale,
             self.annotation_all_visible(),
+            None,
         ));
         self.mesh_cache
             .borrow_mut()
@@ -6034,6 +6057,7 @@ impl Scene {
             None,
             self.displayed_annotation_scale_handle(),
             self.annotation_all_visible(),
+            self.active_viewport,
         ));
         *self.interaction_mesh_cache.borrow_mut() =
             Some((self.geometry_epoch, key, Arc::clone(&meshes)));
@@ -6083,6 +6107,7 @@ impl Scene {
         frozen: Option<&HashSet<Handle>>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
+        viewport: Option<Handle>,
     ) -> Vec<MeshLodSet> {
         // Top-level solids: drop those whose layer is off/frozen or that are
         // flagged invisible / isolated-hidden, mirroring the 2D wire path, plus
@@ -6105,7 +6130,33 @@ impl Scene {
                         })
                         .unwrap_or(false)
             })
-            .map(|(_, set)| set.clone())
+            .map(|(&handle, set)| {
+                let mut set = set.clone();
+                if let Some(entity) = self.document.get_entity(handle) {
+                    let style = crate::scene::view::render::render_style_for_viewport(
+                        &self.document,
+                        entity,
+                        viewport,
+                    );
+                    let attached_material = set
+                        .material
+                        .as_ref()
+                        .is_some_and(|material| material.handle.is_some());
+                    for mesh in &mut set.lods {
+                        if !attached_material {
+                            mesh.color[0..3].copy_from_slice(&style.0[0..3]);
+                        }
+                        mesh.color[3] = style.0[3];
+                    }
+                    if let Some(material) = set.material.as_mut() {
+                        if !attached_material {
+                            material.diffuse[0..3].copy_from_slice(&style.0[0..3]);
+                        }
+                        material.diffuse[3] = style.0[3];
+                    }
+                }
+                set
+            })
             .collect();
         // Block-definition solids are instanced per INSERT of the ACTIVE space's
         // block so a block placed at an INSERT scale renders at the right size
@@ -6116,6 +6167,7 @@ impl Scene {
             frozen,
             annotation_scale_handle,
             all_visible,
+            viewport,
         ));
         all
     }
@@ -6171,7 +6223,8 @@ impl Scene {
         let scale = self.viewport_scale_handle(viewport);
         let all_visible = self.annotation_all_visible();
         let context_sig = scale.map_or(0, |handle| handle.value())
-            ^ u64::from(all_visible).rotate_left(61);
+            ^ u64::from(all_visible).rotate_left(61)
+            ^ viewport.value().rotate_left(23);
         let sig = Self::frozen_layers_sig(frozen) ^ context_sig;
         let key = (target_block, self.current_layout.clone(), sig);
         let sel = self.selected_hatch_sig();
@@ -6185,6 +6238,7 @@ impl Scene {
             Some(frozen),
             scale,
             all_visible,
+            Some(viewport),
         ));
         self.frozen_hatch_cache
             .borrow_mut()
@@ -6205,7 +6259,8 @@ impl Scene {
         let scale = self.viewport_scale_handle(viewport);
         let all_visible = self.annotation_all_visible();
         let context_sig = scale.map_or(0, |handle| handle.value())
-            ^ u64::from(all_visible).rotate_left(61);
+            ^ u64::from(all_visible).rotate_left(61)
+            ^ viewport.value().rotate_left(23);
         let sig = Self::frozen_layers_sig(frozen) ^ context_sig;
         let key = (target_block, self.current_layout.clone(), sig);
         if let Some((e, arc)) = self.frozen_wipeout_cache.borrow().get(&key) {
@@ -6238,7 +6293,8 @@ impl Scene {
         let scale = self.viewport_scale_handle(viewport);
         let all_visible = self.annotation_all_visible();
         let context_sig = scale.map_or(0, |handle| handle.value())
-            ^ u64::from(all_visible).rotate_left(61);
+            ^ u64::from(all_visible).rotate_left(61)
+            ^ viewport.value().rotate_left(23);
         let sig = Self::frozen_layers_sig(frozen) ^ context_sig;
         let key = (target_block, sig);
         if let Some((e, arc)) = self.frozen_image_cache.borrow().get(&key) {
@@ -6272,7 +6328,8 @@ impl Scene {
         let scale = self.viewport_scale_handle(viewport);
         let all_visible = self.annotation_all_visible();
         let context_sig = scale.map_or(0, |handle| handle.value())
-            ^ u64::from(all_visible).rotate_left(61);
+            ^ u64::from(all_visible).rotate_left(61)
+            ^ viewport.value().rotate_left(23);
         let sig = Self::frozen_layers_sig(frozen) ^ context_sig;
         let key = (target_block, self.current_layout.clone(), sig);
         if let Some((e, arc)) = self.frozen_mesh_cache.borrow().get(&key) {
@@ -6285,6 +6342,7 @@ impl Scene {
             Some(frozen),
             scale,
             all_visible,
+            Some(viewport),
         ));
         self.frozen_mesh_cache
             .borrow_mut()
@@ -6364,6 +6422,7 @@ impl Scene {
         frozen: Option<&HashSet<Handle>>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
+        viewport: Option<Handle>,
     ) -> Vec<MeshLodSet> {
         if self.block_meshes.is_empty() {
             return Vec::new();
@@ -6375,7 +6434,8 @@ impl Scene {
             annotation_scale_handle,
             all_visible,
             depth_map.as_ref(),
-        );
+        )
+        .with_viewport(viewport);
         let mut out = Vec::new();
         graph.walk_root(
             self.render_scene_root(layout_block),
@@ -7960,6 +8020,7 @@ impl Scene {
         anno_scale_override: Option<f32>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
+        style_viewport: Option<Handle>,
     ) -> Vec<WireModel> {
         use acadrust::objects::ObjectType;
 
@@ -8065,7 +8126,7 @@ impl Scene {
         // `geometry_epoch` (a full model re-tessellation).
         let empty_sel: HashSet<Handle> = HashSet::default();
         let sel: &HashSet<Handle> = &empty_sel;
-        let avp = self.active_viewport;
+        let avp = style_viewport.or(self.active_viewport);
         // A paper-space content viewport renders MODEL block entities while
         // the user is sitting in a paper layout — that path expects
         // `world_offset` subtraction even though `current_layout != "Model"`.
@@ -8086,7 +8147,7 @@ impl Scene {
         // Content shown inside a paper-space viewport carries a scale override;
         // only there does PSLTSCALE resize linetypes by the viewport scale.
         let paper = anno_scale_override.is_some();
-        let blk_cache = self.block_cache_arc_for(annotation_scale_handle, all_visible);
+        let blk_cache = self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
         let blk_ref: &cache::block_cache::BlockCache = &blk_cache;
         // Zoom-adaptive curve sampling for top-level Edge tessellation. Target
         // ~0.5 px chord height — far-out arcs that used to emit hundreds of
@@ -8863,6 +8924,7 @@ impl Scene {
         let blk_cache = self.block_cache_arc_for(
             annotation_scale_handle,
             self.annotation_all_visible(),
+            self.active_viewport,
         );
         // tessellate_one is used for one-off lookups (hit test, properties).
         // Skip culling here so the caller always gets the full geometry.
@@ -8945,6 +9007,7 @@ impl Scene {
             None,
             scale,
             self.annotation_all_visible(),
+            None,
         );
         let mut min = glam::DVec2::splat(f64::INFINITY);
         let mut max = glam::DVec2::splat(f64::NEG_INFINITY);

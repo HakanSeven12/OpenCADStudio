@@ -12,8 +12,8 @@ use acadrust::{CadDocument, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::scene::view::render::{
-    has_resolved_book_color, is_effective_layer_zero, layer_render_style,
-    render_style_for, render_style_for_block_sub, InheritStyle,
+    has_resolved_book_color, is_effective_layer_zero, layer_render_style_viewport,
+    render_style_for_block_sub_viewport, render_style_for_viewport, InheritStyle,
 };
 
 pub type ResolvedStyle = ([f32; 4], f32, [f32; 8], f32, u8);
@@ -75,12 +75,12 @@ pub struct InsertStyleSpec {
 }
 
 impl InsertStyleSpec {
-    pub fn new(document: &CadDocument, insert: &Insert) -> Self {
+    pub fn new(document: &CadDocument, insert: &Insert, viewport: Option<Handle>) -> Self {
         let entity = EntityType::Insert(insert.clone());
         let has_book_color = has_resolved_book_color(document, &entity);
         let linetype = &insert.common.linetype;
         Self {
-            own: BlockStyle::for_entity(document, &entity),
+            own: BlockStyle::for_entity(document, &entity, viewport),
             color_byblock: !has_book_color && insert.common.color == Color::ByBlock,
             color_bylayer: !has_book_color && insert.common.color == Color::ByLayer,
             linetype_byblock: linetype.eq_ignore_ascii_case("byblock"),
@@ -136,10 +136,14 @@ impl InsertStyleSpec {
 }
 
 impl BlockStyle {
-    pub fn for_entity(document: &CadDocument, entity: &EntityType) -> Self {
+    pub fn for_entity(
+        document: &CadDocument,
+        entity: &EntityType,
+        viewport: Option<Handle>,
+    ) -> Self {
         Self {
-            insert: render_style_for(document, entity),
-            layer0: layer_render_style(document, &entity.common().layer),
+            insert: render_style_for_viewport(document, entity, viewport),
+            layer0: layer_render_style_viewport(document, &entity.common().layer, viewport),
             layer0_aci: layer_aci(document, &entity.common().layer),
         }
     }
@@ -148,27 +152,29 @@ impl BlockStyle {
         document: &CadDocument,
         insert: &Insert,
         parent: Self,
+        viewport: Option<Handle>,
     ) -> Self {
-        InsertStyleSpec::new(document, insert).resolve(parent)
+        InsertStyleSpec::new(document, insert, viewport).resolve(parent)
     }
 
     pub fn for_owned(
         document: &CadDocument,
         entity: &EntityType,
         parent: Option<Self>,
+        viewport: Option<Handle>,
     ) -> Self {
         let on_layer0 = is_effective_layer_zero(&entity.common().layer);
         let insert = parent
-            .map(|style| style.resolve(document, entity))
-            .unwrap_or_else(|| render_style_for(document, entity));
+            .map(|style| style.resolve(document, entity, viewport))
+            .unwrap_or_else(|| render_style_for_viewport(document, entity, viewport));
         Self {
             insert,
             layer0: if on_layer0 {
                 parent
                     .map(|style| style.layer0)
-                    .unwrap_or_else(|| layer_render_style(document, &entity.common().layer))
+                    .unwrap_or_else(|| layer_render_style_viewport(document, &entity.common().layer, viewport))
             } else {
-                layer_render_style(document, &entity.common().layer)
+                layer_render_style_viewport(document, &entity.common().layer, viewport)
             },
             layer0_aci: if on_layer0 {
                 parent
@@ -180,8 +186,13 @@ impl BlockStyle {
         }
     }
 
-    pub fn resolve(self, document: &CadDocument, entity: &EntityType) -> ResolvedStyle {
-        let mut resolved = render_style_for_block_sub(
+    pub fn resolve(
+        self,
+        document: &CadDocument,
+        entity: &EntityType,
+        viewport: Option<Handle>,
+    ) -> ResolvedStyle {
+        let mut resolved = render_style_for_block_sub_viewport(
             document,
             entity,
             self.insert.0,
@@ -189,6 +200,7 @@ impl BlockStyle {
             self.insert.2,
             self.insert.3,
             self.layer0,
+            viewport,
         );
         let common = entity.common();
         let has_book_color = has_resolved_book_color(document, entity);
@@ -228,10 +240,11 @@ pub struct RenderContext {
     pub depth_base: f32,
     pub depth_scale: f32,
     pub nesting_depth: usize,
+    pub viewport: Option<Handle>,
 }
 
 impl RenderContext {
-    fn direct(depth_base: f32) -> Self {
+    fn direct(depth_base: f32, viewport: Option<Handle>) -> Self {
         Self {
             transform: Transform::identity(),
             root_handle: Handle::NULL,
@@ -242,6 +255,7 @@ impl RenderContext {
             depth_base,
             depth_scale: 1.0,
             nesting_depth: 0,
+            viewport,
         }
     }
 
@@ -251,8 +265,8 @@ impl RenderContext {
 
     pub fn style_for(&self, document: &CadDocument, entity: &EntityType) -> ResolvedStyle {
         self.block_style
-            .map(|style| style.resolve(document, entity))
-            .unwrap_or_else(|| render_style_for(document, entity))
+            .map(|style| style.resolve(document, entity, self.viewport))
+            .unwrap_or_else(|| render_style_for_viewport(document, entity, self.viewport))
     }
 
     pub fn draw_depth(&self, handle: Handle, depths: &FxHashMap<u64, [f32; 2]>) -> f32 {
@@ -276,6 +290,7 @@ pub struct RenderSceneGraph<'a> {
     annotation_scale_handle: Option<Handle>,
     all_visible: bool,
     depths: &'a FxHashMap<u64, [f32; 2]>,
+    viewport: Option<Handle>,
 }
 
 impl<'a> RenderSceneGraph<'a> {
@@ -292,7 +307,13 @@ impl<'a> RenderSceneGraph<'a> {
             annotation_scale_handle,
             all_visible,
             depths,
+            viewport: None,
         }
+    }
+
+    pub fn with_viewport(mut self, viewport: Option<Handle>) -> Self {
+        self.viewport = viewport.filter(|handle| handle.is_valid());
+        self
     }
 
     /// Walk direct root entities and every referenced block subtree. `visible`
@@ -304,6 +325,10 @@ impl<'a> RenderSceneGraph<'a> {
         F: FnMut(&EntityType, &RenderContext),
     {
         let block = root.content_block();
+        let viewport = match root {
+            SceneRoot::Viewport { viewport, .. } => Some(viewport),
+            SceneRoot::Block(_) => self.viewport,
+        };
         let Some(record) = self
             .document
             .block_records
@@ -326,7 +351,7 @@ impl<'a> RenderSceneGraph<'a> {
                 .depths
                 .get(&handle.value())
                 .map_or(0.0, |depth| depth[0]);
-            let context = RenderContext::direct(direct_depth);
+            let context = RenderContext::direct(direct_depth, viewport);
             if !self.document_visible(entity) || !visible(entity, &context) {
                 continue;
             }
@@ -358,7 +383,7 @@ impl<'a> RenderSceneGraph<'a> {
             .depths
             .get(&root_handle.value())
             .map_or(0.0, |depth| depth[0]);
-        let context = RenderContext::direct(depth_base);
+        let context = RenderContext::direct(depth_base, self.viewport);
         if self.document_visible(&entity) && visible(&entity, &context) {
             self.walk_insert_instances(&root_insert, &context, &mut visible, &mut leaf);
         }
@@ -378,8 +403,8 @@ impl<'a> RenderSceneGraph<'a> {
         let insert_entity = EntityType::Insert(insert.clone());
         let block_style = parent
             .block_style
-            .map(|style| BlockStyle::for_nested(self.document, insert, style))
-            .unwrap_or_else(|| BlockStyle::for_entity(self.document, &insert_entity));
+            .map(|style| BlockStyle::for_nested(self.document, insert, style, self.viewport))
+            .unwrap_or_else(|| BlockStyle::for_entity(self.document, &insert_entity, self.viewport));
         let root_handle = if parent.root_handle.is_null() {
             insert.common.handle
         } else {
@@ -525,6 +550,7 @@ impl<'a> RenderSceneGraph<'a> {
                     self.document,
                     entity,
                     context.block_style,
+                    self.viewport,
                 ));
                 owned.nesting_depth += 1;
                 stack.push(block_name.to_string());

@@ -2,8 +2,9 @@
 //
 // Vertex layout: position [f32;3], normal [f32;3], color [f32;4]  (40 bytes)
 //
-// Lighting: simple half-Lambert with a fixed directional light. Two
-// shading paths share this shader, picked per-frame via `u.flat_shade`:
+// Lighting: viewport default lights or drawing light entities supplied by the
+// frame uniform. Two shading paths share this shader, picked per-frame via
+// `u.flat_shade`:
 //   - 0.0 → per-vertex normals interpolated to the fragment (Gouraud).
 //   - 1.0 → per-triangle face normal from screen-space derivatives
 //     `cross(dpdx(pos), dpdy(pos))`, so each triangle reads as a single
@@ -27,10 +28,36 @@ struct Uniforms {
     light_color_hotspot: array<vec4<f32>, 4>,
     light_attenuation: array<vec4<f32>, 4>,
     lighting: vec4<f32>,
+    visual_style: vec4<f32>,
+    visual_style_color: vec4<f32>,
+    viewport_background: vec4<f32>,
+    view_tone: vec4<f32>,
+    background_top: vec4<f32>,
+    background_middle: vec4<f32>,
+    background_bottom: vec4<f32>,
+    background_aux0: vec4<f32>,
+    background_aux1: vec4<f32>,
+    background_params: vec4<f32>,
+    background_image_params: vec4<f32>,
+    background_image_transform: vec4<f32>,
+    environment_params: vec4<f32>,
+    environment_view: mat4x4<f32>,
+    shadow_view_proj: mat4x4<f32>,
+    shadow_params: vec4<f32>,
+    fog_color: vec4<f32>,
+    fog_params: vec4<f32>,
+    fog_distances: vec4<f32>,
+    light_web_profile_a: array<vec4<f32>, 4>,
+    light_web_profile_b: array<vec4<f32>, 4>,
+    light_web_rotation: array<vec4<f32>, 4>,
 };
 
 @group(0) @binding(0)
 var<uniform> u: Uniforms;
+@group(0) @binding(3) var environment_texture: texture_2d<f32>;
+@group(0) @binding(4) var environment_sampler: sampler;
+@group(0) @binding(5) var shadow_texture: texture_depth_2d;
+@group(0) @binding(6) var shadow_sampler: sampler_comparison;
 
 struct MaterialMaps {
     blends0:  vec4<f32>,
@@ -202,6 +229,63 @@ fn map_weight(uv: vec2<f32>, tiling: u32) -> f32 {
     return 1.0;
 }
 
+fn environment_uv(direction: vec3<f32>) -> vec2<f32> {
+    let d = normalize(direction);
+    let longitude = atan2(d.x, -d.z) + u.environment_params.y;
+    let latitude = asin(clamp(d.y, -1.0, 1.0));
+    return vec2<f32>(
+        fract(longitude / (2.0 * 3.14159265359) + 0.5),
+        0.5 - latitude / 3.14159265359,
+    );
+}
+
+fn shadow_visibility(position: vec3<f32>) -> f32 {
+    if u.shadow_params.x < 0.5 {
+        return 1.0;
+    }
+    let clip = u.shadow_view_proj * vec4<f32>(position, 1.0);
+    let ndc = clip.xyz / max(abs(clip.w), 1e-6);
+    if ndc.z <= 0.0 || ndc.z >= 1.0 || any(abs(ndc.xy) > vec2<f32>(1.0)) {
+        return 1.0;
+    }
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let dimensions = vec2<f32>(textureDimensions(shadow_texture));
+    let texel = 1.0 / max(dimensions, vec2<f32>(1.0));
+    let radius = i32(clamp(ceil(u.shadow_params.z * 2.0), 0.0, 2.0));
+    var visibility = 0.0;
+    var samples = 0.0;
+    for (var y = -2; y <= 2; y = y + 1) {
+        for (var x = -2; x <= 2; x = x + 1) {
+            if abs(x) <= radius && abs(y) <= radius {
+                visibility += textureSampleCompare(
+                    shadow_texture,
+                    shadow_sampler,
+                    uv + vec2<f32>(f32(x), f32(y)) * texel,
+                    ndc.z - u.shadow_params.y,
+                );
+                samples += 1.0;
+            }
+        }
+    }
+    return visibility / max(samples, 1.0);
+}
+
+fn photometric_web(index: u32, cosine: f32) -> f32 {
+    if u.light_web_rotation[index].w < 0.5 {
+        return 1.0;
+    }
+    let profile_a = u.light_web_profile_a[index];
+    let profile_b = u.light_web_profile_b[index];
+    let angle_index = clamp(acos(clamp(cosine, -1.0, 1.0)) / 3.14159265359 * 7.0, 0.0, 7.0);
+    let lower = u32(floor(angle_index));
+    let upper = min(lower + 1u, 7u);
+    let value_at = array<f32, 8>(
+        profile_a.x, profile_a.y, profile_a.z, profile_a.w,
+        profile_b.x, profile_b.y, profile_b.z, profile_b.w,
+    );
+    return mix(value_at[lower], value_at[upper], fract(angle_index));
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let two_sided = maps.render_modes.x != 0u;
@@ -252,79 +336,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         );
     }
 
-    // Native AcDbLight / Sun lighting. When a drawing has no active lights,
-    // retain the neutral three-point editor rig so ordinary models remain
-    // readable.
-    let l0 = normalize(vec3<f32>( 0.5,  0.8,  0.6)); // key (upper front)
-    let l1 = normalize(vec3<f32>(-0.7,  0.3,  0.4)); // fill (left)
-    let l2 = normalize(vec3<f32>( 0.2, -0.6, -0.8)); // back/under
-    var direct_light = vec3<f32>(
-        0.45 * select(max(dot(n, l0), 0.0), abs(dot(n, l0)), two_sided)
-            + 0.30 * select(max(dot(n, l1), 0.0), abs(dot(n, l1)), two_sided)
-            + 0.25 * select(max(dot(n, l2), 0.0), abs(dot(n, l2)), two_sided)
-    );
-    var key_light = l0;
-    if (u.lighting.x > 0.5) {
-        direct_light = vec3<f32>(0.0);
-        let count = min(u32(u.lighting.x), 4u);
-        for (var index = 0u; index < count; index = index + 1u) {
-            let position_type = u.light_position_type[index];
-            let direction_intensity = u.light_direction_intensity[index];
-            let color_hotspot = u.light_color_hotspot[index];
-            let attenuation_data = u.light_attenuation[index];
-            var light_vector = -normalize(direction_intensity.xyz);
-            var attenuation = 1.0;
-            if (position_type.w > 1.5) {
-                let delta = position_type.xyz - in.world_pos;
-                let distance = max(length(delta), 1e-5);
-                light_vector = delta / distance;
-                if (attenuation_data.x > 1.5) {
-                    attenuation /= max(distance * distance, 1.0);
-                } else if (attenuation_data.x > 0.5) {
-                    attenuation /= max(distance, 1.0);
-                }
-                if (attenuation_data.z > attenuation_data.y) {
-                    attenuation *= 1.0 - smoothstep(
-                        attenuation_data.y,
-                        attenuation_data.z,
-                        distance,
-                    );
-                }
-                if (position_type.w > 2.5) {
-                    let source_to_fragment = -light_vector;
-                    let cone = dot(
-                        source_to_fragment,
-                        normalize(direction_intensity.xyz),
-                    );
-                    attenuation *= smoothstep(
-                        attenuation_data.w,
-                        color_hotspot.w,
-                        cone,
-                    );
-                }
-            }
-            let strength = max(direction_intensity.w, 0.0) * attenuation;
-            let response = select(
-                max(dot(n, light_vector), 0.0),
-                abs(dot(n, light_vector)),
-                two_sided,
-            );
-            direct_light += color_hotspot.rgb * response * strength;
-            if (index == 0u) {
-                key_light = light_vector;
-            }
-        }
-    }
-    let view = normalize(in.eye_vec);
-    let half_vec = normalize(key_light + view);
-    let gloss_exp = mix(2.0, 128.0, clamp(in.material.x, 0.0, 1.0));
-    let fresnel0 = pow(
-        (max(in.specular.w, 1.0) - 1.0) / (max(in.specular.w, 1.0) + 1.0),
-        2.0,
-    );
-    let fresnel = fresnel0
-        + (1.0 - fresnel0) * pow(1.0 - abs(dot(n, view)), 5.0);
-    let specular_strength = clamp(1.0 + in.material.y + fresnel, 0.0, 1.5);
     var albedo = in.color.rgb;
     if (maps.present0.x != 0u) {
         let texel = textureSample(diffuse_map, diffuse_sampler, in.uv_diffuse).rgb;
@@ -335,6 +346,23 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         );
         albedo = mix(albedo, texel, blend);
     }
+
+    // Viewport face-colour modes apply to unmaterialed faces. An attached
+    // material remains authoritative, including its own diffuse texture.
+    if (maps.source_state.z == 0u) {
+        let mode = u32(max(u.visual_style.x, 0.0) + 0.5);
+        if (mode == 2u) {
+            albedo = u.viewport_background.rgb;
+        } else if (mode == 3u || mode == 4u) {
+            albedo = u.visual_style_color.rgb;
+        } else if (mode == 5u) {
+            albedo = mix(albedo, u.visual_style_color.rgb, 0.5);
+        } else if (mode == 6u) {
+            let luminance = dot(albedo, vec3<f32>(0.2126, 0.7152, 0.0722));
+            albedo = mix(albedo, vec3<f32>(luminance), 0.3);
+        }
+    }
+
     var specular_color = select(in.specular.rgb, albedo, in.flags.x == 1u);
     if (maps.present0.y != 0u) {
         let texel = textureSample(specular_map, specular_sampler, in.uv_specular).rgb;
@@ -345,17 +373,124 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         );
         specular_color = mix(specular_color, texel, blend);
     }
-    let half_response = select(
-        max(dot(n, half_vec), 0.0),
-        abs(dot(n, half_vec)),
-        two_sided,
+    let view = normalize(in.eye_vec);
+    let gloss_exp = mix(2.0, 128.0, clamp(in.material.x, 0.0, 1.0));
+    let fresnel0 = pow(
+        (max(in.specular.w, 1.0) - 1.0) / (max(in.specular.w, 1.0) + 1.0),
+        2.0,
     );
-    let specular = specular_color
-        * pow(half_response, gloss_exp)
-        * specular_strength
-        * max(in.advanced.z, 0.0);
-    let ambient_light = albedo * clamp(in.ambient.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    var lit = ambient_light + albedo * clamp(direct_light, vec3<f32>(0.0), vec3<f32>(2.0)) + specular;
+    let fresnel = fresnel0
+        + (1.0 - fresnel0) * pow(1.0 - abs(dot(n, view)), 5.0);
+    let specular_strength = clamp(1.0 + in.material.y + fresnel, 0.0, 1.5);
+    let viewport_highlight = select(
+        1.0,
+        max(u.visual_style.z, 0.0),
+        maps.source_state.z == 0u && u.visual_style.z >= 0.0,
+    );
+
+    // The CPU resolves the viewport's default-light policy before upload, so
+    // this loop handles both generated distant lights and drawing light data.
+    // Diffuse and specular are accumulated from every visible light using the
+    // same colour, intensity, cone and attenuation terms.
+    var direct_light = vec3<f32>(0.0);
+    var direct_specular = vec3<f32>(0.0);
+    let shadow = shadow_visibility(in.world_pos);
+    let shadow_light_index = u32(max(u.shadow_params.w, 0.0) + 0.5);
+    let count = min(u32(u.lighting.x), 4u);
+    for (var index = 0u; index < count; index = index + 1u) {
+        let position_type = u.light_position_type[index];
+        let direction_intensity = u.light_direction_intensity[index];
+        let color_hotspot = u.light_color_hotspot[index];
+        let attenuation_data = u.light_attenuation[index];
+        var light_vector = -normalize(direction_intensity.xyz);
+        var attenuation = 1.0;
+        if (position_type.w > 1.5) {
+            let delta = position_type.xyz - in.world_pos;
+            let distance = max(length(delta), 1e-5);
+            light_vector = delta / distance;
+            if (attenuation_data.x > 1.5) {
+                attenuation /= max(distance * distance, 1.0);
+            } else if (attenuation_data.x > 0.5) {
+                attenuation /= max(distance, 1.0);
+            }
+            if (attenuation_data.z > attenuation_data.y) {
+                attenuation *= 1.0 - smoothstep(
+                    attenuation_data.y,
+                    attenuation_data.z,
+                    distance,
+                );
+            }
+            if (position_type.w > 2.5) {
+                let source_to_fragment = -light_vector;
+                let cone = dot(
+                    source_to_fragment,
+                    normalize(direction_intensity.xyz),
+                );
+                attenuation *= smoothstep(
+                    attenuation_data.w,
+                    color_hotspot.w,
+                    cone,
+                );
+            }
+            attenuation *= photometric_web(
+                index,
+                dot(-light_vector, normalize(direction_intensity.xyz)),
+            );
+        }
+        let visibility = select(1.0, shadow, index == shadow_light_index);
+        let strength = max(direction_intensity.w, 0.0) * attenuation * visibility;
+        let response = select(
+            max(dot(n, light_vector), 0.0),
+            abs(dot(n, light_vector)),
+            two_sided,
+        );
+        direct_light += color_hotspot.rgb * response * strength;
+        let half_vec = normalize(light_vector + view);
+        let half_response = select(
+            max(dot(n, half_vec), 0.0),
+            abs(dot(n, half_vec)),
+            two_sided,
+        );
+        direct_specular += color_hotspot.rgb
+            * specular_color
+            * pow(half_response, gloss_exp)
+            * specular_strength
+            * viewport_highlight
+            * max(in.advanced.z, 0.0)
+            * strength;
+    }
+    let ambient_light = clamp(in.ambient.rgb, vec3<f32>(0.0), vec3<f32>(1.0))
+        * clamp(u.lighting.yzw, vec3<f32>(0.0), vec3<f32>(1.0));
+    var lit = ambient_light
+        + albedo * clamp(direct_light, vec3<f32>(0.0), vec3<f32>(2.0))
+        + direct_specular;
+    if (u.environment_params.x > 0.5) {
+        let diffuse_environment = textureSample(
+            environment_texture,
+            environment_sampler,
+            environment_uv(n),
+        ).rgb;
+        let reflection_direction = reflect(-view, n);
+        let reflected_environment = textureSample(
+            environment_texture,
+            environment_sampler,
+            environment_uv(reflection_direction),
+        ).rgb;
+        let indirect_enabled = maps.source_state.z == 0u
+            || maps.render_modes.z >= 2u
+            || maps.render_modes.w != 0u;
+        let color_bleed = select(0.0, max(maps.indirect.x, 0.0), indirect_enabled);
+        lit += albedo
+            * diffuse_environment
+            * max(u.environment_params.z, 0.0)
+            * color_bleed;
+        lit += reflected_environment
+            * specular_color
+            * specular_strength
+            * viewport_highlight
+            * max(in.advanced.z, 0.0)
+            * max(u.environment_params.w, 0.0);
+    }
     if (maps.present0.z != 0u) {
         let reflected = textureSample(
             reflection_map,
@@ -398,6 +533,21 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if (in.flags.w == 1u) {
         rgb = lit + albedo * max(in.material.w, 0.0);
     }
+    let contrast = 1.0 + clamp(u.view_tone.y, -1.0, 1.0);
+    rgb = (rgb - vec3<f32>(0.5)) * contrast + vec3<f32>(0.5);
+    rgb += vec3<f32>(clamp(u.view_tone.x, -1.0, 1.0) * 0.5);
+    rgb *= max(1.0 + u.visual_style.w, 0.0);
+    if (u.fog_params.x > 0.5) {
+        let fog_range = max(u.fog_distances.y - u.fog_distances.x, 1e-6);
+        let fog_distance = length(in.world_pos);
+        let fog_position = clamp(
+            (fog_distance - u.fog_distances.x) / fog_range,
+            0.0,
+            1.0,
+        );
+        let fog_density = mix(u.fog_params.z, u.fog_params.w, fog_position);
+        rgb = mix(rgb, u.fog_color.rgb, clamp(fog_density, 0.0, 1.0));
+    }
     var material_alpha = in.color.a;
     if (maps.present0.w != 0u) {
         let opacity = textureSample(opacity_map, opacity_sampler, in.uv_opacity).r;
@@ -409,6 +559,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         material_alpha *= mix(1.0, opacity, blend);
     }
     material_alpha *= 1.0 - clamp(in.ambient.a * max(in.advanced.w, 0.0), 0.0, 0.95);
+    material_alpha *= clamp(u.visual_style.y, 0.0, 1.0);
     let alpha = select(1.0, material_alpha, u.transparency_enable > 0.5);
     return vec4<f32>(rgb, alpha);
 }

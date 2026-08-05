@@ -360,6 +360,10 @@ impl Scene {
             vp.view_direction.y = dir.y as f64;
             vp.view_direction.z = dir.z as f64;
             vp.twist_angle = twist;
+            vp.status.perspective =
+                tmp.projection == view::camera::Projection::Perspective;
+            vp.lens_length =
+                (12.0 / (tmp.fov_y * 0.5).tan().max(1e-6)) as f64;
             return true;
         }
         false

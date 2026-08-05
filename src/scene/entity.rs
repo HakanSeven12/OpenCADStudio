@@ -799,6 +799,7 @@ impl Scene {
         frozen: Option<&rustc_hash::FxHashSet<Handle>>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
+        viewport: Option<Handle>,
     ) -> Vec<HatchModel> {
         let layer_hidden = |layer: &str| {
             self.document
@@ -818,6 +819,11 @@ impl Scene {
         // Every content viewport supplies the block it renders. Do not depend
         // on camera/frustum culling to separate paper and model coordinates:
         // overlapping coordinates otherwise make foreign fills visible.
+        let hatch_bg = if self.current_layout != "Model" {
+            self.paper_bg_color
+        } else {
+            self.bg_color
+        };
         let depth_map = self.draw_depth_map();
         let mut models: Vec<HatchModel> = self
             .hatches
@@ -887,7 +893,12 @@ impl Scene {
                 // emitted first so LessEqual layering keeps it underneath.
                 let mut backdrop: Option<HatchModel> = None;
                 if let Some(e) = entity {
-                    let style = self.render_style(e);
+                    let mut style = crate::scene::view::render::render_style_for_viewport(
+                        &self.document,
+                        e,
+                        viewport,
+                    );
+                    style.0 = crate::scene::view::render::adapt_to_bg(style.0, hatch_bg);
                     m.aci = style.4;
                     m.line_weight_px = style.3;
                     // A gradient's colour is its first stop (already baked into
@@ -913,9 +924,10 @@ impl Scene {
                                         })
                                         .unwrap_or(0);
                                     (
-                                        crate::scene::view::render::layer_render_style(
+                                        crate::scene::view::render::layer_render_style_viewport(
                                             &self.document,
                                             &dxf.common.layer,
+                                            viewport,
                                         )
                                         .color,
                                         aci,
@@ -970,11 +982,6 @@ impl Scene {
             .collect();
 
         // Background for adapting block-child hatch colours at the leaf (#221).
-        let hatch_bg: [f32; 4] = if self.current_layout != "Model" {
-            self.paper_bg_color
-        } else {
-            self.bg_color
-        };
         // Instanced/owned hatch leaves are produced by the shared scene graph.
         models.extend(self.instanced_hatch_models(
             target_block,
@@ -983,6 +990,7 @@ impl Scene {
             frozen,
             annotation_scale_handle,
             all_visible,
+            viewport,
         ));
 
         // Wide polyline bands remain on the wire path, including inside block
@@ -1009,6 +1017,7 @@ impl Scene {
         frozen: Option<&rustc_hash::FxHashSet<Handle>>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
+        viewport: Option<Handle>,
     ) -> Vec<HatchModel> {
         self.instanced_hatch_models_filtered(
             layout_block,
@@ -1017,6 +1026,7 @@ impl Scene {
             frozen,
             annotation_scale_handle,
             all_visible,
+            viewport,
             None,
             false,
         )
@@ -1055,6 +1065,7 @@ impl Scene {
             (!frozen.is_empty()).then_some(&frozen),
             self.displayed_annotation_scale_handle(),
             self.annotation_all_visible(),
+            self.active_viewport,
             Some(&targets),
             true,
         )
@@ -1068,6 +1079,7 @@ impl Scene {
         frozen: Option<&rustc_hash::FxHashSet<Handle>>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
+        viewport: Option<Handle>,
         targets: Option<&rustc_hash::FxHashSet<Handle>>,
         include_preview_hidden: bool,
     ) -> Vec<HatchModel> {
@@ -1078,7 +1090,8 @@ impl Scene {
             annotation_scale_handle,
             all_visible,
             depth_map.as_ref(),
-        );
+        )
+        .with_viewport(viewport);
         let mut hatch_block_memo = std::collections::HashMap::new();
         let mut models = Vec::new();
         graph.walk_root(

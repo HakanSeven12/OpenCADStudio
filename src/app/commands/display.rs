@@ -7,6 +7,7 @@ impl OpenCADStudio {
             // path when there is no middle mouse button (trackpad / web).
             "PAN" => {
                 self.tabs[i].pan_mode = true;
+                self.clear_navigation_hover(i);
                 self.command_line
                     .push_output(crate::t!("PAN: drag with the left mouse button. Press Esc to exit.").as_ref());
             }

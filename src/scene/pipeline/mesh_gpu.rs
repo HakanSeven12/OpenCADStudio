@@ -612,7 +612,7 @@ pub fn create_material_bind_group(
             [
                 material.advanced_data_present as u32,
                 material.is_anonymous as u32,
-                0,
+                material.handle.is_some() as u32,
                 0,
             ]
         }),

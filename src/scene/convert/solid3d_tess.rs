@@ -626,12 +626,13 @@ fn sphere_param_range(
 
 /// Revolution-angle arc a torus face spans, walking all its boundary loops.
 ///
-/// A partial tube ends in two minor-circle caps sitting in constant-φ planes.
-/// Their adjacent planar faces carry outward normals that identify which cap is
-/// the start and which is the end, so both short elbows and long open tubes use
-/// the correct side of the analytic surface. If that topology is absent or
-/// ambiguous, the face remains untrimmed instead of guessing between the two
-/// possible arcs. Returns `(body_start, body_span, full)`.
+/// A partial tube ends in two oriented minor-circle boundary loops sitting in
+/// constant-φ planes. Each loop's coedge and edge senses, combined with the
+/// face sense, identify the side that belongs to the trimmed face. That makes
+/// both short elbows and long open tubes follow their recorded boundary rather
+/// than choosing an angular span by size. If that trim topology is absent or
+/// ambiguous, the face remains untrimmed. Returns
+/// `(body_start, body_span, full)`.
 pub(crate) fn torus_phi_range(
     sat: &SatDocument,
     face: &SatFace,
@@ -652,13 +653,15 @@ pub(crate) fn torus_phi_range(
             break;
         };
         lp = sl.next_loop();
-        let Some((cap_center, cap_normal)) = adjacent_planar_circle_cap(sat, &sl) else {
+        let Some((boundary_center, inward_direction)) =
+            circle_loop_inward_direction(sat, face, &sl)
+        else {
             continue;
         };
         let rel = [
-            cap_center[0] - center[0],
-            cap_center[1] - center[1],
-            cap_center[2] - center[2],
+            boundary_center[0] - center[0],
+            boundary_center[1] - center[1],
+            boundary_center[2] - center[2],
         ];
         let axial = dot3(rel, axis);
         let radial_u = dot3(rel, u);
@@ -682,11 +685,11 @@ pub(crate) fn torus_phi_range(
             major_sign * (-u[1] * phi.sin() + v[1] * phi.cos()),
             major_sign * (-u[2] * phi.sin() + v[2] * phi.cos()),
         ]);
-        let alignment = dot3(tangent, cap_normal);
+        let alignment = dot3(tangent, inward_direction);
         if (alignment.abs() - 1.0).abs() > GEOM_EPS {
             continue;
         }
-        if alignment < 0.0 {
+        if alignment > 0.0 {
             starts.push(phi);
         } else {
             ends.push(phi);
@@ -738,46 +741,73 @@ fn loop_circle_geometry(
     None
 }
 
-/// Circle centre and outward normal of the planar cap sharing a boundary loop
-/// with a curved face. Both values come from analytic SAT records.
-fn adjacent_planar_circle_cap(
+/// Circle centre and the in-surface direction lying inside an oriented loop.
+/// The direction comes directly from the boundary curve winding and face sense.
+fn circle_loop_inward_direction(
     sat: &SatDocument,
+    face: &SatFace,
     sat_loop: &SatLoop,
 ) -> Option<([f64; 3], [f64; 3])> {
-    let (circle_center, _, _) = loop_circle_geometry(sat, sat_loop)?;
+    const GEOM_EPS: f64 = 1e-6;
     let first = sat_loop.first_coedge();
     let mut current = first;
     let mut seen: HashSet<i32> = HashSet::default();
     while !current.is_null() && seen.insert(current.0) {
         let coedge = SatCoedge::from_record(sat.resolve(current)?)?;
-        if let Some(partner) = sat.resolve(coedge.partner()).and_then(SatCoedge::from_record) {
-            if let Some(partner_loop) = sat
-                .resolve(partner.owner_loop())
-                .and_then(SatLoop::from_record)
-            {
-                if let Some(adjacent_face) = sat
-                    .resolve(partner_loop.face())
-                    .and_then(SatFace::from_record)
-                {
-                    if let Some(plane) = sat
-                        .resolve(adjacent_face.surface())
-                        .and_then(SatPlaneSurface::from_record)
-                    {
-                        let (nx, ny, nz) = plane.normal();
-                        let normal = if matches!(adjacent_face.sense(), Sense::Reversed) {
-                            [-nx, -ny, -nz]
-                        } else {
-                            [nx, ny, nz]
-                        };
-                        return Some((circle_center, norm3(normal)));
-                    }
-                }
-            }
-        }
-        current = coedge.next();
-        if current == first {
+        let Some(edge) = sat.resolve(coedge.edge()).and_then(SatEdge::from_record) else {
             break;
+        };
+        let Some(ellipse) = sat
+            .resolve(edge.curve())
+            .and_then(SatEllipseCurve::from_record)
+        else {
+            current = coedge.next();
+            if current == first {
+                break;
+            }
+            continue;
+        };
+        if (ellipse.ratio() - 1.0).abs() > GEOM_EPS {
+            current = coedge.next();
+            if current == first {
+                break;
+            }
+            continue;
         }
+
+        let center = ellipse.center();
+        let ellipse_frame = ellipse_frame(&ellipse, matches!(edge.sense(), Sense::Reversed))?;
+        let coedge_forward = matches!(coedge.sense(), Sense::Forward);
+        let parameter = if coedge_forward {
+            edge.start_param()
+        } else {
+            edge.end_param()
+        };
+        let edge_span = edge.end_param() - edge.start_param();
+        let edge_direction = if edge_span < -GEOM_EPS { -1.0 } else { 1.0 };
+        let traversal_direction = if coedge_forward {
+            edge_direction
+        } else {
+            -edge_direction
+        };
+        let (point, curve_tangent) = ellipse_frame.point_tangent(parameter);
+        let boundary_tangent = norm3([
+            traversal_direction * curve_tangent[0],
+            traversal_direction * curve_tangent[1],
+            traversal_direction * curve_tangent[2],
+        ]);
+        let face_sign = if matches!(face.sense(), Sense::Reversed) {
+            -1.0
+        } else {
+            1.0
+        };
+        let face_normal = norm3([
+            face_sign * (point[0] - center.0),
+            face_sign * (point[1] - center.1),
+            face_sign * (point[2] - center.2),
+        ]);
+        let inward = norm3(cross3(face_normal, boundary_tangent));
+        return Some(([center.0, center.1, center.2], inward));
     }
     None
 }
@@ -1642,6 +1672,66 @@ pub(crate) fn append_coedge_points(
     }
 }
 
+struct EllipseFrame {
+    center: [f64; 3],
+    major: [f64; 3],
+    minor: [f64; 3],
+    major_len: f64,
+}
+
+impl EllipseFrame {
+    fn point_tangent(&self, parameter: f64) -> ([f64; 3], [f64; 3]) {
+        let (sin_parameter, cos_parameter) = parameter.sin_cos();
+        (
+            [
+                self.center[0]
+                    + self.major[0] * cos_parameter
+                    + self.minor[0] * sin_parameter,
+                self.center[1]
+                    + self.major[1] * cos_parameter
+                    + self.minor[1] * sin_parameter,
+                self.center[2]
+                    + self.major[2] * cos_parameter
+                    + self.minor[2] * sin_parameter,
+            ],
+            [
+                -self.major[0] * sin_parameter + self.minor[0] * cos_parameter,
+                -self.major[1] * sin_parameter + self.minor[1] * cos_parameter,
+                -self.major[2] * sin_parameter + self.minor[2] * cos_parameter,
+            ],
+        )
+    }
+}
+
+/// Analytic ellipse frame shared by boundary sampling and trim orientation.
+fn ellipse_frame(ellipse: &SatEllipseCurve, curve_reversed: bool) -> Option<EllipseFrame> {
+    let center = ellipse.center();
+    let major = ellipse.major_axis();
+    let major_len = (major.0 * major.0 + major.1 * major.1 + major.2 * major.2).sqrt();
+    if major_len < 1e-12 {
+        return None;
+    }
+    let major_u = [
+        major.0 / major_len,
+        major.1 / major_len,
+        major.2 / major_len,
+    ];
+    let normal = norm3([ellipse.normal().0, ellipse.normal().1, ellipse.normal().2]);
+    let minor_u = cross3(normal, major_u);
+    let minor_len = major_len * ellipse.ratio();
+    let hand = if curve_reversed { -1.0 } else { 1.0 };
+    Some(EllipseFrame {
+        center: [center.0, center.1, center.2],
+        major: [major_u[0] * major_len, major_u[1] * major_len, major_u[2] * major_len],
+        minor: [
+            minor_u[0] * minor_len * hand,
+            minor_u[1] * minor_len * hand,
+            minor_u[2] * minor_len * hand,
+        ],
+        major_len,
+    })
+}
+
 /// Sample points along an ellipse/circle arc from `sp` to `ep` (radians).
 /// Returns points at the start of each segment (the end param is omitted so
 /// adjacent coedges don't double up the shared junction point). Segment count
@@ -1657,49 +1747,24 @@ fn sample_ellipse_arc(
     if span.abs() < 1e-9 {
         return vec![];
     }
-    let center = ellipse.center();
-    let major = ellipse.major_axis();
-    let major_len = (major.0 * major.0 + major.1 * major.1 + major.2 * major.2).sqrt();
-    if major_len < 1e-12 {
+    let Some(frame) = ellipse_frame(ellipse, curve_reversed) else {
         return vec![];
-    }
-    let major_u = [
-        major.0 / major_len,
-        major.1 / major_len,
-        major.2 / major_len,
-    ];
-    let normal = norm3([ellipse.normal().0, ellipse.normal().1, ellipse.normal().2]);
-    let minor_u = cross3(normal, major_u);
-    let minor_len = major_len * ellipse.ratio();
-
-    // P(t) = center + major·cos t + (normal×major)·ratio·sin t, with param
-    // winding CCW about the curve normal. An edge stored with REVERSED sense
-    // traverses the curve backward, i.e. about the opposite normal, so its
-    // params index the mirror winding — evaluate with the sin term negated.
-    // Ignoring the edge sense mirrors a reversed boundary arc across the major
-    // axis to the far side of the circle, ballooning a curved wall into a full
-    // cylinder of the surface radius.
-    let hand = if curve_reversed { -1.0 } else { 1.0 };
+    };
 
     // Segment count from this ellipse's own radius and arc span at the requested
     // chord tolerance — the same model the 2-D circle/arc/ellipse wires use, so
     // a big rim samples finer than a small one and a short arc proportionally
     // less than a full turn. `major_len` is the reference radius.
     let segs = crate::scene::convert::tess_util::arc_segments_floored(
-        major_len,
+        frame.major_len,
         span.abs(),
-        major_len * chord_frac,
+        frame.major_len * chord_frac,
         2,
     ) as usize;
     let mut out = Vec::with_capacity(segs);
     for i in 0..segs {
         let t = sp + span * (i as f64 / segs as f64);
-        let (c, s) = (t.cos(), t.sin() * hand);
-        out.push([
-            center.0 + major_u[0] * major_len * c + minor_u[0] * minor_len * s,
-            center.1 + major_u[1] * major_len * c + minor_u[1] * minor_len * s,
-            center.2 + major_u[2] * major_len * c + minor_u[2] * minor_len * s,
-        ]);
+        out.push(frame.point_tangent(t).0);
     }
     out
 }

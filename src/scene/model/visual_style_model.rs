@@ -110,7 +110,7 @@ fn property_color(style: &VisualStyle, index: usize) -> Option<[f32; 4]> {
 }
 
 impl MeshVisualStyle {
-    fn from_dwg(handle: Handle, style: &VisualStyle) -> Self {
+    pub(crate) fn from_dwg(handle: Handle, style: &VisualStyle) -> Self {
         Self {
             full_handle: Some(handle),
             face_handle: None,
@@ -230,6 +230,14 @@ impl MeshVisualStyle {
         color[3] *= self.edge_opacity;
         color
     }
+}
+
+pub(crate) fn resolve_visual_style_handle(
+    document: &CadDocument,
+    handle: Handle,
+) -> Option<MeshVisualStyle> {
+    visual_style(document, Some(handle))
+        .map(|(handle, style)| MeshVisualStyle::from_dwg(handle, style))
 }
 
 fn visual_style(

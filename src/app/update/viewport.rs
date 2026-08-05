@@ -663,17 +663,22 @@ impl OpenCADStudio {
             VIEWCUBE_PX,
         ));
 
-        // Multi-functional grip hover: detect cursor sitting on a
-        // selected entity's grip and, after a dwell, open the
-        // popup menu. See scene::model::object::GripMenuItem.
-        self.update_grip_hover(i, p);
+        let navigating = self.tabs[i].scene.selection.borrow().middle_down;
+        if navigating {
+            self.clear_navigation_hover(i);
+        } else {
+            // Multi-functional grip hover: detect cursor sitting on a
+            // selected entity's grip and, after a dwell, open the
+            // popup menu. See scene::model::object::GripMenuItem.
+            self.update_grip_hover(i, p);
 
-        // UCS icon hover highlight (suppressed mid grip-drag).
-        self.ucs_icon_hover = self.ucs_grip_drag.is_none()
-            && self
-                .ucs_icon_hit_info(i, svw, svh)
-                .map(|h| over_ucs_icon(p, &h))
-                .unwrap_or(false);
+            // UCS icon hover highlight (suppressed mid grip-drag).
+            self.ucs_icon_hover = self.ucs_grip_drag.is_none()
+                && self
+                    .ucs_icon_hit_info(i, svw, svh)
+                    .map(|h| over_ucs_icon(p, &h))
+                    .unwrap_or(false);
+        }
 
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.last_move_pos = Some(p);
@@ -2213,6 +2218,7 @@ impl OpenCADStudio {
         // Interactive navigation tools reuse the middle-button movement path,
         // so no selection/pick logic runs while the left button drives them.
         if self.tabs[i].orbit_mode || self.tabs[i].pan_mode {
+            self.clear_navigation_hover(i);
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
             sel.middle_down = true;
             sel.middle_last_pos = Some(p);
@@ -2388,6 +2394,8 @@ impl OpenCADStudio {
             sel.middle_down = false;
             sel.middle_last_pos = None;
             sel.orbit_pivot = None;
+            drop(sel);
+            self.arm_hover_after_navigation(i);
             return Task::none();
         }
 
@@ -3952,8 +3960,52 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// Remove cursor-derived highlights and cancel a queued rollover pick before
+    /// moving the camera. A later idle cursor move re-arms hover normally.
+    pub(in crate::app) fn clear_navigation_hover(&mut self, i: usize) {
+        if i >= self.tabs.len() {
+            return;
+        }
+        self.tabs[i].scene.set_hover_highlight(None);
+        self.hover_dwell = None;
+        self.grip_hover = None;
+        self.ucs_icon_hover = false;
+    }
+
+    /// Queue a fresh rollover pick at the stationary cursor after camera motion
+    /// ends. Repeated wheel events replace this timestamp, so the pick runs only
+    /// after the final zoom step settles.
+    pub(in crate::app) fn arm_hover_after_navigation(&mut self, i: usize) {
+        if i >= self.tabs.len() || self.tabs[i].active_cmd.is_some() {
+            return;
+        }
+        let (cursor, canvas_size) = {
+            let selection = self.tabs[i].scene.selection.borrow();
+            (selection.last_move_pos, selection.vp_size)
+        };
+        let Some(cursor) = cursor else {
+            return;
+        };
+        let tile = self.tabs[i]
+            .scene
+            .viewport_edit_frame(canvas_size)
+            .map(|(_, rect)| rect)
+            .unwrap_or_else(|| {
+                self.tabs[i]
+                    .scene
+                    .active_model_tile_bounds(canvas_size.0, canvas_size.1)
+            });
+        self.hover_dwell = Some(crate::app::HoverDwell {
+            last_move_at: Instant::now(),
+            point: Point::new(cursor.x - tile.x, cursor.y - tile.y),
+            tile_size: (tile.width, tile.height),
+            tab: i,
+        });
+    }
+
     pub(super) fn on_viewport_middle_press(&mut self) -> Task<Message> {
         let i = self.active_tab;
+        self.clear_navigation_hover(i);
         self.ribbon.close_dropdown();
         let now = Instant::now();
         let is_double = {
@@ -3988,6 +4040,7 @@ impl OpenCADStudio {
             mouse::ScrollDelta::Pixels { y, .. } => y * 0.01,
         };
         let i = self.active_tab;
+        self.clear_navigation_hover(i);
         let cursor = self.tabs[i].scene.selection.borrow().last_move_pos;
         let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
         let bounds = iced::Rectangle {
@@ -4040,6 +4093,7 @@ impl OpenCADStudio {
         self.tabs[i]
             .scene
             .record_nav_perf(crate::scene::NavPerfOp::Zoom, nav_started);
+        self.arm_hover_after_navigation(i);
         Task::none()
     }
 
@@ -4149,6 +4203,7 @@ impl OpenCADStudio {
 
     fn snap_view_region(&mut self, region: CubeRegion, r_ucs: glam::Mat4) -> Task<Message> {
         let i = self.active_tab;
+        self.clear_navigation_hover(i);
         let mut region = region;
         // "Already there → flip to opposite" check: compare the
         // current gaze direction with the region's target gaze.
@@ -4204,8 +4259,13 @@ impl OpenCADStudio {
         let i = dwell.tab;
         // Re-check the gate — drag / command may have started
         // between the move that armed the dwell and this tick.
-        if i >= self.tabs.len() || self.tabs[i].active_cmd.is_some() {
+        if i >= self.tabs.len() {
             self.hover_dwell = None;
+            return Task::none();
+        }
+        let navigating = self.tabs[i].scene.selection.borrow().middle_down;
+        if self.tabs[i].active_cmd.is_some() || navigating {
+            self.clear_navigation_hover(i);
             return Task::none();
         }
         let bounds = iced::Rectangle {

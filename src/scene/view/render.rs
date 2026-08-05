@@ -14,9 +14,12 @@ use std::sync::Arc;
 use crate::scene::pipeline::viewcube::{hover_id, VIEWCUBE_PX};
 use crate::scene::pipeline::MultiPipeline;
 use crate::scene::convert::tess_util;
+use crate::scene::model::visual_style_model::{
+    resolve_visual_style_handle, MeshVisualStyle,
+};
 use crate::scene::{
-    vp_effective_scale, HatchModel, ImageModel, MeshLodSet, NavPerfSample, Scene, SceneLight,
-    Uniforms, ViewportInstance, WireModel,
+    vp_effective_scale, Camera, HatchModel, ImageModel, MeshLodSet, NavPerfSample, Scene,
+    SceneLight, Uniforms, ViewportInstance, WireModel,
 };
 
 // ── Camera hover state (shader::Program::State) ───────────────────────────
@@ -24,6 +27,75 @@ use crate::scene::{
 #[derive(Clone, Default)]
 pub struct CameraState {
     pub hover_region: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct ViewportLightingSettings {
+    force_default: bool,
+    default_type: i16,
+    ambient: [f32; 3],
+}
+
+#[derive(Clone)]
+struct ViewportDisplaySettings {
+    visual_style: Option<MeshVisualStyle>,
+    brightness: f32,
+    contrast: f32,
+    background: ViewportBackgroundSettings,
+}
+
+#[derive(Clone, Debug)]
+struct ViewportBackgroundSettings {
+    base: [f32; 4],
+    colors: [[f32; 4]; 5],
+    params: [f32; 4],
+    image_params: [f32; 4],
+    image_transform: [f32; 4],
+    environment_params: [f32; 4],
+    fog_color: [f32; 4],
+    fog_params: [f32; 4],
+    fog_distances: [f32; 4],
+    image: Option<crate::scene::model::image_model::DecodedImage>,
+    environment: Option<crate::scene::model::image_model::DecodedImage>,
+}
+
+impl ViewportBackgroundSettings {
+    fn canvas(color: [f32; 4]) -> Self {
+        Self {
+            base: color,
+            colors: [[0.0; 4]; 5],
+            params: [0.0; 4],
+            image_params: [0.0; 4],
+            image_transform: [0.0, 0.0, 1.0, 1.0],
+            environment_params: [0.0, 0.0, 0.25, 0.35],
+            fog_color: [0.0, 0.0, 0.0, 1.0],
+            fog_params: [0.0; 4],
+            fog_distances: [0.0, 1.0, 0.0, 0.0],
+            image: None,
+            environment: None,
+        }
+    }
+}
+
+impl Default for ViewportDisplaySettings {
+    fn default() -> Self {
+        Self {
+            visual_style: None,
+            brightness: 0.0,
+            contrast: 0.0,
+            background: ViewportBackgroundSettings::canvas([0.0; 4]),
+        }
+    }
+}
+
+impl Default for ViewportLightingSettings {
+    fn default() -> Self {
+        Self {
+            force_default: true,
+            default_type: 1,
+            ambient: [0.18; 3],
+        }
+    }
 }
 
 // ── GPU primitive ─────────────────────────────────────────────────────────
@@ -79,6 +151,10 @@ pub struct ViewportData {
     pub(in crate::scene) wipeout_hatches: Arc<Vec<HatchModel>>,
     pub(in crate::scene) images: Arc<Vec<ImageModel>>,
     pub(in crate::scene) meshes: Arc<Vec<MeshLodSet>>,
+    pub(in crate::scene) background_image:
+        Option<crate::scene::model::image_model::DecodedImage>,
+    pub(in crate::scene) environment_image:
+        Option<crate::scene::model::image_model::DecodedImage>,
     pub(in crate::scene) uniforms: Uniforms,
     /// World-space camera forward — the parallel view direction. DISPSILH
     /// silhouettes use this alone (not the eye position), so the outline follows
@@ -333,6 +409,12 @@ impl shader::Primitive for Primitive {
             let (uo_x, us_x) = uv_crop_axis(sr.x, sr.width);
             let (uo_y, us_y) = uv_crop_axis(sr.y, sr.height);
             inner.upload_blit_uv(queue, [uo_x, uo_y], [us_x, us_y]);
+            inner.upload_background_images(
+                device,
+                queue,
+                vp.background_image.as_ref(),
+                vp.environment_image.as_ref(),
+            );
             inner.upload_uniforms(queue, &vp.uniforms);
 
             // ── Scene-render cache ────────────────────────────────────────
@@ -1140,6 +1222,16 @@ fn render_signature(vp: &ViewportData, clip_w: u32, clip_h: u32) -> u64 {
     // one shot. Identical camera state recomputes to identical bits, so a still
     // view never spuriously misses the cache.
     bytemuck::bytes_of(&vp.uniforms).hash(&mut h);
+    vp.background_image
+        .as_ref()
+        .map(|image| std::sync::Arc::as_ptr(&image.pixels) as usize)
+        .unwrap_or(0)
+        .hash(&mut h);
+    vp.environment_image
+        .as_ref()
+        .map(|image| std::sync::Arc::as_ptr(&image.pixels) as usize)
+        .unwrap_or(0)
+        .hash(&mut h);
     vp.geometry_epoch.hash(&mut h);
     vp.selection_generation.hash(&mut h);
     vp.selected_sig.hash(&mut h);
@@ -1373,7 +1465,7 @@ impl Scene {
             if !light.status {
                 return None;
             }
-            let direction = normalized(
+            let mut direction = normalized(
                 [
                     light.target.x - light.position.x,
                     light.target.y - light.position.y,
@@ -1391,14 +1483,110 @@ impl Scene {
             } else {
                 scene.layer_color(&light.common.layer)
             };
+            let mut color = [rgba[0], rgba[1], rgba[2]];
+            let mut intensity = light.intensity.max(0.0) as f32;
+            let mut attenuation_type = light.attenuation_type as f32;
+            let mut attenuation_start = if light.use_attenuation_limits {
+                light.attenuation_start_limit as f32
+            } else {
+                0.0
+            };
+            let mut attenuation_end = if light.use_attenuation_limits {
+                light.attenuation_end_limit as f32
+            } else {
+                0.0
+            };
+            let mut area_softness = 0.0_f32;
+            let mut web_profile = [1.0_f32; 8];
+            let mut web_rotation = [0.0_f32; 3];
+            let mut web_enabled = false;
+            if light.photometric_mode {
+                if let Some(photo) = light.photometric_data.as_ref() {
+                    let solid_angle = if light.is_spot() && light.falloff_angle > 0.0 {
+                        2.0 * std::f64::consts::PI
+                            * (1.0 - (light.falloff_angle * 0.5).cos())
+                    } else {
+                        4.0 * std::f64::consts::PI
+                    };
+                    let physical = if photo.physical_intensity > 0.0 {
+                        photo.physical_intensity
+                    } else {
+                        photo.web_flux.max(0.0)
+                    };
+                    let candela = match photo.physical_intensity_method {
+                        1 => physical / solid_angle.max(1e-6),
+                        2 => physical * photo.illuminance_distance.max(1e-6).powi(2),
+                        _ => physical,
+                    };
+                    if candela > 0.0 && candela.is_finite() {
+                        intensity *= (candela / 1500.0) as f32;
+                    }
+                    if photo.lamp_color_temperature >= 1000.0 {
+                        let kelvin = photo.lamp_color_temperature.clamp(1000.0, 40000.0) / 100.0;
+                        let red = if kelvin <= 66.0 {
+                            255.0
+                        } else {
+                            329.698_727_446 * (kelvin - 60.0).powf(-0.133_204_759_2)
+                        };
+                        let green = if kelvin <= 66.0 {
+                            99.470_802_586_1 * kelvin.ln() - 161.119_568_166_1
+                        } else {
+                            288.122_169_528_3 * (kelvin - 60.0).powf(-0.075_514_849_2)
+                        };
+                        let blue = if kelvin >= 66.0 {
+                            255.0
+                        } else if kelvin <= 19.0 {
+                            0.0
+                        } else {
+                            138.517_731_223_1 * (kelvin - 10.0).ln() - 305.044_792_730_7
+                        };
+                        let lamp = [red, green, blue].map(|channel| {
+                            (channel.clamp(0.0, 255.0) / 255.0) as f32
+                        });
+                        for index in 0..3 {
+                            color[index] *= lamp[index];
+                        }
+                    }
+                    attenuation_type = 2.0;
+                    attenuation_start = 0.0;
+                    attenuation_end = 0.0;
+                    area_softness = match photo.extended_light_shape {
+                        1 => photo.extended_light_length,
+                        2 => photo.extended_light_length.max(photo.extended_light_width),
+                        3 => photo.extended_light_radius * 2.0,
+                        _ => 0.0,
+                    }
+                    .max(0.0) as f32;
+                    if photo.has_web_file {
+                        if let Some(profile) = scene.photometric_web_profile(&photo.web_file) {
+                            web_profile = profile;
+                            web_rotation = [
+                                photo.web_rotation.x as f32,
+                                photo.web_rotation.y as f32,
+                                photo.web_rotation.z as f32,
+                            ];
+                            let rotation = glam::Quat::from_euler(
+                                glam::EulerRot::XYZ,
+                                web_rotation[0],
+                                web_rotation[1],
+                                web_rotation[2],
+                            );
+                            direction = (rotation * glam::Vec3::from_array(direction))
+                                .normalize_or(glam::Vec3::NEG_Z)
+                                .to_array();
+                            web_enabled = true;
+                        }
+                    }
+                }
+            }
             Some(SceneLight {
                 handle: light.common.handle,
                 color_layer,
                 light_type: light.light_type as f32,
                 position: [light.position.x, light.position.y, light.position.z],
                 direction,
-                color: [rgba[0], rgba[1], rgba[2]],
-                intensity: light.intensity.max(0.0) as f32,
+                color,
+                intensity,
                 hotspot_cos: if light.hotspot_angle > 0.0 {
                     (light.hotspot_angle * 0.5).cos() as f32
                 } else {
@@ -1409,17 +1597,16 @@ impl Scene {
                 } else {
                     -1.0
                 },
-                attenuation_type: light.attenuation_type as f32,
-                attenuation_start: if light.use_attenuation_limits {
-                    light.attenuation_start_limit as f32
-                } else {
-                    0.0
-                },
-                attenuation_end: if light.use_attenuation_limits {
-                    light.attenuation_end_limit as f32
-                } else {
-                    0.0
-                },
+                attenuation_type,
+                attenuation_start,
+                attenuation_end,
+                cast_shadows: light.cast_shadows,
+                shadow_softness: light.shadow_map_softness as f32 / 255.0 + area_softness,
+                shadow_map_size: u32::try_from(light.shadow_map_size.max(0))
+                    .unwrap_or(0),
+                web_profile,
+                web_rotation,
+                web_enabled,
             })
         }
 
@@ -1487,6 +1674,12 @@ impl Scene {
                 attenuation_type: 0.0,
                 attenuation_start: 0.0,
                 attenuation_end: 0.0,
+                cast_shadows: sun.has_shadow,
+                shadow_softness: sun.shadow_softness as f32 / 255.0,
+                shadow_map_size: u32::try_from(sun.shadow_map_size.max(0)).unwrap_or(0),
+                web_profile: [1.0; 8],
+                web_rotation: [0.0; 3],
+                web_enabled: false,
             });
             break;
         }
@@ -1498,6 +1691,7 @@ impl Scene {
         uniforms: &mut Uniforms,
         target_block: Handle,
         frozen: &rustc_hash::FxHashSet<Handle>,
+        viewport: &ViewportInstance,
     ) {
         let key = (target_block, Self::frozen_layers_sig(frozen));
         if !self.lighting_cache.borrow().contains_key(&key) {
@@ -1532,13 +1726,19 @@ impl Scene {
             })
             .take(4)
             .collect();
+        let settings = self.viewport_lighting_settings(viewport);
+        uniforms.lighting[1..4].copy_from_slice(&settings.ambient);
+        if settings.force_default || visible_lights.is_empty() {
+            Self::apply_default_lighting(uniforms, &viewport.camera, settings.default_type);
+            return;
+        }
         let eye = [
             uniforms.eye_high[0] as f64 + uniforms.eye_low[0] as f64,
             uniforms.eye_high[1] as f64 + uniforms.eye_low[1] as f64,
             uniforms.eye_high[2] as f64 + uniforms.eye_low[2] as f64,
         ];
         uniforms.lighting[0] = visible_lights.len() as f32;
-        for (index, light) in visible_lights.into_iter().enumerate() {
+        for (index, light) in visible_lights.iter().copied().enumerate() {
             let color = light
                 .color_layer
                 .as_deref()
@@ -1569,6 +1769,575 @@ impl Scene {
                 light.attenuation_end,
                 light.falloff_cos,
             ];
+            uniforms.light_web_profile_a[index]
+                .copy_from_slice(&light.web_profile[..4]);
+            uniforms.light_web_profile_b[index]
+                .copy_from_slice(&light.web_profile[4..]);
+            uniforms.light_web_rotation[index] = [
+                light.web_rotation[0],
+                light.web_rotation[1],
+                light.web_rotation[2],
+                light.web_enabled as u8 as f32,
+            ];
+        }
+        if let Some((index, light)) = visible_lights
+            .iter()
+            .enumerate()
+            .find(|(_, light)| light.cast_shadows)
+        {
+            let target = (viewport.camera.target - viewport.camera.eye()).as_vec3();
+            let up_for = |direction: glam::Vec3| {
+                if direction.z.abs() > 0.95 {
+                    glam::Vec3::Y
+                } else {
+                    glam::Vec3::Z
+                }
+            };
+            let radius = viewport
+                .camera
+                .ortho_size()
+                .max(viewport.camera.distance * 0.25)
+                .max(1.0);
+            let shadow_view_proj = if light.light_type < 1.5 {
+                let direction = glam::Vec3::from_array(light.direction)
+                    .normalize_or(glam::Vec3::NEG_Z);
+                let light_eye = target - direction * radius * 2.0;
+                let view = glam::camera::rh::view::look_at_mat4(
+                    light_eye,
+                    target,
+                    up_for(direction),
+                );
+                let aspect = (uniforms.viewport_size[0] / uniforms.viewport_size[1].max(1.0))
+                    .max(1.0);
+                let projection = glam::camera::rh::proj::directx::orthographic(
+                    -radius * aspect,
+                    radius * aspect,
+                    -radius,
+                    radius,
+                    0.01,
+                    radius * 5.0,
+                );
+                projection * view
+            } else {
+                let position = glam::Vec3::new(
+                    uniforms.light_position_type[index][0],
+                    uniforms.light_position_type[index][1],
+                    uniforms.light_position_type[index][2],
+                );
+                let direction = if light.light_type < 2.5 {
+                    (target - position).normalize_or(glam::Vec3::NEG_Z)
+                } else {
+                    glam::Vec3::from_array(light.direction)
+                        .normalize_or(glam::Vec3::NEG_Z)
+                };
+                let view = glam::camera::rh::view::look_at_mat4(
+                    position,
+                    position + direction,
+                    up_for(direction),
+                );
+                let fov = if light.light_type < 2.5 {
+                    170.0_f32.to_radians()
+                } else {
+                    (2.0 * light.falloff_cos.clamp(-0.99, 0.99).acos())
+                        .clamp(5.0_f32.to_radians(), 170.0_f32.to_radians())
+                };
+                let far = if light.attenuation_end > 0.01 {
+                    light.attenuation_end
+                } else {
+                    radius * 5.0
+                };
+                glam::camera::rh::proj::directx::perspective(
+                    fov,
+                    1.0,
+                    0.01,
+                    far.max(0.02),
+                ) * view
+            };
+            uniforms.shadow_view_proj = shadow_view_proj;
+            let requested_size = light.shadow_map_size.max(256) as f32;
+            uniforms.shadow_params = [
+                1.0,
+                (2.0 / requested_size).clamp(0.0002, 0.004),
+                light.shadow_softness.clamp(0.0, 2.0),
+                index as f32,
+            ];
+        }
+    }
+
+    fn viewport_lighting_settings(
+        &self,
+        viewport: &ViewportInstance,
+    ) -> ViewportLightingSettings {
+        let ambient = |color: &AcadColor| {
+            color.rgb().map_or([0.18; 3], |(r, g, b)| {
+                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
+            })
+        };
+        let from_entity = |value: &acadrust::entities::Viewport| ViewportLightingSettings {
+            force_default: value.default_lighting,
+            default_type: value.default_lighting_type,
+            ambient: ambient(&value.ambient_color),
+        };
+        let from_table = |value: &acadrust::tables::VPort| ViewportLightingSettings {
+            force_default: value.use_default_lights,
+            default_type: value.default_lighting_type,
+            ambient: ambient(&value.ambient_color),
+        };
+
+        if viewport.paper_sheet {
+            let handle = self.current_layout_sheet_viewport_handle();
+            if let Some(EntityType::Viewport(value)) = self.document.get_entity(handle) {
+                return from_entity(value);
+            }
+        } else if viewport.handle.is_valid() {
+            if let Some(EntityType::Viewport(value)) = self.document.get_entity(viewport.handle) {
+                return from_entity(value);
+            }
+        } else if self.current_layout == "Model" {
+            let index = viewport.tile_idx.unwrap_or(0);
+            if let Some(value) = self
+                .document
+                .vports
+                .iter()
+                .filter(|value| value.name.eq_ignore_ascii_case("*Active"))
+                .nth(index)
+            {
+                return from_table(value);
+            }
+        }
+        ViewportLightingSettings::default()
+    }
+
+    fn viewport_display_settings(
+        &self,
+        viewport: &ViewportInstance,
+    ) -> ViewportDisplaySettings {
+        let canvas_background = if viewport.paper_sheet {
+            self.paper_bg_color
+        } else {
+            self.bg_color
+        };
+        let build = |visual_style_handle: Handle,
+                     brightness: f64,
+                     contrast: f64,
+                     background_handle: Handle| {
+            let visual_style = resolve_visual_style_handle(
+                &self.document,
+                visual_style_handle,
+            );
+            let mut background = self
+                .viewport_background(background_handle, canvas_background, 0);
+            self.apply_document_render_environment(&mut background);
+            ViewportDisplaySettings {
+                visual_style,
+                brightness: (brightness as f32 / 10.0).clamp(-1.0, 1.0),
+                contrast: (contrast as f32 / 10.0).clamp(-1.0, 1.0),
+                background,
+            }
+        };
+
+        if viewport.paper_sheet {
+            let handle = self.current_layout_sheet_viewport_handle();
+            if let Some(EntityType::Viewport(value)) = self.document.get_entity(handle) {
+                return build(
+                    value.visual_style_handle,
+                    value.brightness,
+                    value.contrast,
+                    value.background_handle,
+                );
+            }
+        } else if viewport.handle.is_valid() {
+            if let Some(EntityType::Viewport(value)) = self.document.get_entity(viewport.handle) {
+                return build(
+                    value.visual_style_handle,
+                    value.brightness,
+                    value.contrast,
+                    value.background_handle,
+                );
+            }
+        } else if self.current_layout == "Model" {
+            let index = viewport.tile_idx.unwrap_or(0);
+            if let Some(value) = self
+                .document
+                .vports
+                .iter()
+                .filter(|value| value.name.eq_ignore_ascii_case("*Active"))
+                .nth(index)
+            {
+                return build(
+                    value.visual_style_handle,
+                    value.brightness,
+                    value.contrast,
+                    value.background_handle,
+                );
+            }
+        }
+
+        let mut background = ViewportBackgroundSettings::canvas(canvas_background);
+        self.apply_document_render_environment(&mut background);
+        ViewportDisplaySettings {
+            background,
+            ..ViewportDisplaySettings::default()
+        }
+    }
+
+    fn packed_background_color(color: u32) -> [f32; 4] {
+        [
+            ((color >> 16) & 0xff) as f32 / 255.0,
+            ((color >> 8) & 0xff) as f32 / 255.0,
+            (color & 0xff) as f32 / 255.0,
+            1.0,
+        ]
+    }
+
+    fn background_image(
+        &self,
+        reference: &str,
+    ) -> Option<crate::scene::model::image_model::DecodedImage> {
+        let reference = reference.trim();
+        if reference.is_empty() {
+            return None;
+        }
+        if reference.starts_with("http://") || reference.starts_with("https://") {
+            return crate::scene::model::image_model::resolve_image(reference);
+        }
+        let normalized = reference.replace('\\', "/");
+        let source = std::path::PathBuf::from(&normalized);
+        let mut candidates = Vec::new();
+        if source.is_absolute() {
+            candidates.push(source.clone());
+        }
+        if let Some(base) = self.material_base_dir.as_deref() {
+            candidates.push(base.join(&source));
+            if let Some(name) = source.file_name() {
+                candidates.push(base.join(name));
+                for folder in ["Textures", "textures", "Materials", "materials"] {
+                    candidates.push(base.join(folder).join(name));
+                }
+            }
+        }
+        candidates
+            .into_iter()
+            .find(|path| path.is_file())
+            .and_then(|path| {
+                crate::scene::model::image_model::resolve_image(&path.to_string_lossy())
+            })
+    }
+
+    fn photometric_web_profile(&self, reference: &str) -> Option<[f32; 8]> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (self, reference);
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let reference = reference.trim();
+            if reference.is_empty() {
+                return None;
+            }
+            let source = std::path::PathBuf::from(reference.replace('\\', "/"));
+            let mut candidates = Vec::new();
+            if source.is_absolute() {
+                candidates.push(source.clone());
+            }
+            if let Some(base) = self.material_base_dir.as_deref() {
+                candidates.push(base.join(&source));
+                if let Some(name) = source.file_name() {
+                    candidates.push(base.join(name));
+                    for folder in ["Photometric", "photometric", "Web", "web", "Lights", "lights"] {
+                        candidates.push(base.join(folder).join(name));
+                    }
+                }
+            }
+            let path = candidates.into_iter().find(|path| path.is_file())?;
+            let contents = std::fs::read_to_string(path).ok()?;
+            let tilt_start = contents.lines().position(|line| {
+                line.trim_start().to_ascii_uppercase().starts_with("TILT=")
+            })?;
+            let lines: Vec<&str> = contents.lines().collect();
+            let tilt = lines[tilt_start]
+                .trim()
+                .split_once('=')
+                .map(|(_, value)| value.trim().to_ascii_uppercase())?;
+            if tilt != "NONE" && tilt != "INCLUDE" {
+                return None;
+            }
+            let values: Vec<f64> = lines[tilt_start + 1..]
+                .iter()
+                .flat_map(|line| line.split(|character: char| character.is_whitespace() || character == ','))
+                .filter(|token| !token.is_empty())
+                .filter_map(|token| token.parse::<f64>().ok())
+                .collect();
+            let mut cursor = 0usize;
+            if tilt == "INCLUDE" {
+                let angle_count = values.get(cursor + 1).copied()?.round() as usize;
+                cursor = cursor.checked_add(2 + angle_count.checked_mul(2)?)?;
+            }
+            let header = values.get(cursor..cursor + 13)?;
+            let candela_multiplier = header[2].max(0.0);
+            let vertical_count = header[3].round() as usize;
+            let horizontal_count = header[4].round() as usize;
+            if vertical_count < 2
+                || horizontal_count == 0
+                || vertical_count > 4096
+                || horizontal_count > 4096
+            {
+                return None;
+            }
+            cursor += 13;
+            let vertical = values.get(cursor..cursor + vertical_count)?;
+            cursor += vertical_count;
+            cursor += horizontal_count;
+            let candela_count = vertical_count.checked_mul(horizontal_count)?;
+            let candela = values.get(cursor..cursor + candela_count)?;
+            let sample_row = |row: &[f64], angle: f64| {
+                if angle <= vertical[0] {
+                    return row[0];
+                }
+                if angle >= vertical[vertical_count - 1] {
+                    return row[vertical_count - 1];
+                }
+                let upper = vertical.partition_point(|candidate| *candidate < angle);
+                let lower = upper.saturating_sub(1);
+                let span = (vertical[upper] - vertical[lower]).max(1e-9);
+                let amount = (angle - vertical[lower]) / span;
+                row[lower] + (row[upper] - row[lower]) * amount
+            };
+            let mut profile = [0.0_f32; 8];
+            for (sample, value) in profile.iter_mut().enumerate() {
+                let angle = sample as f64 * 180.0 / 7.0;
+                let sum = candela
+                    .chunks_exact(vertical_count)
+                    .map(|row| sample_row(row, angle))
+                    .sum::<f64>();
+                *value = (sum * candela_multiplier / horizontal_count as f64).max(0.0) as f32;
+            }
+            let peak = profile.iter().copied().fold(0.0_f32, f32::max);
+            if !peak.is_finite() || peak <= 1e-9 {
+                return None;
+            }
+            for value in &mut profile {
+                *value = (*value / peak).clamp(0.0, 1.0);
+            }
+            Some(profile)
+        }
+    }
+
+    fn apply_document_render_environment(
+        &self,
+        background: &mut ViewportBackgroundSettings,
+    ) {
+        use acadrust::objects::{ClassObjectData, ObjectType};
+
+        let environment = self
+            .document
+            .objects
+            .iter()
+            .filter_map(|(handle, object)| match object {
+                ObjectType::ClassObject(value) => match &value.data {
+                    ClassObjectData::RenderEnvironment(environment) => {
+                        Some((*handle, environment))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .min_by_key(|(handle, _)| handle.value())
+            .map(|(_, environment)| environment);
+
+        if let Some(environment) = environment {
+            if environment.fog_enabled {
+                background.fog_color = [
+                    environment.fog_color[0] as f32 / 255.0,
+                    environment.fog_color[1] as f32 / 255.0,
+                    environment.fog_color[2] as f32 / 255.0,
+                    1.0,
+                ];
+                let normalized_density = |density: f64| {
+                    let density = density.max(0.0) as f32;
+                    if density > 1.0 {
+                        (density / 100.0).clamp(0.0, 1.0)
+                    } else {
+                        density.clamp(0.0, 1.0)
+                    }
+                };
+                background.fog_params = [
+                    1.0,
+                    environment.fog_background_enabled as u8 as f32,
+                    normalized_density(environment.fog_density_near),
+                    normalized_density(environment.fog_density_far),
+                ];
+                let near = environment.fog_distance_near.max(0.0) as f32;
+                let far = environment.fog_distance_far.max(near as f64 + 1e-6) as f32;
+                background.fog_distances = [near, far, 0.0, 0.0];
+            }
+            if background.environment.is_none() && environment.environment_image_enabled {
+                if let Some(image) = self.background_image(&environment.environment_image_filename) {
+                    background.environment_params = [1.0, 0.0, 0.25, 0.35];
+                    background.environment = Some(image);
+                }
+            }
+        }
+
+        if background.environment.is_some() {
+            return;
+        }
+        let preset = self
+            .document
+            .objects
+            .iter()
+            .filter_map(|(handle, object)| match object {
+                ObjectType::ClassObject(value) => {
+                    let settings = match &value.data {
+                        ClassObjectData::RenderSettings(settings) => settings,
+                        ClassObjectData::MentalRayRenderSettings(settings) => &settings.base,
+                        ClassObjectData::RapidRtRenderSettings(settings) => &settings.base,
+                        _ => return None,
+                    };
+                    (settings.environment_image_enabled
+                        && !settings.environment_image_filename.is_empty())
+                        .then_some((*handle, settings))
+                }
+                _ => None,
+            })
+            .min_by_key(|(handle, settings)| (!settings.has_predefined, handle.value()))
+            .map(|(_, settings)| settings);
+        if let Some(settings) = preset {
+            if let Some(image) = self.background_image(&settings.environment_image_filename) {
+                background.environment_params = [1.0, 0.0, 0.25, 0.35];
+                background.environment = Some(image);
+            }
+        }
+    }
+
+    fn viewport_background(
+        &self,
+        handle: Handle,
+        canvas: [f32; 4],
+        depth: usize,
+    ) -> ViewportBackgroundSettings {
+        use acadrust::objects::{ClassObjectData, ObjectType};
+
+        if depth > 4 || !handle.is_valid() {
+            return ViewportBackgroundSettings::canvas(canvas);
+        }
+        let Some(ObjectType::ClassObject(value)) = self.document.objects.get(&handle) else {
+            return ViewportBackgroundSettings::canvas(canvas);
+        };
+        match &value.data {
+            ClassObjectData::SolidBackground(background) => {
+                let mut result = ViewportBackgroundSettings::canvas(
+                    Self::packed_background_color(background.color),
+                );
+                result.params[0] = 1.0;
+                result
+            }
+            ClassObjectData::GradientBackground(background) => {
+                let mut result = ViewportBackgroundSettings::canvas(canvas);
+                result.colors[0] = Self::packed_background_color(background.color_top);
+                result.colors[1] = Self::packed_background_color(background.color_middle);
+                result.colors[2] = Self::packed_background_color(background.color_bottom);
+                result.base = result.colors[1];
+                result.params = [
+                    2.0,
+                    background.horizon as f32,
+                    background.height as f32,
+                    background.rotation as f32,
+                ];
+                result
+            }
+            ClassObjectData::GroundPlaneBackground(background) => {
+                let mut result = ViewportBackgroundSettings::canvas(canvas);
+                result.colors[0] = Self::packed_background_color(background.color_sky_zenith);
+                result.colors[1] = Self::packed_background_color(background.color_sky_horizon);
+                result.colors[2] =
+                    Self::packed_background_color(background.color_underground_horizon);
+                result.colors[3] =
+                    Self::packed_background_color(background.color_underground_azimuth);
+                result.colors[4] = Self::packed_background_color(background.color_near);
+                result.base = Self::packed_background_color(background.color_far);
+                result.params[0] = 3.0;
+                result
+            }
+            ClassObjectData::ImageBackground(background) => {
+                let mut result = ViewportBackgroundSettings::canvas(canvas);
+                if let Some(image) = self.background_image(&background.filename) {
+                    result.image_params = [
+                        background.fit_to_screen as u8 as f32,
+                        background.maintain_aspect_ratio as u8 as f32,
+                        background.use_tiling as u8 as f32,
+                        image.width as f32 / image.height.max(1) as f32,
+                    ];
+                    result.image_transform = [
+                        background.offset.x as f32,
+                        background.offset.y as f32,
+                        background.scale.x as f32,
+                        background.scale.y as f32,
+                    ];
+                    result.params[0] = 4.0;
+                    result.image = Some(image);
+                }
+                result
+            }
+            ClassObjectData::IblBackground(background) => {
+                let mut result = self.viewport_background(
+                    background.secondary_background,
+                    canvas,
+                    depth + 1,
+                );
+                if background.enabled {
+                    if let Some(environment) = self.background_image(&background.name) {
+                        result.environment_params = [
+                            1.0,
+                            background.rotation as f32,
+                            0.25,
+                            0.35,
+                        ];
+                        if background.display_image {
+                            result.params = [5.0, 0.0, 0.0, background.rotation as f32];
+                            result.image_params[3] =
+                                environment.width as f32 / environment.height.max(1) as f32;
+                            result.image = Some(environment.clone());
+                        }
+                        result.environment = Some(environment);
+                    }
+                }
+                result
+            }
+            ClassObjectData::SkyLightBackground(_) => {
+                let mut result = ViewportBackgroundSettings::canvas(canvas);
+                result.colors[0] = [0.18, 0.42, 0.78, 1.0];
+                result.colors[2] = [0.78, 0.86, 0.95, 1.0];
+                result.base = result.colors[2];
+                result.params[0] = 6.0;
+                result
+            }
+            _ => ViewportBackgroundSettings::canvas(canvas),
+        }
+    }
+
+    fn apply_default_lighting(uniforms: &mut Uniforms, camera: &Camera, default_type: i16) {
+        let sources = [
+            (glam::Vec3::new(0.5, 0.8, 0.6), 0.6_f32),
+            (glam::Vec3::new(-0.7, 0.3, 0.4), 0.4_f32),
+        ];
+        let count = if default_type == 0 { 1 } else { 2 };
+        uniforms.lighting[0] = count as f32;
+        for (index, (view_direction, two_light_intensity)) in
+            sources.into_iter().take(count).enumerate()
+        {
+            let toward_source = (camera.rotation * view_direction).normalize_or_zero();
+            let intensity = if count == 1 { 1.0 } else { two_light_intensity };
+            uniforms.light_position_type[index][3] = 1.0;
+            uniforms.light_direction_intensity[index] = [
+                -toward_source.x,
+                -toward_source.y,
+                -toward_source.z,
+                intensity,
+            ];
+            uniforms.light_color_hotspot[index] = [1.0, 1.0, 1.0, 1.0];
+            uniforms.light_attenuation[index][3] = -1.0;
         }
     }
 
@@ -1607,8 +2376,28 @@ pub(in crate::scene) fn layer_locked(document: &CadDocument, e: &EntityType) -> 
 /// Resolves the effective linetype name for an entity, falling back to the
 /// layer's linetype when the entity's own linetype is "ByLayer".
 pub(in crate::scene) fn linetype_name_for<'a>(document: &'a CadDocument, e: &'a EntityType) -> &'a str {
+    linetype_name_for_viewport(document, e, None)
+}
+
+pub(in crate::scene) fn linetype_name_for_viewport<'a>(
+    document: &'a CadDocument,
+    e: &'a EntityType,
+    viewport: Option<Handle>,
+) -> &'a str {
     let elt = &e.common().linetype;
     if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
+        if let Some(handle) = viewport_override(
+            document,
+            &e.common().layer,
+            viewport,
+            acadrust::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+        )
+        .and_then(|value| value.as_handle())
+        {
+            if let Some(line_type) = document.line_types.iter().find(|line_type| line_type.handle == handle) {
+                return line_type.name.as_str();
+            }
+        }
         document
             .layers
             .get(&e.common().layer)
@@ -1625,6 +2414,28 @@ pub(in crate::scene) fn render_style_for(
     document: &CadDocument,
     e: &EntityType,
 ) -> ([f32; 4], f32, [f32; 8], f32, u8) {
+    render_style_for_viewport(document, e, None)
+}
+
+fn viewport_override(
+    document: &CadDocument,
+    layer_name: &str,
+    viewport: Option<Handle>,
+    kind: acadrust::objects::KnownXRecordKind,
+) -> Option<acadrust::objects::XRecordValue> {
+    let viewport = viewport.filter(|handle| handle.is_valid())?;
+    let layer = document.layers.get(layer_name)?;
+    document
+        .layer_viewport_overrides(layer.handle, kind)
+        .into_iter()
+        .find_map(|(handle, value)| (handle == viewport).then_some(value))
+}
+
+pub(in crate::scene) fn render_style_for_viewport(
+    document: &CadDocument,
+    e: &EntityType,
+    viewport: Option<Handle>,
+) -> ([f32; 4], f32, [f32; 8], f32, u8) {
     let layer_name = &e.common().layer;
     let (entity_color, aci) = {
         let common = e.common();
@@ -1637,12 +2448,26 @@ pub(in crate::scene) fn render_style_for(
                 _ => None,
             });
         let ec = book_color.unwrap_or(&common.color);
+        let viewport_color = (!book_color.is_some() && *ec == AcadColor::ByLayer)
+            .then(|| {
+                viewport_override(
+                    document,
+                    layer_name,
+                    viewport,
+                    acadrust::objects::KnownXRecordKind::LayerViewportColorOverride,
+                )
+                .and_then(|value| value.as_i32())
+                .map(AcadColor::from_true_color_value)
+            })
+            .flatten();
         let resolved = if *ec == AcadColor::ByLayer {
-            document
-                .layers
-                .get(layer_name)
-                .map(|l| &l.color)
-                .unwrap_or(&AcadColor::WHITE)
+            viewport_color.as_ref().unwrap_or_else(|| {
+                document
+                    .layers
+                    .get(layer_name)
+                    .map(|l| &l.color)
+                    .unwrap_or(&AcadColor::WHITE)
+            })
         } else {
             ec
         };
@@ -1652,11 +2477,16 @@ pub(in crate::scene) fn render_style_for(
         };
         let [r, g, b, _] = tess_util::aci_to_rgba(resolved);
         let transparency = if common.transparency.alpha() == 0 {
-            document
-                .layers
-                .get(layer_name)
-                .map(|layer| layer.transparency)
-                .unwrap_or(common.transparency)
+            viewport_override(
+                document,
+                layer_name,
+                viewport,
+                acadrust::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+            )
+            .and_then(|value| value.as_i32())
+            .map(|value| acadrust::types::Transparency::from_alpha_value(value as u32))
+            .or_else(|| document.layers.get(layer_name).map(|layer| layer.transparency))
+            .unwrap_or(common.transparency)
         } else {
             common.transparency
         };
@@ -1664,7 +2494,7 @@ pub(in crate::scene) fn render_style_for(
         ([r, g, b, alpha], aci)
     };
 
-    let lt_name = linetype_name_for(document, e);
+    let lt_name = linetype_name_for_viewport(document, e, viewport);
     // Effective scale = global LTSCALE × per-entity scale (both default to 1.0).
     let lt_scale = document.header.linetype_scale as f32 * e.common().linetype_scale as f32;
     let (pattern_length, pattern) = resolve_pattern(&document.line_types, lt_name, lt_scale);
@@ -1675,11 +2505,22 @@ pub(in crate::scene) fn render_style_for(
         // entity's resolved (layer-inherited) weight. Toggling lineweight
         // visibility costs only a uniform write, not a retessellate.
         let ew = &e.common().line_weight;
+        let viewport_lineweight = matches!(ew, LineWeight::ByLayer | LineWeight::Default)
+            .then(|| {
+                viewport_override(
+                    document,
+                    layer_name,
+                    viewport,
+                    acadrust::objects::KnownXRecordKind::LayerViewportLineweightOverride,
+                )
+                .and_then(|value| value.as_i32())
+                .map(|value| LineWeight::from_value(value as i16))
+            })
+            .flatten();
         let resolved = match ew {
-            LineWeight::ByLayer | LineWeight::ByBlock | LineWeight::Default => document
-                .layers
-                .get(layer_name)
-                .map(|l| &l.line_weight)
+            LineWeight::ByLayer | LineWeight::ByBlock | LineWeight::Default => viewport_lineweight
+                .as_ref()
+                .or_else(|| document.layers.get(layer_name).map(|l| &l.line_weight))
                 .unwrap_or(&LineWeight::Default),
             _ => ew,
         };
@@ -1730,16 +2571,64 @@ pub(crate) fn lineweight_to_px(lw: &LineWeight) -> f32 {
 /// happens at emit time). Falls back to white / Continuous / 1 px when the
 /// layer is missing.
 pub(crate) fn layer_render_style(document: &CadDocument, layer_name: &str) -> InheritStyle {
+    layer_render_style_viewport(document, layer_name, None)
+}
+
+pub(crate) fn layer_render_style_viewport(
+    document: &CadDocument,
+    layer_name: &str,
+    viewport: Option<Handle>,
+) -> InheritStyle {
     let layer = document.layers.get(layer_name);
-    let color = layer.map(|l| &l.color).unwrap_or(&AcadColor::WHITE);
+    let viewport_color = viewport_override(
+        document,
+        layer_name,
+        viewport,
+        acadrust::objects::KnownXRecordKind::LayerViewportColorOverride,
+    )
+    .and_then(|value| value.as_i32())
+    .map(AcadColor::from_true_color_value);
+    let color = viewport_color
+        .as_ref()
+        .or_else(|| layer.map(|layer| &layer.color))
+        .unwrap_or(&AcadColor::WHITE);
     let [r, g, b, _] = tess_util::aci_to_rgba(color);
-    let alpha = layer
-        .map(|layer| 1.0 - layer.transparency.as_percent() as f32)
+    let alpha = viewport_override(
+        document,
+        layer_name,
+        viewport,
+        acadrust::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+    )
+    .and_then(|value| value.as_i32())
+    .map(|value| acadrust::types::Transparency::from_alpha_value(value as u32))
+    .or_else(|| layer.map(|layer| layer.transparency))
+        .map(|transparency| 1.0 - transparency.as_percent() as f32)
         .unwrap_or(1.0);
-    let lt_name = layer.map(|l| l.line_type.as_str()).unwrap_or("Continuous");
+    let lt_name = viewport_override(
+        document,
+        layer_name,
+        viewport,
+        acadrust::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+    )
+    .and_then(|value| value.as_handle())
+    .and_then(|handle| document.line_types.iter().find(|line_type| line_type.handle == handle))
+    .map(|line_type| line_type.name.as_str())
+    .or_else(|| layer.map(|layer| layer.line_type.as_str()))
+    .unwrap_or("Continuous");
     let lt_scale = document.header.linetype_scale as f32;
     let (pat_len, pat) = resolve_pattern(&document.line_types, lt_name, lt_scale);
-    let lw = layer.map(|l| &l.line_weight).unwrap_or(&LineWeight::Default);
+    let viewport_lineweight = viewport_override(
+        document,
+        layer_name,
+        viewport,
+        acadrust::objects::KnownXRecordKind::LayerViewportLineweightOverride,
+    )
+    .and_then(|value| value.as_i32())
+    .map(|value| LineWeight::from_value(value as i16));
+    let lw = viewport_lineweight
+        .as_ref()
+        .or_else(|| layer.map(|layer| &layer.line_weight))
+        .unwrap_or(&LineWeight::Default);
     InheritStyle {
         color: [r, g, b, alpha],
         pat_len,
@@ -1774,7 +2663,29 @@ pub(crate) fn render_style_for_block_sub(
     insert_lw_px: f32,
     l0: InheritStyle,
 ) -> ([f32; 4], f32, [f32; 8], f32, u8) {
-    let (color, pat_len, pat, lw_px, aci) = render_style_for(document, e);
+    render_style_for_block_sub_viewport(
+        document,
+        e,
+        insert_color,
+        insert_pat_len,
+        insert_pat,
+        insert_lw_px,
+        l0,
+        None,
+    )
+}
+
+pub(crate) fn render_style_for_block_sub_viewport(
+    document: &CadDocument,
+    e: &EntityType,
+    insert_color: [f32; 4],
+    insert_pat_len: f32,
+    insert_pat: [f32; 8],
+    insert_lw_px: f32,
+    l0: InheritStyle,
+    viewport: Option<Handle>,
+) -> ([f32; 4], f32, [f32; 8], f32, u8) {
+    let (color, pat_len, pat, lw_px, aci) = render_style_for_viewport(document, e, viewport);
     let common = e.common();
     let on_l0 = is_effective_layer_zero(&common.layer);
 
@@ -2076,7 +2987,7 @@ impl Scene {
                     }
                     _ => annotation_scale,
                 };
-                let block_cache = self.block_cache_arc_for(Some(scale), true);
+                let block_cache = self.block_cache_arc_for(Some(scale), true, self.active_viewport);
                 let mut context_wires = crate::scene::tessellate_entity(
                     &self.document,
                     &empty_selection,
@@ -2247,7 +3158,18 @@ impl Scene {
         hover_region: Option<usize>,
         show_viewcube: bool,
     ) -> Option<ViewportData> {
-        let flags = render_mode_flags(inst.render_mode);
+        let display = self.viewport_display_settings(inst);
+        let mut flags = render_mode_flags(inst.render_mode);
+        if let Some(style) = display.visual_style.as_ref() {
+            if flags.mesh_fill {
+                flags.face3d_fill &= style.face_visible();
+                flags.mesh_fill &= style.face_visible();
+                flags.show_3d_edges = style.edges_visible();
+                if style.face_lighting_quality == 1 {
+                    flags.flat_shade = true;
+                }
+            }
+        }
         let view_wireframe = !flags.face3d_fill;
 
         // Clip the viewport rect to the canvas; size the per-viewport MSAA
@@ -2463,7 +3385,42 @@ impl Scene {
         uniforms.viewport_size = [visible_w, visible_h];
         uniforms.flat_shade = if flags.flat_shade { 1.0 } else { 0.0 };
         uniforms.transparency_enable = if self.transparency_display { 1.0 } else { 0.0 };
-        self.apply_document_lighting(&mut uniforms, lighting_block, &vp_frozen);
+        uniforms.viewport_background = display.background.base;
+        uniforms.view_tone = [display.brightness, display.contrast, 0.0, 0.0];
+        uniforms.background_top = display.background.colors[0];
+        uniforms.background_middle = display.background.colors[1];
+        uniforms.background_bottom = display.background.colors[2];
+        uniforms.background_aux0 = display.background.colors[3];
+        uniforms.background_aux1 = display.background.colors[4];
+        uniforms.background_params = display.background.params;
+        uniforms.background_image_params = display.background.image_params;
+        uniforms.background_image_transform = display.background.image_transform;
+        uniforms.environment_params = display.background.environment_params;
+        uniforms.environment_view = glam::Mat4::from_quat(inst.camera.rotation);
+        uniforms.fog_color = display.background.fog_color;
+        uniforms.fog_params = display.background.fog_params;
+        uniforms.fog_distances = display.background.fog_distances;
+        if let Some(style) = display.visual_style.as_ref() {
+            let opacity = if style.face_modifier & 1 != 0 {
+                style.face_opacity
+            } else {
+                1.0
+            };
+            let highlight = if style.face_modifier & 2 != 0 {
+                (style.face_specular / 100.0).clamp(0.0, 1.0)
+            } else {
+                -1.0
+            };
+            uniforms.visual_style = [
+                style.face_color_mode as f32,
+                opacity,
+                highlight,
+                (style.brightness / 10.0).clamp(-1.0, 1.0),
+            ];
+            uniforms.visual_style_color =
+                style.mono_color.unwrap_or([1.0, 1.0, 1.0, 1.0]);
+        }
+        self.apply_document_lighting(&mut uniforms, lighting_block, &vp_frozen, inst);
 
         // `screen_rect` carries the *visible* sub-rectangle in normalized
         // canvas coords — that's what `Pipeline::prepare` uses to size
@@ -2609,6 +3566,8 @@ impl Scene {
             wipeout_hatches,
             images,
             meshes,
+            background_image: display.background.image.clone(),
+            environment_image: display.background.environment.clone(),
             uniforms,
             view_dir: (inst.camera.rotation * glam::Vec3::NEG_Z).normalize_or(glam::Vec3::NEG_Z),
             cam_rotation: inst.camera.view_rotation_mat() * self.viewcube_ucs_mat(),
@@ -2624,7 +3583,11 @@ impl Scene {
             show_2d_solid_fills: flags.show_2d_solid_fills,
             mesh_fill: flags.mesh_fill,
             show_3d_edges: flags.show_3d_edges,
-            display_silhouette: flags.hidden_line || self.document.header.display_silhouette,
+            display_silhouette: flags.hidden_line
+                || display.visual_style.as_ref().is_some_and(|style| {
+                    style.silhouette_width > 0 && style.edges_visible()
+                })
+                || self.document.header.display_silhouette,
             hidden_line: flags.hidden_line,
             // Interaction LOD: suppress the costly hatch pass while the view is
             // actively moving; the scene-render cache holds the full-quality

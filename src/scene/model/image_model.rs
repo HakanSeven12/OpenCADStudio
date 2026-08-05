@@ -349,7 +349,7 @@ impl ImageModel {
 
 /// Decoded RGBA image shared between the raster pipeline and the
 /// unresolved-reference probe. Cheap to clone — the pixels are `Arc`-shared.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DecodedImage {
     pub pixels: Arc<Vec<u8>>,
     pub width: u32,

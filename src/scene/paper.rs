@@ -477,6 +477,7 @@ impl Scene {
             None,
             annotation_scale_handle,
             all_visible,
+            None,
         );
         models.extend(instanced);
         Arc::new(models)
@@ -560,6 +561,7 @@ impl Scene {
             frozen,
             annotation_scale_handle,
             all_visible,
+            None,
         ));
         models
     }
@@ -679,7 +681,7 @@ impl Scene {
         let center_set =
             vp.view_center.x.abs() > 1e-6 || vp.view_center.y.abs() > 1e-6;
 
-        if let Some(cam) = self.camera_from_view(
+        if let Some(cam) = self.camera_from_view_mode(
             vp.view_direction,
             vp.view_target,
             acadrust::types::Vector2 {
@@ -688,6 +690,8 @@ impl Scene {
             },
             saved_h,
             vp.twist_angle,
+            vp.status.perspective,
+            vp.lens_length,
         ) {
             if target_set || !center_set {
                 return Some(cam);
@@ -718,12 +722,14 @@ impl Scene {
             y: cy,
             z: vp.view_target.z,
         };
-        self.camera_from_view(
+        self.camera_from_view_mode(
             vp.view_direction,
             tgt,
             acadrust::types::Vector2::ZERO,
             fit_h,
             vp.twist_angle,
+            vp.status.perspective,
+            vp.lens_length,
         )
     }
 
@@ -758,6 +764,7 @@ impl Scene {
             Some(self.viewport_annotation_multiplier(vp_handle)),
             scale_handle,
             Some(&frozen),
+            Some(vp_handle),
         )
     }
 

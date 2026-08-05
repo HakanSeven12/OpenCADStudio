@@ -541,6 +541,12 @@ pub(super) struct OpenCADStudio {
     render_mode_preview: Option<acadrust::entities::ViewportRenderMode>,
     /// Whether the Properties panel is shown on the left (PROPERTIES).
     show_properties: bool,
+    /// Docked Insert Block panel visibility.
+    pub(crate) show_block_palette: bool,
+    /// Docked Insert Block panel state (search, preview size, cached thumbnails).
+    pub(crate) block_palette: crate::ui::window::block_palette::BlockPalette,
+    /// Whether the narrow-window block-palette bar is expanded.
+    block_palette_expanded: bool,
     /// Whether the document file tabs are shown at the top (FILETAB).
     show_file_tabs: bool,
     /// Whether the layout/paper-space tabs are shown at the bottom (LAYOUTTAB).
@@ -2594,6 +2600,8 @@ pub enum Message {
     PlotDialogOpen,
     /// An edit inside the Plot / Print dialog.
     PlotDlg(crate::ui::window::plot::PlotDlgMsg),
+    /// An edit inside the docked Insert Block panel.
+    BlockPalette(crate::ui::window::block_palette::BlockPaletteMsg),
     /// Open the paper-layout batch output dialog.
     PrintAllOpen,
     /// Toggle one paper layout in the batch.
@@ -3007,6 +3015,9 @@ impl OpenCADStudio {
             render_mode_menu_open: false,
             render_mode_preview: None,
             show_properties: true,
+            show_block_palette: false,
+            block_palette: Default::default(),
+            block_palette_expanded: false,
             show_file_tabs: true,
             show_layout_tabs: true,
             last_point: None,

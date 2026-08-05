@@ -408,4 +408,55 @@ impl Scene {
         // bump, so the model isn't re-tessellated on every interim update.
         self.interim_wire = Some(w);
     }
+
+    /// Tessellate one block definition's entities into block-local wire models
+    /// (insertion base at origin) for the block-palette thumbnail. Nested INSERTs
+    /// expand through the block cache. Unknown / empty block → `vec![]`.
+    pub(crate) fn block_preview_wires(&self, name: &str) -> Vec<WireModel> {
+        use acadrust::EntityType;
+        let Some(br) = self.document.block_records.get(name) else {
+            return vec![];
+        };
+        let mut out = Vec::new();
+        for &eh in &br.entity_handles {
+            let Some(e) = self.document.get_entity(eh) else {
+                continue;
+            };
+            if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)) {
+                continue;
+            }
+            out.extend(self.tessellate_one(e));
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::entities::Line;
+    use acadrust::types::Vector3;
+    use acadrust::EntityType;
+
+    #[test]
+    fn block_preview_wires_tessellates_block_entities() {
+        let mut s = Scene::new();
+        let mut line = Line::new();
+        line.start = Vector3::new(0.0, 0.0, 0.0);
+        line.end = Vector3::new(10.0, 5.0, 0.0);
+        s.define_block_from_owned_entities(
+            vec![EntityType::Line(line)],
+            "Widget",
+            glam::DVec3::ZERO,
+        )
+        .unwrap();
+        let wires = s.block_preview_wires("Widget");
+        assert!(!wires.is_empty(), "a LINE block must tessellate to wires");
+    }
+
+    #[test]
+    fn block_preview_wires_empty_for_unknown_block() {
+        let s = Scene::new();
+        assert!(s.block_preview_wires("Nope").is_empty());
+    }
 }

@@ -23,7 +23,7 @@ pub(crate) use view::DrawOrderRefCommand;
 impl OpenCADStudio {
     /// First `"{prefix}{n}"` (n ≥ 1) not already used by a block record in the
     /// active drawing. Used to auto-name a paste-as-block definition.
-    fn unique_block_name(&self, prefix: &str) -> String {
+    pub(super) fn unique_block_name(&self, prefix: &str) -> String {
         let i = self.active_tab;
         let mut n = 1;
         loop {

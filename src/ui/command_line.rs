@@ -910,6 +910,7 @@ fn history_highlight_format(
 #[cfg(test)]
 mod tests {
     use super::{ranked_matches, CommandLine};
+    use crate::t;
     use rustc_hash::FxHashMap;
 
     fn aliases(pairs: &[(&str, &str)]) -> FxHashMap<String, String> {

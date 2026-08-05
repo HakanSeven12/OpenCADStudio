@@ -239,6 +239,9 @@ impl OpenCADStudio {
         self.command_line.set_step_options(opts);
         // Persist UI preferences whenever a toggle changes them (issue #68).
         self.persist_settings_if_changed();
+        // The block panel watches the drawing's block list and rebuilds its
+        // thumbnails whenever the names change (BLOCK define, file open, …).
+        self.refresh_block_palette_if_stale();
         // OTRACK acquires tracking points only while a command or grip drag is
         // running; drop them once neither is active so the temporary tracking
         // points / vectors disappear when the command ends (issue #64).
@@ -261,6 +264,9 @@ impl OpenCADStudio {
         }
         #[cfg(target_arch = "wasm32")]
         crate::sys::set_unsaved_changes_warning(self.tabs.iter().any(|tab| tab.dirty));
+        if self.tabs[i].active_cmd.is_none() {
+            self.block_palette.placing = None;
+        }
         task
     }
 
@@ -5960,6 +5966,7 @@ impl OpenCADStudio {
             }
             Message::PlotDialogOpen => self.on_plot_dialog_open(),
             Message::PlotDlg(m) => self.on_plot_dlg(m),
+            Message::BlockPalette(m) => self.on_block_palette(m),
             Message::PrintAllOpen => self.on_print_all_open(),
             Message::PrintAllToggle(name) => {
                 if let Some((_, selected)) = self

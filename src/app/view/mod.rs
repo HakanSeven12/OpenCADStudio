@@ -5,6 +5,7 @@ use super::{ArrowKey, Message, OpenCADStudio};
 use crate::scene::pick::grip::{grips_to_screen, grips_to_screen_paper, grips_to_screen_rte};
 use crate::scene::view::viewport_pane::ViewportPane;
 use crate::scene::{VIEWCUBE_PAD, VIEWCUBE_REGION_PX};
+use crate::ui::window::block_palette::BlockPaletteMsg;
 use crate::ui::wrap_bar::DensitySwap;
 use crate::ui::wrap_bar::WrapFlow;
 use iced::widget::{
@@ -1445,6 +1446,7 @@ impl OpenCADStudio {
                     self.properties_side,
                     Message::TogglePropertiesBar,
                     Message::PropertiesHover(true),
+                    26.0,
                 )
             } else {
                 let panel = tab
@@ -1466,6 +1468,33 @@ impl OpenCADStudio {
         // the input stays close to the cursor. The Start page gives it a real
         // layout row instead: its panels and action buttons must end above the
         // command line rather than rendering behind it (#546).
+        // The block palette docks on the right, mirroring the Properties panel on the
+        // left. The collapse button reduces it to a vertical bar whose width equals
+        // the title height, with the title rotated 90° (see `collapse_bar`).
+        let block_palette_el: Element<'_, Message> = if tab.is_start {
+            Space::new().into()
+        } else if self.show_block_palette && !self.clean_screen {
+            if self.block_palette_expanded {
+                crate::ui::window::block_palette::view(&self.block_palette)
+            } else {
+                // Collapsed bar width matches the title bar height (icon button
+                // 30px + 5px top/bottom padding) so expand/collapse is seamless.
+                collapse_bar(
+                    "Block Palette",
+                    crate::app::config::DockSide::Right,
+                    Message::BlockPalette(BlockPaletteMsg::ToggleBar),
+                    Message::Noop,
+                    40.0,
+                )
+            }
+        } else {
+            Space::new().into()
+        };
+
+        // Command-line sits as a bottom-centre overlay on top of the
+        // viewport stack rather than as a separate row in the main
+        // column — frees up vertical space when no command is active
+        // and keeps the input close to where the cursor is drawing.
         // Autocomplete shows only when no command is collecting its
         // own input (otherwise typed prefixes are coordinates / values).
         let allow_autocomplete = tab.active_cmd.is_none();
@@ -1531,6 +1560,9 @@ impl OpenCADStudio {
         } else {
             workspace
         };
+        let workspace = row![workspace, block_palette_el]
+            .width(Fill)
+            .height(Fill);
         let command_line = self.command_line.view(
             allow_autocomplete,
             dyn_capturing,
@@ -2416,6 +2448,7 @@ pub(super) fn collapse_bar<'a>(
     side: crate::app::config::DockSide,
     on_press: Message,
     on_enter: Message,
+    width: f32,
 ) -> Element<'a, Message> {
     let label = canvas(VBarLabel {
         text: name.to_string(),
@@ -2426,7 +2459,7 @@ pub(super) fn collapse_bar<'a>(
 
     mouse_area(
         container(label)
-            .width(iced::Length::Fixed(26.0))
+            .width(iced::Length::Fixed(width))
             .height(Fill)
             .style(|theme: &Theme| container::Style {
                 background: Some(Background::Color(

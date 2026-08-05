@@ -456,19 +456,14 @@ impl OpenCADStudio {
                 ).as_ref());
             }
 
-            // BLOCKPALETTE — list the blocks available to insert.
+            // BLOCKPALETTE / BLOCKSPALETTE — toggle the docked Insert Block panel.
             "BLOCKPALETTE" | "BLOCKSPALETTE" => {
-                let blocks = self.tabs[i].scene.custom_block_names();
-                if blocks.is_empty() {
-                    self.command_line.push_info(
-                        "No user-defined blocks. Define one with BLOCK, then INSERT it.",
-                    );
-                } else {
-                    self.command_line.push_output(crate::tf!(
-                        "Blocks ({}) — insert with INSERT <name>:  {}",
-                        blocks.len(),
-                        blocks.join(", ")
-                    ).as_ref());
+                self.show_block_palette ^= true;
+                if self.show_block_palette {
+                    // Always open expanded so the panel is immediately usable;
+                    // the user can still collapse it via the title-bar button.
+                    self.block_palette_expanded = true;
+                    self.refresh_block_palette();
                 }
             }
 
@@ -703,6 +698,108 @@ mod tests {
         assert!(
             !attman.contains("no matching block"),
             "ATTMAN must not run the old command-line listing, got: {attman:?}"
+        );
+    }
+
+    #[test]
+    fn blockpalette_toggles_panel() {
+        let mut app = fresh_app();
+        assert!(!app.show_block_palette);
+        let _ = app.run_command_line("BLOCKPALETTE");
+        assert!(app.show_block_palette);
+        assert!(
+            app.block_palette_expanded,
+            "palette must open expanded, not as the collapsed bar"
+        );
+        let _ = app.run_command_line("BLOCKSPALETTE");
+        assert!(!app.show_block_palette);
+    }
+
+    #[test]
+    fn blockpalette_refresh_lists_blocks() {
+        let mut app = fresh_app();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut line = acadrust::entities::Line::new();
+        line.start = acadrust::types::Vector3::ZERO;
+        line.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+        app.tabs[i]
+            .scene
+            .define_block_from_owned_entities(
+                vec![acadrust::EntityType::Line(line)],
+                "Widget",
+                glam::DVec3::ZERO,
+            )
+            .unwrap();
+        let _ = app.run_command_line("BLOCKPALETTE");
+        assert!(app.show_block_palette);
+        assert_eq!(app.block_palette.cached_names, vec!["Widget"]);
+        assert_eq!(app.block_palette.blocks.len(), 1);
+    }
+
+    #[test]
+    fn blockpalette_refresh_if_stale() {
+        let mut app = fresh_app();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.show_block_palette = true;
+        app.refresh_block_palette();
+        assert!(app.block_palette.blocks.is_empty());
+        let i = app.active_tab;
+        let mut line = acadrust::entities::Line::new();
+        line.start = acadrust::types::Vector3::ZERO;
+        line.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+        app.tabs[i]
+            .scene
+            .define_block_from_owned_entities(
+                vec![acadrust::EntityType::Line(line)],
+                "Widget",
+                glam::DVec3::ZERO,
+            )
+            .unwrap();
+        app.refresh_block_palette_if_stale();
+        assert!(app.block_palette.blocks.iter().any(|b| b.name == "Widget"));
+    }
+
+    #[test]
+    fn blockpalette_refreshes_when_switching_to_same_named_block_in_another_tab() {
+        let mut app = fresh_app();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut line = acadrust::entities::Line::new();
+        line.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+        app.tabs[i]
+            .scene
+            .define_block_from_owned_entities(
+                vec![acadrust::EntityType::Line(line)],
+                "Widget",
+                glam::DVec3::ZERO,
+            )
+            .unwrap();
+        app.show_block_palette = true;
+        app.refresh_block_palette();
+        let first_tab_id = app.tabs[i].id;
+
+        app.tabs
+            .push(crate::app::document::DocumentTab::new_drawing(99));
+        let other = app.tabs.len() - 1;
+        let mut line = acadrust::entities::Line::new();
+        line.end = acadrust::types::Vector3::new(50.0, 0.0, 0.0);
+        app.tabs[other]
+            .scene
+            .define_block_from_owned_entities(
+                vec![acadrust::EntityType::Line(line)],
+                "Widget",
+                glam::DVec3::ZERO,
+            )
+            .unwrap();
+        app.active_tab = other;
+        app.refresh_block_palette_if_stale();
+
+        assert_ne!(app.tabs[other].id, first_tab_id);
+        assert_eq!(app.block_palette.source_tab_id, Some(app.tabs[other].id));
+        assert_eq!(
+            app.block_palette.source_block_epoch,
+            app.tabs[other].scene.block_epoch
         );
     }
 }

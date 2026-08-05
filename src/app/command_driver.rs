@@ -3141,40 +3141,49 @@ impl OpenCADStudio {
     /// this drawing doesn't already have. Each recreated record gets a fresh
     /// handle from the target document so it can't collide with an existing
     /// one. No-op for same-document pastes (the records already exist). (#129)
-    pub(super) fn merge_clipboard_deps(&mut self, i: usize) {
+    pub(super) fn merge_dependencies(
+        &mut self,
+        i: usize,
+        deps: &crate::app::ClipboardDeps,
+    ) {
         use acadrust::TableEntry;
-        if self.clipboard_deps.is_empty() {
+        if deps.is_empty() {
             return;
         }
         let doc = &mut self.tabs[i].scene.document;
-        for rec in &self.clipboard_deps.layers {
+        for rec in &deps.layers {
             if !doc.layers.contains(rec.name()) {
                 let mut r = rec.clone();
                 r.set_handle(doc.allocate_handle());
                 let _ = doc.layers.add(r);
             }
         }
-        for rec in &self.clipboard_deps.linetypes {
+        for rec in &deps.linetypes {
             if !doc.line_types.contains(rec.name()) {
                 let mut r = rec.clone();
                 r.set_handle(doc.allocate_handle());
                 let _ = doc.line_types.add(r);
             }
         }
-        for rec in &self.clipboard_deps.text_styles {
+        for rec in &deps.text_styles {
             if !doc.text_styles.contains(rec.name()) {
                 let mut r = rec.clone();
                 r.set_handle(doc.allocate_handle());
                 let _ = doc.text_styles.add(r);
             }
         }
-        for rec in &self.clipboard_deps.dim_styles {
+        for rec in &deps.dim_styles {
             if !doc.dim_styles.contains(rec.name()) {
                 let mut r = rec.clone();
                 r.set_handle(doc.allocate_handle());
                 let _ = doc.dim_styles.add(r);
             }
         }
+    }
+
+    pub(super) fn merge_clipboard_deps(&mut self, i: usize) {
+        let deps = self.clipboard_deps.clone();
+        self.merge_dependencies(i, &deps);
     }
 
     /// Recreate any block definition the pasted INSERTs reference but tab

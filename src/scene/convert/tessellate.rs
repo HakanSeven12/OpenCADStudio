@@ -1189,7 +1189,14 @@ pub fn tessellate(
                 } else {
                     color
                 };
-
+                // Circles use the Lines path for large-coordinate precision, but they
+                // must still preserve the entity's resolved linetype pattern.
+                let (edge_pattern_length, edge_pattern) =
+                    if matches!(entity, EntityType::Circle(_)) {
+                        (pattern_length, pattern)
+                    } else {
+                        (0.0, [0.0; 8])
+                    };
                 if !local_pts.is_empty() {
                     let (snap, keys, tangents) = if is_first {
                         is_first = false;
@@ -1217,8 +1224,8 @@ pub fn tessellate(
                         points_low: local_pts_low,
                         color: edge_color,
                         selected,
-                        pattern_length: 0.0,
-                        pattern: [0.0; 8],
+                        pattern_length: edge_pattern_length,
+                        pattern: edge_pattern,
                         line_weight_px,
                         snap_pts: snap,
                         tangent_geoms: tangents,

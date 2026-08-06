@@ -1887,6 +1887,8 @@ impl OpenCADStudio {
                     if v > 0.0 {
                         self.push_undo_snapshot(i, "LTSCALE");
                         self.tabs[i].scene.document.header.linetype_scale = v;
+                        // LTSCALE affects the cached linetype geometry of the whole drawing.
+                        self.tabs[i].scene.bump_geometry();
                         self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::tf!("LTSCALE set to {v:.4}").as_ref());

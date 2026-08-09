@@ -423,6 +423,11 @@ inventory::submit!(crate::command::CommandRegistration {
         "XOPEN",
         "REGION",
         "REG",
+        // Redraw / regenerate the display caches.
+        "REDRAW",
+        "REDRAWALL",
+        "REGEN",
+        "REGENALL",
         "ARCHIVE",
         "ETRANSMIT",
         "FLATSHOT",

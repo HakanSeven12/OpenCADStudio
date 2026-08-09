@@ -1500,6 +1500,16 @@ struct SceneLight {
     web_enabled: bool,
 }
 
+/// One-shot presentation-cache refresh scope for REDRAW/REDRAWALL. Resolved to
+/// concrete `ViewportInstance::instance_id`s at request time; `All` is the
+/// superset and dominates. `Active` = current-input viewport (paper sheet in
+/// paper space with nothing entered, D6).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ViewportRefreshScope {
+    Active,
+    All,
+}
+
 pub struct Scene {
     pub camera: Rc<RefCell<Camera>>,
     /// View saved immediately before the latest navigation operation. ZOOM
@@ -1847,7 +1857,11 @@ pub struct Scene {
     /// without depending on the shader widget's internal `Program::State`
     /// (which can miss events under overlapping overlays).
     pub viewcube_hover: std::cell::Cell<Option<usize>>,
-    /// Wall time (ms) of the most recent wire re-tessellation — the work done
+    /// Pending REDRAW force set, keyed by viewport `instance_id`. Populated by
+    /// `request_refresh` and drained per-id by `refresh_consume` from whichever
+    /// builder owns that instance. Never touches geometry_epoch/block_epoch.
+    pending_refresh: std::cell::RefCell<rustc_hash::FxHashSet<u64>>,
+    /// Wall time (ms) of the most recent wire re-tessellation
     /// on a wire-cache miss in `model_tile_wires_arc` / `paper_sheet_wires_arc`.
     /// Stays at the last value while the cache is hit (idle pan/zoom on a warm
     /// cache reads ~0). Surfaced by the frame-budget HUD (Phase 5.3).
@@ -2039,6 +2053,7 @@ impl Scene {
             last_render_aspect: std::cell::Cell::new(16.0 / 9.0),
             last_world_per_pixel: std::cell::Cell::new(0.0),
             viewcube_hover: std::cell::Cell::new(None),
+            pending_refresh: std::cell::RefCell::new(rustc_hash::FxHashSet::default()),
             last_tess_ms: std::cell::Cell::new(0.0),
             last_tess_wires: std::cell::Cell::new(0),
             last_model_wire_gen: std::cell::Cell::new(0),
@@ -2615,6 +2630,63 @@ impl Scene {
         self.resident_tess_memo.borrow_mut().clear();
         // Can't name the changed handles → force every journal consumer to rebuild.
         self.push_geometry_delta(epoch, Vec::new(), true);
+    }
+
+    /// Stable per-viewport identity (mirrors the tag used by the renderer so
+    /// request resolution and builder consumption can never disagree — see
+    /// render.rs `instance_id` encoding).
+    pub fn instance_id_for(&self, inst: &ViewportInstance) -> u64 {
+        if let Some(t) = inst.tile_idx {
+            0x1000_0000_0000_0000 | (t as u64)
+        } else if inst.paper_sheet {
+            0x2000_0000_0000_0000
+        } else {
+            0x3000_0000_0000_0000 | inst.handle.value()
+        }
+    }
+
+    /// REDRAW core: resolve a scope to the concrete `instance_id`s it targets
+    /// and add them to the pending force set. `All` unions over `Active` so the
+    /// superset always wins (never shrinks a prior `All`). No DB / undo touch.
+    pub fn request_refresh(&self, scope: ViewportRefreshScope) {
+        let mut set = self.pending_refresh.borrow_mut();
+        if let ViewportRefreshScope::All = scope {
+            set.clear();
+            // All: every current tile in Model, else sheet + every paper content vp.
+            if self.current_layout == "Model" {
+                let tiles = self.model_tiles.borrow();
+                for (t, _) in tiles.iter().enumerate() {
+                    set.insert(0x1000_0000_0000_0000 | (t as u64));
+                }
+            } else {
+                set.insert(0x2000_0000_0000_0000); // sheet
+                let (_sheet, _sheet_h, content) = self.paper_viewport_handles();
+                for h in content.iter() {
+                    set.insert(0x3000_0000_0000_0000 | h.value());
+                }
+            }
+        } else if self.current_layout != "Model" {
+            // Active in paper: entered content vp, else the sheet (D6(a)).
+            match self.active_viewport {
+                Some(h) => { set.insert(0x3000_0000_0000_0000 | h.value()); }
+                None => { set.insert(0x2000_0000_0000_0000); }
+            }
+        } else {
+            // Active in Model: the active tile (always resolvable).
+            let active = self.active_model_tile.get();
+            set.insert(0x1000_0000_0000_0000 | (active as u64));
+        }
+    }
+
+    /// True while any force is still pending (never cleared falsely).
+    pub fn refresh_pending_any(&self) -> bool {
+        !self.pending_refresh.borrow().is_empty()
+    }
+
+    /// Builder hook: if `instance_id` has a pending force, mark it forced and
+    /// remove it (one-shot per id). Returns whether to set force_rasterize.
+    pub(crate) fn refresh_consume(&self, instance_id: u64) -> bool {
+        self.pending_refresh.borrow_mut().remove(&instance_id)
     }
 
     /// Drop a single entity from the tessellation memo so the next render
@@ -10097,5 +10169,82 @@ mod delta_undo_tests {
             copy_img
         );
         assert_eq!(ms_occurrences(&scene, copy_h), 1);
+    }
+}
+
+#[cfg(test)]
+mod redraw_tests {
+    use super::*;
+
+    fn tile_inst(idx: usize, active: bool) -> ViewportInstance {
+        ViewportInstance {
+            handle: Handle::NULL,
+            tile_idx: Some(idx),
+            screen_rect: iced::Rectangle { x: 0.0, y: 0.0, width: 1.0, height: 1.0 },
+            camera: Camera::default(),
+            render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
+            active,
+            grid_on: false,
+            paper_sheet: false,
+        }
+    }
+
+    #[test]
+    fn request_resolves_to_instance_ids_and_consumes_per_id() {
+        let scene = Scene::new(); // default: one model tile, index 0, active
+        let geom_before = scene.geometry_epoch;
+        let block_before = scene.block_epoch;
+
+        // Active -> the active model tile's instance_id.
+        scene.request_refresh(ViewportRefreshScope::Active);
+        let active_id = scene.instance_id_for(&tile_inst(0, true));
+        assert!(scene.refresh_pending_any(), "a request must be pending");
+        assert!(scene.refresh_consume(active_id), "active tile id must be consumed");
+        assert!(!scene.refresh_consume(active_id), "second consume for the same id is empty (one-shot per id)");
+        assert!(!scene.refresh_pending_any(), "id set empty after its only target consumed it");
+
+        // REDRAW never touches geometry / block epochs.
+        assert_eq!(scene.geometry_epoch, geom_before, "REDRAW must not bump geometry_epoch");
+        assert_eq!(scene.block_epoch, block_before, "REDRAW must not bump block_epoch");
+    }
+
+    #[test]
+    fn all_extinguishes_and_then_resurrects_active_after_consumption() {
+        let scene = Scene::new();
+        let t0 = scene.instance_id_for(&tile_inst(0, false));
+
+        scene.request_refresh(ViewportRefreshScope::Active);
+        assert!(scene.refresh_consume(t0), "Active targeted tile 0");
+        assert!(!scene.refresh_pending_any(), "Active consumed: set now empty");
+
+        // A subsequent All must re-establish membership even after the Active
+        // request was fully drained (the superset is resolved at request time).
+        scene.request_refresh(ViewportRefreshScope::All);
+        assert!(scene.refresh_pending_any(), "All re-pends after Active was consumed");
+        assert!(scene.refresh_consume(t0), "All must re-force tile 0 after Active drained");
+    }
+
+    #[test]
+    fn all_targets_every_existing_model_tile() {
+        let mut scene = Scene::new();
+        // Create MULTIPLE real model tiles through the public split API so the
+        // test exercises the per-id REDRAWALL guarantee (the very reason for the
+        // FxHashSet design): every EXISTING tile id must be targeted and drained.
+        scene.split_active_pane(false); // 2 tiles
+        scene.split_active_pane(false); // 3 tiles
+        assert!(scene.model_tiles.borrow().len() >= 3, "split must have produced tiles");
+
+        scene.request_refresh(ViewportRefreshScope::All);
+        for idx in 0..scene.model_tiles.borrow().len() {
+            let id = scene.instance_id_for(&tile_inst(idx, false));
+            assert!(
+                scene.refresh_consume(id),
+                "All must target EXISTING tile {idx}, not just tile 0"
+            );
+        }
+        assert!(!scene.refresh_pending_any(), "All drained every existing tile");
+        // A tile index that does not exist must NOT be drained.
+        let ghost = scene.instance_id_for(&tile_inst(99, false));
+        assert!(!scene.refresh_consume(ghost), "nonexistent tile 99 has no membership");
     }
 }

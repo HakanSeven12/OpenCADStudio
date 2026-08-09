@@ -1281,6 +1281,21 @@ mod tests {
     }
 
     #[test]
+    fn aliases_route_like_full_verbs() {
+        let mut full = fresh_app();
+        let mut short = fresh_app();
+        let _ = full.run_command_line("REDRAW");
+        let _ = short.run_command_line("R");
+        let i = full.active_tab;
+        assert!(short.tabs[i].scene.refresh_pending_any(), "'R' must trigger REDRAW");
+        assert_eq!(
+            short.tabs[i].scene.refresh_pending_any(),
+            full.tabs[i].scene.refresh_pending_any(),
+            "'R' and 'REDRAW' must leave the same refresh state"
+        );
+    }
+
+    #[test]
     fn redrawall_marks_all_tiles() {
         let mut app = fresh_app();
         let i = app.active_tab;

@@ -168,6 +168,10 @@ pub struct ViewportData {
     pub(in crate::scene) compass_rotation: Mat4,
     pub(in crate::scene) hover_region: Option<usize>,
     pub(in crate::scene) show_viewcube: bool,
+    /// Set when REDRAW/REDRAWALL requested a forced re-rasterize of this
+    /// viewport this frame — bypasses the scene-render cache even if the
+    /// signature is unchanged. Consumed (reset) in `prepare`.
+    pub(in crate::scene) force_rasterize: bool,
     /// Header.fill_mode (FILLMODE): when false, hatch / wipeout / face3d-fill
     /// uploads short-circuit so the renderer draws only wireframe.
     pub(in crate::scene) fill_mode: bool,
@@ -433,6 +437,13 @@ impl shader::Primitive for Primitive {
             // keeps updating in its own always-on pass, so cube hover still
             // tracks while the scene is cached.
             let sig = render_signature(vp, clip_size.width, clip_size.height);
+            // REDRAW bypass: pin render_sig to force a full pass this frame
+            // even if the signature is otherwise unchanged. The request is
+            // one-shot per viewport (consumed by the builder that produced
+            // this `ViewportData`), so this frame only.
+            if vp.force_rasterize {
+                inner.render_sig = u64::MAX;
+            }
             let skip = inner.render_sig != u64::MAX && sig == inner.render_sig;
             inner.render_sig = sig;
             inner.skip_geometry = skip;
@@ -3070,7 +3081,10 @@ impl Scene {
         let bg_color = [0.0, 0.0, 0.0, 0.0];
         let viewports: Vec<ViewportData> = instances
             .iter()
-            .filter_map(|inst| self.viewport_data_for(inst, canvas, hover_region, show_viewcube))
+            .filter_map(|inst| {
+                let force = self.refresh_consume(self.instance_id_for(inst));
+                self.viewport_data_for(inst, canvas, hover_region, show_viewcube, force)
+            })
             .collect();
         // Empty viewports → blit nothing; the container background (model bg
         // or the paper desk colour) stays visible.
@@ -3149,8 +3163,9 @@ impl Scene {
             grid_on: tile.grid_on,
             paper_sheet: false,
         };
+        let force = self.refresh_consume(self.instance_id_for(&inst));
         let viewports = self
-            .viewport_data_for(&inst, canvas, hover_region, show_viewcube)
+            .viewport_data_for(&inst, canvas, hover_region, show_viewcube, force)
             .into_iter()
             .collect();
         let perf_nav = perf_nav.map(|mut sample| {
@@ -3175,6 +3190,7 @@ impl Scene {
         canvas: (f32, f32),
         hover_region: Option<usize>,
         show_viewcube: bool,
+        force_rasterize: bool,
     ) -> Option<ViewportData> {
         let display = self.viewport_display_settings(inst);
         let mut flags = render_mode_flags(inst.render_mode);
@@ -3571,6 +3587,7 @@ impl Scene {
         };
         Some(ViewportData {
             instance_id,
+            force_rasterize,
             wires: Arc::downgrade(&all_wires),
             clip_boundary_ndc,
             preview_wires,

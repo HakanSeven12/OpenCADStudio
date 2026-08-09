@@ -214,6 +214,37 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::ToggleLayoutTabs));
             }
 
+            // ── REDRAW / REGEN ──────────────────────────────────────────────
+            // REDRAW — force a full re-rasterize of the current viewport next
+            // frame, WITHOUT touching the DB (never bumps geometry_epoch /
+            // block_epoch, never pushes undo). Scope: Active. This arm does not
+            // itself clear previews or cancel commands (the normal non-transparent
+            // dispatch teardown, commands/mod.rs:90-96, governs that separately);
+            // it only queues a per-viewport cache invalidation.
+            "REDRAW" => {
+                use crate::scene::ViewportRefreshScope;
+                self.tabs[i].scene.request_refresh(ViewportRefreshScope::Active);
+                self.command_line.push_output("REDRAW: viewport refreshed.");
+                return Some(Task::none());
+            }
+            // REDRAWALL — force re-rasterize of every generated viewport.
+            "REDRAWALL" => {
+                use crate::scene::ViewportRefreshScope;
+                self.tabs[i].scene.request_refresh(ViewportRefreshScope::All);
+                self.command_line.push_output("REDRAWALL: viewports refreshed.");
+                return Some(Task::none());
+            }
+            // REGEN — full model regeneration (bump_geometry: geometry_epoch AND
+            // block_epoch; C4). No undo, no DB mutation, so do NOT touch
+            // self.tabs[i].dirty — a newly opened drawing must not become
+            // "modified" merely because tessellation caches were invalidated (C7).
+            // REGENALL is functionally identical (C5).
+            "REGEN" | "REGENALL" => {
+                self.tabs[i].scene.bump_geometry();
+                self.command_line.push_output("REGEN: regenerated model.");
+                return Some(Task::none());
+            }
+
             // ── Drafting aids — same toggles the status-bar pills drive, also
             //    reachable by name from the command line. ─────────────────────────
             // GRID — show / hide the reference grid.
@@ -1222,4 +1253,53 @@ fn parse_landxml_cgpoints(xml: &str) -> Vec<[f64; 3]> {
         rest = &body[close + "</CgPoint>".len()..];
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::OpenCADStudio;
+
+    fn fresh_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    #[test]
+    fn redraw_requests_and_leaves_geometry_untouched() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let geom_before = app.tabs[i].scene.geometry_epoch;
+        let block_before = app.tabs[i].scene.block_epoch;
+        let _ = app.run_command_line("REDRAW");
+        assert!(
+            app.tabs[i].scene.refresh_pending_any(),
+            "REDRAW must leave a pending force request"
+        );
+        assert_eq!(app.tabs[i].scene.geometry_epoch, geom_before, "REDRAW must not regen");
+        assert_eq!(app.tabs[i].scene.block_epoch, block_before, "REDRAW must not regen blocks");
+    }
+
+    #[test]
+    fn redrawall_marks_all_tiles() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let _ = app.run_command_line("REDRAWALL");
+        assert!(app.tabs[i].scene.refresh_pending_any(), "REDRAWALL must leave a force request");
+    }
+
+    #[test]
+    fn regen_rebuilds_but_does_not_dirty_document() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let geom_before = app.tabs[i].scene.geometry_epoch;
+        let block_before = app.tabs[i].scene.block_epoch;
+        app.tabs[i].dirty = false;
+        let _ = app.run_command_line("REGEN");
+        assert_ne!(app.tabs[i].scene.geometry_epoch, geom_before, "REGEN must regenerate geometry");
+        assert_ne!(app.tabs[i].scene.block_epoch, block_before, "REGEN must regenerate block epoch");
+        assert!(!app.tabs[i].dirty, "REGEN must NOT mark the document as modified (no DB change)");
+        let _ = app.run_command_line("REGENALL");
+        assert!(!app.tabs[i].dirty, "REGENALL must not dirty the document either");
+    }
 }

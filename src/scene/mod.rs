@@ -2679,6 +2679,7 @@ impl Scene {
     }
 
     /// True while any force is still pending (never cleared falsely).
+    #[cfg(test)]
     pub fn refresh_pending_any(&self) -> bool {
         !self.pending_refresh.borrow().is_empty()
     }

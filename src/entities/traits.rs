@@ -1,17 +1,17 @@
 use acadrust::{CadDocument, EntityType};
 
 use crate::command::EntityTransform;
-use crate::scene::convert::acad_to_truck::TruckEntity;
+use crate::scene::convert::acad_to_render::RenderEntity;
 use crate::scene::model::object::{
     GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection,
 };
 use crate::scene::convert::tess_util::FallbackGeometry;
 
-pub trait TruckConvertible {
-    fn to_truck(&self, document: &CadDocument) -> Option<TruckEntity>;
+pub trait RenderConvertible {
+    fn to_render(&self, document: &CadDocument) -> Option<RenderEntity>;
 }
 
-/// Fallback geometry for entities not routed through the truck topology
+/// Fallback geometry for entities not routed through the render
 /// pipeline (Viewport, Insert, Hatch outline, Ole2Frame). Returns absolute
 /// WCS `f32` points + snap/key vertices the dispatcher wraps into a
 /// `WireModel`.
@@ -162,7 +162,7 @@ pub fn entity_type_name(et: &EntityType) -> &str {
 }
 
 pub trait EntityTypeOps {
-    fn to_truck_entity(&self, document: &CadDocument) -> Option<TruckEntity>;
+    fn to_render_entity(&self, document: &CadDocument) -> Option<RenderEntity>;
     fn grips(&self) -> Vec<GripDef>;
     fn grip_menu(&self, grip_id: usize) -> Vec<GripMenuItem>;
     fn geometry_properties(&self, text_style_names: &[String]) -> Vec<PropSection>;
@@ -284,9 +284,9 @@ macro_rules! impl_entity_basics_with_text_styles {
 }
 
 impl EntityTypeOps for EntityType {
-    fn to_truck_entity(&self, document: &CadDocument) -> Option<TruckEntity> {
+    fn to_render_entity(&self, document: &CadDocument) -> Option<RenderEntity> {
         dispatch!(self,
-            |e| TruckConvertible::to_truck(e, document),
+            |e| RenderConvertible::to_render(e, document),
             [
                 Point, Line, Circle, Arc, Ellipse, Spline, LwPolyline,
                 Polyline, Polyline2D, Polyline3D, Ray, XLine, RasterImage,

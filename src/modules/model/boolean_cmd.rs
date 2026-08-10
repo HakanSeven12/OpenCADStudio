@@ -1,6 +1,6 @@
 // Boolean operations on 3D solids (Design group). The actual CSG runs in
-// `App::solid_boolean` (src/app/model_ops.rs) using truck-shapeops on the
-// session-cached truck B-reps; this module just names the operations.
+// `App::solid_boolean` (src/app/model_ops.rs) using the kernel on the
+// session-cached B-reps; this module just names the operations.
 
 /// Which boolean a Design-group tool performs on the two selected solids.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

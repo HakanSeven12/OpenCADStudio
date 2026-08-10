@@ -1,5 +1,4 @@
 use acadrust::entities::Ellipse;
-use truck_modeling::{builder, BSplineCurve, Curve, Edge, KnotVec, Point3, Wire};
 
 use crate::entities::curve::CurveSnap;
 use crate::t;
@@ -8,11 +7,11 @@ use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
-fn to_truck(ell: &Ellipse) -> TruckEntity {
+fn to_render(ell: &Ellipse) -> RenderEntity {
     // ELLIPSE is one of the few WCS entities in DXF: `center` (code 10) and
     // `major_axis` (code 11) are world coordinates already — unlike ARC /
     // CIRCLE, whose centers are OCS. The converter knows that; this used to
@@ -35,9 +34,9 @@ fn to_truck(ell: &Ellipse) -> TruckEntity {
     // SWEEP read their profile out of `Contour` / `Curve` and have no arm for
     // a bare point list, so an ellipse handed over as `Lines` would stop
     // being usable as either.
-    let empty = |snap: CurveSnap| TruckEntity {
+    let empty = |snap: CurveSnap| RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Lines(Vec::new()),
+        object: RenderObject::Lines(Vec::new()),
         snap_pts: snap.snap_pts,
         tangent_geoms: vec![],
         key_vertices: vec![],
@@ -46,42 +45,14 @@ fn to_truck(ell: &Ellipse) -> TruckEntity {
     let Some(planar) = curve else {
         return empty(snap);
     };
-    let points: Vec<Point3> = crate::entities::curve::curve_points(&planar)
-        .into_iter()
-        .map(|p| Point3::new(p[0], p[1], p[2]))
-        .collect();
+    let points = crate::entities::curve::curve_points(&planar);
     if points.len() < 2 {
         return empty(snap);
     }
 
-    // Closure decided on the points rather than on the stored parameters. A
-    // file that writes an end parameter a hair short of a full turn still
-    // draws a closed ellipse, and an open edge whose two vertices sit on top
-    // of each other is not something a plane can be attached to.
-    let ends_meet = {
-        let (first, last) = (points[0], *points.last().expect("checked non-empty"));
-        let span = first.x.abs().max(first.y.abs()).max(first.z.abs()).max(1.0);
-        let gap = first - last;
-        (gap.x * gap.x + gap.y * gap.y + gap.z * gap.z).sqrt() <= 1e-9 * span
-    };
-    let object = if planar.is_closed() || ends_meet {
-        // Two half-edges rather than one closed edge: a single edge whose
-        // two vertices coincide is not a wire truck will attach a plane to.
-        let split = points.len() / 2;
-        let upper = points[..=split].to_vec();
-        let lower = points[split..].to_vec();
-        let v_pos = builder::vertex(points[0]);
-        let v_neg = builder::vertex(points[split]);
-        let edge_upper = Edge::new(&v_pos, &v_neg, polyline_curve(upper));
-        let edge_lower = Edge::new(&v_neg, &v_pos, polyline_curve(lower));
-        TruckObject::Contour([edge_upper, edge_lower].into_iter().collect::<Wire>())
-    } else {
-        let v_start = builder::vertex(points[0]);
-        let v_end = builder::vertex(*points.last().expect("checked non-empty"));
-        TruckObject::Curve(Edge::new(&v_start, &v_end, polyline_curve(points)))
-    };
+    let object = RenderObject::Lines(points);
 
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
         object,
         snap_pts: snap.snap_pts,
@@ -91,15 +62,11 @@ fn to_truck(ell: &Ellipse) -> TruckEntity {
     }
 }
 
-/// A truck curve that passes through every one of `points` in order.
+/// A curve through every one of `points` in order.
 ///
 /// Degree one, so the control polygon *is* the curve — the same thing the
 /// hand-built sampling produced, without restating how a B-spline is put
 /// together at each site.
-fn polyline_curve(points: Vec<Point3>) -> Curve {
-    let spans = points.len().saturating_sub(1);
-    Curve::BSplineCurve(BSplineCurve::new(KnotVec::uniform_knot(1, spans), points))
-}
 
 fn grips(ell: &Ellipse) -> Vec<GripDef> {
     let ctr = glam::DVec3::new(ell.center.x, ell.center.y, ell.center.z);
@@ -302,9 +269,9 @@ fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
     });
 }
 
-impl TruckConvertible for Ellipse {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+impl RenderConvertible for Ellipse {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self))
     }
 }
 

@@ -1,6 +1,6 @@
 // SOLID entity — 2D filled quadrilateral (or triangle when p3 == p4).
 //
-// Wireframe: the 4 perimeter edges as TruckObject::Lines.
+// Wireframe: the 4 perimeter edges as RenderObject::Lines.
 // Filled:    two triangles on `fill_tris`, preserving the entity's full WCS
 //            plane both at top level and through block expansion. The scene
 //            keeps a separate 2-D HatchModel only for plot projection; screen
@@ -12,8 +12,8 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::SnapHint;
 
@@ -72,8 +72,8 @@ pub(crate) fn perimeter_indices(corners: &[[f64; 3]; 4]) -> [usize; 4] {
     }
 }
 
-impl TruckConvertible for Solid {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Solid {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         // SOLID corners are OCS. Map them to WCS, then resolve either the DXF
         // Z-order or legacy perimeter order before building edges and fill.
         let corners = wcs_corners(self);
@@ -104,9 +104,9 @@ impl TruckConvertible for Solid {
         // two points coincide and the second triangle degenerates harmlessly.
         let fill_tris = vec![p0, p1, p2, p0, p2, p3];
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(pts),
+            object: RenderObject::Lines(pts),
             snap_pts: snap,
             tangent_geoms: vec![],
             key_vertices: corners.to_vec(),

@@ -344,7 +344,40 @@ pub fn entity_curve_xy(entity: &EntityType) -> Option<Curve> {
 /// pair; casting local coordinates on the way in throws away precision the
 /// shader was built to reconstruct.
 pub fn curve_points(curve: &PlanarCurve) -> Vec<[f64; 3]> {
-    curve.tessellate_within(crate::scene::convert::truck_tess::current_curve_tol())
+    let tolerance = crate::scene::convert::curve_tol::curve_tol_for(curve_size(&curve.curve));
+    curve.tessellate_within(tolerance)
+}
+
+/// How big a curve is, for deciding how finely to sample it.
+///
+/// A radius where there is one, since that is what the chord-height relation
+/// is written in terms of. `0` for the kinds whose sampling density is not a
+/// question of curvature — a straight run needs its two ends and nothing in
+/// between — which leaves those on the frame's own tolerance.
+fn curve_size(curve: &Curve) -> f64 {
+    match curve {
+        Curve::Circle(circle) => circle.radius,
+        Curve::Arc(arc) => arc.radius,
+        Curve::Ellipse(arc) => arc.ellipse.major_radius,
+        // A polyline's bulges and a spline's bends are the same question asked
+        // of a chain, and its own extent is the nearest thing to a radius.
+        Curve::Polyline(_) | Curve::Nurbs(_) => {
+            let sampled = curve.tessellate(64.0);
+            let (mut low, mut high) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+            for point in &sampled {
+                for axis in 0..2 {
+                    low[axis] = low[axis].min(point[axis]);
+                    high[axis] = high[axis].max(point[axis]);
+                }
+            }
+            if low[0] > high[0] {
+                0.0
+            } else {
+                (high[0] - low[0]).max(high[1] - low[1]) * 0.5
+            }
+        }
+        Curve::Line(_) | Curve::Ray(_) | Curve::XLine(_) => 0.0,
+    }
 }
 
 /// The snap candidates an entity's curve offers, in the two channels the

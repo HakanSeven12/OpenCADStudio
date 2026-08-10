@@ -2,12 +2,12 @@ use acadrust::entities::{Ole2Frame, OleObjectType};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::SnapHint;
 
-fn to_truck(ole: &Ole2Frame) -> TruckEntity {
+fn to_render(ole: &Ole2Frame) -> RenderEntity {
     let x0 = ole.upper_left_corner.x;
     let y0 = ole.lower_right_corner.y;
     let x1 = ole.lower_right_corner.x;
@@ -16,9 +16,9 @@ fn to_truck(ole: &Ole2Frame) -> TruckEntity {
 
     if (x1 - x0).abs() < 1e-6 && (y1 - y0).abs() < 1e-6 {
         let s = 0.5_f64;
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(vec![[-s, 0.0, z], [s, 0.0, z]]),
+            object: RenderObject::Lines(vec![[-s, 0.0, z], [s, 0.0, z]]),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -42,7 +42,7 @@ fn to_truck(ole: &Ole2Frame) -> TruckEntity {
         [x0, y0, z],
     ];
     let center = glam::DVec3::new(cx, cy, z);
-    TruckEntity {
+    RenderEntity {
         // Interior pick surface: the frame selects on a click anywhere
         // inside, not just on its border.
         pick_tris: crate::entities::common::quad_pick_tris(&[
@@ -51,7 +51,7 @@ fn to_truck(ole: &Ole2Frame) -> TruckEntity {
             [x1, y1, z],
             [x0, y1, z],
         ]),
-        object: TruckObject::Lines(pts),
+        object: RenderObject::Lines(pts),
         snap_pts: vec![(center, SnapHint::Center)],
         tangent_geoms: vec![],
         key_vertices: vec![[x0, y0, z], [x1, y1, z]],
@@ -168,9 +168,9 @@ fn apply_transform(ole: &mut Ole2Frame, t: &EntityTransform) {
     }
 }
 
-impl TruckConvertible for Ole2Frame {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+impl RenderConvertible for Ole2Frame {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self))
     }
 }
 

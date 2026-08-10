@@ -10,8 +10,8 @@ use crate::entities::text_support::{
     layout_mtext, resolve_dxf_special_chars, resolve_text_style, text_local_bounds,
     MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{GlyphRun, TextStroke, TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 use crate::scene::text::lff;
@@ -20,7 +20,7 @@ use crate::t;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-/// Bundle of the fields both attribute kinds carry. Lets the truck builder
+/// Bundle of the fields both attribute kinds carry. Lets the render builder
 /// stay generic over ATTDEF vs ATTRIB.
 struct AttrTextInputs<'a> {
     value: &'a str,
@@ -101,7 +101,7 @@ fn mtext_flag_str(f: MTextFlag) -> &'static str {
 /// Render text strokes for an attribute, honouring alignment, oblique angle,
 /// width factor, generation flags (backward / upside-down), text-style
 /// resolution, and basic multiline splitting on `\n` / `\\P`.
-fn build_attr_truck(input: AttrTextInputs<'_>, document: &acadrust::CadDocument) -> TruckEntity {
+fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument) -> RenderEntity {
     let normal = (input.normal.x, input.normal.y, input.normal.z);
     let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
         (
@@ -218,9 +218,9 @@ fn build_attr_truck(input: AttrTextInputs<'_>, document: &acadrust::CadDocument)
         });
         let _ = input.line_count;
         let _ = input.is_multiline;
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Text(layout.strokes),
+            object: RenderObject::Text(layout.strokes),
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -321,9 +321,9 @@ fn build_attr_truck(input: AttrTextInputs<'_>, document: &acadrust::CadDocument)
     }
     let _ = input.line_count; // round-trip only — recomputed above
 
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Text(strokes_all),
+        object: RenderObject::Text(strokes_all),
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![],
@@ -333,8 +333,8 @@ fn build_attr_truck(input: AttrTextInputs<'_>, document: &acadrust::CadDocument)
 
 // ── AttributeDefinition ───────────────────────────────────────────────────────
 
-impl TruckConvertible for AttributeDefinition {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for AttributeDefinition {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
         // An attribute definition previews its tag when it has no default
         // value, so the placeholder is visible where a block will prompt for
         // input. (Passed as a non-empty value, so it renders as-is.)
@@ -343,7 +343,7 @@ impl TruckConvertible for AttributeDefinition {
         } else {
             self.default_value.clone()
         };
-        Some(build_attr_truck(
+        Some(build_attr_render(
             AttrTextInputs {
                 value: &display_value,
                 insertion_point: self.insertion_point,
@@ -622,9 +622,9 @@ impl Transformable for AttributeDefinition {
 
 // ── AttributeEntity ───────────────────────────────────────────────────────────
 
-impl TruckConvertible for AttributeEntity {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(build_attr_truck(
+impl RenderConvertible for AttributeEntity {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(build_attr_render(
             AttrTextInputs {
                 value: &self.value,
                 insertion_point: self.insertion_point,

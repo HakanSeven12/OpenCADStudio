@@ -7,8 +7,8 @@ use crate::entities::common::{
 use crate::entities::text_support::{
     layout_mtext, resolve_text_style, GlyphBox, MTextColumns, MTextRenderOpts, MTextVAnchor,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 use crate::t;
@@ -70,7 +70,7 @@ fn drawing_dir_str(d: &DrawingDirection) -> &'static str {
 }
 
 /// Per-visible-character world-space boxes for the MText editor's
-/// click-to-select preview. Uses the exact same layout opts as `to_truck`
+/// click-to-select preview. Uses the exact same layout opts as `to_render`
 /// so the boxes line up with the rendered glyphs.
 /// The MTEXT string to render: the live re-evaluated value when the entity
 /// hosts a dynamic field, otherwise its stored (cached) value.
@@ -127,7 +127,7 @@ pub fn glyph_boxes(t: &MText, document: &acadrust::CadDocument) -> Vec<GlyphBox>
     layout.glyph_boxes
 }
 
-fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
+fn to_render(t: &MText, document: &acadrust::CadDocument) -> RenderEntity {
     let resolved_style = resolve_text_style(&t.style, document);
     let attach_h_anchor: f32 = match t.attachment_point {
         AttachmentPoint::TopCenter
@@ -178,9 +178,9 @@ fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
         t.insertion_point.y,
         t.insertion_point.z,
     );
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Text(layout.strokes),
+        object: RenderObject::Text(layout.strokes),
         snap_pts: vec![(insertion, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![],
@@ -562,9 +562,9 @@ fn apply_transform(t: &mut MText, tr: &EntityTransform) {
     });
 }
 
-impl TruckConvertible for MText {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self, document))
+impl RenderConvertible for MText {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self, document))
     }
 }
 

@@ -157,6 +157,68 @@ impl OpenCADStudio {
         Some((base, target))
     }
 
+    fn active_axis_lock(
+        &mut self,
+        tab: usize,
+        cursor: glam::DVec3,
+        base: glam::DVec3,
+        allowed: bool,
+    ) -> Option<glam::DVec3> {
+        if self.shift_down && allowed {
+            if self.axis_lock_dir.is_none() {
+                let ucs = self.tabs[tab].ucs_xform();
+                self.axis_lock_dir = axis_lock_capture(
+                    cursor,
+                    base,
+                    self.polar_mode,
+                    self.polar_increment_deg,
+                    &ucs,
+                    self.isometric_drafting,
+                    self.iso_plane,
+                    self.snap_angle_deg,
+                );
+            }
+        } else {
+            self.axis_lock_dir = None;
+        }
+        self.axis_lock_dir
+    }
+
+    fn active_otrack_hit(
+        &self,
+        tab: usize,
+        cursor: glam::DVec3,
+        snap: Option<crate::snap::SnapResult>,
+        base: Option<glam::DVec3>,
+        drafting: bool,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+    ) -> Option<crate::snap::OtrackHit> {
+        if snap.is_some_and(|hit| hit.snap_type != crate::snap::SnapType::Extension) {
+            return None;
+        }
+        let required_crossing_ray = match snap {
+            Some(extension) => Some((extension.extension_origin?, extension.extension_dir?)),
+            None => None,
+        };
+        let step = (self.polar_mode && drafting).then_some(self.polar_increment_deg);
+        let (_, (ucs_x, ucs_y, _)) = self.drafting_grid_basis(tab);
+        let hit = self.snapper.otrack_snap(
+            cursor,
+            view_rot,
+            eye,
+            bounds,
+            step,
+            base,
+            required_crossing_ray,
+            self.ortho_mode && drafting,
+            ucs_x.as_dvec3(),
+            ucs_y.as_dvec3(),
+        )?;
+        Some(hit)
+    }
+
     /// Write PDSIZE from the dialog buffer with the current relative/absolute
     /// sign. A relative size is stored negative; absolute positive. Switching to
     /// absolute with an empty/zero size seeds a positive value from the current
@@ -1094,49 +1156,36 @@ impl OpenCADStudio {
 
             self.tabs[i].snap_result = snap_hit;
 
-            // Grip edits use the same tracking-point acquisition and OTRACK
-            // resolution as normal interactive point commands.
-            let otrack_hit = {
-                let snap_world = snap_hit.map(|s| s.world);
-
-                self.snapper.update_otrack_dwell(
-                    snap_world,
-                    &snap_candidates,
+            self.snapper.update_otrack_dwell(
+                snap_hit,
+                &snap_candidates,
+                view_rot,
+                eye,
+                bounds,
+                Instant::now(),
+            );
+            let axis_lock = self.active_axis_lock(i, raw, base, true);
+            let otrack_hit = if axis_lock.is_none() {
+                self.active_otrack_hit(
+                    i,
+                    raw,
+                    snap_hit,
+                    Some(base),
+                    true,
                     view_rot,
                     eye,
                     bounds,
-                    Instant::now(),
-                );
-
-                if snap_hit.is_none() {
-                    let polar_step = if self.polar_mode {
-                        Some(self.polar_increment_deg)
-                    } else {
-                        None
-                    };
-
-                    let (_, (ucs_x, ucs_y, _)) = self.drafting_grid_basis(i);
-
-                    self.snapper.otrack_snap(
-                        raw,
-                        view_rot,
-                        eye,
-                        bounds,
-                        polar_step,
-                        Some(grip.origin_world),
-                        self.ortho_mode,
-                        ucs_x.as_dvec3(),
-                        ucs_y.as_dvec3(),
-                    )
-                } else {
-                    None
-                }
+                )
+            } else {
+                None
             };
 
             self.otrack_active = otrack_hit.map(|hit| (hit.base, hit.dir));
             self.otrack_kind = otrack_hit.map(|hit| hit.kind);
 
-            let mut snapped = if let Some(hit) = otrack_hit {
+            let mut snapped = if let Some(dir) = axis_lock {
+                axis_lock_apply(snap_hit.map(|hit| hit.world).unwrap_or(raw), base, dir)
+            } else if let Some(hit) = otrack_hit {
                 hit.aligned
             } else {
                 snap_hit.map(|s| s.world).unwrap_or(raw)
@@ -1146,29 +1195,8 @@ impl OpenCADStudio {
                 s.screen.y += tile_b.y;
             }
 
-            // Hard axis lock (#312) works for grip drags too: Shift
-            // pins the drag to the nearest polar/ortho ray from the
-            // grip's origin, osnap hits included.
-            if self.shift_down {
-                if self.axis_lock_dir.is_none() {
-                    let ucs_xf = self.tabs[i].ucs_xform();
-                    self.axis_lock_dir = axis_lock_capture(
-                        raw,
-                        grip.origin_world,
-                        self.polar_mode,
-                        self.polar_increment_deg,
-                        &ucs_xf,
-                        self.isometric_drafting,
-                        self.iso_plane,
-                        self.snap_angle_deg,
-                    );
-                }
-            } else {
-                self.axis_lock_dir = None;
-            }
-            if let Some(dir) = self.axis_lock_dir {
-                snapped = axis_lock_apply(snapped, grip.origin_world, dir);
-            } else if otrack_hit.is_none()
+            if axis_lock.is_none()
+                && otrack_hit.is_none()
                 && !snap_hit.is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid)
             {
                 let base = grip.origin_world;
@@ -1539,53 +1567,51 @@ impl OpenCADStudio {
                 )
             };
 
-            // Object Snap Tracking: update dwell, then align the cursor
-            // to a tracking ray (and store the alignment so a typed
-            // distance can place a point along it — issue #69).
-            let otrack_hit = {
-                let snap_world = self.tabs[i].snap_result.map(|s| s.world);
-                self.snapper.update_otrack_dwell(
-                    snap_world,
-                    &snap_candidates,
+            let wants_point = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
+                !command.needs_entity_pick()
+                    && !command.needs_tangent_pick()
+                    && !command.is_selection_gathering()
+            });
+            let axis_lock = if let Some(base) = self.last_point {
+                self.active_axis_lock(
+                    i,
+                    cursor_world,
+                    base,
+                    wants_point && !is_window_corner,
+                )
+            } else {
+                self.axis_lock_dir = None;
+                None
+            };
+            self.snapper.update_otrack_dwell(
+                self.tabs[i].snap_result,
+                &snap_candidates,
+                view_rot,
+                eye,
+                bounds,
+                Instant::now(),
+            );
+            self.snapper.update_parallel(
+                cursor_world.as_vec3(),
+                &snap_candidates,
+                view_rot,
+                eye,
+                bounds,
+                Instant::now(),
+            );
+            let otrack_hit = if axis_lock.is_none() {
+                self.active_otrack_hit(
+                    i,
+                    cursor_world,
+                    self.tabs[i].snap_result,
+                    self.last_point,
+                    !is_window_corner,
                     view_rot,
                     eye,
                     bounds,
-                    Instant::now(),
-                );
-                // Parallel snap: acquire the reference line under the
-                // cursor (independent of OTRACK). (#277)
-                self.snapper.update_parallel(
-                    cursor_world.as_vec3(),
-                    &snap_candidates,
-                    view_rot,
-                    eye,
-                    bounds,
-                    Instant::now(),
-                );
-                if self.tabs[i].snap_result.is_none() {
-                    // A window corner is a free point, so neither the
-                    // Polar increment nor the Ortho lock may pull the
-                    // OTRACK alignment onto an axis (#291).
-                    let step = if self.polar_mode && !is_window_corner {
-                        Some(self.polar_increment_deg)
-                    } else {
-                        None
-                    };
-                    let (_, (ucs_x, ucs_y, _)) = self.drafting_grid_basis(i);
-                    self.snapper.otrack_snap(
-                        cursor_world,
-                        view_rot,
-                        eye,
-                        bounds,
-                        step,
-                        self.last_point,
-                        self.ortho_mode && !is_window_corner,
-                        ucs_x.as_dvec3(),
-                        ucs_y.as_dvec3(),
-                    )
-                } else {
-                    None
-                }
+                )
+            } else {
+                None
             };
             self.otrack_active = otrack_hit.map(|h| (h.base, h.dir));
             self.otrack_kind = otrack_hit.map(|h| h.kind);
@@ -1594,7 +1620,10 @@ impl OpenCADStudio {
             // the point onto the line through last_point parallel to the
             // acquired reference, and drive the alignment guide off it.
             // (#277)
-            if self.tabs[i].snap_result.is_none() && otrack_hit.is_none() {
+            if axis_lock.is_none()
+                && self.tabs[i].snap_result.is_none()
+                && otrack_hit.is_none()
+            {
                 if let Some(par) = self.snapper.parallel_snap(
                     cursor_world.as_vec3(),
                     self.last_point.map(|p| p.as_vec3()),
@@ -1612,9 +1641,15 @@ impl OpenCADStudio {
             }
 
             let effective = {
-                let mut pt: glam::DVec3 = if let Some(h) = otrack_hit {
-                    // Tracking alignment wins over the free cursor;
-                    // ortho/polar don't re-constrain it.
+                let mut pt: glam::DVec3 = if let (Some(dir), Some(base)) =
+                    (axis_lock, self.last_point)
+                {
+                    let point = self.tabs[i]
+                        .snap_result
+                        .map(|snap| snap.world)
+                        .unwrap_or(cursor_world);
+                    axis_lock_apply(point, base, dir)
+                } else if let Some(h) = otrack_hit {
                     h.aligned
                 } else {
                     // Snap runs in model space (viewport camera or the
@@ -1623,78 +1658,36 @@ impl OpenCADStudio {
                         .snap_result
                         .map(|s| s.world)
                         .unwrap_or(cursor_world);
-                    // Hard axis lock (#312): Shift during a rubber-band
-                    // pick captures the nearest polar/ortho direction
-                    // and pins the pick to that ray — even an osnap hit
-                    // contributes only its along-axis component.
-                    // Only while an active command is asking for a
-                    // POINT — Shift has other meanings during entity
-                    // picks (TRIM/EXTEND swap) and selection.
-                    let wants_point = self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
-                        !c.needs_entity_pick()
-                            && !c.needs_tangent_pick()
-                            && !c.is_selection_gathering()
-                    });
-                    if let Some(base) = self.last_point {
-                        if self.shift_down && wants_point && !is_window_corner {
-                            if self.axis_lock_dir.is_none() {
-                                let ucs_xf = self.tabs[i].ucs_xform();
-                                self.axis_lock_dir = axis_lock_capture(
-                                    cursor_world,
+                    let osnap_locked = self.tabs[i]
+                        .snap_result
+                        .is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid);
+                    if !osnap_locked && !is_window_corner {
+                        if let Some(base) = self.last_point {
+                            let ucs_xf = self.tabs[i].ucs_xform();
+                            if self.ortho_mode {
+                                pt = drafting_constrain(
+                                    pt,
                                     base,
-                                    self.polar_mode,
-                                    self.polar_increment_deg,
                                     &ucs_xf,
                                     self.isometric_drafting,
                                     self.iso_plane,
                                     self.snap_angle_deg,
                                 );
-                            }
-                        } else if !self.shift_down {
-                            self.axis_lock_dir = None;
-                        }
-                    } else if !self.shift_down {
-                        self.axis_lock_dir = None;
-                    }
-                    if let (Some(dir), Some(base)) = (self.axis_lock_dir, self.last_point) {
-                        pt = axis_lock_apply(pt, base, dir);
-                        pt
-                    } else {
-                        // Object snap wins over ortho/polar: a snapped point
-                        // is taken as-is so it isn't pulled onto the ortho
-                        // axis. Grid snap is positional, not an object snap,
-                        // so it still combines with ortho/polar. (#132)
-                        let osnap_locked = self.tabs[i]
-                            .snap_result
-                            .is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid);
-                        if !osnap_locked && !is_window_corner {
-                            if let Some(base) = self.last_point {
-                                let ucs_xf = self.tabs[i].ucs_xform();
-                                if self.ortho_mode {
-                                    pt = drafting_constrain(
-                                        pt,
-                                        base,
-                                        &ucs_xf,
-                                        self.isometric_drafting,
-                                        self.iso_plane,
-                                        self.snap_angle_deg,
-                                    );
-                                } else if self.polar_mode {
-                                    pt = polar_constrain_near(
-                                        pt,
-                                        base,
-                                        self.polar_increment_deg,
-                                        view_rot,
-                                        eye,
-                                        bounds,
-                                        self.snapper.osnap_radius_px,
-                                        &ucs_xf,
-                                    );
-                                }
+                            } else if self.polar_mode {
+                                pt = polar_constrain_near(
+                                    pt,
+                                    base,
+                                    self.polar_increment_deg,
+                                    view_rot,
+                                    eye,
+                                    bounds,
+                                    self.snapper.osnap_radius_px,
+                                    &ucs_xf,
+                                );
                             }
                         }
-                        pt
                     }
+                    pt
                 };
                 // Clamp to world XY only when no UCS is active; with a
                 // UCS the point already lies on the UCS XY plane.
@@ -1797,6 +1790,7 @@ impl OpenCADStudio {
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,
+                        extension_dir: None,
                     });
                     if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
                         cmd.set_acquisition_hint(Some(pick.label));
@@ -2888,36 +2882,33 @@ impl OpenCADStudio {
                 if self.tabs[i].active_ucs.is_none() {
                     pt.z = 0.0;
                 }
-                let mut world_pt_locked = false;
-                // Hard axis lock (#312): the held Shift lock projects
-                // the committed point — osnap hits included — onto the
-                // locked ray, matching the preview exactly.
-                if let (Some(dir), Some(base)) = (self.axis_lock_dir, self.last_point) {
+                let axis_lock = if let Some(base) = self.last_point {
+                    self.active_axis_lock(
+                        i,
+                        raw,
+                        base,
+                        !needs_entity_click && !needs_tan && !is_window_corner,
+                    )
+                } else {
+                    self.axis_lock_dir = None;
+                    None
+                };
+                if let (Some(dir), Some(base)) = (axis_lock, self.last_point) {
                     pt = axis_lock_apply(pt, base, dir);
                     if self.tabs[i].active_ucs.is_none() {
                         pt.z = 0.0;
                     }
-                    world_pt_locked = true;
                 }
-                // OTRACK alignment wins over ortho/polar; otherwise apply
-                // ortho/polar relative to the last point.
-                let otrack = if !world_pt_locked && snap_hit.is_none() {
-                    let step = if self.polar_mode && !is_window_corner {
-                        Some(self.polar_increment_deg)
-                    } else {
-                        None
-                    };
-                    let (_, (ucs_x, ucs_y, _)) = self.drafting_grid_basis(i);
-                    self.snapper.otrack_snap(
+                let otrack = if axis_lock.is_none() {
+                    self.active_otrack_hit(
+                        i,
                         raw,
+                        snap_hit,
+                        self.last_point,
+                        !is_window_corner,
                         view_rot,
                         eye,
                         bounds,
-                        step,
-                        self.last_point,
-                        self.ortho_mode && !is_window_corner,
-                        ucs_x.as_dvec3(),
-                        ucs_y.as_dvec3(),
                     )
                 } else {
                     None
@@ -2927,7 +2918,7 @@ impl OpenCADStudio {
                     if self.tabs[i].active_ucs.is_none() {
                         pt.z = 0.0;
                     }
-                } else if !world_pt_locked
+                } else if axis_lock.is_none()
                     && !is_window_corner
                     && !snap_hit.is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid)
                 {

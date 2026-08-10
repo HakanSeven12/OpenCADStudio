@@ -1468,7 +1468,7 @@ fn tessellate_dimension_inner(
     line_weight_px: f32,
     anno_scale: f32,
     // LOD hints — when present, synthesised dim text routes through the
-    // top-level LOD ladder (baseline / greek / full) instead of the truck
+    // top-level LOD ladder (baseline / greek / full) instead of the render
     // path so far-out drawings collapse to a colored rect or baseline.
     selected_set: &rustc_hash::FxHashSet<acadrust::Handle>,
     active_viewport: Option<acadrust::Handle>,
@@ -1478,7 +1478,7 @@ fn tessellate_dimension_inner(
 ) -> Vec<WireModel> {
     let name = handle.value().to_string();
     // (Baked-block fast path moved up into scene::tessellate_entity so the
-    // recursive call goes through the LOD ladder, not the truck path.)
+    // recursive call goes through the LOD ladder, not the kernel path.)
 
     let style_name = &dim.base().style_name;
     let source_style = document.dim_styles.iter().find(|s| {

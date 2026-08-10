@@ -1,19 +1,18 @@
 use acadrust::entities::{Polyline, Polyline2D, Polyline3D};
 use crate::t;
-use truck_modeling::{builder, Edge, Point3, Wire};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_prop as edit, parse_f64, ro_prop as ro, square_grip, stepper_prop as stepper,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{extrusion_wall_tris, TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;
 
 // ── Polyline (old-style 3D heavy polyline) ────────────────────────────────────
 
-fn tessellate_polyline(pl: &Polyline) -> TruckEntity {
+fn tessellate_polyline(pl: &Polyline) -> RenderEntity {
     let pts: Vec<[f64; 3]> = pl
         .vertices
         .iter()
@@ -26,9 +25,9 @@ fn tessellate_polyline(pl: &Polyline) -> TruckEntity {
     }
 
     let key_verts = pts.clone();
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Lines(points),
+        object: RenderObject::Lines(points),
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices: key_verts,
@@ -36,8 +35,8 @@ fn tessellate_polyline(pl: &Polyline) -> TruckEntity {
     }
 }
 
-impl TruckConvertible for Polyline {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Polyline {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         Some(tessellate_polyline(self))
     }
 }
@@ -196,13 +195,13 @@ pub fn drawn_vertices2d(
     (kept.len() >= 2).then_some(kept)
 }
 
-fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
+fn tessellate_polyline2d(pl: &Polyline2D) -> RenderEntity {
     let filtered = drawn_vertices2d(pl);
     let verts: &[acadrust::entities::Vertex2D] = filtered.as_deref().unwrap_or(&pl.vertices);
     if verts.is_empty() {
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(vec![]),
+            object: RenderObject::Lines(vec![]),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -214,16 +213,15 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
     let normal = (pl.normal.x, pl.normal.y, pl.normal.z);
     let count = verts.len();
     let seg_count = if pl.is_closed() { count } else { count - 1 };
-    let mut edges: Vec<Edge> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
     let mut key_verts: Vec<[f64; 3]> = Vec::new();
 
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
         crate::scene::view::transform::ocs_point_to_wcs((x, y, elev), normal)
     };
-    let to_pt = |v: &acadrust::entities::Vertex2D| -> Point3 {
+    let to_pt = |v: &acadrust::entities::Vertex2D| -> [f64; 3] {
         let (wx, wy, wz) = to_wcs(v.location.x, v.location.y);
-        Point3::new(wx, wy, wz)
+        [wx, wy, wz]
     };
 
     if pl.thickness.abs() > 1e-10 {
@@ -282,9 +280,9 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
             let (origin, fills) = wide_fills(pl);
             let (fill_tris, lines) =
                 crate::entities::common::thick_band_tube(origin, &fills, t, normal, &to_wcs);
-            return TruckEntity {
+            return RenderEntity {
                 pick_tris: fill_tris.clone(),
-                object: TruckObject::Lines(lines),
+                object: RenderObject::Lines(lines),
                 snap_pts: vec![],
                 tangent_geoms: tgs,
                 key_vertices: kv,
@@ -307,9 +305,9 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
                 }
             }
         }
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: extrusion_wall_tris(&path, [t * nx, t * ny, t * nz]),
-            object: TruckObject::Lines(pts),
+            object: RenderObject::Lines(pts),
             snap_pts: vec![],
             tangent_geoms: tgs,
             key_vertices: kv,
@@ -325,24 +323,15 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
         let bulge = v0.bulge;
 
         if bulge.abs() < 1e-9 {
-            let tv0 = builder::vertex(p0);
-            let tv1 = builder::vertex(p1);
-            edges.push(builder::line(&tv0, &tv1));
             tangents.push(TangentGeom::Line {
-                p1: [p0.x as f32, p0.y as f32, p0.z as f32],
-                p2: [p1.x as f32, p1.y as f32, p1.z as f32],
+                p1: [p0[0] as f32, p0[1] as f32, p0[2] as f32],
+                p2: [p1[0] as f32, p1[1] as f32, p1[2] as f32],
             });
         } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
             [v0.location.x, v0.location.y],
             [v1.location.x, v1.location.y],
             bulge,
         ) {
-            let mid_s = arc.sample(0.5);
-            let (mid_wx, mid_wy, mid_wz) = to_wcs(mid_s[0], mid_s[1]);
-            let p_mid = Point3::new(mid_wx, mid_wy, mid_wz);
-            let tv0 = builder::vertex(p0);
-            let tv1 = builder::vertex(p1);
-            edges.push(builder::circle_arc(&tv0, &tv1, p_mid));
             let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
             tangents.push(TangentGeom::Circle {
                 center: [wcx as f32, wcy as f32, wcz as f32],
@@ -351,9 +340,9 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
         }
 
         if i == 0 {
-            key_verts.push([p0.x, p0.y, p0.z]);
+            key_verts.push([p0[0], p0[1], p0[2]]);
         }
-        key_verts.push([p1.x, p1.y, p1.z]);
+        key_verts.push([p1[0], p1[1], p1[2]]);
     }
 
     let (fill_origin, fills) = wide_fills(pl);
@@ -366,11 +355,15 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
                 pl.is_closed(),
                 &to_wcs,
             );
-            TruckObject::TaperedLines(pts, widths)
+            RenderObject::TaperedLines(pts, widths)
         }
-        None => TruckObject::Contour(edges.into_iter().collect::<Wire>()),
+        None => RenderObject::Lines(
+            crate::entities::curve::polyline2d_curve(pl)
+                .map(|planar| crate::entities::curve::curve_points(&planar))
+                .unwrap_or_default(),
+        ),
     };
-    TruckEntity {
+    RenderEntity {
         pick_tris: crate::entities::common::wide_band_tris(fill_origin, &fills),
         object,
         snap_pts: vec![],
@@ -416,8 +409,8 @@ fn tapered_band_verts_2d(
     }
 }
 
-impl TruckConvertible for Polyline2D {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Polyline2D {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         Some(tessellate_polyline2d(self))
     }
 }
@@ -699,7 +692,7 @@ impl Transformable for Polyline2D {
 
 // ── Polyline3D ────────────────────────────────────────────────────────────────
 
-fn tessellate_polyline3d(pl: &Polyline3D) -> TruckEntity {
+fn tessellate_polyline3d(pl: &Polyline3D) -> RenderEntity {
     let to_pt = |v: &acadrust::entities::Vertex3DPolyline| -> [f64; 3] {
         [v.position.x, v.position.y, v.position.z]
     };
@@ -724,9 +717,9 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> TruckEntity {
         points.push(wire_pts[0]);
     }
 
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Lines(points),
+        object: RenderObject::Lines(points),
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices: key_verts,
@@ -734,8 +727,8 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> TruckEntity {
     }
 }
 
-impl TruckConvertible for Polyline3D {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Polyline3D {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         Some(tessellate_polyline3d(self))
     }
 }

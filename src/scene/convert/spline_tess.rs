@@ -3,7 +3,7 @@
 // Lofted / swept / revolved surfaces store their geometry as an ACIS
 // `nubs` (non-uniform B-spline) block inside the `spline-surface` record.
 // Rather than evaluate the basis functions by hand, we parse the control net
-// and knot vectors out of the SAT tokens, hand them to truck's
+// and knot vectors out of the SAT tokens, hand them to the kernel's
 // `BSplineSurface` (the same NURBS kernel the Model tab already builds on),
 // and sample its parametric grid into triangles.
 
@@ -12,46 +12,14 @@ use acadrust::entities::acis::{
     SatCoedge, SatDocument, SatFace, SatLoop, SatPCurve, SatRecord, SatSplineSurface, SatToken,
 };
 use rustc_hash::FxHashSet;
-use truck_modeling::base::{Vector3, Vector4};
-use truck_modeling::{
-    BSplineSurface, KnotVec, NurbsSurface, ParametricSurface, ParametricSurface3D, Point3,
-};
+use acadrust::kernel::space::NurbsSurface3;
 
 use crate::scene::convert::solid3d_tess::LodConfig;
 
-/// A `spline-surface` block is either a non-rational `nubs` (control points are
-/// plain xyz) or a rational `nurbs` (control points carry a weight). They share
-/// the parametric-surface interface, so tessellation treats them uniformly.
-enum SplineSurf {
-    Bs(BSplineSurface<Point3>),
-    Nurbs(NurbsSurface<Vector4>),
-}
-
-impl SplineSurf {
-    fn parameter_range(
-        &self,
-    ) -> (
-        (std::ops::Bound<f64>, std::ops::Bound<f64>),
-        (std::ops::Bound<f64>, std::ops::Bound<f64>),
-    ) {
-        match self {
-            SplineSurf::Bs(s) => s.parameter_range(),
-            SplineSurf::Nurbs(s) => s.parameter_range(),
-        }
-    }
-    fn subs(&self, u: f64, v: f64) -> Point3 {
-        match self {
-            SplineSurf::Bs(s) => s.subs(u, v),
-            SplineSurf::Nurbs(s) => s.subs(u, v),
-        }
-    }
-    fn normal(&self, u: f64, v: f64) -> Vector3 {
-        match self {
-            SplineSurf::Bs(s) => s.normal(u, v),
-            SplineSurf::Nurbs(s) => s.normal(u, v),
-        }
-    }
-}
+// A `spline-surface` block is either a non-rational `nubs`, whose control
+// points are plain xyz, or a rational `nurbs`, whose carry a weight. The
+// kernel's surface holds both — weights absent means polynomial — so there is
+// nothing here to tell apart.
 
 /// Tessellate one `spline-surface` face by sampling its B-spline surface.
 /// Appends triangles to the shared mesh buffers; a no-op when the surface
@@ -74,9 +42,7 @@ pub fn tess_spline_face(
     // Sample over the knot domain and clip cells against ACIS pcurves when the
     // face carries a parametric trim. This preserves holes and non-rectangular
     // spline faces instead of always filling the complete UV rectangle.
-    let (u_range, v_range) = surface.parameter_range();
-    let (u0, u1) = range_bounds(u_range);
-    let (v0, v1) = range_bounds(v_range);
+    let ((u0, u1), (v0, v1)) = surface.domain();
     if !(u1 > u0) || !(v1 > v0) {
         return false;
     }
@@ -95,13 +61,17 @@ pub fn tess_spline_face(
         let v = v0 + (v1 - v0) * (j as f64 / sv as f64);
         for i in 0..=su {
             let u = u0 + (u1 - u0) * (i as f64 / su as f64);
-            let p = surface.subs(u, v);
-            let mut n = surface.normal(u, v);
+            let p = surface.point_at_knot(u, v);
+            // A pole, or a row of coincident control points, has no plane to
+            // be perpendicular to. Up is as good an answer as any there and
+            // better than an invented one, since the patch has no area at
+            // that point to shade.
+            let mut n = surface.normal_at_knot(u, v).unwrap_or([0.0, 0.0, 1.0]);
             if reversed {
-                n = -n;
+                n = [-n[0], -n[1], -n[2]];
             }
-            verts.push([p.x, p.y, p.z]);
-            normals.push([n.x as f32, n.y as f32, n.z as f32]);
+            verts.push(p);
+            normals.push([n[0] as f32, n[1] as f32, n[2] as f32]);
         }
     }
 
@@ -270,23 +240,9 @@ fn point_in_polygon(point: (f64, f64), polygon: &[(f64, f64)]) -> bool {
     inside
 }
 
-/// Extract the inclusive `[start, end]` bounds from a truck parameter range.
-fn range_bounds(r: (std::ops::Bound<f64>, std::ops::Bound<f64>)) -> (f64, f64) {
-    use std::ops::Bound::*;
-    let lo = match r.0 {
-        Included(v) | Excluded(v) => v,
-        Unbounded => 0.0,
-    };
-    let hi = match r.1 {
-        Included(v) | Excluded(v) => v,
-        Unbounded => 1.0,
-    };
-    (lo, hi)
-}
-
 /// Parse the `nubs` control net + knot vectors out of a `spline-surface`
-/// record's token stream into a truck `BSplineSurface`.
-fn build_spline_surface(sat: &SatDocument, rec: &SatRecord) -> Option<SplineSurf> {
+/// record's token stream into a kernel surface.
+fn build_spline_surface(sat: &SatDocument, rec: &SatRecord) -> Option<NurbsSurface3> {
     if let Some(surface) = build_decoded_spline_surface(sat, rec) {
         return Some(surface);
     }
@@ -356,98 +312,68 @@ fn build_spline_surface(sat: &SatDocument, rec: &SatRecord) -> Option<SplineSurf
     let v_knots = with_clamped_ends(raw_v_knots, clamp_v)?;
 
     // Control points are stored row-major with u varying fastest (a full row
-    // of u control points per v step). truck wants `ctrl[i_u][j_v]`.
+    // of u control points per v step). the kernel wants `ctrl[i_u][j_v]`.
     let total = n_ctrl_u * n_ctrl_v;
-    let uk = KnotVec::from(u_knots);
-    let vk = KnotVec::from(v_knots);
-
-    if rational {
-        // Rational: read x, y, z, w and store the homogeneous point (xw, yw,
-        // zw, w) that truck's `NurbsSurface` expects.
-        let mut flat: Vec<Vector4> = Vec::with_capacity(total);
-        for _ in 0..total {
-            let x = read_float(toks, &mut p)?;
-            let y = read_float(toks, &mut p)?;
-            let z = read_float(toks, &mut p)?;
-            let w = read_float(toks, &mut p)?;
-            flat.push(Vector4::new(x * w, y * w, z * w, w));
-        }
-        let mut ctrl = vec![Vec::with_capacity(n_ctrl_v); n_ctrl_u];
-        for v in 0..n_ctrl_v {
-            for u in 0..n_ctrl_u {
-                ctrl[u].push(flat[v * n_ctrl_u + u]);
-            }
-        }
-        let bs = match BSplineSurface::try_new((uk, vk), ctrl) {
-            Ok(surface) => surface,
-            Err(error) => {
-                if std::env::var_os("OCS_TESS_DEBUG").is_some() {
-                    eprintln!(
-                        "acis_spline_parse[{}]: rational surface rejected degree={deg_u}x{deg_v} control={n_ctrl_u}x{n_ctrl_v}: {error:?}",
-                        rec.index
-                    );
-                }
-                return None;
-            }
-        };
-        Some(SplineSurf::Nurbs(NurbsSurface::new(bs)))
-    } else {
-        let mut flat: Vec<Point3> = Vec::with_capacity(total);
-        for _ in 0..total {
-            let x = read_float(toks, &mut p)?;
-            let y = read_float(toks, &mut p)?;
-            let z = read_float(toks, &mut p)?;
-            flat.push(Point3::new(x, y, z));
-        }
-        let mut ctrl = vec![Vec::with_capacity(n_ctrl_v); n_ctrl_u];
-        for v in 0..n_ctrl_v {
-            for u in 0..n_ctrl_u {
-                ctrl[u].push(flat[v * n_ctrl_u + u]);
-            }
-        }
-        let bs = match BSplineSurface::try_new((uk, vk), ctrl) {
-            Ok(surface) => surface,
-            Err(error) => {
-                if std::env::var_os("OCS_TESS_DEBUG").is_some() {
-                    eprintln!(
-                        "acis_spline_parse[{}]: surface rejected degree={deg_u}x{deg_v} control={n_ctrl_u}x{n_ctrl_v}: {error:?}",
-                        rec.index
-                    );
-                }
-                return None;
-            }
-        };
-        Some(SplineSurf::Bs(bs))
+    let mut flat: Vec<[f64; 3]> = Vec::with_capacity(total);
+    let mut flat_weights: Vec<f64> = Vec::with_capacity(total);
+    for _ in 0..total {
+        let x = read_float(toks, &mut p)?;
+        let y = read_float(toks, &mut p)?;
+        let z = read_float(toks, &mut p)?;
+        // A rational net stores the weight alongside each point, and the
+        // point itself unweighted — the kernel carries the two separately and
+        // does the homogeneous multiply where it belongs.
+        flat_weights.push(if rational { read_float(toks, &mut p)? } else { 1.0 });
+        flat.push([x, y, z]);
     }
+    let mut net = vec![Vec::with_capacity(n_ctrl_v); n_ctrl_u];
+    let mut weights = vec![Vec::with_capacity(n_ctrl_v); n_ctrl_u];
+    for v in 0..n_ctrl_v {
+        for u in 0..n_ctrl_u {
+            net[u].push(flat[v * n_ctrl_u + u]);
+            weights[u].push(flat_weights[v * n_ctrl_u + u]);
+        }
+    }
+    let surface = NurbsSurface3::new(
+        deg_u,
+        deg_v,
+        net,
+        u_knots,
+        v_knots,
+        rational.then_some(weights),
+    );
+    if surface.is_none() && std::env::var_os("OCS_TESS_DEBUG").is_some() {
+        eprintln!(
+            "acis_spline_parse[{}]: surface rejected degree={deg_u}x{deg_v} control={n_ctrl_u}x{n_ctrl_v}",
+            rec.index
+        );
+    }
+    surface
 }
 
-fn build_decoded_spline_surface(sat: &SatDocument, rec: &SatRecord) -> Option<SplineSurf> {
+fn build_decoded_spline_surface(sat: &SatDocument, rec: &SatRecord) -> Option<NurbsSurface3> {
     let spline = SatSplineSurface::from_record(rec)?;
     let decoded = spline.bspline(sat)?;
-    let uk = KnotVec::from(decoded.u_knots);
-    let vk = KnotVec::from(decoded.v_knots);
-    let mut ctrl = vec![Vec::with_capacity(decoded.control_count_v); decoded.control_count_u];
 
-    if decoded.rational {
-        for v in 0..decoded.control_count_v {
-            for u in 0..decoded.control_count_u {
-                let point = decoded.control_points[v * decoded.control_count_u + u];
-                ctrl[u].push(Vector4::new(point[0], point[1], point[2], point[3]));
-            }
+    // Row-major with u varying fastest, which is how ACIS writes it and the
+    // other way round from the net the kernel reads.
+    let mut net = vec![Vec::with_capacity(decoded.control_count_v); decoded.control_count_u];
+    let mut weights = vec![Vec::with_capacity(decoded.control_count_v); decoded.control_count_u];
+    for v in 0..decoded.control_count_v {
+        for u in 0..decoded.control_count_u {
+            let point = decoded.control_points[v * decoded.control_count_u + u];
+            net[u].push([point[0], point[1], point[2]]);
+            weights[u].push(point[3]);
         }
-        let surface = BSplineSurface::try_new((uk, vk), ctrl).ok()?;
-        Some(SplineSurf::Nurbs(NurbsSurface::new(surface)))
-    } else {
-        let mut points = vec![Vec::with_capacity(decoded.control_count_v); decoded.control_count_u];
-        for v in 0..decoded.control_count_v {
-            for u in 0..decoded.control_count_u {
-                let point = decoded.control_points[v * decoded.control_count_u + u];
-                points[u].push(Point3::new(point[0], point[1], point[2]));
-            }
-        }
-        let surface = BSplineSurface::try_new((uk, vk), points).ok()?;
-        Some(SplineSurf::Bs(surface))
     }
+    NurbsSurface3::new(
+        decoded.degree_u,
+        decoded.degree_v,
+        net,
+        decoded.u_knots,
+        decoded.v_knots,
+        decoded.rational.then_some(weights),
+    )
 }
 
 /// Read `count` `(knot value, multiplicity)` pairs into an expanded raw knot

@@ -1,14 +1,13 @@
 use acadrust::entities::{LwPolyline, LwVertex};
 use crate::t;
-use truck_modeling::{builder, Edge, Point3, Wire};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_prop as edit, parse_f64, rectangle_grip, ro_prop as ro, square_grip,
     stepper_prop as stepper,
 };
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{extrusion_wall_tris, TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;
 
@@ -179,7 +178,7 @@ fn thick_segments(
     normal: (f64, f64, f64),
     key_verts: Vec<[f64; 3]>,
     tangents: Vec<TangentGeom>,
-) -> TruckEntity {
+) -> RenderEntity {
     let (nx, ny, nz) = normal;
     let t = thickness;
     let off = |p: [f64; 3]| -> [f64; 3] { [p[0] + t * nx, p[1] + t * ny, p[2] + t * nz] };
@@ -210,9 +209,9 @@ fn thick_segments(
             pts.push(off(last));
         }
     }
-    TruckEntity {
+    RenderEntity {
         pick_tris: extrusion_wall_tris(path_pts, [t * nx, t * ny, t * nz]),
-        object: TruckObject::Lines(pts),
+        object: RenderObject::Lines(pts),
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
@@ -233,14 +232,14 @@ fn thick_wide_band(
     normal: (f64, f64, f64),
     key_verts: Vec<[f64; 3]>,
     tangents: Vec<TangentGeom>,
-) -> TruckEntity {
+) -> RenderEntity {
     let (origin, fills) = wide_fills(pl);
     let (fill_tris, lines) =
         crate::entities::common::thick_band_tube(origin, &fills, thickness, normal, to_wcs);
 
-    TruckEntity {
+    RenderEntity {
         pick_tris: fill_tris.clone(),
-        object: TruckObject::Lines(lines),
+        object: RenderObject::Lines(lines),
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
@@ -248,12 +247,12 @@ fn thick_wide_band(
     }
 }
 
-fn to_truck(pline: &LwPolyline) -> TruckEntity {
+fn to_render(pline: &LwPolyline) -> RenderEntity {
     let verts = &pline.vertices;
     if verts.is_empty() {
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Point(builder::vertex(Point3::new(0.0, 0.0, 0.0))),
+            object: RenderObject::Lines(Vec::new()),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -265,17 +264,16 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
     let normal = (pline.normal.x, pline.normal.y, pline.normal.z);
     let count = verts.len();
     let seg_count = if pline.is_closed { count } else { count - 1 };
-    let mut edges: Vec<Edge> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
     let mut key_verts: Vec<[f64; 3]> = Vec::new();
 
-    // Convert OCS (x, y, elevation) to WCS Point3.
+    // Convert OCS (x, y, elevation) to a WCS point.
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
         crate::scene::view::transform::ocs_point_to_wcs((x, y, elev), normal)
     };
-    let to_pt = |v: &LwVertex| -> Point3 {
+    let to_pt = |v: &LwVertex| -> [f64; 3] {
         let (wx, wy, wz) = to_wcs(v.location.x, v.location.y);
-        Point3::new(wx, wy, wz)
+        [wx, wy, wz]
     };
 
     if pline.thickness.abs() > 1e-10 {
@@ -345,13 +343,13 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
             let p0 = to_pt(v0);
             let p1 = to_pt(v1);
             if i == 0 {
-                kv.push([p0.x, p0.y, p0.z]);
+                kv.push([p0[0], p0[1], p0[2]]);
             }
-            kv.push([p1.x, p1.y, p1.z]);
+            kv.push([p1[0], p1[1], p1[2]]);
             if v0.bulge.abs() < 1e-9 {
                 tgs.push(TangentGeom::Line {
-                    p1: [p0.x as f32, p0.y as f32, p0.z as f32],
-                    p2: [p1.x as f32, p1.y as f32, p1.z as f32],
+                    p1: [p0[0] as f32, p0[1] as f32, p0[2] as f32],
+                    p2: [p1[0] as f32, p1[1] as f32, p1[2] as f32],
                 });
             } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
                 [v0.location.x, v0.location.y],
@@ -368,9 +366,9 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
         let (pts, widths) =
             crate::entities::common::tapered_band_points(&band_verts, pline.is_closed, &to_wcs);
         let (fill_origin, fills) = wide_fills(pline);
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: crate::entities::common::wide_band_tris(fill_origin, &fills),
-            object: TruckObject::TaperedLines(pts, widths),
+            object: RenderObject::TaperedLines(pts, widths),
             snap_pts: vec![],
             tangent_geoms: tgs,
             key_vertices: kv,
@@ -426,9 +424,9 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
             }
         }
         let (fill_origin, fills) = wide_fills(pline);
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: crate::entities::common::wide_band_tris(fill_origin, &fills),
-            object: TruckObject::SegmentedLines(pts),
+            object: RenderObject::SegmentedLines(pts),
             snap_pts: vec![],
             tangent_geoms: tgs,
             key_vertices: kv,
@@ -444,24 +442,15 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
         let bulge = v0.bulge;
 
         if bulge.abs() < 1e-9 {
-            let tv0 = builder::vertex(p0);
-            let tv1 = builder::vertex(p1);
-            edges.push(builder::line(&tv0, &tv1));
             tangents.push(TangentGeom::Line {
-                p1: [p0.x as f32, p0.y as f32, p0.z as f32],
-                p2: [p1.x as f32, p1.y as f32, p1.z as f32],
+                p1: [p0[0] as f32, p0[1] as f32, p0[2] as f32],
+                p2: [p1[0] as f32, p1[1] as f32, p1[2] as f32],
             });
         } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
             [v0.location.x, v0.location.y],
             [v1.location.x, v1.location.y],
             bulge as f64,
         ) {
-            let mid_s = arc.sample(0.5);
-            let (mid_wx, mid_wy, mid_wz) = to_wcs(mid_s[0], mid_s[1]);
-            let p_mid = Point3::new(mid_wx, mid_wy, mid_wz);
-            let tv0 = builder::vertex(p0);
-            let tv1 = builder::vertex(p1);
-            edges.push(builder::circle_arc(&tv0, &tv1, p_mid));
             let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
             tangents.push(TangentGeom::Circle {
                 center: [wcx as f32, wcy as f32, wcz as f32],
@@ -470,15 +459,21 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
         }
 
         if i == 0 {
-            key_verts.push([p0.x, p0.y, p0.z]);
+            key_verts.push([p0[0], p0[1], p0[2]]);
         }
-        key_verts.push([p1.x, p1.y, p1.z]);
+        key_verts.push([p1[0], p1[1], p1[2]]);
     }
 
     let (fill_origin, fills) = wide_fills(pline);
-    TruckEntity {
+    RenderEntity {
         pick_tris: crate::entities::common::wide_band_tris(fill_origin, &fills),
-        object: TruckObject::Contour(edges.into_iter().collect::<Wire>()),
+        // Sampled through the polyline's own curve, so a bulge stays an
+        // arc rather than becoming the chord across it.
+        object: RenderObject::Lines(
+            crate::entities::curve::lwpolyline_curve(pline)
+                .map(|planar| crate::entities::curve::curve_points(&planar))
+                .unwrap_or_default(),
+        ),
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
@@ -805,9 +800,9 @@ fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
     });
 }
 
-impl TruckConvertible for LwPolyline {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+impl RenderConvertible for LwPolyline {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self))
     }
 }
 

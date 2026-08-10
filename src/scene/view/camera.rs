@@ -276,8 +276,20 @@ impl Camera {
         let aspect = bounds.width / bounds.height;
         let up_dir = self.rotation * Vec3::Y;
 
-        let mut view = look_at_mat4(self.eye().as_vec3(), self.target.as_vec3(), up_dir);
-        // Zero the translation column → pure rotation (world→view basis).
+        // The basis, from the rotation alone. Zeroing the translation column
+        // afterwards is not enough: `look_at` builds the basis out of
+        // `target - eye`, and handing it two absolute positions cast to f32
+        // rounds both to the f32 grid first. At UTM that grid is half a metre
+        // across, so the difference — and with it the whole view basis —
+        // jitters as the camera moves, which is the shimmer a survey-placed
+        // drawing showed.
+        //
+        // It never needed them. `eye` is `target + rotation·Z·distance`, so
+        // the direction between the two is the rotation's own Z, a unit
+        // vector that carries no coordinate at all.
+        let mut view = look_at_mat4(Vec3::ZERO, -(self.rotation * Vec3::Z), up_dir);
+        // Already zero, since the eye is the origin here; kept so the invariant
+        // survives someone reworking the line above.
         view.w_axis = glam::vec4(0.0, 0.0, 0.0, 1.0);
 
         let proj = match self.projection {
@@ -863,5 +875,70 @@ mod tests {
             half_h >= 40.0,
             "half-height {half_h} no longer contains the drawing"
         );
+    }
+}
+
+#[cfg(test)]
+mod rte_tests {
+    use super::*;
+    use iced::Rectangle;
+
+    /// The relative-to-eye view carries rotation and nothing else, so where the
+    /// camera stands must not reach it at all.
+    ///
+    /// It used to. The basis came from `look_at(eye, target)` with both cast to
+    /// f32, and at survey coordinates that grid is half a metre across — so the
+    /// difference between them, and the whole basis, jittered as the camera
+    /// moved. A drawing placed at UTM shimmered.
+    #[test]
+    fn the_view_basis_does_not_depend_on_where_the_camera_stands() {
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1600.0,
+            height: 900.0,
+        };
+        let mut at_origin = Camera::default();
+        at_origin.target = glam::DVec3::ZERO;
+
+        let mut at_utm = at_origin.clone();
+        at_utm.target = glam::DVec3::new(639_792.184_2, 4_517_057.531_7, 12.5);
+
+        let here = at_origin.view_proj_rte(bounds);
+        let there = at_utm.view_proj_rte(bounds);
+        for (a, b) in here.to_cols_array().iter().zip(there.to_cols_array().iter()) {
+            assert_eq!(a, b, "the camera's position reached the view matrix");
+        }
+    }
+
+    /// And it is the same basis as before, which the origin proves: there the
+    /// old construction had no large coordinates to lose, so the two must
+    /// agree exactly. Anything else would mean the refactor turned the view
+    /// round rather than just keeping the coordinates out of it.
+    #[test]
+    fn the_basis_matches_what_two_positions_gave_where_they_were_exact() {
+        for (yaw, pitch) in [(0.0, 1.2), (0.7, 0.3), (-2.1, -0.9)] {
+            let mut camera = Camera::default();
+            camera.target = glam::DVec3::ZERO;
+            camera.rotation =
+                Quat::from_rotation_z(yaw) * Quat::from_rotation_x(pitch);
+            let up_dir = camera.rotation * Vec3::Y;
+
+            let mut old = look_at_mat4(
+                camera.eye().as_vec3(),
+                camera.target.as_vec3(),
+                up_dir,
+            );
+            old.w_axis = glam::vec4(0.0, 0.0, 0.0, 1.0);
+            let new = {
+                let mut view =
+                    look_at_mat4(Vec3::ZERO, -(camera.rotation * Vec3::Z), up_dir);
+                view.w_axis = glam::vec4(0.0, 0.0, 0.0, 1.0);
+                view
+            };
+            for (a, b) in old.to_cols_array().iter().zip(new.to_cols_array().iter()) {
+                assert!((a - b).abs() < 1e-6, "yaw {yaw} pitch {pitch}: {a} vs {b}");
+            }
+        }
     }
 }

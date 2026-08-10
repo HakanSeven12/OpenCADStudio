@@ -1,7 +1,12 @@
-// acadrust -> truck topology conversion layer.
+// acadrust entity -> what the renderer draws.
+//
+// Every entity becomes one of a handful of shapes: a run of points, a run of
+// text strokes, a band of varying width, or a single dot. Curved entities are
+// sampled through `entities::curve`, which is where each one's geometry is
+// defined once — so a circle drawn here and a circle extruded by the Model
+// tab come from the same definition and cannot disagree.
 
 use acadrust::{CadDocument, EntityType};
-use truck_modeling::{Edge, Solid, Vertex, Wire};
 
 use crate::entities::traits::EntityTypeOps;
 use crate::scene::model::wire_model::{SnapHint, TangentGeom};
@@ -43,10 +48,10 @@ pub struct GlyphRun {
 }
 
 #[allow(dead_code)]
-pub enum TruckObject {
-    Point(Vertex),
-    Curve(Edge),
-    Contour(Wire),
+pub enum RenderObject {
+    /// A single position, drawn as a dot sized in pixels rather than in world
+    /// units — what a PDMODE 0 point is.
+    Dot([f64; 3]),
     Text(Vec<TextStroke>),
     /// Pre-computed NaN-separated 3-D point list (leader lines, arrowheads, etc.).
     /// Points are stored in WCS as **f64** so the large world_offset can be
@@ -61,11 +66,10 @@ pub enum TruckObject {
     /// shader interpolates the two endpoint widths of each segment so the band
     /// tapers smoothly. Points hold no NaN breaks (one continuous band).
     TaperedLines(Vec<[f64; 3]>, Vec<f32>),
-    Volume(Solid),
 }
 
-pub struct TruckEntity {
-    pub object: TruckObject,
+pub struct RenderEntity {
+    pub object: RenderObject,
     pub snap_pts: Vec<(glam::DVec3, SnapHint)>,
     pub tangent_geoms: Vec<TangentGeom>,
     /// Polyline vertex positions in WCS f64; converted to offset-relative f32
@@ -83,13 +87,13 @@ pub struct TruckEntity {
     pub pick_tris: Vec<[f64; 3]>,
 }
 
-pub fn convert(entity: &EntityType, document: &CadDocument) -> Option<TruckEntity> {
-    entity.to_truck_entity(document)
+pub fn convert(entity: &EntityType, document: &CadDocument) -> Option<RenderEntity> {
+    entity.to_render_entity(document)
 }
 
 /// Triangulate the wall swept by extruding `base` along `extrusion` — the
 /// geometry a DXF thickness (code 39) adds to an entity. Two triangles per
-/// base segment, in `TruckEntity::pick_tris` order (flat WCS f64, 3 per tri).
+/// base segment, in `RenderEntity::pick_tris` order (flat WCS f64, 3 per tri).
 ///
 /// `base` is a point chain in the same form a wire uses, so a NaN entry breaks
 /// the sweep exactly as it breaks a segment chain — a polyline with disjoint

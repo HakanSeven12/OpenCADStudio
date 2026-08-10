@@ -220,14 +220,13 @@ fn plot_scene_content(
 }
 
 impl OpenCADStudio {
-    /// Before a save, give every cached truck solid that still has no ACIS
+    /// Before a save, give every cached solid that still has no ACIS
     /// geometry (EXTRUDE/REVOLVE/SWEEP/LOFT/boolean results) an exact modeler
-    /// body derived from its truck B-rep, so the written DWG/DXF carries real
+    /// body derived from its B-rep, so the written DWG/DXF carries real
     /// 3-D geometry other CAD apps can open instead of an empty data stream.
-    /// Curved solids that the exact planar path can't yet express are left
-    /// untouched (handled by the NURBS path).
-    #[cfg(feature = "solid3d")]
-    fn sync_truck_solids_to_acis(&mut self, i: usize) {
+    /// A body holding something the kernel has no ACIS record form for is
+    /// left untouched rather than written out half-complete.
+    fn sync_solid_models_to_acis(&mut self, i: usize) {
         use acadrust::EntityType;
         let scene = &mut self.tabs[i].scene;
         let targets: Vec<acadrust::Handle> = scene
@@ -255,9 +254,6 @@ impl OpenCADStudio {
             }
         }
     }
-
-    #[cfg(not(feature = "solid3d"))]
-    fn sync_truck_solids_to_acis(&mut self, _i: usize) {}
 
     /// Snapshot the persisted UI preferences from live state.
     pub(in crate::app) fn current_settings(&self) -> crate::app::settings::UserSettings {
@@ -1340,7 +1336,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         self.stamp_header_sysvars(i);
         self.tabs[i].scene.document.header.user_real1 =
             self.tabs[i].scene.annotation_scale as f64;
-        self.sync_truck_solids_to_acis(i);
+        self.sync_solid_models_to_acis(i);
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -2032,7 +2028,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     let close = self.close_save_dialog_window();
                     sync_annotation_scale_header(&mut self.tabs[i].scene);
                     self.stamp_header_sysvars(i);
-                    self.sync_truck_solids_to_acis(i);
+                    self.sync_solid_models_to_acis(i);
                     self.stamp_thumbnail(i, version);
                     let mut recent_task = Task::none();
                     let saved = match crate::io::save_to_bytes(

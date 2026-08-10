@@ -4,8 +4,8 @@ use crate::t;
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::text_support::{resolve_text_style, text_local_bounds};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{GlyphRun, TextStroke, TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::text::lff;
 
@@ -67,8 +67,8 @@ fn reflect_vec3(vx: &mut f64, vy: &mut f64, ax: f64, ay: f64, len2: f64) {
 
 // ── RasterImage ───────────────────────────────────────────────────────────────
 
-impl TruckConvertible for RasterImage {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for RasterImage {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
         let corners = image_corners(
             &self.insertion_point,
             &self.u_vector,
@@ -141,11 +141,11 @@ impl TruckConvertible for RasterImage {
         let resolvable =
             path.is_empty() || crate::scene::model::image_model::resolve_image(path).is_some();
         if resolvable {
-            return Some(TruckEntity {
+            return Some(RenderEntity {
                 // Interior pick surface: the image selects on a click anywhere
                 // inside its frame, not just on the border.
                 pick_tris: crate::entities::common::quad_pick_tris(&corners),
-                object: TruckObject::Lines(pts),
+                object: RenderObject::Lines(pts),
                 snap_pts: vec![],
                 tangent_geoms: vec![],
                 key_vertices: corners.to_vec(),
@@ -230,9 +230,9 @@ impl TruckConvertible for RasterImage {
             });
         }
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: crate::entities::common::quad_pick_tris(&corners),
-            object: TruckObject::Text(groups),
+            object: RenderObject::Text(groups),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: corners.to_vec(),
@@ -416,8 +416,8 @@ impl Transformable for RasterImage {
 
 // ── Wipeout ───────────────────────────────────────────────────────────────────
 
-impl TruckConvertible for Wipeout {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Wipeout {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         let corners = image_corners(
             &self.insertion_point,
             &self.u_vector,
@@ -464,11 +464,11 @@ impl TruckConvertible for Wipeout {
             image_wire(corners, false)
         };
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             // Interior pick surface — a wipeout reads as a solid patch, so a
             // click anywhere on it should select it.
             pick_tris: crate::entities::common::quad_pick_tris(&corners),
-            object: TruckObject::Lines(pts),
+            object: RenderObject::Lines(pts),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: corners.to_vec(),
@@ -491,7 +491,7 @@ impl Grippable for Wipeout {
             let ox = self.insertion_point.x;
             let oy = self.insertion_point.y;
             let oz = self.insertion_point.z;
-            // Same image-pixel-space → WCS mapping as `to_truck` so grips
+            // Same image-pixel-space → WCS mapping as `to_render` so grips
             // sit exactly on the rendered polygon vertices.
             self.clip_boundary_vertices
                 .iter()

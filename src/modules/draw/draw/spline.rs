@@ -11,8 +11,7 @@ use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use glam::DVec3;
-use truck_modeling::base::{BoundedCurve, ParametricCurve};
-use truck_modeling::{BSplineCurve, KnotVec, Point3};
+use acadrust::kernel::space::NurbsCurve3;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
@@ -87,19 +86,19 @@ fn sample_curve(pts: &[DVec3]) -> Vec<[f32; 3]> {
             .collect();
     }
     let degree = 3_usize.min(n - 1);
-    let ctrl: Vec<Point3> = pts
-        .iter()
-        .map(|p| Point3::new(p.x, p.y, p.z))
-        .collect();
-    let curve = BSplineCurve::new(KnotVec::from(uniform_knots(n, degree)), ctrl);
-    let (t0, t1) = curve.range_tuple();
+    let ctrl: Vec<[f64; 3]> = pts.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let Some(curve) = NurbsCurve3::new(degree, ctrl, uniform_knots(n, degree), None) else {
+        return pts
+            .iter()
+            .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+            .collect();
+    };
     // Resolution scales with span count so long splines stay smooth.
     let steps = 24 * (n - 1);
     (0..=steps)
         .map(|i| {
-            let t = t0 + (t1 - t0) * (i as f64 / steps as f64);
-            let p = curve.subs(t);
-            [p.x as f32, p.y as f32, p.z as f32]
+            let p = curve.point_at(i as f64 / steps as f64);
+            [p[0] as f32, p[1] as f32, p[2] as f32]
         })
         .collect()
 }

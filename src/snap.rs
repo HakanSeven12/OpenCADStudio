@@ -80,12 +80,10 @@ pub struct SnapResult {
     /// overlay draws a dashed guide from each base to the crossing so both
     /// contributing extensions stay visible. `None` otherwise. (#247, #259)
     pub extension_base2: Option<Point>,
-    /// World-space twin of `extension_base`: the acquired endpoint the guide is
-    /// drawn from. Typed-distance entry measures along this ray, so taking it
-    /// from the same decision that drew the guide keeps the two from
-    /// disagreeing — the guide showing while typing does nothing, or the
-    /// distance running off along a ray the user cannot see.
+    /// Acquired endpoint used by the Extension guide and typed distance.
     pub extension_origin: Option<glam::DVec3>,
+    /// Source direction paired with `extension_origin`.
+    pub extension_dir: Option<glam::DVec3>,
 }
 
 /// Object-snap-tracking alignment: the cursor projected onto a ray from an
@@ -280,28 +278,38 @@ impl Snapper {
         self.enabled.clear();
     }
 
-    /// Update dwell tracking and possibly acquire a new OST point.
-    /// Should be called on every ViewportMove when snap is active.
-    /// `snap_world` is the current snap result world point (if any).
+    /// Update dwell tracking from the current snap result.
     pub fn update_otrack_dwell<W: WireSource + ?Sized>(
         &mut self,
-        snap_world: Option<DVec3>,
+        snap: Option<SnapResult>,
         wires: &W,
         view_rot: glam::Mat4,
         eye: glam::DVec3,
         bounds: iced::Rectangle,
         now: Instant,
     ) {
-        // Temporary tracking points are acquired when OTRACK is on, OR when the
-        // Extension object snap is on: Extension tracks a segment's line only
-        // from an endpoint the user has acquired, independently of OTRACK's
-        // on/off state (#262).
+        // Extension uses acquired points even when OTRACK is off. (#262)
         if !self.tracking_active() {
             self.last_snap_world = None;
             self.dwell_since = None;
             self.dwell_acquired = false;
             return;
         }
+        // Acquire only stable geometric snap points for OTRACK. (#716)
+        let snap_world = snap.and_then(|hit| {
+            matches!(
+                hit.snap_type,
+                SnapType::Endpoint
+                    | SnapType::Midpoint
+                    | SnapType::Center
+                    | SnapType::Node
+                    | SnapType::Quadrant
+                    | SnapType::Intersection
+                    | SnapType::Insertion
+                    | SnapType::ApparentIntersection
+            )
+            .then_some(hit.world)
+        });
         // With OTRACK off, acquisition is Extension-driven, and Extension tracks
         // a line only from a real segment endpoint — so acquire endpoints only.
         // This stops a paused cursor on an extension foot (or a midpoint/centre)
@@ -441,21 +449,7 @@ impl Snapper {
         }
     }
 
-    /// Project the cursor onto a tracking ray emanating from one of the
-    /// acquired tracking points, in the XY plane. Without `polar_step_deg` the
-    /// rays are horizontal / vertical (0° / 90°); with it, every polar
-    /// increment is a candidate so the user can track along POLAR angles. Each
-    /// acquired corner also contributes a ray along its own edge directions, so
-    /// pulling the cursor along a segment's extension locks to that line (#219).
-    ///
-    /// When the cursor sits near the crossing of two active vectors from
-    /// different origins the intersection point wins, so the cursor locks onto
-    /// the exact crossing rather than a free point along one vector:
-    ///   * two OTRACK vectors from different tracking points (#112), and
-    ///   * a POLAR vector from `last_point` crossing an OTRACK vector (#111).
-    ///
-    /// Returns the aligned point, the unit ray direction (pointing toward the
-    /// cursor side, used for typed-distance entry), and the originating point.
+    /// Project the cursor onto acquired tracking rays and eligible crossings.
     pub fn otrack_snap(
         &self,
         cursor_world: DVec3,
@@ -464,6 +458,7 @@ impl Snapper {
         bounds: iced::Rectangle,
         polar_step_deg: Option<f32>,
         last_point: Option<DVec3>,
+        required_crossing_ray: Option<(DVec3, DVec3)>,
         // Ortho on: the axis from `last_point` is a hard lock. Only crossings of
         // an acquired ray with that axis lock; single tracking rays are
         // suppressed so the cursor can't leave the ortho axis. (#218)
@@ -622,6 +617,12 @@ impl Snapper {
                 if rays[i].group == rays[j].group {
                     continue;
                 }
+                if required_crossing_ray.is_some_and(|(origin, dir)| {
+                    !((rays[i].origin == origin && rays[i].dir == dir)
+                        || (rays[j].origin == origin && rays[j].dir == dir))
+                }) {
+                    continue;
+                }
                 // Under an ortho lock only crossings that involve the ortho axis
                 // are valid — every other crossing lies off it. (#218)
                 if ortho_lock && rays[i].group != ORTHO_GROUP && rays[j].group != ORTHO_GROUP {
@@ -632,6 +633,13 @@ impl Snapper {
                 else {
                     continue;
                 };
+                if required_crossing_ray.is_some_and(|(origin, dir)| {
+                    let len2 = dir.x * dir.x + dir.y * dir.y;
+                    let t = ((x.x - origin.x) * dir.x + (x.y - origin.y) * dir.y) / len2;
+                    t < 0.05
+                }) {
+                    continue;
+                }
                 let sd = screen_dist(x);
                 if sd < r && best_x.as_ref().map_or(true, |(bd, _)| sd < *bd) {
                     // Report an acquired tracking ray (not an auxiliary
@@ -657,6 +665,9 @@ impl Snapper {
         }
         if let Some((_, h)) = best_x {
             return Some(h);
+        }
+        if required_crossing_ray.is_some() {
+            return None;
         }
 
         // With Ortho on and a base point, the axis is a hard lock: no single
@@ -803,6 +814,7 @@ impl Snapper {
             extension_base: None,
             extension_base2: None,
             extension_origin: None,
+            extension_dir: None,
         })
     }
 
@@ -934,6 +946,7 @@ impl Snapper {
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,
+                        extension_dir: None,
                     });
                     best_rank = snap_tier(SnapType::Grid);
                     best_sub = snap_priority(SnapType::Grid);
@@ -1033,6 +1046,7 @@ impl Snapper {
                     extension_base: None,
                     extension_base2: None,
                     extension_origin: None,
+                    extension_dir: None,
                 });
             }
         };
@@ -1186,31 +1200,24 @@ impl Snapper {
         }
 
         // ── Perpendicular — foot of perpendicular from the drawing base ──
-        // Drop the foot from the point the command is drawing *from* (so the
-        // new segment is truly perpendicular to the target). Only when there
-        // is no base point — e.g. picking the very first point — does it fall
-        // back to the cursor (a plain nearest-on-line). The candidate is gated
-        // on its screen distance to the cursor like every other snap, so it
-        // offers when the cursor is near the perpendicular foot. (#118)
+        // Perpendicular requires a drawing base; cursor fallback acts like Nearest. (#716)
         if self.is_on(SnapType::Perpendicular) {
-            let q = self
-                .from_point
-                .map(|v| v.as_dvec3())
-                .unwrap_or(cursor_world);
-            if let Some(segments) = &local_segments {
-                for seg in segments {
-                    if let Some(foot) = perp_foot(q, seg.a, seg.b) {
-                        try_pt(foot, SnapType::Perpendicular);
-                    }
-                }
-            } else {
-                for wire in wires.iter() {
-                    if !wire_in_range(wire) {
-                        continue;
-                    }
-                    for i in 0..wire.points.len().saturating_sub(1) {
-                        if let Some(foot) = perp_foot(q, wp_f64(wire, i), wp_f64(wire, i + 1)) {
+            if let Some(q) = self.from_point.map(|v| v.as_dvec3()) {
+                if let Some(segments) = &local_segments {
+                    for seg in segments {
+                        if let Some(foot) = perp_foot(q, seg.a, seg.b) {
                             try_pt(foot, SnapType::Perpendicular);
+                        }
+                    }
+                } else {
+                    for wire in wires.iter() {
+                        if !wire_in_range(wire) {
+                            continue;
+                        }
+                        for i in 0..wire.points.len().saturating_sub(1) {
+                            if let Some(foot) = perp_foot(q, wp_f64(wire, i), wp_f64(wire, i + 1)) {
+                                try_pt(foot, SnapType::Perpendicular);
+                            }
                         }
                     }
                 }
@@ -1648,6 +1655,7 @@ impl Snapper {
                             extension_base: None,
                             extension_base2: None,
                             extension_origin: None,
+                            extension_dir: None,
                         });
                     }
                 }
@@ -1697,6 +1705,7 @@ impl Snapper {
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,
+                        extension_dir: None,
                     });
                 }
             };
@@ -1754,7 +1763,7 @@ impl Snapper {
         // intersection yields none, so its guides simply don't draw. (#238, #247, #259)
         if let Some(b) = best.as_mut() {
             if matches!(b.snap_type, SnapType::Extension | SnapType::Intersection) {
-                let (b1, b2, origin) = extension_bases_screen(
+                let (b1, b2, ray) = extension_bases_screen(
                     b.world,
                     &self.tracking_points,
                     &self.tracking_dirs,
@@ -1764,7 +1773,8 @@ impl Snapper {
                 );
                 b.extension_base = b1;
                 b.extension_base2 = b2;
-                b.extension_origin = origin;
+                b.extension_origin = ray.map(|(origin, _)| origin);
+                b.extension_dir = ray.map(|(_, dir)| dir);
             }
         }
 
@@ -2262,12 +2272,16 @@ fn extension_bases_screen(
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
-) -> (Option<Point>, Option<Point>, Option<glam::DVec3>) {
+) -> (
+    Option<Point>,
+    Option<Point>,
+    Option<(glam::DVec3, glam::DVec3)>,
+) {
     let snapped_screen = world_to_screen(snapped, view_rot, eye, bounds);
     // Collect qualifying endpoints, off-ray distance measured in screen space so
     // the tolerance stays scale-independent at UTM coordinates (a world² test
     // would reject the crossing base once coordinates reach ~1e7).
-    let mut found: Vec<(f32, glam::DVec3, Point)> = Vec::new();
+    let mut found: Vec<(f32, glam::DVec3, glam::DVec3, Point)> = Vec::new();
     for (&origin, dirs) in tracking_points.iter().zip(tracking_dirs) {
         for &dir in dirs {
             let len2 = dir.x * dir.x + dir.y * dir.y;
@@ -2282,7 +2296,7 @@ fn extension_bases_screen(
             let off = dist2(world_to_screen(on, view_rot, eye, bounds), snapped_screen);
             if off <= 4.0 {
                 let base = world_to_screen(origin, view_rot, eye, bounds);
-                found.push((off, origin, base));
+                found.push((off, origin, dir, base));
             }
         }
     }
@@ -2291,7 +2305,8 @@ fn extension_bases_screen(
     found.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut bases: [Option<Point>; 2] = [None, None];
     let mut origins: Vec<glam::DVec3> = Vec::new();
-    for (_, origin, base) in found {
+    let mut directions: Vec<glam::DVec3> = Vec::new();
+    for (_, origin, dir, base) in found {
         if origins
             .iter()
             .any(|o| (*o - origin).length_squared() < 1e-12)
@@ -2299,6 +2314,7 @@ fn extension_bases_screen(
             continue;
         }
         origins.push(origin);
+        directions.push(dir);
         if bases[0].is_none() {
             bases[0] = Some(base);
         } else {
@@ -2308,7 +2324,11 @@ fn extension_bases_screen(
     }
     // `origins` is sorted nearest-fit first, so its head is the endpoint the
     // primary guide is drawn from — the one a typed distance measures along.
-    (bases[0], bases[1], origins.first().copied())
+    (
+        bases[0],
+        bases[1],
+        origins.first().copied().zip(directions.first().copied()),
+    )
 }
 
 // ── Projection helpers ────────────────────────────────────────────────────
@@ -2552,6 +2572,7 @@ mod ext_tests {
                 bounds,
                 None,
                 Some(base),
+                None,
                 false,
                 DVec3::X,
                 DVec3::Y,
@@ -2578,6 +2599,7 @@ mod ext_tests {
             view_rot,
             eye,
             bounds,
+            None,
             None,
             None,
             false,

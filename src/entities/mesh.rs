@@ -4,8 +4,8 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{parse_f64, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 
@@ -151,8 +151,8 @@ fn v3f32(v: &acadrust::types::Vector3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 
-impl TruckConvertible for Face3D {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Face3D {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         let p0 = v3(&self.first_corner);
         let p1 = v3(&self.second_corner);
         let p2 = v3(&self.third_corner);
@@ -195,9 +195,9 @@ impl TruckConvertible for Face3D {
             pts = vec![[cx - s, cy, cz], [cx + s, cy, cz]];
         }
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(pts),
+            object: RenderObject::Lines(pts),
             snap_pts: vec![
                 (Vec3::from(p0f).as_dvec3(), SnapHint::Node),
                 (Vec3::from(p1f).as_dvec3(), SnapHint::Node),
@@ -312,17 +312,17 @@ impl Transformable for Face3D {
 
 // ── PolygonMesh (N×M grid) ────────────────────────────────────────────────────
 
-impl TruckConvertible for PolygonMesh {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for PolygonMesh {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         let m = self.m_vertex_count as usize;
         let n = self.n_vertex_count as usize;
         if m == 0 || n == 0 || self.vertices.len() < m * n {
             return None;
         }
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(Vec::new()),
+            object: RenderObject::Lines(Vec::new()),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -433,15 +433,15 @@ impl Transformable for PolygonMesh {
 
 // ── PolyfaceMesh (arbitrary faces with 1-based vertex indices) ────────────────
 
-impl TruckConvertible for PolyfaceMesh {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for PolyfaceMesh {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() || self.faces.is_empty() {
             return None;
         }
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(Vec::new()),
+            object: RenderObject::Lines(Vec::new()),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -1064,8 +1064,8 @@ pub(crate) fn tessellate_shaded_mesh(
     }
 }
 
-impl TruckConvertible for Mesh {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Mesh {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }
@@ -1088,9 +1088,9 @@ impl TruckConvertible for Mesh {
             )
         };
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(Vec::new()),
+            object: RenderObject::Lines(Vec::new()),
             snap_pts,
             tangent_geoms: vec![],
             key_vertices,

@@ -2,8 +2,8 @@ use acadrust::entities::Tolerance;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{GlyphRun, TextStroke, TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::SnapHint;
 use crate::scene::text::lff;
@@ -430,10 +430,10 @@ fn tessellate_tolerance(
     (box_out, cells)
 }
 
-// ── TruckConvertible ──────────────────────────────────────────────────────────
+// ── RenderConvertible ──────────────────────────────────────────────────────────
 
-impl TruckConvertible for Tolerance {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Tolerance {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
         if self.text.is_empty() {
             return None;
         }
@@ -493,9 +493,9 @@ impl TruckConvertible for Tolerance {
             return None;
         }
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Text(groups),
+            object: RenderObject::Text(groups),
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -845,10 +845,10 @@ mod tests {
         let mut tol = Tolerance::new();
         tol.text = "ABC".into();
 
-        let Some(TruckEntity {
-            object: TruckObject::Text(groups),
+        let Some(RenderEntity {
+            object: RenderObject::Text(groups),
             ..
-        }) = tol.to_truck(&doc)
+        }) = tol.to_render(&doc)
         else {
             panic!("tolerance produced no text");
         };

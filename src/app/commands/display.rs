@@ -442,7 +442,7 @@ impl OpenCADStudio {
             }
 
             // BOX / SPHERE / CYLINDER / CONE / WEDGE / TORUS are handled by the
-            // Model-tab primitive command above (with truck boolean caching).
+            // Model-tab primitive command above (with the kernel boolean caching).
 
             // ── EXTRUDE ────────────────────────────────────────────────────
             // PRESSPULL on a closed boundary creates a solid by extruding it to a

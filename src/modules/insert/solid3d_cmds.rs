@@ -1,7 +1,7 @@
 // 2D→3D modelling commands — EXTRUDE, REVOLVE, SWEEP, LOFT.
 //
 // Each picks profile/path entities and emits a `CmdResult` whose handler
-// builds a truck solid and inserts its MeshModel into scene.meshes under a
+// builds a solid and inserts its MeshModel into scene.meshes under a
 // minimal placeholder Solid3D entity (empty ACIS — saving will not restore
 // the mesh). The standalone primitives (BOX/CYLINDER/CONE/SPHERE/WEDGE/TORUS)
 // live in the Model tab (`modules::model::primitive_cmd`).
@@ -13,7 +13,7 @@ use crate::t;
 use crate::command::{CadCommand, CmdResult};
 
 // BOX / SPHERE / CYLINDER (and CONE / WEDGE / TORUS) now live in the Model tab
-// (`modules::model::primitive_cmd`), which builds them as truck B-reps cached
+// (`modules::model::primitive_cmd`), which builds them as B-reps cached
 // for the Design-group boolean tools. EXTRUDE / REVOLVE / SWEEP / LOFT remain
 // here as 2D→3D operations.
 

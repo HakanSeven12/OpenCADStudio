@@ -57,12 +57,12 @@ use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, ro_prop as ro, square_grip, triangle_grip,
 };
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::{SnapHint, TangentGeom};
 
-// ── TruckConvertible ────────────────────────────────────────────────────────
+// ── RenderConvertible ────────────────────────────────────────────────────────
 
 /// Catmull-Rom spline tessellation through `ctrl` points, `segs_per_span` segments each.
 /// Operates in f64 so it can be applied to either WCS-direct coordinates (entity path)
@@ -93,7 +93,7 @@ pub(crate) fn catmull_rom_pts(ctrl: &[[f64; 3]], segs_per_span: u32) -> Vec<[f64
     out
 }
 
-fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckEntity> {
+fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<RenderEntity> {
     let nan = [f64::NAN; 3];
     let p3 = |v: &acadrust::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
 
@@ -327,9 +327,9 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
         return None;
     }
 
-    Some(TruckEntity {
+    Some(RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Lines(points),
+        object: RenderObject::Lines(points),
         snap_pts,
         tangent_geoms: tangents,
         key_vertices: key_verts,
@@ -1120,9 +1120,9 @@ fn reflect_xy_direction(dx: &mut f64, dy: &mut f64, p1: DVec3, p2: DVec3) {
 
 // ── Trait impls ────────────────────────────────────────────────────────────
 
-impl TruckConvertible for MultiLeader {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        to_truck(self, document)
+impl RenderConvertible for MultiLeader {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        to_render(self, document)
     }
 }
 

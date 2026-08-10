@@ -3,8 +3,8 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
 /// Display length used when rendering semi-infinite / infinite lines.
@@ -12,8 +12,8 @@ const DISPLAY_EXTENT: f64 = 1_000_000.0;
 
 // ── Ray (semi-infinite line) ──────────────────────────────────────────────────
 
-impl TruckConvertible for Ray {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Ray {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         let bp = self.base_point;
         let dir = self.direction;
         // Normalize direction to avoid f32 overflow when DXF stores
@@ -29,9 +29,9 @@ impl TruckConvertible for Ray {
             bp.z + nz * DISPLAY_EXTENT,
         ];
         let start: [f64; 3] = [bp.x, bp.y, bp.z];
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(vec![start, far]),
+            object: RenderObject::Lines(vec![start, far]),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![start],
@@ -151,8 +151,8 @@ impl Transformable for Ray {
 
 // ── XLine (construction line, infinite) ──────────────────────────────────────
 
-impl TruckConvertible for XLine {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for XLine {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         let bp = self.base_point;
         let dir = self.direction;
         let len = (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z).sqrt();
@@ -170,9 +170,9 @@ impl TruckConvertible for XLine {
             bp.y - ny * DISPLAY_EXTENT,
             bp.z - nz * DISPLAY_EXTENT,
         ];
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(vec![far_neg, far_pos]),
+            object: RenderObject::Lines(vec![far_neg, far_pos]),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![[bp.x, bp.y, bp.z]],

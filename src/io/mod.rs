@@ -1896,7 +1896,7 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
             !finite_vec3(&c.center)
                 || !finite_coord(c.radius)
                 // Reject zero- or near-zero circles: they tessellate into a
-                // degenerate truck curve that crashes parameter_division.
+                // degenerate curve the tessellator cannot sample.
                 || c.radius.abs() < 1.0e-10
                 || c.radius.abs() > 1.0e10
         }
@@ -1909,12 +1909,12 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
                 || a.radius.abs() < 1.0e-10
                 || a.radius.abs() > 1.0e10
                 // Zero-sweep arc (start_angle == end_angle, modulo 2π) collapses
-                // to a single point in WCS — truck's circle_arc on three
+                // to a single point in WCS — a three-point circle fit on
                 // coincident vertices recurses unboundedly in parameter_division.
                 || (a.end_angle - a.start_angle).abs() < 1.0e-9
                 // Near-zero sweep is the same trap with a wider mouth: a tiny but
                 // non-zero sweep (e.g. 1.6e-6 rad) still places start/mid/end
-                // within truck's coincidence tolerance, so parameter_division
+                // within the coincidence tolerance, so sampling
                 // recurses and allocates until OOM. Gate on arc *length*
                 // (radius × sweep), not sweep alone, so a legitimately large-
                 // radius small-sweep arc (still a visible curve) survives while
@@ -1924,7 +1924,7 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
                 // the floor above, a small sweep over a modest radius leaves
                 // start/mid/end almost on one line (a 35-unit, 6.5e-7-rad arc has
                 // arc length 2.3e-5 — past the gate — yet bows off its chord by
-                // only ~2e-12). truck's 3-point `circle_arc` fit then returns a
+                // only ~2e-12). A three-point circle fit then returns a
                 // near-infinite radius and `parameter_division` subdivides without
                 // bound. Gate on the sagitta (chord height = r·(1−cos(sweep/2))),
                 // the true measure of how far the arc departs a straight line and
@@ -1951,13 +1951,13 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
         }
         E::Spline(s) => {
             // Parser desync emits exactly-100_000-control-point splines with a
-            // garbage knot vector. Building a truck NURBS/B-spline from one and
+            // garbage knot vector. Building a NURBS from one and
             // tessellating it runs `parameter_division` into an unbounded
             // allocation — single-threaded, 32 GB+ — long before the drawing
             // finishes loading. Reject the desync signature plus any spline
-            // truck can't build: non-finite control points, or a knot vector
+            // the kernel can't build: non-finite control points, or a knot vector
             // that's non-finite, non-monotonic, or the wrong length
-            // (truck requires `knots.len() == ctrl.len() + degree + 1`).
+            // (the kernel requires `knots.len() == ctrl.len() + degree + 1`).
             let n = s.control_points.len();
             let degree_bad = s.degree < 1;
             let deg = s.degree.max(0) as usize;
@@ -1966,7 +1966,7 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
                     || s.knots.windows(2).any(|w| w[1] < w[0])
                     || s.knots.len() != n + deg + 1);
             // Degenerate: every control point collapses onto (nearly) the same
-            // point, so the curve has zero length. truck's `circle_arc` /
+            // point, so the curve has zero length. A three-point fit
             // `parameter_division` never converges on it and the tessellation
             // hangs — a periodic 9-point spline pinned at the origin is the seen
             // case. Reject when the control-point extent is sub-precision.
@@ -2203,7 +2203,7 @@ mod corrupt_guard_tests {
     // A near-zero-sweep arc: sweep 1.56e-6 rad on a 3.9e-3 radius. The angles
     // are individually finite and the radius is in range, so the old
     // (end-start) < 1e-9 check passed it through — but start/mid/end land
-    // within truck's coincidence tolerance and parameter_division allocates
+    // within the coincidence tolerance and sampling allocates
     // until OOM. The arc-length floor must reject it.
     #[test]
     fn rejects_near_degenerate_arc() {
@@ -2218,7 +2218,7 @@ mod corrupt_guard_tests {
 
     // A 35-unit-radius arc sweeping 6.5e-7 rad has arc length 2.3e-5 — past the
     // arc-length floor — yet its start/mid/end bow off the chord by only ~2e-12,
-    // so truck's 3-point circle fit blows up and parameter_division hangs. The
+    // so a three-point circle fit blows up and sampling hangs. The
     // sagitta floor must reject it where the arc-length floor alone does not.
     #[test]
     fn rejects_near_collinear_arc() {
@@ -2246,7 +2246,7 @@ mod corrupt_guard_tests {
         assert!(!is_entity_corrupt(&EntityType::Arc(a)));
     }
 
-    // Parser desync emits 100_000-control-point splines; building a truck
+    // Parser desync emits 100_000-control-point splines; building a kernel
     // NURBS from one and tessellating it OOMs. The control-point cap rejects it.
     #[test]
     fn rejects_desync_spline() {
@@ -2256,7 +2256,7 @@ mod corrupt_guard_tests {
     }
 
     // A periodic spline whose control points all collapse onto (nearly) one
-    // point has zero length; truck's parameter_division never converges and the
+    // point has zero length; sampling never converges and the
     // tessellation hangs. The control-point extent floor must reject it.
     #[test]
     fn rejects_degenerate_point_spline() {

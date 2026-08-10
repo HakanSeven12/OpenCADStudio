@@ -8,9 +8,9 @@
 
 [build]
 target = "index.html"
-# Note: the `solid3d` feature is disabled via `data-cargo-no-default-features`
-# on the rust <link> in index.html (truck-meshalgo → lzma-sys C deps cannot
-# cross-compile to wasm).
+# The crate has no Cargo features: the geometry kernel is pure Rust and
+# cross-compiles to wasm, so the web build gets the same solid modelling the
+# native one does.
 
 [[hooks]]
 stage = "post_build"

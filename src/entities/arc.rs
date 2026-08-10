@@ -1,20 +1,19 @@
 use acadrust::entities::Arc;
 use crate::t;
-use truck_modeling::{builder, Point3};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro,
     square_grip,
 };
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{extrusion_wall_tris, TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::TangentGeom;
 
 const TAU: f64 = std::f64::consts::TAU;
 
-fn to_truck(arc: &Arc) -> TruckEntity {
+fn to_render(arc: &Arc) -> RenderEntity {
     let cx = arc.center.x;
     let cy = arc.center.y;
     let cz = arc.center.z;
@@ -32,11 +31,11 @@ fn to_truck(arc: &Arc) -> TruckEntity {
     // Arc points in WCS: centre_wcs + r*cos(a)*Ax + r*sin(a)*Ay
     let arc_pt = |a: f64| {
         let (c, s) = (a.cos(), a.sin());
-        Point3::new(
+        [
             cwx + r * c * ax.0 + r * s * ay.0,
             cwy + r * c * ax.1 + r * s * ay.1,
             cwz + r * c * ax.2 + r * s * ay.2,
-        )
+        ]
     };
 
     // Centre, ends, arc-length midpoint and the quadrants the sweep actually
@@ -58,7 +57,7 @@ fn to_truck(arc: &Arc) -> TruckEntity {
         let base: Vec<[f64; 3]> = (0..=n)
             .map(|i| {
                 let p = arc_pt(start_a + (end_a - start_a) * (i as f64 / n as f64));
-                [p.x, p.y, p.z]
+                [p[0], p[1], p[2]]
             })
             .collect();
         let mut pts: Vec<[f64; 3]> = Vec::with_capacity((n + 1) * 2 + 8);
@@ -68,16 +67,15 @@ fn to_truck(arc: &Arc) -> TruckEntity {
             pts.push([x + t * nx, y + t * ny, z + t * nz]);
         }
         pts.push([f64::NAN; 3]);
-        let ps = arc_pt(sa);
-        pts.push([ps.x, ps.y, ps.z]);
-        pts.push([ps.x + t * nx, ps.y + t * ny, ps.z + t * nz]);
-        pts.push([f64::NAN; 3]);
-        let pe = arc_pt(ea);
-        pts.push([pe.x, pe.y, pe.z]);
-        pts.push([pe.x + t * nx, pe.y + t * ny, pe.z + t * nz]);
-        return TruckEntity {
+        for end in [arc_pt(sa), arc_pt(ea)] {
+            pts.push(end);
+            pts.push([end[0] + t * nx, end[1] + t * ny, end[2] + t * nz]);
+            pts.push([f64::NAN; 3]);
+        }
+        pts.pop();
+        return RenderEntity {
             pick_tris: extrusion_wall_tris(&base, [t * nx, t * ny, t * nz]),
-            object: TruckObject::Lines(pts),
+            object: RenderObject::Lines(pts),
             snap_pts: snap.snap_pts.clone(),
             tangent_geoms: vec![tangent],
             key_vertices: vec![],
@@ -85,20 +83,13 @@ fn to_truck(arc: &Arc) -> TruckEntity {
         };
     }
 
-    // Kept as a truck edge rather than a point list: EXTRUDE, REVOLVE and
-    // SWEEP take their profile and path from `Curve` / `Contour` and have no
-    // arm for `Lines`, so handing them one would quietly stop an arc being
-    // usable as either.
-    let p_start = arc_pt(sa);
-    let p_end = arc_pt(ea);
-    let ccw_end = if ea >= sa { ea } else { ea + TAU };
-    let p_mid = arc_pt(sa + (ccw_end - sa) * 0.5);
-    let v_start = builder::vertex(p_start);
-    let v_end = builder::vertex(p_end);
-    let edge = builder::circle_arc(&v_start, &v_end, p_mid);
-    TruckEntity {
+    // Sampled through the arc's own curve, which is the one definition of
+    // its geometry. EXTRUDE, REVOLVE and SWEEP read that definition directly
+    // rather than this point list, so nothing is lost by drawing from it.
+    let points = crate::entities::curve::curve_points(&crate::entities::curve::arc_curve(arc));
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Curve(edge),
+        object: RenderObject::Lines(points),
         snap_pts: snap.snap_pts.clone(),
         tangent_geoms: vec![tangent],
         key_vertices: vec![],
@@ -291,9 +282,9 @@ fn apply_grip(arc: &mut Arc, grip_id: usize, apply: GripApply) {
             arc.center.z += d.z;
         }
         (0, GripApply::Absolute(p)) => {
-            arc.center.x = p.x;
-            arc.center.y = p.y;
-            arc.center.z = p.z;
+            arc.center.x = p[0];
+            arc.center.y = p[1];
+            arc.center.z = p[2];
         }
         (1..=3, GripApply::Absolute(p)) => {
             let original = arc.clone();
@@ -320,9 +311,9 @@ fn apply_transform(arc: &mut Arc, t: &EntityTransform) {
     });
 }
 
-impl TruckConvertible for Arc {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+impl RenderConvertible for Arc {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self))
     }
 }
 

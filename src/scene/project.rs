@@ -593,8 +593,8 @@ pub(crate) fn clip_boundary_polygon_for_document(
     else {
         return vec![];
     };
-    // Circles and ellipses tessellate directly — their `to_truck` returns a
-    // parametric TruckObject (not `Lines`), so extracting a polygon there
+    // Circles and ellipses tessellate directly — their `to_render` returns a
+    // parametric RenderObject (not `Lines`), so extracting a polygon there
     // would come back empty. Everything else (splines, polylines, …) reuses
     // the entity's own `Lines` tessellation.
     const N: usize = 64;
@@ -688,20 +688,16 @@ pub(crate) fn clip_boundary_polygon_for_document(
                 ]
             })
             .collect(),
-        _ => {
-            use crate::entities::traits::EntityTypeOps;
-            let Some(te) = entity.to_truck_entity(document) else {
-                return vec![];
-            };
-            if let crate::scene::convert::acad_to_truck::TruckObject::Lines(pts) = te.object {
-                pts.into_iter()
-                    .filter(|p| p[0].is_finite() && p[1].is_finite())
-                    .map(|p| [p[0] as f32, p[1] as f32, z])
-                    .collect()
-            } else {
-                vec![]
-            }
-        }
+        // Anything else that draws as a plane curve — a circle, an ellipse, a
+        // bulged polyline, a spline — is sampled through its own geometry,
+        // which is where every entity's curve is defined once.
+        _ => crate::entities::curve::entity_curve(entity)
+            .map(|planar| crate::entities::curve::curve_points(&planar))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|point| point[0].is_finite() && point[1].is_finite())
+            .map(|point| [point[0] as f32, point[1] as f32, z])
+            .collect(),
     }
 }
 

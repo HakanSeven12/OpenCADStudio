@@ -1,7 +1,7 @@
 use acadrust::types::aci_table::aci_to_rgb;
 use acadrust::CadDocument;
 
-use crate::scene::convert::acad_to_truck::{GlyphRun, TextStroke};
+use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke};
 use crate::scene::text::font_face::Face;
 use crate::scene::text::lff;
 

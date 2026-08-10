@@ -4,14 +4,14 @@
 // `acis::primitives` builders. `Scene::add_entity` tessellates the SAT B-rep
 // into the 3D mesh pipeline, so the solid renders, selects, and saves to DXF.
 //
-// A matching truck `Solid` is cached on the scene (see model/mod.rs) when the
+// A matching the kernel `Solid` is cached on the scene (see model/mod.rs) when the
 // entity is committed, so the Design-group boolean tools can combine it.
 
 use acadrust::entities::Solid3D;
 use acadrust::{primitives, EntityType};
 use glam::DVec3;
 use crate::t;
-use truck_modeling::Solid;
+use acadrust::kernel::brep::Body;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::scene::model::solid_model;
@@ -100,9 +100,9 @@ impl PrimitiveCommand {
         .max(1.0)
     }
 
-    /// Build both the acadrust `Solid3D` (ACIS, for persistence) and the truck
-    /// `Solid` B-rep (rendering + booleans) from the footprint + `height`.
-    fn build(&self, height: f64) -> Option<(EntityType, Solid)> {
+    /// Build both the acadrust `Solid3D` (ACIS, for persistence) and the
+    /// kernel `Body` (rendering + booleans) from the footprint + `height`.
+    fn build(&self, height: f64) -> Option<(EntityType, Body)> {
         let (doc, solid) = match self.shape {
             Shape::Box | Shape::Wedge => {
                 let (a, b) = (self.pts[0], self.pts[1]);
@@ -174,6 +174,7 @@ impl PrimitiveCommand {
                 )
             }
         };
+        let solid = solid?;
         let mut s3d = Solid3D::new();
         s3d.set_sat_document(&doc);
         // Edge wires make the solid click-pickable and draw a wireframe over
@@ -185,27 +186,26 @@ impl PrimitiveCommand {
     fn commit(&self, height: f64) -> CmdResult {
         match self.build(height) {
             Some((entity, solid)) => {
-                let matrix = truck_modeling::Matrix4::new(
-                    self.plane.x.x,
-                    self.plane.x.y,
-                    self.plane.x.z,
-                    0.0,
-                    self.plane.y.x,
-                    self.plane.y.y,
-                    self.plane.y.z,
-                    0.0,
-                    self.plane.z.x,
-                    self.plane.z.y,
-                    self.plane.z.z,
-                    0.0,
-                    self.plane.origin.x,
-                    self.plane.origin.y,
-                    self.plane.origin.z,
-                    1.0,
+                // Built upright in its own frame, then put on the working
+                // plane — the same move `place_entity` makes for the ACIS
+                // copy, so the two stay on top of each other.
+                let placed = solid_model::placed(
+                    &solid,
+                    [self.plane.x.x, self.plane.x.y, self.plane.x.z],
+                    [self.plane.y.x, self.plane.y.y, self.plane.y.z],
+                    [self.plane.z.x, self.plane.z.y, self.plane.z.z],
+                    [
+                        self.plane.origin.x,
+                        self.plane.origin.y,
+                        self.plane.origin.z,
+                    ],
                 );
-                CmdResult::CommitSolid {
-                    entity: self.plane.place_entity(entity),
-                    solid: Box::new(truck_modeling::builder::transformed(&solid, matrix)),
+                match placed {
+                    Some(placed) => CmdResult::CommitSolid {
+                        entity: self.plane.place_entity(entity),
+                        solid: Box::new(placed),
+                    },
+                    None => CmdResult::Cancel,
                 }
             }
             None => CmdResult::Cancel,

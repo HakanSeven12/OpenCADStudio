@@ -50,10 +50,8 @@ jobs:
         with:
           tool: wasm-bindgen@${{ steps.wasm-bindgen-version.outputs.version }}
 
-      # The rust <link> in index.html sets `data-cargo-no-default-features`,
-      # so this drops the `solid3d` feature (truck-meshalgo → lzma-sys C deps
-      # that can't cross-compile to wasm). `--public-url` matches the project
-      # page sub-path: https://<user>.github.io/OpenCADStudio/.
+      # `--public-url` matches the project page sub-path:
+      # https://<user>.github.io/OpenCADStudio/.
       - name: Build web bundle
         run: trunk build --release --public-url /OpenCADStudio/
 

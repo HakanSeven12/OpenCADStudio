@@ -590,7 +590,7 @@ pub fn parse_angle_deg(value: &str) -> Option<f64> {
 pub use acadrust::kernel::geom2d::BulgeArc;
 
 /// Triangulate the solid bands a `wide_fills` returns into the flat WCS f64
-/// triangle list `TruckEntity::pick_tris` carries, so a wide polyline is
+/// triangle list `RenderEntity::pick_tris` carries, so a wide polyline is
 /// selectable across the band it draws and not just along its centreline.
 ///
 /// `origin` and `fills` are that function's own pair: 2-D offsets from the
@@ -616,7 +616,7 @@ pub(crate) fn wide_band_tris(origin: [f64; 2], fills: &[Vec<[f32; 2]>]) -> Vec<[
 /// thickness (code 39): a vertical wall between every band-boundary point and
 /// its `thickness`-along-`normal` copy, plus triangulated bottom and top caps.
 /// Returns `(fill_tris, edge_lines)` as flat WCS f64 lists — the caller wraps
-/// them in a `TruckEntity` (object = `Lines(edge_lines)`, `fill_tris`, and
+/// them in a `RenderEntity` (object = `Lines(edge_lines)`, `fill_tris`, and
 /// `pick_tris = fill_tris`). Shared by LwPolyline and Polyline2D so both wide
 /// polyline kinds extrude the same solid instead of just their centre-line.
 ///

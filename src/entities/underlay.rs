@@ -10,8 +10,8 @@ use glam::DVec3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_angle_prop as edit_angle, edit_prop as edit, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 
@@ -37,7 +37,7 @@ fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
     ]
 }
 
-// ── TruckConvertible ──────────────────────────────────────────────────────────
+// ── RenderConvertible ──────────────────────────────────────────────────────────
 
 /// The underlay's page rectangle in world space (CCW from the insertion),
 /// when its definition resolves and the page rasterises: page inches × the
@@ -71,8 +71,8 @@ fn page_quad(
     ])
 }
 
-impl TruckConvertible for Underlay {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Underlay {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         let origin = v3(&self.insertion_point);
         let _origin_f32 = v3f32(&self.insertion_point);
 
@@ -90,9 +90,9 @@ impl TruckConvertible for Underlay {
             // selects on a click anywhere inside, not just on its outline.
             let ring: Vec<[f64; 3]> = world_verts.iter().map(|v| [v.x, v.y, v.z]).collect();
             let pick_tris = crate::entities::mesh::triangulate_planar(&ring);
-            Some(TruckEntity {
+            Some(RenderEntity {
                 pick_tris,
-                object: TruckObject::Lines(pts),
+                object: RenderObject::Lines(pts),
                 snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
                 tangent_geoms: vec![],
                 key_vertices: key,
@@ -103,9 +103,9 @@ impl TruckConvertible for Underlay {
             // visible extent instead of a lone cross under the raster.
             let pts = vec![q[0], q[1], q[2], q[3], q[0]];
             let pick_tris = crate::entities::mesh::triangulate_planar(&q.to_vec());
-            Some(TruckEntity {
+            Some(RenderEntity {
                 pick_tris,
-                object: TruckObject::Lines(pts),
+                object: RenderObject::Lines(pts),
                 snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
                 tangent_geoms: vec![],
                 key_vertices: q.to_vec(),
@@ -114,9 +114,9 @@ impl TruckConvertible for Underlay {
         } else {
             // No clip boundary: draw a cross at insertion point.
             let pts = cross_wire(origin, 1.0);
-            Some(TruckEntity {
+            Some(RenderEntity {
                 pick_tris: Vec::new(),
-                object: TruckObject::Lines(pts),
+                object: RenderObject::Lines(pts),
                 snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
                 tangent_geoms: vec![],
                 key_vertices: vec![origin],

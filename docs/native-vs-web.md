@@ -10,7 +10,7 @@ browser can't provide. This page lists the differences.
 | Area | Native (desktop) | Web (wasm) |
 |------|------------------|------------|
 | Windowing | Multi-window (`iced::daemon`) | Single window (`iced::application`); dialogs are in-canvas modals |
-| 3D solid modeling | Yes | **No** — `solid3d` feature off |
+| 3D solid modeling | Yes | Yes — the geometry kernel is pure Rust |
 | Hatch rendering | Yes | **No** — WebGL2 has no vertex-stage storage |
 | Fonts | Embedded stroke fonts + system TrueType + shaping + fallback | Embedded stroke fonts only |
 | File open | Native file dialog → path | Browser picker → bytes |
@@ -22,15 +22,16 @@ browser can't provide. This page lists the differences.
 
 ## Details
 
-### 3D solid modeling — web: disabled
-The `solid3d` Cargo feature (default on) gates `truck-meshalgo` and
-`truck-shapeops`, which pull `vtkio → xz2 → lzma-sys`, a C library that can't
-cross-compile to `wasm32`. The web build compiles with `--no-default-features`,
-so on the web:
-- The Model tab's solid primitives and boolean operations are no-ops.
-- Solid tessellation and ACIS (SAT) import produce no geometry.
+### 3D solid modeling — web: the same as native
+It used to be off. The modelling kernel was truck, whose mesh and boolean
+crates reach `vtkio → xz2 → lzma-sys` — a C library that cannot cross-compile
+to `wasm32` — so the web build dropped a `solid3d` feature and the Model tab,
+solid tessellation and ACIS import all did nothing there.
 
-2-D CAD is unaffected.
+The kernel is now cadkernel, which is pure Rust and has no C dependency at
+all, so none of that applies and the feature is gone. The web build makes
+primitives, runs booleans, draws ACIS solids read from a file and writes them
+back out as exact geometry, exactly as the desktop build does.
 
 ### Hatch rendering — web: not drawn
 The batched hatch pipeline binds a read-only storage buffer in the vertex
@@ -97,8 +98,7 @@ folder and load again on the next desktop launch.
 ## Build & deploy
 
 - Native: `cargo build --release --bin OpenCADStudio`.
-- Web: `trunk build --release --public-url /OpenCADStudio/` (the rust `<link>`
-  in `index.html` sets `data-cargo-no-default-features`, dropping `solid3d`).
+- Web: `trunk build --release --public-url /OpenCADStudio/`.
   `.github/workflows/pages.yml` builds and deploys to GitHub Pages on every
   release. No COOP/COEP headers are needed because the web build is
   single-threaded.

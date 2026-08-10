@@ -2,7 +2,7 @@
 //
 //   Model group  : create primitive solids (box, cylinder, cone, sphere, …)
 //                  as ACIS Solid3D entities via acadrust's primitive builders.
-//   Design group : combine solids with truck boolean operations
+//   Design group : combine solids with the kernel boolean operations
 //                  (union / subtract / intersect).
 
 pub mod boolean_cmd;

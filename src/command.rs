@@ -1154,11 +1154,11 @@ pub enum CmdResult {
     /// Commit an acadrust entity to the document and end the command.
     CommitAndExit(EntityType),
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
-    /// persistence) plus its truck B-rep (cached for boolean ops + shaded
+    /// persistence) plus its B-rep (cached for boolean ops + shaded
     /// rendering). Ends the command.
     CommitSolid {
         entity: EntityType,
-        solid: Box<truck_modeling::Solid>,
+        solid: Box<acadrust::kernel::brep::Body>,
     },
     /// Commit an acadrust entity, end the command, and open the in-place text
     /// editor on it (used by MLEADER to type the annotation after placement).

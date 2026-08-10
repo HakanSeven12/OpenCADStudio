@@ -1,12 +1,11 @@
 use acadrust::entities::Point;
 use acadrust::EntityType;
 use crate::t;
-use truck_modeling::{builder, Point3};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::SnapHint;
 
@@ -17,7 +16,7 @@ use crate::scene::model::wire_model::SnapHint;
 const REL_REF_PX: f64 = 600.0;
 
 /// Resolve a positive (absolute) PDSIZE to a world size. Relative/zero PDSIZE
-/// is handled by [`relative_truck`] when a world-per-pixel factor is available;
+/// is handled by [`relative_render`] when a world-per-pixel factor is available;
 /// without one it falls back to a small fixed world size.
 fn pdsize_world(pdsize: f64) -> f64 {
     if pdsize > 0.0 {
@@ -27,21 +26,20 @@ fn pdsize_world(pdsize: f64) -> f64 {
     }
 }
 
-/// Build the truck entity for a point given the glyph half-size `s` in world
-/// units. Shared by the header-driven path ([`to_truck`]) and the
-/// viewport-aware relative path ([`relative_truck`]).
-fn point_truck(pt: &Point, pdmode: i16, s: f64) -> TruckEntity {
+/// Build the render entity for a point given the glyph half-size `s` in world
+/// units. Shared by the header-driven path ([`to_render`]) and the
+/// viewport-aware relative path ([`relative_render`]).
+fn point_render(pt: &Point, pdmode: i16, s: f64) -> RenderEntity {
     // POINT location is stored in WCS (the extrusion normal only orients the
     // glyph/thickness) — remapping it through the arbitrary-axis OCS moved
     // mirrored points (normal 0,0,-1) to the wrong side of the drawing.
     let (wx, wy, wz) = (pt.location.x, pt.location.y, pt.location.z);
     let snap = glam::DVec3::new(wx, wy, wz);
     if pdmode == 0 {
-        // Default: a single vertex (driver handles the dot pixel).
-        let p = Point3::new(wx, wy, wz);
-        return TruckEntity {
+        // Default: a single position (the driver sizes the dot in pixels).
+        return RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Point(builder::vertex(p)),
+            object: RenderObject::Dot([wx, wy, wz]),
             snap_pts: vec![(snap, SnapHint::Node)],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -51,18 +49,18 @@ fn point_truck(pt: &Point, pdmode: i16, s: f64) -> TruckEntity {
     let pts = point_glyph(wx, wy, wz, pdmode, s);
     if pts.is_empty() {
         // PDMODE 1 = nothing — emit an empty Lines wire so picking still works.
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(vec![]),
+            object: RenderObject::Lines(vec![]),
             snap_pts: vec![(snap, SnapHint::Node)],
             tangent_geoms: vec![],
             key_vertices: vec![[wx, wy, wz]],
             fill_tris: vec![],
         };
     }
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Lines(pts),
+        object: RenderObject::Lines(pts),
         snap_pts: vec![(snap, SnapHint::Node)],
         tangent_geoms: vec![],
         key_vertices: vec![[wx, wy, wz]],
@@ -75,11 +73,11 @@ fn point_truck(pt: &Point, pdmode: i16, s: f64) -> TruckEntity {
 /// across zoom. Returns `None` for an absolute PDSIZE, the size-independent
 /// default dot (PDMODE 0), or when no `wpp` is available — the caller then uses
 /// the normal header-driven path.
-pub fn relative_truck(
+pub fn relative_render(
     entity: &EntityType,
     document: &acadrust::CadDocument,
     wpp: Option<f32>,
-) -> Option<TruckEntity> {
+) -> Option<RenderEntity> {
     let EntityType::Point(pt) = entity else {
         return None;
     };
@@ -89,7 +87,7 @@ pub fn relative_truck(
         return None;
     }
     let wpp = wpp.filter(|w| *w > 0.0)?;
-    Some(point_truck(pt, pdmode, relative_world_size(pdsize, wpp) * 0.5))
+    Some(point_render(pt, pdmode, relative_world_size(pdsize, wpp) * 0.5))
 }
 
 /// Full on-screen glyph size (world units) for a relative (≤ 0) PDSIZE at the
@@ -175,10 +173,10 @@ fn point_glyph(cx: f64, cy: f64, z: f64, pdmode: i16, s_half: f64) -> Vec<[f64; 
     pts
 }
 
-fn to_truck(pt: &Point, document: &acadrust::CadDocument) -> TruckEntity {
+fn to_render(pt: &Point, document: &acadrust::CadDocument) -> RenderEntity {
     let pdmode = document.header.point_display_mode;
     let s = pdsize_world(document.header.point_display_size) * 0.5;
-    point_truck(pt, pdmode, s)
+    point_render(pt, pdmode, s)
 }
 
 fn grips(pt: &Point) -> Vec<GripDef> {
@@ -235,9 +233,9 @@ fn apply_transform(pt: &mut Point, t: &EntityTransform) {
     });
 }
 
-impl TruckConvertible for Point {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self, document))
+impl RenderConvertible for Point {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self, document))
     }
 }
 

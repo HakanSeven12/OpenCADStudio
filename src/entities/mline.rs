@@ -3,8 +3,8 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 
@@ -204,8 +204,8 @@ pub fn mline_lines(m: &MLine, document: &acadrust::CadDocument) -> Vec<MLineLine
     out
 }
 
-impl TruckConvertible for MLine {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for MLine {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }
@@ -239,9 +239,9 @@ impl TruckConvertible for MLine {
             })
             .collect();
 
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(pts),
+            object: RenderObject::Lines(pts),
             snap_pts,
             tangent_geoms: vec![],
             key_vertices: key_verts,

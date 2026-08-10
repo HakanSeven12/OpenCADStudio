@@ -1,17 +1,14 @@
 use acadrust::entities::Spline;
 use crate::t;
-use truck_modeling::{
-    base::{BoundedCurve, ParameterDivision1D, ParametricCurve, Vector4},
-    builder, BSplineCurve, Curve, Edge, KnotVec, NurbsCurve, Point3, Wire,
-};
+use acadrust::kernel::space::NurbsCurve3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
-fn to_truck(spl: &Spline) -> TruckEntity {
+fn to_render(spl: &Spline) -> RenderEntity {
     let n = spl.control_points.len();
     if n < 2 {
         // A fit-point spline (DWG scenario 2 / R2013+) stores only the points
@@ -57,60 +54,24 @@ fn to_truck(spl: &Spline) -> TruckEntity {
             } else {
                 spl.fit_points.iter().map(|p| [p.x, p.y, p.z]).collect()
             };
-            return TruckEntity {
+            return RenderEntity {
                 pick_tris: Vec::new(),
-                object: TruckObject::Lines(pts),
+                object: RenderObject::Lines(pts),
                 snap_pts,
                 tangent_geoms: vec![],
                 key_vertices,
                 fill_tris: vec![],
             };
         }
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Point(builder::vertex(Point3::new(0.0, 0.0, 0.0))),
+            object: RenderObject::Lines(Vec::new()),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
             fill_tris: vec![],
         };
     }
-
-    let knot_vec = if !spl.knots.is_empty() {
-        KnotVec::from(spl.knots.clone())
-    } else {
-        KnotVec::uniform_knot(spl.degree as usize, n - 1)
-    };
-
-    // Use rational NURBS when weights are provided (circles/conics stored as NURBS).
-    let use_nurbs = !spl.weights.is_empty() && spl.weights.len() == n;
-    let (p_start, p_end, curve) = if use_nurbs {
-        let homo_pts: Vec<Vector4> = spl
-            .control_points
-            .iter()
-            .zip(spl.weights.iter())
-            .map(|(p, &w)| {
-                let w = if w.abs() < 1e-12 { 1.0 } else { w };
-                Vector4::new(p.x * w, p.y * w, p.z * w, w)
-            })
-            .collect();
-        let nurbs = NurbsCurve::new(BSplineCurve::new(knot_vec, homo_pts));
-        let (t0, t1) = nurbs.range_tuple();
-        (nurbs.subs(t0), nurbs.subs(t1), Curve::NurbsCurve(nurbs))
-    } else {
-        let ctrl_pts: Vec<Point3> = spl
-            .control_points
-            .iter()
-            .map(|p| Point3::new(p.x, p.y, p.z))
-            .collect();
-        let bspline = BSplineCurve::new(knot_vec, ctrl_pts);
-        let (t0, t1) = bspline.range_tuple();
-        (
-            bspline.subs(t0),
-            bspline.subs(t1),
-            Curve::BSplineCurve(bspline),
-        )
-    };
 
     // Snap sources from the spline's own curve. A spline is not a chain of
     // straight segments, so nothing goes in `key_vertices`: consecutive
@@ -149,30 +110,27 @@ fn to_truck(spl: &Spline) -> TruckEntity {
         }
     };
 
+    // Sampled through the spline's own curve — the same definition EXTRUDE
+    // and REVOLVE read — and closed back onto its start when the flags say
+    // it is periodic and the two ends do not already meet.
     let is_closed = spl.flags.closed || spl.flags.periodic;
-    let gap = {
-        let dx = (p_end.x - p_start.x) as f32;
-        let dy = (p_end.y - p_start.y) as f32;
-        let dz = (p_end.z - p_start.z) as f32;
-        (dx * dx + dy * dy + dz * dz).sqrt()
-    };
+    let mut points = crate::entities::curve::spline_curve(spl)
+        .map(|planar| crate::entities::curve::curve_points(&planar))
+        .unwrap_or_default();
+    if is_closed {
+        if let (Some(first), Some(last)) = (points.first().copied(), points.last().copied()) {
+            let gap = ((last[0] - first[0]).powi(2)
+                + (last[1] - first[1]).powi(2)
+                + (last[2] - first[2]).powi(2))
+            .sqrt();
+            if gap > 1e-6 {
+                points.push(first);
+            }
+        }
+    }
+    let object = RenderObject::Lines(points);
 
-    let object = if is_closed && gap > 1e-6 {
-        let v_start = builder::vertex(p_start);
-        let v_end = builder::vertex(p_end);
-        let v_close = builder::vertex(p_start);
-        let main_edge = Edge::new(&v_start, &v_end, curve);
-        let close_edge = builder::line(&v_end, &v_close);
-        let wire: Wire = [main_edge, close_edge].into_iter().collect();
-        TruckObject::Contour(wire)
-    } else {
-        let v_start = builder::vertex(p_start);
-        let v_end = builder::vertex(p_end);
-        let edge = Edge::new(&v_start, &v_end, curve);
-        TruckObject::Curve(edge)
-    };
-
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
         object,
         snap_pts,
@@ -199,12 +157,6 @@ pub(crate) fn measurement_polyline(spl: &Spline) -> Vec<[f64; 3]> {
     if degree == 0 || degree >= count {
         return spl.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
     }
-    let knot_vec = if spl.knots.len() == count + degree + 1 {
-        KnotVec::from(spl.knots.clone())
-    } else {
-        KnotVec::uniform_knot(degree, count - 1)
-    };
-
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];
     for point in &spl.control_points {
@@ -221,35 +173,23 @@ pub(crate) fn measurement_polyline(spl: &Spline) -> Vec<[f64; 3]> {
     .sqrt();
     let tolerance = crate::scene::convert::tess_util::fill_chord_tol(diagonal.max(1.0));
 
-    if spl.weights.len() == count {
-        let controls = spl
-            .control_points
+    // The kernel's space curve holds the rational and the polynomial case
+    // alike — weights absent means polynomial — and samples to a chord
+    // tolerance, refined where the curve bends rather than evenly.
+    let controls: Vec<[f64; 3]> = spl
+        .control_points
+        .iter()
+        .map(|point| [point.x, point.y, point.z])
+        .collect();
+    let weights = (spl.weights.len() == count).then(|| {
+        spl.weights
             .iter()
-            .zip(&spl.weights)
-            .map(|(point, &weight)| {
-                let weight = if weight.abs() < 1e-12 { 1.0 } else { weight };
-                Vector4::new(
-                    point.x * weight,
-                    point.y * weight,
-                    point.z * weight,
-                    weight,
-                )
-            })
-            .collect::<Vec<_>>();
-        let curve = NurbsCurve::new(BSplineCurve::new(knot_vec, controls));
-        let range = curve.range_tuple();
-        let (_, points) = curve.parameter_division(range, tolerance);
-        points.into_iter().map(|point| [point.x, point.y, point.z]).collect()
-    } else {
-        let controls = spl
-            .control_points
-            .iter()
-            .map(|point| Point3::new(point.x, point.y, point.z))
-            .collect::<Vec<_>>();
-        let curve = BSplineCurve::new(knot_vec, controls);
-        let range = curve.range_tuple();
-        let (_, points) = curve.parameter_division(range, tolerance);
-        points.into_iter().map(|point| [point.x, point.y, point.z]).collect()
+            .map(|weight| if weight.abs() < 1e-12 { 1.0 } else { *weight })
+            .collect()
+    });
+    match NurbsCurve3::new(degree, controls, spl.knots.clone(), weights) {
+        Some(curve) => curve.tessellate_within(tolerance),
+        None => spl.control_points.iter().map(|p| [p.x, p.y, p.z]).collect(),
     }
 }
 
@@ -651,9 +591,9 @@ fn apply_transform(spline: &mut Spline, t: &EntityTransform) {
     });
 }
 
-impl TruckConvertible for Spline {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+impl RenderConvertible for Spline {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self))
     }
 }
 
@@ -712,7 +652,7 @@ impl crate::entities::traits::Grippable for Spline {
                         * 0.5;
                     self.weights.insert(i1, w);
                 }
-                // Clear knots so to_truck rebuilds a uniform knot vector
+                // Clear knots so to_render rebuilds a uniform knot vector
                 // for the new CV count.
                 self.knots.clear();
             }

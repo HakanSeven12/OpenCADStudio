@@ -39,14 +39,6 @@ use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 /// fraction of the curve radius sets their sampling density (~0.002 ⇒ ~50
 /// segments per full circle).
 pub(crate) const EDGE_CHORD_FRAC: f64 = 0.002;
-/// Truck's own triangulation chord tolerance for the cone faces still routed
-/// through its kernel, as a fraction of the surface radius. Matches
-/// [`LodConfig::HIGH`]: truck emits a single mesh rather than an LOD ladder, so
-/// it has to be the detailed one. A coarse fraction here turns a wide pipe into
-/// a hexagonal prism whose flats sink far inside the true radius, tearing the
-/// wall away from the planar faces and caps that meet it.
-#[cfg(feature = "solid3d")]
-pub(crate) const TRUCK_CHORD_FRAC: f64 = 0.005;
 /// Boundary-loop sampling for parameter-range classification (which arc of a
 /// sphere/torus a face covers): a fine fraction so the classification is
 /// accurate; the points are not rendered.
@@ -276,9 +268,10 @@ fn tessellate_sat(
     ))
 }
 
-/// Tessellate an ACIS document, preferring the truck B-rep kernel and falling
-/// back to the bespoke per-surface sampler when truck can't rebuild the shell
-/// (e.g. an unhandled surface type).
+/// Tessellate an ACIS document, preferring the geometry kernel and falling
+/// back to the bespoke per-surface sampler when the kernel cannot rebuild the
+/// whole shell (a surface kind it does not model, a face whose boundary it
+/// cannot express in that surface's own parameters).
 fn tessellate_acis(
     sat: &SatDocument,
     name: String,
@@ -286,22 +279,22 @@ fn tessellate_acis(
     facet_res: f64,
     isolines: usize,
 ) -> Option<MeshLodSet> {
-    let truck = crate::scene::convert::acis_to_truck::tessellate_sat_truck(
+    let lifted = crate::scene::convert::acis_kernel::tessellate_sat(
         sat,
         name.clone(),
         color,
         facet_res,
     );
-    let manual = if truck.as_ref().is_some_and(|set| set.complete) {
+    let manual = if lifted.as_ref().is_some_and(|set| set.complete) {
         None
     } else {
         tessellate_sat_lods(sat, name.clone(), color, facet_res)
     };
-    let mut set = match (truck, manual) {
+    let mut set = match (lifted, manual) {
         (Some(set), _) if set.complete => set,
         (_, Some(set)) if set.complete => set,
-        (Some(truck), Some(manual)) => {
-            let truck_tris = truck
+        (Some(lifted), Some(manual)) => {
+            let lifted_tris = lifted
                 .lods
                 .first()
                 .map(|mesh| mesh.indices.len())
@@ -311,10 +304,10 @@ fn tessellate_acis(
                 .first()
                 .map(|mesh| mesh.indices.len())
                 .unwrap_or(0);
-            if manual_tris > truck_tris {
+            if manual_tris > lifted_tris {
                 manual
             } else {
-                truck
+                lifted
             }
         }
         (Some(set), None) | (None, Some(set)) => set,
@@ -2024,8 +2017,13 @@ pub(crate) fn tess_plane_face(
     normals: &mut Vec<[f32; 3]>,
     indices: &mut Vec<u32>,
 ) {
-    let mut poly = collect_face_polygon(sat, face, chord_frac);
-    if poly.len() < 3 {
+    // Every loop, not just the first. A face with a hole in it carries the
+    // hole on a second loop, and nothing says the outer one is listed first —
+    // so reading `first_loop` alone drew whichever came first and ignored the
+    // rest. When that was a hole, the hole came out solid and the material
+    // around it came out missing.
+    let rings = collect_face_loops(sat, face, chord_frac);
+    if rings.iter().all(|ring| ring.len() < 3) {
         return;
     }
 
@@ -2038,21 +2036,63 @@ pub(crate) fn tess_plane_face(
     };
     let nf = [nx as f32, ny as f32, nz as f32];
 
-    if dot3(newell_normal(&poly), [nx, ny, nz]) < 0.0 {
-        poly.reverse();
+    // Flattened into the plane's own frame, where "inside" is a question with
+    // an answer. The kernel's ear clipping bridges the holes into the outer
+    // ring; a fan from one vertex cannot express a hole at all.
+    let (px, py, pz) = plane.root_point();
+    let seed = if nx.abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let Some(frame) =
+        acadrust::kernel::space::Plane::orthonormal([px, py, pz], seed, [nx, ny, nz])
+    else {
+        return;
+    };
+    let flat: Vec<Vec<[f64; 2]>> = rings
+        .iter()
+        .filter(|ring| ring.len() >= 3)
+        .map(|ring| ring.iter().filter_map(|p| frame.project(*p)).collect())
+        .collect();
+    let Some(widest) = flat
+        .iter()
+        .enumerate()
+        .max_by(|a, b| {
+            acadrust::kernel::geom2d::signed_area(a.1)
+                .abs()
+                .total_cmp(&acadrust::kernel::geom2d::signed_area(b.1).abs())
+        })
+        .map(|(index, _)| index)
+    else {
+        return;
+    };
+    let holes: Vec<Vec<[f64; 2]>> = flat
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != widest)
+        .map(|(_, ring)| ring.clone())
+        .collect();
+    let (points, triangles) =
+        acadrust::kernel::geom2d::triangulate::polygon(&flat[widest], &holes);
+    if triangles.is_empty() {
+        return;
     }
 
     let base = verts.len() as u32;
-    for &pt in &poly {
-        verts.push(pt);
+    for point in &points {
+        verts.push(frame.point_at(*point));
         normals.push(nf);
     }
-
-    // Fan triangulation from vertex 0 (outer loop only; holes are handled by
-    // the truck B-rep path in `acis_to_truck`).
-    let n = poly.len() as u32;
-    for i in 1..(n - 1) {
-        indices.extend_from_slice(&[base, base + i, base + i + 1]);
+    // Ear clipping hands back counter-clockwise triangles in the frame's own
+    // coordinates; the frame was built around the outward normal, so that is
+    // already the outward winding.
+    for triangle in triangles {
+        indices.extend_from_slice(&[
+            base + triangle[0] as u32,
+            base + triangle[1] as u32,
+            base + triangle[2] as u32,
+        ]);
     }
 }
 
@@ -2639,20 +2679,6 @@ fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// Area-weighted polygon normal via Newell's method. Robust for non-planar or
-/// slightly noisy loops; its sign encodes the winding direction.
-fn newell_normal(poly: &[[f64; 3]]) -> [f64; 3] {
-    let mut n = [0.0f64; 3];
-    let len = poly.len();
-    for i in 0..len {
-        let a = poly[i];
-        let b = poly[(i + 1) % len];
-        n[0] += (a[1] - b[1]) * (a[2] + b[2]);
-        n[1] += (a[2] - b[2]) * (a[0] + b[0]);
-        n[2] += (a[0] - b[0]) * (a[1] + b[1]);
-    }
-    n
-}
 
 #[inline]
 fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {

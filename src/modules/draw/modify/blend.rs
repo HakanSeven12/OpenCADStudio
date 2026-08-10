@@ -11,8 +11,7 @@ use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::DVec3;
 use crate::t;
-use truck_modeling::base::{BoundedCurve, ParametricCurve, Vector4};
-use truck_modeling::{BSplineCurve, KnotVec, NurbsCurve, Point3};
+use acadrust::kernel::space::NurbsCurve3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::entities::common::BulgeArc;
@@ -563,51 +562,34 @@ fn spline_control_endpoint(spline: &Spline, click: DVec3) -> Option<EndpointFram
     if degree == 0 || count <= degree {
         return None;
     }
-    let knots = if spline.knots.len() == count + degree + 1 {
-        KnotVec::from(spline.knots.clone())
-    } else {
-        KnotVec::uniform_knot(degree, count - 1)
-    };
+    // The kernel's space curve holds the rational and the polynomial case
+    // alike — weights absent means polynomial — so there is nothing here to
+    // tell apart, and a malformed knot vector is replaced with a clamped
+    // uniform one rather than refused.
+    let controls: Vec<[f64; 3]> = spline
+        .control_points
+        .iter()
+        .map(|point| [point.x, point.y, point.z])
+        .collect();
+    let weights = (spline.weights.len() == count).then(|| {
+        spline
+            .weights
+            .iter()
+            .map(|weight| if weight.abs() <= EPS { 1.0 } else { *weight })
+            .collect()
+    });
+    let curve = NurbsCurve3::new(degree, controls, spline.knots.clone(), weights)?;
 
-    if spline.weights.len() == count {
-        let homogeneous: Vec<Vector4> = spline
-            .control_points
-            .iter()
-            .zip(&spline.weights)
-            .map(|(point, &weight)| {
-                let weight = if weight.abs() <= EPS { 1.0 } else { weight };
-                Vector4::new(point.x * weight, point.y * weight, point.z * weight, weight)
-            })
-            .collect();
-        let curve = NurbsCurve::new(BSplineCurve::new(knots, homogeneous));
-        let (start, end) = curve.range_tuple();
-        let at_start = click.distance_squared(point_to_dvec(curve.subs(start)))
-            <= click.distance_squared(point_to_dvec(curve.subs(end)));
-        let parameter = if at_start { start } else { end };
-        curve_frame(
-            point_to_dvec(curve.subs(parameter)),
-            vector_to_dvec(curve.der(parameter)),
-            vector_to_dvec(curve.der2(parameter)),
-            at_start,
-        )
-    } else {
-        let controls: Vec<Point3> = spline
-            .control_points
-            .iter()
-            .map(|point| Point3::new(point.x, point.y, point.z))
-            .collect();
-        let curve = BSplineCurve::new(knots, controls);
-        let (start, end) = curve.range_tuple();
-        let at_start = click.distance_squared(point_to_dvec(curve.subs(start)))
-            <= click.distance_squared(point_to_dvec(curve.subs(end)));
-        let parameter = if at_start { start } else { end };
-        curve_frame(
-            point_to_dvec(curve.subs(parameter)),
-            vector_to_dvec(curve.der(parameter)),
-            vector_to_dvec(curve.der2(parameter)),
-            at_start,
-        )
-    }
+    let (start, end) = curve.domain();
+    let at_start = click.distance_squared(point_to_dvec(curve.point_at_knot(start)))
+        <= click.distance_squared(point_to_dvec(curve.point_at_knot(end)));
+    let parameter = if at_start { start } else { end };
+    curve_frame(
+        point_to_dvec(curve.point_at_knot(parameter)),
+        point_to_dvec(curve.tangent_at_knot(parameter)),
+        point_to_dvec(curve.acceleration_at_knot(parameter)),
+        at_start,
+    )
 }
 
 fn curve_frame(
@@ -666,12 +648,8 @@ fn to_dvec(point: Vector3) -> DVec3 {
     DVec3::new(point.x, point.y, point.z)
 }
 
-fn point_to_dvec(point: Point3) -> DVec3 {
-    DVec3::new(point.x, point.y, point.z)
-}
-
-fn vector_to_dvec(vector: truck_modeling::Vector3) -> DVec3 {
-    DVec3::new(vector.x, vector.y, vector.z)
+fn point_to_dvec(point: [f64; 3]) -> DVec3 {
+    DVec3::new(point[0], point[1], point[2])
 }
 
 inventory::submit!(crate::command::CommandRegistration {

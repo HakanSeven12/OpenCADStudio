@@ -1,4 +1,4 @@
-// Triangle mesh model — produced by truck Shell/Solid tessellation.
+// Triangle mesh model — produced by the kernel Shell/Solid tessellation.
 //
 // Stored alongside WireModels in the scene; rendered by the mesh pipeline
 // (wgpu TriangleList with depth test, flat normals).
@@ -301,7 +301,7 @@ impl MeshLodSet {
     }
 
     /// Wrap a single MeshModel as a one-LOD set. Used by interactive
-    /// commands that only produce one tessellation (e.g. truck-based
+    /// commands that only produce one tessellation (e.g. the kernel-based
     /// BOX/CYLINDER creation). The LOD selector will pick slot 0 for
     /// every zoom level.
     pub fn from_single(mesh: MeshModel) -> Self {

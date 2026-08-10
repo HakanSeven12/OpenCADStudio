@@ -11,8 +11,8 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::ro_prop as ro;
-use crate::entities::traits::{Grippable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::TruckEntity;
+use crate::entities::traits::{Grippable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::RenderEntity;
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
 /// Perpendicular distance from `p` to the helix axis (line through
@@ -103,9 +103,9 @@ fn apply_transform(helix: &mut Helix, t: &EntityTransform) {
     Transformable::apply_transform(&mut helix.spline, t);
 }
 
-impl TruckConvertible for Helix {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        self.spline.to_truck(document)
+impl RenderConvertible for Helix {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        self.spline.to_render(document)
     }
 }
 

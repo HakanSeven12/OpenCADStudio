@@ -1,5 +1,5 @@
 // Scene modules grouped by role:
-//   convert — DXF/ACIS entities → truck solids & tessellated geometry
+//   convert — DXF/ACIS entities → solids & tessellated geometry
 //   text    — LFF stroke + TrueType font engines and shaping
 //   model   — per-entity GPU render models (wire, hatch, mesh, image, object)
 //   pick    — hit-testing, selection, grips, spatial index, xclip
@@ -147,11 +147,6 @@ use acadrust::objects::ObjectType;
 use acadrust::types::Vector2;
 use acadrust::{CadDocument, EntityType, Handle, TableEntry};
 use glam;
-use truck_modeling::{
-    base::{BoundedCurve, ParameterDivision1D},
-    BSplineCurve as TruckBSpline, KnotVec, NurbsCurve, Point3, Vector4,
-};
-
 use iced::time::Duration;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::cell::RefCell;
@@ -1777,7 +1772,7 @@ pub struct Scene {
     pub viewcube_ucs: glam::Mat4,
     /// GPU render data for hatch fills, keyed by the DXF entity Handle.
     pub hatches: HashMap<Handle, HatchModel>,
-    /// GPU render data for solid meshes (truck Shell/Solid tessellation).
+    /// GPU render data for solid meshes (the kernel Shell/Solid tessellation).
     /// Top-level (layout-owned) solids only, stored in the offset-relative
     /// render frame and drawn flat.
     pub meshes: HashMap<Handle, MeshLodSet>,
@@ -1789,11 +1784,12 @@ pub struct Scene {
     /// owning block emits a transformed instance so a block placed at an
     /// INSERT scale renders at the right size. (#123)
     pub block_meshes: HashMap<Handle, MeshLodSet>,
-    /// Live truck B-reps for solids created this session by the Model tab,
-    /// keyed by entity handle. Backs the Design-group boolean tools (a solid
-    /// must be here to be combined). Not persisted — rebuilt only by creating
-    /// or combining primitives in-session.
-    pub solid_models: HashMap<Handle, truck_modeling::Solid>,
+    /// Live B-reps for solids created this session by the Model tab, keyed by
+    /// entity handle. Backs the Design-group boolean tools (a solid must be
+    /// here to be combined) and the exact-geometry save path, which writes
+    /// each one back out as ACIS rather than as facets. Not persisted —
+    /// rebuilt only by creating or combining primitives in-session.
+    pub solid_models: HashMap<Handle, acadrust::kernel::brep::Body>,
     /// GPU render data for raster images (RasterImage entities), keyed by handle.
     pub images: HashMap<Handle, ImageModel>,
     /// The viewport that is currently "entered" (MSPACE mode).
@@ -2792,11 +2788,12 @@ impl Scene {
     }
 
     /// Re-evaluate every cached mesh's color through `render_style` so a
-    /// Register a Model-tab solid: cache its truck B-rep (for boolean ops) and
-    /// tessellate it into the shaded mesh pipeline under `handle`. The solid is
-    /// in the same offset-relative frame the mesh pipeline uses, so the mesh is
-    /// stored as-is (Model-tab geometry is authored at world_offset 0).
-    pub fn register_solid_model(&mut self, handle: Handle, solid: truck_modeling::Solid) {
+    /// Register a Model-tab solid: cache its B-rep (for boolean ops and the
+    /// exact-geometry save path) and tessellate it into the shaded mesh
+    /// pipeline under `handle`. The body is in the same offset-relative frame
+    /// the mesh pipeline uses, so the mesh is stored as-is (Model-tab geometry
+    /// is authored at world_offset 0).
+    pub fn register_solid_model(&mut self, handle: Handle, solid: acadrust::kernel::brep::Body) {
         let entity = self.document.get_entity(handle);
         let color = entity
             .map(|e| self.render_style(e).0)
@@ -8405,11 +8402,11 @@ impl Scene {
         struct CurveTolGuard;
         impl Drop for CurveTolGuard {
             fn drop(&mut self) {
-                crate::scene::convert::truck_tess::set_curve_tol_override(None);
+                crate::scene::convert::curve_tol::set_curve_tol_override(None);
             }
         }
         let _tol_guard = wpp.map(|w| {
-            crate::scene::convert::truck_tess::set_curve_tol_override(Some((w * 0.5) as f64));
+            crate::scene::convert::curve_tol::set_curve_tol_override(Some((w * 0.5) as f64));
             CurveTolGuard
         });
         // Per-entity tessellation memo. Same classify/tessellate logic, two

@@ -1,11 +1,15 @@
 // 3D solid modelling support on the App: committing Model-tab primitives,
-// and the Design-group boolean operations (truck-shapeops) over the scene's
-// session-cached truck B-reps.
+// and the Design-group boolean operations over the scene's session-cached
+// B-reps.
+//
+// The bodies come from the geometry kernel, so every operation here is on
+// analytic surfaces rather than on facets — a turned cylinder is still a
+// cylinder afterwards, and saves as one.
 
 use acadrust::entities::Solid3D;
+use acadrust::kernel::brep::Body;
 use acadrust::{EntityType, Handle};
 use iced::Task;
-use truck_modeling::Solid;
 
 use super::Message;
 use crate::modules::model::boolean_cmd::BoolOp;
@@ -13,9 +17,9 @@ use crate::scene::model::solid_model::{self, Bool};
 
 impl super::OpenCADStudio {
     /// Commit a Model-tab solid: add its acadrust entity to the document, then
-    /// register the truck B-rep (caches it for booleans + tessellates it into
-    /// the shaded mesh pipeline). Returns the new entity handle.
-    pub(super) fn add_solid_model(&mut self, entity: EntityType, solid: Solid) -> Handle {
+    /// register the B-rep (caches it for booleans + tessellates it into the
+    /// shaded mesh pipeline). Returns the new entity handle.
+    pub(super) fn add_solid_model(&mut self, entity: EntityType, solid: Body) -> Handle {
         let i = self.active_tab;
         let Some(handle) = self.commit_entity_handle(entity) else {
             return Handle::NULL;
@@ -25,10 +29,10 @@ impl super::OpenCADStudio {
     }
 
     /// Run a boolean (`union` / `subtract` / `intersect`) on exactly two
-    /// selected solids whose truck B-reps are in the session cache.
+    /// selected solids whose B-reps are in the session cache.
     pub(super) fn solid_boolean(&mut self, op: BoolOp) -> Task<Message> {
         let i = self.active_tab;
-        // Selected entities that have a cached truck B-rep.
+        // Selected entities that have a cached B-rep.
         let handles: Vec<Handle> = self.tabs[i]
             .scene
             .selected
@@ -59,7 +63,7 @@ impl super::OpenCADStudio {
         self.tabs[i].scene.erase_entities(&handles);
         // The result is freshly combined geometry with no ACIS parametrisation,
         // so it lives as a Solid3D whose render/boolean data is the injected
-        // truck mesh + cached B-rep; its edge wires make it pickable.
+        // mesh + cached B-rep; its edge wires make it pickable.
         let mut s3d = Solid3D::new();
         s3d.wires = solid_model::edge_wires(&result);
         let handle = self.add_solid_model(EntityType::Solid3D(s3d), result);
@@ -75,7 +79,7 @@ impl super::OpenCADStudio {
     /// Slice the one selected solid with an axis-aligned plane (axis 0/1/2 =
     /// X/Y/Z at `value`), keeping the lower side when `keep_low` is true. The
     /// kept half is the intersection of the solid with a half-space box, reusing
-    /// the same truck-shapeops path as the boolean tools.
+    /// the same boolean path the Design-group tools use.
     pub(super) fn solid_slice(&mut self, axis: usize, value: f64, keep_low: bool) -> Task<Message> {
         let i = self.active_tab;
         let handles: Vec<Handle> = self.tabs[i]
@@ -92,22 +96,11 @@ impl super::OpenCADStudio {
         }
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
         // Bounding box from the solid's edge wires.
-        let wires = solid_model::edge_wires(&solid);
-        let (mut min, mut max) = ([f64::MAX; 3], [f64::MIN; 3]);
-        for w in &wires {
-            for p in &w.points {
-                let c = [p.x, p.y, p.z];
-                for k in 0..3 {
-                    min[k] = min[k].min(c[k]);
-                    max[k] = max[k].max(c[k]);
-                }
-            }
-        }
-        if min[0] > max[0] {
+        let Some((min, max)) = solid_model::extent(&solid) else {
             self.command_line
                 .push_error(crate::t!("SLICE: could not determine the solid's extent.").as_ref());
             return Task::none();
-        }
+        };
         // Generous margin so the box fully spans the solid in the free axes.
         let m = [
             (max[0] - min[0]).max(1.0),
@@ -132,7 +125,10 @@ impl super::OpenCADStudio {
             (lo[2] + hi[2]) / 2.0,
         ];
         let halfspace = solid_model::box_solid(center, hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
-        let Some(result) = solid_model::boolean(Bool::Intersect, &solid, &halfspace) else {
+        let Some(result) = halfspace
+            .as_ref()
+            .and_then(|half| solid_model::boolean(Bool::Intersect, &solid, half))
+        else {
             self.command_line
                 .push_error(crate::t!("SLICE failed — the plane may not cross the solid.").as_ref());
             return Task::none();
@@ -195,9 +191,8 @@ impl super::OpenCADStudio {
 
     /// 3DROTATE — rotate the one selected solid about the X/Y/Z axis (0/1/2)
     /// through its centre by `angle_deg` degrees. Rotation preserves the solid's
-    /// orientation, so it reuses the cached truck B-rep directly.
+    /// orientation, so it reuses the cached B-rep directly.
     pub(super) fn solid_rotate3d(&mut self, axis: usize, angle_deg: f64) -> Task<Message> {
-        use truck_modeling::{builder, Point3, Rad, Vector3 as TVec3};
         let i = self.active_tab;
         let handles: Vec<Handle> = self.tabs[i]
             .scene
@@ -212,33 +207,18 @@ impl super::OpenCADStudio {
             return Task::none();
         }
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
-        let wires = solid_model::edge_wires(&solid);
-        let (mut min, mut max) = ([f64::MAX; 3], [f64::MIN; 3]);
-        for w in &wires {
-            for p in &w.points {
-                let c = [p.x, p.y, p.z];
-                for k in 0..3 {
-                    min[k] = min[k].min(c[k]);
-                    max[k] = max[k].max(c[k]);
-                }
-            }
-        }
-        if min[0] > max[0] {
+        let Some(middle) = solid_model::centre(&solid) else {
             self.command_line
                 .push_error(crate::t!("3DROTATE: could not determine the solid's extent.").as_ref());
             return Task::none();
-        }
-        let origin = Point3::new(
-            (min[0] + max[0]) / 2.0,
-            (min[1] + max[1]) / 2.0,
-            (min[2] + max[2]) / 2.0,
-        );
-        let axis_v = match axis {
-            0 => TVec3::unit_x(),
-            1 => TVec3::unit_y(),
-            _ => TVec3::unit_z(),
         };
-        let rotated = builder::rotated(&solid, origin, axis_v, Rad(angle_deg.to_radians()));
+        let Some(rotated) =
+            solid_model::turned(&solid, axis, angle_deg.to_radians(), middle)
+        else {
+            self.command_line
+                .push_error(crate::t!("3DROTATE: could not turn the solid.").as_ref());
+            return Task::none();
+        };
         self.push_undo_snapshot(i, "3DROTATE");
         self.tabs[i].scene.erase_entities(&handles);
         let mut s3d = Solid3D::new();
@@ -261,7 +241,6 @@ impl super::OpenCADStudio {
     /// segment (oriented along it, `width` wide, `height` tall) unioned together,
     /// reusing the box primitive + the boolean union path.
     pub(super) fn solid_polysolid(&mut self, width: f64, height: f64) -> Task<Message> {
-        use truck_modeling::{builder, Point3, Rad, Vector3 as TVec3};
         let i = self.active_tab;
         let found: Option<(Handle, Vec<[f64; 2]>, bool)> = self.tabs[i]
             .scene
@@ -287,7 +266,7 @@ impl super::OpenCADStudio {
         if closed && pts.len() > 2 {
             segs.push((pts[pts.len() - 1], pts[0]));
         }
-        let mut acc: Option<Solid> = None;
+        let mut acc: Option<Body> = None;
         let mut used = 0usize;
         for (a, b) in &segs {
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
@@ -296,10 +275,22 @@ impl super::OpenCADStudio {
                 continue;
             }
             let angle = dy.atan2(dx);
-            // Local box: X 0..len, Y -w/2..w/2, Z 0..h, then orient to the segment.
-            let bx = solid_model::box_solid([len / 2.0, 0.0, height / 2.0], len, width, height);
-            let bx = builder::rotated(&bx, Point3::new(0.0, 0.0, 0.0), TVec3::unit_z(), Rad(angle));
-            let bx = builder::translated(&bx, TVec3::new(a[0], a[1], 0.0));
+            // Local box: X 0..len, Y -w/2..w/2, Z 0..h, then turned to lie
+            // along the segment and moved onto its start.
+            let (sin, cos) = angle.sin_cos();
+            let Some(bx) = solid_model::box_solid([len / 2.0, 0.0, height / 2.0], len, width, height)
+                .and_then(|bx| {
+                    solid_model::placed(
+                        &bx,
+                        [cos, sin, 0.0],
+                        [-sin, cos, 0.0],
+                        [0.0, 0.0, 1.0],
+                        [a[0], a[1], 0.0],
+                    )
+                })
+            else {
+                continue;
+            };
             acc = Some(match acc {
                 None => bx,
                 Some(prev) => solid_model::boolean(Bool::Union, &prev, &bx).unwrap_or(prev),
@@ -330,10 +321,9 @@ impl super::OpenCADStudio {
 
     /// 3DMIRROR — add a mirrored copy of the one selected solid across the plane
     /// perpendicular to the X/Y/Z axis (0/1/2) through its centre, keeping the
-    /// original. Reflection reverses face orientation, so `Solid::not()` restores
-    /// outward normals (the same inversion the boolean subtraction relies on).
+    /// original. A reflection loses handedness, so the kernel reverses every
+    /// loop on the way through; without that the copy lights black.
     pub(super) fn solid_mirror3d(&mut self, axis: usize) -> Task<Message> {
-        use truck_modeling::{builder, Matrix4, Vector3 as TVec3};
         let i = self.active_tab;
         let handles: Vec<Handle> = self.tabs[i]
             .scene
@@ -348,38 +338,16 @@ impl super::OpenCADStudio {
             return Task::none();
         }
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
-        let wires = solid_model::edge_wires(&solid);
-        let (mut min, mut max) = ([f64::MAX; 3], [f64::MIN; 3]);
-        for w in &wires {
-            for p in &w.points {
-                let c = [p.x, p.y, p.z];
-                for k in 0..3 {
-                    min[k] = min[k].min(c[k]);
-                    max[k] = max[k].max(c[k]);
-                }
-            }
-        }
-        if min[0] > max[0] {
+        let Some(middle) = solid_model::centre(&solid) else {
             self.command_line
                 .push_error(crate::t!("3DMIRROR: could not determine the solid's extent.").as_ref());
             return Task::none();
-        }
-        let c = TVec3::new(
-            (min[0] + max[0]) / 2.0,
-            (min[1] + max[1]) / 2.0,
-            (min[2] + max[2]) / 2.0,
-        );
-        let s = match axis {
-            0 => TVec3::new(-1.0, 1.0, 1.0),
-            1 => TVec3::new(1.0, -1.0, 1.0),
-            _ => TVec3::new(1.0, 1.0, -1.0),
         };
-        // Reflect about the plane through the centre: T(c) · scale · T(-c).
-        let mat = Matrix4::from_translation(c)
-            * Matrix4::from_nonuniform_scale(s.x, s.y, s.z)
-            * Matrix4::from_translation(-c);
-        let mut reflected = builder::transformed(&solid, mat);
-        reflected.not(); // restore outward orientation after the reflection
+        let Some(reflected) = solid_model::mirrored(&solid, axis, middle) else {
+            self.command_line
+                .push_error(crate::t!("3DMIRROR: could not mirror the solid.").as_ref());
+            return Task::none();
+        };
         self.push_undo_snapshot(i, "3DMIRROR");
         let mut s3d = Solid3D::new();
         s3d.wires = solid_model::edge_wires(&reflected);
@@ -399,14 +367,13 @@ impl super::OpenCADStudio {
 
     /// 3DALIGN — move/rotate the one selected solid so its three source points
     /// land on the three destination points. The frame-to-frame transform is
-    /// computed in glam (`M = D · S⁻¹`) and handed to truck as a raw matrix; both
-    /// frames are right-handed so the result is a pure rotation+translation.
+    /// computed in glam (`M = D · S⁻¹`); both frames are right-handed, so the
+    /// result is a pure rotation and translation and the kernel accepts it.
     pub(super) fn solid_align3d(
         &mut self,
         src: [[f64; 3]; 3],
         dst: [[f64; 3]; 3],
     ) -> Task<Message> {
-        use truck_modeling::{builder, Matrix4};
         let i = self.active_tab;
         let handles: Vec<Handle> = self.tabs[i]
             .scene
@@ -443,13 +410,13 @@ impl super::OpenCADStudio {
                 .push_error(crate::t!("3DALIGN: each point triple must be non-coincident and non-collinear.").as_ref());
             return Task::none();
         };
-        let a = (d * s.inverse()).to_cols_array(); // column-major [f64; 16]
-        let mat = Matrix4::new(
-            a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13],
-            a[14], a[15],
-        );
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
-        let aligned = builder::transformed(&solid, mat);
+        let Some(aligned) = solid_model::by_matrix(&solid, (d * s.inverse()).to_cols_array())
+        else {
+            self.command_line
+                .push_error(crate::t!("3DALIGN: could not align the solid.").as_ref());
+            return Task::none();
+        };
         self.push_undo_snapshot(i, "3DALIGN");
         self.tabs[i].scene.erase_entities(&handles);
         let mut s3d = Solid3D::new();
@@ -467,15 +434,11 @@ impl super::OpenCADStudio {
     }
 
     /// SECTION — draw the cross-section outline where an axis-aligned plane
-    /// (X/Y/Z = `axis` at `value`) cuts the one selected solid, as Line entities.
-    /// Reuses the mesh-interference analyzer to find the cut segments.
-    #[cfg(feature = "solid3d")]
+    /// (X/Y/Z = `axis` at `value`) cuts the one selected solid, as Line
+    /// entities.
     pub(super) fn solid_section(&mut self, axis: usize, value: f64) -> Task<Message> {
         use acadrust::types::Vector3;
         use acadrust::Line;
-        use truck_meshalgo::analyzers::Collision;
-        use truck_meshalgo::tessellation::{MeshableShape, MeshedShape};
-        use truck_modeling::{builder, Point3, Shell, Wire};
 
         let i = self.active_tab;
         let handles: Vec<Handle> = self.tabs[i]
@@ -491,69 +454,18 @@ impl super::OpenCADStudio {
             return Task::none();
         }
         let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
-        let wires = solid_model::edge_wires(&solid);
-        let (mut min, mut max) = ([f64::MAX; 3], [f64::MIN; 3]);
-        for w in &wires {
-            for p in &w.points {
-                let c = [p.x, p.y, p.z];
-                for k in 0..3 {
-                    min[k] = min[k].min(c[k]);
-                    max[k] = max[k].max(c[k]);
-                }
-            }
-        }
-        if min[0] > max[0] {
+        let Some((min, max)) = solid_model::extent(&solid) else {
             self.command_line
                 .push_error(crate::t!("SECTION: could not determine the solid's extent.").as_ref());
             return Task::none();
-        }
-        // Margin so the cutting plane fully spans the solid in the free axes.
-        let m = [
-            (max[0] - min[0]).max(1.0) * 0.1,
-            (max[1] - min[1]).max(1.0) * 0.1,
-            (max[2] - min[2]).max(1.0) * 0.1,
-        ];
-        let lo = [min[0] - m[0], min[1] - m[1], min[2] - m[2]];
-        let hi = [max[0] + m[0], max[1] + m[1], max[2] + m[2]];
-        let corners: [Point3; 4] = match axis {
-            0 => [
-                Point3::new(value, lo[1], lo[2]),
-                Point3::new(value, hi[1], lo[2]),
-                Point3::new(value, hi[1], hi[2]),
-                Point3::new(value, lo[1], hi[2]),
-            ],
-            1 => [
-                Point3::new(lo[0], value, lo[2]),
-                Point3::new(hi[0], value, lo[2]),
-                Point3::new(hi[0], value, hi[2]),
-                Point3::new(lo[0], value, hi[2]),
-            ],
-            _ => [
-                Point3::new(lo[0], lo[1], value),
-                Point3::new(hi[0], lo[1], value),
-                Point3::new(hi[0], hi[1], value),
-                Point3::new(lo[0], hi[1], value),
-            ],
         };
-        let v: Vec<_> = corners.iter().map(|p| builder::vertex(*p)).collect();
-        let wire: Wire = vec![
-            builder::line(&v[0], &v[1]),
-            builder::line(&v[1], &v[2]),
-            builder::line(&v[2], &v[3]),
-            builder::line(&v[3], &v[0]),
-        ]
-        .into_iter()
-        .collect();
-        let Ok(face) = builder::try_attach_plane(&[wire]) else {
+        // The plane has to actually reach the solid to cut it.
+        if value < min[axis] || value > max[axis] {
             self.command_line
-                .push_error(crate::t!("SECTION: could not build the cutting plane.").as_ref());
+                .push_output(crate::t!("SECTION: the plane does not cross the solid.").as_ref());
             return Task::none();
-        };
-        let shell: Shell = std::iter::once(face).collect();
-        let tol = 0.02;
-        let solid_mesh = solid.triangulation(tol).to_polygon();
-        let plane_mesh = shell.triangulation(tol).to_polygon();
-        let segs = solid_mesh.extract_interference(&plane_mesh);
+        }
+        let segs = solid_model::section(&solid, axis, value);
         if segs.is_empty() {
             self.command_line
                 .push_output(crate::t!("SECTION: the plane does not cross the solid.").as_ref());
@@ -562,8 +474,8 @@ impl super::OpenCADStudio {
         self.push_undo_snapshot(i, "SECTION");
         for (p1, p2) in &segs {
             let line = Line::from_points(
-                Vector3::new(p1.x, p1.y, p1.z),
-                Vector3::new(p2.x, p2.y, p2.z),
+                Vector3::new(p1[0], p1[1], p1[2]),
+                Vector3::new(p2[0], p2[1], p2[2]),
             );
             self.tabs[i].scene.add_entity(EntityType::Line(line));
         }
@@ -577,18 +489,11 @@ impl super::OpenCADStudio {
         Task::none()
     }
 
-    /// Without `solid3d` (e.g. wasm) there is no mesh-interference kernel.
-    #[cfg(not(feature = "solid3d"))]
-    pub(super) fn solid_section(&mut self, _axis: usize, _value: f64) -> Task<Message> {
-        self.command_line
-            .push_error(crate::t!("SECTION: solid modelling is unavailable in this build.").as_ref());
-        Task::none()
-    }
-
-    /// PYRAMID — create an `n`-sided pyramid (regular polygon base of the given
-    /// circumradius, apex at `height`) as a tessellated mesh, reusing the same
-    /// face→Shell→mesh path as LOFT. Each face is independent, so no closed-shell
-    /// topology is required; the windings give outward normals.
+    /// PYRAMID — create an `n`-sided pyramid: a regular polygon base of the
+    /// given circumradius with its apex at `height`.
+    ///
+    /// A real B-rep rather than a bag of faces, so it joins the boolean tools
+    /// and the exact-geometry save path like every other primitive.
     pub(super) fn solid_pyramid(
         &mut self,
         radius: f64,
@@ -596,90 +501,24 @@ impl super::OpenCADStudio {
         sides: usize,
     ) -> Task<Message> {
         use crate::modules::insert::solid3d_cmds::empty_solid3d;
-        use crate::scene::convert::truck_tess;
-        use crate::scene::model::mesh_model::MeshModel;
-        use truck_modeling::{builder, Point3, Shell, Wire};
 
         let i = self.active_tab;
         let n = sides.max(3);
-        if radius <= 0.0 || height <= 0.0 {
+        let Some(solid) = solid_model::pyramid_solid([0.0; 3], radius, height, n) else {
             self.command_line
                 .push_error(crate::t!("PYRAMID: radius and height must be positive.").as_ref());
             return Task::none();
-        }
-        let corners: Vec<Point3> = (0..n)
-            .map(|k| {
-                let a = std::f64::consts::TAU * k as f64 / n as f64;
-                Point3::new(radius * a.cos(), radius * a.sin(), 0.0)
-            })
-            .collect();
-        let apex = builder::vertex(Point3::new(0.0, 0.0, height));
-        let mut faces = Vec::new();
-        // Base: reversed winding so the normal points down (outward at the base).
-        {
-            let bv: Vec<_> = corners.iter().rev().map(|p| builder::vertex(*p)).collect();
-            let wire: Wire = (0..n)
-                .map(|k| builder::line(&bv[k], &bv[(k + 1) % n]))
-                .collect();
-            if let Ok(f) = builder::try_attach_plane(&[wire]) {
-                faces.push(f);
-            }
-        }
-        // Side triangles [corner k, corner k+1, apex] → outward normals.
-        let sv: Vec<_> = corners.iter().map(|p| builder::vertex(*p)).collect();
-        for k in 0..n {
-            let k1 = (k + 1) % n;
-            let wire: Wire = vec![
-                builder::line(&sv[k], &sv[k1]),
-                builder::line(&sv[k1], &apex),
-                builder::line(&apex, &sv[k]),
-            ]
-            .into_iter()
-            .collect();
-            if let Ok(f) = builder::try_attach_plane(&[wire]) {
-                faces.push(f);
-            }
-        }
-        if faces.len() < n + 1 {
-            self.command_line
-                .push_error(crate::t!("PYRAMID: could not build all faces.").as_ref());
-            return Task::none();
-        }
-        let shell = Shell::from(faces);
-        let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
-        let truck_tess::TruckTessResult::Mesh {
-            verts,
-            verts_low,
-            normals,
-            indices,
-        } = truck_tess::tessellate_shell(&shell)
-        else {
-            self.command_line
-                .push_error(crate::t!("PYRAMID: tessellation failed.").as_ref());
-            return Task::none();
         };
-        if verts.is_empty() {
-            self.command_line
-                .push_error(crate::t!("PYRAMID: tessellation produced no geometry.").as_ref());
-            return Task::none();
-        }
         self.push_undo_snapshot(i, "PYRAMID");
-        let new_handle = self.tabs[i].scene.add_entity(empty_solid3d());
-        let mesh = MeshModel {
-            name: format!("{}", new_handle.value()),
-            verts,
-            verts_low,
-            normals,
-            indices,
-            triangle_material_handles: Vec::new(),
-            triangle_colors: Vec::new(),
-            color,
-            selected: false,
-        };
-        self.tabs[i]
-            .scene
-            .meshes
-            .insert(new_handle, crate::scene::MeshLodSet::from_single(mesh));
+        let mut entity = empty_solid3d();
+        if let EntityType::Solid3D(inner) = &mut entity {
+            inner.wires = solid_model::edge_wires(&solid);
+        }
+        let handle = self.add_solid_model(entity, solid);
+        self.tabs[i].scene.deselect_all();
+        if !handle.is_null() {
+            self.tabs[i].scene.select_entity(handle, false);
+        }
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(crate::tf!(

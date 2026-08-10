@@ -6,8 +6,8 @@ use crate::entities::common::{ro_prop as ro, square_grip};
 use crate::entities::text_support::{
     layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, Property, PropValue};
 use crate::scene::view::transform;
 use crate::scene::model::wire_model::SnapHint;
@@ -703,8 +703,8 @@ pub(crate) fn block_cell_inserts(
     inserts
 }
 
-impl TruckConvertible for Table {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Table {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
         if self.rows.is_empty() || self.columns.is_empty() {
             return None;
         }
@@ -982,7 +982,7 @@ impl TruckConvertible for Table {
                 });
                 // Flatten TextStroke groups into the table's Lines buffer.
                 // Per-run inline `\C` / `\c` colour is dropped here because the
-                // table emits a single TruckObject::Lines for borders + text;
+                // table emits a single RenderObject::Lines for borders + text;
                 // tracking it would require splitting the table into multiple
                 // WireModels per cell colour. Borders + uniform-coloured runs
                 // honour the entity's outer colour.
@@ -1026,9 +1026,9 @@ impl TruckConvertible for Table {
                 [x as f64 + base[0], y as f64 + base[1], z as f64 + base[2]]
             })
             .collect();
-        Some(TruckEntity {
+        Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: TruckObject::Lines(pts_f64),
+            object: RenderObject::Lines(pts_f64),
             snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],

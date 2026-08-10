@@ -11,7 +11,7 @@ use glam::Vec3;
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 
 /// Output of the fallback per-entity geometry path used by entities not
-/// covered by the truck topology pipeline (Viewport, Insert, Hatch
+/// covered by the render conversion pipeline (Viewport, Insert, Hatch
 /// outline, Ole2Frame). Tuple form preserved to avoid touching every
 /// callsite when the dispatcher wraps these into a WireModel.
 ///
@@ -91,13 +91,13 @@ pub fn fill_chord_tol(radius: f64) -> f64 {
 }
 
 /// Chord tolerance for the per-frame wire outline: pulls the active
-/// `truck_tess::set_curve_tol_override` value (Scene sets it to
+/// `curve_tol::set_curve_tol_override` value (Scene sets it to
 /// `world_per_pixel × 0.5` so curves stay at ~half-pixel chord error at
 /// the current zoom). When no override is active (snap / hit-test
 /// passes, load-time builds), falls back to [`fill_chord_tol`] so we
 /// never under-sample.
 pub fn wire_chord_tol(radius: f64) -> f64 {
-    match crate::scene::convert::truck_tess::active_curve_tol() {
+    match crate::scene::convert::curve_tol::active_curve_tol() {
         Some(t) => t.min(fill_chord_tol(radius)).max(1e-9),
         None => fill_chord_tol(radius),
     }

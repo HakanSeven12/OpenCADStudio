@@ -7,8 +7,8 @@ use crate::entities::common::{
 use crate::entities::text_support::{
     resolve_dxf_special_chars, resolve_text_style, text_local_bounds,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{GlyphRun, TextStroke, TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
 use crate::scene::text::lff;
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
@@ -52,7 +52,7 @@ pub(crate) fn sync_text_alignment_point(t: &mut Text) {
 }
 
 /// Resolved placement of a TEXT run: the baseline-anchored run origin (WCS xy)
-/// plus every parameter needed to lay the glyphs out. Shared by `to_truck` (the
+/// plus every parameter needed to lay the glyphs out. Shared by `to_render` (the
 /// stroke path) and the SDF-quad text collector so both place text identically.
 pub struct TextPlacement {
     /// Run-local origin (glyph space `[0,0]` maps here), WCS xy, kept f64.
@@ -98,7 +98,7 @@ pub(crate) fn acad_text_encode(value: &str) -> String {
     out
 }
 
-fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
+fn to_render(t: &Text, document: &acadrust::CadDocument) -> RenderEntity {
     let p = text_run_placement(t, document);
     let snap_pt = glam::DVec3::new(p.wcs_insertion[0], p.wcs_insertion[1], p.wcs_insertion[2]);
     // Parse `%%` codes via acadrust, re-encoded for the stroke tessellator.
@@ -113,9 +113,9 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
         &p.font,
         &value,
     );
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Text(vec![TextStroke {
+        object: RenderObject::Text(vec![TextStroke {
             strokes,
             origin: p.origin,
             color: None,
@@ -139,7 +139,7 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
 }
 
 /// Compute a TEXT entity's run placement (origin + layout params). Extracted
-/// from `to_truck` verbatim so the stroke and SDF-quad paths agree exactly.
+/// from `to_render` verbatim so the stroke and SDF-quad paths agree exactly.
 pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPlacement {
     let normal = (t.normal.x, t.normal.y, t.normal.z);
     let (wsx, wsy, wsz) = crate::scene::view::transform::ocs_point_to_wcs(
@@ -493,9 +493,9 @@ fn apply_transform(t: &mut Text, tr: &EntityTransform) {
     });
 }
 
-impl TruckConvertible for Text {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self, document))
+impl RenderConvertible for Text {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self, document))
     }
 }
 

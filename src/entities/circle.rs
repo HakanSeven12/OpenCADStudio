@@ -5,12 +5,12 @@ use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{extrusion_wall_tris, TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::TangentGeom;
 
-fn to_truck(circle: &Circle) -> TruckEntity {
+fn to_render(circle: &Circle) -> RenderEntity {
     let cx = circle.center.x;
     let cy = circle.center.y;
     let cz = circle.center.z;
@@ -64,9 +64,9 @@ fn to_truck(circle: &Circle) -> TruckEntity {
                 pts.push([f64::NAN; 3]);
             }
         }
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: extrusion_wall_tris(&base, [t * nx, t * ny, t * nz]),
-            object: TruckObject::Lines(pts),
+            object: RenderObject::Lines(pts),
             snap_pts,
             tangent_geoms: vec![tangent],
             key_vertices: vec![],
@@ -74,7 +74,7 @@ fn to_truck(circle: &Circle) -> TruckEntity {
         };
     }
 
-    // Sampled from the entity's own curve rather than as a truck
+    // Sampled from the entity's own curve rather than as a
     // `circle_arc` (arc-through-three-points). At large WCS coordinates
     // (e.g. −1.2M UTM) the three-point fit cancels catastrophically — the
     // circle comes back with a ~3% radius wobble and uneven segment lengths,
@@ -84,9 +84,9 @@ fn to_truck(circle: &Circle) -> TruckEntity {
     // double-single the shader reconstructs.
     let pts = crate::entities::curve::curve_points(&curve);
 
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Lines(pts),
+        object: RenderObject::Lines(pts),
         snap_pts,
         tangent_geoms: vec![tangent],
         key_vertices: vec![],
@@ -175,9 +175,9 @@ fn apply_transform(circle: &mut Circle, t: &EntityTransform) {
     });
 }
 
-impl TruckConvertible for Circle {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+impl RenderConvertible for Circle {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self))
     }
 }
 

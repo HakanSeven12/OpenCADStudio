@@ -1515,21 +1515,11 @@ impl Scene {
                         // where boundaries are often spline curves with
                         // rational weights and short cubic segments).
                         //
-                        // Build a NurbsCurve when `rational`, otherwise a
-                        // plain BSplineCurve, and sample adaptively via
-                        // truck's `parameter_division` at the same chord
-                        // tolerance the fill polygon uses for arcs.
+                        // The kernel's plane NURBS holds the rational and
+                        // the polynomial case alike — weights absent means
+                        // polynomial — and tessellates to a chord tolerance,
+                        // the same one the fill polygon uses for arcs.
                         let degree = spline.degree.max(0) as usize;
-                        let knot_vec = if !spline.knots.is_empty() {
-                            KnotVec::from(spline.knots.clone())
-                        } else if spline.control_points.len() >= degree + 1 {
-                            KnotVec::uniform_knot(degree, spline.control_points.len() - 1)
-                        } else {
-                            KnotVec::from(vec![])
-                        };
-                        let knot_ok = spline.control_points.len() >= 2
-                            && degree >= 1
-                            && knot_vec.len() == spline.control_points.len() + degree + 1;
 
                         // Rough chord-tolerance: 0.1% of the control-poly
                         // diagonal so adaptive sampling produces enough
@@ -1550,39 +1540,30 @@ impl Scene {
 
                         let mut epts: Vec<[f64; 2]> = Vec::new();
                         let mut sampled = false;
-                        if knot_ok {
-                            if spline.rational {
-                                // NURBS: pack (x, y, 0, w) into Vector4.
-                                let cps: Vec<Vector4> = spline
-                                    .control_points
-                                    .iter()
-                                    .map(|p| {
-                                        let w = if p.z.abs() > 1e-12 { p.z } else { 1.0 };
-                                        Vector4::new(p.x * w, p.y * w, 0.0, w)
-                                    })
-                                    .collect();
-                                let bspl = TruckBSpline::new(knot_vec.clone(), cps);
-                                let curve = NurbsCurve::new(bspl);
-                                let (t0, t1) = curve.range_tuple();
-                                let (_, pts) = curve.parameter_division((t0, t1), tol);
-                                for p in pts {
-                                    epts.push(to_xy(p.x, p.y));
-                                }
-                                sampled = true;
-                            } else {
-                                let cps: Vec<Point3> = spline
-                                    .control_points
-                                    .iter()
-                                    .map(|p| Point3::new(p.x, p.y, 0.0))
-                                    .collect();
-                                let bspl = TruckBSpline::new(knot_vec, cps);
-                                let (t0, t1) = bspl.range_tuple();
-                                let (_, pts) = bspl.parameter_division((t0, t1), tol);
-                                for p in pts {
-                                    epts.push(to_xy(p.x, p.y));
-                                }
-                                sampled = true;
+                        let points: Vec<[f64; 2]> = spline
+                            .control_points
+                            .iter()
+                            .map(|p| [p.x, p.y])
+                            .collect();
+                        let weights = spline.rational.then(|| {
+                            spline
+                                .control_points
+                                .iter()
+                                .map(|p| if p.z.abs() > 1e-12 { p.z } else { 1.0 })
+                                .collect()
+                        });
+                        if let Some(curve) = acadrust::kernel::geom2d::NurbsCurve::new(
+                            degree,
+                            points,
+                            spline.knots.clone(),
+                            weights,
+                        ) {
+                            for point in
+                                acadrust::kernel::geom2d::Curve::Nurbs(curve).tessellate_within(tol)
+                            {
+                                epts.push(to_xy(point[0], point[1]));
                             }
+                            sampled = epts.len() >= 2;
                         }
                         if !sampled {
                             // Fallback: prefer fit_points (which lie on the

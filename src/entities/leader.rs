@@ -6,13 +6,13 @@ use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_prop as edit, ro_prop as ro, square_grip, stepper_prop as stepper,
 };
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;
 use crate::t;
 
-// ── TruckConvertible (used for snap/grip key-vertices) ─────────────────────
+// ── RenderConvertible (used for snap/grip key-vertices) ─────────────────────
 
 /// Whether a leader draws a horizontal hookline. DWG stores no "hookline
 /// exists" flag (only the direction bit), so the stored flag alone would drop
@@ -44,7 +44,7 @@ fn draws_hookline(leader: &Leader) -> bool {
     cos < (15.0f64).to_radians().cos()
 }
 
-fn to_truck(leader: &Leader) -> TruckEntity {
+fn to_render(leader: &Leader) -> RenderEntity {
     let verts = &leader.vertices;
     let nan = [f64::NAN; 3];
     let p3 = |v: &acadrust::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
@@ -126,9 +126,9 @@ fn to_truck(leader: &Leader) -> TruckEntity {
         ]);
     }
 
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Lines(points),
+        object: RenderObject::Lines(points),
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
@@ -459,12 +459,12 @@ fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
 
 // ── Trait impls ────────────────────────────────────────────────────────────
 
-impl TruckConvertible for Leader {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Leader {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }
-        Some(to_truck(self))
+        Some(to_render(self))
     }
 }
 

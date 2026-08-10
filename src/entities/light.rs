@@ -6,7 +6,7 @@
 //! same way AutoCAD shows a light symbol.
 //!
 //! The glyph is sized in **screen space** (a roughly constant pixel size across
-//! zoom) via [`relative_truck`], falling back to a small fixed world size when
+//! zoom) via [`relative_render`], falling back to a small fixed world size when
 //! no world-per-pixel factor is available (e.g. snapshot tessellation).
 
 use acadrust::entities::Light;
@@ -17,8 +17,8 @@ use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_angle_prop, edit_prop as edit, ro_prop, square_grip,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 
@@ -165,7 +165,7 @@ fn light_wire(l: &Light, r: f64) -> Vec<[f64; 3]> {
     out
 }
 
-fn build(l: &Light, r: f64) -> TruckEntity {
+fn build(l: &Light, r: f64) -> RenderEntity {
     let p = pos(l);
     let snap = glam::DVec3::new(p[0], p[1], p[2]);
     let mut snap_pts = vec![(snap, SnapHint::Node)];
@@ -175,9 +175,9 @@ fn build(l: &Light, r: f64) -> TruckEntity {
         snap_pts.push((glam::DVec3::new(t[0], t[1], t[2]), SnapHint::Node));
         key.push(t);
     }
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Lines(light_wire(l, r)),
+        object: RenderObject::Lines(light_wire(l, r)),
         snap_pts,
         tangent_geoms: vec![],
         key_vertices: key,
@@ -187,12 +187,12 @@ fn build(l: &Light, r: f64) -> TruckEntity {
 
 /// Viewport-aware glyph: constant on-screen size from the world-per-pixel
 /// factor. Returns `None` for a non-light entity or when no factor is
-/// available (the caller then falls back to the fixed-world [`to_truck`]).
-pub fn relative_truck(
+/// available (the caller then falls back to the fixed-world [`to_render`]).
+pub fn relative_render(
     entity: &EntityType,
     _document: &acadrust::CadDocument,
     wpp: Option<f32>,
-) -> Option<TruckEntity> {
+) -> Option<RenderEntity> {
     let EntityType::Light(l) = entity else {
         return None;
     };
@@ -200,8 +200,8 @@ pub fn relative_truck(
     Some(build(l, w * GLYPH_PX))
 }
 
-impl TruckConvertible for Light {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
+impl RenderConvertible for Light {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         Some(build(self, FIXED_WORLD))
     }
 }

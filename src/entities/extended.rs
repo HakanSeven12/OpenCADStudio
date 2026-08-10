@@ -9,8 +9,8 @@ use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_angle_prop, edit_prop, parse_f64, ro_prop, square_grip,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::convert::acad_to_truck::{TruckEntity, TruckObject};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{
     GripApply, GripDef, PropSection, PropValue, Property,
 };
@@ -373,7 +373,7 @@ fn camera_lines(document: &acadrust::CadDocument, view_handle: Handle) -> Vec<[f
     points
 }
 
-fn to_truck(entity: &ExtendedEntity, document: &acadrust::CadDocument) -> Option<TruckEntity> {
+fn to_render(entity: &ExtendedEntity, document: &acadrust::CadDocument) -> Option<RenderEntity> {
     let (points, snaps, keys): (
         Vec<[f64; 3]>,
         Vec<(glam::DVec3, SnapHint)>,
@@ -455,8 +455,8 @@ fn to_truck(entity: &ExtendedEntity, document: &acadrust::CadDocument) -> Option
     if points.len() < 2 {
         return None;
     }
-    Some(TruckEntity {
-        object: TruckObject::Lines(points),
+    Some(RenderEntity {
+        object: RenderObject::Lines(points),
         snap_pts: snaps,
         tangent_geoms: Vec::new(),
         key_vertices: keys,
@@ -1520,9 +1520,9 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
     }
 }
 
-impl TruckConvertible for ExtendedEntity {
-    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        to_truck(self, document)
+impl RenderConvertible for ExtendedEntity {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        to_render(self, document)
     }
 }
 

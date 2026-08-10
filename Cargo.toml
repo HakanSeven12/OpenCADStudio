@@ -15,30 +15,22 @@ members = [
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 
-[features]
-default = ["solid3d"]
-solid3d = ["dep:truck-meshalgo", "dep:truck-shapeops", "dep:lzma-sys"]
-
 [dependencies]
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 semver = "1"
-lzma-sys = { version = "0.1", features = ["static"], optional = true }
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["image", "svg", "advanced", "canvas", "smol", "markdown"] }
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_aw = { git = "https://github.com/HakanSeven12/iced_aw.git", branch = "agent/fix-iced-fonts", features = ["menu", "context_menu", "color_picker", "drop_down"] }
 bytemuck = { version = "1.25", features = ["derive"] }
 glam = { version = "0.33", features = ["bytemuck"] }
-truck-modeling = "0.6"
-truck-meshalgo = { version = "0.4", default-features = false, features = ["tessellation"], optional = true }
-truck-polymesh = "0.6"
 rfd = "0.17"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 # The CAD stack is reached through acadifc, which re-exports the codec and
 # the geometry kernel. Aliased to `acadrust` so existing `use acadrust::…`
 # paths keep resolving.
-acadrust = { package = "acadifc", git = "https://github.com/OpenAEC-Foundation/acadifc.git", rev = "fe98e42", features = ["serde", "offset"] }
+acadrust = { package = "acadifc", git = "https://github.com/OpenAEC-Foundation/acadifc.git", rev = "1ffe44e", features = ["serde", "offset"] }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
@@ -50,7 +42,6 @@ i18n-embed = { version = "0.16", features = ["fluent-system"] }
 i18n-embed-fl = "0.10"
 rust-embed = "8"
 inventory = "0.3"
-truck-shapeops = { version = "0.4", optional = true }
 rustc-hash = "2"
 sha2 = "0.10"
 fontdb = "0.23"

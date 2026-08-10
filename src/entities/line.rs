@@ -1,17 +1,16 @@
 use acadrust::{entities::Line, Entity};
 use crate::t;
-use truck_modeling::{builder, Point3};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
-use crate::entities::traits::TruckConvertible;
-use crate::scene::convert::acad_to_truck::{extrusion_wall_tris, TruckEntity, TruckObject};
+use crate::entities::traits::RenderConvertible;
+use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::TangentGeom;
 
-fn to_truck(line: &Line) -> TruckEntity {
+fn to_render(line: &Line) -> RenderEntity {
     // LINE endpoints are stored in WCS — unlike the planar OCS entities
     // (ARC/CIRCLE/LWPOLYLINE/TEXT), the extrusion normal on a LINE only
     // orients its thickness sweep. Remapping the endpoints through the
@@ -20,9 +19,7 @@ fn to_truck(line: &Line) -> TruckEntity {
     let normal = (line.normal.x, line.normal.y, line.normal.z);
     let (sx, sy, sz) = (line.start.x, line.start.y, line.start.z);
     let (ex, ey, ez) = (line.end.x, line.end.y, line.end.z);
-    let p0 = Point3::new(sx, sy, sz);
-    let p1 = Point3::new(ex, ey, ez);
-    let kv: Vec<[f64; 3]> = vec![[p0.x, p0.y, p0.z], [p1.x, p1.y, p1.z]];
+    let kv: Vec<[f64; 3]> = vec![[sx, sy, sz], [ex, ey, ez]];
     let tangent = TangentGeom::Line {
         p1: [kv[0][0] as f32, kv[0][1] as f32, kv[0][2] as f32],
         p2: [kv[1][0] as f32, kv[1][1] as f32, kv[1][2] as f32],
@@ -46,9 +43,9 @@ fn to_truck(line: &Line) -> TruckEntity {
             kv[1],
             p1t,
         ];
-        return TruckEntity {
+        return RenderEntity {
             pick_tris: extrusion_wall_tris(&kv, [t * nx, t * ny, t * nz]),
-            object: TruckObject::Lines(pts),
+            object: RenderObject::Lines(pts),
             snap_pts: vec![],
             tangent_geoms: vec![tangent],
             key_vertices: kv,
@@ -56,12 +53,9 @@ fn to_truck(line: &Line) -> TruckEntity {
         };
     }
 
-    let v0 = builder::vertex(p0);
-    let v1 = builder::vertex(p1);
-    let edge = builder::line(&v0, &v1);
-    TruckEntity {
+    RenderEntity {
         pick_tris: Vec::new(),
-        object: TruckObject::Curve(edge),
+        object: RenderObject::Lines(kv.clone()),
         snap_pts: vec![],
         tangent_geoms: vec![tangent],
         key_vertices: kv,
@@ -167,9 +161,9 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
     }
 }
 
-impl TruckConvertible for Line {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+impl RenderConvertible for Line {
+    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self))
     }
 }
 

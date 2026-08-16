@@ -1012,15 +1012,18 @@ impl OpenCADStudio {
                     self.command_line.push_error(crate::t!("FLATTEN: no entities.").as_ref());
                 } else {
                     self.push_undo_snapshot(i, "FLATTEN");
+                    let mut moved = 0usize;
                     for h in &handles {
                         if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
-                            flatten_entity_z(e);
+                            if flatten_entity_z(e) {
+                                moved += 1;
+                            }
                         }
                     }
                     self.tabs[i].dirty = true;
                     self.command_line.push_output(crate::tf!(
                         "FLATTEN: {} entity(ies) moved to Z=0.",
-                        handles.len()
+                        moved
                     ).as_ref());
                     self.refresh_properties();
                 }
@@ -1564,7 +1567,10 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
     }
 }
 
-fn flatten_entity_z(entity: &mut acadrust::EntityType) {
+/// Project `entity` onto the Z=0 plane. Returns false when FLATTEN has no
+/// projection for that entity type, so the caller can report how many entities
+/// it actually moved instead of how many it looked at.
+fn flatten_entity_z(entity: &mut acadrust::EntityType) -> bool {
     match entity {
         acadrust::EntityType::Line(l) => {
             l.start.z = 0.0;
@@ -1578,6 +1584,25 @@ fn flatten_entity_z(entity: &mut acadrust::EntityType) {
         }
         acadrust::EntityType::LwPolyline(p) => {
             p.elevation = 0.0;
+        }
+        // Polyline vertices carry their own Z, so clearing the elevation alone
+        // leaves the geometry where it was.
+        acadrust::EntityType::Polyline(p) => {
+            for v in &mut p.vertices {
+                v.location.z = 0.0;
+            }
+        }
+        acadrust::EntityType::Polyline2D(p) => {
+            p.elevation = 0.0;
+            for v in &mut p.vertices {
+                v.location.z = 0.0;
+            }
+        }
+        acadrust::EntityType::Polyline3D(p) => {
+            p.elevation = 0.0;
+            for v in &mut p.vertices {
+                v.position.z = 0.0;
+            }
         }
         acadrust::EntityType::Text(t) => {
             t.insertion_point.z = 0.0;
@@ -1602,8 +1627,21 @@ fn flatten_entity_z(entity: &mut acadrust::EntityType) {
         acadrust::EntityType::Ellipse(e) => {
             e.center.z = 0.0;
         }
-        _ => {}
+        acadrust::EntityType::Solid(s) => {
+            s.first_corner.z = 0.0;
+            s.second_corner.z = 0.0;
+            s.third_corner.z = 0.0;
+            s.fourth_corner.z = 0.0;
+        }
+        acadrust::EntityType::Face3D(f) => {
+            f.first_corner.z = 0.0;
+            f.second_corner.z = 0.0;
+            f.third_corner.z = 0.0;
+            f.fourth_corner.z = 0.0;
+        }
+        _ => return false,
     }
+    true
 }
 
 // ── DATAEXTRACTION ─────────────────────────────────────────────────────────
@@ -1812,5 +1850,87 @@ impl ArithParser {
         }
         let s: String = self.chars[start..self.pos].iter().collect();
         s.parse::<f64>().map_err(|_| format!("bad number '{s}'"))
+    }
+}
+
+#[cfg(test)]
+mod flatten_tests {
+    use super::flatten_entity_z;
+    use acadrust::types::Vector3;
+    use acadrust::EntityType;
+
+    #[test]
+    fn flattens_3d_polyline_vertices() {
+        let mut pl = acadrust::entities::Polyline3D::new();
+        for z in [5.0, -2.0, 7.5] {
+            pl.vertices
+                .push(acadrust::entities::Vertex3DPolyline::new(Vector3::new(1.0, 2.0, z)));
+        }
+        pl.elevation = 5.0;
+
+        let mut entity = EntityType::Polyline3D(pl);
+        assert!(flatten_entity_z(&mut entity));
+
+        let EntityType::Polyline3D(pl) = entity else { panic!("wrong variant") };
+        assert_eq!(pl.elevation, 0.0);
+        assert!(pl.vertices.iter().all(|v| v.position.z == 0.0));
+        // X/Y must survive the projection.
+        assert!(pl.vertices.iter().all(|v| v.position.x == 1.0 && v.position.y == 2.0));
+    }
+
+    #[test]
+    fn flattens_2d_polyline_vertices_and_elevation() {
+        let mut pl = acadrust::entities::Polyline2D::new();
+        pl.vertices
+            .push(acadrust::entities::Vertex2D::new(Vector3::new(3.0, 4.0, 9.0)));
+        pl.elevation = 9.0;
+
+        let mut entity = EntityType::Polyline2D(pl);
+        assert!(flatten_entity_z(&mut entity));
+
+        let EntityType::Polyline2D(pl) = entity else { panic!("wrong variant") };
+        assert_eq!(pl.elevation, 0.0);
+        assert_eq!(pl.vertices[0].location.z, 0.0);
+        assert_eq!(pl.vertices[0].location.x, 3.0);
+    }
+
+    #[test]
+    fn flattens_solid_corners() {
+        let solid = acadrust::entities::Solid::new(
+            Vector3::new(0.0, 0.0, 1.0),
+            Vector3::new(1.0, 0.0, 2.0),
+            Vector3::new(1.0, 1.0, 3.0),
+            Vector3::new(0.0, 1.0, 4.0),
+        );
+
+        let mut entity = EntityType::Solid(solid);
+        assert!(flatten_entity_z(&mut entity));
+
+        let EntityType::Solid(s) = entity else { panic!("wrong variant") };
+        assert_eq!(
+            [s.first_corner.z, s.second_corner.z, s.third_corner.z, s.fourth_corner.z],
+            [0.0; 4]
+        );
+    }
+
+    #[test]
+    fn reports_unsupported_entities_as_not_moved() {
+        // Ray has no Z projection here; FLATTEN must not count it as moved.
+        let mut entity = EntityType::Ray(acadrust::entities::Ray::new(
+            Vector3::new(0.0, 0.0, 5.0),
+            Vector3::new(1.0, 0.0, 0.0),
+        ));
+        assert!(!flatten_entity_z(&mut entity));
+    }
+
+    #[test]
+    fn still_flattens_a_line() {
+        let mut line = acadrust::entities::Line::new();
+        line.start = Vector3::new(0.0, 0.0, 3.0);
+        line.end = Vector3::new(1.0, 1.0, 4.0);
+        let mut entity = EntityType::Line(line);
+        assert!(flatten_entity_z(&mut entity));
+        let EntityType::Line(l) = entity else { panic!("wrong variant") };
+        assert_eq!((l.start.z, l.end.z), (0.0, 0.0));
     }
 }

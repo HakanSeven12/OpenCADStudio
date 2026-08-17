@@ -18,3 +18,10 @@ rustflags = [
     # WebAssembly stack while developing with `trunk serve`.
     '-Clink-arg=-zstack-size=4194304',
 ]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    # Debug builds of the host have a deeper call stack than the default 1 MiB
+    # Windows stack allows; increase it to avoid stack overflow on startup.
+    '-Clink-arg=/STACK:16777216',
+]

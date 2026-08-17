@@ -91,39 +91,64 @@ pub fn list_printers() -> Vec<String> {
     }
 }
 
+/// The command that opens the OS printer configuration surface, for the named
+/// printer when one is selected and the printer list otherwise.
+///
+/// Split out from [`open_printer_properties`] so the argument construction can
+/// be asserted without spawning anything.
+#[cfg(not(target_arch = "wasm32"))]
+fn printer_properties_command(printer: Option<&str>) -> (&'static str, Vec<String>) {
+    let named = printer
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+
+    // printui.dll opens the driver's own Properties dialog for one printer,
+    // which is where print quality lives on Windows — `dispatch_to_printer_opts`
+    // prints through ShellExecute's "printto" verb, which carries no quality of
+    // its own. Without a selection there is nothing to open but the list.
+    #[cfg(target_os = "windows")]
+    let command = match named {
+        Some(name) => (
+            "rundll32.exe",
+            vec![
+                "printui.dll,PrintUIEntry".to_string(),
+                "/p".to_string(),
+                "/n".to_string(),
+                name.to_string(),
+            ],
+        ),
+        None => ("control.exe", vec!["printers".to_string()]),
+    };
+
+    #[cfg(target_os = "macos")]
+    let command = {
+        let _ = named;
+        (
+            "open",
+            vec!["x-apple.systempreferences:com.apple.Print-Scan-Settings.extension".to_string()],
+        )
+    };
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let command = {
+        let target = named
+            .map(|name| format!("http://localhost:631/printers/{name}"))
+            .unwrap_or_else(|| "http://localhost:631/printers".to_string());
+        ("xdg-open", vec![target])
+    };
+
+    command
+}
+
 /// Open the operating system's printer configuration surface.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn open_printer_properties(printer: Option<&str>) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        let mut command = std::process::Command::new("control.exe");
-        command.arg("printers");
-        return command
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("Could not open printer properties: {error}"));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut command = std::process::Command::new("open");
-        command.arg("x-apple.systempreferences:com.apple.Print-Scan-Settings.extension");
-        return command
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("Could not open printer properties: {error}"));
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        let target = printer
-            .filter(|name| !name.is_empty())
-            .map(|name| format!("http://localhost:631/printers/{name}"))
-            .unwrap_or_else(|| "http://localhost:631/printers".to_string());
-        std::process::Command::new("xdg-open")
-            .arg(target)
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("Could not open printer properties: {error}"))
-    }
+    let (program, args) = printer_properties_command(printer);
+    std::process::Command::new(program)
+        .args(args)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Could not open printer properties: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -308,5 +333,37 @@ fn dispatch_to_printer_opts(
                 String::from_utf8_lossy(&out.stderr)
             ))
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod printer_properties_tests {
+    use super::printer_properties_command;
+
+    #[test]
+    fn a_selected_printer_is_named_in_the_command() {
+        let (program, args) = printer_properties_command(Some("Office LaserJet"));
+        assert!(
+            args.iter().any(|arg| arg == "Office LaserJet"),
+            "{program} {args:?} must target the selected printer",
+        );
+    }
+
+    #[test]
+    fn no_selection_falls_back_to_the_printer_list() {
+        let (_, args) = printer_properties_command(None);
+        assert!(
+            !args.iter().any(|arg| arg.contains("Office LaserJet")),
+            "there is no printer to name",
+        );
+    }
+
+    #[test]
+    fn a_blank_selection_is_treated_as_no_selection() {
+        // The plot dialog stores Some("") before the user picks anything.
+        assert_eq!(
+            printer_properties_command(Some("   ")),
+            printer_properties_command(None),
+        );
     }
 }

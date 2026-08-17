@@ -85,6 +85,17 @@ impl OpenCADStudio {
         {
             let mut selection = self.tabs[i].scene.selection.borrow_mut();
             selection.box_crossing_locked = false;
+            // A half-drawn marquee belongs to the press that started it. Left armed, the new
+            // command's first click closes that selection instead of feeding the command, so
+            // the command only really begins on the click after (#732). Clicking the tool on
+            // the ribbon already loses it, because the pointer left the viewport to get there;
+            // typing the verb never did.
+            selection.box_anchor = None;
+            // Drop the world anchor too, or the next pan/zoom re-projects it back into
+            // `box_anchor` and the cancelled marquee springs back to life.
+            selection.box_anchor_world = None;
+            selection.box_current = None;
+            selection.box_crossing = false;
         }
         // Cancel any running command before starting a new one.
         if self.tabs[i].active_cmd.is_some() {
@@ -652,3 +663,76 @@ inventory::submit!(crate::command::CommandRegistration {
         "ZS",
     ]
 });
+
+#[cfg(test)]
+mod marquee_cancel_tests {
+    use crate::app::OpenCADStudio;
+
+    fn fresh() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// Arm a marquee the way a press-drag leaves it: anchored, with a live
+    /// corner following the cursor.
+    fn arm_marquee(app: &mut OpenCADStudio) {
+        let i = app.active_tab;
+        let mut sel = app.tabs[i].scene.selection.borrow_mut();
+        sel.box_anchor = Some(iced::Point::new(10.0, 10.0));
+        sel.box_anchor_world = Some(glam::DVec3::new(1.0, 2.0, 0.0));
+        sel.box_current = Some(iced::Point::new(40.0, 40.0));
+        sel.box_crossing = true;
+    }
+
+    #[test]
+    fn typing_a_command_cancels_a_half_drawn_marquee() {
+        // #732: the marquee stayed armed, so LINE's first click closed the
+        // selection instead of setting the start point.
+        let mut app = fresh();
+        arm_marquee(&mut app);
+        let i = app.active_tab;
+
+        let _ = app.dispatch_command("LINE");
+
+        let sel = app.tabs[i].scene.selection.borrow();
+        assert!(sel.box_anchor.is_none(), "the pending marquee must be dropped");
+        assert!(
+            sel.box_anchor_world.is_none(),
+            "the world anchor must go too, or a pan re-projects the marquee back",
+        );
+        assert!(sel.box_current.is_none());
+        assert!(!sel.box_crossing);
+    }
+
+    #[test]
+    fn an_aliased_command_cancels_it_as_well() {
+        // "L" reaches the same dispatch through alias resolution.
+        let mut app = fresh();
+        arm_marquee(&mut app);
+        let i = app.active_tab;
+
+        let _ = app.dispatch_command("L");
+
+        let sel = app.tabs[i].scene.selection.borrow();
+        assert!(sel.box_anchor.is_none());
+        assert!(sel.box_anchor_world.is_none());
+    }
+
+    #[test]
+    fn a_transparent_command_leaves_the_marquee_alone() {
+        // A drafting aid only flips a flag; it must not abandon the drag in
+        // progress any more than it abandons a running command.
+        let mut app = fresh();
+        arm_marquee(&mut app);
+        let i = app.active_tab;
+
+        let _ = app.dispatch_command("ORTHO");
+
+        let sel = app.tabs[i].scene.selection.borrow();
+        assert!(
+            sel.box_anchor.is_some(),
+            "a transparent command must not cancel the marquee",
+        );
+    }
+}

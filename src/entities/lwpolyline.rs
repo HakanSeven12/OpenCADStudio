@@ -597,6 +597,35 @@ fn grips(pline: &LwPolyline) -> Vec<GripDef> {
     out
 }
 
+fn is_rectangle(pline: &LwPolyline) -> bool {
+    if !pline.is_closed
+        || pline.vertices.len() != 4
+        || pline.vertices.iter().any(|vertex| vertex.bulge.abs() > 1e-9)
+    {
+        return false;
+    }
+
+    let edges: Vec<[f64; 2]> = (0..4)
+        .map(|index| {
+            let from = pline.vertices[index].location;
+            let to = pline.vertices[(index + 1) % 4].location;
+            [to.x - from.x, to.y - from.y]
+        })
+        .collect();
+    let length = |edge: [f64; 2]| edge[0].hypot(edge[1]);
+    let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
+    let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
+    let lengths: Vec<f64> = edges.iter().copied().map(length).collect();
+    if lengths.iter().any(|&value| value <= 1e-12) {
+        return false;
+    }
+
+    let tolerance = 1e-9;
+    dot(edges[0], edges[1]).abs() <= tolerance * lengths[0] * lengths[1]
+        && cross(edges[0], edges[2]).abs() <= tolerance * lengths[0] * lengths[2]
+        && cross(edges[1], edges[3]).abs() <= tolerance * lengths[1] * lengths[3]
+}
+
 fn properties(pline: &LwPolyline) -> Vec<PropSection> {
     let n = pline.vertices.len();
     // The panel's Current Vertex focus, clamped to this polyline's range.
@@ -616,20 +645,25 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
     } else {
         format!("{} / {}", vi + 1, n)
     };
+    let mut geometry_props = vec![
+        stepper(t!("Current Vertex").as_ref(), "current_vertex", vertex_label),
+        edit(t!("Vertex X").as_ref(), "vertex_x", vx),
+        edit(t!("Vertex Y").as_ref(), "vertex_y", vy),
+    ];
+    if !is_rectangle(pline) {
+        geometry_props.push(edit(t!("Start segment width").as_ref(), "start_width", start_w));
+        geometry_props.push(edit(t!("End segment width").as_ref(), "end_width", end_w));
+    }
+    geometry_props.extend([
+        edit(t!("Global width").as_ref(), "global_width", pline.constant_width),
+        edit(t!("Elevation").as_ref(), "elevation", pline.elevation),
+        ro(t!("Area").as_ref(), "area", format!("{:.4}", mp.area)),
+        ro(t!("Length").as_ref(), "length", format!("{:.4}", mp.perimeter)),
+    ]);
     vec![
         PropSection {
             title: t!("Geometry").into_owned(),
-            props: vec![
-                stepper(t!("Current Vertex").as_ref(), "current_vertex", vertex_label),
-                edit(t!("Vertex X").as_ref(), "vertex_x", vx),
-                edit(t!("Vertex Y").as_ref(), "vertex_y", vy),
-                edit(t!("Start segment width").as_ref(), "start_width", start_w),
-                edit(t!("End segment width").as_ref(), "end_width", end_w),
-                edit(t!("Global width").as_ref(), "global_width", pline.constant_width),
-                edit(t!("Elevation").as_ref(), "elevation", pline.elevation),
-                ro(t!("Area").as_ref(), "area", format!("{:.4}", mp.area)),
-                ro(t!("Length").as_ref(), "length", format!("{:.4}", mp.perimeter)),
-            ],
+            props: geometry_props,
         },
         PropSection {
             title: t!("Misc").into_owned(),

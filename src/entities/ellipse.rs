@@ -114,7 +114,11 @@ fn properties(ell: &Ellipse) -> Vec<PropSection> {
     let minor_vec = v * r_minor;
 
     let start_angle = ell.start_parameter.to_degrees().rem_euclid(360.0);
-    let end_angle = ell.end_parameter.to_degrees().rem_euclid(360.0);
+    let end_angle = if ell.is_full() {
+        360.0
+    } else {
+        ell.end_parameter.to_degrees().rem_euclid(360.0)
+    };
 
     let props = ell.mass_props();
 

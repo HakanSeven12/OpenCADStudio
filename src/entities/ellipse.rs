@@ -149,9 +149,6 @@ fn properties(ell: &Ellipse) -> Vec<PropSection> {
             ro(t!("Start parameter").as_ref(), "start_param", format!("{:.4}", ell.start_parameter)),
             ro(t!("End parameter").as_ref(), "end_param", format!("{:.4}", ell.end_parameter)),
             ro(t!("Length").as_ref(), "length", format!("{:.4}", props.perimeter)),
-            ro(t!("Normal X").as_ref(), "normal_x", format!("{:.4}", ell.normal.x)),
-            ro(t!("Normal Y").as_ref(), "normal_y", format!("{:.4}", ell.normal.y)),
-            ro(t!("Normal Z").as_ref(), "normal_z", format!("{:.4}", ell.normal.z)),
         ],
     }]
 }

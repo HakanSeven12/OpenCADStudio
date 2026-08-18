@@ -60,6 +60,15 @@ fn xyz(v: Vector3) -> [f64; 3] {
 /// first or accept anything for the second.
 const PLANARITY_TOLERANCE: f64 = 1e-9;
 
+/// Maximum turn between consecutive segments of a curve drawn on screen.
+///
+/// The kernel default is intentionally coarse (15 degrees) because it is a
+/// general modelling tolerance.  Using it for presentation leaves only six
+/// segments in a quarter arc, so circles and arcs visibly turn into polygons.
+/// Rendering at one-degree intervals keeps the stored analytic geometry
+/// untouched while giving every curved entity a consistently smooth outline.
+const DISPLAY_MAX_ANGLE: f64 = std::f64::consts::PI / 180.0;
+
 /// The entity's geometry as a curve on the plane it lives on.
 ///
 /// `None` for entities that are not curves, and for the ones that are but
@@ -331,9 +340,9 @@ pub fn entity_curve_xy(entity: &EntityType) -> Option<Curve> {
     })
 }
 
-/// World-space wire points sampled by the kernel's angular policy.
+/// World-space wire points sampled at the application's display quality.
 pub fn curve_points(curve: &PlanarCurve) -> Vec<[f64; 3]> {
-    curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+    curve.tessellate_angle(DISPLAY_MAX_ANGLE)
 }
 
 /// The snap candidates an entity's curve offers, in the two channels the

@@ -457,52 +457,61 @@ fn properties(spline: &Spline) -> Vec<PropSection> {
         String::new()
     };
 
+    let mut data_props = vec![
+        ro(t!("Show").as_ref(), "show", show),
+        ro(t!("Degree").as_ref(), "degree", spline.degree.to_string()),
+    ];
+    if spline.fit_points.is_empty() {
+        data_props.extend([
+            ro(
+                t!("Control Point Count").as_ref(),
+                "ctrl_pt_count",
+                spline.control_points.len().to_string(),
+            ),
+            ro(t!("Control Point").as_ref(), "ctrl_pt_index", "0"),
+            edit(
+                t!("Control Point X").as_ref(),
+                "ctrl_pt_x",
+                cp0.map(|p| p.x).unwrap_or(0.0),
+            ),
+            edit(
+                t!("Control Point Y").as_ref(),
+                "ctrl_pt_y",
+                cp0.map(|p| p.y).unwrap_or(0.0),
+            ),
+            edit(
+                t!("Control Point Z").as_ref(),
+                "ctrl_pt_z",
+                cp0.map(|p| p.z).unwrap_or(0.0),
+            ),
+            edit(t!("Weight").as_ref(), "weight", w0.unwrap_or(1.0)),
+        ]);
+    } else {
+        data_props.extend([
+            ro(t!("Knot Parameterization").as_ref(), "knot_param", knot_param),
+            ro(
+                t!("Fit Point Count").as_ref(),
+                "fit_pt_count",
+                spline.fit_points.len().to_string(),
+            ),
+            ro(t!("Fit Point").as_ref(), "fit_pt_index", "0"),
+            edit(t!("Fit Point X").as_ref(), "fit_pt_x", fp0.map(|p| p.x).unwrap_or(0.0)),
+            edit(t!("Fit Point Y").as_ref(), "fit_pt_y", fp0.map(|p| p.y).unwrap_or(0.0)),
+            edit(t!("Fit Point Z").as_ref(), "fit_pt_z", fp0.map(|p| p.z).unwrap_or(0.0)),
+            edit(t!("Fit Tolerance").as_ref(), "fit_tolerance", spline.fit_tolerance),
+            edit(t!("Start Tangent X").as_ref(), "start_tan_x", spline.begin_tangent.x),
+            edit(t!("Start Tangent Y").as_ref(), "start_tan_y", spline.begin_tangent.y),
+            edit(t!("Start Tangent Z").as_ref(), "start_tan_z", spline.begin_tangent.z),
+            edit(t!("End Tangent X").as_ref(), "end_tan_x", spline.end_tangent.x),
+            edit(t!("End Tangent Y").as_ref(), "end_tan_y", spline.end_tangent.y),
+            edit(t!("End Tangent Z").as_ref(), "end_tan_z", spline.end_tangent.z),
+        ]);
+    }
+
     vec![
         PropSection {
             title: t!("Data Points").into_owned(),
-            props: vec![
-                ro(t!("Show").as_ref(), "show", show),
-                ro(t!("Degree").as_ref(), "degree", spline.degree.to_string()),
-                ro(
-                    t!("Control Point Count").as_ref(),
-                    "ctrl_pt_count",
-                    spline.control_points.len().to_string(),
-                ),
-                ro(t!("Control Point").as_ref(), "ctrl_pt_index", "0"),
-                edit(
-                    t!("Control Point X").as_ref(),
-                    "ctrl_pt_x",
-                    cp0.map(|p| p.x).unwrap_or(0.0),
-                ),
-                edit(
-                    t!("Control Point Y").as_ref(),
-                    "ctrl_pt_y",
-                    cp0.map(|p| p.y).unwrap_or(0.0),
-                ),
-                edit(
-                    t!("Control Point Z").as_ref(),
-                    "ctrl_pt_z",
-                    cp0.map(|p| p.z).unwrap_or(0.0),
-                ),
-                edit(t!("Weight").as_ref(), "weight", w0.unwrap_or(1.0)),
-                ro(t!("Knot Parameterization").as_ref(), "knot_param", knot_param),
-                ro(
-                    t!("Fit Point Count").as_ref(),
-                    "fit_pt_count",
-                    spline.fit_points.len().to_string(),
-                ),
-                ro(t!("Fit Point").as_ref(), "fit_pt_index", "0"),
-                edit(t!("Fit Point X").as_ref(), "fit_pt_x", fp0.map(|p| p.x).unwrap_or(0.0)),
-                edit(t!("Fit Point Y").as_ref(), "fit_pt_y", fp0.map(|p| p.y).unwrap_or(0.0)),
-                edit(t!("Fit Point Z").as_ref(), "fit_pt_z", fp0.map(|p| p.z).unwrap_or(0.0)),
-                edit(t!("Fit Tolerance").as_ref(), "fit_tolerance", spline.fit_tolerance),
-                edit(t!("Start Tangent X").as_ref(), "start_tan_x", spline.begin_tangent.x),
-                edit(t!("Start Tangent Y").as_ref(), "start_tan_y", spline.begin_tangent.y),
-                edit(t!("Start Tangent Z").as_ref(), "start_tan_z", spline.begin_tangent.z),
-                edit(t!("End Tangent X").as_ref(), "end_tan_x", spline.end_tangent.x),
-                edit(t!("End Tangent Y").as_ref(), "end_tan_y", spline.end_tangent.y),
-                edit(t!("End Tangent Z").as_ref(), "end_tan_z", spline.end_tangent.z),
-            ],
+            props: data_props,
         },
         PropSection {
             title: t!("Misc").into_owned(),

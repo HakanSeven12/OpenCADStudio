@@ -487,14 +487,6 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             .map(|l| l.offset.length())
             .unwrap_or_default(),
     );
-    // Pattern tiling origin: the base point the pattern lines are anchored to.
-    let (origin_x, origin_y) = h
-        .pattern
-        .lines
-        .first()
-        .map(|l| (l.base_point.x, l.base_point.y))
-        .unwrap_or((0.0, 0.0));
-
     let mut sections = vec![
         PropSection {
             title: t!("Pattern").into_owned(),
@@ -504,8 +496,8 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
                 ro(t!("Annotative").as_ref(), "annotative", String::new()),
                 edit_angle(t!("Angle").as_ref(), "pattern_angle", h.pattern_angle.to_degrees()),
                 edit(t!("Scale").as_ref(), "pattern_scale", h.pattern_scale),
-                edit(t!("Origin X").as_ref(), "origin_x", origin_x),
-                edit(t!("Origin Y").as_ref(), "origin_y", origin_y),
+                ro(t!("Origin X").as_ref(), "origin_x", "0.0000"),
+                ro(t!("Origin Y").as_ref(), "origin_y", "0.0000"),
                 spacing_row,
                 ro(t!("ISO pen width").as_ref(), "iso_pen_width", String::new()),
                 double_row,

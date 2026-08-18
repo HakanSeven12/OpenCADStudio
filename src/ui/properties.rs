@@ -26,6 +26,7 @@ use crate::t;
 const FONT_SZ: f32 = ROW_H * 0.42; // ≈11 px
 const COMBO_PAD_V: f32 = (ROW_H - FONT_SZ * 1.3 - 2.0) / 2.0; // fills combo to ROW_H
 const SWATCH_SZ: f32 = ROW_H * 0.54; // ≈14 px color swatch
+const LINE_PREVIEW_W: f32 = 46.0;
 const PATTERN_CARD_W: f32 = 158.0;
 const PATTERN_PREVIEW_H: f32 = 58.0;
 const PATTERN_PICKER_W: f32 = 348.0;
@@ -68,6 +69,120 @@ impl fmt::Display for LwItem {
             LineWeight::Value(v) => write!(f, "{:.2} mm", v as f64 / 100.0),
         }
     }
+}
+
+// ── AutoCAD-style line previews used beside Properties combo values ─────
+
+#[derive(Clone)]
+enum LinePropertyPreview {
+    Linetype(String),
+    Lineweight(LineWeight),
+    Empty,
+}
+
+impl canvas::Program<Message> for LinePropertyPreview {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let ink = theme.palette().background.base.text.scale_alpha(0.82);
+        let y = bounds.height * 0.5;
+        let left = 4.0;
+        let right = (bounds.width - 4.0).max(left);
+
+        match self {
+            LinePropertyPreview::Linetype(art) => {
+                draw_linetype_sample(&mut frame, art, ink, left, right, y);
+            }
+            LinePropertyPreview::Lineweight(weight) => {
+                let path = canvas::Path::line(Point::new(left, y), Point::new(right, y));
+                frame.stroke(
+                    &path,
+                    canvas::Stroke::default()
+                        .with_color(ink)
+                        .with_width(lineweight_preview_width(*weight)),
+                );
+            }
+            LinePropertyPreview::Empty => {}
+        }
+
+        vec![frame.into_geometry()]
+    }
+}
+
+fn lineweight_preview_width(weight: LineWeight) -> f32 {
+    match weight {
+        LineWeight::Value(value) if value > 0 => {
+            (0.8 + value as f32 / 211.0 * 4.2).clamp(0.8, 5.0)
+        }
+        _ => 1.0,
+    }
+}
+
+fn draw_linetype_sample(
+    frame: &mut canvas::Frame,
+    art: &str,
+    ink: Color,
+    left: f32,
+    right: f32,
+    y: f32,
+) {
+    let marks: Vec<char> = art
+        .chars()
+        .filter(|ch| matches!(ch, '_' | '-' | '.' | ' '))
+        .collect();
+    if !marks.iter().any(|ch| matches!(ch, '_' | '-' | '.')) {
+        let path = canvas::Path::line(Point::new(left, y), Point::new(right, y));
+        frame.stroke(
+            &path,
+            canvas::Stroke::default().with_color(ink).with_width(1.25),
+        );
+        return;
+    }
+
+    let slot = (right - left) / marks.len().max(1) as f32;
+    let mut run_start: Option<f32> = None;
+    for (index, mark) in marks.iter().chain(std::iter::once(&' ')).enumerate() {
+        let x = left + index as f32 * slot;
+        match mark {
+            '_' | '-' => {
+                run_start.get_or_insert(x);
+            }
+            '.' => {
+                if let Some(start) = run_start.take() {
+                    let path = canvas::Path::line(Point::new(start, y), Point::new(x, y));
+                    frame.stroke(
+                        &path,
+                        canvas::Stroke::default().with_color(ink).with_width(1.25),
+                    );
+                }
+                frame.fill(&canvas::Path::circle(Point::new(x + slot * 0.5, y), 1.15), ink);
+            }
+            _ => {
+                if let Some(start) = run_start.take() {
+                    let path = canvas::Path::line(Point::new(start, y), Point::new(x, y));
+                    frame.stroke(
+                        &path,
+                        canvas::Stroke::default().with_color(ink).with_width(1.25),
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn line_property_preview(preview: LinePropertyPreview) -> Element<'static, Message> {
+    canvas(preview)
+        .width(Length::Fixed(LINE_PREVIEW_W))
+        .height(Length::Fixed(ROW_H - 4.0))
+        .into()
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -960,7 +1075,15 @@ impl PropertiesPanel {
         .on_open(Message::PropColorPickerClose)
         .width(Length::Fill);
 
-        prop_row_widget(label, combo.into())
+        let value = row![
+            line_property_preview(LinePropertyPreview::Lineweight(lw)),
+            combo,
+        ]
+        .spacing(2)
+        .align_y(iced::Center)
+        .width(Length::Fill);
+
+        prop_row_widget(label, value.into())
     }
 
     fn render_lw_varies_row<'a>(&'a self, label: &'a str) -> Element<'a, Message> {
@@ -981,7 +1104,15 @@ impl PropertiesPanel {
         .on_open(Message::PropColorPickerClose)
         .width(Length::Fill);
 
-        prop_row_widget(label, combo.into())
+        let value = row![
+            line_property_preview(LinePropertyPreview::Empty),
+            combo,
+        ]
+        .spacing(2)
+        .align_y(iced::Center)
+        .width(Length::Fill);
+
+        prop_row_widget(label, value.into())
     }
 
     // ── Linetype row (combo_box) ──────────────────────────────────────────
@@ -998,6 +1129,10 @@ impl PropertiesPanel {
             .iter()
             .find(|item| item.name.eq_ignore_ascii_case(display))
             .cloned();
+        let preview_art = selected
+            .as_ref()
+            .map(|item| item.art.clone())
+            .unwrap_or_default();
         let combo = combo_box(
             &self.linetype_combo,
             VARIES_LABEL,
@@ -1015,7 +1150,15 @@ impl PropertiesPanel {
         .on_open(Message::PropColorPickerClose)
         .width(Length::Fill);
 
-        prop_row_widget(label, combo.into())
+        let value = row![
+            line_property_preview(LinePropertyPreview::Linetype(preview_art)),
+            combo,
+        ]
+        .spacing(2)
+        .align_y(iced::Center)
+        .width(Length::Fill);
+
+        prop_row_widget(label, value.into())
     }
 
     fn render_choice_row<'a>(

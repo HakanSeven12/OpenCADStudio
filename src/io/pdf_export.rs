@@ -1292,12 +1292,15 @@ mod tests {
 
     #[test]
     fn clip_and_scale_emit_pdf_bytes() {
-        let w = WireModel::solid(
-            "test".into(),
-            vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
-            WireModel::WHITE,
-            false,
-        );
+        let w = PlotWire {
+            wire: WireModel::solid(
+                "test".into(),
+                vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
+                WireModel::WHITE,
+                false,
+            ),
+            draw_depth: 0.0,
+        };
         let bytes = build_pdf(
             &[w],
             &[],
@@ -1319,7 +1322,7 @@ mod tests {
 
     // Build a WireModel carrying the SDF glyph quads for `text` in the embedded
     // "txt" stroke font, laid out into the process-wide atlas emit_text reads.
-    fn text_wire(text: &str, origin: [f64; 3]) -> WireModel {
+    fn text_wire(text: &str, origin: [f64; 3]) -> PlotWire {
         use crate::scene::pipeline::text_gpu::push_glyph_vertices;
         use crate::scene::text::{glyph_quads::layout_glyph_quads, sdf_atlas};
         let quads = {
@@ -1329,9 +1332,12 @@ mod tests {
         assert!(!quads.is_empty(), "stroke glyphs laid out for {text:?}");
         let mut verts = Vec::new();
         push_glyph_vertices(&mut verts, &quads, origin, 1.0, [1.0, 0.0, 0.0, 1.0], 0.0);
-        WireModel {
-            text_verts: verts,
-            ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
+        PlotWire {
+            wire: WireModel {
+                text_verts: verts,
+                ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
+            },
+            draw_depth: 0.0,
         }
     }
 
@@ -1341,7 +1347,7 @@ mod tests {
     fn text_grows_the_pdf_vs_no_text() {
         let wire = text_wire("HELLO", [20.0, 20.0, 0.0]);
         let mut blank = wire.clone();
-        blank.text_verts.clear();
+        blank.wire.text_verts.clear();
 
         let with_text = build_pdf(
             &[wire],

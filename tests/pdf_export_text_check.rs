@@ -11,7 +11,7 @@
 use acadrust::entities::{Dimension, DimensionLinear, Text};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
-use OpenCADStudio::io::pdf_export::{export_pdf, PdfPlotOptions};
+use OpenCADStudio::io::pdf_export::{export_pdf, PdfPlotOptions, PlotWire};
 use OpenCADStudio::scene::Scene;
 
 #[test]
@@ -39,14 +39,10 @@ fn text_and_dim_reach_pdf_export() {
             .iter()
             .any(|w| w.name == want && !w.text_verts.is_empty())
     };
-    assert!(
-        has_text(text_h),
-        "TEXT carries no glyph quads to the exporter"
-    );
+    assert!(has_text(text_h), "TEXT entity emitted no text glyphs");
     assert!(
         has_text(dim_h),
-        "DIMENSION carries no glyph quads to the exporter — dim text would be \
-         missing from the PDF (#385)"
+        "DIMENSION entity emitted no measurement-value text glyphs"
     );
 
     // End-to-end: the same wire set with and without text. A private temp dir
@@ -55,9 +51,17 @@ fn text_and_dim_reach_pdf_export() {
     let dir = std::env::temp_dir().join(format!("ocs385-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
 
+    let plot_wires: Vec<PlotWire> = wires
+        .iter()
+        .map(|w| PlotWire {
+            wire: w.clone(),
+            draw_depth: 0.0,
+        })
+        .collect();
+
     let p_text = dir.join("with_text.pdf");
     export_pdf(
-        &wires,
+        &plot_wires,
         &[],
         &[],
         210.0,
@@ -75,11 +79,10 @@ fn text_and_dim_reach_pdf_export() {
     let with_text = std::fs::read(&p_text).expect("read pdf");
     assert!(with_text.starts_with(b"%PDF"), "not a PDF");
 
-    let stripped: Vec<_> = wires
-        .iter()
-        .cloned()
+    let stripped: Vec<_> = plot_wires
+        .into_iter()
         .map(|mut w| {
-            w.text_verts.clear();
+            w.wire.text_verts.clear();
             w
         })
         .collect();

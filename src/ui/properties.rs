@@ -308,9 +308,8 @@ pub fn active_key_focused(
 /// Precomputes the focused-id → [`FieldKey`] map for every editable value row
 /// in the given sections. Building it once when the panel's sections are
 /// assembled lets a `PropSyncActive` event map a focused text-input id back to
-/// its field key in O(1) instead of re-scanning the sections. The block-Name
-/// caret-dropdown (`EditChoice`) is editable but deliberately carries no id and
-/// is excluded here, mirroring the renderer.
+/// its field key in O(1) instead of re-scanning the sections, enabling
+/// select-all-on-focus for both text inputs and edit-choices (e.g. transparency).
 pub fn build_field_key_map(
     sections: &[PropSection],
 ) -> HashMap<iced::widget::Id, FieldKey> {
@@ -318,7 +317,9 @@ pub fn build_field_key_map(
     for section in sections {
         for prop in &section.props {
             let key = match &prop.value {
-                PropValue::EditText(_) | PropValue::PlainText(_) => {
+                PropValue::EditText(_)
+                | PropValue::PlainText(_)
+                | PropValue::EditChoice { .. } => {
                     Some(FieldKey::Geom(prop.field))
                 }
                 PropValue::AttrText { tag, .. } => Some(FieldKey::Attr(tag.clone())),
@@ -778,6 +779,9 @@ impl PropertiesPanel {
                 render_annotative_scale_row(label, val)
             }
             PropValue::ReadOnly(val) => render_ro_row(label, val),
+            PropValue::ReadOnlyWithTooltip { value, tooltip } => {
+                render_ro_with_tooltip_row(label, value, tooltip)
+            }
             PropValue::HatchPatternChoice(current) => {
                 self.render_hatch_pattern_row(label, current)
             }
@@ -1102,20 +1106,21 @@ impl PropertiesPanel {
         entity_val: &'a str,
         options: &'a [String],
     ) -> Element<'a, Message> {
-        let typed = self.edit_buf.get(&FieldKey::Geom(field));
+        let key = FieldKey::Geom(field);
+        let active = self.active_field.as_ref() == Some(&key);
+        let typed = self.edit_buf.get(&key);
         let display = typed.map(|s| s.as_str()).unwrap_or(entity_val);
 
-        // NOTE: unlike `render_edit_row` / `render_attr_row`, this input is
-        // deliberately NOT wrapped in a click-to-focus mouse_area. It is a
-        // caret-dropdown: clicking should place the caret / open the list, and
-        // the auto Select-all-on-focus would fight that. Don't "fix" it.
         let input = text_input("", display)
+            .id(prop_geom_field_id(field))
             .on_input(move |v| Message::PropGeomInput { field, value: v })
             .on_submit(Message::PropGeomCommit(field))
             .size(FONT_SZ)
             .style(|theme: &Theme, status| text_input::Style {
-                // The wrapping container draws the border; keep the input flat
-                // so field + caret read as one control.
+                // The wrapping container draws the border and background; keep
+                // the input transparent and borderless so field + caret read as
+                // one continuous bordered box.
+                background: Background::Color(Color::TRANSPARENT),
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
@@ -1123,55 +1128,69 @@ impl PropertiesPanel {
                 },
                 ..text_input_style(theme, status)
             })
-            .padding([3, 6])
+            .padding(Padding {
+                top: COMBO_PAD_V,
+                bottom: COMBO_PAD_V,
+                left: 6.0,
+                right: 2.0,
+            })
             .width(Length::Fill);
         let caret = button(
             container(if self.edit_choice_open {
-                crate::ui::icons::themed_arrow_up(FONT_SZ)
+                crate::ui::icons::themed_arrow_up(9.0)
             } else {
-                crate::ui::icons::themed_arrow_down(FONT_SZ)
+                crate::ui::icons::themed_arrow_down(9.0)
             })
-            .height(Length::Fill)
             .align_y(iced::Center),
         )
         .on_press(Message::PropEditChoiceToggle)
         .style(|theme: &Theme, status| {
             let palette = theme.palette();
-            let pair = match status {
-                button::Status::Hovered | button::Status::Pressed => palette.background.weak,
-                _ => palette.background.base,
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    Some(Background::Color(palette.background.weak.color))
+                }
+                _ => None,
+            };
+            let text_color = match status {
+                button::Status::Hovered | button::Status::Pressed => palette.background.weak.text,
+                _ => palette.background.base.text,
             };
             button::Style {
-            background: Some(Background::Color(pair.color)),
-            text_color: pair.text,
-            border: Border::default(),
-            ..Default::default()
+                background: bg,
+                text_color,
+                border: Border::default(),
+                ..Default::default()
             }
         })
         .padding(Padding {
-            top: 0.0,
-            bottom: 0.0,
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
             left: 3.0,
-            right: 3.0,
-        })
-        .height(Length::Fixed(ROW_H - 6.0));
+            right: 4.0,
+        });
         let head = container(row![input, caret].align_y(iced::Center))
-            .style(|theme: &Theme| {
+            .style(move |theme: &Theme| {
                 let palette = theme.palette();
+                let border_color = if active {
+                    palette.primary.base.color
+                } else {
+                    palette.background.neutral.color
+                };
                 container::Style {
-                background: Some(Background::Color(palette.background.base.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
+                    background: Some(Background::Color(palette.background.base.color)),
+                    border: Border {
+                        color: border_color,
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
                 }
             })
             .width(Length::Fill);
 
         if !self.edit_choice_open {
-            return prop_row_widget(label, head.into());
+            return prop_row_with_active(label, head.into(), active);
         }
 
         // Open list: all definitions, filtered by any typed text.
@@ -1194,19 +1213,18 @@ impl PropertiesPanel {
         }
         let popup = container(scrollable(list).height(Length::Shrink))
             .style(container::bordered_box)
-            .padding(2)
-            .width(200)
-            .height(Length::Fit.max(220.0));
+            .padding(2);
 
-        prop_row_widget(
+        prop_row_with_active(
             label,
             crate::ui::color_select::drop_down_below(
                 head.into(),
                 popup.into(),
-                Length::Fixed(200.0),
+                None,
                 Length::Shrink,
                 Message::PropEditChoiceToggle,
             ),
+            active,
         )
     }
 
@@ -1381,7 +1399,7 @@ impl PropertiesPanel {
             crate::ui::color_select::drop_down_below(
                 head.into(),
                 popup.into(),
-                Length::Fixed(PATTERN_PICKER_W),
+                Some(Length::Fixed(PATTERN_PICKER_W)),
                 Length::Fixed(PATTERN_PICKER_H),
                 Message::PropHatchPatternPickerToggle(current.to_string()),
             ),
@@ -1658,7 +1676,12 @@ fn coord_suffix(label: &str) -> Option<(&str, usize)> {
 /// labelled "<Base> X", "<Base> Y" and optionally "<Base> Z". 0/1 = no group.
 fn coord_group_len(props: &[crate::scene::model::object::Property], idx: usize) -> usize {
     let groupable = |p: &crate::scene::model::object::Property| {
-        matches!(p.value, PropValue::EditText(_) | PropValue::ReadOnly(_))
+        matches!(
+            p.value,
+            PropValue::EditText(_)
+                | PropValue::ReadOnly(_)
+                | PropValue::ReadOnlyWithTooltip { .. }
+        )
     };
     let Some((base, 0)) = coord_suffix(&props[idx].label) else {
         return 0;
@@ -1697,7 +1720,9 @@ fn coord_component(label: &str) -> &'static str {
 /// EditText / ReadOnly — see `coord_group_len`).
 fn prop_text_value(prop: &crate::scene::model::object::Property) -> String {
     match &prop.value {
-        PropValue::EditText(s) | PropValue::ReadOnly(s) => s.clone(),
+        PropValue::EditText(s)
+        | PropValue::ReadOnly(s)
+        | PropValue::ReadOnlyWithTooltip { value: s, .. } => s.clone(),
         _ => String::new(),
     }
 }
@@ -1809,6 +1834,31 @@ fn render_ro_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {
     // (carrying the full, un-truncated value) and copied with Ctrl+C.
     let field = crate::ui::read_only::field(value, FONT_SZ, Length::Fill);
     prop_row_widget(label, field)
+}
+
+fn render_ro_with_tooltip_row<'a>(
+    label: &'a str,
+    value: &'a str,
+    tooltip_text: &'a str,
+) -> Element<'a, Message> {
+    let field = crate::ui::read_only::field(value, FONT_SZ, Length::Fill);
+    let wrapped = tooltip(field, text(tooltip_text).size(FONT_SZ), tooltip::Position::Top)
+        .gap(4.0)
+        .padding(6.0)
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.base.color)),
+                text_color: Some(palette.background.base.text),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+    prop_row_widget(label, wrapped.into())
 }
 
 /// Build a label | widget property row.
@@ -2093,8 +2143,10 @@ mod tests {
         assert_eq!(map.get(&attr_id), Some(&attr_edit_key("TITLE")));
         assert!(active_key_focused(map.get(&attr_id), Some(&attr_id)));
 
-        // The block-Name caret-dropdown is editable but deliberately excluded.
-        assert_eq!(map.get(&prop_geom_field_id("name")), None);
+        // The caret-dropdown (EditChoice) is editable and maps to its field key.
+        let name_id = prop_geom_field_id("name");
+        assert_eq!(map.get(&name_id), Some(&FieldKey::Geom("name")));
+        assert!(active_key_focused(map.get(&name_id), Some(&name_id)));
 
         // Unknown or non-property ids map to nothing.
         assert_eq!(map.get(&prop_geom_field_id("nope")), None);

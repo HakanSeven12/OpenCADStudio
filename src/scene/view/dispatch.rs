@@ -135,11 +135,55 @@ pub fn apply_common_prop(entity: &mut EntityType, field: &str, value: &str) {
             }
         }
         "transparency" => {
-            if let Ok(pct) = value.trim().parse::<f64>() {
-                let alpha = (pct.clamp(0.0, 100.0) / 100.0 * 255.0).round() as u8;
-                entity
-                    .as_entity_mut()
-                    .set_transparency(Transparency::new(alpha));
+            let s = value.trim();
+            if s.eq_ignore_ascii_case("ByLayer") {
+                entity.as_entity_mut().set_transparency(Transparency::new(0));
+            } else if s.eq_ignore_ascii_case("ByBlock") {
+                entity.as_entity_mut().set_transparency(Transparency::new(1));
+            } else {
+                let clean = s.trim_end_matches('%').trim();
+                if let Ok(pct) = clean.parse::<f64>() {
+                    let alpha = (pct.clamp(0.0, 90.0) / 100.0 * 255.0).round() as u8;
+                    entity
+                        .as_entity_mut()
+                        .set_transparency(Transparency::new(alpha));
+                }
+            }
+        }
+        "material" => {
+            let common = entity.common_mut();
+            match value.trim() {
+                "ByLayer" => {
+                    common.material_flags = 0;
+                    common.material_handle = None;
+                }
+                "ByBlock" => {
+                    common.material_flags = 1;
+                    common.material_handle = None;
+                }
+                "Global" => {
+                    common.material_flags = 2;
+                    common.material_handle = None;
+                }
+                _ => {}
+            }
+        }
+        "plot_style" => {
+            let common = entity.common_mut();
+            match value.trim() {
+                "ByLayer" => {
+                    common.plotstyle_flags = 0;
+                    common.plotstyle_handle = None;
+                }
+                "ByBlock" => {
+                    common.plotstyle_flags = 1;
+                    common.plotstyle_handle = None;
+                }
+                "Normal" => {
+                    common.plotstyle_flags = 2;
+                    common.plotstyle_handle = None;
+                }
+                _ => {}
             }
         }
         "thickness" => {

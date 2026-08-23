@@ -77,6 +77,7 @@ fn expand_block_mtext(
         },
         0,
         false,
+        false,
         1.0,
         None,
         None,

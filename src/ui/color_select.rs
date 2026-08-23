@@ -132,6 +132,7 @@ pub fn color_selector<'a>(
         row![
             swatch(cur_bg),
             text(cur_name).size(11),
+            iced::widget::Space::new().width(Length::Fill),
             crate::ui::icons::themed_arrow_toggle(open, 9.0),
         ]
         .spacing(5)
@@ -149,22 +150,22 @@ pub fn color_selector<'a>(
         .style(|theme: &Theme| {
             let palette = theme.palette();
             container::Style {
-            background: Some(Background::Color(palette.background.weak.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
+                background: Some(Background::Color(palette.background.weak.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
             }
         })
-        .padding(5)
-        .width(220);
+        .padding(2);
 
     // `DropDown` keeps the popup outside the surrounding form layout and
     // handles viewport placement, Escape, and outside-click dismissal.
+    // By omitting `.width(...)`, DropDown defaults to the exact pixel width
+    // of the underlay (`head`), matching the value column width and aligning flush.
     iced_aw::DropDown::new(head, popup, true)
-        .width(220)
         .alignment(iced_aw::drop_down::Alignment::Bottom)
         .offset(2.0)
         .on_dismiss(on_dismiss)
@@ -187,8 +188,8 @@ fn list_row_style(theme: &Theme, status: button::Status) -> button::Style {
 }
 
 /// The colour list shown inside a picker popup: named ACI colours (with
-/// swatches) plus a "More…" entry that opens the full palette window. Shared by
-/// `color_selector` and the ribbon's colour overlay.
+/// swatches) plus a "Select Color..." entry that opens the full palette window.
+/// Shared by `color_selector` and the ribbon's colour overlay.
 pub fn color_list<'a>(
     extras: ColorExtras,
     on_select: impl Fn(AcadColor) -> Message + 'a,
@@ -219,7 +220,7 @@ pub fn color_list<'a>(
         list = list.push(named_row(AcadColor::Index(i)));
     }
     list = list.push(
-        button(text(t!("More…")).size(11))
+        button(text(t!("Select Color...")).size(11))
             .on_press(on_more)
             .style(list_row_style)
             .padding([2, 4])
@@ -232,17 +233,19 @@ pub fn color_list<'a>(
 pub fn drop_down_below<'a>(
     base: Element<'a, Message>,
     popup: Element<'a, Message>,
-    popup_width: Length,
+    popup_width: Option<Length>,
     popup_height: Length,
     on_dismiss: Message,
 ) -> Element<'a, Message> {
-    iced_aw::DropDown::new(base, popup, true)
-        .width(popup_width)
+    let mut dd = iced_aw::DropDown::new(base, popup, true)
         .height(popup_height)
         .alignment(iced_aw::drop_down::Alignment::Bottom)
         .offset(2.0)
-        .on_dismiss(on_dismiss)
-        .into()
+        .on_dismiss(on_dismiss);
+    if let Some(w) = popup_width {
+        dd = dd.width(w);
+    }
+    dd.into()
 }
 
 /// Full CAD indexed-colour page used by the standalone Select Color dialog.

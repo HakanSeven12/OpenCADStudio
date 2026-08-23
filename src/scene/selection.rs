@@ -463,6 +463,7 @@ impl Scene {
                             match prop.value {
                                 PropValue::PlainText(_) => QSelectValueEditor::Text,
                                 PropValue::ReadOnly(ref value)
+                                | PropValue::ReadOnlyWithTooltip { ref value, .. }
                                 | PropValue::EditText(ref value) => {
                                     let field = prop.field.to_ascii_lowercase();
                                     let textual = [
@@ -660,6 +661,7 @@ impl Scene {
                     .find(|p| p.field == field)?;
                 Some(match prop.value {
                     PropValue::ReadOnly(s)
+                    | PropValue::ReadOnlyWithTooltip { value: s, .. }
                     | PropValue::EditText(s)
                     | PropValue::PlainText(s) => s,
                     PropValue::LayerChoice(s) => s,

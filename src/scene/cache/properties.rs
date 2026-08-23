@@ -10,15 +10,15 @@ pub fn general_section(entity: &EntityType) -> PropSection {
     } else {
         common.linetype.clone()
     };
-    // Alpha 0 is the ByLayer default (Transparency::BY_LAYER); show it by name
-    // and fall back to a rounded percentage only for an explicit value.
-    let transp_display = if common.transparency.alpha() == 0 {
-        "ByLayer".to_string()
-    } else {
-        format!(
+    // Alpha 0 is ByLayer, Alpha 1 is ByBlock; show them by name and fall back
+    // to a rounded percentage for explicit values.
+    let transp_display = match common.transparency.alpha() {
+        0 => "ByLayer".to_string(),
+        1 => "ByBlock".to_string(),
+        alpha => format!(
             "{}",
-            (common.transparency.alpha() as f64 / 255.0 * 100.0).round() as u32
-        )
+            (alpha as f64 / 255.0 * 100.0).round() as u32
+        ),
     };
 
     // Hyperlink is stored in XDATA under the "PE_URL" application.
@@ -81,7 +81,10 @@ pub fn general_section(entity: &EntityType) -> PropSection {
             Property {
                 label: t!("Transparency").into_owned(),
                 field: "transparency",
-                value: PropValue::EditText(transp_display),
+                value: PropValue::EditChoice {
+                    value: transp_display,
+                    options: vec!["ByLayer".to_string(), "ByBlock".to_string()],
+                },
             },
             Property {
                 label: t!("Hyperlink").into_owned(),
@@ -136,14 +139,26 @@ pub fn visualization_section(entity: &EntityType) -> Option<PropSection> {
     let material = match common.material_flags {
         0 => "ByLayer",
         1 => "ByBlock",
+        2 => "Global",
         _ => "Custom",
     };
+    let mut options = vec![
+        "ByLayer".to_string(),
+        "ByBlock".to_string(),
+        "Global".to_string(),
+    ];
+    if !options.iter().any(|o| o == material) && !material.is_empty() {
+        options.push(material.to_string());
+    }
     Some(PropSection {
         title: t!("3D Visualization").into_owned(),
         props: vec![Property {
             label: t!("Material").into_owned(),
             field: "material",
-            value: PropValue::ReadOnly(material.into()),
+            value: PropValue::Choice {
+                selected: material.to_string(),
+                options,
+            },
         }],
     })
 }

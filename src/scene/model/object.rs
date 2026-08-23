@@ -8,6 +8,8 @@ use glam::DVec3;
 pub enum PropValue {
     /// Read-only display text.
     ReadOnly(String),
+    /// Read-only display text with a tooltip explaining why it cannot be edited.
+    ReadOnlyWithTooltip { value: String, tooltip: String },
     /// Editable numeric field.
     EditText(String),
     /// Editable text that must not be expression-evaluated.

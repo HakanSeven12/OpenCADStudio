@@ -273,18 +273,60 @@ impl OpenCADStudio {
                                         ),
                                     ),
                                 },
-                                read_only(t!("Transparency").as_ref(), "ByLayer".to_string()),
+                                Property {
+                                    label: t!("Transparency").into_owned(),
+                                    field: "transparency",
+                                    value: PropValue::EditChoice {
+                                        value: "ByLayer".to_string(),
+                                        options: vec!["ByLayer".to_string(), "ByBlock".to_string()],
+                                    },
+                                },
                                 read_only(t!("Thickness").as_ref(), format_length(header.thickness)),
                             ],
                         },
                         PropSection {
                             title: t!("3D Visualization").into_owned(),
-                            props: vec![read_only(t!("Material").as_ref(), material)],
+                            props: vec![Property {
+                                label: t!("Material").into_owned(),
+                                field: "material",
+                                value: PropValue::Choice {
+                                    selected: material.clone(),
+                                    options: {
+                                        let mut opts = vec![
+                                            "ByLayer".to_string(),
+                                            "ByBlock".to_string(),
+                                            "Global".to_string(),
+                                        ];
+                                        if !opts.contains(&material) && !material.is_empty() {
+                                            opts.push(material.clone());
+                                        }
+                                        opts
+                                    },
+                                },
+                            }],
                         },
                         PropSection {
                             title: t!("Plot style").into_owned(),
                             props: vec![
-                                read_only(t!("Plot style").as_ref(), plot_style.to_string()),
+                                Property {
+                                    label: t!("Plot style").into_owned(),
+                                    field: "plot_style",
+                                    value: if header.plotstyle_mode {
+                                        PropValue::Choice {
+                                            selected: plot_style.to_string(),
+                                            options: vec![
+                                                "ByLayer".to_string(),
+                                                "ByBlock".to_string(),
+                                                "Normal".to_string(),
+                                            ],
+                                        }
+                                    } else {
+                                        PropValue::ReadOnlyWithTooltip {
+                                            value: plot_style.to_string(),
+                                            tooltip: t!("Plot style is locked to color in Color-Dependent (CTB) mode").into_owned(),
+                                        }
+                                    },
+                                },
                                 read_only(t!("Plot style table").as_ref(), plot_table.clone()),
                                 read_only(
                                     t!("Plot table attached to").as_ref(),
@@ -338,6 +380,23 @@ impl OpenCADStudio {
                     ];
                     ui::PropertiesPanel {
                         title: t!("No selection").into_owned(),
+                        choice_combos: sections
+                            .iter()
+                            .flat_map(|section| section.props.iter())
+                            .filter_map(|prop| match &prop.value {
+                                crate::scene::model::object::PropValue::Choice { options, .. } => Some((
+                                    prop.field.to_string(),
+                                    iced::widget::combo_box::State::new(
+                                        options
+                                            .iter()
+                                            .cloned()
+                                            .map(ui::properties::LocalizedChoice::new)
+                                            .collect(),
+                                    ),
+                                )),
+                                _ => None,
+                            })
+                            .collect(),
                         sections,
                         layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
                         linetype_combo: iced::widget::combo_box::State::new(
@@ -381,17 +440,10 @@ impl OpenCADStudio {
                     {
                         let doc = &self.tabs[i].scene.document;
                         let common = entity.common();
-                        let mat_names: Vec<String> = doc
-                            .objects
-                            .iter()
-                            .filter_map(|(_, o)| match o {
-                                acadrust::objects::ObjectType::Material(m) => Some(m.name.clone()),
-                                _ => None,
-                            })
-                            .collect();
                         let selected = match common.material_flags {
                             0 => "ByLayer".to_string(),
                             1 => "ByBlock".to_string(),
+                            2 => "Global".to_string(),
                             _ => common
                                 .material_handle
                                 .and_then(|mh| {
@@ -402,10 +454,16 @@ impl OpenCADStudio {
                                         _ => None,
                                     })
                                 })
-                                .unwrap_or_else(|| "ByLayer".to_string()),
+                                .unwrap_or_else(|| "Global".to_string()),
                         };
-                        let mut options = vec!["ByLayer".to_string(), "ByBlock".to_string()];
-                        options.extend(mat_names);
+                        let mut options = vec![
+                            "ByLayer".to_string(),
+                            "ByBlock".to_string(),
+                            "Global".to_string(),
+                        ];
+                        if !options.contains(&selected) && !selected.is_empty() {
+                            options.push(selected.clone());
+                        }
                         for section in sections.iter_mut() {
                             if let Some(row) =
                                 section.props.iter_mut().find(|p| p.field == "material")
@@ -665,32 +723,61 @@ impl OpenCADStudio {
                     if self.tabs[i].scene.document.header.plotstyle_mode {
                         let doc = &self.tabs[i].scene.document;
                         let dict_h = doc.header.acad_plotstylename_dict_handle;
+                        let common = entity.common();
+                        let mut options = vec![
+                            "ByLayer".to_string(),
+                            "ByBlock".to_string(),
+                            "Normal".to_string(),
+                        ];
                         if let Some(dict) = crate::scene::annotative::as_dict(doc, dict_h) {
-                            let common = entity.common();
-                            let mut options = vec!["ByLayer".to_string(), "ByBlock".to_string()];
-                            options.extend(dict.entries.iter().map(|(n, _)| n.clone()));
-                            let selected = match common.plotstyle_flags {
-                                0 => "ByLayer".to_string(),
-                                1 => "ByBlock".to_string(),
-                                _ => common
-                                    .plotstyle_handle
-                                    .and_then(|ph| {
+                            for (n, _) in &dict.entries {
+                                if !options.contains(n) {
+                                    options.push(n.clone());
+                                }
+                            }
+                        }
+                        let selected = match common.plotstyle_flags {
+                            0 => "ByLayer".to_string(),
+                            1 => "ByBlock".to_string(),
+                            2 => "Normal".to_string(),
+                            _ => common
+                                .plotstyle_handle
+                                .and_then(|ph| {
+                                    crate::scene::annotative::as_dict(doc, dict_h).and_then(|dict| {
                                         dict.entries
                                             .iter()
                                             .find(|(_, h)| *h == ph)
                                             .map(|(n, _)| n.clone())
                                     })
-                                    .unwrap_or_else(|| "ByLayer".to_string()),
-                            };
-                            for section in sections.iter_mut() {
-                                if let Some(row) =
-                                    section.props.iter_mut().find(|p| p.field == "plot_style")
-                                {
-                                    row.value = crate::scene::model::object::PropValue::Choice {
-                                        selected: selected.clone(),
-                                        options: options.clone(),
-                                    };
-                                }
+                                })
+                                .unwrap_or_else(|| "ByLayer".to_string()),
+                        };
+                        for section in sections.iter_mut() {
+                            if let Some(row) =
+                                section.props.iter_mut().find(|p| p.field == "plot_style")
+                            {
+                                row.value = crate::scene::model::object::PropValue::Choice {
+                                    selected: selected.clone(),
+                                    options: options.clone(),
+                                };
+                            }
+                        }
+                    } else {
+                        for section in sections.iter_mut() {
+                            if let Some(row) =
+                                section.props.iter_mut().find(|p| p.field == "plot_style")
+                            {
+                                let common = entity.common();
+                                let plot_style_str = match common.plotstyle_flags {
+                                    0 => "ByLayer",
+                                    1 => "ByBlock",
+                                    2 => "Normal",
+                                    _ => "ByColor",
+                                };
+                                row.value = crate::scene::model::object::PropValue::ReadOnlyWithTooltip {
+                                    value: plot_style_str.to_string(),
+                                    tooltip: t!("Plot style is locked to color in Color-Dependent (CTB) mode").into_owned(),
+                                };
                             }
                         }
                     }
@@ -2017,6 +2104,7 @@ fn make_sections_read_only(
     {
         let text = match &property.value {
             PropValue::ReadOnly(value)
+            | PropValue::ReadOnlyWithTooltip { value, .. }
             | PropValue::EditText(value)
             | PropValue::PlainText(value)
             | PropValue::LayerChoice(value)
@@ -2199,20 +2287,36 @@ fn merge_prop_value(
                 options: other_options,
                 ..
             },
-        ) if options == other_options => PropValue::Choice {
-            selected: VARIES_LABEL.into(),
-            options: options.clone(),
-        },
+        ) => {
+            let mut merged_options = options.clone();
+            for opt in other_options {
+                if !merged_options.contains(opt) {
+                    merged_options.push(opt.clone());
+                }
+            }
+            PropValue::Choice {
+                selected: VARIES_LABEL.into(),
+                options: merged_options,
+            }
+        }
         (
             PropValue::EditChoice { options, .. },
             PropValue::EditChoice {
                 options: other_options,
                 ..
             },
-        ) if options == other_options => PropValue::EditChoice {
-            value: VARIES_LABEL.into(),
-            options: options.clone(),
-        },
+        ) => {
+            let mut merged_options = options.clone();
+            for opt in other_options {
+                if !merged_options.contains(opt) {
+                    merged_options.push(opt.clone());
+                }
+            }
+            PropValue::EditChoice {
+                value: VARIES_LABEL.into(),
+                options: merged_options,
+            }
+        }
         (PropValue::EditText(_), PropValue::EditText(_)) => {
             PropValue::EditText(VARIES_LABEL.into())
         }
@@ -2221,6 +2325,19 @@ fn merge_prop_value(
         }
         (PropValue::ReadOnly(_), PropValue::ReadOnly(_)) => {
             PropValue::ReadOnly(VARIES_LABEL.into())
+        }
+        (PropValue::ReadOnlyWithTooltip { tooltip, .. }, PropValue::ReadOnlyWithTooltip { .. }) => {
+            PropValue::ReadOnlyWithTooltip {
+                value: VARIES_LABEL.into(),
+                tooltip: tooltip.clone(),
+            }
+        }
+        (PropValue::ReadOnly(_), PropValue::ReadOnlyWithTooltip { tooltip, .. })
+        | (PropValue::ReadOnlyWithTooltip { tooltip, .. }, PropValue::ReadOnly(_)) => {
+            PropValue::ReadOnlyWithTooltip {
+                value: VARIES_LABEL.into(),
+                tooltip: tooltip.clone(),
+            }
         }
         (PropValue::HatchPatternChoice(_), PropValue::HatchPatternChoice(_)) => {
             PropValue::HatchPatternChoice(VARIES_LABEL.into())

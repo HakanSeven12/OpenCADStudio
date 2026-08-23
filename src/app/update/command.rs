@@ -2109,6 +2109,15 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 self.tabs[i].scene.bump_entities(&changes);
                             }
                         }
+                    } else if field == "transparency" {
+                        for &handle in &handles {
+                            if self.tabs[i].scene.is_layer_locked(handle) {
+                                continue;
+                            }
+                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                                crate::scene::view::dispatch::apply_common_prop(entity, "transparency", &value);
+                            }
+                        }
                     } else if field == "plot_style" {
                         // Named plot-style pick: ByLayer / ByBlock clear the
                         // handle; a named style resolves through the drawing's
@@ -2137,6 +2146,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     }
                                     "ByBlock" => {
                                         common.plotstyle_flags = 1;
+                                        common.plotstyle_handle = None;
+                                    }
+                                    "Normal" => {
+                                        common.plotstyle_flags = 2;
                                         common.plotstyle_handle = None;
                                     }
                                     _ => {
@@ -2177,6 +2190,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     }
                                     "ByBlock" => {
                                         common.material_flags = 1;
+                                        common.material_handle = None;
+                                    }
+                                    "Global" => {
+                                        common.material_flags = 2;
                                         common.material_handle = None;
                                     }
                                     _ => {
@@ -2233,11 +2250,60 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     }
                     self.invalidate_property_targets(i, &handles);
                     self.tabs[i].dirty = true;
+                    self.tabs[i].properties.edit_choice_open = false;
                     if field == "spline_method" {
                         self.tabs[i].properties.prop_vertex = 0;
                         self.tabs[i].properties.prop_vertex_indicator_active = false;
                     }
                     self.refresh_properties();
+                } else {
+                    match field {
+                        "transparency" => {
+                            self.tabs[i].dirty = true;
+                            self.refresh_properties();
+                        }
+                        "material" => {
+                            let mat_handle: Option<acadrust::Handle> = self.tabs[i]
+                                .scene
+                                .document
+                                .objects
+                                .iter()
+                                .find_map(|(h, o)| match o {
+                                    acadrust::objects::ObjectType::Material(m) if m.name == value => {
+                                        Some(*h)
+                                    }
+                                    _ => None,
+                                });
+                            match value.as_str() {
+                                "ByLayer" | "ByBlock" | "Global" => {
+                                    self.tabs[i].scene.document.header.current_material_handle =
+                                        acadrust::Handle::NULL;
+                                }
+                                _ => {
+                                    if let Some(h) = mat_handle {
+                                        self.tabs[i].scene.document.header.current_material_handle =
+                                            h;
+                                    }
+                                }
+                            }
+                            self.tabs[i].dirty = true;
+                            self.refresh_properties();
+                        }
+                        "plot_style" => {
+                            match value.as_str() {
+                                "ByBlock" => {
+                                    self.tabs[i].scene.document.header.current_plotstyle_type = 1
+                                }
+                                "Normal" | "ByColor" => {
+                                    self.tabs[i].scene.document.header.current_plotstyle_type = 2
+                                }
+                                _ => self.tabs[i].scene.document.header.current_plotstyle_type = 0,
+                            }
+                            self.tabs[i].dirty = true;
+                            self.refresh_properties();
+                        }
+                        _ => {}
+                    }
                 }
                 Task::none()
     }
@@ -2470,6 +2536,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.tabs[i].dirty = true;
                         self.refresh_properties();
                     }
+                } else {
+                    let _ = self.tabs[i]
+                        .properties
+                        .edit_buf
+                        .remove(&crate::ui::properties::FieldKey::Geom(field));
+                    self.refresh_properties();
                 }
                 Task::none()
     }

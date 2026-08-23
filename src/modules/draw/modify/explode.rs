@@ -27,6 +27,7 @@ use acadrust::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
 
 use crate::command::{CadCommand, CmdResult};
+use crate::entities::curve::lwpolyline_world_xy;
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use glam::DVec3;
 use crate::t;
@@ -62,6 +63,27 @@ pub fn explode_polyline_segments(entity: &EntityType) -> Vec<EntityType> {
 /// Returns an empty vec if the entity cannot be exploded.
 pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<EntityType> {
     match entity {
+        EntityType::Line(line) => {
+            let Some(association) = acadrust::entities::CenterMarkAssociation::read(
+                &line.common.extended_data,
+            ) else {
+                return vec![];
+            };
+            crate::scene::centermark::mark_segments(&association)
+                .into_iter()
+                .map(|segment| {
+                    let mut common = line.common.clone();
+                    common.handle = Handle::NULL;
+                    acadrust::entities::CenterMarkAssociation::remove(&mut common.extended_data);
+                    EntityType::Line(LineEnt {
+                        common,
+                        start: Vector3::new(segment[0].x, segment[0].y, segment[0].z),
+                        end: Vector3::new(segment[1].x, segment[1].y, segment[1].z),
+                        ..LineEnt::new()
+                    })
+                })
+                .collect()
+        }
         EntityType::LwPolyline(p) => explode_lwpolyline(p),
         EntityType::Polyline2D(p) => explode_polyline2d(p),
         EntityType::Polyline(p) => explode_polyline(p),
@@ -188,6 +210,9 @@ pub fn normalize_entity_for_block(entity: EntityType) -> EntityType {
 }
 
 fn explode_lwpolyline(p: &LwPolyline) -> Vec<EntityType> {
+    let Some(p) = lwpolyline_world_xy(p) else {
+        return vec![];
+    };
     let n = p.vertices.len();
     if n < 2 {
         return vec![];

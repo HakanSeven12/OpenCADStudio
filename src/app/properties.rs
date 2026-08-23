@@ -121,6 +121,13 @@ impl OpenCADStudio {
                     acadrust::EntityType::LwPolyline(polyline) => Some(polyline.vertices.len()),
                     acadrust::EntityType::Polyline2D(polyline) => Some(polyline.vertices.len()),
                     acadrust::EntityType::Leader(leader) => Some(leader.vertices.len()),
+                    acadrust::EntityType::Spline(spline) => {
+                        Some(if crate::entities::spline::shows_fit_points(spline) {
+                            spline.fit_points.len()
+                        } else {
+                            crate::entities::spline::control_vertex_count(spline)
+                        })
+                    }
                     _ => None,
                 });
             vertex_count.map_or(prop_vertex, |count| prop_vertex.min(count.saturating_sub(1)))
@@ -830,7 +837,7 @@ impl OpenCADStudio {
                             geom.props.push(crate::scene::model::object::Property {
                                 label: t!("Frozen Layers").into_owned(),
                                 field: "frozen_layers",
-                                value: crate::scene::model::object::PropValue::EditText(
+                                value: crate::scene::model::object::PropValue::PlainText(
                                     frozen_names.join(", "),
                                 ),
                             });
@@ -896,15 +903,17 @@ impl OpenCADStudio {
                             .filter(|n| !n.is_empty())
                             .collect();
                         if !dim_style_names.is_empty() {
-                            // Current style is already shown as EditText in the geom section;
+                            // Current style is already shown as text in the geom section;
                             // replace/upgrade it to a Choice if we have a list.
                             if let Some(geom) = sections.last_mut() {
-                                // Find and replace the style_name EditText with a Choice.
+                                // Replace the style name with a choice.
                                 if let Some(prop) =
                                     geom.props.iter_mut().find(|p| p.field == "style_name")
                                 {
                                     let current = match &prop.value {
-                                        crate::scene::model::object::PropValue::EditText(s) => s.clone(),
+                                        crate::scene::model::object::PropValue::PlainText(s) => {
+                                            s.clone()
+                                        }
                                         _ => String::new(),
                                     };
                                     prop.value = crate::scene::model::object::PropValue::Choice {
@@ -1037,7 +1046,7 @@ impl OpenCADStudio {
                                         .find(|p| p.field == "dimension_style")
                                     {
                                         let cur = match &p.value {
-                                            crate::scene::model::object::PropValue::EditText(s) => {
+                                            crate::scene::model::object::PropValue::PlainText(s) => {
                                                 s.clone()
                                             }
                                             _ => ld.dimension_style.clone(),
@@ -1215,7 +1224,8 @@ impl OpenCADStudio {
                             acadrust::EntityType::Text(_)
                             | acadrust::EntityType::MText(_)
                             | acadrust::EntityType::Insert(_)
-                            | acadrust::EntityType::Leader(_) => Some(("annotative", None)),
+                            | acadrust::EntityType::Leader(_)
+                            | acadrust::EntityType::Hatch(_) => Some(("annotative", None)),
                             acadrust::EntityType::MultiLeader(_) => {
                                 Some(("enable_annotation_scale", None))
                             }
@@ -1258,7 +1268,8 @@ impl OpenCADStudio {
                                         },
                                     ),
                                     acadrust::EntityType::Text(_)
-                                    | acadrust::EntityType::Insert(_) => set_row_value(
+                                    | acadrust::EntityType::Insert(_)
+                                    | acadrust::EntityType::Hatch(_) => set_row_value(
                                         &mut sections,
                                         "annotative",
                                         crate::scene::model::object::PropValue::BoolToggle {
@@ -1833,6 +1844,41 @@ impl OpenCADStudio {
             &mut entity,
         );
 
+        // Smart centre objects carry their own drawing-level creation style.
+        // Apply it after the generic ribbon style so ordinary LINE entities
+        // keep the existing path while centre lines honour their settings.
+        let center_line = acadrust::entities::CenterLineAssociation::read(
+            &entity.common().extended_data,
+        ).is_some();
+        let center_mark = acadrust::entities::CenterMarkAssociation::read(
+            &entity.common().extended_data,
+        ).is_some();
+        if center_line || center_mark {
+            let settings = self.tabs[i].scene.centerline_settings();
+            if !settings.layer.eq_ignore_ascii_case("Current") {
+                entity.common_mut().layer = settings.layer;
+            }
+            if !settings.linetype.eq_ignore_ascii_case("Current") {
+                entity.common_mut().linetype = settings.linetype;
+            }
+            entity.common_mut().linetype_scale = settings.linetype_scale;
+            let application = if center_mark {
+                acadrust::entities::CENTERMARK_XDATA_APPLICATION
+            } else {
+                acadrust::entities::CENTERLINE_XDATA_APPLICATION
+            };
+            if !self.tabs[i]
+                .scene
+                .document
+                .app_ids
+                .contains(application)
+            {
+                let mut app = acadrust::tables::AppId::new(application);
+                app.handle = self.tabs[i].scene.document.allocate_handle();
+                let _ = self.tabs[i].scene.document.app_ids.add(app);
+            }
+        }
+
         let text_style_annotative = match &entity {
             acadrust::EntityType::Text(text) => {
                 crate::scene::annotative::text_style_is_annotative(
@@ -1972,6 +2018,7 @@ fn make_sections_read_only(
         let text = match &property.value {
             PropValue::ReadOnly(value)
             | PropValue::EditText(value)
+            | PropValue::PlainText(value)
             | PropValue::LayerChoice(value)
             | PropValue::LinetypeChoice(value)
             | PropValue::HatchPatternChoice(value) => value.clone(),
@@ -2044,6 +2091,23 @@ pub(super) fn aggregate_sections(
     let mut result = all_sections.remove(0);
     for sections in all_sections {
         result = merge_sections(&result, &sections);
+    }
+    // Sum the filled area while individual Area rows may still vary.
+    if selected.len() > 1
+        && selected
+            .iter()
+            .all(|(_, entity)| matches!(entity, acadrust::EntityType::Hatch(_)))
+    {
+        let total = selected
+            .iter()
+            .filter_map(|(_, entity)| match entity {
+                acadrust::EntityType::Hatch(hatch) => {
+                    Some(crate::entities::hatch::boundary_area(hatch))
+                }
+                _ => None,
+            })
+            .sum::<f64>();
+        set_row(&mut result, "cumulative_area", format!("{total:.4}"));
     }
     result
 }
@@ -2151,6 +2215,9 @@ fn merge_prop_value(
         },
         (PropValue::EditText(_), PropValue::EditText(_)) => {
             PropValue::EditText(VARIES_LABEL.into())
+        }
+        (PropValue::PlainText(_), PropValue::PlainText(_)) => {
+            PropValue::PlainText(VARIES_LABEL.into())
         }
         (PropValue::ReadOnly(_), PropValue::ReadOnly(_)) => {
             PropValue::ReadOnly(VARIES_LABEL.into())

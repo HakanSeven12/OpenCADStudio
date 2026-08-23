@@ -33,11 +33,38 @@ mod tests {
         let registry: TypeRegistry =
             serde_json::from_str(get_embedded_type_registry_json()).expect("valid TypeRegistry JSON");
 
-        for name in ["Point", "Line", "Circle", "EntityCommon"] {
+        for name in ["Point", "Line", "Circle", "MText", "EntityCommon"] {
             assert!(
                 registry.types.contains_key(&TypeId::new(name)),
                 "registry should contain {}",
                 name
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_type_registry_mtext_is_struct_with_expected_fields() {
+        let registry: TypeRegistry =
+            serde_json::from_str(get_embedded_type_registry_json()).expect("valid TypeRegistry JSON");
+
+        let mtext = registry
+            .types
+            .get(&TypeId::new("MText"))
+            .expect("MText in registry");
+        assert_eq!(mtext.kind, TypeKind::Struct);
+
+        let field_names: Vec<&str> = mtext.fields.iter().map(|f| f.name.as_str()).collect();
+        for expected in [
+            "common",
+            "value",
+            "insertion_point",
+            "height",
+            "attachment_point",
+        ] {
+            assert!(
+                field_names.contains(&expected),
+                "MText should have field {}",
+                expected
             );
         }
     }

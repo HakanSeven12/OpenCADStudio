@@ -286,6 +286,34 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
+            "MLEDIT" => {
+                use crate::modules::draw::modify::mledit::{
+                    MlineEditCommand, MlineEditTarget,
+                };
+                let document = &self.tabs[i].scene.document;
+                let targets = document
+                    .entities()
+                    .filter_map(|entity| {
+                        let acadrust::EntityType::MLine(mline) = entity else {
+                            return None;
+                        };
+                        let style = crate::entities::mline::resolved_mline_style(mline, document)
+                            .cloned()
+                            .unwrap_or_else(acadrust::objects::MLineStyle::standard);
+                        Some((
+                            entity.common().handle.value(),
+                            MlineEditTarget {
+                                entity: mline.clone(),
+                                style,
+                            },
+                        ))
+                    })
+                    .collect();
+                let command = MlineEditCommand::new(targets);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
             "SPLINEDIT" => {
                 use crate::modules::draw::modify::splinedit::SplineditCommand;
                 let cmd_obj = SplineditCommand::new();

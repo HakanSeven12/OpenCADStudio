@@ -51,7 +51,10 @@ jobs:
           tool: wasm-bindgen@${{ steps.wasm-bindgen-version.outputs.version }}
 
       - name: Build web bundle
-        run: trunk build --release --public-url /
+        run: trunk build --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
+
+      - name: Assemble landing page
+        run: sh scripts/assemble-site.sh
 
       # GitHub Pages runs Jekyll, which ignores files; opt out so the
       # wasm-bindgen output is served verbatim.
@@ -74,7 +77,7 @@ jobs:
           from decimal import Decimal, ROUND_HALF_UP
           from pathlib import Path
 
-          output = Path("dist/supporters.json")
+          output = Path("dist/app/supporters.json")
           token = os.environ.get("OCS_PATREON_TOKEN", "")
           if not token:
               output.write_text("[]\n", encoding="utf-8")
@@ -196,8 +199,8 @@ jobs:
 
           playlist = "https://youtube.com/playlist?list=PLZq_TEkIFh9bAnoOX1HiCAunm3anZDBOl"
           fallback = Path("web/videos.json")
-          output = Path("dist/videos.json")
-          thumbs = Path("dist/video_thumbs")
+          output = Path("dist/app/videos.json")
+          thumbs = Path("dist/app/video_thumbs")
           thumbs.mkdir(parents=True, exist_ok=True)
           request_headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -294,8 +297,8 @@ jobs:
                     updated_at: .updatedAt,
                     pinned
                   })' \
-            > dist/discussions.json
-          echo "discussions: $(jq 'length' dist/discussions.json)"
+            > dist/app/discussions.json
+          echo "discussions: $(jq 'length' dist/app/discussions.json)"
 
       - uses: actions/upload-pages-artifact@v3
         with:

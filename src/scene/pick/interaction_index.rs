@@ -557,7 +557,9 @@ pub struct InteractionIndex {
     pick_triangles: SpatialSet<TriangleRef>,
     glyphs: SpatialSet<GlyphRef>,
     unbounded_wires: Vec<u32>,
+    screen_unbounded_wires: Vec<u32>,
     max_line_half_width_px: f32,
+    max_marker_radius_fraction: f32,
 }
 
 pub struct InteractionHandleIndex {
@@ -574,7 +576,9 @@ struct WireIndexEntries {
     pick_triangles: Vec<Entry3<TriangleRef>>,
     glyphs: Vec<Entry3<GlyphRef>>,
     unbounded: bool,
+    screen_unbounded: bool,
     max_line_half_width_px: f32,
+    max_marker_radius_fraction: f32,
 }
 
 fn collect_wire_index_entries(wire_idx: u32, wire: &WireModel) -> WireIndexEntries {
@@ -591,28 +595,34 @@ fn collect_wire_index_entries(wire_idx: u32, wire: &WireModel) -> WireIndexEntri
         pick_triangles: Vec::with_capacity(wire.pick_tris.len() / 3),
         glyphs: Vec::with_capacity(wire.text_verts.len() / 6),
         unbounded: false,
+        screen_unbounded: wire.point_marker.is_some(),
         max_line_half_width_px: if wire.line_weight_px.is_finite() {
             (wire.line_weight_px * 0.5).max(0.0)
         } else {
             0.0
         },
+        max_marker_radius_fraction: wire.point_marker.map_or(0.0, |marker| {
+            marker.viewport_percent.max(0.0) * 0.01 * std::f32::consts::SQRT_2
+        }),
     };
     entries.unbounded = entries.wire.is_none();
 
-    for start in 0..wire.points.len().saturating_sub(1) {
-        let Some(aabb) = points_aabb3([
-            wire_point(wire, start),
-            wire_point(wire, start + 1),
-        ]) else {
-            continue;
-        };
-        entries.segments.push(Entry3 {
-            aabb,
-            value: SegmentRef {
-                wire: wire_idx,
-                start: start as u32,
-            },
-        });
+    if wire.point_marker.is_none() {
+        for start in 0..wire.points.len().saturating_sub(1) {
+            let Some(aabb) = points_aabb3([
+                wire_point(wire, start),
+                wire_point(wire, start + 1),
+            ]) else {
+                continue;
+            };
+            entries.segments.push(Entry3 {
+                aabb,
+                value: SegmentRef {
+                    wire: wire_idx,
+                    start: start as u32,
+                },
+            });
+        }
     }
     for (index, (point, _)) in wire.snap_pts.iter().enumerate() {
         if point.is_finite() {
@@ -773,7 +783,9 @@ impl InteractionIndex {
         let collect_started = iced::time::Instant::now();
         let mut wire_entries = Vec::with_capacity(wires.len());
         let mut unbounded_wires = Vec::new();
+        let mut screen_unbounded_wires = Vec::new();
         let mut max_line_half_width_px = 0.0f32;
+        let mut max_marker_radius_fraction = 0.0f32;
 
         #[cfg(not(target_arch = "wasm32"))]
         let per_wire: Vec<WireIndexEntries> = {
@@ -804,11 +816,16 @@ impl InteractionIndex {
         for (wire_idx, entries) in per_wire.into_iter().enumerate() {
             max_line_half_width_px =
                 max_line_half_width_px.max(entries.max_line_half_width_px);
+            max_marker_radius_fraction =
+                max_marker_radius_fraction.max(entries.max_marker_radius_fraction);
             if let Some(entry) = entries.wire {
                 wire_entries.push(entry);
             }
             if entries.unbounded {
                 unbounded_wires.push(wire_idx as u32);
+            }
+            if entries.screen_unbounded {
+                screen_unbounded_wires.push(wire_idx as u32);
             }
             segment_parts.push(entries.segments);
             snap_point_parts.push(entries.snap_points);
@@ -952,7 +969,9 @@ impl InteractionIndex {
             pick_triangles,
             glyphs,
             unbounded_wires,
+            screen_unbounded_wires,
             max_line_half_width_px,
+            max_marker_radius_fraction,
         }
     }
 
@@ -1002,12 +1021,30 @@ impl InteractionIndex {
         }
     }
 
-    pub fn pick_radius_px(&self, base_radius_px: f32) -> f32 {
-        base_radius_px.max(self.max_line_half_width_px)
+    pub fn pick_radius_px(
+        &self,
+        base_radius_px: f32,
+        viewport_height_px: f32,
+        include_line_weight: bool,
+    ) -> f32 {
+        let radius = base_radius_px
+            .max(self.max_marker_radius_fraction * viewport_height_px.max(0.0));
+        if include_line_weight {
+            radius.max(self.max_line_half_width_px)
+        } else {
+            radius
+        }
     }
 
-    fn queried_wire_keys(&self, mut indices: Vec<u32>) -> Vec<(u64, u32)> {
+    fn queried_wire_keys(
+        &self,
+        mut indices: Vec<u32>,
+        include_screen_unbounded: bool,
+    ) -> Vec<(u64, u32)> {
         indices.extend_from_slice(&self.unbounded_wires);
+        if include_screen_unbounded {
+            indices.extend_from_slice(&self.screen_unbounded_wires);
+        }
         let mut keys: Vec<(u64, u32)> = indices
             .into_iter()
             .filter_map(|index| {
@@ -1029,7 +1066,7 @@ impl InteractionIndex {
     }
 
     pub fn query_wire_keys_xy(&self, aabb: [f64; 4]) -> Vec<(u64, u32)> {
-        self.queried_wire_keys(self.wires.query_xy(aabb))
+        self.queried_wire_keys(self.wires.query_xy(aabb), false)
     }
 
     pub fn query_wire_keys_screen(
@@ -1039,7 +1076,10 @@ impl InteractionIndex {
         eye: DVec3,
         bounds: Rectangle,
     ) -> Vec<(u64, u32)> {
-        self.queried_wire_keys(self.wires.query_screen(screen_rect, view_rot, eye, bounds))
+        self.queried_wire_keys(
+            self.wires.query_screen(screen_rect, view_rot, eye, bounds),
+            true,
+        )
     }
 
     fn remap_wire_index(
@@ -1064,8 +1104,12 @@ impl InteractionIndex {
         &self,
         mut indices: Vec<u32>,
         slots: &rustc_hash::FxHashMap<(u64, u32), u32>,
+        include_screen_unbounded: bool,
     ) -> Vec<u32> {
         indices.extend_from_slice(&self.unbounded_wires);
+        if include_screen_unbounded {
+            indices.extend_from_slice(&self.screen_unbounded_wires);
+        }
         let mut local: Vec<u32> = indices
             .into_iter()
             .filter_map(|index| self.remap_wire_index(index, slots))
@@ -1100,7 +1144,11 @@ impl InteractionIndex {
     ) -> InteractionCandidates {
         InteractionCandidates {
             wires,
-            wire_indices: Some(self.remap_wire_indices(self.wires.query_xy(aabb), slots)),
+            wire_indices: Some(self.remap_wire_indices(
+                self.wires.query_xy(aabb),
+                slots,
+                false,
+            )),
             segments: Some(self.remap_refs(
                 self.segments.query_xy(aabb),
                 slots,
@@ -1164,6 +1212,7 @@ impl InteractionIndex {
                 self.wires
                     .query_screen(screen_rect, view_rot, eye, bounds),
                 slots,
+                true,
             )),
             segments: Some(self.remap_refs(
                 self.segments
@@ -1251,6 +1300,7 @@ impl InteractionIndex {
     ) -> InteractionCandidates {
         let mut wire_indices = self.wires.query_screen(screen_rect, view_rot, eye, bounds);
         wire_indices.extend_from_slice(&self.unbounded_wires);
+        wire_indices.extend_from_slice(&self.screen_unbounded_wires);
         wire_indices.sort_unstable();
         wire_indices.dedup();
         InteractionCandidates {
@@ -1601,6 +1651,26 @@ impl<'a> Iterator for WireIter<'a> {
 }
 
 fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
+    if let Some(marker) = wire.point_marker {
+        if !marker.origin.is_finite() {
+            return None;
+        }
+        let normal = marker.normal.try_normalize().unwrap_or(DVec3::Z);
+        let mut min_axial = 0.0f64;
+        let mut max_axial = 0.0f64;
+        for index in 0..wire.points.len() {
+            let point = DVec3::from_array(wire_point(wire, index));
+            if point.is_finite() {
+                let axial = (point - marker.origin).dot(normal);
+                min_axial = min_axial.min(axial);
+                max_axial = max_axial.max(axial);
+            }
+        }
+        return points_aabb3([
+            (marker.origin + normal * min_axial).to_array(),
+            (marker.origin + normal * max_axial).to_array(),
+        ]);
+    }
     let [min_x, min_y, max_x, max_y] = wire.aabb;
     if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
         return None;

@@ -104,31 +104,31 @@ pub fn format_length(value: f64) -> String {
     match ctx.lunits {
         1 => format!("{:.*e}", prec, value),
         3 => {
-            // Engineering: ft-inches, decimal inches.
+            // Round before splitting so twelve inches carries into feet.
             let sign = if value < 0.0 { "-" } else { "" };
             let abs = value.abs();
-            let feet = (abs / 12.0).trunc();
-            let rem = abs - feet * 12.0;
+            let scale = 10f64.powi(prec.min(15) as i32);
+            let total = (abs * scale).round();
+            let per_foot = 12.0 * scale;
+            let feet = (total / per_foot).trunc();
+            let rem = (total - feet * per_foot) / scale;
             format!("{}{:.0}'-{:.*}\"", sign, feet, prec, rem)
         }
         4 | 5 => {
-            // Architectural / Fractional — n + fraction with 1/2^p denom (1
-            // unit = 1 inch). Use 6 as a moderate denominator power so the
-            // result reads like 1/64".
+            // Architectural and fractional formats use 1/64-inch resolution.
             let sign = if value < 0.0 { "-" } else { "" };
             let abs = value.abs();
-            let (feet, in_rem) = if ctx.lunits == 4 {
-                let f = (abs / 12.0).trunc();
-                (Some(f as i64), abs - f * 12.0)
+            let denom = 64.0;
+            let ticks = (abs * denom).round();
+            let (feet, rest) = if ctx.lunits == 4 {
+                let per_foot = 12.0 * denom;
+                (Some((ticks / per_foot).floor()), ticks.rem_euclid(per_foot))
             } else {
-                (None, abs)
+                (None, ticks)
             };
-            let whole = in_rem.trunc();
-            let frac = in_rem - whole;
-            let denom = 64u64;
-            let numer = (frac * denom as f64).round() as i64;
-            let mut n = numer as u64;
-            let mut d = denom;
+            let whole = (rest / denom).floor();
+            let mut n = (rest - whole * denom).round() as u64;
+            let mut d = denom as u64;
             while d > 1 && n % 2 == 0 && d % 2 == 0 {
                 n /= 2;
                 d /= 2;
@@ -140,11 +140,23 @@ pub fn format_length(value: f64) -> String {
             };
             let unit_suffix = if ctx.lunits == 4 { "\"" } else { "" };
             match feet {
-                Some(f) => format!("{}{}'-{:.0}{}{}", sign, f, whole, frac_str, unit_suffix),
+                Some(f) => format!("{}{:.0}'-{:.0}{}{}", sign, f, whole, frac_str, unit_suffix),
                 None => format!("{}{:.0}{}", sign, whole, frac_str),
             }
         }
         _ => format!("{:.*}", prec, value),
+    }
+}
+
+/// Format an area with the drawing's linear precision. Area stays a decimal
+/// scalar even when linear distances use architectural or fractional notation.
+pub fn format_area(value: f64) -> String {
+    let ctx = unit_context();
+    let precision = ctx.luprec.max(0).min(15) as usize;
+    if ctx.lunits == 1 {
+        format!("{:.*e}", precision, value)
+    } else {
+        format!("{:.*}", precision, value)
     }
 }
 
@@ -169,10 +181,15 @@ pub fn format_angle(value_rad: f64) -> String {
 fn dms(degrees: f64, prec: usize) -> String {
     let sign = if degrees < 0.0 { "-" } else { "" };
     let a = degrees.abs();
-    let d = a.floor();
-    let m_full = (a - d) * 60.0;
-    let m = m_full.floor();
-    let s = (m_full - m) * 60.0;
+    // Round before splitting so seconds carry into minutes and degrees.
+    let scale = 10f64.powi(prec.min(15) as i32);
+    let per_minute = 60.0 * scale;
+    let per_degree = 60.0 * per_minute;
+    let ticks = (a * per_degree).round();
+    let d = (ticks / per_degree).trunc();
+    let rest = ticks - d * per_degree;
+    let m = (rest / per_minute).trunc();
+    let s = (rest - m * per_minute) / scale;
     format!("{}{:.0}d{:.0}'{:.*}\"", sign, d, m, prec, s)
 }
 
@@ -183,20 +200,26 @@ fn dms(degrees: f64, prec: usize) -> String {
 /// the single letter, which is also what keeps a 90° angle from reading as the
 /// contradictory `N 90d0'0" E`.
 fn surveyor(value_rad: f64, prec: usize) -> String {
-    let deg = value_rad.to_degrees().rem_euclid(360.0);
-    let near = |target: f64| (deg - target).abs() < 1e-9;
-    if near(0.0) {
+    // Quantize before choosing a cardinal or quadrant.
+    let scale = 3600.0 * 10f64.powi(prec.min(15) as i32);
+    let turn = 360.0 * scale;
+    let ticks = (value_rad.to_degrees().rem_euclid(360.0) * scale)
+        .round()
+        .rem_euclid(turn);
+    let at = |degrees: f64| (ticks - degrees * scale).abs() < 0.5;
+    if at(0.0) {
         return "E".into();
     }
-    if near(90.0) {
+    if at(90.0) {
         return "N".into();
     }
-    if near(180.0) {
+    if at(180.0) {
         return "W".into();
     }
-    if near(270.0) {
+    if at(270.0) {
         return "S".into();
     }
+    let deg = ticks / scale;
     // Measured from the nearer pole, toward the side the angle falls on.
     let (pole, bearing, side) = if deg < 90.0 {
         ("N", 90.0 - deg, "E")
@@ -409,6 +432,11 @@ pub fn parse_direction(text: &str) -> Option<f64> {
     Some(relative + ctx.angbase)
 }
 
+/// Read a direction typed at a command prompt, accepting a decimal comma.
+pub fn parse_typed_direction(text: &str) -> Option<f64> {
+    parse_direction(&text.replace(',', "."))
+}
+
 /// Two interior triangles covering a quad (flat list, 6 vertices) — the
 /// click-anywhere pick surface for frame-like entities (image, OLE frame,
 /// underlay, wipeout). Corners in ring order.
@@ -453,6 +481,30 @@ pub fn circle_grip(id: usize, world: glam::DVec3) -> GripDef {
     }
 }
 
+/// Round grip that edits one vertex.
+pub fn round_grip(id: usize, world: glam::DVec3) -> GripDef {
+    GripDef {
+        id,
+        world,
+        is_midpoint: false,
+        shape: GripShape::Circle,
+        dir: None,
+        axis: None,
+    }
+}
+
+/// Screen-offset down-arrow that opens a choice menu for an entity.
+pub fn dropdown_grip(id: usize, world: glam::DVec3) -> GripDef {
+    GripDef {
+        id,
+        world,
+        is_midpoint: false,
+        shape: GripShape::Dropdown,
+        dir: None,
+        axis: None,
+    }
+}
+
 /// Mid-segment stretch grip oriented along `dir` (the segment's in-plane
 /// world-XY direction). Drawn as a small rectangle elongated along the
 /// segment so the affordance reads as "stretch perpendicular".
@@ -462,7 +514,7 @@ pub fn rectangle_grip(id: usize, world: glam::DVec3, dir: [f32; 2]) -> GripDef {
         world,
         is_midpoint: true,
         shape: GripShape::Rectangle,
-        dir: Some(dir),
+        dir: Some(glam::DVec3::new(dir[0] as f64, dir[1] as f64, 0.0)),
         axis: None,
     }
 }
@@ -475,6 +527,18 @@ pub fn triangle_grip(id: usize, world: glam::DVec3) -> GripDef {
         is_midpoint: false,
         shape: GripShape::Triangle,
         dir: None,
+        axis: None,
+    }
+}
+
+/// Triangle grip pointing along a world-space direction.
+pub fn oriented_triangle_grip(id: usize, world: glam::DVec3, dir: glam::DVec3) -> GripDef {
+    GripDef {
+        id,
+        world,
+        is_midpoint: false,
+        shape: GripShape::Triangle,
+        dir: Some(dir),
         axis: None,
     }
 }
@@ -496,6 +560,16 @@ pub fn edit_prop(label: &str, field: &'static str, value: f64) -> Property {
         label: label.into(),
         field,
         value: PropValue::EditText(format_length(value)),
+    }
+}
+
+/// Editable dimensionless value independent of drawing units.
+pub fn edit_scalar_prop(label: &str, field: &'static str, value: f64) -> Property {
+    let value = if value == 0.0 { 0.0 } else { value };
+    Property {
+        label: label.into(),
+        field,
+        value: PropValue::EditText(value.to_string()),
     }
 }
 
@@ -538,8 +612,13 @@ pub fn stepper_prop(
 
 pub fn parse_f64(value: &str) -> Option<f64> {
     let t = value.trim();
-    // Angle rows display via AUNITS (#297) — accept those formats back.
-    t.parse::<f64>().ok().or_else(|| parse_angle_deg(t))
+    // Length rows display via LUNITS and angle rows via AUNITS. Accept both
+    // representations back so a value shown by Properties can always be
+    // committed unchanged.
+    t.parse::<f64>()
+        .ok()
+        .or_else(|| parse_length(t))
+        .or_else(|| parse_angle_deg(t))
 }
 
 /// Parse an angle string the panel displayed via AUNITS back to DEGREES:
@@ -789,5 +868,126 @@ pub(crate) fn polyline_segment_fill(
             boundary.push([cx + ri * ang.cos(), cy + ri * ang.sin()]);
         }
         Some(boundary)
+    }
+}
+
+#[cfg(test)]
+mod length_format_tests {
+    use super::*;
+
+    fn with_units(lunits: i16, luprec: i16, value: f64) -> String {
+        let mut ctx = unit_context();
+        ctx.lunits = lunits;
+        ctx.luprec = luprec;
+        set_unit_context(ctx);
+        format_length(value)
+    }
+
+    #[test]
+    fn fractional_carries_a_rounded_up_fraction() {
+        assert_eq!(with_units(5, 4, 5.99), "5 63/64");
+        assert_eq!(with_units(5, 4, 5.995), "6");
+        assert_eq!(with_units(5, 4, 0.995), "1");
+        assert_eq!(with_units(5, 4, 11.999), "12");
+        assert_eq!(with_units(5, 4, -5.995), "-6");
+        assert_eq!(with_units(5, 4, 0.5), "0 1/2");
+        assert_eq!(with_units(5, 4, 9.25), "9 1/4");
+        assert_eq!(with_units(5, 4, 3.0e17), "300000000000000000");
+    }
+
+    #[test]
+    fn architectural_carries_into_feet() {
+        assert_eq!(with_units(4, 4, 11.99), "0'-11 63/64\"");
+        assert_eq!(with_units(4, 4, 11.999), "1'-0\"");
+        assert_eq!(with_units(4, 4, 23.999), "2'-0\"");
+        assert_eq!(with_units(4, 4, 66.5), "5'-6 1/2\"");
+        assert_eq!(with_units(4, 4, -11.999), "-1'-0\"");
+    }
+
+    #[test]
+    fn engineering_carries_into_feet() {
+        assert_eq!(with_units(3, 1, 11.94), "0'-11.9\"");
+        assert_eq!(with_units(3, 1, 11.99), "1'-0.0\"");
+        assert_eq!(with_units(3, 1, 23.99), "2'-0.0\"");
+        assert_eq!(with_units(3, 2, 11.999), "1'-0.00\"");
+        assert_eq!(with_units(3, 1, 66.5), "5'-6.5\"");
+    }
+
+    #[test]
+    fn formatted_lengths_read_back() {
+        for lunits in [3, 4, 5] {
+            for value in [0.995f64, 5.995, 11.999, 23.999, 66.5, 9.25] {
+                let shown = with_units(lunits, if lunits == 3 { 4 } else { 4 }, value);
+                let read = parse_length(&shown)
+                    .unwrap_or_else(|| panic!("lunits {lunits} wrote {shown:?}, which does not read back"));
+                assert!(
+                    (read - value).abs() < 0.02,
+                    "lunits {lunits}: {value} wrote {shown:?}, read back as {read}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod angle_format_tests {
+    use super::*;
+
+    fn shown(aunits: i16, auprec: i16, degrees: f64) -> String {
+        let mut ctx = unit_context();
+        ctx.aunits = aunits;
+        ctx.auprec = auprec;
+        set_unit_context(ctx);
+        format_angle(degrees.to_radians())
+    }
+
+    #[test]
+    fn degrees_minutes_seconds_carry() {
+        assert_eq!(shown(1, 0, 45.9999), "46d0'0\"");
+        assert_eq!(shown(1, 0, 89.99999), "90d0'0\"");
+        assert_eq!(shown(1, 0, 0.99999), "1d0'0\"");
+        assert_eq!(shown(1, 0, 45.5), "45d30'0\"");
+        assert_eq!(shown(1, 2, 45.9999), "45d59'59.64\"");
+        assert_eq!(shown(1, 2, 45.5), "45d30'0.00\"");
+    }
+
+    #[test]
+    fn surveyor_bearings_stay_inside_a_quadrant() {
+        assert_eq!(shown(4, 0, 359.99999), "E");
+        assert_eq!(shown(4, 0, 89.99999), "N");
+        assert_eq!(shown(4, 0, 45.0), "N 45d0'0\" E");
+        assert_eq!(shown(4, 0, 180.0), "W");
+        assert_ne!(shown(4, 8, 0.0000000005), "E");
+        for prec in [0, 2] {
+            for deg in [0.99999f64, 45.9999, 89.99999, 179.99999, 269.99999, 359.99999] {
+                let text = shown(4, prec, deg);
+                assert!(
+                    !text.contains("90d"),
+                    "prec {prec}: {deg} wrote {text:?}, a quarter turn inside a quadrant"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn formatted_angles_read_back() {
+        for aunits in [0, 1, 4] {
+            for prec in [0, 2] {
+                for deg in [0.99999f64, 45.5, 45.9999, 89.99999, 200.25, 359.99999] {
+                    let text = shown(aunits, prec, deg);
+                    let read = parse_angle(&text).unwrap_or_else(|| {
+                        panic!("aunits {aunits} prec {prec} wrote {text:?}, which does not read back")
+                    });
+                    let delta = (read.to_degrees().rem_euclid(360.0) - deg.rem_euclid(360.0))
+                        .rem_euclid(360.0);
+                    let delta = delta.min(360.0 - delta);
+                    assert!(
+                        delta < 1.0,
+                        "aunits {aunits} prec {prec}: {deg} wrote {text:?}, read back as {}",
+                        read.to_degrees()
+                    );
+                }
+            }
+        }
     }
 }

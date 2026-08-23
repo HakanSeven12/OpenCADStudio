@@ -98,7 +98,8 @@ folder and load again on the next desktop launch.
 ## Build & deploy
 
 - Native: `cargo build --release --bin OpenCADStudio`.
-- Web: `trunk build --release --public-url /OpenCADStudio/`.
+- Web app: `trunk build --release --public-url /app/ --dist dist/app --html-output index.html web-app.html`.
+  Run `sh scripts/assemble-site.sh` afterward to add the landing page.
   `.github/workflows/pages.yml` builds and deploys to GitHub Pages on every
   release. No COOP/COEP headers are needed because the web build is
   single-threaded.

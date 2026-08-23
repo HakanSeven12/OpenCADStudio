@@ -123,6 +123,7 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
             }])
         }
         EntityType::LwPolyline(p) => {
+            let p = crate::entities::curve::lwpolyline_world_xy(p)?;
             if p.is_closed || p.vertices.len() < 2 {
                 return None;
             }

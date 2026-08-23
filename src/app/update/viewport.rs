@@ -253,17 +253,44 @@ impl OpenCADStudio {
         eye: glam::DVec3,
         bounds: iced::Rectangle,
     ) -> Option<crate::snap::OtrackHit> {
-        if snap.is_some_and(|hit| hit.snap_type != crate::snap::SnapType::Extension) {
+        let intersection = snap.filter(|hit| {
+            hit.snap_type == crate::snap::SnapType::Intersection
+        });
+
+        // Ordinary object snaps suppress OTRACK. Extension and Intersection are
+        // exceptions: both may lie on an active tracking vector.
+        if snap.is_some_and(|hit| {
+            !matches!(
+                hit.snap_type,
+                crate::snap::SnapType::Extension | crate::snap::SnapType::Intersection
+            )
+        }) {
             return None;
         }
+
         let required_crossing_ray = match snap {
-            Some(extension) => Some((extension.extension_origin?, extension.extension_dir?)),
-            None => None,
+            Some(extension)
+                if extension.snap_type == crate::snap::SnapType::Extension =>
+            {
+                Some((
+                    extension.extension_origin?,
+                    extension.extension_dir?,
+                ))
+            }
+            _ => None,
         };
+
+        // When Intersection has already won OSNAP selection, test OTRACK at the
+        // exact intersection rather than at the free cursor position.
+        let track_cursor = intersection
+            .map(|hit| hit.world)
+            .unwrap_or(cursor);
+
         let step = (self.polar_mode && drafting).then_some(self.polar_increment_deg);
         let (_, (ucs_x, ucs_y, _)) = self.drafting_grid_basis(tab);
-        let hit = self.snapper.otrack_snap(
-            cursor,
+
+        let mut hit = self.snapper.otrack_snap(
+            track_cursor,
             view_rot,
             eye,
             bounds,
@@ -274,6 +301,28 @@ impl OpenCADStudio {
             ucs_x.as_dvec3(),
             ucs_y.as_dvec3(),
         )?;
+
+        if let Some(intersection) = intersection {
+            // Only keep the vector when it really passes through the highlighted
+            // intersection. This avoids showing an unrelated nearby tracking ray.
+            let ndc = view_rot.project_point3((hit.aligned - eye).as_vec3());
+            let aligned_screen = iced::Point::new(
+                (ndc.x + 1.0) * 0.5 * bounds.width,
+                (1.0 - ndc.y) * 0.5 * bounds.height,
+            );
+
+            let dx = aligned_screen.x - intersection.screen.x;
+            let dy = aligned_screen.y - intersection.screen.y;
+
+            if dx * dx + dy * dy > 4.0 {
+                return None;
+            }
+
+            // OTRACK is only providing the visual/reference vector here.
+            // Intersection remains the exact picked point.
+            hit.aligned = intersection.world;
+        }
+
         Some(hit)
     }
 
@@ -292,8 +341,9 @@ impl OpenCADStudio {
             .abs();
         if !self.point_size_relative && mag == 0.0 {
             let wpp = self.tabs[i].scene.world_per_pixel().unwrap_or(0.0);
+            let viewport_height = self.tabs[i].scene.selection.borrow().vp_size.1;
             mag = if wpp > 0.0 {
-                crate::entities::point::relative_world_size(0.0, wpp)
+                crate::entities::point::relative_world_size(0.0, wpp, viewport_height)
             } else {
                 1.0
             };
@@ -653,7 +703,9 @@ impl OpenCADStudio {
                         screen: p,
                         started: iced::time::Instant::now(),
                     });
-                    self.grip_popup = None;
+                    if !self.grip_popup.as_ref().is_some_and(|popup| popup.pinned) {
+                        self.grip_popup = None;
+                    }
                 } else if let Some(h) = self.grip_hover.as_mut() {
                     h.screen = p;
                 }
@@ -672,12 +724,17 @@ impl OpenCADStudio {
                         use crate::entities::traits::EntityTypeOps;
                         let items = e.grip_menu(grip_id);
                         if !items.is_empty() {
+                            let selected = items
+                                .iter()
+                                .position(|item| item.label.starts_with('✓'))
+                                .unwrap_or(0);
                             self.grip_popup = Some(crate::app::GripPopup {
                                 handle,
                                 grip_id,
                                 anchor: p,
                                 items,
-                                selected: 0,
+                                selected,
+                                pinned: false,
                             });
                         }
                     }
@@ -685,7 +742,7 @@ impl OpenCADStudio {
             }
             None => {
                 self.grip_hover = None;
-                if let Some(popup) = &self.grip_popup {
+                if let Some(popup) = self.grip_popup.as_ref().filter(|popup| !popup.pinned) {
                     let dx = p.x - popup.anchor.x;
                     let dy = p.y - popup.anchor.y;
                     if (dx * dx + dy * dy).sqrt() > POPUP_DISMISS_PX {
@@ -752,6 +809,7 @@ impl OpenCADStudio {
         // render mode; the model-layout tab style is untouched.
         if self.tabs[i].scene.set_active_viewport_render_mode(mode) {
             self.tabs[i].scene.bump_geometry_no_blocks();
+            self.tabs[i].dirty = true;
             self.command_line
                 .push_output(crate::tf!("Viewport visual style: {label}").as_ref());
             return Task::none();
@@ -770,6 +828,7 @@ impl OpenCADStudio {
         // Re-upload face3d fills on the next frame — the render
         // pipeline keys its upload cache off `geometry_epoch`.
         self.tabs[i].scene.bump_geometry_no_blocks();
+        self.tabs[i].dirty = true;
         self.command_line
             .push_output(crate::tf!("Visual style: {label}").as_ref());
         Task::none()
@@ -1210,7 +1269,14 @@ impl OpenCADStudio {
                 // Keep the entity's original geometry available for self-OSNAP,
                 // Extension and OTRACK while the live grip preview is being deformed.
                 self.grip_snap_wires = snap.clone();
-
+                // The user explicitly picked this grip, so treat its original position as an
+                // acquired tracking point immediately. This lets Extension/OTRACK use the
+                // original edge direction on the very first movement instead of requiring the
+                // cursor to return to the old grip position and dwell there first.
+                self.snapper.acquire_grip_tracking_point(
+                    grip.origin_world,
+                    &self.grip_snap_wires,
+                );
                 self.grip_text_verts = snap
                     .iter()
                     .flat_map(|w| w.text_verts.iter().copied())
@@ -1749,6 +1815,49 @@ impl OpenCADStudio {
                 self.axis_lock_dir = None;
                 None
             };
+            // An acquired OTRACK ray can cross real drawing geometry even before the
+            // command has a first point. Probe the active tracking ray and let the normal
+            // snap engine evaluate that ray against nearby geometry as a construction ray.
+            //
+            // This makes OTRACK × entity crossings real Intersection snaps, so the normal
+            // dwell acquisition can subsequently turn the crossing into a tracking point.
+            if axis_lock.is_none() && !is_window_corner {
+                let tracking_probe = self.active_otrack_hit(
+                    i,
+                    cursor_world,
+                    None,
+                    self.last_point,
+                    true,
+                    view_rot,
+                    eye,
+                    bounds,
+                );
+
+                if let Some(track) = tracking_probe {
+                    let (go, gr) = self.drafting_grid_basis(i);
+
+                    let tracked_snap = self.snapper.snap(
+                        snap_cursor,
+                        p,
+                        &snap_candidates,
+                        view_rot,
+                        eye,
+                        bounds,
+                        go,
+                        gr,
+                        Some((track.base, track.base + track.dir)),
+                    );
+
+                    // The second pass exists only to discover a crossing between the
+                    // active OTRACK ray and real geometry. Keep the original snap result
+                    // for every other kind of snap.
+                    if tracked_snap
+                        .is_some_and(|hit| hit.snap_type == crate::snap::SnapType::Intersection)
+                    {
+                        self.tabs[i].snap_result = tracked_snap;
+                    }
+                }
+            }
             self.snapper.update_otrack_dwell(
                 self.tabs[i].snap_result,
                 &snap_candidates,
@@ -2131,9 +2240,12 @@ impl OpenCADStudio {
                         let far_pos = base + dir * far;
                         let far_neg = base - dir * far;
                         let guide = crate::scene::WireModel {
+                            point_marker: None,
                             taper_widths: Vec::new(),
                             world_width: 0.0,
                             depth_override: None,
+                            display_visible: true,
+                            plot_visible: true,
                             fill_is_3d: false,
                             fill_is_2d_solid: false,
                             render_instance: None,
@@ -2736,6 +2848,32 @@ impl OpenCADStudio {
                     let Some(&handle) = self.tabs[i].selected_grip_handles.get(grip_index) else {
                         return Task::none();
                     };
+                    let grip_shape = self.tabs[i].selected_grips[grip_index].shape;
+                    if grip_shape == crate::scene::model::object::GripShape::Dropdown {
+                        use crate::entities::traits::EntityTypeOps;
+                        let items = self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(handle)
+                            .map(|entity| entity.grip_menu(grip_id))
+                            .unwrap_or_default();
+                        if !items.is_empty() {
+                            let selected = items
+                                .iter()
+                                .position(|item| item.label.starts_with('✓'))
+                                .unwrap_or(0);
+                            self.grip_popup = Some(crate::app::GripPopup {
+                                handle,
+                                grip_id,
+                                anchor: p_full,
+                                items,
+                                selected,
+                                pinned: true,
+                            });
+                        }
+                        self.grip_hover = None;
+                        return Task::none();
+                    }
                     // The visibility (lookup) grip opens a state
                     // dropdown instead of starting a stretch drag.
                     if grip_id == crate::app::visibility::VIS_GRIP_ID {
@@ -3022,7 +3160,7 @@ impl OpenCADStudio {
                     .as_ref()
                     .map(|c| c.needs_entity_pick())
                     .unwrap_or(false);
-                let snap_hit = if needs_entity_click {
+                let mut snap_hit = if needs_entity_click {
                     None
                 } else if needs_tan {
                     self.snapper.snap_tangent_only(
@@ -3064,6 +3202,43 @@ impl OpenCADStudio {
                         construction_ray,
                     )
                 };
+                // Mirror the cursor-move OTRACK × geometry intersection pass when the
+                // point is actually clicked. The move path may already display the
+                // Intersection marker, but click handling recomputes snapping from scratch.
+                if !needs_entity_click && !needs_tan && !is_window_corner {
+                    let tracking_probe = self.active_otrack_hit(
+                        i,
+                        raw,
+                        None,
+                        self.last_point,
+                        true,
+                        view_rot,
+                        eye,
+                        bounds,
+                    );
+
+                    if let Some(track) = tracking_probe {
+                        let (go, gr) = self.drafting_grid_basis(i);
+
+                        let tracked_snap = self.snapper.snap(
+                            snap_cursor,
+                            p,
+                            &snap_candidates,
+                            view_rot,
+                            eye,
+                            bounds,
+                            go,
+                            gr,
+                            Some((track.base, track.base + track.dir)),
+                        );
+
+                        if tracked_snap
+                            .is_some_and(|hit| hit.snap_type == crate::snap::SnapType::Intersection)
+                        {
+                            snap_hit = tracked_snap;
+                        }
+                    }
+                }
                 // Snap runs in model space; the result is already model.
                 let mut pt = snap_hit.map(|s| s.world).unwrap_or(raw);
                 // When no UCS is active clamp to world XY; with a UCS the point is
@@ -3279,6 +3454,38 @@ impl OpenCADStudio {
                     })?
                 });
                 if let Some(handle) = hit {
+                    let uses_surface_point = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|command| command.entity_pick_uses_surface_point());
+                    let entity_pick_point = if uses_surface_point {
+                        self.tabs[i]
+                            .scene
+                            .solid_click_point_for(p, view_rot2, eye2, bounds, handle)
+                            .unwrap_or(pick_wcs)
+                    } else {
+                        pick_wcs
+                    };
+                    let entity_pick_direction = if uses_surface_point {
+                        if matches!(
+                            self.tabs[i].scene.document.get_entity(handle),
+                            Some(acadrust::EntityType::Solid3D(_))
+                        ) {
+                            self.tabs[i]
+                                .scene
+                                .solid_planar_face_normal_at(handle, entity_pick_point)
+                        } else {
+                            self.tabs[i]
+                                .scene
+                                .document
+                                .get_entity(handle)
+                                .and_then(crate::entities::curve::entity_curve)
+                                .and_then(|curve| curve.plane.normal())
+                                .map(glam::DVec3::from_array)
+                        }
+                    } else {
+                        None
+                    };
                     // Some commands (e.g. SS_CATCHMENT) need the entity
                     // body before `on_entity_pick` can advance.
                     let inject_first = self.tabs[i]
@@ -3309,7 +3516,8 @@ impl OpenCADStudio {
                     let result = self.tabs[i].active_cmd.as_mut().map(|c| {
                         // Shift-swap state for TRIM/EXTEND (#336).
                         c.set_shift(shift);
-                        c.on_entity_pick(handle, pick_wcs)
+                        c.set_entity_pick_direction(entity_pick_direction);
+                        c.on_entity_pick(handle, entity_pick_point)
                     });
                     // HATCHEDIT: after pick, inject hatch model data into the command.
                     if self.tabs[i]
@@ -3319,13 +3527,28 @@ impl OpenCADStudio {
                         .unwrap_or(false)
                     {
                         if let Some(model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
+                            let entity = self.tabs[i].scene.document.get_entity(handle);
+                            let annotative = entity.is_some_and(|entity| {
+                                    crate::scene::annotative::is_annotative(
+                                        &self.tabs[i].scene.document,
+                                        entity,
+                                    )
+                                });
+                            let (scale, angle) = match entity {
+                                Some(acadrust::EntityType::Hatch(hatch)) => (
+                                    hatch.pattern_scale as f32,
+                                    hatch.pattern_angle.to_degrees() as f32,
+                                ),
+                                _ => (model.scale, model.angle_offset.to_degrees()),
+                            };
                             use crate::command::CadCommand;
                             use crate::modules::draw::draw::hatchedit::HatcheditCommand;
                             let cmd: Box<dyn CadCommand> = Box::new(HatcheditCommand::with_handle(
                                 handle,
                                 model.name.clone(),
-                                model.scale,
-                                model.angle_offset,
+                                scale,
+                                angle,
+                                annotative,
                             ));
                             self.command_line.push_info(&cmd.prompt());
                             self.tabs[i].active_cmd = Some(cmd);
@@ -3821,8 +4044,7 @@ impl OpenCADStudio {
                             )
                         })
                         .or_else(|| {
-                            // Block-internal hatch: resolve to the
-                            // parent Insert (AutoCAD behaviour).
+                            // Block-internal hatch: resolve to the parent Insert.
                             scene::pick::hit_test::click_hit_insert_hatch(
                                 p,
                                 self.tabs[i].scene.insert_hatches_for_click().as_ref(),

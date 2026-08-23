@@ -695,16 +695,17 @@ async fn load_web_bytes(
     Ok((name.to_string(), path, doc, caches))
 }
 
-/// Parse a CAD document from in-memory bytes, choosing the format from
-/// `name`'s extension. Used by the web build, where files arrive as bytes from
-/// a browser file picker (no filesystem path). Shares the post-load fixups with
-/// [`load_file`]; raster-image path resolution is skipped (there is no sibling
-/// directory to search on the web).
+/// Parse a drawing from bytes using its name or recovery-file signature.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
     use std::io::Cursor;
     let ext = name.rsplit('.').next().unwrap_or_default().to_lowercase();
-    match ext.as_str() {
+    let format = if matches!(ext.as_str(), "bak" | "sv$") {
+        sniff_dwg_or_dxf_bytes(&bytes)
+    } else {
+        ext.as_str()
+    };
+    match format {
         "dwg" => {
             let mut doc = DwgReader::from_stream(Cursor::new(bytes))
                 .read()
@@ -737,10 +738,14 @@ fn sniff_dwg_or_dxf(path: &Path) -> String {
     if let Ok(mut f) = std::fs::File::open(path) {
         let _ = f.read(&mut buf);
     }
-    if buf.starts_with(b"AC10") {
-        "dwg".to_string()
+    sniff_dwg_or_dxf_bytes(&buf).to_string()
+}
+
+fn sniff_dwg_or_dxf_bytes(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"AC10") {
+        "dwg"
     } else {
-        "dxf".to_string()
+        "dxf"
     }
 }
 
@@ -1345,7 +1350,7 @@ fn validate_save_extension(path: &Path) -> Result<(), SaveFailure> {
         .extension()
         .map(|value| value.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if matches!(extension.as_str(), "dwg" | "dxf") {
+    if matches!(extension.as_str(), "dwg" | "dxf" | "sv$") {
         return Ok(());
     }
 
@@ -1784,6 +1789,7 @@ fn fix_current_style_names(doc: &mut CadDocument) {
             doc.header.current_mleader_style_name = v;
         }
     }
+    reflect_sketch_settings(doc);
 }
 
 /// Find the handle of the `DictionaryVariable` registered under `name` in any
@@ -1812,6 +1818,36 @@ fn vardict_value(doc: &CadDocument, name: &str) -> Option<String> {
         Some(ObjectType::DictionaryVariable(v)) => Some(v.value.clone()),
         _ => None,
     }
+}
+
+pub(crate) fn drawing_variable(doc: &CadDocument, name: &str) -> Option<String> {
+    vardict_value(doc, name)
+}
+
+fn reflect_sketch_settings(doc: &mut CadDocument) {
+    let sketch_type = vardict_value(doc, "SKPOLY")
+        .and_then(|value| value.parse::<i16>().ok())
+        .unwrap_or(doc.header.sketch_type)
+        .clamp(0, 2);
+    let increment = vardict_value(doc, "SKETCHINC")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(doc.header.sketch_increment);
+    let tolerance = vardict_value(doc, "SKTOLERANCE")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+        .unwrap_or(doc.header.sketch_tolerance);
+    doc.header.sketch_type = sketch_type;
+    doc.header.sketch_increment = if increment.is_finite() && increment > 0.0 {
+        increment
+    } else {
+        0.1
+    };
+    doc.header.sketch_tolerance = if tolerance.is_finite() {
+        tolerance.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
 }
 
 /// Write a drawing variable, creating the variable dictionary and record when
@@ -1853,6 +1889,31 @@ pub(crate) fn set_drawing_variable(doc: &mut CadDocument, name: &str, value: &st
     if let Some(ObjectType::Dictionary(dictionary)) = doc.objects.get_mut(&variable_dictionary) {
         dictionary.add_entry(name, handle);
     }
+}
+
+pub(crate) fn set_sketch_settings(
+    doc: &mut CadDocument,
+    sketch_type: i16,
+    increment: f64,
+    tolerance: f64,
+) {
+    let sketch_type = sketch_type.clamp(0, 2);
+    let increment = if increment.is_finite() && increment > 0.0 {
+        increment
+    } else {
+        0.1
+    };
+    let tolerance = if tolerance.is_finite() {
+        tolerance.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    doc.header.sketch_type = sketch_type;
+    doc.header.sketch_increment = increment;
+    doc.header.sketch_tolerance = tolerance;
+    set_drawing_variable(doc, "SKPOLY", &sketch_type.to_string());
+    set_drawing_variable(doc, "SKETCHINC", &increment.to_string());
+    set_drawing_variable(doc, "SKTOLERANCE", &tolerance.to_string());
 }
 
 /// The layout tab that was active when the drawing was saved — the `CTAB`
@@ -1915,6 +1976,10 @@ fn sync_current_styles_on_save(doc: &mut CadDocument) {
     set_drawing_variable(doc, "CMLEADERSTYLE", &mleader);
     let annotation = doc.header.current_annotation_scale.clone();
     set_drawing_variable(doc, "CANNOSCALE", &annotation);
+    let sketch_type = doc.header.sketch_type;
+    let increment = doc.header.sketch_increment;
+    let tolerance = doc.header.sketch_tolerance;
+    set_sketch_settings(doc, sketch_type, increment, tolerance);
 }
 
 // ── Corrupt-entity guard ──────────────────────────────────────────────────

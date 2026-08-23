@@ -158,7 +158,10 @@ pub fn lengthen_entity(entity: &EntityType, pick_pt: Vec3, mode: &LenMode) -> Op
         EntityType::Arc(a) => lengthen_arc(a, pick_pt, mode),
         EntityType::Ellipse(e) => lengthen_ellipse(e, pick_pt, mode),
         EntityType::Spline(s) => lengthen_spline(s, pick_pt, mode),
-        EntityType::LwPolyline(p) => lengthen_lwpoly(p, pick_pt, mode),
+        EntityType::LwPolyline(p) => {
+            let p = crate::entities::curve::lwpolyline_world_xy(p)?;
+            lengthen_lwpoly(&p, pick_pt, mode)
+        }
         _ => None,
     }
 }
@@ -210,37 +213,22 @@ fn lengthen_line(line: &LineEnt, pick_pt: Vec3, mode: &LenMode) -> Option<Entity
 }
 
 fn lengthen_arc(arc: &ArcEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {
-    let cx = arc.center.x as f32;
-    let cy = arc.center.y as f32;
-
     // Current arc span
     let span = arc_span_rad(arc.start_angle, arc.end_angle);
     let current_arc_len = arc.radius * span;
 
     let new_arc_len = apply_mode(current_arc_len, mode)?;
-    if new_arc_len < 1e-10 {
+    if new_arc_len < 1e-10 || new_arc_len >= std::f64::consts::TAU * arc.radius - 1.0e-9 {
         return None;
     }
     let new_span = new_arc_len / arc.radius;
 
     // Which end (start or end angle) is closer to pick?
-    let start_rad = arc.start_angle;
-    let end_rad = arc.end_angle;
-
-    let start_pt = Vec3::new(
-        cx + arc.radius as f32 * start_rad.cos() as f32,
-        pick_pt.y,
-        cy + arc.radius as f32 * start_rad.sin() as f32,
-    );
-    let end_pt = Vec3::new(
-        cx + arc.radius as f32 * end_rad.cos() as f32,
-        pick_pt.y,
-        cy + arc.radius as f32 * end_rad.sin() as f32,
-    );
+    let curve = crate::entities::curve::arc_curve(arc);
+    let start_pt = Vec3::from_array(curve.point_at(0.0).map(|value| value as f32));
+    let end_pt = Vec3::from_array(curve.point_at(1.0).map(|value| value as f32));
     let dist_start = (pick_pt - start_pt).length();
     let dist_end = (pick_pt - end_pt).length();
-
-    let delta_span = new_span - span;
 
     let mut result = arc.clone();
     result.common.handle = Handle::NULL;
@@ -252,7 +240,6 @@ fn lengthen_arc(arc: &ArcEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityTyp
         // Extend start angle (move start backwards)
         result.start_angle = arc.end_angle - new_span;
     }
-    let _ = delta_span;
     Some(EntityType::Arc(result))
 }
 

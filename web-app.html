@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, follow" />
+    <meta name="theme-color" content="#1e1e1e" />
+    <title>Open CAD Studio Web App</title>
+    <link data-trunk rel="icon" href="assets/logo.svg" />
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #1e1e1e; }
+      canvas { display: block; }
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: #1e1e1e;
+        color: #cfcfcf;
+        font-family: system-ui, sans-serif;
+        z-index: 9999;
+        transition: opacity 0.4s ease;
+      }
+      #loading.hide { opacity: 0; pointer-events: none; }
+      #loading .title { font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
+      #loading .title span { color: #3399e6; }
+      #loading .sub { font-size: 12px; color: #777; }
+      #loading .spinner {
+        width: 46px;
+        height: 46px;
+        border: 4px solid #2e2e2e;
+        border-top-color: #3399e6;
+        border-radius: 50%;
+        animation: ocs-spin 0.9s linear infinite;
+      }
+      @keyframes ocs-spin { to { transform: rotate(360deg); } }
+    </style>
+    <link data-trunk rel="rust" data-bin="OpenCADStudio" />
+    <link data-trunk rel="copy-dir" href="web/fonts" />
+    <link data-trunk rel="copy-file" href="web/ocs-parse-worker.js" />
+    <link data-trunk rel="copy-file" href="web/discussions.json" />
+    <link data-trunk rel="copy-file" href="web/videos.json" />
+  </head>
+  <body>
+    <div id="loading">
+      <div class="spinner"></div>
+      <div class="title">Open <span>CAD</span> Studio</div>
+      <div class="sub">Loading…</div>
+    </div>
+    <script>
+      (() => {
+        const splash = document.getElementById("loading");
+        const done = () => {
+          if (!splash) return;
+          splash.classList.add("hide");
+          setTimeout(() => splash.remove(), 450);
+        };
+        if (document.querySelector("canvas")) return done();
+        const observer = new MutationObserver(() => {
+          if (document.querySelector("canvas")) {
+            observer.disconnect();
+            done();
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      })();
+    </script>
+  </body>
+</html>

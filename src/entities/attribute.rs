@@ -417,17 +417,17 @@ impl PropertyEditable for AttributeDefinition {
             Property {
                 label: t!("Tag").into_owned(),
                 field: "att_tag",
-                value: PropValue::EditText(self.tag.clone()),
+                value: PropValue::PlainText(self.tag.clone()),
             },
             Property {
                 label: t!("Prompt").into_owned(),
                 field: "att_prompt",
-                value: PropValue::EditText(self.prompt.clone()),
+                value: PropValue::PlainText(self.prompt.clone()),
             },
             Property {
                 label: t!("Value").into_owned(),
                 field: "att_default",
-                value: PropValue::EditText(self.default_value.clone()),
+                value: PropValue::PlainText(self.default_value.clone()),
             },
             Property {
                 label: t!("Style").into_owned(),
@@ -698,13 +698,13 @@ impl PropertyEditable for AttributeEntity {
                     Property {
                         label: t!("Tag").into_owned(),
                         field: "atte_tag",
-                        value: PropValue::EditText(self.tag.clone()),
+                        value: PropValue::PlainText(self.tag.clone()),
                     },
                     ro(t!("Prompt").as_ref(), "atte_prompt", String::new()),
                     Property {
                         label: t!("Value").into_owned(),
                         field: "atte_val",
-                        value: PropValue::EditText(self.value.clone()),
+                        value: PropValue::PlainText(self.value.clone()),
                     },
                     Property {
                         label: t!("Style").into_owned(),

@@ -265,12 +265,21 @@ pub fn extract_pattern(desc: &str) -> String {
 
 /// Add all standard OpenCADStudio linetypes to `doc`, skipping existing ones.
 pub fn populate_document(doc: &mut CadDocument) {
-    for mut lt in parse(LIN_SOURCE) {
+    populate_document_from_source(doc, LIN_SOURCE);
+}
+
+/// Add all simple linetypes parsed from a caller-supplied `.lin` source.
+/// Returns the number of definitions newly registered in the drawing.
+pub fn populate_document_from_source(doc: &mut CadDocument, source: &str) -> usize {
+    let mut added = 0;
+    for mut lt in parse(source) {
         if !doc.line_types.contains(&lt.name) {
             lt.set_handle(doc.allocate_handle());
             doc.line_types.add(lt).ok();
+            added += 1;
         }
     }
+    added
 }
 
 

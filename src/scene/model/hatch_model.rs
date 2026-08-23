@@ -50,12 +50,19 @@ pub enum GradientKind {
 }
 
 impl GradientKind {
-    pub const ALL: [GradientKind; 5] = [
-        GradientKind::Linear,
-        GradientKind::Cylinder,
-        GradientKind::Spherical,
-        GradientKind::Hemispherical,
-        GradientKind::Curved,
+    /// User-facing gradient definitions in their standard persisted order.
+    /// Inverted definitions are real named patterns rather than a separate
+    /// property, so Properties and the draw command share this single list.
+    pub const CHOICES: [(GradientKind, bool); 9] = [
+        (GradientKind::Linear, false),
+        (GradientKind::Cylinder, false),
+        (GradientKind::Cylinder, true),
+        (GradientKind::Spherical, false),
+        (GradientKind::Hemispherical, false),
+        (GradientKind::Curved, false),
+        (GradientKind::Spherical, true),
+        (GradientKind::Hemispherical, true),
+        (GradientKind::Curved, true),
     ];
 
     /// Radial fills shade from the boundary centre outward.
@@ -63,18 +70,25 @@ impl GradientKind {
         matches!(self, GradientKind::Spherical | GradientKind::Hemispherical)
     }
 
-    pub fn label(self) -> &'static str {
-        match self {
-            GradientKind::Linear => "Linear",
-            GradientKind::Cylinder => "Cylinder",
-            GradientKind::Spherical => "Spherical",
-            GradientKind::Hemispherical => "Hemispherical",
-            GradientKind::Curved => "Curved",
+    pub fn choice_label(self, inverted: bool) -> &'static str {
+        match (self, inverted) {
+            (GradientKind::Linear, _) => "Linear",
+            (GradientKind::Cylinder, false) => "Cylindrical",
+            (GradientKind::Cylinder, true) => "Inverted cylindrical",
+            (GradientKind::Spherical, false) => "Spherical",
+            (GradientKind::Spherical, true) => "Inverted spherical",
+            (GradientKind::Hemispherical, false) => "Hemispherical",
+            (GradientKind::Hemispherical, true) => "Inverted hemispherical",
+            (GradientKind::Curved, false) => "Curved",
+            (GradientKind::Curved, true) => "Inverted curved",
         }
     }
 
-    pub fn from_label(label: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|k| k.label() == label)
+    pub fn from_choice_label(label: &str) -> Option<(Self, bool)> {
+        Self::CHOICES
+            .iter()
+            .copied()
+            .find(|(kind, inverted)| kind.choice_label(*inverted).eq_ignore_ascii_case(label))
     }
 
     /// Parse the DXF gradient name (`LINEAR`, `INVCYLINDER`, …) into the kind
@@ -139,6 +153,8 @@ pub enum HatchPattern {
         color2: [f32; 4],
         kind: GradientKind,
         invert: bool,
+        /// 0 = centred, 1 = shifted towards the upper-left light source.
+        shift: f32,
     },
 }
 
@@ -148,6 +164,13 @@ pub enum HatchPattern {
 /// unlike NaN self-comparison (#386, #416). Boundary verts are local
 /// (anchor-relative), so real coordinates never approach it.
 pub const GPU_BOUNDARY_SEP: f32 = 1.0e30;
+
+#[derive(Clone, Copy, Debug)]
+pub struct FillPlane {
+    pub origin: [f64; 3],
+    pub x_axis: [f64; 3],
+    pub y_axis: [f64; 3],
+}
 
 /// A hatched region defined by a closed polygon boundary.
 #[derive(Clone, Debug)]
@@ -180,10 +203,17 @@ pub struct HatchModel {
     /// rebuilt from a DXF entity — `add_hatch` then reconstructs the persisted
     /// vertices from `boundary` + `world_origin` instead.
     pub boundary_wcs: Option<Arc<Vec<[f64; 2]>>>,
+    /// Optional 3-D placement for planar fills.
+    pub fill_plane: Option<FillPlane>,
+    pub fill_plane_boundary: Option<Arc<Vec<[f32; 2]>>>,
     /// Per-ring DXF role, aligned with the NaN-separated boundary paths.
     pub boundary_exterior: Option<Arc<Vec<bool>>>,
     /// Source entity handles for each boundary ring.
     pub boundary_sources: Option<Arc<Vec<Vec<acadrust::Handle>>>>,
+    /// Exact boundary paths retained for persistence and editing.
+    pub boundary_paths: Option<Arc<Vec<acadrust::entities::BoundaryPath>>>,
+    /// Island handling used by the persisted hatch entity.
+    pub style: acadrust::entities::HatchStyleType,
     /// Fill pattern.
     pub pattern: HatchPattern,
     /// Catalog name for this pattern (e.g. "ANSI31", "SOLID", "LINEAR").
@@ -208,6 +238,25 @@ pub struct HatchModel {
 }
 
 impl HatchModel {
+    pub(crate) fn gradient_frame(
+        &self,
+        angle_deg: f32,
+        shift: f32,
+    ) -> Option<cadkernel::geom2d::GradientFrame> {
+        let boundary: Vec<[f64; 2]> = self
+            .boundary
+            .iter()
+            .filter(|point| point[0].is_finite() && point[1].is_finite())
+            .map(|point| [point[0] as f64, point[1] as f64])
+            .collect();
+        cadkernel::geom2d::gradient_frame(
+            &boundary,
+            (angle_deg as f64).to_radians(),
+            shift as f64,
+            Tolerance::default(),
+        )
+    }
+
     /// Indexed local-space fill mesh with even-odd loop containment.
     pub(crate) fn fill_mesh(&self) -> (Vec<[f32; 2]>, Vec<u32>) {
         let mut rings = Vec::new();

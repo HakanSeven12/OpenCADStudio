@@ -34,6 +34,9 @@ struct WireConst {
     world_half_width: f32,
     _pad1:          f32,
     _pad2:          f32,
+    marker_origin_high: vec4<f32>,
+    marker_origin_low: vec4<f32>,
+    marker_normal_scale: vec4<f32>,
 }
 @group(1) @binding(0) var<storage, read> wire_consts: array<WireConst>;
 
@@ -81,6 +84,28 @@ fn resolve_hw(taper_ratio: f32, world_hw: f32, px_hw: f32) -> f32 {
     return select(0.5, px_hw, u.lwdisplay_enable > 0.5);
 }
 
+fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireConst) -> vec3<f32> {
+    if c.marker_normal_scale.w <= 0.0 {
+        return (position_high - u.eye_high) + (position_low - u.eye_low);
+    }
+    let origin_high = c.marker_origin_high.xyz;
+    let origin_low = c.marker_origin_low.xyz;
+    let origin_relative = (origin_high - u.eye_high) + (origin_low - u.eye_low);
+    let delta = (position_high - origin_high) + (position_low - origin_low);
+    let normal = normalize(c.marker_normal_scale.xyz);
+    let axial = normal * dot(delta, normal);
+    let planar = delta - axial;
+    let origin_clip = u.view_rot * vec4<f32>(origin_relative, 1.0);
+    let projection_scale = max(length(vec3<f32>(
+        u.view_rot[0].y,
+        u.view_rot[1].y,
+        u.view_rot[2].y,
+    )), 1e-12);
+    let view_height = 2.0 * max(abs(origin_clip.w), 1e-6) / projection_scale;
+    let world_size = c.marker_normal_scale.w * 0.01 * view_height;
+    return origin_relative + axial + planar * world_size;
+}
+
 @vertex fn vs_main(@builtin(vertex_index) vid: u32, in: InstanceIn) -> VertexOut {
     let c = wire_consts[in.wire_id];
 
@@ -89,8 +114,8 @@ fn resolve_hw(taper_ratio: f32, world_hw: f32, px_hw: f32) -> f32 {
     let which_end = which_end_arr[vid];
     let side      = side_arr[vid];
 
-    let rel_a = (in.pos_a - u.eye_high) + (in.pos_a_low - u.eye_low);
-    let rel_b = (in.pos_b - u.eye_high) + (in.pos_b_low - u.eye_low);
+    let rel_a = marker_relative(in.pos_a, in.pos_a_low, c);
+    let rel_b = marker_relative(in.pos_b, in.pos_b_low, c);
     let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
     let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
 

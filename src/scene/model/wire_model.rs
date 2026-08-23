@@ -29,8 +29,44 @@ pub enum SnapHint {
 pub enum TangentGeom {
     /// Infinite line through these two world-space points.
     Line { p1: [f32; 3], p2: [f32; 3] },
-    /// Circle/arc.
+    /// Complete circle.
     Circle { center: [f32; 3], radius: f32 },
+    /// Complete circle in an arbitrary world-space plane.
+    PlanarCircle {
+        center: [f64; 3],
+        axis_x: [f64; 3],
+        axis_y: [f64; 3],
+        radius: f64,
+    },
+    /// Bounded circular arc in its world-space plane.
+    Arc {
+        center: [f64; 3],
+        axis_x: [f64; 3],
+        axis_y: [f64; 3],
+        radius: f64,
+        start_angle: f64,
+        end_angle: f64,
+    },
+}
+
+/// Viewport-relative display transform for a point marker.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointMarker {
+    pub origin: glam::DVec3,
+    pub normal: glam::DVec3,
+    pub axis_x: glam::DVec3,
+    pub axis_y: glam::DVec3,
+    pub viewport_percent: f32,
+}
+
+impl PointMarker {
+    pub fn resolve(self, point: glam::DVec3, view_height: f64) -> glam::DVec3 {
+        let normal = self.normal.normalize_or(glam::DVec3::Z);
+        let delta = point - self.origin;
+        let axial = normal * delta.dot(normal);
+        let scale = self.viewport_percent.max(0.0) as f64 * 0.01 * view_height.max(0.0);
+        self.origin + axial + (delta - axial) * scale
+    }
 }
 
 /// A 1-D entity (line, arc, polyline) represented as an ordered set of
@@ -50,6 +86,8 @@ pub struct WireModel {
     /// "all-zero residual" (interactive draw / preview wires whose coordinates
     /// don't need sub-f32 precision). Tessellation from CAD f64 fills it.
     pub points_low: Vec<[f32; 3]>,
+    /// Point-marker scaling shared by the GPU, picking, and plotting paths.
+    pub point_marker: Option<PointMarker>,
     /// RGBA colour in [0, 1].
     pub color: [f32; 4],
     /// Whether this wire is currently selected.
@@ -146,6 +184,10 @@ pub struct WireModel {
     /// mirroring how exploded block fills seed their depth, so bands and fills
     /// from the same block interleave by the block's internal draw order.
     pub depth_override: Option<f32>,
+    /// Whether this wire is drawn in the normal viewport pass.
+    pub display_visible: bool,
+    /// Whether this wire is included in plotted output.
+    pub plot_visible: bool,
     /// `true` when [`fill_tris`] is a real 3-D surface (PolyfaceMesh /
     /// PolygonMesh face) that must render with hidden-surface depth and only in
     /// shaded modes. `false` for a flat 2-D overlay fill (SOLID arrowhead,
@@ -205,9 +247,12 @@ impl WireModel {
     /// Create a solid wire (no dash pattern, 1px weight).
     pub fn solid(name: String, points: Vec<[f32; 3]>, color: [f32; 4], selected: bool) -> Self {
         Self {
+            point_marker: None,
             taper_widths: Vec::new(),
             world_width: 0.0,
             depth_override: None,
+            display_visible: true,
+            plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,
@@ -241,10 +286,11 @@ impl WireModel {
         out.name = format!("preview_{}", self.name);
         out.color = Self::CYAN;
         out.selected = false;
-        for p in &mut out.points {
-            p[0] += delta.x;
-            p[1] += delta.y;
-            p[2] += delta.z;
+        map_points(&mut out.points, &mut out.points_low, |point| {
+            point + delta.as_dvec3()
+        });
+        if let Some(marker) = &mut out.point_marker {
+            marker.origin += delta.as_dvec3();
         }
         if !out.text_verts.is_empty() {
             let (dx, dy, dz) = (delta.x as f64, delta.y as f64, delta.z as f64);
@@ -279,6 +325,17 @@ impl WireModel {
         for p in &mut out.points_low {
             *p = (rotation * glam::Vec3::from_array(*p)).to_array();
         }
+        if let Some(marker) = &mut out.point_marker {
+            let center = center.as_dvec3();
+            let rotation = glam::DQuat::from_axis_angle(
+                axis.as_dvec3().normalize_or(glam::DVec3::Z),
+                angle_rad as f64,
+            );
+            marker.origin = center + rotation * (marker.origin - center);
+            marker.normal = (rotation * marker.normal).normalize_or(glam::DVec3::Z);
+            marker.axis_x = (rotation * marker.axis_x).normalize_or(glam::DVec3::X);
+            marker.axis_y = (rotation * marker.axis_y).normalize_or(glam::DVec3::Y);
+        }
         if !out.text_verts.is_empty() {
             let center = center.as_dvec3();
             let axis = axis.as_dvec3().normalize_or_zero();
@@ -301,10 +358,23 @@ impl WireModel {
         out.name = format!("preview_{}", self.name);
         out.color = Self::CYAN;
         out.selected = false;
-        for p in &mut out.points {
-            p[0] = center.x + (p[0] - center.x) * factor;
-            p[1] = center.y + (p[1] - center.y) * factor;
-            p[2] = center.z + (p[2] - center.z) * factor;
+        if let Some(marker) = out.point_marker {
+            let center = center.as_dvec3();
+            let normal = marker.normal.normalize_or(glam::DVec3::Z);
+            let target_origin = center + (marker.origin - center) * factor as f64;
+            map_points(&mut out.points, &mut out.points_low, |point| {
+                let delta = point - marker.origin;
+                let axial = normal * delta.dot(normal);
+                target_origin + (delta - axial) + axial * factor as f64
+            });
+            if let Some(target) = &mut out.point_marker {
+                target.origin = target_origin;
+            }
+        } else {
+            let center = center.as_dvec3();
+            map_points(&mut out.points, &mut out.points_low, |point| {
+                center + (point - center) * factor as f64
+            });
         }
         if !out.text_verts.is_empty() {
             let (cx, cy, cz) = (center.x as f64, center.y as f64, center.z as f64);
@@ -351,11 +421,22 @@ pub fn stretched_windows(
             })
         };
 
-        for p in &mut out.points {
-            if inside(p[0], p[1]) {
-                p[0] += delta.x;
-                p[1] += delta.y;
-                p[2] += delta.z;
+        if let Some(marker) = out.point_marker {
+            if inside(marker.origin.x as f32, marker.origin.y as f32) {
+                map_points(&mut out.points, &mut out.points_low, |point| {
+                    point + delta.as_dvec3()
+                });
+                if let Some(target) = &mut out.point_marker {
+                    target.origin += delta.as_dvec3();
+                }
+            }
+        } else {
+            for p in &mut out.points {
+                if inside(p[0], p[1]) {
+                    p[0] += delta.x;
+                    p[1] += delta.y;
+                    p[2] += delta.z;
+                }
             }
         }
 
@@ -416,6 +497,20 @@ pub fn stretched_windows(
             let point = glam::Vec3::from_array(*p);
             *p = (point - 2.0 * plane_normal.dot(point) * plane_normal).to_array();
         }
+        if let Some(marker) = &mut out.point_marker {
+            let p1 = p1.as_dvec3();
+            let normal = plane_normal.as_dvec3();
+            marker.origin -= 2.0 * normal.dot(marker.origin - p1) * normal;
+            marker.normal =
+                (marker.normal - 2.0 * normal.dot(marker.normal) * normal)
+                    .normalize_or(glam::DVec3::Z);
+            marker.axis_x =
+                (marker.axis_x - 2.0 * normal.dot(marker.axis_x) * normal)
+                    .normalize_or(glam::DVec3::X);
+            marker.axis_y =
+                (marker.axis_y - 2.0 * normal.dot(marker.axis_y) * normal)
+                    .normalize_or(glam::DVec3::Y);
+        }
         // Glyph quads reflect wholesale (true mirror) — the caller only routes
         // text through here for MIRRTEXT-on; MIRRTEXT-off relocates via
         // `translated` so glyphs stay readable.
@@ -443,6 +538,44 @@ pub fn stretched_windows(
                 (dx * dx + dy * dy + dz * dz).sqrt()
             })
             .sum()
+    }
+
+    pub fn point_world(&self, index: usize, view_height: f64) -> glam::DVec3 {
+        let high = self.points[index];
+        let low = self.points_low.get(index).copied().unwrap_or([0.0; 3]);
+        let point = glam::DVec3::new(
+            high[0] as f64 + low[0] as f64,
+            high[1] as f64 + low[1] as f64,
+            high[2] as f64 + low[2] as f64,
+        );
+        self.point_marker
+            .map_or(point, |marker| marker.resolve(point, view_height))
+    }
+}
+
+fn map_points(
+    points: &mut [[f32; 3]],
+    points_low: &mut Vec<[f32; 3]>,
+    map: impl Fn(glam::DVec3) -> glam::DVec3,
+) {
+    let old_low = std::mem::take(points_low);
+    points_low.reserve(points.len());
+    for (index, high) in points.iter_mut().enumerate() {
+        if !high[0].is_finite() || !high[1].is_finite() || !high[2].is_finite() {
+            points_low.push([0.0; 3]);
+            continue;
+        }
+        let low = old_low.get(index).copied().unwrap_or([0.0; 3]);
+        let mapped = map(glam::DVec3::new(
+            high[0] as f64 + low[0] as f64,
+            high[1] as f64 + low[1] as f64,
+            high[2] as f64 + low[2] as f64,
+        ));
+        let (hx, lx) = WireModel::split_ds(mapped.x);
+        let (hy, ly) = WireModel::split_ds(mapped.y);
+        let (hz, lz) = WireModel::split_ds(mapped.z);
+        *high = [hx, hy, hz];
+        points_low.push([lx, ly, lz]);
     }
 }
 
@@ -480,6 +613,7 @@ pub(crate) fn map_text_verts(
 impl Default for WireModel {
     fn default() -> Self {
         Self {
+            point_marker: None,
             text_verts: Vec::new(),
             name: String::new(),
             points: Vec::new(),
@@ -502,6 +636,8 @@ impl Default for WireModel {
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
             depth_override: None,
+            display_visible: true,
+            plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,

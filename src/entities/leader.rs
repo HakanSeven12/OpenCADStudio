@@ -291,7 +291,7 @@ fn properties(leader: &Leader) -> Vec<PropSection> {
         Property {
             label: t!("Dim style").into_owned(),
             field: "dimension_style",
-            value: PropValue::EditText(leader.dimension_style.clone()),
+            value: PropValue::PlainText(leader.dimension_style.clone()),
         },
         choice_prop(
             t!("Type").as_ref(),
@@ -674,9 +674,12 @@ impl LeaderTess for Leader {
 
         if verts.len() < 2 {
             return WireModel {
+                point_marker: None,
                 taper_widths: Vec::new(),
                 world_width: 0.0,
                 depth_override: None,
+                display_visible: true,
+                plot_visible: true,
                 fill_is_3d: false,
                 fill_is_2d_solid: false,
                 render_instance: None,
@@ -850,9 +853,12 @@ impl LeaderTess for Leader {
             crate::scene::convert::tessellate::points_to_ds(fill_tris);
 
         WireModel {
+            point_marker: None,
             taper_widths: Vec::new(),
             world_width: 0.0,
             depth_override: None,
+            display_visible: true,
+            plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,

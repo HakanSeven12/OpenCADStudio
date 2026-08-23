@@ -7,6 +7,7 @@ use crate::entities::text_support::{resolve_text_style, text_local_bounds};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::model::wire_model::SnapHint;
 use crate::scene::text::lff;
 
 // ── Shared geometry helpers ───────────────────────────────────────────────────
@@ -416,62 +417,112 @@ impl Transformable for RasterImage {
 
 // ── Wipeout ───────────────────────────────────────────────────────────────────
 
+fn wipeout_is_polygonal(wipeout: &Wipeout) -> bool {
+    wipeout.clipping_enabled
+        && wipeout.clip_boundary_vertices.len() >= 3
+        && matches!(
+            wipeout.clip_type,
+            acadrust::entities::WipeoutClipType::Polygonal
+        )
+}
+
+fn wipeout_clip_to_world(wipeout: &Wipeout, point: &acadrust::types::Vector2) -> [f64; 3] {
+    let x = point.x + wipeout.size.x * 0.5;
+    let y = wipeout.size.y * 0.5 - point.y;
+    wipeout_plane(wipeout).point_at([x, y])
+}
+
+fn wipeout_plane(wipeout: &Wipeout) -> cadkernel::space::Plane {
+    cadkernel::space::Plane::from_axes(
+        [
+            wipeout.insertion_point.x,
+            wipeout.insertion_point.y,
+            wipeout.insertion_point.z,
+        ],
+        [
+            wipeout.u_vector.x,
+            wipeout.u_vector.y,
+            wipeout.u_vector.z,
+        ],
+        [
+            wipeout.v_vector.x,
+            wipeout.v_vector.y,
+            wipeout.v_vector.z,
+        ],
+    )
+}
+
+fn wipeout_boundary(wipeout: &Wipeout) -> Vec<[f64; 3]> {
+    if wipeout_is_polygonal(wipeout) {
+        wipeout
+            .clip_boundary_vertices
+            .iter()
+            .map(|point| wipeout_clip_to_world(wipeout, point))
+            .collect()
+    } else {
+        image_corners(
+            &wipeout.insertion_point,
+            &wipeout.u_vector,
+            &wipeout.v_vector,
+            wipeout.size.x,
+            wipeout.size.y,
+        )
+        .to_vec()
+    }
+}
+
+fn wipeout_pick_rings(wipeout: &Wipeout) -> Vec<Vec<[f64; 3]>> {
+    let boundary = wipeout_boundary(wipeout);
+    if wipeout_is_polygonal(wipeout)
+        && matches!(
+            wipeout.clip_mode,
+            acadrust::entities::WipeoutClipMode::Inside
+        )
+    {
+        vec![
+            image_corners(
+                &wipeout.insertion_point,
+                &wipeout.u_vector,
+                &wipeout.v_vector,
+                wipeout.size.x,
+                wipeout.size.y,
+            )
+            .to_vec(),
+            boundary,
+        ]
+    } else {
+        vec![boundary]
+    }
+}
+
+fn wipeout_world_to_clip(wipeout: &Wipeout, world: [f64; 3]) -> Option<acadrust::types::Vector2> {
+    let [x, y] = wipeout_plane(wipeout).project(world)?;
+    Some(acadrust::types::Vector2::new(
+        x - wipeout.size.x * 0.5,
+        wipeout.size.y * 0.5 - y,
+    ))
+}
+
 impl RenderConvertible for Wipeout {
     fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
-        let corners = image_corners(
-            &self.insertion_point,
-            &self.u_vector,
-            &self.v_vector,
-            self.size.x,
-            self.size.y,
-        );
-
-        // If clipping is enabled and there's a polygon boundary, show that.
-        let pts = if self.clipping_enabled
-            && self.clip_boundary_vertices.len() >= 3
-            && matches!(
-                self.clip_type,
-                acadrust::entities::WipeoutClipType::Polygonal
-            ) {
-            // Clip vertices are stored in image-pixel space, centred on the
-            // image (range ±size/2). The image's bottom-left corner sits at
-            // `insertion_point`, the image-Y axis points DOWN (per DXF
-            // "v_vector points down the image"), so map:
-            //   x_off = (clip.x + size.x/2) × u_vector
-            //   y_off = (size.y/2 − clip.y) × v_vector   ← y flipped
-            let ox = self.insertion_point.x;
-            let oy = self.insertion_point.y;
-            let oz = self.insertion_point.z;
-            let mut poly: Vec<[f64; 3]> = self
-                .clip_boundary_vertices
-                .iter()
-                .map(|v| {
-                    let cx = v.x + self.size.x * 0.5;
-                    let cy = self.size.y * 0.5 - v.y;
-                    let wx = self.u_vector.x * cx + self.v_vector.x * cy;
-                    let wy = self.u_vector.y * cx + self.v_vector.y * cy;
-                    let wz = self.u_vector.z * cx + self.v_vector.z * cy;
-                    [ox + wx, oy + wy, oz + wz]
-                })
-                .collect();
-            // Close the polygon.
-            if let Some(&first) = poly.first() {
-                poly.push(first);
-            }
-            poly
-        } else {
-            // Rectangular boundary — just the border, no diagonals (mask area).
-            image_wire(corners, false)
-        };
+        let boundary = wipeout_boundary(self);
+        let mut pts = boundary.clone();
+        if let Some(&first) = pts.first() {
+            pts.push(first);
+        }
 
         Some(RenderEntity {
-            // Interior pick surface — a wipeout reads as a solid patch, so a
-            // click anywhere on it should select it.
-            pick_tris: crate::entities::common::quad_pick_tris(&corners),
+            pick_tris: cadkernel::space::polygon::triangulate_rings(
+                &wipeout_pick_rings(self),
+                cadkernel::geom2d::Tolerance::default(),
+            ),
             object: RenderObject::Lines(pts),
-            snap_pts: vec![],
+            snap_pts: boundary
+                .iter()
+                .map(|point| (glam::DVec3::from(*point), SnapHint::Endpoint))
+                .collect(),
             tangent_geoms: vec![],
-            key_vertices: corners.to_vec(),
+            key_vertices: boundary,
             fill_tris: vec![],
         })
     }
@@ -479,33 +530,15 @@ impl RenderConvertible for Wipeout {
 
 impl Grippable for Wipeout {
     fn grips(&self) -> Vec<GripDef> {
-        // If polygonal clipping is active, expose individual polygon vertices as grips.
-        let is_polygon = self.clipping_enabled
-            && self.clip_boundary_vertices.len() >= 3
-            && matches!(
-                self.clip_type,
-                acadrust::entities::WipeoutClipType::Polygonal
-            );
-
-        if is_polygon {
-            let ox = self.insertion_point.x;
-            let oy = self.insertion_point.y;
-            let oz = self.insertion_point.z;
-            // Same image-pixel-space → WCS mapping as `to_render` so grips
-            // sit exactly on the rendered polygon vertices.
-            self.clip_boundary_vertices
-                .iter()
+        if wipeout_is_polygonal(self) {
+            wipeout_boundary(self)
+                .into_iter()
                 .enumerate()
-                .map(|(i, v)| {
-                    let cx = v.x + self.size.x * 0.5;
-                    let cy = self.size.y * 0.5 - v.y;
-                    let wx = self.u_vector.x * cx + self.v_vector.x * cy;
-                    let wy = self.u_vector.y * cx + self.v_vector.y * cy;
-                    let wz = self.u_vector.z * cx + self.v_vector.z * cy;
+                .map(|(i, point)| {
                     if i == 0 {
-                        square_grip(i, glam::DVec3::new(ox + wx, oy + wy, oz + wz))
+                        square_grip(i, glam::DVec3::from(point))
                     } else {
-                        center_grip(i, glam::DVec3::new(ox + wx, oy + wy, oz + wz))
+                        center_grip(i, glam::DVec3::from(point))
                     }
                 })
                 .collect()
@@ -527,61 +560,103 @@ impl Grippable for Wipeout {
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        let is_polygon = self.clipping_enabled
-            && self.clip_boundary_vertices.len() >= 3
-            && matches!(
-                self.clip_type,
-                acadrust::entities::WipeoutClipType::Polygonal
-            );
-
-        if is_polygon {
-            // Move the clicked polygon vertex in world space → back-project to pixel space.
-            if let Some(v) = self.clip_boundary_vertices.get_mut(grip_id) {
-                // Compute current world position of this vertex.
-                let ox = self.insertion_point.x;
-                let oy = self.insertion_point.y;
-                let oz = self.insertion_point.z;
-                let cur_wx =
-                    ox + self.u_vector.x * v.x * self.size.x + self.v_vector.x * v.y * self.size.y;
-                let cur_wy =
-                    oy + self.u_vector.y * v.x * self.size.x + self.v_vector.y * v.y * self.size.y;
-                let cur_wz =
-                    oz + self.u_vector.z * v.x * self.size.x + self.v_vector.z * v.y * self.size.y;
+        if wipeout_is_polygonal(self) {
+            if let Some(current) = self.clip_boundary_vertices.get(grip_id).cloned() {
+                let current_world = wipeout_clip_to_world(self, &current);
                 let new_w = match apply {
                     GripApply::Translate(d) => [
-                        cur_wx + d.x as f64,
-                        cur_wy + d.y as f64,
-                        cur_wz + d.z as f64,
+                        current_world[0] + d.x as f64,
+                        current_world[1] + d.y as f64,
+                        current_world[2] + d.z as f64,
                     ],
                     GripApply::Absolute(p) => [p.x as f64, p.y as f64, p.z as f64],
                 };
-                // Back-project: solve for pixel coords using u_vector and v_vector.
-                // In 2D (XY plane): new_w - insertion_point = u_vec * vx * sx + v_vec * vy * sy
-                let dx = new_w[0] - self.insertion_point.x;
-                let dy = new_w[1] - self.insertion_point.y;
-                let ux = self.u_vector.x * self.size.x;
-                let uy = self.u_vector.y * self.size.x;
-                let vx = self.v_vector.x * self.size.y;
-                let vy = self.v_vector.y * self.size.y;
-                let det = ux * vy - uy * vx;
-                if det.abs() > 1e-12 {
-                    v.x = (dx * vy - dy * vx) / det;
-                    v.y = (ux * dy - uy * dx) / det;
+                if let Some(clip) = wipeout_world_to_clip(self, new_w) {
+                    self.clip_boundary_vertices[grip_id] = clip;
                 }
             }
-        } else if grip_id == 0 {
-            match apply {
-                GripApply::Translate(d) => {
-                    self.insertion_point.x += d.x as f64;
-                    self.insertion_point.y += d.y as f64;
-                    self.insertion_point.z += d.z as f64;
-                }
-                GripApply::Absolute(p) => {
-                    self.insertion_point.x = p.x as f64;
-                    self.insertion_point.y = p.y as f64;
-                    self.insertion_point.z = p.z as f64;
-                }
+            return;
+        }
+
+        let corners = wipeout_boundary(self);
+        let Some(current) = corners.get(grip_id).copied() else {
+            return;
+        };
+        let target = match apply {
+            GripApply::Translate(delta) => glam::DVec3::from(current) + delta,
+            GripApply::Absolute(point) => point,
+        };
+        let u_hat = glam::DVec3::new(self.u_vector.x, self.u_vector.y, self.u_vector.z)
+            .normalize_or_zero();
+        let v_hat = glam::DVec3::new(self.v_vector.x, self.v_vector.y, self.v_vector.z)
+            .normalize_or_zero();
+        if u_hat == glam::DVec3::ZERO || v_hat == glam::DVec3::ZERO {
+            return;
+        }
+        let resize_plane = cadkernel::space::Plane::from_axes(
+            [0.0; 3],
+            u_hat.to_array(),
+            v_hat.to_array(),
+        );
+        let (width, height, insertion) = match grip_id {
+            0 => {
+                let fixed = glam::DVec3::from(corners[2]);
+                let Some([width, height]) =
+                    resize_plane.project_vector((fixed - target).to_array())
+                else {
+                    return;
+                };
+                (width, height, target)
             }
+            1 => {
+                let fixed = glam::DVec3::from(corners[3]);
+                let Some([width, neg_height]) =
+                    resize_plane.project_vector((target - fixed).to_array())
+                else {
+                    return;
+                };
+                let height = -neg_height;
+                (width, height, fixed - v_hat * height)
+            }
+            2 => {
+                let fixed = glam::DVec3::from(corners[0]);
+                let Some([width, height]) =
+                    resize_plane.project_vector((target - fixed).to_array())
+                else {
+                    return;
+                };
+                (width, height, fixed)
+            }
+            3 => {
+                let fixed = glam::DVec3::from(corners[1]);
+                let Some([neg_width, height]) =
+                    resize_plane.project_vector((target - fixed).to_array())
+                else {
+                    return;
+                };
+                let width = -neg_width;
+                (width, height, fixed - u_hat * width)
+            }
+            _ => return,
+        };
+        if width.abs() > 1e-9 && height.abs() > 1e-9 {
+            self.insertion_point = acadrust::types::Vector3::new(
+                insertion.x,
+                insertion.y,
+                insertion.z,
+            );
+            let sx = self.size.x.abs().max(1e-9);
+            let sy = self.size.y.abs().max(1e-9);
+            self.u_vector = acadrust::types::Vector3::new(
+                u_hat.x * width / sx,
+                u_hat.y * width / sx,
+                u_hat.z * width / sx,
+            );
+            self.v_vector = acadrust::types::Vector3::new(
+                v_hat.x * height / sy,
+                v_hat.y * height / sy,
+                v_hat.z * height / sy,
+            );
         }
     }
 }
@@ -607,76 +682,23 @@ impl PropertyEditable for Wipeout {
             PropSection {
                 title: t!("Misc").into_owned(),
                 props: vec![
-                    Property {
-                        label: t!("Show image").into_owned(),
-                        field: "wo_show_image",
-                        value: PropValue::BoolToggle {
-                            field: "wo_show_image",
-                            value: show_image,
-                        },
-                    },
-                    Property {
-                        label: t!("Show clipped").into_owned(),
-                        field: "wo_show_clipped",
-                        value: PropValue::BoolToggle {
-                            field: "wo_show_clipped",
-                            value: show_clipped,
-                        },
-                    },
-                    Property {
-                        label: t!("Background transparency").into_owned(),
-                        field: "wo_bg_transparency",
-                        value: PropValue::BoolToggle {
-                            field: "wo_bg_transparency",
-                            value: bg_transparency,
-                        },
-                    },
+                    ro(t!("Show image").as_ref(), "wo_show_image", if show_image { t!("Yes") } else { t!("No") }),
+                    ro(t!("Show clipped").as_ref(), "wo_show_clipped", if show_clipped { t!("Yes") } else { t!("No") }),
+                    ro(t!("Background transparency").as_ref(), "wo_bg_transparency", if bg_transparency { t!("Yes") } else { t!("No") }),
+                ],
+            },
+            PropSection {
+                title: t!("Image Adjust").into_owned(),
+                props: vec![
+                    ro(t!("Brightness").as_ref(), "wo_brightness", self.brightness.to_string()),
+                    ro(t!("Contrast").as_ref(), "wo_contrast", self.contrast.to_string()),
+                    ro(t!("Fade").as_ref(), "wo_fade", self.fade.to_string()),
                 ],
             },
         ]
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        match field {
-            "wo_show_image" => {
-                let on = if value == "toggle" {
-                    !self.flags.contains(acadrust::entities::WipeoutDisplayFlags::SHOW_IMAGE)
-                } else {
-                    value == "true"
-                };
-                self.set_frame_visible(on);
-                return;
-            }
-            "wo_show_clipped" => {
-                let on = if value == "toggle" {
-                    !self
-                        .flags
-                        .contains(acadrust::entities::WipeoutDisplayFlags::USE_CLIPPING_BOUNDARY)
-                } else {
-                    value == "true"
-                };
-                if on {
-                    self.flags |= acadrust::entities::WipeoutDisplayFlags::USE_CLIPPING_BOUNDARY;
-                } else {
-                    self.flags -= acadrust::entities::WipeoutDisplayFlags::USE_CLIPPING_BOUNDARY;
-                }
-                return;
-            }
-            "wo_bg_transparency" => {
-                let on = if value == "toggle" {
-                    !self.flags.contains(acadrust::entities::WipeoutDisplayFlags::TRANSPARENCY_ON)
-                } else {
-                    value == "true"
-                };
-                if on {
-                    self.flags |= acadrust::entities::WipeoutDisplayFlags::TRANSPARENCY_ON;
-                } else {
-                    self.flags -= acadrust::entities::WipeoutDisplayFlags::TRANSPARENCY_ON;
-                }
-                return;
-            }
-            _ => {}
-        }
         let Ok(v) = value.trim().parse::<f64>() else {
             return;
         };

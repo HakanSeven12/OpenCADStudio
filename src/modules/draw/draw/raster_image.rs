@@ -123,9 +123,12 @@ impl CadCommand for ImageCommand {
         let [p0, p1, p2, p3] = corners;
 
         Some(WireModel {
+            point_marker: None,
             taper_widths: Vec::new(),
             world_width: 0.0,
             depth_override: None,
+            display_visible: true,
+            plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,

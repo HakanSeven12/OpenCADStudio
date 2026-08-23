@@ -285,7 +285,11 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                 heights.push([f.height, c.height, b.height, t.height]);
             }
         }
-        let levels = decide_levels(self.mode, &widths, max_w);
+        let levels = if let Some(level) = self.mode.forced_level() {
+            vec![level; n]
+        } else {
+            decide_levels(self.mode, &widths, max_w)
+        };
 
         // The row is "tight" once any panel has dropped to its small icon — the
         // last, most cramped state. The tab bar hides its mode selector then.

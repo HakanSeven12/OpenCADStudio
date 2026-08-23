@@ -165,7 +165,7 @@ impl TextureHatch {
         let (mode, color2, grad_cos, grad_sin) = match &model.pattern {
             HatchPattern::Solid => (1u32, [0.0f32; 4], 0.0f32, 0.0f32),
             HatchPattern::Pattern(_) => (0u32, [0.0f32; 4], 0.0f32, 0.0f32),
-            HatchPattern::Gradient { angle_deg, color2, kind, invert } => {
+            HatchPattern::Gradient { angle_deg, color2, kind, invert, .. } => {
                 let gk = (kind.shader_kind() | if *invert { 16 } else { 0 }) << 8;
                 if kind.radial() {
                     // Radial: centre is the local origin; grad_cos/sin unused.
@@ -191,7 +191,6 @@ impl TextureHatch {
         }
 
         let origin = model.world_origin;
-        let drift = [0.0f32, 0.0f32];
         let (mesh_points, indices) = model.fill_mesh();
         if mesh_points.is_empty() || indices.is_empty() {
             return None;
@@ -239,33 +238,31 @@ impl TextureHatch {
         });
 
         // ── Gradient projection range (snapped-local space) ───────────────
-        let (grad_min, grad_range) = if mode == 2 {
-            let projs: Vec<f32> = model
-                .boundary
-                .iter()
-                .filter(|v| v[0].is_finite() && v[1].is_finite())
-                .map(|&[x, y]| (x + drift[0]) * grad_cos + (y + drift[1]) * grad_sin)
-                .collect();
-            if projs.is_empty() {
-                (0.0, 1.0)
-            } else {
-                let proj_min = projs.iter().cloned().fold(f32::INFINITY, f32::min);
-                let proj_max = projs.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                // Floor matches the storage backend.
-                (proj_min, (proj_max - proj_min).max(1.0))
-            }
-        } else if mode == 3 {
-            // Radial: range = the farthest boundary vertex from the centre.
-            let radius = model
-                .boundary
-                .iter()
-                .filter(|v| v[0].is_finite() && v[1].is_finite())
-                .map(|&[x, y]| (x * x + y * y).sqrt())
-                .fold(0.0_f32, f32::max)
-                .max(1.0);
-            (0.0, radius)
+        let base_mode = mode & 0xFF;
+        let frame = match &model.pattern {
+            HatchPattern::Gradient {
+                angle_deg, shift, ..
+            } => model.gradient_frame(*angle_deg, *shift),
+            _ => None,
+        };
+        let (grad_min, grad_range, radial_center) = if base_mode == 2 {
+            frame.map_or((0.0, 1.0, [0.0, 0.0]), |frame| {
+                (
+                    frame.projection_min as f32,
+                    frame.projection_span as f32,
+                    [0.0, 0.0],
+                )
+            })
+        } else if base_mode == 3 {
+            frame.map_or((0.0, 1.0, [0.0, 0.0]), |frame| {
+                (
+                    0.0,
+                    frame.radius as f32,
+                    [frame.center[0] as f32, frame.center[1] as f32],
+                )
+            })
         } else {
-            (0.0, 1.0)
+            (0.0, 1.0, [0.0, 0.0])
         };
 
         // ── Pack the data texture: families | dashes ─────────────────────
@@ -355,8 +352,8 @@ impl TextureHatch {
             // Clamp like the desktop renderer so scale==0 can't make perp_step 0
             // → round(perp/0)=NaN → an invisible hatch.
             scale: model.scale.max(1e-6),
-            grad_cos,
-            grad_sin,
+            grad_cos: if base_mode == 3 { radial_center[0] } else { grad_cos },
+            grad_sin: if base_mode == 3 { radial_center[1] } else { grad_sin },
             grad_min,
             grad_range,
             origin: [origin[0] as f32, origin[1] as f32],

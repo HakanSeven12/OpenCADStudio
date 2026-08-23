@@ -22,16 +22,10 @@ enum Step {
     Point {
         name: String,
     },
-    /// Attribute filling: prompt the user tag by tag.
     FillAttr {
-        /// The block's attribute definitions — carried in full so the created
-        /// attributes inherit their position / alignment / height / rotation /
-        /// style, not just tag + prompt + default (#255).
         attdefs: Vec<AttributeDefinition>,
-        /// Index of the attdef currently being prompted.
         idx: usize,
-        /// (tag, value) pairs collected so far, in attdef order.
-        values: Vec<(String, String)>,
+        values: Vec<(usize, String)>,
     },
 }
 
@@ -268,12 +262,16 @@ impl CadCommand for InsertBlockCommand {
         }
     }
 
-    fn attreq_set_attdefs(&mut self, attdefs: Vec<AttributeDefinition>) {
+    fn attreq_set_attdefs(
+        &mut self,
+        attdefs: Vec<AttributeDefinition>,
+    ) -> Option<acadrust::EntityType> {
         self.step = Step::FillAttr {
             attdefs,
             idx: 0,
             values: vec![],
         };
+        self.advance_automatic_attributes()
     }
 
     fn attreq_take_insert(&mut self) -> Option<acadrust::EntityType> {
@@ -284,13 +282,13 @@ impl CadCommand for InsertBlockCommand {
 }
 
 impl InsertBlockCommand {
-    /// Accept the current attribute value (empty = use default) and advance.
-    /// Returns CommitAndExit when all attdefs have been filled.
     fn accept_attr_value(&mut self, text: &str) -> CmdResult {
-        let (tag, default, next_idx, total) = match &self.step {
+        let (attdef_idx, default) = match &self.step {
             Step::FillAttr { attdefs, idx, .. } => {
-                let ad = &attdefs[*idx];
-                (ad.tag.clone(), ad.default_value.clone(), idx + 1, attdefs.len())
+                let Some(ad) = attdefs.get(*idx) else {
+                    return CmdResult::Cancel;
+                };
+                (*idx, ad.default_value.clone())
             }
             _ => return CmdResult::Cancel,
         };
@@ -307,36 +305,57 @@ impl InsertBlockCommand {
             ..
         } = self.step
         {
-            values.push((tag, value));
-            *idx = next_idx;
+            values.push((attdef_idx, value));
+            *idx = attdef_idx + 1;
         }
 
-        if next_idx >= total {
-            // All attdefs filled — build the INSERT's attribute list. Each
-            // attribute inherits its ATTDEF's geometry (position, alignment,
-            // height, rotation, style) via `from_definition`, then the block's
-            // insertion transform places it into WCS so it lands where the block
-            // put it instead of stacking at the origin (#255).
-            let (attdefs, values) = match &self.step {
-                Step::FillAttr {
-                    attdefs, values, ..
-                } => (attdefs.clone(), values.clone()),
-                _ => (vec![], vec![]),
-            };
-            let mut ins = match self.pending_insert.take() {
-                Some(i) => i,
-                None => return CmdResult::Cancel,
-            };
-            let xform = ins.get_transform();
-            for (ad, (_tag, value)) in attdefs.iter().zip(values.iter()) {
-                let mut attr = AttributeEntity::from_definition(ad, Some(value.clone()));
-                attr.apply_transform(&xform);
-                ins.attributes.push(attr);
-            }
-            CmdResult::CommitAndExit(EntityType::Insert(ins))
-        } else {
-            CmdResult::NeedPoint
+        match self.advance_automatic_attributes() {
+            Some(entity) => CmdResult::CommitAndExit(entity),
+            None => CmdResult::NeedPoint,
         }
+    }
+
+    fn advance_automatic_attributes(&mut self) -> Option<EntityType> {
+        loop {
+            let next = match &self.step {
+                Step::FillAttr { attdefs, idx, .. } => attdefs.get(*idx).map(|ad| {
+                    (*idx, ad.flags.constant, ad.flags.preset, ad.default_value.clone())
+                }),
+                _ => return None,
+            };
+            let Some((attdef_idx, constant, preset, default)) = next else {
+                return self.finish_insert();
+            };
+            if !constant && !preset {
+                return None;
+            }
+            if let Step::FillAttr { idx, values, .. } = &mut self.step {
+                if !constant {
+                    values.push((attdef_idx, default));
+                }
+                *idx += 1;
+            }
+        }
+    }
+
+    fn finish_insert(&mut self) -> Option<EntityType> {
+        let (attdefs, values) = match &self.step {
+            Step::FillAttr {
+                attdefs, values, ..
+            } => (attdefs.clone(), values.clone()),
+            _ => return None,
+        };
+        let mut insert = self.pending_insert.take()?;
+        let transform = insert.get_transform();
+        for (attdef_idx, value) in values {
+            let Some(attdef) = attdefs.get(attdef_idx) else {
+                continue;
+            };
+            let mut attribute = AttributeEntity::from_definition(attdef, Some(value));
+            attribute.apply_transform(&transform);
+            insert.attributes.push(attribute);
+        }
+        Some(EntityType::Insert(insert))
     }
 }
 

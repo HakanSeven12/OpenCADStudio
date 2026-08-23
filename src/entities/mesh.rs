@@ -1,4 +1,6 @@
 use acadrust::entities::{mesh::Mesh, polygon_mesh::PolygonMesh, Face3D, PolyfaceMesh};
+use cadkernel::geom2d::{triangulate, Tolerance};
+use cadkernel::space::{polygon, Plane, Vec3 as KernelVec3};
 use glam::Vec3;
 use crate::t;
 
@@ -151,12 +153,62 @@ fn v3f32(v: &acadrust::types::Vector3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 
+fn face3d_fill(corners: [[f64; 3]; 4]) -> Vec<[f64; 3]> {
+    let tolerance = Tolerance::default();
+    let mut ring = Vec::with_capacity(4);
+    for corner in corners {
+        if ring.last().is_none_or(|previous| {
+            KernelVec3::from(*previous).distance(KernelVec3::from(corner))
+                > tolerance.linear()
+        }) {
+            ring.push(corner);
+        }
+    }
+    if ring.len() > 1
+        && KernelVec3::from(ring[0]).distance(KernelVec3::from(*ring.last().unwrap()))
+            <= tolerance.linear()
+    {
+        ring.pop();
+    }
+    if ring.len() < 3 {
+        return Vec::new();
+    }
+
+    let Some(normal) = polygon::normal(&ring) else {
+        return Vec::new();
+    };
+    let axis = (KernelVec3::from(ring[1]) - KernelVec3::from(ring[0])).to_array();
+    let Some(plane) = Plane::orthonormal(ring[0], axis, normal) else {
+        return Vec::new();
+    };
+    let projected: Vec<[f64; 2]> = ring
+        .iter()
+        .filter_map(|&point| plane.project(point))
+        .collect();
+    if projected.len() != ring.len() {
+        return Vec::new();
+    }
+    let (points, triangles) = triangulate(&projected, &[]);
+    let source: Vec<usize> = points
+        .iter()
+        .filter_map(|point| projected.iter().position(|candidate| candidate == point))
+        .collect();
+    if source.len() != points.len() {
+        return Vec::new();
+    }
+    triangles
+        .into_iter()
+        .flat_map(|triangle| triangle.map(|index| ring[source[index]]))
+        .collect()
+}
+
 impl RenderConvertible for Face3D {
     fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
         let p0 = v3(&self.first_corner);
         let p1 = v3(&self.second_corner);
         let p2 = v3(&self.third_corner);
         let p3 = v3(&self.fourth_corner);
+        let fill_tris = face3d_fill([p0, p1, p2, p3]);
         let p0f = v3f32(&self.first_corner);
         let p1f = v3f32(&self.second_corner);
         let p2f = v3f32(&self.third_corner);
@@ -206,7 +258,7 @@ impl RenderConvertible for Face3D {
             ],
             tangent_geoms: vec![],
             key_vertices: vec![p0, p1, p2, p3],
-            fill_tris: vec![],
+            fill_tris,
         })
     }
 }

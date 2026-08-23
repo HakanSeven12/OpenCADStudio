@@ -668,9 +668,8 @@ impl OpenCADStudio {
         true
     }
 
-    /// Add is delta-safe on an already-existing layer unless it creates block
-    /// records. RasterImage definitions are captured as exact object-map deltas;
-    /// Viewport commits explicitly record their added entity handle.
+    /// Add is delta-safe when its layer and XData application IDs already exist
+    /// and it creates no block records.
     pub(super) fn delta_add_safe(&self, i: usize, entity: &EntityType) -> bool {
         if matches!(
             entity,
@@ -680,7 +679,18 @@ impl OpenCADStudio {
             return false;
         }
         let layer = entity.common().layer.clone();
-        layer.trim().is_empty() || self.tabs[i].scene.document.layers.contains(&layer)
+        let doc = &self.tabs[i].scene.document;
+        let layer_exists = layer.trim().is_empty() || doc.layers.contains(&layer);
+        let app_ids_exist = entity
+            .common()
+            .extended_data
+            .records()
+            .iter()
+            .all(|record| {
+                record.application_name.trim().is_empty()
+                    || doc.app_ids.contains(&record.application_name)
+            });
+        layer_exists && app_ids_exist
     }
 
     /// Close the delta transaction opened by [`OpenCADStudio::begin_undo`]:

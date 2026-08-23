@@ -34,7 +34,7 @@ fn text_prop(label: &str, field: &'static str, value: &str) -> Property {
     Property {
         label: label.into(),
         field,
-        value: PropValue::EditText(value.to_string()),
+        value: PropValue::PlainText(value.to_string()),
     }
 }
 
@@ -301,6 +301,11 @@ fn geo_marker_lines(data: &GeoPositionMarkerData) -> Vec<[f64; 3]> {
 fn point_cloud_lines(data: &PointCloudData) -> Vec<[f64; 3]> {
     let mut points = Vec::new();
     push_box(&mut points, data.extents_min, data.extents_max);
+    points
+}
+
+fn point_cloud_clip_lines(data: &PointCloudData) -> Vec<[f64; 3]> {
+    let mut points = Vec::new();
     if data.show_clipping {
         for clip in &data.clippings {
             if clip.vertices.len() < 2 {
@@ -323,6 +328,11 @@ fn point_cloud_lines(data: &PointCloudData) -> Vec<[f64; 3]> {
 fn point_cloud_ex_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
     let mut points = Vec::new();
     push_box(&mut points, data.extents_min, data.extents_max);
+    points
+}
+
+fn point_cloud_ex_clip_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
+    let mut points = Vec::new();
     if data.show_cropping {
         for crop in &data.croppings {
             if crop.points.len() < 2 {
@@ -337,6 +347,14 @@ fn point_cloud_ex_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
         }
     }
     points
+}
+
+pub(crate) fn point_cloud_frame_lines(entity: &ExtendedEntity) -> Option<Vec<[f64; 3]>> {
+    match &entity.data {
+        ExtendedEntityData::PointCloud(data) => Some(point_cloud_clip_lines(data)),
+        ExtendedEntityData::PointCloudEx(data) => Some(point_cloud_ex_clip_lines(data)),
+        _ => None,
+    }
 }
 
 fn camera_lines(document: &acadrust::CadDocument, view_handle: Handle) -> Vec<[f64; 3]> {

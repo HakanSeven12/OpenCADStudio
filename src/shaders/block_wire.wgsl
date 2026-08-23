@@ -26,6 +26,9 @@ struct WireConst {
     world_half_width: f32,
     _pad1: f32,
     _pad2: f32,
+    marker_origin_high: vec4<f32>,
+    marker_origin_low: vec4<f32>,
+    marker_normal_scale: vec4<f32>,
 }
 @group(1) @binding(0) var<uniform> wire_const: WireConst;
 
@@ -67,6 +70,35 @@ fn resolve_hw(taper_ratio: f32, world_hw: f32, px_hw: f32) -> f32 {
     return select(0.5, px_hw, u.lwdisplay_enable > 0.5);
 }
 
+fn marker_relative(
+    position_high: vec3<f32>,
+    position_low: vec3<f32>,
+    translation: vec3<f32>,
+    translation_low: vec3<f32>,
+) -> vec3<f32> {
+    if wire_const.marker_normal_scale.w <= 0.0 {
+        return (position_high + translation - u.eye_high)
+            + (position_low + translation_low - u.eye_low);
+    }
+    let origin_high = wire_const.marker_origin_high.xyz;
+    let origin_low = wire_const.marker_origin_low.xyz;
+    let origin_relative = (origin_high + translation - u.eye_high)
+        + (origin_low + translation_low - u.eye_low);
+    let delta = (position_high - origin_high) + (position_low - origin_low);
+    let normal = normalize(wire_const.marker_normal_scale.xyz);
+    let axial = normal * dot(delta, normal);
+    let planar = delta - axial;
+    let origin_clip = u.view_rot * vec4<f32>(origin_relative, 1.0);
+    let projection_scale = max(length(vec3<f32>(
+        u.view_rot[0].y,
+        u.view_rot[1].y,
+        u.view_rot[2].y,
+    )), 1e-12);
+    let view_height = 2.0 * max(abs(origin_clip.w), 1e-6) / projection_scale;
+    let world_size = wire_const.marker_normal_scale.w * 0.01 * view_height;
+    return origin_relative + axial + planar * world_size;
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut {
     let corner = vertex_index % 6u;
@@ -75,10 +107,8 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
     let which_end = which_end_arr[corner];
     let side = side_arr[corner];
 
-    let rel_a = (in.pos_a + in.translation - u.eye_high)
-        + (in.pos_a_low + in.translation_low - u.eye_low);
-    let rel_b = (in.pos_b + in.translation - u.eye_high)
-        + (in.pos_b_low + in.translation_low - u.eye_low);
+    let rel_a = marker_relative(in.pos_a, in.pos_a_low, in.translation, in.translation_low);
+    let rel_b = marker_relative(in.pos_b, in.pos_b_low, in.translation, in.translation_low);
     let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
     let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
     let screen_a = clip_a.xy / clip_a.w * u.viewport_size * 0.5;

@@ -82,6 +82,8 @@ pub struct GripPopup {
     pub anchor: iced::Point,
     pub items: Vec<crate::scene::model::object::GripMenuItem>,
     pub selected: usize,
+    /// Whether a click-opened menu stays visible away from its grip.
+    pub pinned: bool,
 }
 
 /// Pending follow-up value for grip-menu actions that need a number
@@ -606,6 +608,12 @@ pub(super) struct OpenCADStudio {
     /// OS window Id for the floating Layer Properties Manager (None when closed).
     /// OS window Id of the primary application window.
     main_window: Option<window::Id>,
+    /// Hides drawing UI overlays for one thumbnail capture frame.
+    thumbnail_capture_clean: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_native_thumbnail_save: Option<PendingNativeThumbnailSave>,
+    #[cfg(target_arch = "wasm32")]
+    pending_web_thumbnail_save: Option<PendingWebThumbnailSave>,
     // ── Floating panel windows ────────────────────────────────────────────
     /// Active `iced_aw` colour picker: destination plus its initial colour.
     color_pick_target: Option<(ColorPickTarget, AcadColor)>,
@@ -1131,6 +1139,28 @@ pub(super) enum SaveContinuation {
 
 #[derive(Debug, Clone)]
 #[cfg(not(target_arch = "wasm32"))]
+pub(super) struct PendingNativeThumbnailSave {
+    tab_id: u64,
+    path: PathBuf,
+    version: acadrust::DxfVersion,
+    purpose: SavePurpose,
+    continuation: SaveContinuation,
+    set_current_path: bool,
+    check_external_change: bool,
+}
+
+#[derive(Debug, Clone)]
+#[cfg(target_arch = "wasm32")]
+pub(super) struct PendingWebThumbnailSave {
+    tab_id: u64,
+    filename: String,
+    ext: String,
+    version: acadrust::DxfVersion,
+    bounds: iced::Rectangle,
+}
+
+#[derive(Debug, Clone)]
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct PendingSaveFailure {
     tab_id: u64,
     path: PathBuf,
@@ -1152,16 +1182,6 @@ pub(super) struct PendingExternalChange {
     set_current_path: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) struct ThumbnailCacheKey {
-    epoch: u64,
-    camera_generation: u64,
-    bg_color: [u32; 4],
-    png: bool,
-    viewport: [u32; 2],
-}
-
 #[derive(Debug, Clone)]
 #[cfg(not(target_arch = "wasm32"))]
 pub struct SaveOutcome {
@@ -1176,7 +1196,6 @@ pub struct SaveOutcome {
     set_current_path: bool,
     purpose: SavePurpose,
     continuation: SaveContinuation,
-    thumbnail_key: Option<ThumbnailCacheKey>,
     refreshed_preview: Option<Option<acadrust::Preview>>,
     result: Result<(), crate::io::SaveFailure>,
 }
@@ -1913,9 +1932,23 @@ pub enum Message {
     AecDropBack,
     /// Periodic autosave tick — write `.sv$` recovery files for dirty tabs.
     AutoSave,
+    /// A clean viewport frame is ready for thumbnail capture.
+    ThumbnailCaptureFrame,
+    /// Restore drawing UI after the compositor screenshot is captured.
+    ThumbnailCaptureFinished,
     /// Native background save/autosave completed.
     #[cfg(not(target_arch = "wasm32"))]
     SaveFinished(SaveOutcome),
+    /// Web viewport capture completed; serialize and download the drawing.
+    #[cfg(target_arch = "wasm32")]
+    WebSaveScreenshot {
+        tab_id: u64,
+        filename: String,
+        ext: String,
+        version: acadrust::DxfVersion,
+        bounds: Option<iced::Rectangle>,
+        screenshot: Option<iced::window::Screenshot>,
+    },
     /// Retry the failed save after the other application releases the file.
     #[cfg(not(target_arch = "wasm32"))]
     SaveFileInUseRetry,
@@ -1970,9 +2003,9 @@ pub enum Message {
     },
     /// A widget captured Up/Down; resolve it only if the command input owns
     /// keyboard focus.
-    CommandLineArrowProbe { direction: ArrowKey },
+    CommandLineArrowProbe { direction: ArrowKey, extend_selection: bool },
     /// Result of the command-input focus query for a captured Up/Down key.
-    CommandLineArrowResolved { direction: ArrowKey, focused: bool },
+    CommandLineArrowResolved { direction: ArrowKey, focused: bool, extend_selection: bool },
     /// Toggle the dropdown listing the full command-line history.
     CommandHistoryToggle,
     /// Grab/move/release the expanded history panel's top resize edge.
@@ -2011,6 +2044,7 @@ pub enum Message {
     LayerToggleVisible(usize),
     LayerToggleLock(usize),
     LayerToggleFreeze(usize),
+    LayerTogglePlot(usize),
     /// Sort the Layer Manager table by a clicked column header.
     LayerSort(crate::ui::window::layers::LayerSortCol),
     /// Toggle per-viewport freeze: (layer_index, vp_col_index)
@@ -3158,6 +3192,11 @@ impl OpenCADStudio {
             show_layout_tabs: true,
             last_point: None,
             main_window: None,
+            thumbnail_capture_clean: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_native_thumbnail_save: None,
+            #[cfg(target_arch = "wasm32")]
+            pending_web_thumbnail_save: None,
             color_pick_target: None,
             color_picker_tab: ColorPickerTab::Index,
             recent_colors: Vec::new(),
@@ -3723,6 +3762,7 @@ pub fn run_web() -> iced::Result {
     .subscription(OpenCADStudio::subscription)
     .title(|_state: &OpenCADStudio| "Open CAD Studio".to_string())
     .theme(|state: &OpenCADStudio| state.active_theme.clone())
+    .backend(iced::Backend::Hardware(iced::backend::Api::OpenGL))
     .font(iced_aw::ICED_AW_FONT_BYTES)
     .run()
 }

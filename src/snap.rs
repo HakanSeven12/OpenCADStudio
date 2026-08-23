@@ -382,7 +382,24 @@ impl Snapper {
             }
         }
     }
+    /// Immediately acquire an explicit grip origin as a tracking point.
+    ///
+    /// Unlike normal cursor acquisition, a grip was deliberately selected by the
+    /// user, so it should not require OTRACK dwell before Extension/OTRACK can use it.
+    pub fn acquire_grip_tracking_point<W: WireSource + ?Sized>(
+        &mut self,
+        p: DVec3,
+        wires: &W,
+    ) {
+        if !self.tracking_active() {
+            return;
+        }
 
+        // With OTRACK disabled, Extension acquisition must remain endpoint-only.
+        let endpoints_only = !self.otrack_enabled;
+
+        self.acquire_tracking_point(p, wires, endpoints_only);
+    }
     /// Add `p` as a tracking point (capturing its corner edge directions) unless
     /// it is already tracked; drops the oldest when the 4-point cap is reached.
     /// Edge directions are scanned once here, at acquisition, so OTRACK can align
@@ -1255,7 +1272,31 @@ impl Snapper {
                 }
             }
         };
-
+        // Check engaged extension tracking rays against nearby real geometry.
+        // OTRACK can align the cursor to an acquired segment extension even when
+        // Extension OSNAP itself is not the current snap result. Allow Intersection
+        // to stop that active extension ray where it crosses drawing geometry.
+        if self.is_on(SnapType::Intersection) && self.otrack_enabled {
+            for (&origin, dirs) in self.tracking_points.iter().zip(&self.tracking_dirs) {
+                for &dir in dirs {
+                    // Only test the extension ray while the cursor is actually
+                    // engaged with it, so Intersection does not become Nearest.
+                    if extension_snap(
+                        cursor_world,
+                        origin,
+                        dir,
+                        view_rot,
+                        eye,
+                        bounds,
+                        self.osnap_radius_px,
+                    )
+                    .is_some()
+                    {
+                        try_ray_intersections(origin, origin + dir);
+                    }
+                }
+            }
+        }
         if self.is_on(SnapType::Intersection) {
             if let Some((origin, through)) = construction_ray {
                 try_ray_intersections(origin, through);
@@ -1566,7 +1607,7 @@ impl Snapper {
                             let d2 = dist2_to_segment(cursor_screen, sp0, sp1);
                             let t = t_on_segment(cursor_screen, sp0, sp1);
                             let w = Vec3::from(*p1) + t * (Vec3::from(*p2) - Vec3::from(*p1));
-                            (w, d2)
+                            (w.as_dvec3(), d2)
                         }
                         TangentGeom::Circle { center, radius } => {
                             let cv = Vec3::from(*center);
@@ -1580,52 +1621,139 @@ impl Snapper {
                             );
                             let sr = dist2(sc, rim).sqrt();
                             let dc = dist2(cursor_screen, sc).sqrt();
-                            // Trigger by proximity to the circle EDGE (hovering
-                            // the circle), independent of where the tangent point
-                            // lands.
                             let edge_d = (dc - sr).abs();
-                            // A TRUE tangent: from the point the command draws
-                            // from (P), the tangent point T on the circle has the
-                            // radius CT perpendicular to PT, so T lies at the
-                            // half-angle acos(r/|CP|) either side of the C→P
-                            // direction. Two solutions — take the one nearer the
-                            // cursor. Without P (a deferred tangent picked first)
-                            // or with P inside the circle, fall back to the circle
-                            // point facing the cursor. Previously this always used
-                            // the facing point, so Tangent behaved like Nearest
-                            // (#274).
-                            let w = self
-                                .from_point
-                                .and_then(|p| circle_tangent_points(p, cv, r))
-                                .map(|(t0, t1)| {
-                                    // Two tangents — take the one nearer the cursor.
-                                    let s0 = world_to_screen(t0.as_dvec3(), view_rot, eye, bounds);
-                                    let s1 = world_to_screen(t1.as_dvec3(), view_rot, eye, bounds);
-                                    if dist2(s0, cursor_screen) <= dist2(s1, cursor_screen) {
-                                        t0
-                                    } else {
-                                        t1
-                                    }
+                            let w = if let Some(from) = self.from_point {
+                                let Some((t0, t1)) = circle_tangent_points(from, cv, r) else {
+                                    continue;
+                                };
+                                let s0 = world_to_screen(t0.as_dvec3(), view_rot, eye, bounds);
+                                let s1 = world_to_screen(t1.as_dvec3(), view_rot, eye, bounds);
+                                if dist2(s0, cursor_screen) <= dist2(s1, cursor_screen) {
+                                    t0
+                                } else {
+                                    t1
+                                }
+                            } else {
+                                let dx = cursor_screen.x - sc.x;
+                                let dy = cursor_screen.y - sc.y;
+                                let dl = (dx * dx + dy * dy).sqrt();
+                                let (nx, ny) = if dl > 1e-6 {
+                                    (dx / dl, -dy / dl)
+                                } else {
+                                    (1.0, 0.0)
+                                };
+                                Vec3::new(cv.x + r * nx, cv.y + r * ny, cv.z)
+                            };
+                            (w.as_dvec3(), edge_d * edge_d)
+                        }
+                        TangentGeom::Arc {
+                            center,
+                            axis_x,
+                            axis_y,
+                            radius,
+                            start_angle,
+                            end_angle,
+                        } => {
+                            let Some(from) = self.from_point else {
+                                continue;
+                            };
+                            let Some(world) = arc_tangent_points(
+                                from.as_dvec3(),
+                                *center,
+                                *axis_x,
+                                *axis_y,
+                                *radius,
+                                *start_angle,
+                                *end_angle,
+                            )
+                            .into_iter()
+                            .min_by(|a, b| {
+                                let sa = world_to_screen(*a, view_rot, eye, bounds);
+                                let sb = world_to_screen(*b, view_rot, eye, bounds);
+                                dist2(sa, cursor_screen).total_cmp(&dist2(sb, cursor_screen))
+                            }) else {
+                                continue;
+                            };
+                            let edge_d2 = wire
+                                .points
+                                .windows(2)
+                                .enumerate()
+                                .filter_map(|(index, _)| {
+                                    let a = wp_f64(wire, index);
+                                    let b = wp_f64(wire, index + 1);
+                                    (a.is_finite() && b.is_finite()).then(|| {
+                                        dist2_to_segment(
+                                            cursor_screen,
+                                            world_to_screen(a, view_rot, eye, bounds),
+                                            world_to_screen(b, view_rot, eye, bounds),
+                                        )
+                                    })
                                 })
-                                .unwrap_or_else(|| {
-                                    let dx = cursor_screen.x - sc.x;
-                                    let dy = cursor_screen.y - sc.y;
-                                    let dl = (dx * dx + dy * dy).sqrt();
-                                    let (nx, ny) = if dl > 1e-6 {
-                                        (dx / dl, -dy / dl)
-                                    } else {
-                                        (1.0, 0.0)
-                                    };
-                                    Vec3::new(cv.x + r * nx, cv.y + r * ny, cv.z)
-                                });
-                            (w, edge_d * edge_d)
+                                .fold(f32::INFINITY, f32::min);
+                            (world, edge_d2)
+                        }
+                        TangentGeom::PlanarCircle {
+                            center,
+                            axis_x,
+                            axis_y,
+                            radius,
+                        } => {
+                            let cv = DVec3::from_array(*center);
+                            let candidate = self.from_point.and_then(|from| {
+                                planar_circle_tangent_points(
+                                    from.as_dvec3(),
+                                    *center,
+                                    *axis_x,
+                                    *axis_y,
+                                    *radius,
+                                )
+                                .into_iter()
+                                .min_by(|a, b| {
+                                    let sa = world_to_screen(*a, view_rot, eye, bounds);
+                                    let sb = world_to_screen(*b, view_rot, eye, bounds);
+                                    dist2(sa, cursor_screen).total_cmp(&dist2(sb, cursor_screen))
+                                })
+                            });
+                            if self.from_point.is_some() && candidate.is_none() {
+                                continue;
+                            }
+                            let fallback = || {
+                                (0..wire.points.len())
+                                    .map(|index| wp_f64(wire, index))
+                                    .filter(|point| point.is_finite())
+                                    .min_by(|a, b| {
+                                        let sa = world_to_screen(*a, view_rot, eye, bounds);
+                                        let sb = world_to_screen(*b, view_rot, eye, bounds);
+                                        dist2(sa, cursor_screen)
+                                            .total_cmp(&dist2(sb, cursor_screen))
+                                    })
+                                    .unwrap_or(cv)
+                            };
+                            let world = candidate.unwrap_or_else(fallback);
+                            let edge_d2 = wire
+                                .points
+                                .windows(2)
+                                .enumerate()
+                                .filter_map(|(index, _)| {
+                                    let a = wp_f64(wire, index);
+                                    let b = wp_f64(wire, index + 1);
+                                    (a.is_finite() && b.is_finite()).then(|| {
+                                        dist2_to_segment(
+                                            cursor_screen,
+                                            world_to_screen(a, view_rot, eye, bounds),
+                                            world_to_screen(b, view_rot, eye, bounds),
+                                        )
+                                    })
+                                })
+                                .fold(f32::INFINITY, f32::min);
+                            (world, edge_d2)
                         }
                     };
                     let (tier, sub) = (
                         snap_tier(SnapType::Tangent),
                         snap_priority(SnapType::Tangent),
                     );
-                    let screen_pt = world_to_screen(world_pt.as_dvec3(), view_rot, eye, bounds);
+                    let screen_pt = world_to_screen(world_pt, view_rot, eye, bounds);
                     if d2 < radius2
                         && in_bounds(screen_pt)
                         && snap_better(tier, d2, sub, (best_rank, best_d2, best_sub))
@@ -1646,9 +1774,19 @@ impl Snapper {
                                 ),
                                 radius: *radius as f64,
                             },
+                            TangentGeom::Arc { center, radius, .. } => TangentObject::Circle {
+                                center: glam::DVec3::from_array(*center),
+                                radius: *radius,
+                            },
+                            TangentGeom::PlanarCircle { center, radius, .. } => {
+                                TangentObject::Circle {
+                                    center: glam::DVec3::from_array(*center),
+                                    radius: *radius,
+                                }
+                            }
                         };
                         best = Some(SnapResult {
-                            world: world_pt.as_dvec3(),
+                            world: world_pt,
                             screen: screen_pt,
                             snap_type: SnapType::Tangent,
                             tangent_obj: Some(tangent_obj),
@@ -2208,30 +2346,66 @@ fn seg_intersect_2d(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<(f32, 
     Some((t, s))
 }
 
-/// The two points on a circle (`center`, `radius`, in its XY plane) where a
-/// line drawn from `p` touches tangentially, or `None` when `p` is inside or on
-/// the circle (no external tangent). Each tangent point's radius is
-/// perpendicular to the line from `p`, so it sits at the half-angle
-/// `acos(radius / |center→p|)` on either side of the center→p direction. This
-/// is the real Tangent osnap; snapping to the circle point merely facing the
-/// cursor made Tangent behave like Nearest (#274).
+/// Returns the two external tangent points on an XY circle.
 fn circle_tangent_points(p: Vec3, center: Vec3, radius: f32) -> Option<(Vec3, Vec3)> {
-    let vx = p.x - center.x;
-    let vy = p.y - center.y;
-    let d = (vx * vx + vy * vy).sqrt();
-    if d <= radius + 1e-6 {
+    let curve = cadkernel::geom2d::Curve::Circle(cadkernel::geom2d::Circle {
+        centre: [center.x as f64, center.y as f64],
+        radius: radius as f64,
+    });
+    let points = cadkernel::geom2d::tangent_from(&curve, [p.x as f64, p.y as f64]);
+    let [first, second] = points.as_slice() else {
         return None;
-    }
-    let base = vy.atan2(vx);
-    let off = (radius / d).acos();
-    let at = |a: f32| {
-        Vec3::new(
-            center.x + radius * a.cos(),
-            center.y + radius * a.sin(),
-            center.z,
-        )
     };
-    Some((at(base + off), at(base - off)))
+    Some((
+        Vec3::new(first.point[0] as f32, first.point[1] as f32, center.z),
+        Vec3::new(second.point[0] as f32, second.point[1] as f32, center.z),
+    ))
+}
+
+fn planar_circle_tangent_points(
+    from: DVec3,
+    center: [f64; 3],
+    axis_x: [f64; 3],
+    axis_y: [f64; 3],
+    radius: f64,
+) -> Vec<DVec3> {
+    let plane = cadkernel::space::Plane::from_axes(center, axis_x, axis_y);
+    let Some(from) = plane.project(from.to_array()) else {
+        return Vec::new();
+    };
+    let curve = cadkernel::geom2d::Curve::Circle(cadkernel::geom2d::Circle {
+        centre: [0.0, 0.0],
+        radius,
+    });
+    cadkernel::geom2d::tangent_from(&curve, from)
+        .into_iter()
+        .map(|point| DVec3::from_array(plane.point_at(point.point)))
+        .collect()
+}
+
+fn arc_tangent_points(
+    from: DVec3,
+    center: [f64; 3],
+    axis_x: [f64; 3],
+    axis_y: [f64; 3],
+    radius: f64,
+    start_angle: f64,
+    end_angle: f64,
+) -> Vec<DVec3> {
+    let plane = cadkernel::space::Plane::from_axes(center, axis_x, axis_y);
+    let Some(from) = plane.project(from.to_array()) else {
+        return Vec::new();
+    };
+    let curve = cadkernel::geom2d::Curve::Arc(cadkernel::geom2d::Arc {
+        centre: [0.0, 0.0],
+        radius,
+        start_angle,
+        end_angle,
+    });
+    cadkernel::geom2d::tangent_from(&curve, from)
+        .into_iter()
+        .map(|point| DVec3::from_array(plane.point_at(point.point)))
+        .collect()
 }
 
 /// Snap to the extension of a ray beyond `origin` in `dir` direction.

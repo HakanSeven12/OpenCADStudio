@@ -1,7 +1,7 @@
 use super::*;
 
 impl OpenCADStudio {
-    pub(super) fn dispatch_view(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+    pub(crate) fn dispatch_view(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
             "DONATE" => {
                 self.command_line.push_info(crate::t!("Opening Patreon page...").as_ref());
@@ -772,17 +772,20 @@ impl OpenCADStudio {
             // the front (or back) of the draw order via the DRAWORDER machinery.
             "TEXTTOFRONT" | "TEXTTOBACK" => {
                 let to_front = cmd.ends_with("FRONT");
+                let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
                 let handles: rustc_hash::FxHashSet<acadrust::Handle> = self.tabs[i]
                     .scene
                     .document
                     .entities()
                     .filter(|e| {
-                        matches!(
-                            e,
-                            acadrust::EntityType::Text(_)
-                                | acadrust::EntityType::MText(_)
-                                | acadrust::EntityType::Dimension(_)
-                        )
+                        let c = e.common();
+                        (c.owner_handle == block_handle || c.owner_handle.is_null())
+                            && matches!(
+                                e,
+                                acadrust::EntityType::Text(_)
+                                    | acadrust::EntityType::MText(_)
+                                    | acadrust::EntityType::Dimension(_)
+                            )
                     })
                     .map(|e| e.common().handle)
                     .collect();
@@ -802,15 +805,140 @@ impl OpenCADStudio {
                 );
             }
 
-            "DRAWORDER" => {
-                use crate::command::SelectThenKeywordCommand;
-                let has_sel = !self.tabs[i].scene.selected_entities().is_empty();
-                let c = SelectThenKeywordCommand::new(
-                    "DRAWORDER",
-                    "DRAWORDER  [Front / Back]  (Above/Under <handle> by typing):",
-                    vec![("Front", "FRONT", None), ("Back", "BACK", None)],
-                    has_sel,
+            // HATCHTOBACK ÔÇö move every hatch object in the active space to the back of the draw order.
+            "HATCHTOBACK" => {
+                use acadrust::objects::{ObjectType, SortEntitiesTable};
+                let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
+                let doc_ref = &self.tabs[i].scene.document;
+
+                // 1. Single scan over objects to find existing SortEntitiesTable handle & overrides.
+                let mut existing_table_handle = None;
+                let mut overrides: Option<rustc_hash::FxHashMap<u64, u64>> = None;
+                for (h, obj) in &doc_ref.objects {
+                    if let ObjectType::SortEntitiesTable(t) = obj {
+                        if t.block_owner_handle == block_handle {
+                            existing_table_handle = Some(*h);
+                            if !t.is_empty() {
+                                overrides = Some(
+                                    t.entries()
+                                        .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+                                        .collect(),
+                                );
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // 2. Pre-filter locked layers with zero string allocation.
+                let locked_layers: rustc_hash::FxHashSet<&str> = doc_ref
+                    .layers
+                    .iter()
+                    .filter(|l| l.is_locked())
+                    .map(|l| l.name.as_str())
+                    .collect();
+                let has_locked_layers = !locked_layers.is_empty();
+
+                // 3. Single pass over entities in the active space.
+                let mut hatches_to_move: Vec<acadrust::Handle> = Vec::new();
+                let mut min_eff = u64::MAX;
+
+                for e in doc_ref.entities() {
+                    let c = e.common();
+                    if c.owner_handle != block_handle && !c.owner_handle.is_null() {
+                        continue;
+                    }
+                    let hv = c.handle.value();
+                    if matches!(e, acadrust::EntityType::Hatch(_)) {
+                        if !has_locked_layers || !locked_layers.contains(c.layer.as_str()) {
+                            hatches_to_move.push(c.handle);
+                        }
+                    } else {
+                        let eff = match &overrides {
+                            Some(map) => map.get(&hv).copied().unwrap_or(hv),
+                            None => hv,
+                        };
+                        min_eff = min_eff.min(eff);
+                    }
+                }
+
+                if hatches_to_move.is_empty() {
+                    self.command_line
+                        .push_info(crate::tf!("{cmd}: no hatch objects.").as_ref());
+                    return Some(Task::none());
+                }
+
+                if min_eff == u64::MAX {
+                    min_eff = 1;
+                }
+
+                // Compute all sort-key assignments before any mutable step:
+                // the exhausted-floor path needs one more read-only pass over
+                // entities to find colliding siblings to lift.
+                let assigns = assign_back_group_keys(
+                    doc_ref,
+                    block_handle,
+                    &hatches_to_move,
+                    min_eff,
+                    overrides.as_ref(),
+                    &locked_layers,
                 );
+
+                // 4. Ultra-fast targeted Delta Undo (snapshots ONLY the SortEntitiesTable, zero full-drawing clone).
+                let pending_delta = self.begin_undo(i, "DRAWORDER", hatches_to_move.len(), true);
+
+                // 5. Update or insert SortEntitiesTable directly.
+                let table_before = existing_table_handle
+                    .and_then(|h| self.tabs[i].scene.document.objects.get(&h).cloned());
+                let th = existing_table_handle.unwrap_or_else(|| {
+                    let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
+                    let mut table = SortEntitiesTable::for_block(block_handle);
+                    table.handle = nh;
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .objects
+                        .insert(nh, ObjectType::SortEntitiesTable(table));
+                    nh
+                });
+                self.tabs[i].scene.record_undo_object_before(th, table_before);
+
+                if let Some(ObjectType::SortEntitiesTable(table)) =
+                    self.tabs[i].scene.document.objects.get_mut(&th)
+                {
+                    for (h, sort) in &assigns {
+                        table.add_entry(*h, acadrust::Handle::new(*sort));
+                    }
+                }
+
+                if let Some(pending) = pending_delta {
+                    self.commit_undo_delta(i, pending);
+                }
+
+                // 6. Invalidate ONLY draw-depth cache without dropping whole-drawing tessellations or spatial indexes.
+                let changes: Vec<(acadrust::Handle, crate::scene::ChangeKind)> = hatches_to_move
+                    .iter()
+                    .map(|h| (*h, crate::scene::ChangeKind::Modified))
+                    .collect();
+                self.tabs[i].scene.bump_entities(&changes);
+                self.tabs[i].scene.invalidate_draw_depth();
+
+                self.tabs[i].dirty = true;
+                self.command_line.push_info(
+                    crate::tf!("DRAWORDER: moved {} entities to back.", hatches_to_move.len()).as_ref(),
+                );
+
+                return Some(Task::none());
+            }
+
+            "DRAWORDER" => {
+                let selected: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .collect();
+                let c = DrawOrderCommand::new(selected);
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
@@ -857,6 +985,7 @@ impl OpenCADStudio {
                         // entities land strictly above/below every sibling —
                         // including ones not yet in the table, which sort by
                         // their own handle. (min_eff, max_eff) over siblings.
+                        let mut back_assigns: Option<Vec<(acadrust::Handle, u64)>> = None;
                         let fb_baseline: Option<(u64, u64)> = if to_front_opt.is_some() {
                             let selected_set: rustc_hash::FxHashSet<u64> =
                                 selected.iter().map(|h| h.value()).collect();
@@ -900,6 +1029,24 @@ impl OpenCADStudio {
                             if min_eff == u64::MAX {
                                 min_eff = 1;
                             }
+                            if to_front_opt == Some(false) {
+                                // Same exhausted-floor handling as HATCHTOBACK:
+                                // never clamp the group onto tied keys.
+                                let locked_layers: rustc_hash::FxHashSet<&str> = doc_ref
+                                    .layers
+                                    .iter()
+                                    .filter(|l| l.is_locked())
+                                    .map(|l| l.name.as_str())
+                                    .collect();
+                                back_assigns = Some(assign_back_group_keys(
+                                    doc_ref,
+                                    block_handle,
+                                    &selected,
+                                    min_eff,
+                                    Some(&overrides),
+                                    &locked_layers,
+                                ));
+                            }
                             Some((min_eff, max_eff))
                         } else {
                             None
@@ -917,28 +1064,6 @@ impl OpenCADStudio {
                                 None
                             }
                         });
-                        let get_or_create =
-                            |doc: &mut acadrust::CadDocument, block_handle| -> acadrust::Handle {
-                                if let Some(th) = doc.objects.iter().find_map(|(h, obj)| {
-                                    if let ObjectType::SortEntitiesTable(t) = obj {
-                                        if t.block_owner_handle == block_handle {
-                                            Some(*h)
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }) {
-                                    th
-                                } else {
-                                    let nh = acadrust::Handle::new(doc.next_handle());
-                                    let mut table = SortEntitiesTable::for_block(block_handle);
-                                    table.handle = nh;
-                                    doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
-                                    nh
-                                }
-                            };
                         let th = table_handle.unwrap_or_else(|| {
                             let nh = acadrust::Handle::new(doc.next_handle());
                             let mut table = SortEntitiesTable::for_block(block_handle);
@@ -946,24 +1071,37 @@ impl OpenCADStudio {
                             doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
                             nh
                         });
-                        let _ = get_or_create; // suppress unused warning
                         if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th)
                         {
                             if let Some((above, target)) = relative_target {
-                                // move_above/move_below read the target's sort
-                                // handle from the table and no-op when it is
-                                // absent. A reference object that was never
-                                // reordered isn't in the table yet, so seed it
-                                // with its own handle as the implicit sort key.
-                                if !table.contains(target) {
-                                    table.add_entry(target, target);
-                                }
-                                for h in &selected {
-                                    if above {
-                                        table.move_above(*h, target);
-                                    } else {
-                                        table.move_below(*h, target);
+                                // move_above/move_below recompute target±1 per
+                                // call, so looping them over N selected entities
+                                // ties the whole group onto one key. Read the
+                                // reference key once and hand out per-index
+                                // keys instead, keeping the moved entities a
+                                // distinct, selection-ordered block adjacent to
+                                // the reference.
+                                let target_sort = match table.get_sort_handle(target) {
+                                    Some(h) => h.value(),
+                                    None => {
+                                        // A reference object that was never
+                                        // reordered isn't in the table yet;
+                                        // seed it with its own handle as the
+                                        // implicit sort key.
+                                        table.add_entry(target, target);
+                                        table
+                                            .get_sort_handle(target)
+                                            .map_or(target.value(), |h| h.value())
                                     }
+                                };
+                                for (k, h) in selected.iter().enumerate() {
+                                    let offset = 1 + k as u64;
+                                    let sort = if above {
+                                        target_sort.saturating_add(offset)
+                                    } else {
+                                        target_sort.saturating_sub(offset).max(1)
+                                    };
+                                    table.add_entry(*h, acadrust::Handle::new(sort));
                                 }
                                 let rel = if above { "above" } else { "below" };
                                 self.command_line.push_info(crate::tf!(
@@ -973,14 +1111,16 @@ impl OpenCADStudio {
                                     target.value()
                                 ).as_ref());
                             } else if let Some(to_front) = to_front_opt {
-                                let (min_eff, max_eff) = fb_baseline.unwrap_or((1, 0));
-                                for (k, h) in selected.iter().enumerate() {
-                                    let sort = if to_front {
-                                        max_eff.saturating_add(1 + k as u64)
-                                    } else {
-                                        min_eff.saturating_sub(1 + k as u64).max(1)
-                                    };
-                                    table.add_entry(*h, acadrust::Handle::new(sort));
+                                if to_front {
+                                    let (_, max_eff) = fb_baseline.unwrap_or((1, 0));
+                                    for (k, h) in selected.iter().enumerate() {
+                                        let sort = max_eff.saturating_add(1 + k as u64);
+                                        table.add_entry(*h, acadrust::Handle::new(sort));
+                                    }
+                                } else if let Some(assigns) = &back_assigns {
+                                    for (h, sort) in assigns {
+                                        table.add_entry(*h, acadrust::Handle::new(*sort));
+                                    }
                                 }
                                 let dir = if to_front { "front" } else { "back" };
                                 self.command_line.push_info(crate::tf!(
@@ -1083,38 +1223,159 @@ impl OpenCADStudio {
     }
 }
 
-// ── Draw Order: interactive reference-object pick ──────────────────────────
-
-/// Moves a captured selection above or below a reference object the user
-/// picks in the viewport. On pick it relaunches `DRAWORDER A|U <handle>`
-/// with the captured handles reinstalled as the selection, so the existing
-/// command path performs the actual reorder.
-pub(crate) struct DrawOrderRefCommand {
-    to_move: Vec<acadrust::Handle>,
-    above: bool,
+// ── Draw Order: interactive command ──────────────────────────
+ 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DrawOrderStep {
+    SelectObjects,
+    ChooseVerb,
+    PickReference { above: bool },
 }
 
-impl DrawOrderRefCommand {
-    pub(crate) fn new(to_move: Vec<acadrust::Handle>, above: bool) -> Self {
-        Self { to_move, above }
+/// Interactive front-end for the DRAWORDER command.
+///
+/// Flow:
+/// 1. If nothing is selected, prompt to select objects (Enter confirms).
+/// 2. Prompt for verb: `[Above / Under / Front / Back]`.
+///    - `Front` / `F`: moves selection to front.
+///    - `Back` / `B` / Enter: moves selection to back.
+///    - `Above` / `A` / `Under` / `U`: advances to reference object pick.
+/// 3. Reference object pick: user can click the reference entity in the viewport
+///    or type its hex handle on the command line.
+pub(crate) struct DrawOrderCommand {
+    selected: Vec<acadrust::Handle>,
+    step: DrawOrderStep,
+}
+
+impl DrawOrderCommand {
+    pub(crate) fn new(selected: Vec<acadrust::Handle>) -> Self {
+        let step = if selected.is_empty() {
+            DrawOrderStep::SelectObjects
+        } else {
+            DrawOrderStep::ChooseVerb
+        };
+        Self { selected, step }
+    }
+
+    pub(crate) fn for_reference_pick(selected: Vec<acadrust::Handle>, above: bool) -> Self {
+        Self {
+            selected,
+            step: DrawOrderStep::PickReference { above },
+        }
     }
 }
 
-impl CadCommand for DrawOrderRefCommand {
+impl CadCommand for DrawOrderCommand {
     fn name(&self) -> &'static str {
         "DRAWORDER"
     }
 
     fn prompt(&self) -> String {
-        if self.above {
-            crate::t!("DRAWORDER  Select reference object (move selection above):").into_owned()
-        } else {
-            crate::t!("DRAWORDER  Select reference object (move selection under):").into_owned()
+        match self.step {
+            DrawOrderStep::SelectObjects => {
+                crate::t!("DRAWORDER  select objects, then press Enter:").into_owned()
+            }
+            DrawOrderStep::ChooseVerb => {
+                crate::t!("DRAWORDER  [Above / Under / Front / Back] <Back>:").into_owned()
+            }
+            DrawOrderStep::PickReference { above: true } => {
+                crate::t!("DRAWORDER  Select reference object (move selection above):").into_owned()
+            }
+            DrawOrderStep::PickReference { above: false } => {
+                crate::t!("DRAWORDER  Select reference object (move selection under):").into_owned()
+            }
+        }
+    }
+
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        match self.step {
+            DrawOrderStep::ChooseVerb => vec![
+                crate::command::CmdOption::new("Above", "ABOVE"),
+                crate::command::CmdOption::new("Under", "UNDER"),
+                crate::command::CmdOption::new("Front", "FRONT"),
+                crate::command::CmdOption::new("Back", "BACK"),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    fn wants_text_input(&self) -> bool {
+        !matches!(self.step, DrawOrderStep::SelectObjects)
+    }
+
+    fn is_selection_gathering(&self) -> bool {
+        matches!(self.step, DrawOrderStep::SelectObjects)
+    }
+
+    fn on_selection_complete(&mut self, handles: Vec<acadrust::Handle>) -> crate::command::CmdResult {
+        self.selected = handles;
+        crate::command::CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> crate::command::CmdResult {
+        match self.step {
+            DrawOrderStep::SelectObjects => {
+                if self.selected.is_empty() {
+                    crate::command::CmdResult::Cancel
+                } else {
+                    self.step = DrawOrderStep::ChooseVerb;
+                    crate::command::CmdResult::NeedPoint
+                }
+            }
+            DrawOrderStep::ChooseVerb => {
+                // Bare Enter defaults to Back
+                let handles = std::mem::take(&mut self.selected);
+                crate::command::CmdResult::Relaunch("DRAWORDER BACK".into(), handles)
+            }
+            DrawOrderStep::PickReference { .. } => crate::command::CmdResult::Cancel,
+        }
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<crate::command::CmdResult> {
+        let t = text.trim();
+        if t.is_empty() {
+            return None;
+        }
+        match self.step {
+            DrawOrderStep::SelectObjects => None,
+            DrawOrderStep::ChooseVerb => {
+                let up = t.to_uppercase();
+                match up.as_str() {
+                    "F" | "FRONT" => {
+                        let handles = std::mem::take(&mut self.selected);
+                        Some(crate::command::CmdResult::Relaunch("DRAWORDER FRONT".into(), handles))
+                    }
+                    "B" | "BACK" => {
+                        let handles = std::mem::take(&mut self.selected);
+                        Some(crate::command::CmdResult::Relaunch("DRAWORDER BACK".into(), handles))
+                    }
+                    "A" | "ABOVE" => {
+                        self.step = DrawOrderStep::PickReference { above: true };
+                        Some(crate::command::CmdResult::NeedPoint)
+                    }
+                    "U" | "UNDER" | "BELOW" => {
+                        self.step = DrawOrderStep::PickReference { above: false };
+                        Some(crate::command::CmdResult::NeedPoint)
+                    }
+                    _ => Some(crate::command::CmdResult::NeedPoint),
+                }
+            }
+            DrawOrderStep::PickReference { above } => {
+                let hex_str = t.trim_start_matches("0x").trim_start_matches("0X");
+                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                    let opt = if above { "A" } else { "U" };
+                    let cmd = format!("DRAWORDER {} {:x}", opt, val);
+                    let handles = std::mem::take(&mut self.selected);
+                    Some(crate::command::CmdResult::Relaunch(cmd, handles))
+                } else {
+                    Some(crate::command::CmdResult::NeedPoint)
+                }
+            }
         }
     }
 
     fn needs_entity_pick(&self) -> bool {
-        true
+        matches!(self.step, DrawOrderStep::PickReference { .. })
     }
 
     fn on_entity_pick(
@@ -1125,16 +1386,900 @@ impl CadCommand for DrawOrderRefCommand {
         if handle.is_null() {
             return crate::command::CmdResult::NeedPoint;
         }
-        let opt = if self.above { "A" } else { "U" };
-        let cmd = format!("DRAWORDER {} {:x}", opt, handle.value());
-        crate::command::CmdResult::Relaunch(cmd, std::mem::take(&mut self.to_move))
+        if let DrawOrderStep::PickReference { above } = self.step {
+            let opt = if above { "A" } else { "U" };
+            let cmd = format!("DRAWORDER {} {:x}", opt, handle.value());
+            let handles = std::mem::take(&mut self.selected);
+            crate::command::CmdResult::Relaunch(cmd, handles)
+        } else {
+            crate::command::CmdResult::NeedPoint
+        }
     }
 
     fn on_point(&mut self, _pt: glam::DVec3) -> crate::command::CmdResult {
         crate::command::CmdResult::NeedPoint
     }
+}
 
-    fn on_enter(&mut self) -> crate::command::CmdResult {
-        crate::command::CmdResult::Cancel
+/// Sort-key assignments sending `group` to the back of the active space.
+///
+/// Normal case: the floor is the lowest effective sort key among non-moved
+/// siblings, and there are enough unused slots below it — hand them out in
+/// ascending order so the group lands as one block strictly behind everything
+/// else with its internal stacking order preserved.
+///
+/// Exhausted case (`floor <= group.len()`, e.g. a sibling already pinned at
+/// key 1 or 2): decrementing would clamp every member onto one tied key via
+/// `.max(1)`. Instead pin the group to keys 1..=n and lift every other
+/// in-space sibling whose effective key collides with that range above it,
+/// shifted by `n` so lifted siblings keep their relative order. Locked-layer
+/// entities are never moved or lifted.
+fn assign_back_group_keys(
+    doc: &acadrust::CadDocument,
+    block_handle: acadrust::Handle,
+    group: &[acadrust::Handle],
+    floor: u64,
+    overrides: Option<&rustc_hash::FxHashMap<u64, u64>>,
+    locked_layers: &rustc_hash::FxHashSet<&str>,
+) -> Vec<(acadrust::Handle, u64)> {
+    let n = group.len() as u64;
+    let mut out: Vec<(acadrust::Handle, u64)> = Vec::with_capacity(group.len());
+    if n == 0 {
+        return out;
+    }
+    if floor > n {
+        for (k, h) in group.iter().enumerate() {
+            out.push((*h, floor - n + k as u64));
+        }
+        return out;
+    }
+    for (k, h) in group.iter().enumerate() {
+        out.push((*h, 1 + k as u64));
+    }
+    let moved: rustc_hash::FxHashSet<u64> = group.iter().map(|h| h.value()).collect();
+    let has_locked = !locked_layers.is_empty();
+    let mut lifts: Vec<(acadrust::Handle, u64)> = Vec::new();
+    for e in doc.entities() {
+        let c = e.common();
+        if c.owner_handle != block_handle && !c.owner_handle.is_null() {
+            continue;
+        }
+        let hv = c.handle.value();
+        if moved.contains(&hv) {
+            continue;
+        }
+        if has_locked && locked_layers.contains(c.layer.as_str()) {
+            continue;
+        }
+        let eff = overrides.map_or(hv, |m| m.get(&hv).copied().unwrap_or(hv));
+        if eff <= n {
+            lifts.push((c.handle, eff.saturating_add(n)));
+        }
+    }
+    out.extend(lifts);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use acadrust::objects::ObjectType;
+    use acadrust::EntityType;
+
+    // Benchmark, not a correctness test: measures end-to-end latency of
+    // HATCHTOBACK and interactive DRAWORDER BACK on a large synthetic drawing.
+    // Ignored by default; A/B across commits with:
+    //   BENCH_LINES=100000 BENCH_HATCHES=350 BENCH_RUNS=5 \
+    //   cargo test --release --lib bench_draworder_large_drawing -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_draworder_large_drawing() {
+        let lines_n: usize = std::env::var("BENCH_LINES").ok().and_then(|v| v.parse().ok()).unwrap_or(100_000);
+        let hatches_n: usize = std::env::var("BENCH_HATCHES").ok().and_then(|v| v.parse().ok()).unwrap_or(350);
+        let runs: usize = std::env::var("BENCH_RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+        let sel_n: usize = std::env::var("BENCH_SEL").ok().and_then(|v| v.parse().ok()).unwrap_or(100);
+
+        fn median(v: &mut [f64]) -> f64 {
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[v.len() / 2]
+        }
+
+        // --- HATCHTOBACK ---
+        let mut hb_ms: Vec<f64> = Vec::new();
+        for _ in 0..runs {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let t0 = std::time::Instant::now();
+            let lines: Vec<EntityType> =
+                (0..lines_n).map(|_| EntityType::Line(Default::default())).collect();
+            let _ = app.tabs[i].scene.add_entities(lines);
+            let hatches: Vec<EntityType> =
+                (0..hatches_n).map(|_| EntityType::Hatch(Default::default())).collect();
+            app.tabs[i].scene.add_entities(hatches);
+            eprintln!(
+                "[bench] setup ({} lines + {} hatches): {:.1} ms",
+                lines_n,
+                hatches_n,
+                t0.elapsed().as_secs_f64() * 1e3
+            );
+            let t1 = std::time::Instant::now();
+            let _ = app.run_command_line("HATCHTOBACK");
+            hb_ms.push(t1.elapsed().as_secs_f64() * 1e3);
+        }
+        eprintln!("[bench] HATCHTOBACK median: {:.3} ms over {} runs", median(&mut hb_ms), runs);
+
+        // --- DRAWORDER BACK (interactive path) ---
+        let mut db_ms: Vec<f64> = Vec::new();
+        for _ in 0..runs {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let lines: Vec<EntityType> =
+                (0..lines_n).map(|_| EntityType::Line(Default::default())).collect();
+            let _ = app.tabs[i].scene.add_entities(lines);
+            let hatches: Vec<EntityType> =
+                (0..hatches_n).map(|_| EntityType::Hatch(Default::default())).collect();
+            let handles = app.tabs[i].scene.add_entities(hatches);
+            app.tabs[i]
+                .scene
+                .replace_selection(handles.into_iter().take(sel_n).collect());
+            let t1 = std::time::Instant::now();
+            let _ = app.run_command_line("DRAWORDER BACK");
+            db_ms.push(t1.elapsed().as_secs_f64() * 1e3);
+        }
+        eprintln!(
+            "[bench] DRAWORDER BACK ({} selected) median: {:.3} ms over {} runs",
+            sel_n, median(&mut db_ms), runs
+        );
+    }
+
+    fn fresh_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    #[test]
+    fn hatchtoback_no_hatches_warns_and_noop() {
+        let mut app = fresh_app();
+        let _ = app.run_command_line("HATCHTOBACK");
+        let i = app.active_tab;
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let table_exists = app.tabs[i].scene.document.objects.values().any(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                t.block_owner_handle == block_handle
+            } else {
+                false
+            }
+        });
+        assert!(!table_exists, "No SortEntitiesTable created when no hatches exist");
+    }
+
+    #[test]
+    fn hatchtoback_moves_hatches_to_back() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line1 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_line2 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let table = app.tabs[i].scene.document.objects.values().find_map(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                if t.block_owner_handle == block_handle {
+                    return Some(t);
+                }
+            }
+            None
+        }).expect("SortEntitiesTable should exist for the active layout block");
+
+        let entries: rustc_hash::FxHashMap<u64, u64> = table
+            .entries()
+            .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+            .collect();
+
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let line1_sort = entries.get(&h_line1.value()).copied().unwrap_or(h_line1.value());
+        let line2_sort = entries.get(&h_line2.value()).copied().unwrap_or(h_line2.value());
+
+        assert!(
+            hatch_sort < line1_sort,
+            "Hatch sort handle ({hatch_sort}) must be behind line 1 ({line1_sort})"
+        );
+        assert!(
+            hatch_sort < line2_sort,
+            "Hatch sort handle ({hatch_sort}) must be behind line 2 ({line2_sort})"
+        );
+    }
+
+    #[test]
+    fn hb_alias_moves_hatches_to_back() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        let _ = app.run_command_line("HB");
+
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let table = app.tabs[i].scene.document.objects.values().find_map(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                if t.block_owner_handle == block_handle {
+                    return Some(t);
+                }
+            }
+            None
+        }).expect("SortEntitiesTable should exist for the active layout block");
+
+        let entries: rustc_hash::FxHashMap<u64, u64> = table
+            .entries()
+            .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+            .collect();
+
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+
+        assert!(
+            hatch_sort < line_sort,
+            "Hatch sort handle ({hatch_sort}) must be behind line ({line_sort}) via HB alias"
+        );
+    }
+
+    #[test]
+    fn hatchtoback_ignores_hatches_in_other_spaces() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let other_block = acadrust::Handle::new(0x9999);
+        let h_foreign = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(h_foreign) {
+            entity.common_mut().owner_handle = other_block;
+        }
+
+        // When no hatches exist in the current layout, HATCHTOBACK should no-op.
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let table_exists = app.tabs[i].scene.document.objects.values().any(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                t.block_owner_handle == block_handle
+            } else {
+                false
+            }
+        });
+        assert!(!table_exists, "Foreign hatch must not trigger table creation in active layout");
+
+        // Now add a line and a hatch in the active layout.
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let table = app.tabs[i].scene.document.objects.values().find_map(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                if t.block_owner_handle == block_handle {
+                    return Some(t);
+                }
+            }
+            None
+        }).expect("SortEntitiesTable should exist for current layout");
+
+        let entries: rustc_hash::FxHashMap<u64, u64> = table
+            .entries()
+            .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+            .collect();
+
+        assert!(!entries.contains_key(&h_foreign.value()), "Foreign hatch must not be in active layout table");
+        assert!(entries.contains_key(&h_hatch.value()), "Active layout hatch must be in table");
+        let hatch_sort = entries[&h_hatch.value()];
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+        assert!(hatch_sort < line_sort);
+    }
+
+    #[test]
+    fn hatchtoback_multiple_calls_are_idempotent() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        let _ = app.run_command_line("HATCHTOBACK");
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let table = app.tabs[i].scene.document.objects.values().find_map(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                if t.block_owner_handle == block_handle {
+                    return Some(t);
+                }
+            }
+            None
+        }).expect("SortEntitiesTable should exist");
+
+        let entries: rustc_hash::FxHashMap<u64, u64> = table
+            .entries()
+            .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+            .collect();
+
+        let h1_sort = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let h2_sort = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+
+        assert!(h1_sort < line_sort);
+        assert!(h2_sort < line_sort);
+    }
+
+    #[test]
+    fn hatchtoback_preserves_active_selection() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let _h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        // User had the line selected before running HATCHTOBACK.
+        app.tabs[i].scene.replace_selection(std::iter::once(h_line).collect());
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let selected = app.tabs[i].scene.selected_handles_in_order();
+        assert_eq!(selected, vec![h_line], "HATCHTOBACK must not overwrite existing user selection");
+    }
+
+    #[test]
+    fn hatchtoback_skips_hatches_on_locked_layers() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+
+        // Lock layer "LOCKED_LAYER".
+        app.tabs[i].scene.ensure_layer("LOCKED_LAYER");
+        if let Some(layer) = app.tabs[i].scene.document.layers.get_mut("LOCKED_LAYER") {
+            layer.flags.locked = true;
+        }
+
+        let mut locked_hatch = acadrust::entities::Hatch::default();
+        locked_hatch.common.layer = "LOCKED_LAYER".into();
+        let h_locked_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(locked_hatch));
+
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+
+        // Run HATCHTOBACK when only a locked hatch exists: it should not move the locked hatch.
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let table_exists = app.tabs[i].scene.document.objects.values().any(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                t.block_owner_handle == block_handle
+            } else {
+                false
+            }
+        });
+        assert!(!table_exists, "Locked hatch must not trigger table creation");
+
+        // Now add an unlocked hatch.
+        let h_unlocked_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let table = app.tabs[i].scene.document.objects.values().find_map(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                if t.block_owner_handle == block_handle {
+                    return Some(t);
+                }
+            }
+            None
+        }).expect("SortEntitiesTable should exist for unlocked hatch");
+
+        let entries: rustc_hash::FxHashMap<u64, u64> = table
+            .entries()
+            .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+            .collect();
+
+        assert!(!entries.contains_key(&h_locked_hatch.value()), "Locked hatch must not be reordered");
+        assert!(entries.contains_key(&h_unlocked_hatch.value()), "Unlocked hatch must be reordered");
+        let hatch_sort = entries[&h_unlocked_hatch.value()];
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+        assert!(hatch_sort < line_sort);
+    }
+
+    // HATCHTOBACK must preserve the moved group's internal stacking order.
+    // Written while auditing the descending key assignment, which silently
+    // REVERSES hatch-to-hatch order; this test fails while that holds.
+    #[test]
+    fn hatchtoback_preserves_hatch_stacking_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch3 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let entries = effective_sort_map(&app);
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+        let s1 = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let s2 = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+        let s3 = entries.get(&h_hatch3.value()).copied().unwrap_or(h_hatch3.value());
+
+        assert!(s3 > s2 && s2 > s1, "stacking order must be preserved, got {s1}, {s2}, {s3}");
+        assert!(s1 < line_sort && s2 < line_sort && s3 < line_sort, "all hatches must stay behind the line");
+    }
+
+    // When the key space below the floor is exhausted (an entity already sits
+    // at a very low sort key), HATCHTOBACK must not clamp every hatch onto one
+    // tied key: hatches stay pairwise distinct and no sibling may sink below
+    // them. Fails while `.max(1)` clamping is in place.
+    #[test]
+    fn hatchtoback_exhausted_floor_keeps_hatches_distinct_and_behind() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch3 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        // Pin the line to sort key 2: only ONE slot below the floor exists,
+        // but three hatches need to fit behind it.
+        {
+            use acadrust::objects::{ObjectType, SortEntitiesTable};
+            let doc = &mut app.tabs[i].scene.document;
+            let nh = acadrust::Handle::new(doc.next_handle());
+            let mut table = SortEntitiesTable::for_block(block_handle);
+            table.handle = nh;
+            table.add_entry(h_line, acadrust::Handle::new(2));
+            doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
+        }
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let entries = effective_sort_map(&app);
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+        let s1 = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let s2 = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+        let s3 = entries.get(&h_hatch3.value()).copied().unwrap_or(h_hatch3.value());
+
+        assert_ne!(s1, s2, "hatches must not tie on one clamped key");
+        assert_ne!(s1, s3, "hatches must not tie on one clamped key");
+        assert_ne!(s2, s3, "hatches must not tie on one clamped key");
+        assert!(
+            line_sort > s1.max(s2).max(s3),
+            "the pinned line ({line_sort}) must still render above every hatch ({s1}, {s2}, {s3})"
+        );
+    }
+
+    #[test]
+    fn hatchtoback_undo_restores_draw_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let _h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let table = app.tabs[i].scene.document.objects.values().find_map(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                if t.block_owner_handle == block_handle {
+                    return Some(t);
+                }
+            }
+            None
+        }).expect("SortEntitiesTable should exist");
+        assert!(table.entries().any(|e| e.entity_handle == h_hatch));
+
+        // Perform UNDO.
+        let _ = app.update(crate::app::Message::Undo);
+
+        let table_after_undo = app.tabs[i].scene.document.objects.values().find_map(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                if t.block_owner_handle == block_handle {
+                    return Some(t);
+                }
+            }
+            None
+        });
+        // Table was created fresh by HATCHTOBACK, so undo should remove it or leave it empty of the hatch.
+        let has_hatch = table_after_undo.map_or(false, |t| t.entries().any(|e| e.entity_handle == h_hatch));
+        assert!(!has_hatch, "Undo must revert the SortEntitiesTable entry");
+    }
+
+    fn effective_sort_map(
+        app: &OpenCADStudio,
+    ) -> rustc_hash::FxHashMap<u64, u64> {
+        let i = app.active_tab;
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        app.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|obj| {
+                if let ObjectType::SortEntitiesTable(t) = obj {
+                    if t.block_owner_handle == block_handle {
+                        return Some(
+                            t.entries()
+                                .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+                                .collect(),
+                        );
+                    }
+                }
+                None
+            })
+            .unwrap_or_default()
+    }
+
+    // Regression guard for DRAWORDER BACK anchoring. Written while auditing
+    // the draw-order code, where BACK *looked* like it skipped the baseline
+    // scan and clamped every moved entity onto sort key 1 (a tie). Running
+    // this test disproved that — `to_front_opt` is Some(false) for BACK, so
+    // the baseline scan does run. Kept to lock in the strict-order behavior:
+    // a second BACK must land strictly below earlier assignments, never tie.
+    #[test]
+    fn draworder_back_twice_keeps_strict_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line1 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        // Send the hatch to back, then send line 1 behind it: the second BACK
+        // must anchor strictly below the first assignment, never tie with it.
+        app.tabs[i].scene.replace_selection(std::iter::once(h_hatch).collect());
+        let _ = app.run_command_line("DRAWORDER BACK");
+        app.tabs[i].scene.replace_selection(std::iter::once(h_line1).collect());
+        let _ = app.run_command_line("DRAWORDER BACK");
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let line1_sort = entries.get(&h_line1.value()).copied().unwrap_or(h_line1.value());
+
+        assert!(
+            line1_sort < hatch_sort,
+            "second BACK must land strictly below the first ({line1_sort} vs {hatch_sort})"
+        );
+    }
+
+    // Regression test for a suspected multi-select tie in DRAWORDER
+    // ABOVE/UNDER: the loop called move_above/move_below per entity, and each
+    // call recomputes target±1, so N selected entities should all collapse to
+    // one key. This test must fail while that bug exists.
+    // Same floor-exhaustion scenario as hatchtoback_exhausted_floor_…, but
+    // through the interactive DRAWORDER BACK path: two selected lines must
+    // land distinct and strictly behind a sibling pinned at key 2, instead of
+    // both clamping onto key 1.
+    #[test]
+    fn draworder_back_exhausted_floor_keeps_distinct_and_behind() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let h_pinned = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_line1 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_line2 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+
+        {
+            use acadrust::objects::{ObjectType, SortEntitiesTable};
+            let doc = &mut app.tabs[i].scene.document;
+            let nh = acadrust::Handle::new(doc.next_handle());
+            let mut table = SortEntitiesTable::for_block(block_handle);
+            table.handle = nh;
+            table.add_entry(h_pinned, acadrust::Handle::new(2));
+            doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
+        }
+
+        app.tabs[i]
+            .scene
+            .replace_selection([h_line1, h_line2].into_iter().collect());
+        let _ = app.run_command_line("DRAWORDER BACK");
+
+        let entries = effective_sort_map(&app);
+        let pinned_sort = entries.get(&h_pinned.value()).copied().unwrap_or(h_pinned.value());
+        let s1 = entries.get(&h_line1.value()).copied().unwrap_or(h_line1.value());
+        let s2 = entries.get(&h_line2.value()).copied().unwrap_or(h_line2.value());
+
+        assert_ne!(s1, s2, "BACK must not clamp both selected entities onto one tied key");
+        assert!(
+            pinned_sort > s1.max(s2),
+            "pinned sibling ({pinned_sort}) must stay above the moved pair ({s1}, {s2})"
+        );
+    }
+
+    #[test]
+    fn draworder_above_multi_select_keeps_distinct_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        app.tabs[i]
+            .scene
+            .replace_selection([h_hatch1, h_hatch2].into_iter().collect());
+        let cmd = format!("DRAWORDER ABOVE {:x}", h_ref.value());
+        let _ = app.run_command_line(&cmd);
+
+        let entries = effective_sort_map(&app);
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+        let hatch1_sort = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let hatch2_sort = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+
+        assert!(hatch1_sort > ref_sort, "hatch 1 ({hatch1_sort}) must be above reference ({ref_sort})");
+        assert!(hatch2_sort > ref_sort, "hatch 2 ({hatch2_sort}) must be above reference ({ref_sort})");
+        assert_ne!(hatch1_sort, hatch2_sort, "multi-select ABOVE must not tie selected entities");
+        assert!(
+            hatch2_sort > hatch1_sort,
+            "selection order must be preserved within the moved group ({hatch1_sort}, {hatch2_sort})"
+        );
+    }
+
+    #[test]
+    fn draworder_under_multi_select_keeps_distinct_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        app.tabs[i]
+            .scene
+            .replace_selection([h_hatch1, h_hatch2].into_iter().collect());
+        let cmd = format!("DRAWORDER UNDER {:x}", h_ref.value());
+        let _ = app.run_command_line(&cmd);
+
+        let entries = effective_sort_map(&app);
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+        let hatch1_sort = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let hatch2_sort = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+
+        assert!(hatch1_sort < ref_sort, "hatch 1 ({hatch1_sort}) must be under reference ({ref_sort})");
+        assert!(hatch2_sort < ref_sort, "hatch 2 ({hatch2_sort}) must be under reference ({ref_sort})");
+        assert_ne!(hatch1_sort, hatch2_sort, "multi-select UNDER must not tie selected entities");
+        assert!(
+            hatch1_sort > hatch2_sort,
+            "selection order must be preserved within the moved group ({hatch1_sort}, {hatch2_sort})"
+        );
+    }
+
+    #[test]
+    fn draworder_front_moves_hatch_in_front_of_all() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line1 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_line2 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+
+        app.tabs[i].scene.replace_selection(std::iter::once(h_hatch).collect());
+        let _ = app.run_command_line("DRAWORDER FRONT");
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let line1_sort = entries.get(&h_line1.value()).copied().unwrap_or(h_line1.value());
+        let line2_sort = entries.get(&h_line2.value()).copied().unwrap_or(h_line2.value());
+
+        assert!(hatch_sort > line1_sort, "hatch ({hatch_sort}) must render in front of line 1 ({line1_sort})");
+        assert!(hatch_sort > line2_sort, "hatch ({hatch_sort}) must render in front of line 2 ({line2_sort})");
+    }
+
+    #[test]
+    fn draworder_back_moves_hatch_behind_all() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line1 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_line2 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+
+        app.tabs[i].scene.replace_selection(std::iter::once(h_hatch).collect());
+        let _ = app.run_command_line("DRAWORDER BACK");
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let line1_sort = entries.get(&h_line1.value()).copied().unwrap_or(h_line1.value());
+        let line2_sort = entries.get(&h_line2.value()).copied().unwrap_or(h_line2.value());
+
+        assert!(hatch_sort < line1_sort, "hatch ({hatch_sort}) must render behind line 1 ({line1_sort})");
+        assert!(hatch_sort < line2_sort, "hatch ({hatch_sort}) must render behind line 2 ({line2_sort})");
+    }
+
+    #[test]
+    fn draworder_above_reference_puts_hatch_in_front_of_object() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        app.tabs[i].scene.replace_selection(std::iter::once(h_hatch).collect());
+        let cmd = format!("DRAWORDER ABOVE {:x}", h_ref.value());
+        let _ = app.run_command_line(&cmd);
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+
+        assert!(hatch_sort > ref_sort, "hatch ({hatch_sort}) must be above reference object ({ref_sort})");
+    }
+
+    #[test]
+    fn draworder_under_reference_puts_hatch_behind_object() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        app.tabs[i].scene.replace_selection(std::iter::once(h_hatch).collect());
+        let cmd = format!("DRAWORDER UNDER {:x}", h_ref.value());
+        let _ = app.run_command_line(&cmd);
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+
+        assert!(hatch_sort < ref_sort, "hatch ({hatch_sort}) must be under reference object ({ref_sort})");
+    }
+
+    #[test]
+    fn draworder_interactive_shortcuts_f_b_a_u() {
+        use crate::command::CadCommand;
+
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let _h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        // 1. Shortcut 'F' -> Front
+        let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
+        assert_eq!(cmd.wants_text_input(), true);
+        let res = cmd.on_text_input("F");
+        match res {
+            Some(crate::command::CmdResult::Relaunch(c, handles)) => {
+                assert_eq!(c, "DRAWORDER FRONT");
+                assert_eq!(handles, vec![h_hatch]);
+            }
+            _ => panic!("Expected Relaunch for shortcut F"),
+        }
+
+        // 2. Shortcut 'B' -> Back
+        let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
+        let res = cmd.on_text_input("B");
+        match res {
+            Some(crate::command::CmdResult::Relaunch(c, handles)) => {
+                assert_eq!(c, "DRAWORDER BACK");
+                assert_eq!(handles, vec![h_hatch]);
+            }
+            _ => panic!("Expected Relaunch for shortcut B"),
+        }
+
+        // 3. Shortcut 'A' -> Advances to PickReference (above)
+        let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
+        assert!(!cmd.needs_entity_pick());
+        let res = cmd.on_text_input("A");
+        assert!(matches!(res, Some(crate::command::CmdResult::NeedPoint)));
+        assert!(cmd.needs_entity_pick(), "Needs entity pick after choosing 'A'");
+
+        // 4. Shortcut 'U' -> Advances to PickReference (under)
+        let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
+        let res = cmd.on_text_input("U");
+        assert!(matches!(res, Some(crate::command::CmdResult::NeedPoint)));
+        assert!(cmd.needs_entity_pick(), "Needs entity pick after choosing 'U'");
+    }
+
+    #[test]
+    fn draworder_interactive_above_under_viewport_entity_pick() {
+        use crate::command::CadCommand;
+
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        // Above with viewport pick
+        let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
+        let _ = cmd.on_text_input("A");
+        assert!(cmd.needs_entity_pick());
+        let pick_res = cmd.on_entity_pick(h_ref, glam::DVec3::ZERO);
+        match pick_res {
+            crate::command::CmdResult::Relaunch(relaunch_cmd, handles) => {
+                assert_eq!(relaunch_cmd, format!("DRAWORDER A {:x}", h_ref.value()));
+                assert_eq!(handles, vec![h_hatch]);
+                app.tabs[i].scene.replace_selection(handles.into_iter().collect());
+                let _ = app.run_command_line(&relaunch_cmd);
+            }
+            _ => panic!("Expected Relaunch from entity pick"),
+        }
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+        assert!(hatch_sort > ref_sort, "Hatch must be above reference after viewport pick");
+
+        // Under with viewport pick
+        let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
+        let _ = cmd.on_text_input("U");
+        assert!(cmd.needs_entity_pick());
+        let pick_res = cmd.on_entity_pick(h_ref, glam::DVec3::ZERO);
+        match pick_res {
+            crate::command::CmdResult::Relaunch(relaunch_cmd, handles) => {
+                assert_eq!(relaunch_cmd, format!("DRAWORDER U {:x}", h_ref.value()));
+                assert_eq!(handles, vec![h_hatch]);
+                app.tabs[i].scene.replace_selection(handles.into_iter().collect());
+                let _ = app.run_command_line(&relaunch_cmd);
+            }
+            _ => panic!("Expected Relaunch from entity pick"),
+        }
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+        assert!(hatch_sort < ref_sort, "Hatch must be under reference after viewport pick");
+    }
+
+    #[test]
+    fn draworder_interactive_typed_hex_handle() {
+        use crate::command::CadCommand;
+
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
+        let _ = cmd.on_text_input("Above");
+        let hex_input = format!("0x{:x}", h_ref.value());
+        let typed_res = cmd.on_text_input(&hex_input);
+        match typed_res {
+            Some(crate::command::CmdResult::Relaunch(relaunch_cmd, handles)) => {
+                assert_eq!(relaunch_cmd, format!("DRAWORDER A {:x}", h_ref.value()));
+                assert_eq!(handles, vec![h_hatch]);
+                app.tabs[i].scene.replace_selection(handles.into_iter().collect());
+                let _ = app.run_command_line(&relaunch_cmd);
+            }
+            _ => panic!("Expected Relaunch from typed hex handle"),
+        }
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+        assert!(hatch_sort > ref_sort);
+    }
+
+    #[test]
+    fn draworder_interactive_without_preselection() {
+        use crate::command::CadCommand;
+
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        // Start command with no pre-selection
+        let mut cmd = DrawOrderCommand::new(vec![]);
+        assert!(cmd.is_selection_gathering());
+        assert!(!cmd.wants_text_input());
+
+        // Gather selection
+        let _ = cmd.on_selection_complete(vec![h_hatch]);
+        let enter_res = cmd.on_enter();
+        assert!(matches!(enter_res, crate::command::CmdResult::NeedPoint));
+        assert!(!cmd.is_selection_gathering());
+        assert!(cmd.wants_text_input());
+
+        // Choose verb Front
+        let res = cmd.on_text_input("F");
+        match res {
+            Some(crate::command::CmdResult::Relaunch(relaunch_cmd, handles)) => {
+                assert_eq!(relaunch_cmd, "DRAWORDER FRONT");
+                assert_eq!(handles, vec![h_hatch]);
+                app.tabs[i].scene.replace_selection(handles.into_iter().collect());
+                let _ = app.run_command_line(&relaunch_cmd);
+            }
+            _ => panic!("Expected Relaunch"),
+        }
+
+        let entries = effective_sort_map(&app);
+        let hatch_sort = entries.get(&h_hatch.value()).copied().unwrap_or(h_hatch.value());
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+        assert!(hatch_sort > line_sort);
     }
 }

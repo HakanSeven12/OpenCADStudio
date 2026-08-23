@@ -32,6 +32,8 @@ use viewcube::{viewcube_nav_controls, viewcube_ucs_picker, UCS_PICKER_W};
 // the `view::` path as before the split.
 pub(in crate::app) use overlay::{MTEXT_TEXT_ID, TEXT_INLINE_ID};
 
+pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bounds";
+
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
 /// The desk shown around the sheet, as the widget wants it. One definition,
 /// shared with the renderer that clears the sheet viewport to the same thing.
@@ -184,6 +186,7 @@ impl OpenCADStudio {
     pub fn view_main(&self) -> Element<'_, Message> {
         let i = self.active_tab;
         let tab = &self.tabs[i];
+        let thumbnail_capture_clean = self.thumbnail_capture_clean;
         let theme_text = self.active_theme.palette().background.base.text;
         let viewcube_text_color = [
             theme_text.r,
@@ -229,8 +232,10 @@ impl OpenCADStudio {
             let (vw, vh) = tab.scene.selection.borrow().vp_size;
             tab.scene.active_model_tile_bounds(vw, vh).width
         };
-        let viewcube_visible =
-            self.show_viewcube && !tab.is_start && viewcube_has_room(render_bar_w, active_vp_w);
+        let viewcube_visible = self.show_viewcube
+            && !thumbnail_capture_clean
+            && !tab.is_start
+            && viewcube_has_room(render_bar_w, active_vp_w);
         // Start tab: render welcome page in place of the viewport.
         // Surrounding chrome (tab bar, status bar) stays; the welcome widget
         // returned here also flags the rest of `view` to skip drawing-only
@@ -258,6 +263,7 @@ impl OpenCADStudio {
             shader(ViewportPane::model(
                 &tab.scene,
                 viewcube_visible,
+                !thumbnail_capture_clean,
                 viewport_render_mode,
                 viewcube_text_color,
             ))
@@ -276,6 +282,7 @@ impl OpenCADStudio {
             // mouse_areas' hover state and drops their move events).
             let scene = &tab.scene;
             let show_viewcube = viewcube_visible;
+            let show_interaction = !thumbnail_capture_clean;
             let render_mode = viewport_render_mode;
             let size_probe: Element<'_, Message> = responsive(move |size| {
                 {
@@ -293,6 +300,7 @@ impl OpenCADStudio {
                         shader(ViewportPane::for_pane(
                             scene,
                             show_viewcube,
+                            show_interaction,
                             render_mode,
                             idx,
                             viewcube_text_color,
@@ -414,22 +422,20 @@ impl OpenCADStudio {
                         None => tab.scene.active_model_tile_bounds(vw, vh),
                     };
                     let sel_h = tab.selected_handle;
-                    // The Current Vertex the Properties panel is focused on:
-                    // mark that grip hot so the navigated vertex is visible in
-                    // the drawing. Only for a single selected polyline, whose
-                    // vertex grips are ids 0..n. (Properties vertex stepper)
+                    // Mark the Properties panel's current point grip hot.
                     let current_vertex_grip: Option<usize> = tab
                         .properties
                         .prop_vertex_indicator_active
                         .then(|| sel_h)
                         .flatten()
                         .and_then(|h| {
-                        matches!(
-                            tab.scene.document.get_entity(h),
-                            Some(acadrust::EntityType::LwPolyline(_))
+                            let indexed = match tab.scene.document.get_entity(h) {
+                                Some(acadrust::EntityType::LwPolyline(_))
                                 | Some(acadrust::EntityType::Polyline2D(_))
-                        )
-                        .then_some(tab.properties.prop_vertex)
+                                | Some(acadrust::EntityType::Spline(_)) => true,
+                                _ => false,
+                            };
+                            indexed.then_some(tab.properties.prop_vertex)
                         });
                     // In-viewport grips are model-space; project them with the
                     // viewport camera so they sit on the wire the GPU draws.
@@ -495,6 +501,30 @@ impl OpenCADStudio {
                 } else {
                     vec![]
                 };
+            let control_polygon = tab.selected_handle.and_then(|handle| {
+                let spline = match tab.scene.document.get_entity(handle) {
+                    Some(acadrust::EntityType::Spline(spline)) if spline.cv_frame_visible => spline,
+                    _ => return None,
+                };
+                if tab
+                    .selected_grip_handles
+                    .iter()
+                    .any(|owner| *owner != handle)
+                {
+                    return None;
+                }
+                let points: Vec<_> = grips
+                    .iter()
+                    .filter(|grip| {
+                        grip.shape == crate::scene::model::object::GripShape::Circle
+                    })
+                    .map(|grip| grip.pos)
+                    .collect();
+                (points.len() >= 2).then_some((
+                    points,
+                    spline.flags.closed || spline.flags.periodic,
+                ))
+            });
             let grip_clip = if grips.is_empty() {
                 None
             } else {
@@ -688,6 +718,7 @@ impl OpenCADStudio {
                 snap_ext_base,
                 snap_ext_base2,
                 grips,
+                control_polygon,
                 grip_clip,
                 ucs_icons,
                 ost_points,
@@ -845,13 +876,24 @@ impl OpenCADStudio {
                 .height(Fill)]
             .width(Fill)
             .height(Fill)
-        } else if is_paper {
-            // Paper layout: the GPU shader renders everything — the desk is the
-            // container background, the white sheet + paper entities + borders
-            // come from the full-canvas top-locked "sheet" viewport, and the
-            // floating content viewports overlay it (same path as model space).
+        } else if thumbnail_capture_clean {
+            let capture_bg = if is_paper { PAPER_SPACE_BACKGROUND } else { bg_color };
             stack![
-                container(grid_overlay)
+                container(Space::new())
+                    .style(move |_: &Theme| container::Style {
+                        background: Some(Background::Color(capture_bg)),
+                        ..Default::default()
+                    })
+                    .width(Fill)
+                    .height(Fill),
+                viewport_3d,
+            ]
+            .width(Fill)
+            .height(Fill)
+        } else if is_paper {
+            // Keep the grid above the opaque GPU sheet and below interaction UI.
+            stack![
+                container(Space::new())
                     .style(move |_: &Theme| container::Style {
                         background: Some(Background::Color(PAPER_SPACE_BACKGROUND)),
                         ..Default::default()
@@ -859,6 +901,7 @@ impl OpenCADStudio {
                     .width(Fill)
                     .height(Fill),
                 viewport_3d,
+                grid_overlay,
                 selection_overlay,
                 viewport_mouse,
             ]
@@ -866,7 +909,7 @@ impl OpenCADStudio {
             .height(Fill)
         } else {
             stack![
-                container(grid_overlay)
+                container(Space::new())
                     .style(move |_: &Theme| container::Style {
                         background: Some(Background::Color(bg_color)),
                         ..Default::default()
@@ -874,12 +917,14 @@ impl OpenCADStudio {
                     .width(Fill)
                     .height(Fill),
                 viewport_3d,
+                grid_overlay,
                 selection_overlay,
             ]
             .width(Fill)
             .height(Fill)
         };
 
+        if !thumbnail_capture_clean {
         // Per-pane input pane_grid goes ABOVE the crosshair overlay so it
         // receives mouse events (the overlay's `Hidden` cursor would otherwise
         // starve any layer beneath it). The controls bar is pushed on top of it.
@@ -1093,26 +1138,28 @@ impl OpenCADStudio {
             }
         }
 
-        // Multi-functional grip popup (Phase 2). One bordered container
-        // wraps a column of borderless item buttons so the popup reads
-        // as a single widget instead of stacked tiles.
         if let Some(popup) = self.grip_popup.as_ref() {
             if !tab.is_start {
-                // Size the row to the widest label so the selection
-                // highlight fills the whole row instead of just the
-                // text glyphs. ~7 px per character at size 12 + the
-                // horizontal padding (10 + 10).
-                let max_len = popup
+                let labels: Vec<String> = popup
                     .items
                     .iter()
-                    .map(|i| i.label.chars().count())
+                    .map(|item| {
+                        let (mark, raw) = item
+                            .label
+                            .strip_prefix("✓ ")
+                            .map_or(("", item.label), |raw| ("✓ ", raw));
+                        format!("{mark}{}", crate::i18n::translate(raw))
+                    })
+                    .collect();
+                let max_len = labels
+                    .iter()
+                    .map(|label| label.chars().count())
                     .max()
                     .unwrap_or(8) as f32;
                 let row_w = max_len * 7.0 + 24.0;
                 let mut col = column![].spacing(0).width(iced::Length::Fixed(row_w));
-                for (idx, item) in popup.items.iter().enumerate() {
+                for (idx, label) in labels.into_iter().enumerate() {
                     let is_sel = idx == popup.selected;
-                    let label = item.label;
                     let btn = button(text(label).size(12))
                         .on_press(Message::GripMenuPick(idx))
                         .padding([3, 10])
@@ -1457,6 +1504,7 @@ impl OpenCADStudio {
                 viewport_stack = viewport_stack.push(text_inline_overlay(ed, canvas));
             }
         }
+        }
 
         // Docked side panels (Properties, block palette, future palettes) live
         // in an ordered vertical stack on the left/right edge of the drawing
@@ -1511,7 +1559,13 @@ impl OpenCADStudio {
         if let Some(e) = left_edge {
             parts.push(e);
         }
-        parts.push(viewport_stack.into());
+        parts.push(
+            crate::ui::wrap_bar::PosReport::new(
+                VIEWPORT_CAPTURE_BOUNDS_ID,
+                viewport_stack,
+            )
+            .into(),
+        );
         if let Some(e) = right_edge {
             parts.push(e);
         }
@@ -1688,7 +1742,9 @@ impl OpenCADStudio {
             &self.history_content,
             self.win_size.1,
         );
-        let center_stack: Element<'_, Message> = if tab.is_start {
+        let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
+            workspace
+        } else if tab.is_start {
             column![
                 workspace,
                 iced::widget::container(command_line)
@@ -2072,6 +2128,11 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        let thumbnail_capture = if self.thumbnail_capture_clean {
+            window::frames().map(|_| Message::ThumbnailCaptureFrame)
+        } else {
+            Subscription::none()
+        };
         // Blink the MText preview caret while the editor is open.
         let caret_blink = if self.mtext_editor.is_some() {
             iced::time::every(std::time::Duration::from_millis(530))
@@ -2130,6 +2191,7 @@ impl OpenCADStudio {
             grip_dwell,
             hover_dwell,
             nav_settle,
+            thumbnail_capture,
             caret_blink,
             web_fonts,
             autosave,
@@ -2242,6 +2304,7 @@ impl OpenCADStudio {
                         {
                             return Some(Message::CommandLineArrowProbe {
                                 direction: arrow?,
+                                extend_selection: modifiers.shift(),
                             });
                         }
                         // A focused web text field needs the browser clipboard;

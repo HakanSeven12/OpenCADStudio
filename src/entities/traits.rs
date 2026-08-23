@@ -111,6 +111,22 @@ pub trait TextContent {
 pub fn entity_type_name(et: &EntityType) -> &str {
     match et {
         EntityType::Point(_) => "Point",
+        EntityType::Line(line)
+            if acadrust::entities::CenterMarkAssociation::read(
+                &line.common.extended_data,
+            )
+            .is_some() =>
+        {
+            "CenterMark"
+        }
+        EntityType::Line(line)
+            if acadrust::entities::CenterLineAssociation::read(
+                &line.common.extended_data,
+            )
+            .is_some() =>
+        {
+            "CenterLine"
+        }
         EntityType::Line(_) => "Line",
         EntityType::Circle(_) => "Circle",
         EntityType::Arc(_) => "Arc",
@@ -118,6 +134,11 @@ pub fn entity_type_name(et: &EntityType) -> &str {
         EntityType::Polyline(_) => "Polyline",
         EntityType::Polyline2D(_) => "Polyline2D",
         EntityType::Polyline3D(_) => "Polyline3D",
+        EntityType::LwPolyline(polyline)
+            if crate::entities::lwpolyline::is_revision_cloud(polyline) =>
+        {
+            "Revcloud"
+        }
         EntityType::LwPolyline(_) => "LwPolyline",
         EntityType::Text(_) => "Text",
         EntityType::MText(_) => "MText",

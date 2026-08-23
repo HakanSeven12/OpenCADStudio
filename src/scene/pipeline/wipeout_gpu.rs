@@ -9,11 +9,13 @@
 // a limit on visible hatch fills.
 //
 // Group 1 bindings per fill:
-//   binding 0 — HatchUniformData  (64 bytes)   mode, color, angle_offset, scale, gradient params
+//   binding 0 — HatchUniformData  fill and plane parameters
 //   binding 1 — BoundaryData      (16384 bytes) boundary polygon vertices
 //   binding 2 — FamilyBatchData   (1296 bytes)  up to 16 line families + 128 dash values (unused for wipeouts)
 
-use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily, MAX_HATCH_BOUNDARY_VERTS};
+use crate::scene::model::hatch_model::{
+    FillPlane, HatchModel, HatchPattern, PatFamily, MAX_HATCH_BOUNDARY_VERTS,
+};
 use iced::wgpu;
 use iced::wgpu::util::DeviceExt;
 
@@ -48,10 +50,10 @@ impl HatchVertex {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct WipeoutPlacement {
-    pub translation: [f32; 2],
-    pub translation_low: [f32; 2],
+    pub translation: [f32; 3],
+    pub translation_low: [f32; 3],
     pub draw_depth: f32,
-    pub _pad: [f32; 3],
+    pub _pad: f32,
 }
 
 impl WipeoutPlacement {
@@ -60,9 +62,9 @@ impl WipeoutPlacement {
             array_stride: std::mem::size_of::<Self>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
-                wgpu::VertexAttribute { offset: 0, shader_location: 1, format: wgpu::VertexFormat::Float32x2 },
-                wgpu::VertexAttribute { offset: 8, shader_location: 2, format: wgpu::VertexFormat::Float32x2 },
-                wgpu::VertexAttribute { offset: 16, shader_location: 3, format: wgpu::VertexFormat::Float32 },
+                wgpu::VertexAttribute { offset: 0, shader_location: 1, format: wgpu::VertexFormat::Float32x3 },
+                wgpu::VertexAttribute { offset: 12, shader_location: 2, format: wgpu::VertexFormat::Float32x3 },
+                wgpu::VertexAttribute { offset: 24, shader_location: 3, format: wgpu::VertexFormat::Float32 },
             ],
         }
     }
@@ -70,7 +72,7 @@ impl WipeoutPlacement {
 
 // ── Uniform structs ───────────────────────────────────────────────────────
 
-/// Per-hatch parameters (binding 0).  Must be 96 bytes (16-byte aligned).
+/// Per-fill parameters (binding 0).
 ///
 /// `mode` encoding:
 ///   0 → Pattern  (families in FamilyBatchData)
@@ -89,18 +91,15 @@ pub struct HatchUniformData {
     pub grad_sin: f32,       // 52: gradient direction sin
     pub grad_min: f32,       // 56: gradient proj_min
     pub grad_range: f32,     // 60: gradient proj_range
-    pub origin: [f32; 2],    // 64: hatch-local origin (boundary AABB centre),
-    //                       //     high half of the double-single anchor.
-    //                       //     The pattern fragment shader subtracts this
-    //                       //     from xz before the perp/perp_step quotient
-    //                       //     so f32 doesn't catastrophically cancel when
-    //                       //     world coords are large and pattern spacing
-    //                       //     is small (e.g. UTM drawing + sub-mm hatch).
-    pub origin_low: [f32; 2], // 72: anchor low residual (double-single) so the
-    //                        //     vertex clip position stays precise at UTM scale.
+    pub origin: [f32; 2],     // 64: reserved pattern origin
+    pub origin_low: [f32; 2], // 72: reserved low residual
     pub draw_depth: f32,      // 80: signed (-1,1) draw-order bias
     pub _pad: [f32; 3],       // 84..96
-} // total 96 bytes
+    pub plane_origin_high: [f32; 4],
+    pub plane_origin_low: [f32; 4],
+    pub plane_x: [f32; 4],
+    pub plane_y: [f32; 4],
+}
 
 /// Boundary polygon (binding 1).  Matches WGSL `Boundary`.
 #[repr(C)]
@@ -194,13 +193,22 @@ impl WipeoutGpu {
         };
 
         // ── Bounding box ─────────────────────────────────────────────────
+        let plane = model.fill_plane.unwrap_or(FillPlane {
+            origin: [model.world_origin[0], model.world_origin[1], 0.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        });
+        let gpu_boundary = model
+            .fill_plane_boundary
+            .as_deref()
+            .unwrap_or(model.boundary.as_ref());
         let (mut min_x, mut max_x, mut min_y, mut max_y) = (
             f32::INFINITY,
             f32::NEG_INFINITY,
             f32::INFINITY,
             f32::NEG_INFINITY,
         );
-        for &[x, y] in model.boundary.iter() {
+        for &[x, y] in gpu_boundary {
             if !x.is_finite() || !y.is_finite() {
                 continue;
             }
@@ -218,68 +226,16 @@ impl WipeoutGpu {
             _ => 5.0,
         };
         let diag = ((max_x - min_x).powi(2) + (max_y - min_y).powi(2)).sqrt();
-        let pad = (diag * 0.8 + max_spacing * 2.0 * model.scale).max(1.0);
-        // ── Pattern phase anchor.
-        //
-        // Boundary verts are already stored as small f32 offsets from
-        // `model.world_origin` (an f64 anchor near the AABB centre), so
-        // the in_polygon ray-cast and the pattern math both run at full
-        // f32 precision in the fragment shader. The remaining question
-        // is *which* offset-rel point we hand to the vertex shader as
-        // `h.origin` (so the quad lands at the correct WCS position
-        // after `view_proj * (v.pos + h.origin)`).
-        //
-        // For pattern alignment across adjacent hatches with the same
-        // family, snap `h.origin` to the family's perp/along grid in
-        // f64. Without the snap, each hatch's pattern phase is per-hatch
-        // and stripes don't continue across hatch boundaries (you see
-        // pattern misalignment along a road etc).
-        let mut origin = model.world_origin;
-        if let HatchPattern::Pattern(families) = &model.pattern {
-            if let Some(fam) = families.first() {
-                // Must mirror the shader's pattern math exactly. QCAD PAT
-                // convention (matching build_family_batch): `dy` is the
-                // perpendicular spacing and `dx` is the along-line phase
-                // shift, both in family-local space. Multiplied by
-                // `model.scale` in the fragment shader. Combined angle
-                // (family + pattern_angle) rotates the perp/along axes.
-                let angle = (fam.angle_deg.to_radians() + model.angle_offset) as f64;
-                let cos_a = angle.cos();
-                let sin_a = angle.sin();
-                let scale = model.scale as f64;
-                let perp_step = fam.dy as f64 * scale;
-                let along_step = fam.dx as f64 * scale;
-                let o_perp = -origin[0] * sin_a + origin[1] * cos_a;
-                let o_along = origin[0] * cos_a + origin[1] * sin_a;
-                let snapped_perp = if perp_step.abs() > 1e-12 {
-                    (o_perp / perp_step).round() * perp_step
-                } else {
-                    o_perp
-                };
-                let snapped_along = if along_step.abs() > 1e-12 {
-                    (o_along / along_step).round() * along_step
-                } else {
-                    o_along
-                };
-                origin = [
-                    -snapped_perp * sin_a + snapped_along * cos_a,
-                    snapped_perp * cos_a + snapped_along * sin_a,
-                ];
-            }
-        }
-        // Boundary buffer + quad now live in "snap-shifted" hatch-local
-        // coords: subtract any drift between model.world_origin and the
-        // snapped origin so the in_polygon ray-cast in fragment shader
-        // (which reads the boundary verts straight) lines up with v.xz.
-        let drift = [
-            (model.world_origin[0] - origin[0]) as f32,
-            (model.world_origin[1] - origin[1]) as f32,
-        ];
+        let pad = if mode == 1 {
+            0.0
+        } else {
+            (diag * 0.8 + max_spacing * 2.0 * model.scale).max(1.0)
+        };
         let (x0, x1, y0, y1) = (
-            min_x + drift[0] - pad,
-            max_x + drift[0] + pad,
-            min_y + drift[1] - pad,
-            max_y + drift[1] + pad,
+            min_x - pad,
+            max_x + pad,
+            min_y - pad,
+            max_y + pad,
         );
 
         let quad = [
@@ -316,11 +272,9 @@ impl WipeoutGpu {
 
         // ── Gradient: projection range (in snapped-local space) ──────────
         let (grad_min, grad_range) = if mode == 2 {
-            let projs: Vec<f32> = model
-                .boundary
-                .iter()
+            let projs: Vec<f32> = gpu_boundary.iter()
                 .filter(|v| v[0].is_finite() && v[1].is_finite())
-                .map(|&[x, y]| (x + drift[0]) * grad_cos + (y + drift[1]) * grad_sin)
+                .map(|&[x, y]| x * grad_cos + y * grad_sin)
                 .collect();
             if projs.is_empty() {
                 (0.0, 1.0)
@@ -334,7 +288,11 @@ impl WipeoutGpu {
         };
 
         // ── HatchUniformData ─────────────────────────────────────────────
-        let n = model.boundary.len().min(MAX_HATCH_BOUNDARY_VERTS);
+        let n = gpu_boundary.len().min(MAX_HATCH_BOUNDARY_VERTS);
+        let plane_origin_high = plane.origin.map(|value| value as f32);
+        let plane_origin_low: [f32; 3] = std::array::from_fn(|index| {
+            (plane.origin[index] - plane_origin_high[index] as f64) as f32
+        });
         let uniform_data = HatchUniformData {
             color: model.color,
             color2,
@@ -346,30 +304,46 @@ impl WipeoutGpu {
             grad_sin,
             grad_min,
             grad_range,
-            origin: [origin[0] as f32, origin[1] as f32],
-            origin_low: [
-                (origin[0] - origin[0] as f32 as f64) as f32,
-                (origin[1] - origin[1] as f32 as f64) as f32,
-            ],
+            origin: [0.0; 2],
+            origin_low: [0.0; 2],
             draw_depth: 0.0,
             _pad: [0.0; 3],
+            plane_origin_high: [
+                plane_origin_high[0],
+                plane_origin_high[1],
+                plane_origin_high[2],
+                0.0,
+            ],
+            plane_origin_low: [
+                plane_origin_low[0],
+                plane_origin_low[1],
+                plane_origin_low[2],
+                0.0,
+            ],
+            plane_x: [
+                plane.x_axis[0] as f32,
+                plane.x_axis[1] as f32,
+                plane.x_axis[2] as f32,
+                0.0,
+            ],
+            plane_y: [
+                plane.y_axis[0] as f32,
+                plane.y_axis[1] as f32,
+                plane.y_axis[2] as f32,
+                0.0,
+            ],
         };
 
         // ── BoundaryData (in snapped-local space) ────────────────────────
         let mut boundary_data = BoundaryData {
             verts: [[0.0; 4]; MAX_HATCH_BOUNDARY_VERTS],
         };
-        for (i, &[x, y]) in model
-            .boundary
-            .iter()
+        for (i, &[x, y]) in gpu_boundary.iter()
             .take(MAX_HATCH_BOUNDARY_VERTS)
             .enumerate()
         {
-            // Path-break separators go up as the finite GPU sentinel, not
-            // NaN — the shader NaN self-compare is folded to `true` on some
-            // drivers (#386, #416) — and must not be shifted by `drift`.
             if x.is_finite() && y.is_finite() {
-                boundary_data.verts[i] = [x + drift[0], y + drift[1], 0.0, 0.0];
+                boundary_data.verts[i] = [x, y, 0.0, 0.0];
             } else {
                 let s = crate::scene::model::hatch_model::GPU_BOUNDARY_SEP;
                 boundary_data.verts[i] = [s, s, 0.0, 0.0];
@@ -433,16 +407,15 @@ impl WipeoutGpu {
                 let translation = model
                     .render_instance
                     .map_or([0.0; 3], |instance| instance.translation);
-                let delta = [translation[0] - base[0], translation[1] - base[1]];
-                let high = [delta[0] as f32, delta[1] as f32];
+                let delta = std::array::from_fn(|index| translation[index] - base[index]);
+                let high = delta.map(|value| value as f32);
                 WipeoutPlacement {
                     translation: high,
-                    translation_low: [
-                        (delta[0] - high[0] as f64) as f32,
-                        (delta[1] - high[1] as f64) as f32,
-                    ],
+                    translation_low: std::array::from_fn(|index| {
+                        (delta[index] - high[index] as f64) as f32
+                    }),
                     draw_depth: model.draw_depth,
-                    _pad: [0.0; 3],
+                    _pad: 0.0,
                 }
             })
             .collect();
@@ -451,19 +424,38 @@ impl WipeoutGpu {
             contents: bytemuck::cast_slice(&placements),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let ox = model.world_origin[0] as f32;
-        let oy = model.world_origin[1] as f32;
-        let world_aabb = if min_x.is_finite() && min_y.is_finite() {
+        let mut world_bounds = [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        for &[x, y] in model.boundary.iter() {
+            if x.is_finite() && y.is_finite() {
+                world_bounds[0] = world_bounds[0].min(x);
+                world_bounds[1] = world_bounds[1].min(y);
+                world_bounds[2] = world_bounds[2].max(x);
+                world_bounds[3] = world_bounds[3].max(y);
+            }
+        }
+        let tilted = plane.origin[2].abs() > f64::EPSILON
+            || plane.x_axis[2].abs() > f64::EPSILON
+            || plane.y_axis[2].abs() > f64::EPSILON;
+        let world_aabb = if tilted {
+            [f32::NAN; 4]
+        } else if world_bounds[0].is_finite() && world_bounds[1].is_finite() {
+            let ox = model.world_origin[0] as f32;
+            let oy = model.world_origin[1] as f32;
             let mut aabb = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
             for placement in &placements {
-                aabb[0] = aabb[0].min(min_x + ox + placement.translation[0]);
-                aabb[1] = aabb[1].min(min_y + oy + placement.translation[1]);
-                aabb[2] = aabb[2].max(max_x + ox + placement.translation[0]);
-                aabb[3] = aabb[3].max(max_y + oy + placement.translation[1]);
+                aabb[0] = aabb[0].min(world_bounds[0] + ox + placement.translation[0]);
+                aabb[1] = aabb[1].min(world_bounds[1] + oy + placement.translation[1]);
+                aabb[2] = aabb[2].max(world_bounds[2] + ox + placement.translation[0]);
+                aabb[3] = aabb[3].max(world_bounds[3] + oy + placement.translation[1]);
             }
             aabb
         } else {
-            [min_x, min_y, max_x, max_y]
+            world_bounds
         };
 
         Self {
@@ -482,7 +474,7 @@ impl WipeoutGpu {
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 /// Perpendicular spacing between adjacent parallel lines.
-/// QCAD PAT format stores (dx, dy) in line-local coordinates: dy = perpendicular, dx = along-line.
+/// Pattern spacing perpendicular to adjacent parallel lines.
 fn perp_spacing(f: &PatFamily) -> f32 {
     f.dy
 }
@@ -519,7 +511,7 @@ fn build_family_batch(pattern: &HatchPattern) -> FamilyBatchData {
         let angle_r = family.angle_deg.to_radians();
         let cos_a = angle_r.cos();
         let sin_a = angle_r.sin();
-        // QCAD PAT local-frame convention: dy = perpendicular spacing, dx = along-line phase shift.
+        // Pattern offsets are stored in the line-local frame.
         let perp_step = family.dy;
         let along_step = family.dx;
         let line_width = 0.0_f32; // unused: shader uses screen-space derivative for 1px lines

@@ -19,19 +19,19 @@ fn base_props(base: &DimensionBase) -> Vec<crate::scene::model::object::Property
         crate::scene::model::object::Property {
             label: t!("Text").into_owned(),
             field: "text",
-            value: crate::scene::model::object::PropValue::EditText(base.text.clone()),
+            value: crate::scene::model::object::PropValue::PlainText(base.text.clone()),
         },
         crate::scene::model::object::Property {
             label: t!("User Text").into_owned(),
             field: "user_text",
-            value: crate::scene::model::object::PropValue::EditText(
+            value: crate::scene::model::object::PropValue::PlainText(
                 base.user_text.clone().unwrap_or_default(),
             ),
         },
         crate::scene::model::object::Property {
             label: t!("Style").into_owned(),
             field: "style_name",
-            value: crate::scene::model::object::PropValue::EditText(base.style_name.clone()),
+            value: crate::scene::model::object::PropValue::PlainText(base.style_name.clone()),
         },
         edit(t!("Text X").as_ref(), "text_x", base.text_middle_point.x),
         edit(t!("Text Y").as_ref(), "text_y", base.text_middle_point.y),
@@ -2066,9 +2066,12 @@ fn tessellate_dimension_inner(
             let (ext1, ext2) = split_ext_lines(&geom.ext_lines);
             if !ext1.is_empty() {
                 wires.push(WireModel {
+                    point_marker: None,
                     taper_widths: Vec::new(),
                     world_width: 0.0,
                     depth_override: None,
+                    display_visible: true,
+                    plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
                     render_instance: None,
@@ -2097,9 +2100,12 @@ fn tessellate_dimension_inner(
             }
             if !ext2.is_empty() {
                 wires.push(WireModel {
+                    point_marker: None,
                     taper_widths: Vec::new(),
                     world_width: 0.0,
                     depth_override: None,
+                    display_visible: true,
+                    plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
                     render_instance: None,
@@ -2128,9 +2134,12 @@ fn tessellate_dimension_inner(
             }
         } else {
             wires.push(WireModel {
+                point_marker: None,
                 taper_widths: Vec::new(),
                 world_width: 0.0,
                 depth_override: None,
+                display_visible: true,
+                plot_visible: true,
                 fill_is_3d: false,
                 fill_is_2d_solid: false,
                 render_instance: None,
@@ -2160,9 +2169,12 @@ fn tessellate_dimension_inner(
     }
 
     wires.push(WireModel {
+        point_marker: None,
         taper_widths: Vec::new(),
         world_width: 0.0,
         depth_override: None,
+        display_visible: true,
+        plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
         render_instance: None,
@@ -2208,9 +2220,12 @@ fn tessellate_dimension_inner(
                     aci_to_rgba(&c)
                 };
                 wires.push(WireModel {
+                    point_marker: None,
                     taper_widths: Vec::new(),
                     world_width: 0.0,
                     depth_override: None,
+                    display_visible: true,
+                    plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
                     render_instance: None,
@@ -4128,5 +4143,4 @@ mod arch_format_tests {
         assert_eq!(format_fractional(6.5, 0), "6 1/2");
     }
 }
-
 

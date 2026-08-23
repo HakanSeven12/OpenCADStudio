@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="../../README.md">English</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
+  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center"><img src="../../assets/logo.svg" width="112" alt="شعار Open CAD Studio"></p>
@@ -19,7 +19,7 @@
   <a href="https://github.com/HakanSeven12/OpenCADStudio/discussions"><strong>الانضمام إلى النقاش</strong></a>
 </p>
 
-<p align="center"><img src="https://github.com/user-attachments/assets/10635ad0-454b-4c87-935f-1a3a46f24ccb" alt="مساحة عمل Open CAD Studio" width="100%"></p>
+<p align="center"><img src="../../site/workspace.png" alt="مساحة عمل Open CAD Studio" width="100%"></p>
 
 ## نظرة عامة
 
@@ -36,7 +36,7 @@ Open CAD Studio تطبيق متعدد المنصات للرسم التقني و�
 - **تصيير عبر GPU** — إطارات عرض ثنائية وثلاثية الأبعاد مسرّعة بواسطة `wgpu` مع كاميرات متعامدة ومنظورية.
 - **سير عمل قابل للتوسعة** — إضافات أصلية ونصوص أوامر وتحويل من دون واجهة وواجهة JSON للأتمتة تعتمد على الأسطر.
 
-<p align="center"><img src="https://github.com/user-attachments/assets/2a037a09-e8e8-498c-8ed3-58ecb8ae958d" alt="نموذج ثلاثي الأبعاد في Open CAD Studio" width="100%"></p>
+<p align="center"><img src="../../site/modeling.png" alt="نموذج ثلاثي الأبعاد في Open CAD Studio" width="100%"></p>
 
 ## سير عمل الملفات
 
@@ -91,9 +91,9 @@ chmod +x OpenCADStudio-*-linux-x86_64.AppImage
 
 ## اللغات
 
-يمكن لـ Open CAD Studio اتباع لغة النظام أو استخدام إحدى لغات الواجهة التسع عشرة التالية:
+يمكن لـ Open CAD Studio اتباع لغة النظام أو استخدام إحدى لغات الواجهة العشرين التالية:
 
-> العربية · البرتغالية البرازيلية · التشيكية · الهولندية · الإنجليزية · الفنلندية · الفرنسية · الألمانية · الهندية · المجرية · الإيطالية · اليابانية · الكورية · البولندية · الروسية · الصينية المبسطة · الإسبانية · الصينية التقليدية · التركية
+> العربية · البرتغالية البرازيلية · البلغارية · التشيكية · الهولندية · الإنجليزية · الفنلندية · الفرنسية · الألمانية · الهندية · المجرية · الإيطالية · اليابانية · الكورية · البولندية · الروسية · الصينية المبسطة · الإسبانية · الصينية التقليدية · التركية
 
 غيّر اللغة من إعدادات التطبيق. عند اختيار **النظام**، يستخدم إصدار المتصفح أيضاً الإعدادات المحلية المفضلة للمتصفح.
 

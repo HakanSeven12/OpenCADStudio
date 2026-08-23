@@ -1,11 +1,7 @@
-// Model module — 3D solid modelling.
-//
-//   Model group  : create primitive solids (box, cylinder, cone, sphere, …)
-//                  as ACIS Solid3D entities via acadrust's primitive builders.
-//   Design group : combine solids with the kernel boolean operations
-//                  (union / subtract / intersect).
+// Solid creation and kernel modelling tools.
 
 pub mod boolean_cmd;
+pub mod edge_cmd;
 pub mod primitive_cmd;
 
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
@@ -16,11 +12,20 @@ const BOX_ICON: &[u8] = include_bytes!("../../../assets/icons/box3d.svg");
 const CYLINDER_ICON: &[u8] = include_bytes!("../../../assets/icons/cylinder3d.svg");
 const CONE_ICON: &[u8] = include_bytes!("../../../assets/icons/cone3d.svg");
 const SPHERE_ICON: &[u8] = include_bytes!("../../../assets/icons/sphere3d.svg");
+const PYRAMID_ICON: &[u8] = include_bytes!("../../../assets/icons/pyramid3d.svg");
 const WEDGE_ICON: &[u8] = include_bytes!("../../../assets/icons/wedge3d.svg");
 const TORUS_ICON: &[u8] = include_bytes!("../../../assets/icons/torus3d.svg");
+const POLYSOLID_ICON: &[u8] = include_bytes!("../../../assets/icons/polysolid.svg");
+const EXTRUDE_ICON: &[u8] = include_bytes!("../../../assets/icons/extrude.svg");
+const REVOLVE_ICON: &[u8] = include_bytes!("../../../assets/icons/revolve.svg");
+const LOFT_ICON: &[u8] = include_bytes!("../../../assets/icons/loft.svg");
+const SWEEP_ICON: &[u8] = include_bytes!("../../../assets/icons/sweep.svg");
+const PRESSPULL_ICON: &[u8] = include_bytes!("../../../assets/icons/presspull.svg");
 const UNION_ICON: &[u8] = include_bytes!("../../../assets/icons/union.svg");
 const SUBTRACT_ICON: &[u8] = include_bytes!("../../../assets/icons/subtract.svg");
 const INTERSECT_ICON: &[u8] = include_bytes!("../../../assets/icons/intersect.svg");
+const FILLET_ICON: &[u8] = include_bytes!("../../../assets/icons/fillet.svg");
+const CHAMFER_ICON: &[u8] = include_bytes!("../../../assets/icons/chamfer.svg");
 
 /// Helper to declare a ribbon tool that fires a named command.
 fn tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> ToolDef {
@@ -37,7 +42,7 @@ impl CadModule for ModelModule {
         "model"
     }
     fn title(&self) -> &'static str {
-        "Model"
+        "Modelling"
     }
 
     fn ribbon_groups(&self) -> &[RibbonGroup] {
@@ -45,29 +50,44 @@ impl CadModule for ModelModule {
         GROUPS.get_or_init(|| {
             vec![
                 RibbonGroup {
-                    title: "Model",
+                    title: "Create",
                     tools: vec![
-                        RibbonItem::LargeTool(tool("BOX", "Box", BOX_ICON)),
-                        RibbonItem::LargeTool(tool("CYLINDER", "Cylinder", CYLINDER_ICON)),
-                        RibbonItem::LargeTool(tool("CONE", "Cone", CONE_ICON)),
-                        RibbonItem::LargeTool(tool("SPHERE", "Sphere", SPHERE_ICON)),
-                        RibbonItem::Dropdown {
-                            id: "MODEL_MORE",
-                            icon: IconKind::Svg(WEDGE_ICON),
+                        RibbonItem::LargeDropdown {
+                            id: "MODEL_PRIMITIVES",
+                            label: "Box",
+                            icon: IconKind::Svg(BOX_ICON),
                             items: vec![
+                                ("BOX", "Box", IconKind::Svg(BOX_ICON)),
+                                ("CYLINDER", "Cylinder", IconKind::Svg(CYLINDER_ICON)),
+                                ("CONE", "Cone", IconKind::Svg(CONE_ICON)),
+                                ("SPHERE", "Sphere", IconKind::Svg(SPHERE_ICON)),
+                                ("PYRAMID", "Pyramid", IconKind::Svg(PYRAMID_ICON)),
                                 ("WEDGE", "Wedge", IconKind::Svg(WEDGE_ICON)),
                                 ("TORUS", "Torus", IconKind::Svg(TORUS_ICON)),
+                                ("POLYSOLID", "Polysolid", IconKind::Svg(POLYSOLID_ICON)),
                             ],
-                            default: "WEDGE",
+                            default: "BOX",
                         },
+                        RibbonItem::LargeTool(tool("EXTRUDE", "Extrude", EXTRUDE_ICON)),
+                        RibbonItem::LargeTool(tool("REVOLVE", "Revolve", REVOLVE_ICON)),
+                        RibbonItem::LargeTool(tool("LOFT", "Loft", LOFT_ICON)),
+                        RibbonItem::LargeTool(tool("SWEEP", "Sweep", SWEEP_ICON)),
+                        RibbonItem::LargeTool(tool("PRESSPULL", "Presspull", PRESSPULL_ICON)),
                     ],
                 },
                 RibbonGroup {
-                    title: "Design",
+                    title: "Boolean",
                     tools: vec![
                         RibbonItem::LargeTool(tool("UNION", "Union", UNION_ICON)),
                         RibbonItem::LargeTool(tool("SUBTRACT", "Subtract", SUBTRACT_ICON)),
                         RibbonItem::LargeTool(tool("INTERSECT", "Intersect", INTERSECT_ICON)),
+                    ],
+                },
+                RibbonGroup {
+                    title: "Edges",
+                    tools: vec![
+                        RibbonItem::LargeTool(tool("SOLIDFILLET", "Fillet", FILLET_ICON)),
+                        RibbonItem::LargeTool(tool("SOLIDCHAMFER", "Chamfer", CHAMFER_ICON)),
                     ],
                 },
             ]

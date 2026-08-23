@@ -1,41 +1,33 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
 use super::*;
 
-/// Convert a HATCH's own resolved pattern line (world-unit `offset` = step to
-/// the next parallel line, plus a base angle) into a render `PatFamily` whose
-/// geometry is already final — the HatchModel that carries it uses scale 1 and
-/// angle_offset 0 (see `prebaked` in `hatch_model_from_dxf`). The world-space
-/// offset is rotated into the line's local frame so `pattern_segments` and the
-/// GPU shader, which rotate `(dx, dy)` back out by the family angle, reproduce
-/// the exact stored step. `x0/y0` are filled in by the caller (from the stored
-/// `base_point`, relative to `world_origin`) once the boundary anchor is known;
-/// they set the pattern origin, observable for dashed / offset patterns.
-/// Order a hatch boundary path's sampled edges into one tip-to-tail loop.
-///
-/// Real files do not store boundary edges as a sequential walk: associative
-/// hatches list them in boundary-source-entity order, with arbitrary
-/// direction — the next edge in the list may attach to either end of the
-/// chain built so far, or belong to the far side of the loop entirely.
-/// Concatenating them verbatim draws a self-crossing "bowtie" outline and
-/// flips the even-odd fill over the wrong region.
-///
-/// Greedy nearest-endpoint assembly: keep the chain open at both ends and, at
-/// each step, attach the unused edge whose endpoint lies closest to either
-/// end (reversing / prepending as needed). Distance comparison, no tolerance:
-/// a correctly-ordered file matches at distance 0 and reproduces exactly.
-fn chain_path_edges(mut polys: Vec<Vec<[f64; 2]>>) -> Vec<[f64; 2]> {
+/// Order sampled boundary edges into one tip-to-tail loop.
+pub(super) fn chain_path_edges(polys: Vec<Vec<[f64; 2]>>) -> Vec<[f64; 2]> {
+    chain_path_edges_with_directions(polys).0
+}
+
+pub(super) fn chain_path_edges_with_directions(
+    polys: Vec<Vec<[f64; 2]>>,
+) -> (Vec<[f64; 2]>, Vec<f64>) {
     let d2 = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2);
-    polys.retain(|p| !p.is_empty());
+    let mut directions = vec![0.0; polys.len()];
+    let mut polys: Vec<_> = polys
+        .into_iter()
+        .enumerate()
+        .filter(|(_, points)| !points.is_empty())
+        .collect();
     if polys.is_empty() {
-        return Vec::new();
+        return (Vec::new(), directions);
     }
-    let mut chain: std::collections::VecDeque<[f64; 2]> = polys.swap_remove(0).into();
+    let (first_index, first) = polys.swap_remove(0);
+    directions[first_index] = 1.0;
+    let mut chain: std::collections::VecDeque<[f64; 2]> = first.into();
     while !polys.is_empty() {
         let head = *chain.front().unwrap();
         let tail = *chain.back().unwrap();
         // (distance, index, reverse-points, attach-at-front)
         let mut best = (f64::MAX, 0usize, false, false);
-        for (i, p) in polys.iter().enumerate() {
+        for (i, (_, p)) in polys.iter().enumerate() {
             let s = p[0];
             let e = *p.last().unwrap();
             for c in [
@@ -50,7 +42,8 @@ fn chain_path_edges(mut polys: Vec<Vec<[f64; 2]>>) -> Vec<[f64; 2]> {
             }
         }
         let (_, idx, rev, at_front) = best;
-        let mut p = polys.swap_remove(idx);
+        let (original_index, mut p) = polys.swap_remove(idx);
+        directions[original_index] = if rev { -1.0 } else { 1.0 };
         if rev {
             p.reverse();
         }
@@ -71,7 +64,7 @@ fn chain_path_edges(mut polys: Vec<Vec<[f64; 2]>>) -> Vec<[f64; 2]> {
             chain.extend(it);
         }
     }
-    chain.into()
+    (chain.into(), directions)
 }
 
 fn family_from_stored_line(
@@ -88,6 +81,36 @@ fn family_from_stored_line(
         dy: dy as f32,
         dashes: ln.dash_lengths.iter().map(|&d| d as f32).collect(),
     }
+}
+
+/// Preserve the selected hue while moving its HSL lightness towards the
+/// persisted one-colour tint/shade target (0 = black, 1 = white).
+fn gradient_tint_color(base: [f32; 4], target: f32) -> [f32; 4] {
+    let max = base[0].max(base[1]).max(base[2]);
+    let min = base[0].min(base[1]).min(base[2]);
+    let lightness = (max + min) * 0.5;
+    let target = target.clamp(0.0, 1.0);
+    let mut result = base;
+    if target <= lightness {
+        let factor = if lightness > 1.0e-6 {
+            target / lightness
+        } else {
+            0.0
+        };
+        for channel in &mut result[..3] {
+            *channel *= factor;
+        }
+    } else {
+        let factor = if lightness < 1.0 - 1.0e-6 {
+            (target - lightness) / (1.0 - lightness)
+        } else {
+            1.0
+        };
+        for channel in &mut result[..3] {
+            *channel += (1.0 - *channel) * factor;
+        }
+    }
+    result
 }
 
 impl Scene {
@@ -109,6 +132,15 @@ impl Scene {
         let mut layer = acadrust::tables::Layer::new(name);
         layer.handle = self.document.allocate_handle();
         let _ = self.document.layers.add(layer);
+    }
+
+    fn ensure_app_id(&mut self, name: &str) {
+        if name.trim().is_empty() || self.document.app_ids.contains(name) {
+            return;
+        }
+        let mut app_id = acadrust::tables::AppId::new(name);
+        app_id.handle = self.document.allocate_handle();
+        let _ = self.document.app_ids.add(app_id);
     }
 
     pub fn add_entity(&mut self, entity: EntityType) -> Handle {
@@ -233,6 +265,20 @@ impl Scene {
         let creates_layer =
             self.is_recording_undo() && !layer.trim().is_empty() && !self.document.layers.contains(&layer);
         self.ensure_layer(&layer);
+        let app_ids: Vec<String> = entity
+            .common()
+            .extended_data
+            .records()
+            .iter()
+            .map(|record| record.application_name.clone())
+            .collect();
+        let creates_app_id = self.is_recording_undo()
+            && app_ids.iter().any(|name| {
+                !name.trim().is_empty() && !self.document.app_ids.contains(name)
+            });
+        for name in &app_ids {
+            self.ensure_app_id(name);
+        }
 
         // Route to the correct block based on current editing mode:
         //   - BEDIT block editor: geometry belongs to the edited block record,
@@ -285,12 +331,10 @@ impl Scene {
             }
             // Delta-undo: the new handle's before-image is "nothing" (it did not
             // exist). Poison the recording if this add also mutated non-entity
-            // state (a new layer / block) so the app knows a pure-entity delta
-            // would be incomplete. Raster image definitions are captured as
-            // targeted object before-images above.
+            // state (a new layer, application ID, or block).
             if self.is_recording_undo() {
                 self.record_undo_before(handle, None);
-                if creates_layer || mutates_block_structure {
+                if creates_layer || creates_app_id || mutates_block_structure {
                     self.poison_undo_recording();
                 }
             }
@@ -542,11 +586,28 @@ impl Scene {
             self.images.insert(handle, model);
         }
         self.refresh_meshes_for_handles(&[handle]);
-        if let Some(operation) = self.document.solid_history_operation(handle).cloned() {
-            if let Ok(body) = cadkernel::acis::rebuild_body(&operation) {
-                self.solid_models.insert(handle, body);
-            }
-        }
+        self.restore_solid_models(&[handle]);
+    }
+
+    pub fn restore_solid_models(&mut self, handles: &[Handle]) {
+        let bodies: Vec<(Handle, cadkernel::brep::Body)> = handles
+            .iter()
+            .filter(|handle| !self.solid_models.contains_key(handle))
+            .filter_map(|&handle| {
+                let from_history = self
+                    .document
+                    .solid_history_operation(handle)
+                    .and_then(|operation| cadkernel::acis::rebuild_body(operation).ok());
+                let body = from_history.or_else(|| match self.document.get_entity(handle) {
+                    Some(EntityType::Solid3D(solid)) => {
+                        crate::scene::convert::solid3d_tess::kernel_body(solid)
+                    }
+                    _ => None,
+                })?;
+                Some((handle, body))
+            })
+            .collect();
+        self.solid_models.extend(bodies);
     }
 
     /// Re-tessellate only the named ACIS entities. The former edit path
@@ -880,6 +941,7 @@ impl Scene {
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
         viewport: Option<Handle>,
+        tint_selected: bool,
     ) -> Vec<HatchModel> {
         let layer_hidden = |layer: &str| {
             self.document
@@ -1041,15 +1103,20 @@ impl Scene {
                                 m.angle_offset = dxf.pattern_angle as f32;
                                 m.scale = dxf.pattern_scale as f32;
                             }
-                            model::hatch_model::HatchPattern::Gradient { angle_deg, .. } => {
-                                *angle_deg = dxf.pattern_angle.to_degrees() as f32;
+                            model::hatch_model::HatchPattern::Gradient {
+                                angle_deg,
+                                shift,
+                                ..
+                            } => {
+                                *angle_deg = dxf.gradient_color.angle.to_degrees() as f32;
+                                *shift = dxf.gradient_color.shift as f32;
                             }
                             model::hatch_model::HatchPattern::Pattern(_)
                             | model::hatch_model::HatchPattern::Solid => {}
                         }
                     }
                 }
-                if self.selected.contains(&handle) {
+                if tint_selected && self.selected.contains(&handle) {
                     m.color = [0.15, 0.55, 1.00, m.color[3]];
                 }
                 let d = depth_map.get(&handle.value()).map_or(0.0, |d| d[0]);
@@ -1066,7 +1133,7 @@ impl Scene {
         models.extend(self.instanced_hatch_models(
             target_block,
             hatch_bg,
-            true,
+            tint_selected,
             frozen,
             annotation_scale_handle,
             all_visible,
@@ -1109,9 +1176,58 @@ impl Scene {
             viewport,
             None,
             false,
+            false,
         )
     }
 
+    fn layer_plottable_in_context(
+        &self,
+        entity: &EntityType,
+        context: &crate::scene::render_graph::RenderContext,
+    ) -> bool {
+        let common = entity.common();
+        let layer = if crate::scene::view::render::is_effective_layer_zero(&common.layer) {
+            context
+                .insert_path
+                .iter()
+                .rev()
+                .find(|insert| {
+                    !crate::scene::view::render::is_effective_layer_zero(&insert.common.layer)
+                })
+                .map(|insert| insert.common.layer.as_str())
+                .unwrap_or(common.layer.as_str())
+        } else {
+            common.layer.as_str()
+        };
+        self.document
+            .layers
+            .get(layer)
+            .map(|layer| layer.is_plottable)
+            .unwrap_or(true)
+    }
+
+    pub(super) fn instanced_plot_hatch_models(
+        &self,
+        layout_block: Handle,
+        hatch_bg: [f32; 4],
+        frozen: Option<&rustc_hash::FxHashSet<Handle>>,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        viewport: Option<Handle>,
+    ) -> Vec<HatchModel> {
+        self.instanced_hatch_models_filtered(
+            layout_block,
+            hatch_bg,
+            false,
+            frozen,
+            annotation_scale_handle,
+            all_visible,
+            viewport,
+            None,
+            false,
+            true,
+        )
+    }
     /// Build live hatch overlays for INSERT grip previews. The edited INSERT
     /// is intentionally hidden from the resident scene while its current
     /// document entity moves, so include that hidden target and reuse the full
@@ -1148,6 +1264,7 @@ impl Scene {
             self.active_viewport,
             Some(&targets),
             true,
+            false,
         )
     }
 
@@ -1162,6 +1279,7 @@ impl Scene {
         viewport: Option<Handle>,
         targets: Option<&rustc_hash::FxHashSet<Handle>>,
         include_preview_hidden: bool,
+        plot_only: bool,
     ) -> Vec<HatchModel> {
         let depth_map = self.draw_depth_map();
         let graph = crate::scene::render_graph::RenderSceneGraph::new(
@@ -1178,10 +1296,15 @@ impl Scene {
         graph.walk_root(
             self.render_scene_root(layout_block),
             |entity, context| {
+                let common = entity.common();
+
+                if plot_only && !self.layer_plottable_in_context(entity, context) {
+                    return false;
+                }
+
                 if context.is_instanced() {
                     return true;
                 }
-                let common = entity.common();
                 if self.object_isolation.hides(common.handle)
                     || (!include_preview_hidden
                         && self.preview_hidden.contains(&common.handle))
@@ -1219,6 +1342,9 @@ impl Scene {
                 let EntityType::Hatch(source_hatch) = entity else {
                     return;
                 };
+                if plot_only && !self.layer_plottable_in_context(entity, context) {
+                    return;
+                }
                 let style = context.style_for(&self.document, entity);
                 let preserve_white_mask = source_hatch.is_solid
                     && matches!(
@@ -1317,6 +1443,7 @@ impl Scene {
             all_visible,
             bg_color,
             false,
+            false,
         )
     }
 
@@ -1328,6 +1455,7 @@ impl Scene {
         all_visible: bool,
         bg_color: [f32; 4],
         tint_insert_selection: bool,
+        plot_only: bool,
     ) -> Vec<HatchModel> {
         let depth_map = self.draw_depth_map();
         let graph = crate::scene::render_graph::RenderSceneGraph::new(
@@ -1342,8 +1470,11 @@ impl Scene {
         graph.walk_root(
             self.render_scene_root(target_block),
             |entity, context| {
-                context.is_instanced()
-                    || !self.entity_temporarily_hidden(entity.common().handle)
+                let common = entity.common();
+                if plot_only && !self.layer_plottable_in_context(entity, context) {
+                    return false;
+                }
+                context.is_instanced() || !self.entity_temporarily_hidden(common.handle)
             },
             |entity, context| {
                 let EntityType::Wipeout(source) = entity else {
@@ -1358,6 +1489,9 @@ impl Scene {
                     wipeout.v_vector =
                         context.transform.apply_rotation(source.v_vector);
                 }
+                let Some(mut fill_plane) = Self::wipeout_fill_plane(&wipeout) else {
+                    return;
+                };
                 let (world_origin, mut boundary) =
                     Self::wipeout_boundary_2d(&wipeout);
                 for clip in &context.clips {
@@ -1373,6 +1507,16 @@ impl Scene {
                 }
                 if boundary.len() < 3 {
                     return;
+                }
+                if !context.clips.is_empty() {
+                    let Some(local) = Self::wipeout_boundary_at_xy(
+                        fill_plane.0,
+                        world_origin,
+                        &boundary,
+                    ) else {
+                        return;
+                    };
+                    fill_plane.1 = local;
                 }
                 let selection_handle =
                     if tint_insert_selection && context.is_instanced() {
@@ -1411,12 +1555,18 @@ impl Scene {
                 } else {
                     None
                 };
+                let fill_plane_boundary = Some(Arc::new(fill_plane.1));
+                let fill_plane = Some(fill_plane.0);
                 models.push(HatchModel {
                     render_instance,
                     boundary: Arc::new(boundary),
                     boundary_wcs: None,
+                    fill_plane,
+                    fill_plane_boundary,
                     boundary_exterior: None,
                     boundary_sources: None,
+                    boundary_paths: None,
+                    style: acadrust::entities::HatchStyleType::Normal,
                     pattern: model::hatch_model::HatchPattern::Solid,
                     name: "WIPEOUT_FILL".into(),
                     color,
@@ -1439,66 +1589,113 @@ impl Scene {
     pub(super) fn wipeout_boundary_2d(
         wo: &acadrust::entities::Wipeout,
     ) -> ([f64; 2], Vec<[f32; 2]>) {
-        use acadrust::entities::WipeoutClipType;
-
         let origin = [wo.insertion_point.x, wo.insertion_point.y];
-
-        let is_polygon = wo.clipping_enabled
-            && wo.clip_boundary_vertices.len() >= 3
-            && matches!(wo.clip_type, WipeoutClipType::Polygonal);
-
-        if is_polygon {
-            // DXF clip vertices live in image-pixel space, centred on the
-            // image (range −size/2 … +size/2). Image-bottom-left → insertion,
-            // image-y-axis points DOWN (per the DXF "v_vector points down the
-            // image" convention), so map:
-            //   x_off = (clip.x + size.x/2) × u_vec
-            //   y_off = (size.y/2 − clip.y) × v_vec    ← y flipped
-            // Offsets are relative to `origin` (the insertion point).
-            let cx_of = |v: &acadrust::types::Vector2| v.x + wo.size.x * 0.5;
-            let cy_of = |v: &acadrust::types::Vector2| wo.size.y * 0.5 - v.y;
-            let mut poly: Vec<[f32; 2]> = wo
-                .clip_boundary_vertices
-                .iter()
-                .map(|v| {
-                    let cx = cx_of(v);
-                    let cy = cy_of(v);
-                    let wx = (wo.u_vector.x * cx + wo.v_vector.x * cy) as f32;
-                    let wy = (wo.u_vector.y * cx + wo.v_vector.y * cy) as f32;
-                    [wx, wy]
-                })
-                .collect();
-            // Close the loop: the GPU `in_polygon` ray-cast walks
-            // sequential pairs and doesn't wrap, so without an explicit
-            // closing vertex the last edge (vN-1 → v0) is never tested and
-            // the fill bleeds far past the boundary.
-            if let Some(&first) = poly.first() {
-                if poly.last() != Some(&first) {
-                    poly.push(first);
+        let plane = cadkernel::space::Plane::from_axes(
+            [wo.insertion_point.x, wo.insertion_point.y, wo.insertion_point.z],
+            [wo.u_vector.x, wo.u_vector.y, wo.u_vector.z],
+            [wo.v_vector.x, wo.v_vector.y, wo.v_vector.z],
+        );
+        let boundary = Self::wipeout_local_boundary(wo)
+            .into_iter()
+            .map(|point| {
+                if point[0].is_finite() && point[1].is_finite() {
+                    let offset = plane.vector_at(point);
+                    [offset[0] as f32, offset[1] as f32]
+                } else {
+                    [f32::NAN; 2]
                 }
-            }
-            (origin, poly)
-        } else {
-            // Rectangular boundary from 4 corners, as offsets from `origin`.
-            let ux = (wo.u_vector.x * wo.size.x) as f32;
-            let uy = (wo.u_vector.y * wo.size.x) as f32;
-            let vx = (wo.v_vector.x * wo.size.y) as f32;
-            let vy = (wo.v_vector.y * wo.size.y) as f32;
-            // Close the loop (repeat corner 0): the GPU `in_polygon` ray-cast
-            // walks sequential vertex pairs and never wraps last→first, so an
-            // unclosed quad leaves the v3→v0 edge untested and the solid mask
-            // bleeds past the boundary — same reason the polygon branch closes.
-            (
-                origin,
-                vec![
-                    [0.0, 0.0],
-                    [ux, uy],
-                    [ux + vx, uy + vy],
-                    [vx, vy],
-                    [0.0, 0.0],
-                ],
-            )
+            })
+            .collect();
+        (origin, boundary)
+    }
+
+    fn wipeout_local_boundary(wo: &acadrust::entities::Wipeout) -> Vec<[f64; 2]> {
+        use acadrust::entities::{WipeoutClipMode, WipeoutClipType};
+        let mut outer = vec![
+            [0.0, 0.0],
+            [wo.size.x, 0.0],
+            [wo.size.x, wo.size.y],
+            [0.0, wo.size.y],
+            [0.0, 0.0],
+        ];
+        if !wo.clipping_enabled
+            || wo.clip_boundary_vertices.len() < 3
+            || !matches!(wo.clip_type, WipeoutClipType::Polygonal)
+        {
+            return outer;
         }
+        let mut clip: Vec<[f64; 2]> = wo
+            .clip_boundary_vertices
+            .iter()
+            .map(|point| {
+                [
+                    point.x + wo.size.x * 0.5,
+                    wo.size.y * 0.5 - point.y,
+                ]
+            })
+            .collect();
+        if clip.last() != clip.first() {
+            clip.push(clip[0]);
+        }
+        if matches!(wo.clip_mode, WipeoutClipMode::Inside) {
+            outer.push([f64::NAN; 2]);
+            outer.extend(clip);
+            outer
+        } else {
+            clip
+        }
+    }
+
+    fn wipeout_fill_plane(
+        wipeout: &acadrust::entities::Wipeout,
+    ) -> Option<(model::hatch_model::FillPlane, Vec<[f32; 2]>)> {
+        let origin = [
+            wipeout.insertion_point.x,
+            wipeout.insertion_point.y,
+            wipeout.insertion_point.z,
+        ];
+        let x_axis = [wipeout.u_vector.x, wipeout.u_vector.y, wipeout.u_vector.z];
+        let y_axis = [wipeout.v_vector.x, wipeout.v_vector.y, wipeout.v_vector.z];
+        cadkernel::space::Plane::from_axes(origin, x_axis, y_axis).normal()?;
+        let boundary = Self::wipeout_local_boundary(wipeout)
+            .into_iter()
+            .map(|point| [point[0] as f32, point[1] as f32])
+            .collect();
+        Some((
+            model::hatch_model::FillPlane {
+                origin,
+                x_axis,
+                y_axis,
+            },
+            boundary,
+        ))
+    }
+
+    fn wipeout_boundary_at_xy(
+        plane: model::hatch_model::FillPlane,
+        world_origin: [f64; 2],
+        boundary: &[[f32; 2]],
+    ) -> Option<Vec<[f32; 2]>> {
+        let plane = cadkernel::space::Plane::from_axes(
+            plane.origin,
+            plane.x_axis,
+            plane.y_axis,
+        );
+        boundary
+            .iter()
+            .map(|point| {
+                if point[0].is_finite() && point[1].is_finite() {
+                    plane
+                        .coordinates_at_xy([
+                            world_origin[0] + point[0] as f64,
+                            world_origin[1] + point[1] as f64,
+                        ])
+                        .map(|point| [point[0] as f32, point[1] as f32])
+                } else {
+                    Some([f32::NAN; 2])
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn hatch_model_from_dxf(
@@ -1520,8 +1717,9 @@ impl Scene {
             return None;
         }
 
-        let mut boundary: Vec<[f64; 2]> = Vec::new();
-        let mut boundary_exterior = Vec::new();
+        let mut rings = Vec::new();
+        let mut local_rings = Vec::new();
+        let mut ring_sources = Vec::new();
 
         for path in &dxf.paths {
             // Skip TEXTBOX boundary paths (flag bit 3). These are text
@@ -1531,47 +1729,69 @@ impl Scene {
             if path.flags.bits() & 8 != 0 {
                 continue;
             }
-            let before_path = boundary.len();
-            if !boundary.is_empty() {
-                boundary.push([f64::NAN, f64::NAN]);
-            }
-            let path_start = boundary.len();
-
             let mut edge_polys: Vec<Vec<[f64; 2]>> = Vec::new();
             for edge in &path.edges {
                 if let Some(curve) = crate::entities::hatch::edge_curve(edge) {
                     edge_polys.push(
-                        curve
-                            .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
-                            .into_iter()
-                            .map(|point| to_xy(point[0], point[1]))
-                            .collect(),
+                        curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE),
                     );
                 }
             }
-            boundary.extend(chain_path_edges(edge_polys));
-
-            if boundary.len() == path_start {
-                boundary.truncate(before_path);
+            let mut local_ring = chain_path_edges(edge_polys);
+            if local_ring.is_empty() {
                 continue;
             }
-            boundary_exterior.push(path.flags.is_external() || path.flags.is_outermost());
-            if boundary.len() >= path_start + 3 {
-                let first = boundary[path_start];
-                let last = *boundary.last().unwrap();
+            if local_ring.len() >= 3 {
+                let first = local_ring[0];
+                let last = *local_ring.last().unwrap();
                 if (first[0] - last[0]).abs() > 1e-5 || (first[1] - last[1]).abs() > 1e-5 {
-                    boundary.push(first);
+                    local_ring.push(first);
                 }
             }
+            let ring = local_ring
+                .iter()
+                .map(|point| to_xy(point[0], point[1]))
+                .collect();
+            rings.push(ring);
+            local_rings.push(local_ring);
+            ring_sources.push(path.boundary_handles.clone());
         }
 
-        if boundary.is_empty() {
+        if rings.is_empty() {
             return None;
         }
-        if !boundary_exterior.iter().any(|role| *role) {
-            if let Some(first) = boundary_exterior.first_mut() {
-                *first = true;
+
+        let depths = cadkernel::geom2d::ring_nesting_depths(&rings);
+        let mut boundary = Vec::new();
+        let mut local_boundary = Vec::new();
+        let mut boundary_exterior = Vec::new();
+        let mut boundary_sources = Vec::new();
+        for (((ring, local_ring), sources), depth) in rings
+            .into_iter()
+            .zip(local_rings)
+            .zip(ring_sources)
+            .zip(depths)
+        {
+            let keep = match dxf.style {
+                acadrust::entities::HatchStyleType::Normal => true,
+                acadrust::entities::HatchStyleType::Outer => depth <= 1,
+                acadrust::entities::HatchStyleType::Ignore => depth == 0,
+            };
+            if !keep {
+                continue;
             }
+            if !boundary.is_empty() {
+                boundary.push([f64::NAN, f64::NAN]);
+                local_boundary.push([f32::NAN, f32::NAN]);
+            }
+            boundary.extend(ring);
+            local_boundary.extend(
+                local_ring
+                    .into_iter()
+                    .map(|[x, y]| [x as f32, y as f32]),
+            );
+            boundary_exterior.push(depth == 0);
+            boundary_sources.push(sources);
         }
         // The batched hatch renderer keeps boundaries in a GPU storage
         // buffer (no fixed length), so a hatch with many island loops must
@@ -1618,8 +1838,13 @@ impl Scene {
                 )
             };
             gradient_color1 = stop(0);
-            let color2 = stop(1).unwrap_or(color);
-            let angle_deg = dxf.pattern_angle.to_degrees() as f32;
+            let color1 = gradient_color1.unwrap_or(color);
+            let color2 = if dxf.gradient_color.is_single_color {
+                gradient_tint_color(color1, dxf.gradient_color.color_tint as f32)
+            } else {
+                stop(1).unwrap_or(color)
+            };
+            let angle_deg = dxf.gradient_color.angle.to_degrees() as f32;
             let (kind, invert) =
                 model::hatch_model::GradientKind::from_name(&dxf.gradient_color.name);
             model::hatch_model::HatchPattern::Gradient {
@@ -1627,6 +1852,7 @@ impl Scene {
                 color2,
                 kind,
                 invert,
+                shift: dxf.gradient_color.shift as f32,
             }
         } else if dxf.is_solid {
             model::hatch_model::HatchPattern::Solid
@@ -1763,18 +1989,21 @@ impl Scene {
             })
             .collect();
 
+        let storage = crate::entities::curve::ocs_plane(dxf.normal, dxf.elevation);
         Some(HatchModel {
             render_instance: None,
             boundary: std::sync::Arc::new(boundary_f32),
             boundary_wcs: None,
+            fill_plane: Some(model::hatch_model::FillPlane {
+                origin: storage.origin,
+                x_axis: storage.x_axis,
+                y_axis: storage.y_axis,
+            }),
+            fill_plane_boundary: Some(std::sync::Arc::new(local_boundary)),
             boundary_exterior: Some(std::sync::Arc::new(boundary_exterior)),
-            boundary_sources: Some(std::sync::Arc::new(
-                dxf.paths
-                    .iter()
-                    .filter(|path| path.flags.bits() & 8 == 0)
-                    .map(|path| path.boundary_handles.clone())
-                    .collect(),
-            )),
+            boundary_sources: Some(std::sync::Arc::new(boundary_sources)),
+            boundary_paths: Some(std::sync::Arc::new(dxf.paths.clone())),
+            style: dxf.style,
             pattern,
             name,
             // A gradient starts from its first stop; other fills use the
@@ -2048,8 +2277,8 @@ impl Scene {
     }
 
     /// Build a solid-fill HatchModel for a DXF Solid entity.
-    /// Conventional DXF SOLID corners use Z-order; legacy entities may already
-    /// be in perimeter order. Use the same non-crossing resolver as wire fill.
+    /// SOLID corners use Z-order. Preserve it in the projected hatch as well so
+    /// intentionally crossing geometry is not silently rewritten.
     pub(super) fn solid_hatch_model(solid: &DxfSolid, color: [f32; 4]) -> HatchModel {
         // Keep the corners in f64 until the AABB centre is known, then store
         // each as a small f32 offset from it — same precision-preserving anchor
@@ -2057,7 +2286,7 @@ impl Scene {
         // to f32 costs ~0.06 units of resolution at UTM magnitudes (~1e6), so
         // the quad snapped to a grid and the fill drifted off its outline.
         let wcs = crate::entities::solid::wcs_corners(solid);
-        let order = crate::entities::solid::perimeter_indices(&wcs);
+        let order = [0, 1, 3, 2];
         let corners: [[f64; 2]; 4] = order.map(|index| [wcs[index][0], wcs[index][1]]);
         let mut min = [f64::INFINITY; 2];
         let mut max = [f64::NEG_INFINITY; 2];
@@ -2089,8 +2318,12 @@ impl Scene {
             render_instance: None,
             boundary: std::sync::Arc::new(boundary),
             boundary_wcs: None,
+            fill_plane: None,
+            fill_plane_boundary: None,
             boundary_exterior: None,
             boundary_sources: None,
+            boundary_paths: None,
+            style: acadrust::entities::HatchStyleType::Normal,
             pattern: model::hatch_model::HatchPattern::Solid,
             name: "SOLID".into(),
             color,
@@ -2110,14 +2343,24 @@ impl Scene {
         entity_style: Option<(acadrust::types::Color, acadrust::types::Transparency)>,
     ) -> Handle {
         let mut dxf = DxfHatch::new();
+        dxf.style = model.style;
+        if let Some(plane) = model.fill_plane {
+            let x = glam::DVec3::from_array(plane.x_axis);
+            let y = glam::DVec3::from_array(plane.y_axis);
+            let normal = x.cross(y).normalize_or(glam::DVec3::Z);
+            dxf.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+            dxf.elevation = glam::DVec3::from_array(plane.origin).dot(normal);
+        }
         dxf.is_solid = matches!(
             model.pattern,
             crate::scene::model::hatch_model::HatchPattern::Solid
         );
-        // Prefer exact command geometry; otherwise reconstruct every ring from
-        // the render offsets without dropping its separators.
-        // Build one DXF path per NaN-separated ring and retain each outer/hole role.
-        let reconstructed_wcs: Vec<[f64; 2]> = if model.boundary_wcs.is_none() {
+        // Persist analytic command geometry when available.
+        if let Some(paths) = model.boundary_paths.as_deref() {
+            dxf.paths = paths.clone();
+        } else {
+            // Otherwise reconstruct every ring from render offsets.
+            let reconstructed_wcs: Vec<[f64; 2]> = if model.boundary_wcs.is_none() {
             let [wx, wy] = model.world_origin;
             model
                 .boundary
@@ -2130,69 +2373,69 @@ impl Scene {
                     }
                 })
                 .collect()
-        } else {
-            Vec::new()
-        };
-        let wcs = model
-            .boundary_wcs
-            .as_deref()
-            .map(|points| points.as_slice())
-            .unwrap_or(reconstructed_wcs.as_slice());
-        let mut ring: Vec<Vector2> = Vec::new();
-        let mut first = true;
-        let mut ring_index = 0usize;
-        let mut push_ring = |r: &mut Vec<Vector2>, is_outer: bool, index: usize| {
+            } else {
+                Vec::new()
+            };
+            let wcs = model
+                .boundary_wcs
+                .as_deref()
+                .map(|points| points.as_slice())
+                .unwrap_or(reconstructed_wcs.as_slice());
+            let mut ring: Vec<Vector2> = Vec::new();
+            let mut first = true;
+            let mut ring_index = 0usize;
+            let mut push_ring = |r: &mut Vec<Vector2>, is_outer: bool, index: usize| {
             if !r.is_empty() {
                 let edge = PolylineEdge::new(std::mem::take(r), true);
-                let mut path = if is_outer {
-                    let mut p = BoundaryPath::external();
-                    p.flags = acadrust::entities::hatch::BoundaryPathFlags::from_bits(
-                        p.flags.bits()
-                            | acadrust::entities::hatch::BoundaryPathFlags::OUTERMOST.bits(),
-                    );
-                    p
-                } else {
-                    BoundaryPath::new()
-                };
-                path.add_edge(BoundaryEdge::Polyline(edge));
-                if let Some(handles) = model
+                let handles: Vec<_> = model
                     .boundary_sources
                     .as_deref()
                     .and_then(|sources| sources.get(index))
-                {
-                    for &handle in handles {
-                        if handle.is_valid() {
-                            path.add_boundary_handle(handle);
-                        }
-                    }
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|handle| handle.is_valid())
+                    .collect();
+                let mut bits = 0;
+                if is_outer {
+                    bits |= acadrust::entities::hatch::BoundaryPathFlags::OUTERMOST.bits();
+                    bits |= acadrust::entities::hatch::BoundaryPathFlags::EXTERNAL.bits();
+                }
+                let mut path = BoundaryPath::with_flags(
+                    acadrust::entities::hatch::BoundaryPathFlags::from_bits(bits),
+                );
+                path.add_edge(BoundaryEdge::Polyline(edge));
+                for handle in handles {
+                    path.add_boundary_handle(handle);
                 }
                 dxf.paths.push(path);
             }
-        };
-        for &[x, y] in wcs {
-            if x.is_finite() && y.is_finite() {
-                ring.push(Vector2::new(x, y));
-            } else {
-                let is_outer = model
-                    .boundary_exterior
-                    .as_deref()
-                    .and_then(|roles| roles.get(ring_index))
-                    .copied()
-                    .unwrap_or(first);
-                first = false;
-                if !ring.is_empty() {
-                    push_ring(&mut ring, is_outer, ring_index);
-                    ring_index += 1;
+            };
+            for &[x, y] in wcs {
+                if x.is_finite() && y.is_finite() {
+                    ring.push(Vector2::new(x, y));
+                } else {
+                    let is_outer = model
+                        .boundary_exterior
+                        .as_deref()
+                        .and_then(|roles| roles.get(ring_index))
+                        .copied()
+                        .unwrap_or(first);
+                    first = false;
+                    if !ring.is_empty() {
+                        push_ring(&mut ring, is_outer, ring_index);
+                        ring_index += 1;
+                    }
                 }
             }
+            let is_outer = model
+                .boundary_exterior
+                .as_deref()
+                .and_then(|roles| roles.get(ring_index))
+                .copied()
+                .unwrap_or(first);
+            push_ring(&mut ring, is_outer, ring_index);
         }
-        let is_outer = model
-            .boundary_exterior
-            .as_deref()
-            .and_then(|roles| roles.get(ring_index))
-            .copied()
-            .unwrap_or(first);
-        push_ring(&mut ring, is_outer, ring_index);
         dxf.is_associative = dxf
             .paths
             .iter()
@@ -2202,6 +2445,16 @@ impl Scene {
         } else {
             1.0
         };
+        let pattern_origin = model
+            .fill_plane_boundary
+            .as_deref()
+            .and_then(|points| {
+                points
+                    .iter()
+                    .find(|point| point[0].is_finite() && point[1].is_finite())
+            })
+            .map(|point| [point[0] as f64, point[1] as f64])
+            .unwrap_or(model.world_origin);
         if let crate::scene::model::hatch_model::HatchPattern::Pattern(families) = &model.pattern {
             let mut pattern = acadrust::entities::HatchPattern::new(&model.name);
             let rotation = model.angle_offset as f64;
@@ -2219,10 +2472,10 @@ impl Scene {
                 pattern.lines.push(acadrust::entities::HatchPatternLine {
                     angle,
                     base_point: Vector2::new(
-                        model.world_origin[0]
+                        pattern_origin[0]
                             + base_x * rotation_cos
                             - base_y * rotation_sin,
-                        model.world_origin[1]
+                        pattern_origin[1]
                             + base_x * rotation_sin
                             + base_y * rotation_cos,
                     ),
@@ -2254,6 +2507,7 @@ impl Scene {
             color2,
             kind,
             invert,
+            shift,
         } = &model.pattern
         {
             let to_color = |c: [f32; 4]| acadrust::types::Color::Rgb {
@@ -2264,10 +2518,10 @@ impl Scene {
             dxf.is_solid = true;
             dxf.gradient_color.enabled = true;
             dxf.gradient_color.name = kind.dxf_name(*invert).to_string();
-            // The render model reads the gradient angle from pattern_angle
-            // (radians); the gradient record keeps its own copy for the file.
+            // Keep both persisted angle fields aligned.
             dxf.pattern_angle = (*angle_deg as f64).to_radians();
             dxf.gradient_color.angle = (*angle_deg as f64).to_radians();
+            dxf.gradient_color.shift = *shift as f64;
             dxf.gradient_color.is_single_color = false;
             // Linear has no INV name in the standard set: persist an inverted
             // linear by swapping the colour stops instead.

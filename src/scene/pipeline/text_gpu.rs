@@ -433,6 +433,9 @@ pub fn upload_block_vertex_refs(
     let mut slots = rustc_hash::FxHashMap::default();
     let mut groups: Vec<Vec<&crate::scene::model::wire_model::WireModel>> = Vec::new();
     for &wire in wires {
+        if tint.is_none() && !wire.display_visible {
+            continue;
+        }
         let Some(instance) = wire.render_instance else {
             continue;
         };

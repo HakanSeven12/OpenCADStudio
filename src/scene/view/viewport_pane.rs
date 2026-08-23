@@ -16,6 +16,7 @@ use iced::{mouse, Event, Rectangle};
 pub struct ViewportPane<'a> {
     pub scene: &'a Scene,
     pub show_viewcube: bool,
+    pub show_interaction: bool,
     /// Render mode applied to the active Model tile or active paper viewport.
     /// The app may supply a temporary gallery-hover mode; inactive viewports
     /// keep the values stored on their own tile/entity.
@@ -33,12 +34,14 @@ impl<'a> ViewportPane<'a> {
     pub fn model(
         scene: &'a Scene,
         show_viewcube: bool,
+        show_interaction: bool,
         render_mode: acadrust::entities::ViewportRenderMode,
         viewcube_text_color: [f32; 4],
     ) -> Self {
         Self {
             scene,
             show_viewcube,
+            show_interaction,
             render_mode,
             pane: None,
             viewcube_text_color,
@@ -50,6 +53,7 @@ impl<'a> ViewportPane<'a> {
     pub fn for_pane(
         scene: &'a Scene,
         show_viewcube: bool,
+        show_interaction: bool,
         render_mode: acadrust::entities::ViewportRenderMode,
         tile_idx: usize,
         viewcube_text_color: [f32; 4],
@@ -57,6 +61,7 @@ impl<'a> ViewportPane<'a> {
         Self {
             scene,
             show_viewcube,
+            show_interaction,
             render_mode,
             pane: Some(tile_idx),
             viewcube_text_color,
@@ -82,6 +87,7 @@ impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for ViewportPane<'a>
                 idx,
                 self.render_mode,
                 self.show_viewcube,
+                self.show_interaction,
                 self.viewcube_text_color,
             ),
             None => self.scene.build_viewports(
@@ -89,6 +95,7 @@ impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for ViewportPane<'a>
                 self.render_mode,
                 state.hover_region,
                 self.show_viewcube,
+                self.show_interaction,
                 self.viewcube_text_color,
             ),
         }

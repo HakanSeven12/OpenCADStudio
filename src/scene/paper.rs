@@ -204,7 +204,18 @@ impl Scene {
         Arc<Vec<HatchModel>>,
         Arc<Vec<ImageModel>>,
     ) {
-        let selected = self.selected_hatch_sig();
+        self.paper_sheet_render_models_for_view(true)
+    }
+
+    pub(super) fn paper_sheet_render_models_for_view(
+        &self,
+        tint_selected: bool,
+    ) -> (
+        Arc<Vec<HatchModel>>,
+        Arc<Vec<HatchModel>>,
+        Arc<Vec<ImageModel>>,
+    ) {
+        let selected = if tint_selected { self.selected_hatch_sig() } else { 0 };
         let reuse = {
             let cache = self.paper_sheet_render_cache.borrow();
             if let Some(cache) = cache.get(&self.current_layout) {
@@ -259,7 +270,11 @@ impl Scene {
         if let Some(sheet) = self.paper_sheet_fill() {
             hatches.push(sheet);
         }
-        hatches.extend(self.paper_canvas_hatches().iter().cloned());
+        hatches.extend(
+            self.paper_canvas_hatches(tint_selected)
+                .iter()
+                .cloned(),
+        );
         let hatches = Arc::new(hatches);
         let wipeouts = self.paper_canvas_wipeouts();
         let images = self.paper_sheet_images();
@@ -381,7 +396,7 @@ impl Scene {
     /// entity handle) rather than the already-flattened arc — the
     /// flattened arc carries pattern names, not handles, so filtering
     /// there is unreliable.
-    pub fn paper_canvas_hatches(&self) -> Arc<Vec<HatchModel>> {
+    fn paper_canvas_hatches(&self, tint_selected: bool) -> Arc<Vec<HatchModel>> {
         let layout_block = self.current_layout_block_handle();
         let layer_hidden = |layer: &str| {
             self.document
@@ -455,7 +470,7 @@ impl Scene {
                     }
                 }
             }
-            if self.selected.contains(&handle) {
+            if tint_selected && self.selected.contains(&handle) {
                 m.color = [0.15, 0.55, 1.00, m.color[3]];
             }
             models.push(m);
@@ -482,6 +497,17 @@ impl Scene {
         models.extend(instanced);
         Arc::new(models)
     }
+    pub fn paper_plot_hatches(&self) -> Arc<Vec<HatchModel>> {
+        let layout_block = self.current_layout_block_handle();
+
+        Arc::new(self.plot_hatches_for_block(
+            layout_block,
+            None,
+            self.paper_annotation_scale_handle(),
+            self.annotation_all_visible(),
+            false,
+        ))
+    }
 
     /// Plot-only hatch set for a specific block. Paper PDF generation uses this
     /// for the model block behind each floating viewport; unlike
@@ -492,6 +518,7 @@ impl Scene {
         frozen: Option<&rustc_hash::FxHashSet<Handle>>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
+        include_solids: bool,
     ) -> Vec<HatchModel> {
         let layer_hidden = |layer: &str| {
             self.document
@@ -499,6 +526,13 @@ impl Scene {
                 .get(layer)
                 .map(|l| l.flags.off || l.flags.frozen)
                 .unwrap_or(false)
+        };
+        let layer_plottable = |layer: &str| {
+            self.document
+                .layers
+                .get(layer)
+                .map(|l| l.is_plottable)
+                .unwrap_or(true)
         };
         let mut models = Vec::new();
         for (&handle, model) in self.hatches.iter() {
@@ -511,10 +545,14 @@ impl Scene {
                 annotation_scale_handle,
             );
             let entity = contextual.as_ref();
+            if !include_solids && matches!(entity, EntityType::Solid(_)) {
+                continue;
+            }
             let common = entity.common();
             if common.invisible
                 || self.entity_temporarily_hidden(handle)
                 || layer_hidden(&common.layer)
+                || !layer_plottable(&common.layer)
                 || self.layer_frozen_in(&common.layer, frozen)
                 || crate::scene::annotative::annotative_offscale_for(
                     &self.document,
@@ -554,10 +592,9 @@ impl Scene {
             }
             models.push(hatch);
         }
-        models.extend(self.instanced_hatch_models(
+        models.extend(self.instanced_plot_hatch_models(
             block,
             self.paper_bg_color,
-            false,
             frozen,
             annotation_scale_handle,
             all_visible,
@@ -583,6 +620,7 @@ impl Scene {
             all_visible,
             self.paper_bg_color,
             highlight_selection,
+            true,
         )
     }
 
@@ -593,12 +631,25 @@ impl Scene {
     /// copy on the paper sheet.
     pub fn paper_canvas_wipeouts(&self) -> Arc<Vec<HatchModel>> {
         let layout_block = self.current_layout_block_handle();
+        Arc::new(self.wipeout_models_for_block_graph(
+            layout_block,
+            None,
+            self.paper_annotation_scale_handle(),
+            self.annotation_all_visible(),
+            self.paper_bg_color,
+            true,
+            false,
+        ))
+    }
+
+    pub fn paper_plot_wipeouts(&self) -> Arc<Vec<HatchModel>> {
+        let layout_block = self.current_layout_block_handle();
         Arc::new(self.plot_wipeouts_for_block(
             layout_block,
             None,
             self.paper_annotation_scale_handle(),
             self.annotation_all_visible(),
-            true,
+            false,
         ))
     }
 

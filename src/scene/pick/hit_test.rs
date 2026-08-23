@@ -208,6 +208,31 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     let mut best_dist = f32::MAX;
     let mut best: Option<&str> = None;
 
+    for wire in wires.iter().filter(|wire| wire.point_marker.is_some()) {
+        let tolerance = pick_tolerance_px(wire, lw_display, base_radius_px);
+        let mut previous = None;
+        for (index, point) in wire.points.iter().enumerate() {
+            if !point[0].is_finite() {
+                previous = None;
+                continue;
+            }
+            let screen = world_to_screen(
+                wire_point_world(wire, index, view_rot, eye),
+                view_rot,
+                eye,
+                bounds,
+            );
+            if let Some(start) = previous {
+                let distance = dist_point_to_segment(cursor, start, screen);
+                if distance < tolerance && distance < best_dist {
+                    best_dist = distance;
+                    best = Some(wire.name.as_str());
+                }
+            }
+            previous = Some(screen);
+        }
+    }
+
     // World z only shifts the *screen* x/y when the view is tilted (orbit /
     // perspective). In the flat top-down ortho view — the case where hover lag
     // on large drawings actually bites — a wire's screen position depends only
@@ -224,18 +249,21 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(segment.wire) else {
                 continue;
             };
+            if wire.point_marker.is_some() {
+                continue;
+            }
             let start = segment.start as usize;
             if start + 1 >= wire.points.len() {
                 continue;
             }
             let p0 = world_to_screen(
-                wp64(wire.points[start], &wire.points_low, start),
+                wire_point_world(wire, start, view_rot, eye),
                 view_rot,
                 eye,
                 bounds,
             );
             let p1 = world_to_screen(
-                wp64(wire.points[start + 1], &wire.points_low, start + 1),
+                wire_point_world(wire, start + 1, view_rot, eye),
                 view_rot,
                 eye,
                 bounds,
@@ -249,23 +277,27 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     } else {
         // Q: lazy projection — no Vec allocation per wire; NaN resets the segment chain.
         for wire in wires.iter() {
+            if wire.point_marker.is_some() {
+                continue;
+            }
             let tol = pick_tolerance_px(wire, lw_display, base_radius_px);
             // Cheap AABB pre-reject (flat view only; never for the unbounded
             // sentinel used by previews / greeked text).
             if z_flat
+                && wire.point_marker.is_none()
                 && wire.aabb != WireModel::UNBOUNDED_AABB
                 && aabb_rejects(wire.aabb, cursor, tol, view_rot, eye, bounds)
             {
                 continue;
             }
             let mut prev: Option<Point> = None;
-            for (i, &[px, py, pz]) in wire.points.iter().enumerate() {
+            for (i, &[px, _, _]) in wire.points.iter().enumerate() {
                 if px.is_nan() {
                     prev = None;
                     continue;
                 }
                 let cur = world_to_screen(
-                    wp64([px, py, pz], &wire.points_low, i),
+                    wire_point_world(wire, i, view_rot, eye),
                     view_rot,
                     eye,
                     bounds,
@@ -450,24 +482,55 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
         return Vec::new();
     }
     let mut hits: Vec<(f32, &str)> = Vec::new();
+    let mut marker_hits: HashMap<&str, f32> = HashMap::default();
+    for wire in wires.iter().filter(|wire| wire.point_marker.is_some()) {
+        let tolerance = pick_tolerance_px(wire, lw_display, base_radius_px);
+        let mut previous = None;
+        for (index, point) in wire.points.iter().enumerate() {
+            if !point[0].is_finite() {
+                previous = None;
+                continue;
+            }
+            let screen = world_to_screen(
+                wire_point_world(wire, index, view_rot, eye),
+                view_rot,
+                eye,
+                bounds,
+            );
+            if let Some(start) = previous {
+                let distance = dist_point_to_segment(cursor, start, screen);
+                if distance < tolerance {
+                    marker_hits
+                        .entry(wire.name.as_str())
+                        .and_modify(|best| *best = best.min(distance))
+                        .or_insert(distance);
+                }
+            }
+            previous = Some(screen);
+        }
+    }
+    hits.extend(marker_hits.into_iter().map(|(name, distance)| (distance, name)));
     if let Some(segments) = wires.segments() {
         let mut best_by_wire: HashMap<u32, f32> = HashMap::default();
         for segment in segments {
             let Some(wire) = wires.source_wire(segment.wire) else {
                 continue;
             };
+            if wire.point_marker.is_some() {
+                continue;
+            }
             let start = segment.start as usize;
             if start + 1 >= wire.points.len() {
                 continue;
             }
             let p0 = world_to_screen(
-                wp64(wire.points[start], &wire.points_low, start),
+                wire_point_world(wire, start, view_rot, eye),
                 view_rot,
                 eye,
                 bounds,
             );
             let p1 = world_to_screen(
-                wp64(wire.points[start + 1], &wire.points_low, start + 1),
+                wire_point_world(wire, start + 1, view_rot, eye),
                 view_rot,
                 eye,
                 bounds,
@@ -487,17 +550,20 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
         }));
     } else {
         for wire in wires.iter() {
+            if wire.point_marker.is_some() {
+                continue;
+            }
             let tol = pick_tolerance_px(wire, lw_display, base_radius_px);
             let mut prev: Option<Point> = None;
             let mut best_for_wire = tol;
             let mut hit = false;
-            for (i, &[px, py, pz]) in wire.points.iter().enumerate() {
+            for (i, &[px, _, _]) in wire.points.iter().enumerate() {
                 if px.is_nan() {
                     prev = None;
                     continue;
                 }
                 let cur = world_to_screen(
-                    wp64([px, py, pz], &wire.points_low, i),
+                    wire_point_world(wire, i, view_rot, eye),
                     view_rot,
                     eye,
                     bounds,
@@ -1104,18 +1170,26 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
             continue;
         }
         let a = world_to_screen(
-            wp64(wire.points[start], &wire.points_low, start),
+            wire_point_world(wire, start, view_rot, eye),
             view_rot,
             eye,
             bounds,
         );
         let b = world_to_screen(
-            wp64(wire.points[start + 1], &wire.points_low, start + 1),
+            wire_point_world(wire, start + 1, view_rot, eye),
             view_rot,
             eye,
             bounds,
         );
         if segment_hits(a, b) && seen.insert(wire.name.as_str()) {
+            out.push(wire.name.as_str());
+        }
+    }
+    for wire in wires.iter().filter(|wire| wire.point_marker.is_some()) {
+        if !seen.contains(wire.name.as_str())
+            && marker_segment_hit(wire, view_rot, eye, bounds, |a, b| segment_hits(a, b))
+            && seen.insert(wire.name.as_str())
+        {
             out.push(wire.name.as_str());
         }
     }
@@ -1181,7 +1255,7 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
         if wire.points.iter().enumerate().any(|(index, &point)| {
             point[0].is_finite()
                 && inside(world_to_screen(
-                    wp64(point, &wire.points_low, index),
+                    wire_point_world(wire, index, view_rot, eye),
                     view_rot,
                     eye,
                     bounds,
@@ -1231,18 +1305,26 @@ pub fn poly_fence_hit<'a, W: WireSource + ?Sized>(
                 continue;
             }
             let a = world_to_screen(
-                wp64(wire.points[start], &wire.points_low, start),
+                wire_point_world(wire, start, view_rot, eye),
                 view_rot,
                 eye,
                 bounds,
             );
             let b = world_to_screen(
-                wp64(wire.points[start + 1], &wire.points_low, start + 1),
+                wire_point_world(wire, start + 1, view_rot, eye),
                 view_rot,
                 eye,
                 bounds,
             );
             if cuts(a, b) && seen.insert(wire.name.as_str()) {
+                out.push(wire.name.as_str());
+            }
+        }
+        for wire in wires.iter().filter(|wire| wire.point_marker.is_some()) {
+            if !seen.contains(wire.name.as_str())
+                && marker_segment_hit(wire, view_rot, eye, bounds, |a, b| cuts(a, b))
+                && seen.insert(wire.name.as_str())
+            {
                 out.push(wire.name.as_str());
             }
         }
@@ -1254,13 +1336,13 @@ pub fn poly_fence_hit<'a, W: WireSource + ?Sized>(
         }
         let hit = (0..wire.points.len() - 1).any(|k| {
             let a = world_to_screen(
-                wp64(wire.points[k], &wire.points_low, k),
+                wire_point_world(wire, k, view_rot, eye),
                 view_rot,
                 eye,
                 bounds,
             );
             let b = world_to_screen(
-                wp64(wire.points[k + 1], &wire.points_low, k + 1),
+                wire_point_world(wire, k + 1, view_rot, eye),
                 view_rot,
                 eye,
                 bounds,
@@ -1292,13 +1374,13 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
             continue;
         }
         let a = world_to_screen(
-            wp64(wire.points[start], &wire.points_low, start),
+            wire_point_world(wire, start, view_rot, eye),
             view_rot,
             eye,
             bounds,
         );
         let b = world_to_screen(
-            wp64(wire.points[start + 1], &wire.points_low, start + 1),
+            wire_point_world(wire, start + 1, view_rot, eye),
             view_rot,
             eye,
             bounds,
@@ -1306,6 +1388,18 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         if (point_in_polygon(a, poly)
             || point_in_polygon(b, poly)
             || segment_crosses_polygon(a, b, poly))
+            && seen.insert(wire.name.as_str())
+        {
+            out.push(wire.name.as_str());
+        }
+    }
+    for wire in wires.iter().filter(|wire| wire.point_marker.is_some()) {
+        if !seen.contains(wire.name.as_str())
+            && marker_segment_hit(wire, view_rot, eye, bounds, |a, b| {
+                point_in_polygon(a, poly)
+                    || point_in_polygon(b, poly)
+                    || segment_crosses_polygon(a, b, poly)
+            })
             && seen.insert(wire.name.as_str())
         {
             out.push(wire.name.as_str());
@@ -1371,7 +1465,12 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         if wire.points.iter().enumerate().any(|(index, &point)| {
             point[0].is_finite()
                 && point_in_polygon(
-                    world_to_screen(wp64(point, &wire.points_low, index), view_rot, eye, bounds),
+                    world_to_screen(
+                        wire_point_world(wire, index, view_rot, eye),
+                        view_rot,
+                        eye,
+                        bounds,
+                    ),
                     poly,
                 )
         }) && seen.insert(wire.name.as_str())
@@ -1473,7 +1572,12 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
                     prev = None;
                     continue;
                 }
-                let sp = world_to_screen(wp64([px, py, pz], low, i), view_rot, eye, bounds);
+                let world = if !wire.points.is_empty() {
+                    wire_point_world(wire, i, view_rot, eye)
+                } else {
+                    wp64([px, py, pz], low, i)
+                };
+                let sp = world_to_screen(world, view_rot, eye, bounds);
                 if crossing {
                     if inside(sp) {
                         hit = true;
@@ -1595,7 +1699,12 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                     prev = None;
                     continue;
                 }
-                let sp = world_to_screen(wp64([px, py, pz], low, i), view_rot, eye, bounds);
+                let world = if !wire.points.is_empty() {
+                    wire_point_world(wire, i, view_rot, eye)
+                } else {
+                    wp64([px, py, pz], low, i)
+                };
+                let sp = world_to_screen(world, view_rot, eye, bounds);
                 // Reject points the GPU scissored out of a floating viewport so
                 // the lasso can't reach clipped geometry. No-op in model space.
                 if sp.x < 0.0 || sp.x > bounds.width || sp.y < 0.0 || sp.y > bounds.height {
@@ -1692,6 +1801,53 @@ fn wp64(hi: [f32; 3], low: &[[f32; 3]], i: usize) -> glam::DVec3 {
         hi[1] as f64 + l[1] as f64,
         hi[2] as f64 + l[2] as f64,
     )
+}
+
+fn wire_point_world(
+    wire: &WireModel,
+    index: usize,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+) -> glam::DVec3 {
+    let Some(marker) = wire.point_marker else {
+        return wire.point_world(index, 0.0);
+    };
+    let row_y = glam::DVec3::new(
+        view_rot.x_axis.y as f64,
+        view_rot.y_axis.y as f64,
+        view_rot.z_axis.y as f64,
+    );
+    let projection_scale = row_y.length().max(1.0e-12);
+    let relative = (marker.origin - eye).as_vec3().extend(1.0);
+    let clip_w = (view_rot * relative).w.abs().max(1.0e-6);
+    wire.point_world(index, 2.0 * clip_w as f64 / projection_scale)
+}
+
+fn marker_segment_hit(
+    wire: &WireModel,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+    mut hit: impl FnMut(Point, Point) -> bool,
+) -> bool {
+    let mut previous = None;
+    for (index, point) in wire.points.iter().enumerate() {
+        if !point[0].is_finite() {
+            previous = None;
+            continue;
+        }
+        let screen = world_to_screen(
+            wire_point_world(wire, index, view_rot, eye),
+            view_rot,
+            eye,
+            bounds,
+        );
+        if previous.is_some_and(|start| hit(start, screen)) {
+            return true;
+        }
+        previous = Some(screen);
+    }
+    false
 }
 
 /// Even-odd ray-casting test: is `p` inside the polygon?

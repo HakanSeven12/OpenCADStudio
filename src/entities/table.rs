@@ -1667,9 +1667,12 @@ pub fn tessellate_table(
     let mk =
         |color: [f32; 4], points: Vec<[f32; 3]>, fill_tris: Vec<[f32; 3]>, lw: f32| -> WireModel {
             WireModel {
+                point_marker: None,
                 taper_widths: Vec::new(),
                 world_width: 0.0,
                 depth_override: None,
+                display_visible: true,
+                plot_visible: true,
                 fill_is_3d: false,
                 fill_is_2d_solid: false,
                 render_instance: None,

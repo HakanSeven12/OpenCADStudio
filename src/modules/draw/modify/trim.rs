@@ -35,7 +35,7 @@ use cadkernel::geom2d::{
     NurbsCurve, Ray as KernelRay, Tolerance as KernelTolerance, XLine as KernelXLine,
 };
 
-use crate::entities::curve::entity_curve_xy;
+use crate::entities::curve::{entity_curve_xy, entity_with_lwpolyline_world_xy};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::draw::modify::spline_ops::{
@@ -1777,9 +1777,7 @@ fn fence_pieces(
         }
     }
 
-    // Sentinel handle: keeps the self-exclusion in *_seg_ts from matching any
-    // real boundary geo while the piece is being re-picked.
-    const TMP: u64 = u64::MAX - 7;
+    let target = e.common().handle;
     let mut pieces = vec![e.clone()];
     let mut changed = false;
     for _round in 0..8 {
@@ -1787,7 +1785,7 @@ fn fence_pieces(
         let mut any = false;
         for piece in &pieces {
             let mut tmp = piece.clone();
-            tmp.as_entity_mut().set_handle(Handle::new(TMP));
+            tmp.as_entity_mut().set_handle(target);
             let tmp_all = [tmp];
             let mut consumed = false;
             let mut cps = fence_cross_points(&tmp_all[0], fence_geos);
@@ -1808,10 +1806,10 @@ fn fence_pieces(
             }
             for cp in cps {
                 let res = if extend {
-                    pick_extend_at(&tmp_all, geos, Handle::new(TMP), cp[0], cp[1])
+                    pick_extend_at(&tmp_all, geos, target, cp[0], cp[1])
                         .map(|x| vec![x])
                 } else {
-                    pick_trim_at(&tmp_all, geos, Handle::new(TMP), cp[0], cp[1])
+                    pick_trim_at(&tmp_all, geos, target, cp[0], cp[1])
                 };
                 if let Some(mut sub) = res {
                     for sp in &mut sub {
@@ -2171,6 +2169,10 @@ pub struct TrimCommand {
 
 impl TrimCommand {
     pub fn new(all_entities: Vec<EntityType>) -> Self {
+        let all_entities: Vec<EntityType> = all_entities
+            .iter()
+            .map(entity_with_lwpolyline_world_xy)
+            .collect();
         let entity_index = ModifyEntityIndex::build(&all_entities);
         let geos = build_geos(&all_entities);
         Self {
@@ -2907,6 +2909,10 @@ pub struct ExtendCommand {
 
 impl ExtendCommand {
     pub fn new(all_entities: Vec<EntityType>) -> Self {
+        let all_entities: Vec<EntityType> = all_entities
+            .iter()
+            .map(entity_with_lwpolyline_world_xy)
+            .collect();
         let entity_index = ModifyEntityIndex::build(&all_entities);
         let geos = build_geos(&all_entities);
         Self {
@@ -3713,9 +3719,12 @@ fn collect_runs(pts: &[[f64; 2]], take: &dyn Fn([f64; 2]) -> bool, out: &mut Vec
 /// Build a preview wire from a NaN-break point list.
 fn preview_wire(points: Vec<[f32; 3]>, color: [f32; 4], name: &str) -> WireModel {
     WireModel {
+        point_marker: None,
         taper_widths: Vec::new(),
         world_width: 0.0,
         depth_override: None,
+        display_visible: true,
+        plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
         render_instance: None,
@@ -3832,6 +3841,10 @@ pub struct ExtrimCommand {
 
 impl ExtrimCommand {
     pub fn new(all: Vec<(Handle, EntityType)>) -> Self {
+        let all = all
+            .into_iter()
+            .map(|(handle, entity)| (handle, entity_with_lwpolyline_world_xy(&entity)))
+            .collect();
         Self { all, boundary: None, geos: Vec::new() }
     }
 }

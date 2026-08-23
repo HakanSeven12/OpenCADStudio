@@ -40,15 +40,40 @@ impl Scene {
 
         if exclusive {
             self.selected.clear();
+            self.selected_order.clear();
         }
 
-        self.selected.extend(handles);
+        for handle in handles {
+            if self.selected.insert(handle) {
+                self.selected_order.push(handle);
+            }
+        }
         self.bump_selection();
     }
 
     pub fn deselect_all(&mut self) {
         self.selected.clear();
+        self.selected_order.clear();
         self.bump_selection();
+    }
+
+    pub(crate) fn selected_handles_in_order(&self) -> Vec<Handle> {
+        let mut seen = HashSet::default();
+        let mut ordered: Vec<_> = self
+            .selected_order
+            .iter()
+            .copied()
+            .filter(|handle| self.selected.contains(handle) && seen.insert(*handle))
+            .collect();
+        let mut missing: Vec<_> = self
+            .selected
+            .iter()
+            .copied()
+            .filter(|handle| seen.insert(*handle))
+            .collect();
+        missing.sort_unstable_by_key(|handle| handle.value());
+        ordered.extend(missing);
+        ordered
     }
 
     /// Replace the complete selection and invalidate the GPU highlight overlay
@@ -62,7 +87,22 @@ impl Scene {
             .collect();
 
         if self.selected != selected {
+            let mut seen = HashSet::default();
+            let mut order: Vec<_> = self
+                .selected_order
+                .iter()
+                .copied()
+                .filter(|handle| selected.contains(handle) && seen.insert(*handle))
+                .collect();
+            let mut added: Vec<_> = selected
+                .iter()
+                .copied()
+                .filter(|handle| seen.insert(*handle))
+                .collect();
+            added.sort_unstable_by_key(|handle| handle.value());
+            order.extend(added);
             self.selected = selected;
+            self.selected_order = order;
             self.bump_selection();
         }
     }
@@ -74,6 +114,7 @@ impl Scene {
 
         for handle in handles {
             changed |= self.selected.remove(&handle);
+            self.selected_order.retain(|selected| *selected != handle);
         }
 
         if changed {
@@ -82,9 +123,9 @@ impl Scene {
     }
 
     pub fn selected_entities(&self) -> Vec<(Handle, &EntityType)> {
-        self.selected
-            .iter()
-            .filter_map(|&h| self.document.get_entity(h).map(|e| (h, e)))
+        self.selected_handles_in_order()
+            .into_iter()
+            .filter_map(|h| self.document.get_entity(h).map(|e| (h, e)))
             .collect()
     }
 
@@ -107,7 +148,7 @@ impl Scene {
         match scope {
             crate::app::QSelectScope::CurrentSpace => self.current_layout_entity_handles(),
             crate::app::QSelectScope::CurrentSelection => {
-                self.selected.iter().copied().collect()
+                self.selected_handles_in_order()
             }
         }
     }
@@ -152,6 +193,7 @@ impl Scene {
                 let key = (entity_type_name(e), e.as_entity().layer().to_string());
                 if pairs.contains(&key) {
                     self.selected.insert(h);
+                    self.selected_order.push(h);
                     added += 1;
                 }
             }
@@ -174,9 +216,11 @@ impl Scene {
             .filter_map(|w| Self::handle_from_wire_name(&w.name))
             .collect();
         self.selected.clear();
+        self.selected_order.clear();
         for h in all {
             if !prev.contains(&h) {
                 self.selected.insert(h);
+                self.selected_order.push(h);
             }
         }
         self.bump_selection();
@@ -417,6 +461,7 @@ impl Scene {
                             ])
                         } else {
                             match prop.value {
+                                PropValue::PlainText(_) => QSelectValueEditor::Text,
                                 PropValue::ReadOnly(ref value)
                                 | PropValue::EditText(ref value) => {
                                     let field = prop.field.to_ascii_lowercase();
@@ -614,7 +659,9 @@ impl Scene {
                     .flat_map(|s| s.props)
                     .find(|p| p.field == field)?;
                 Some(match prop.value {
-                    PropValue::ReadOnly(s) | PropValue::EditText(s) => s,
+                    PropValue::ReadOnly(s)
+                    | PropValue::EditText(s)
+                    | PropValue::PlainText(s) => s,
                     PropValue::LayerChoice(s) => s,
                     PropValue::Choice { selected, .. } => selected,
                     PropValue::EditChoice { value, .. } => value,
@@ -676,6 +723,7 @@ impl Scene {
             self.remember_removed_cache_categories(h);
             self.document.remove_entity_arc(h);
             highlight_changed |= self.selected.remove(&h);
+            self.selected_order.retain(|selected| *selected != h);
             if self.hover_highlight == Some(h) {
                 self.hover_highlight = None;
                 highlight_changed = true;

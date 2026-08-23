@@ -279,7 +279,7 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
                 Property {
                     label: t!("Contents").into_owned(),
                     field: "content",
-                    value: PropValue::EditText(t.value.clone()),
+                    value: PropValue::PlainText(t.value.clone()),
                 },
                 Property {
                     label: t!("Style").into_owned(),

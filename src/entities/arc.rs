@@ -22,13 +22,8 @@ fn to_render(arc: &Arc) -> RenderEntity {
     let ea = arc.end_angle;
     let normal = (arc.normal.x, arc.normal.y, arc.normal.z);
 
-    // Compute OCS basis vectors for this entity's normal.
     let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
-
-    // Arc centre in WCS.
     let (cwx, cwy, cwz) = crate::scene::view::transform::ocs_point_to_wcs((cx, cy, cz), normal);
-
-    // Arc points in WCS: centre_wcs + r*cos(a)*Ax + r*sin(a)*Ay
     let arc_pt = |a: f64| {
         let (c, s) = (a.cos(), a.sin());
         [
@@ -43,9 +38,13 @@ fn to_render(arc: &Arc) -> RenderEntity {
     // curves) deliberately emit no midpoint; see #34.
     let curve = crate::entities::curve::arc_curve(arc);
     let snap = crate::entities::curve::snap_from(&curve);
-    let tangent = TangentGeom::Circle {
-        center: [cwx as f32, cwy as f32, cwz as f32],
-        radius: r as f32,
+    let tangent = TangentGeom::Arc {
+        center: [cwx, cwy, cwz],
+        axis_x: [ax.0, ax.1, ax.2],
+        axis_y: [ay.0, ay.1, ay.2],
+        radius: r,
+        start_angle: sa,
+        end_angle: ea,
     };
 
     if arc.thickness.abs() > 1e-10 {
@@ -98,54 +97,12 @@ fn to_render(arc: &Arc) -> RenderEntity {
 }
 
 fn control_points(arc: &Arc) -> [glam::DVec3; 3] {
-    let center = glam::DVec3::new(arc.center.x, arc.center.y, arc.center.z);
-    let sweep = (arc.end_angle - arc.start_angle).rem_euclid(TAU);
-    let point = |angle: f64| {
-        center
-            + glam::DVec3::new(
-                arc.radius * angle.cos(),
-                arc.radius * angle.sin(),
-                0.0,
-            )
-    };
+    let curve = crate::entities::curve::arc_curve(arc);
     [
-        point(arc.start_angle),
-        point(arc.start_angle + sweep * 0.5),
-        point(arc.end_angle),
+        glam::DVec3::from_array(curve.point_at(0.0)),
+        glam::DVec3::from_array(curve.point_at(0.5)),
+        glam::DVec3::from_array(curve.point_at(1.0)),
     ]
-}
-
-fn circumcircle(
-    a: glam::DVec3,
-    b: glam::DVec3,
-    c: glam::DVec3,
-) -> Option<(glam::DVec3, f64)> {
-    // Work relative to the first point so large drawing coordinates do not
-    // lose the small differences that define the circle.
-    let ab = b - a;
-    let ac = c - a;
-    let bc = c - b;
-    let scale2 = ab
-        .length_squared()
-        .max(ac.length_squared())
-        .max(bc.length_squared());
-    if scale2 < 1.0e-18 {
-        return None;
-    }
-    let det = 2.0 * (ab.x * ac.y - ab.y * ac.x);
-    if det.abs() <= scale2 * 1.0e-12 {
-        return None;
-    }
-    let ab2 = ab.x * ab.x + ab.y * ab.y;
-    let ac2 = ac.x * ac.x + ac.y * ac.y;
-    let center = a
-        + glam::DVec3::new(
-            (ab2 * ac.y - ac2 * ab.y) / det,
-            (ab.x * ac2 - ac.x * ab2) / det,
-            0.0,
-        );
-    let radius = center.distance(a);
-    radius.is_finite().then_some((center, radius))
 }
 
 pub(crate) fn refit_grips(
@@ -169,36 +126,35 @@ pub(crate) fn refit_grips(
         return false;
     }
 
-    let Some((center, radius)) = circumcircle(points[0], points[1], points[2]) else {
+    let plane = crate::entities::curve::arc_curve(original).plane;
+    let Some(a) = plane.project(points[0].to_array()) else {
         return false;
     };
-    if radius <= 1.0e-9 {
+    let Some(b) = plane.project(points[1].to_array()) else {
         return false;
-    }
-
-    let start = (points[0].y - center.y).atan2(points[0].x - center.x);
-    let middle = (points[1].y - center.y).atan2(points[1].x - center.x);
-    let end = (points[2].y - center.y).atan2(points[2].x - center.x);
-    let sweep = (end - start).rem_euclid(TAU);
-    let middle_sweep = (middle - start).rem_euclid(TAU);
-    // Crossing the two fixed points makes the three-point definition
-    // degenerate before it reverses. Keep the last valid preview instead of
-    // swapping the start and end grip identities under the cursor.
-    if sweep <= 1.0e-9 || middle_sweep > sweep + 1.0e-9 {
+    };
+    let Some(c) = plane.project(points[2].to_array()) else {
         return false;
-    }
+    };
+    let Some(fit) = cadkernel::geom2d::arc_through_points(a, b, c) else {
+        return false;
+    };
 
-    arc.center.x = center.x;
-    arc.center.y = center.y;
+    arc.center.x = fit.centre[0];
+    arc.center.y = fit.centre[1];
     arc.center.z = original.center.z;
-    arc.radius = radius;
-    arc.start_angle = start;
-    arc.end_angle = end;
+    arc.radius = fit.radius;
+    arc.start_angle = fit.start_angle;
+    arc.end_angle = fit.end_angle;
     true
 }
 
 fn grips(arc: &Arc) -> Vec<GripDef> {
-    let ctr = glam::DVec3::new(arc.center.x, arc.center.y, arc.center.z);
+    let (x, y, z) = crate::scene::view::transform::ocs_point_to_wcs(
+        (arc.center.x, arc.center.y, arc.center.z),
+        (arc.normal.x, arc.normal.y, arc.normal.z),
+    );
+    let ctr = glam::DVec3::new(x, y, z);
     let [start, middle, end] = control_points(arc);
     vec![
         center_grip(0, ctr),
@@ -215,7 +171,11 @@ fn properties(arc: &Arc) -> Vec<PropSection> {
     let sweep = (ea - sa).rem_euclid(TAU);
     let total_angle = sweep.to_degrees();
     let arc_length = r * sweep;
-    let area = 0.5 * r * r * sweep;
+    let area = crate::entities::curve::arc_curve(arc)
+        .curve
+        .chord_closed_area()
+        .unwrap_or(0.0)
+        .abs();
 
     let normal = (arc.normal.x, arc.normal.y, arc.normal.z);
     let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
@@ -240,9 +200,9 @@ fn properties(arc: &Arc) -> Vec<PropSection> {
             ro(t!("Start X").as_ref(), "start_x", format!("{sx:.4}")),
             ro(t!("Start Y").as_ref(), "start_y", format!("{sy:.4}")),
             ro(t!("Start Z").as_ref(), "start_z", format!("{sz:.4}")),
-            edit(t!("Center X").as_ref(), "center_x", arc.center.x),
-            edit(t!("Center Y").as_ref(), "center_y", arc.center.y),
-            edit(t!("Center Z").as_ref(), "center_z", arc.center.z),
+            edit(t!("Center X").as_ref(), "center_x", cwx),
+            edit(t!("Center Y").as_ref(), "center_y", cwy),
+            edit(t!("Center Z").as_ref(), "center_z", cwz),
             ro(t!("End X").as_ref(), "end_x", format!("{ex:.4}")),
             ro(t!("End Y").as_ref(), "end_y", format!("{ey:.4}")),
             ro(t!("End Z").as_ref(), "end_z", format!("{ez:.4}")),
@@ -264,9 +224,23 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
         return;
     };
     match field {
-        "center_x" => arc.center.x = v,
-        "center_y" => arc.center.y = v,
-        "center_z" => arc.center.z = v,
+        "center_x" | "center_y" | "center_z" => {
+            let normal = (arc.normal.x, arc.normal.y, arc.normal.z);
+            let (mut x, mut y, mut z) = crate::scene::view::transform::ocs_point_to_wcs(
+                (arc.center.x, arc.center.y, arc.center.z),
+                normal,
+            );
+            match field {
+                "center_x" => x = v,
+                "center_y" => y = v,
+                "center_z" => z = v,
+                _ => {}
+            }
+            let (ox, oy, oz) = crate::scene::view::transform::wcs_point_to_ocs((x, y, z), normal);
+            arc.center.x = ox;
+            arc.center.y = oy;
+            arc.center.z = oz;
+        }
         "radius" if v > 0.0 => arc.radius = v,
         "start_angle" => arc.start_angle = v.to_radians(),
         "end_angle" => arc.end_angle = v.to_radians(),
@@ -277,14 +251,22 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
 fn apply_grip(arc: &mut Arc, grip_id: usize, apply: GripApply) {
     match (grip_id, apply) {
         (0, GripApply::Translate(d)) => {
-            arc.center.x += d.x;
-            arc.center.y += d.y;
-            arc.center.z += d.z;
+            let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
+                (d.x, d.y, d.z),
+                (arc.normal.x, arc.normal.y, arc.normal.z),
+            );
+            arc.center.x += x;
+            arc.center.y += y;
+            arc.center.z += z;
         }
         (0, GripApply::Absolute(p)) => {
-            arc.center.x = p[0];
-            arc.center.y = p[1];
-            arc.center.z = p[2];
+            let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
+                (p[0], p[1], p[2]),
+                (arc.normal.x, arc.normal.y, arc.normal.z),
+            );
+            arc.center.x = x;
+            arc.center.y = y;
+            arc.center.z = z;
         }
         (1..=3, GripApply::Absolute(p)) => {
             let original = arc.clone();
@@ -386,7 +368,11 @@ impl crate::entities::traits::Grippable for Arc {
         if !matches!(action, A::Lengthen) || self.radius <= 1.0e-9 {
             return None;
         }
-        let cursor_angle = (point.y - self.center.y).atan2(point.x - self.center.x);
+        let (x, y, _) = crate::scene::view::transform::wcs_point_to_ocs(
+            (point.x, point.y, point.z),
+            (self.normal.x, self.normal.y, self.normal.z),
+        );
+        let cursor_angle = (y - self.center.y).atan2(x - self.center.x);
         let current_sweep = (self.end_angle - self.start_angle).rem_euclid(TAU);
         let desired_sweep = match grip_id {
             1 => (self.end_angle - cursor_angle).rem_euclid(TAU),
@@ -412,7 +398,9 @@ impl crate::entities::traits::Grippable for Arc {
                 // Hold start_angle, derive new end_angle from arc length
                 // = r * Δθ.
                 let new_span = value / self.radius;
-                self.end_angle = self.start_angle + new_span;
+                if new_span < TAU - 1.0e-9 {
+                    self.end_angle = self.start_angle + new_span;
+                }
             }
             A::Lengthen => {
                 // Extend either end by `value` arc-length units along
@@ -422,6 +410,11 @@ impl crate::entities::traits::Grippable for Arc {
                     return;
                 }
                 let dtheta = value / self.radius;
+                let current = (self.end_angle - self.start_angle).rem_euclid(TAU);
+                let next = current + dtheta;
+                if next <= 1.0e-9 || next >= TAU - 1.0e-9 {
+                    return;
+                }
                 match grip_id {
                     1 => self.start_angle -= dtheta,
                     2 => self.end_angle += dtheta,
@@ -450,26 +443,18 @@ impl crate::entities::traits::Transformable for Arc {
 
 impl crate::entities::traits::MassPropsCalc for acadrust::entities::Arc {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
-        use std::f64::consts::TAU;
-        let r = self.radius;
-        let span = {
-            let s = (self.end_angle - self.start_angle).rem_euclid(TAU);
-            if s < 1e-6 {
-                TAU
-            } else {
-                s
-            }
-        };
-        // Sector area (pie slice)
-        let area = 0.5 * r * r * span;
-        let arc_len = r * span;
-        // Centroid of arc (chord midpoint direction)
-        let mid_rad = self.start_angle + span / 2.0;
+        let curve = crate::entities::curve::arc_curve(self);
+        let area = curve.curve.chord_closed_area().unwrap_or(0.0).abs();
+        let centroid = curve
+            .curve
+            .chord_closed_centroid()
+            .map(|point| curve.plane.point_at(point))
+            .unwrap_or_else(|| curve.point_at(0.5));
         crate::entities::traits::MassProps {
             area,
-            perimeter: arc_len,
-            cx: self.center.x + r * mid_rad.cos(),
-            cy: self.center.y + r * mid_rad.sin(),
+            perimeter: curve.length(),
+            cx: centroid[0],
+            cy: centroid[1],
         }
     }
 }

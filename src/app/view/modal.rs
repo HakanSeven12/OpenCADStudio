@@ -421,6 +421,7 @@ impl OpenCADStudio {
                 540,
                 |flow| {
                     crate::ui::style::plotstyle::view_window(
+                        &self.tabs[self.active_tab].scene.document,
                         self.active_plot_style.as_ref(),
                         self.plotstyle_panel_aci,
                         &self.ps_color_buf,

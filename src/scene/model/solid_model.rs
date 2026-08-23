@@ -1,19 +1,6 @@
-// B-rep construction for the Model tab's primitives, plus tessellation into
-// the renderer's `MeshLodSet`.
-//
-// The bodies come from the geometry kernel, which builds each primitive the
-// way ACIS records it: an analytic surface with singular vertices where the
-// surface has them, rather than a mesh or a spline that happens to look like
-// one. That is what lets a solid built here be written back out as exact
-// geometry instead of a facetted approximation — see `acis_bridge`.
-//
-// Everything is oriented Z-up with the footprint on the z = base plane, to
-// match acadrust's `acis::primitives`.
-//
-// The resulting `Body` is cached per entity handle on the Scene so the
-// Design-group boolean tools can run on it.
+// Kernel B-rep construction and display tessellation.
 
-use cadkernel::brep::{self, Body};
+use cadkernel::brep::{self, Body, Curve3, EdgeKey, FaceKey, Surface};
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 
@@ -223,6 +210,65 @@ pub fn edge_wires(body: &Body) -> Vec<acadrust::entities::Wire> {
         .collect()
 }
 
+/// B-rep edge nearest a world-space surface pick.
+pub fn nearest_edge(body: &Body, pick: [f64; 3]) -> Option<EdgeKey> {
+    let pick = cadkernel::space::Vec3::from(pick);
+    body.edge_keys()
+        .filter_map(|key| {
+            let edge = body.edges.get(key)?;
+            let curve = body.curves.get(edge.curve)?;
+            let nearest = if matches!(curve, Curve3::Line(_)) {
+                let start = cadkernel::space::Vec3::from(curve.point_at(edge.start_parameter));
+                let end = cadkernel::space::Vec3::from(curve.point_at(edge.end_parameter));
+                let span = end - start;
+                let length2 = span.dot(span);
+                let along = if length2 > 0.0 {
+                    (pick - start).dot(span) / length2
+                } else {
+                    0.0
+                }
+                .clamp(0.0, 1.0);
+                pick.distance(start + span * along)
+            } else {
+                (0..=64)
+                    .map(|step| {
+                        let t = edge.start_parameter
+                            + (edge.end_parameter - edge.start_parameter) * step as f64 / 64.0;
+                        pick.distance(cadkernel::space::Vec3::from(curve.point_at(t)))
+                    })
+                    .fold(f64::INFINITY, f64::min)
+            };
+            Some((key, nearest))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(key, _)| key)
+}
+
+/// Planar face nearest a world-space surface pick.
+pub fn nearest_planar_face(body: &Body, pick: [f64; 3]) -> Option<FaceKey> {
+    let face = body
+        .face_keys()
+        .filter_map(|key| {
+            let face = body.faces.get(key)?;
+            let surface = body.surfaces.get(face.surface)?;
+            Some((key, surface.distance_to(pick).abs()))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(key, _)| key)?;
+    let node = body.faces.get(face)?;
+    matches!(body.surfaces.get(node.surface)?, Surface::Plane(_)).then_some(face)
+}
+
+/// Outward normal of a planar face.
+pub fn planar_face_normal(body: &Body, face: FaceKey) -> Option<[f64; 3]> {
+    let face = body.faces.get(face)?;
+    let Surface::Plane(plane) = body.surfaces.get(face.surface)? else {
+        return None;
+    };
+    let normal = cadkernel::space::Vec3::from(plane.normal()?);
+    Some(if face.forward { normal } else { -normal }.to_array())
+}
+
 // ── Boolean operations ──────────────────────────────────────────────────────
 
 /// Which CSG to apply. Mirrors `model::boolean_cmd::BoolOp` but kept local so
@@ -246,16 +292,11 @@ pub fn boolean(op: Bool, a: &Body, b: &Body) -> Option<Body> {
         Bool::Subtract => brep::Operation::Difference,
         Bool::Intersect => brep::Operation::Intersection,
     };
-    brep::combine(a.clone(), b.clone(), how, TOL).ok()
+    let tolerance = brep::operation_tolerance(&[a, b]);
+    brep::combine(a.clone(), b.clone(), how, tolerance).ok()
 }
 
 // ── Tessellation ────────────────────────────────────────────────────────────
-
-/// Tessellate a `Body` into a single-LOD `MeshLodSet` (world-space, before
-/// world_offset is applied by the caller).
-pub fn mesh_from_solid(body: &Body, color: [f32; 4]) -> Option<MeshLodSet> {
-    mesh_from_tessellation(tessellation(body), color)
-}
 
 fn mesh_from_tessellation(
     tessellation: brep::mesh::BodyMesh,

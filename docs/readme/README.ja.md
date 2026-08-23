@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="../../README.md">English</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
+  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center"><img src="../../assets/logo.svg" width="112" alt="Open CAD Studio ロゴ"></p>
@@ -19,7 +19,7 @@
   <a href="https://github.com/HakanSeven12/OpenCADStudio/discussions"><strong>ディスカッションに参加</strong></a>
 </p>
 
-<p align="center"><img src="https://github.com/user-attachments/assets/10635ad0-454b-4c87-935f-1a3a46f24ccb" alt="Open CAD Studio ワークスペース" width="100%"></p>
+<p align="center"><img src="../../site/workspace.png" alt="Open CAD Studio ワークスペース" width="100%"></p>
 
 ## 概要
 
@@ -36,7 +36,7 @@ Open CAD Studio は、技術製図、レイアウト作業、ソリッドモデ�
 - **GPU レンダリング** — `wgpu` による高速な 2D/3D ビューポートと、正投影・透視投影カメラ。
 - **拡張可能なワークフロー** — ネイティブプラグイン、コマンドスクリプト、ヘッドレス変換、行単位の JSON 自動化 API。
 
-<p align="center"><img src="https://github.com/user-attachments/assets/2a037a09-e8e8-498c-8ed3-58ecb8ae958d" alt="Open CAD Studio の 3D モデル" width="100%"></p>
+<p align="center"><img src="../../site/modeling.png" alt="Open CAD Studio の 3D モデル" width="100%"></p>
 
 ## ファイルワークフロー
 
@@ -91,9 +91,9 @@ chmod +x OpenCADStudio-*-linux-x86_64.AppImage
 
 ## 言語
 
-Open CAD Studio はシステム言語に従うか、次の 19 のインターフェース言語を使用できます。
+Open CAD Studio はシステム言語に従うか、次の 20 のインターフェース言語を使用できます。
 
-> アラビア語 · ブラジルポルトガル語 · チェコ語 · オランダ語 · 英語 · フィンランド語 · フランス語 · ドイツ語 · ヒンディー語 · ハンガリー語 · イタリア語 · 日本語 · 韓国語 · ポーランド語 · ロシア語 · 簡体字中国語 · スペイン語 · 繁体字中国語 · トルコ語
+> アラビア語 · ブラジルポルトガル語 · ブルガリア語 · チェコ語 · オランダ語 · 英語 · フィンランド語 · フランス語 · ドイツ語 · ヒンディー語 · ハンガリー語 · イタリア語 · 日本語 · 韓国語 · ポーランド語 · ロシア語 · 簡体字中国語 · スペイン語 · 繁体字中国語 · トルコ語
 
 言語はアプリケーション設定から変更できます。**システム** を選ぶと、ブラウザ版もブラウザの優先ロケールを使用します。
 

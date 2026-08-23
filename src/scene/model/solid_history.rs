@@ -1,11 +1,9 @@
-use acadrust::entities::{EmbeddedEntity, Solid3D};
+use acadrust::entities::Solid3D;
 use acadrust::objects::{
-    SolidHistoryBox, SolidHistoryBrep, SolidHistoryCylinder, SolidHistoryLoft,
+    SolidHistoryBox, SolidHistoryBrep, SolidHistoryCylinder,
     SolidHistoryNodeBase, SolidHistoryOperation, SolidHistoryPyramid,
-    SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep, SolidHistoryTorus,
+    SolidHistorySphere, SolidHistoryTorus,
 };
-use acadrust::types::{Vector2, Vector3};
-use acadrust::EntityType;
 use cadkernel::brep::Body;
 
 use crate::command::EntityTransform;
@@ -474,21 +472,6 @@ fn base(transform: [f64; 16]) -> SolidHistoryNodeBase {
     base
 }
 
-fn embedded(entity: &EntityType) -> Option<EmbeddedEntity> {
-    Some(match entity {
-        EntityType::Point(value) => EmbeddedEntity::Point(value.clone()),
-        EntityType::Line(value) => EmbeddedEntity::Line(value.clone()),
-        EntityType::Arc(value) => EmbeddedEntity::Arc(value.clone()),
-        EntityType::Circle(value) => EmbeddedEntity::Circle(value.clone()),
-        EntityType::Ellipse(value) => EmbeddedEntity::Ellipse(value.clone()),
-        EntityType::Spline(value) => EmbeddedEntity::Spline(value.clone()),
-        EntityType::LwPolyline(value) => EmbeddedEntity::LwPolyline(value.clone()),
-        EntityType::Ray(value) => EmbeddedEntity::Ray(value.clone()),
-        EntityType::XLine(value) => EmbeddedEntity::XLine(value.clone()),
-        _ => return None,
-    })
-}
-
 pub fn box_op(
     transform: [f64; 16],
     length: f64,
@@ -593,7 +576,7 @@ pub fn pyramid_op(
 }
 
 pub fn brep_op(body: &Body) -> SolidHistoryOperation {
-    let acis_data = crate::scene::convert::acis_export::planar_solid_to_sat(body)
+    let acis_data = crate::scene::convert::acis_export::solid_to_sat(body)
         .map(|document| {
             let mut solid = Solid3D::new();
             solid.set_sat_document(&document);
@@ -605,58 +588,5 @@ pub fn brep_op(body: &Body) -> SolidHistoryOperation {
         operation_major: 1,
         acis_data,
         ..SolidHistoryBrep::default()
-    })
-}
-
-pub fn extrusion_op(profile: &EntityType, height: f64) -> SolidHistoryOperation {
-    SolidHistoryOperation::Extrusion(SolidHistorySweep {
-        base: base(glam::DMat4::IDENTITY.to_cols_array()),
-        operation_major: 1,
-        direction: Vector3::new(0.0, 0.0, height),
-        sweep_entity: embedded(profile),
-        scale_factor: 1.0,
-        sweep_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
-        path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
-        ..SolidHistorySweep::default()
-    })
-}
-
-pub fn sweep_op(profile: &EntityType, path: &EntityType) -> SolidHistoryOperation {
-    SolidHistoryOperation::Sweep(SolidHistorySweep {
-        base: base(glam::DMat4::IDENTITY.to_cols_array()),
-        operation_major: 1,
-        sweep_entity: embedded(profile),
-        path_entity: embedded(path),
-        scale_factor: 1.0,
-        sweep_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
-        path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
-        ..SolidHistorySweep::default()
-    })
-}
-
-pub fn loft_op(profiles: &[EntityType]) -> SolidHistoryOperation {
-    SolidHistoryOperation::Loft(SolidHistoryLoft {
-        base: base(glam::DMat4::IDENTITY.to_cols_array()),
-        operation_major: 1,
-        cross_sections: profiles.iter().filter_map(embedded).collect(),
-        ..SolidHistoryLoft::default()
-    })
-}
-
-pub fn revolve_op(
-    profile: &EntityType,
-    axis_start: [f64; 3],
-    axis_end: [f64; 3],
-    angle: f64,
-) -> SolidHistoryOperation {
-    let direction = glam::DVec3::from_array(axis_end) - glam::DVec3::from_array(axis_start);
-    SolidHistoryOperation::Revolve(SolidHistoryRevolve {
-        base: base(glam::DMat4::IDENTITY.to_cols_array()),
-        operation_major: 1,
-        axis_point: Vector3::new(axis_start[0], axis_start[1], axis_start[2]),
-        direction: Vector2::new(direction.x, direction.y),
-        revolve_angle: angle,
-        sweep_entity: embedded(profile),
-        ..SolidHistoryRevolve::default()
     })
 }

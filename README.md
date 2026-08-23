@@ -1,5 +1,6 @@
 <p align="center">
   <a href="README.md">English</a> ·
+  <a href="docs/readme/README.bg.md">Български</a> ·
   <a href="docs/readme/README.pt-BR.md">Português (Brasil)</a> ·
   <a href="docs/readme/README.cs.md">Čeština</a> ·
   <a href="docs/readme/README.nl.md">Nederlands</a> ·
@@ -46,7 +47,7 @@
 </p>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/10635ad0-454b-4c87-935f-1a3a46f24ccb" alt="Open CAD Studio workspace" width="100%">
+  <img src="site/workspace.png" alt="Open CAD Studio workspace" width="100%">
 </p>
 
 ## Overview
@@ -65,7 +66,7 @@ The project is under active development. Keep backups of important production dr
 - **Extensible workflows** — native plugins, command scripts, headless conversion, and a line-based JSON automation API.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/2a037a09-e8e8-498c-8ed3-58ecb8ae958d" alt="3D model in Open CAD Studio" width="100%">
+  <img src="site/modeling.png" alt="3D model in Open CAD Studio" width="100%">
 </p>
 
 ## File workflows
@@ -121,9 +122,9 @@ The application is ad-hoc signed but is not currently notarized by Apple.
 
 ## Languages
 
-Open CAD Studio can follow the system language or use any of these 19 interface languages:
+Open CAD Studio can follow the system language or use any of these 20 interface languages:
 
-> Arabic · Brazilian Portuguese · Czech · Dutch · English · Finnish · French · German · Hindi · Hungarian · Italian · Japanese · Korean · Polish · Russian · Simplified Chinese · Spanish · Traditional Chinese · Turkish
+> Arabic · Brazilian Portuguese · Bulgarian · Czech · Dutch · English · Finnish · French · German · Hindi · Hungarian · Italian · Japanese · Korean · Polish · Russian · Simplified Chinese · Spanish · Traditional Chinese · Turkish
 
 Change the language from the application settings. The browser version also uses the browser's preferred locale when **System** is selected.
 

@@ -11,7 +11,7 @@
 use crate::io::pdf_export;
 use crate::io::plot_style::PlotStyleTable;
 use crate::scene::model::hatch_model::HatchModel;
-use crate::scene::WireModel;
+use crate::io::pdf_export::PlotWire;
 
 /// Extra options for a print job. On CUPS (Linux/macOS) these map to `lp`
 /// flags / `-o` options. On Windows the generated PDF already carries render
@@ -38,7 +38,7 @@ pub fn list_printers() -> Vec<String> {
 #[cfg(target_arch = "wasm32")]
 #[allow(clippy::too_many_arguments)]
 pub async fn print_wires_with(
-    _wires: std::sync::Arc<Vec<WireModel>>,
+    _wires: std::sync::Arc<Vec<PlotWire>>,
     _hatches: Vec<HatchModel>,
     _wipeouts: Vec<HatchModel>,
     _paper_w: f64,
@@ -153,7 +153,7 @@ pub fn open_printer_properties(_printer: Option<&str>) -> Result<(), String> {
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub async fn print_wires_with(
-    wires: std::sync::Arc<Vec<WireModel>>,
+    wires: std::sync::Arc<Vec<PlotWire>>,
     hatches: Vec<HatchModel>,
     wipeouts: Vec<HatchModel>,
     paper_w: f64,

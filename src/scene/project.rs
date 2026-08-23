@@ -160,6 +160,22 @@ impl Scene {
             let in_vp = |x: f32, y: f32| x >= vp_x0 && x <= vp_x1 && y >= vp_y0 && y <= vp_y1;
 
             for wire in model_wires.iter() {
+                let marker_view_height = wire.point_marker.map_or(view_height_eff, |marker| {
+                    if !use_perspective {
+                        return view_height_eff;
+                    }
+                    let relative = marker.origin
+                        - glam::DVec3::new(
+                            display_center_x,
+                            display_center_y,
+                            display_center_z,
+                        );
+                    let depth = relative.x * view_fwd_d.0
+                        + relative.y * view_fwd_d.1
+                        + relative.z * view_fwd_d.2;
+                    view_height_eff * (camera_dist_d - depth).max(0.001)
+                        / camera_dist_d.max(0.001)
+                });
                 let projected_pts: Vec<[f32; 3]> = wire
                     .points
                     .iter()
@@ -168,11 +184,8 @@ impl Scene {
                         if mx.is_nan() || my.is_nan() || mz.is_nan() {
                             return [f32::NAN; 3];
                         }
-                        // Reconstruct absolute WCS from the double-single high
-                        // (`points`) + low (`points_low`) pair — the high f32
-                        // alone is ~0.5 m off at UTM scale.
-                        let lo = wire.points_low.get(pi).copied().unwrap_or([0.0; 3]);
-                        proj_abs(mx as f64 + lo[0] as f64, my as f64 + lo[1] as f64, mz as f64 + lo[2] as f64)
+                        let point = wire.point_world(pi, marker_view_height);
+                        proj_abs(point.x, point.y, point.z)
                     })
                     .collect();
 
@@ -304,6 +317,7 @@ impl Scene {
                 // residual is needed, and keeping the model wire's points_low
                 // here would add a model-scale offset to the paper points.
                 out.points_low = Vec::new();
+                out.point_marker = None;
                 out.snap_pts = snap_pts;
                 out.key_vertices = key_vertices;
                 // Tangent geometry is in model space and can't be trivially
@@ -354,7 +368,7 @@ impl Scene {
     /// needs the equivalent paper-space geometry explicitly.
     pub fn viewport_plot_fills(
         &self,
-    ) -> (Vec<WireModel>, Vec<HatchModel>, Vec<HatchModel>) {
+    ) -> (Vec<(WireModel, f32)>, Vec<HatchModel>, Vec<HatchModel>) {
         use acadrust::entities::Viewport;
         use model::hatch_model::HatchPattern;
 
@@ -409,8 +423,8 @@ impl Scene {
             } else {
                 0.0
             };
-            let project = |x: f64, y: f64| -> Option<[f32; 2]> {
-                let delta = glam::DVec3::new(x, y, 0.0) - camera.target;
+            let project_3d = |point: [f64; 3]| -> Option<[f32; 2]> {
+                let delta = glam::DVec3::from(point) - camera.target;
                 let u = delta.dot(view_right.as_dvec3());
                 let v = delta.dot(view_up.as_dvec3());
                 let factor = if perspective {
@@ -427,6 +441,7 @@ impl Scene {
                     (center_y + v * factor * viewport_scale) as f32,
                 ])
             };
+            let project = |x: f64, y: f64| project_3d([x, y, 0.0]);
 
             let frozen: rustc_hash::FxHashSet<Handle> =
                 viewport.frozen_layers.iter().copied().collect();
@@ -435,6 +450,7 @@ impl Scene {
                 Some(&frozen),
                 self.viewport_scale_handle(viewport.common.handle),
                 self.annotation_all_visible(),
+                true,
             );
             for hatch in hatches {
                 if matches!(&hatch.pattern, HatchPattern::Pattern(_)) {
@@ -476,12 +492,12 @@ impl Scene {
                         wire.aci = hatch.aci;
                         wire.line_weight_px = hatch.line_weight_px;
                         wire.aabb = aabb;
-                        pattern_wires.push(wire);
+                        pattern_wires.push((wire, hatch.draw_depth));
                     }
                     continue;
                 }
                 if let Some(hatch) =
-                    project_plot_fill(hatch, &project, xmin, ymin, xmax, ymax)
+                    project_plot_fill(hatch, &project_3d, xmin, ymin, xmax, ymax)
                 {
                     projected_hatches.push(hatch);
                 }
@@ -495,7 +511,7 @@ impl Scene {
                 false,
             ) {
                 if let Some(wipeout) =
-                    project_plot_fill(wipeout, &project, xmin, ymin, xmax, ymax)
+                    project_plot_fill(wipeout, &project_3d, xmin, ymin, xmax, ymax)
                 {
                     projected_wipeouts.push(wipeout);
                 }
@@ -753,7 +769,7 @@ fn project_plot_fill<F>(
     ymax: f32,
 ) -> Option<HatchModel>
 where
-    F: Fn(f64, f64) -> Option<[f32; 2]>,
+    F: Fn([f64; 3]) -> Option<[f32; 2]>,
 {
     let mut output = Vec::new();
     let mut ring = Vec::new();
@@ -778,15 +794,35 @@ where
         }
         output.extend(clipped);
     };
-    for &[x, y] in fill.boundary.iter() {
-        if x.is_nan() || y.is_nan() {
-            flush_ring(&mut ring, &mut output);
-            continue;
+    if let (Some(plane), Some(boundary)) = (fill.fill_plane, fill.fill_plane_boundary.as_deref()) {
+        let plane = cadkernel::space::Plane::from_axes(
+            plane.origin,
+            plane.x_axis,
+            plane.y_axis,
+        );
+        for &[x, y] in boundary {
+            if x.is_nan() || y.is_nan() {
+                flush_ring(&mut ring, &mut output);
+                continue;
+            }
+            let point = plane.point_at([x as f64, y as f64]);
+            if let Some(point) = project(point) {
+                ring.push(point);
+            }
         }
-        let absolute_x = fill.world_origin[0] + x as f64;
-        let absolute_y = fill.world_origin[1] + y as f64;
-        if let Some(point) = project(absolute_x, absolute_y) {
-            ring.push(point);
+    } else {
+        for &[x, y] in fill.boundary.iter() {
+            if x.is_nan() || y.is_nan() {
+                flush_ring(&mut ring, &mut output);
+                continue;
+            }
+            if let Some(point) = project([
+                fill.world_origin[0] + x as f64,
+                fill.world_origin[1] + y as f64,
+                0.0,
+            ]) {
+                ring.push(point);
+            }
         }
     }
     flush_ring(&mut ring, &mut output);
@@ -796,6 +832,8 @@ where
     fill.world_origin = [0.0, 0.0];
     fill.boundary = std::sync::Arc::new(output);
     fill.boundary_wcs = None;
+    fill.fill_plane = None;
+    fill.fill_plane_boundary = None;
     Some(fill)
 }
 

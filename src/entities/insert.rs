@@ -196,6 +196,7 @@ pub(crate) fn append_insert_attribute_wires(
     ins_pat: [f32; 8],
     ins_lw_px: f32,
     ins_layer: render::InheritStyle,
+    ins_layer_plottable: bool,
     bg_color: [f32; 4],
     is_xref: bool,
     pslt_factor: f32,
@@ -212,11 +213,8 @@ pub(crate) fn append_insert_attribute_wires(
     if attmode == 0 {
         return;
     }
-    // An annotative block scales as ONE uniform unit about its insertion point;
-    // its attributes are carried by that scale (AutoCAD even forbids annotative
-    // attributes inside annotative blocks, to avoid double-scaling). So pre-scale
-    // the annotative attribute about the insertion point and tessellate it at a
-    // neutral 1.0 — the text path must never scale it a second time.
+    // Attributes inherit the annotative block scale. Pre-scale them here so
+    // text tessellation stays at a neutral scale.
     let annotative = ins
         .common
         .extended_data
@@ -260,6 +258,16 @@ pub(crate) fn append_insert_attribute_wires(
         } else {
             sub_color
         };
+        let attr_plottable = if render::is_effective_layer_zero(&attr.common.layer) {
+            ins_layer_plottable
+        } else {
+            document
+                .layers
+                .get(&attr.common.layer)
+                .map(|layer| layer.is_plottable)
+                .unwrap_or(true)
+        };
+        let attr_plottable = ins_layer_plottable && attr_plottable;
         let sub_aabb = crate::scene::entity_aabb(&attr_entity);
         let mut attr_wires = tessellate::tessellate(
             document,
@@ -284,6 +292,7 @@ pub(crate) fn append_insert_attribute_wires(
             w.name = insert_handle.value().to_string();
             w.aci = sub_aci;
             w.aabb = sub_aabb;
+            w.plot_visible &= attr_plottable;
         }
         wires.extend(attr_wires);
     }

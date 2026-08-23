@@ -1,5 +1,6 @@
 use acadrust::entities::acis::{SabReader, SatBody, SatDocument};
 use acadrust::entities::{Body, Region, Solid3D};
+use cadkernel::brep::{self, Body as KernelBody};
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 
@@ -42,6 +43,8 @@ pub(crate) fn body_transform(
             values.extend_from_slice(&components[..len]);
         } else if let Some(value) = token.as_float() {
             values.push(value);
+        } else if let Some(value) = token.as_integer() {
+            values.push(value as f64);
         } else if let Some(text) = token.as_string() {
             for word in text.split_ascii_whitespace() {
                 let Ok(value) = word.parse::<f64>() else {
@@ -150,6 +153,33 @@ fn parse_acis(
             .then(|| SabReader::read(sab_data).ok())
             .flatten()
     })
+}
+
+pub fn kernel_body(solid: &Solid3D) -> Option<KernelBody> {
+    let sat = parse_acis(
+        || solid.parse_sat(),
+        solid.acis_data.is_binary,
+        &solid.acis_data.sab_data,
+    )?;
+    let (mut bodies, loss) = cadkernel::acis::lift(&sat);
+    if !loss.is_empty() || bodies.len() != 1 {
+        return None;
+    }
+    let body = bodies.pop()?;
+    let source = body.provenance.source()?;
+    let Some((matrix, translation, scale)) = body_transform(&sat, source.index() as usize).ok()?
+    else {
+        return Some(body);
+    };
+    brep::transform(
+        &body,
+        &brep::Placement {
+            x_axis: [scale * matrix[0], scale * matrix[1], scale * matrix[2]],
+            y_axis: [scale * matrix[3], scale * matrix[4], scale * matrix[5]],
+            z_axis: [scale * matrix[6], scale * matrix[7], scale * matrix[8]],
+            origin: translation,
+        },
+    )
 }
 
 fn remap_acis_material_bindings(

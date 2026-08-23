@@ -63,7 +63,7 @@ impl canvas::Program<Message> for GlyphCanvas {
                     stroke.clone(),
                 );
             }
-            4 => frame.stroke(&line(Point::new(cx, cy - r), Point::new(cx, cy + r)), stroke.clone()),
+            4 => frame.stroke(&line(Point::new(cx, cy), Point::new(cx, cy - r)), stroke.clone()),
             _ => {}
         }
         if self.mode & 32 != 0 {

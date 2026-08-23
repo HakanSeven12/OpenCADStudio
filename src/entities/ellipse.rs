@@ -1,11 +1,16 @@
 use acadrust::entities::Ellipse;
+use cadkernel::geom2d::{
+    Curve as KernelCurve, EllipseArc as KernelEllipseArc, Tolerance, Vec2 as KernelVec2,
+};
+use cadkernel::space::PlanarCurve;
 
 use crate::entities::curve::CurveSnap;
 use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
+    center_grip, edit_prop as edit, oriented_triangle_grip, parse_f64, ro_prop as ro,
+    square_grip,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
@@ -58,33 +63,56 @@ fn to_render(ell: &Ellipse) -> RenderEntity {
     }
 }
 
-/// A curve through every one of `points` in order.
-///
-/// Degree one, so the control polygon *is* the curve — the same thing the
-/// hand-built sampling produced, without restating how a B-spline is put
-/// together at each site.
+fn ellipse_curves(ell: &Ellipse) -> Option<(PlanarCurve, PlanarCurve)> {
+    let arc = crate::entities::curve::ellipse_curve(ell)?;
+    let KernelCurve::Ellipse(piece) = &arc.curve else {
+        return None;
+    };
+    let full = PlanarCurve::new(
+        arc.plane,
+        KernelCurve::Ellipse(KernelEllipseArc::full(piece.ellipse)),
+    );
+    Some((arc, full))
+}
+
+fn is_closed(ell: &Ellipse) -> bool {
+    crate::entities::curve::ellipse_curve(ell).is_some_and(|curve| curve.curve.is_closed())
+}
+
+fn parameter_at_point(ell: &Ellipse, point: glam::DVec3) -> Option<f64> {
+    let (_, full) = ellipse_curves(ell)?;
+    Some(
+        (full.parameter_at(point.to_array())? * std::f64::consts::TAU)
+            .rem_euclid(std::f64::consts::TAU),
+    )
+}
 
 fn grips(ell: &Ellipse) -> Vec<GripDef> {
-    let ctr = glam::DVec3::new(ell.center.x, ell.center.y, ell.center.z);
-    let maj = glam::DVec3::new(
-        ell.center.x + ell.major_axis.x,
-        ell.center.y + ell.major_axis.y,
-        ell.center.z + ell.major_axis.z,
-    );
-    let major_xy =
-        ((ell.major_axis.x * ell.major_axis.x + ell.major_axis.y * ell.major_axis.y) as f64).sqrt();
-    let (px, py) = if major_xy > 1e-10 {
-        let s = ell.major_axis_length() * ell.minor_axis_ratio / major_xy;
-        (-ell.major_axis.y * s, ell.major_axis.x * s)
-    } else {
-        (0.0, ell.major_axis_length() * ell.minor_axis_ratio)
+    let fallback = glam::DVec3::new(ell.center.x, ell.center.y, ell.center.z);
+    let Some((arc, full)) = ellipse_curves(ell) else {
+        return vec![center_grip(0, fallback)];
     };
-    let min = glam::DVec3::new(ell.center.x + px, ell.center.y + py, ell.center.z);
-    vec![
+    let KernelCurve::Ellipse(piece) = &full.curve else {
+        return vec![center_grip(0, fallback)];
+    };
+    let ctr = glam::DVec3::from_array(full.plane.point_at(piece.ellipse.centre));
+    let axes = [0.0, 0.25, 0.5, 0.75].map(|t| glam::DVec3::from_array(full.point_at(t)));
+    let mut grips = vec![
         center_grip(0, ctr),
-        square_grip(1, maj),
-        square_grip(2, min),
-    ]
+        square_grip(1, axes[0]),
+        square_grip(2, axes[1]),
+        square_grip(3, axes[2]),
+        square_grip(4, axes[3]),
+    ];
+    if !arc.curve.is_closed() {
+        let start = glam::DVec3::from_array(arc.point_at(0.0));
+        let end = glam::DVec3::from_array(arc.point_at(1.0));
+        let start_outward = -glam::DVec3::from_array(arc.tangent_at(0.0));
+        let end_outward = glam::DVec3::from_array(arc.tangent_at(1.0));
+        grips.push(oriented_triangle_grip(5, start, start_outward));
+        grips.push(oriented_triangle_grip(6, end, end_outward));
+    }
+    grips
 }
 
 fn properties(ell: &Ellipse) -> Vec<PropSection> {
@@ -114,9 +142,7 @@ fn properties(ell: &Ellipse) -> Vec<PropSection> {
     let minor_vec = v * r_minor;
 
     let start_angle = ell.start_parameter.to_degrees().rem_euclid(360.0);
-    let end_angle = if crate::entities::curve::ellipse_curve(ell)
-        .is_some_and(|curve| curve.curve.is_closed())
-    {
+    let end_angle = if is_closed(ell) {
         360.0
     } else {
         ell.end_parameter.to_degrees().rem_euclid(360.0)
@@ -188,6 +214,73 @@ fn apply_geom_prop(ell: &mut Ellipse, field: &str, value: &str) {
     }
 }
 
+fn apply_axis_grip(ell: &mut Ellipse, grip_id: usize, point: glam::DVec3) {
+    let Some((_, full)) = ellipse_curves(ell) else {
+        return;
+    };
+    let KernelCurve::Ellipse(piece) = &full.curve else {
+        return;
+    };
+    let Some(projected) = full.plane.project(point.to_array()) else {
+        return;
+    };
+    let center = KernelVec2::from(piece.ellipse.centre);
+    let mut dragged = KernelVec2::from(projected) - center;
+    let tolerance = Tolerance::default().linear();
+
+    if matches!(grip_id, 1 | 3) {
+        if grip_id == 3 {
+            dragged = -dragged;
+        }
+        if dragged.length() <= tolerance {
+            return;
+        }
+        let axis = full.plane.vector_at(dragged.to_array());
+        ell.major_axis.x = axis[0];
+        ell.major_axis.y = axis[1];
+        ell.major_axis.z = axis[2];
+        return;
+    }
+
+    if grip_id == 4 {
+        dragged = -dragged;
+    }
+    let major_dir = KernelVec2::from(piece.ellipse.major_axis);
+    let minor_dir = major_dir.perpendicular();
+    let major_len = piece.ellipse.major_radius.abs();
+    let minor_len = piece.ellipse.minor_radius.abs();
+    if major_len <= tolerance || minor_len <= tolerance {
+        return;
+    }
+
+    let along_major = dragged.dot(major_dir).abs();
+    let along_minor = dragged.dot(minor_dir).abs();
+    let (drag_dir, dragged_len, fixed_dir, fixed_len) = if along_minor >= along_major {
+        (minor_dir, along_minor, major_dir, major_len)
+    } else {
+        (major_dir, along_major, minor_dir, minor_len)
+    };
+    if fixed_len <= tolerance {
+        return;
+    }
+    let (axis, ratio) = if dragged_len >= fixed_len {
+        (
+            drag_dir * dragged_len,
+            (fixed_len / dragged_len).clamp(0.001, 1.0),
+        )
+    } else {
+        (
+            fixed_dir * fixed_len,
+            (dragged_len / fixed_len).clamp(0.001, 1.0),
+        )
+    };
+    let axis = full.plane.vector_at(axis.to_array());
+    ell.major_axis.x = axis[0];
+    ell.major_axis.y = axis[1];
+    ell.major_axis.z = axis[2];
+    ell.minor_axis_ratio = ratio;
+}
+
 fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
     match (grip_id, apply) {
         (0, GripApply::Translate(d)) => {
@@ -200,54 +293,15 @@ fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
             ell.center.y = p.y as f64;
             ell.center.z = p.z as f64;
         }
-        (1, GripApply::Absolute(p)) => {
-            ell.major_axis.x = p.x as f64 - ell.center.x;
-            ell.major_axis.y = p.y as f64 - ell.center.y;
-            ell.major_axis.z = p.z as f64 - ell.center.z;
-        }
-        (2, GripApply::Absolute(p)) => {
-            // Minor-axis grip. The two axes are always perpendicular, so this
-            // grip stretches one of them along its fixed direction while the
-            // other stays put. Work in the ellipse's view plane (XY).
-            let mx = ell.major_axis.x;
-            let my = ell.major_axis.y;
-            let major_len = (mx * mx + my * my).sqrt();
-            if major_len <= 1e-10 {
+        (1 | 2 | 3 | 4, GripApply::Absolute(p)) => apply_axis_grip(ell, grip_id, p),
+        (5 | 6, GripApply::Absolute(p)) => {
+            let Some(parameter) = parameter_at_point(ell, p) else {
                 return;
-            }
-            let major_unit = (mx / major_len, my / major_len);
-            let minor_unit = (-major_unit.1, major_unit.0);
-            let minor_len = major_len * ell.minor_axis_ratio;
-
-            let dx = p.x as f64 - ell.center.x;
-            let dy = p.y as f64 - ell.center.y;
-            // Which stored axis is actually under the cursor? Below a circle it
-            // is the minor direction; once the drag pushes the minor past the
-            // major and the axes swap, the grabbed endpoint sits on the major
-            // direction. Decide by cursor alignment — NOT by recomputing a perp
-            // from the just-swapped major every frame — so a continuous drag
-            // stays stable instead of flipping the major 90° each move (which
-            // made both axes balloon once the minor reached the major). The
-            // perpendicular (non-dragged) axis keeps its length; the longer axis
-            // is stored as the major so the ratio stays <= 1 per the file format.
-            let along_major = (dx * major_unit.0 + dy * major_unit.1).abs();
-            let along_minor = (dx * minor_unit.0 + dy * minor_unit.1).abs();
-            let (drag_dir, dragged_len, fixed_dir, fixed_len) = if along_minor >= along_major {
-                (minor_unit, along_minor, major_unit, major_len)
-            } else {
-                (major_unit, along_major, minor_unit, minor_len)
             };
-            if fixed_len <= 1e-10 {
-                return;
-            }
-            if dragged_len >= fixed_len {
-                ell.major_axis.x = drag_dir.0 * dragged_len;
-                ell.major_axis.y = drag_dir.1 * dragged_len;
-                ell.minor_axis_ratio = (fixed_len / dragged_len).clamp(0.001, 1.0);
+            if grip_id == 5 {
+                ell.start_parameter = parameter;
             } else {
-                ell.major_axis.x = fixed_dir.0 * fixed_len;
-                ell.major_axis.y = fixed_dir.1 * fixed_len;
-                ell.minor_axis_ratio = (dragged_len / fixed_len).clamp(0.001, 1.0);
+                ell.end_parameter = parameter;
             }
         }
         _ => {}

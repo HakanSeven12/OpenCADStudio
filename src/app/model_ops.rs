@@ -1,15 +1,9 @@
-// 3D solid modelling support on the App: committing Model-tab primitives,
-// and the Design-group boolean operations over the scene's session-cached
-// B-reps.
-//
-// The bodies come from the geometry kernel, so every operation here is on
-// analytic surfaces rather than on facets — a turned cylinder is still a
-// cylinder afterwards, and saves as one.
+// Kernel B-rep solid modelling and exact ACIS persistence.
 
-use acadrust::entities::Solid3D;
-use acadrust::objects::SolidHistoryOperation;
+use acadrust::{
+    entities::Solid3D, objects::SolidHistoryOperation, EntityType, Handle,
+};
 use cadkernel::brep::Body;
-use acadrust::{EntityType, Handle};
 use iced::Task;
 
 use super::Message;
@@ -18,16 +12,25 @@ use crate::scene::model::solid_history;
 use crate::scene::model::solid_model::{self, Bool};
 
 impl super::OpenCADStudio {
-    /// Commit a Model-tab solid: add its acadrust entity to the document, then
-    /// register the B-rep (caches it for booleans + tessellates it into the
-    /// shaded mesh pipeline). Returns the new entity handle.
+    /// Add a solid and register its persistent B-rep.
     pub(super) fn add_solid_model(
         &mut self,
-        entity: EntityType,
+        mut entity: EntityType,
         solid: Body,
         history: SolidHistoryOperation,
     ) -> Handle {
         let i = self.active_tab;
+        let EntityType::Solid3D(inner) = &mut entity else {
+            return Handle::NULL;
+        };
+        inner.wires = solid_model::edge_wires(&solid);
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid)
+        else {
+            self.command_line
+                .push_error(crate::t!("The solid could not be encoded as ACIS.").as_ref());
+            return Handle::NULL;
+        };
+        inner.set_sat_document(&document);
         let Some(handle) = self.commit_entity_handle(entity) else {
             return Handle::NULL;
         };
@@ -36,43 +39,202 @@ impl super::OpenCADStudio {
         handle
     }
 
-    /// Run a boolean (`union` / `subtract` / `intersect`) on exactly two
-    /// selected solids whose B-reps are in the session cache.
-    pub(super) fn solid_boolean(&mut self, op: BoolOp) -> Task<Message> {
+    fn selected_solid_handles(&mut self) -> Vec<Handle> {
         let i = self.active_tab;
-        // Selected entities that have a cached B-rep.
-        let handles: Vec<Handle> = self.tabs[i]
+        let mut handles: Vec<Handle> = self.tabs[i]
             .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
+            .selected_handles_in_order()
+            .into_iter()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .filter(|handle| {
+                matches!(
+                    self.tabs[i].scene.document.get_entity(*handle),
+                    Some(EntityType::Solid3D(_))
+                )
+            })
             .collect();
-        if handles.len() != 2 {
+        self.tabs[i].scene.restore_solid_models(&handles);
+        handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        handles
+    }
+
+    fn replace_solid_body(&mut self, handle: Handle, result: Body, label: &str) -> bool {
+        let i = self.active_tab;
+        let Some(document) =
+            crate::scene::convert::acis_export::solid_to_sat(&result)
+        else {
             self.command_line
-                .push_error(crate::t!("Boolean: select exactly two solids created this session.").as_ref());
+                .push_error(crate::t!("The result could not be encoded as ACIS.").as_ref());
+            return false;
+        };
+        let Some(EntityType::Solid3D(mut entity)) =
+            self.tabs[i].scene.document.get_entity(handle).cloned()
+        else {
+            return false;
+        };
+        entity.wires = solid_model::edge_wires(&result);
+        entity.silhouettes.clear();
+        entity.history_handle = None;
+        entity.set_sat_document(&document);
+
+        self.push_undo_snapshot(i, label);
+        self.tabs[i].scene.delete_solid_history(handle);
+        if !self.tabs[i]
+            .scene
+            .update_entity(EntityType::Solid3D(entity))
+        {
+            self.command_line
+                .push_error(crate::t!("The solid could not be updated.").as_ref());
+            return false;
+        }
+        let history = solid_history::brep_op(&result);
+        self.tabs[i].scene.create_solid_history(handle, history);
+        self.tabs[i].scene.register_solid_model(handle, result);
+        self.tabs[i].scene.deselect_all();
+        self.tabs[i].scene.select_entity(handle, false);
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        true
+    }
+
+    pub(super) fn solid_edge_blend(
+        &mut self,
+        handle: Handle,
+        pick: glam::DVec3,
+        value: f64,
+        fillet: bool,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        if self.reject_locked_edit(i, handle) {
             return Task::none();
         }
-        let a = self.tabs[i].scene.solid_models[&handles[0]].clone();
-        let b = self.tabs[i].scene.solid_models[&handles[1]].clone();
+        if !matches!(
+            self.tabs[i].scene.document.get_entity(handle),
+            Some(EntityType::Solid3D(_))
+        ) {
+            self.command_line
+                .push_error(crate::t!("Select a 3D solid edge.").as_ref());
+            return Task::none();
+        }
+        self.tabs[i].scene.restore_solid_models(&[handle]);
+        let Some(body) = self.tabs[i].scene.solid_models.get(&handle).cloned() else {
+            self.command_line
+                .push_error(crate::t!("The solid geometry could not be restored.").as_ref());
+            return Task::none();
+        };
+        let Some(edge) = solid_model::nearest_edge(&body, pick.to_array()) else {
+            self.command_line
+                .push_error(crate::t!("Select a solid edge.").as_ref());
+            return Task::none();
+        };
+        let result = if fillet {
+            cadkernel::brep::fillet(&body, edge, value)
+        } else {
+            cadkernel::brep::chamfer(&body, edge, value)
+        };
+        let Some(result) = result else {
+            self.command_line.push_error(
+                crate::t!("Edge operation failed. Use a convex planar solid and a smaller value.")
+                    .as_ref(),
+            );
+            return Task::none();
+        };
+        let label = if fillet { "SOLIDFILLET" } else { "SOLIDCHAMFER" };
+        if self.replace_solid_body(handle, result, label) {
+            self.command_line
+                .push_output(crate::tf!("{label}: solid updated.").as_ref());
+        }
+        Task::none()
+    }
+
+    pub(super) fn solid_face_presspull(
+        &mut self,
+        handle: Handle,
+        pick: glam::DVec3,
+        distance: f64,
+        drag: Option<glam::DVec3>,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        if self.reject_locked_edit(i, handle) {
+            return Task::none();
+        }
+        self.tabs[i].scene.restore_solid_models(&[handle]);
+        let Some(body) = self.tabs[i].scene.solid_models.get(&handle).cloned() else {
+            self.command_line
+                .push_error(crate::t!("The solid geometry could not be restored.").as_ref());
+            return Task::none();
+        };
+        let Some(face) = solid_model::nearest_planar_face(&body, pick.to_array()) else {
+            self.command_line
+                .push_error(crate::t!("Select a planar solid face.").as_ref());
+            return Task::none();
+        };
+        let distance = match drag {
+            Some(point) => {
+                let Some(normal) = solid_model::planar_face_normal(&body, face) else {
+                    self.command_line
+                        .push_error(crate::t!("Select a planar solid face.").as_ref());
+                    return Task::none();
+                };
+                (point - pick).dot(glam::DVec3::from_array(normal))
+            }
+            None => distance,
+        };
+        if !distance.is_finite() || distance.abs() <= 1e-6 {
+            self.command_line.push_error(
+                crate::t!("PRESSPULL: drag along the selected face normal.").as_ref(),
+            );
+            return Task::none();
+        }
+        let Some(result) = cadkernel::brep::presspull(&body, face, distance) else {
+            self.command_line.push_error(
+                crate::t!("PRESSPULL: the face move would collapse or invalidate the solid.")
+                    .as_ref(),
+            );
+            return Task::none();
+        };
+        if self.replace_solid_body(handle, result, "PRESSPULL") {
+            self.command_line
+                .push_output(crate::t!("PRESSPULL: solid updated.").as_ref());
+        }
+        Task::none()
+    }
+
+    /// Run a boolean over the selected solids in selection order.
+    pub(super) fn solid_boolean(&mut self, op: BoolOp) -> Task<Message> {
+        let i = self.active_tab;
+        let handles = self.selected_solid_handles();
+        if handles.len() < 2 {
+            self.command_line
+                .push_error(crate::t!("Boolean: select at least two solids.").as_ref());
+            return Task::none();
+        }
         let kind = match op {
             BoolOp::Union => Bool::Union,
             BoolOp::Subtract => Bool::Subtract,
             BoolOp::Intersect => Bool::Intersect,
         };
-        let Some(result) = solid_model::boolean(kind, &a, &b) else {
+        let mut operands = handles
+            .iter()
+            .filter_map(|handle| self.tabs[i].scene.solid_models.get(handle).cloned());
+        let mut result = operands.next().expect("at least two restored solids");
+        for operand in operands {
+            let Some(combined) = solid_model::boolean(kind, &result, &operand) else {
+                self.command_line.push_error(
+                    crate::t!("Boolean failed while combining the selected solids.").as_ref(),
+                );
+                return Task::none();
+            };
+            result = combined;
+        }
+        if crate::scene::convert::acis_export::solid_to_sat(&result).is_none() {
             self.command_line
-                .push_error(crate::t!("Boolean failed — the solids may not overlap.").as_ref());
+                .push_error(crate::t!("The boolean result could not be encoded as ACIS.").as_ref());
             return Task::none();
-        };
+        }
 
         self.push_undo_snapshot(i, "BOOLEAN");
-        // Remove the two operands (entity + mesh + cached B-rep).
         self.tabs[i].scene.erase_entities(&handles);
-        // The result is freshly combined geometry with no ACIS parametrisation,
-        // so it lives as a Solid3D whose render/boolean data is the injected
-        // mesh + cached B-rep; its edge wires make it pickable.
         let mut s3d = Solid3D::new();
         s3d.wires = solid_model::edge_wires(&result);
         let history = solid_history::brep_op(&result);
@@ -86,20 +248,87 @@ impl super::OpenCADStudio {
         Task::none()
     }
 
+    pub(super) fn solid_subtract(
+        &mut self,
+        bases: &[Handle],
+        cutters: &[Handle],
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let valid_solid = |handle: &Handle| {
+            !self.tabs[i].scene.is_layer_locked(*handle)
+                && matches!(
+                    self.tabs[i].scene.document.get_entity(*handle),
+                    Some(EntityType::Solid3D(_))
+                )
+        };
+        let mut base_handles: Vec<_> = bases.iter().copied().filter(valid_solid).collect();
+        let mut cutter_handles: Vec<_> = cutters.iter().copied().filter(valid_solid).collect();
+        cutter_handles.retain(|handle| !base_handles.contains(handle));
+
+        let mut operands = base_handles.clone();
+        operands.extend(cutter_handles.iter().copied());
+        self.tabs[i].scene.restore_solid_models(&operands);
+        base_handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        cutter_handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        if base_handles.is_empty() || cutter_handles.is_empty() {
+            self.command_line.push_error(
+                crate::t!("SUBTRACT: select at least one base solid and one cutter solid.")
+                    .as_ref(),
+            );
+            return Task::none();
+        }
+
+        let mut result = self.tabs[i].scene.solid_models[&base_handles[0]].clone();
+        for handle in &base_handles[1..] {
+            let operand = &self.tabs[i].scene.solid_models[handle];
+            let Some(combined) = solid_model::boolean(Bool::Union, &result, operand) else {
+                self.command_line.push_error(
+                    crate::t!("SUBTRACT failed while combining the base solids.").as_ref(),
+                );
+                return Task::none();
+            };
+            result = combined;
+        }
+        for handle in &cutter_handles {
+            let operand = &self.tabs[i].scene.solid_models[handle];
+            let Some(difference) = solid_model::boolean(Bool::Subtract, &result, operand) else {
+                self.command_line.push_error(
+                    crate::t!("SUBTRACT failed while removing the selected solids.").as_ref(),
+                );
+                return Task::none();
+            };
+            result = difference;
+        }
+        if crate::scene::convert::acis_export::solid_to_sat(&result).is_none() {
+            self.command_line
+                .push_error(crate::t!("The boolean result could not be encoded as ACIS.").as_ref());
+            return Task::none();
+        }
+
+        operands = base_handles;
+        operands.extend(cutter_handles);
+        self.push_undo_snapshot(i, "SUBTRACT");
+        self.tabs[i].scene.erase_entities(&operands);
+        let mut entity = Solid3D::new();
+        entity.wires = solid_model::edge_wires(&result);
+        let history = solid_history::brep_op(&result);
+        let handle = self.add_solid_model(EntityType::Solid3D(entity), result, history);
+        self.tabs[i].scene.deselect_all();
+        if !handle.is_null() {
+            self.tabs[i].scene.select_entity(handle, false);
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        Task::none()
+    }
+
     /// Slice the one selected solid with an axis-aligned plane (axis 0/1/2 =
     /// X/Y/Z at `value`), keeping the lower side when `keep_low` is true. The
     /// kept half is the intersection of the solid with a half-space box, reusing
-    /// the same boolean path the Design-group tools use.
+    /// the same boolean path as the modelling tools.
     pub(super) fn solid_slice(&mut self, axis: usize, value: f64, keep_low: bool) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("SLICE: select exactly one solid created this session.").as_ref());
@@ -168,14 +397,7 @@ impl super::OpenCADStudio {
     /// leaving the originals in place (a non-destructive boolean intersect).
     pub(super) fn solid_interfere(&mut self) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 2 {
             self.command_line
                 .push_error(crate::t!("INTERFERE: select exactly two solids created this session.").as_ref());
@@ -208,14 +430,7 @@ impl super::OpenCADStudio {
     /// orientation, so it reuses the cached B-rep directly.
     pub(super) fn solid_rotate3d(&mut self, axis: usize, angle_deg: f64) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("3DROTATE: select exactly one solid created this session.").as_ref());
@@ -253,72 +468,34 @@ impl super::OpenCADStudio {
         Task::none()
     }
 
-    /// POLYSOLID — build a wall-like solid from a selected polyline: one box per
-    /// segment (oriented along it, `width` wide, `height` tall) unioned together,
-    /// reusing the box primitive + the boolean union path.
+    /// POLYSOLID — build a wall solid around an exact polyline offset.
     pub(super) fn solid_polysolid(&mut self, width: f64, height: f64) -> Task<Message> {
         let i = self.active_tab;
-        let found: Option<(Handle, Vec<[f64; 2]>, bool)> = self.tabs[i]
+        let found: Option<(Handle, EntityType)> = self.tabs[i]
             .scene
             .selected_entities()
             .iter()
             .filter(|(h, _)| !self.tabs[i].scene.is_layer_locked(*h))
             .find_map(|(h, e)| match e {
-                EntityType::LwPolyline(pl) => Some((
-                    *h,
-                    pl.vertices
-                        .iter()
-                        .map(|v| [v.location.x, v.location.y])
-                        .collect(),
-                    pl.is_closed,
-                )),
+                EntityType::LwPolyline(_) => Some((*h, (*e).clone())),
                 _ => None,
             });
-        let Some((handle, pts, closed)) = found else {
+        let Some((handle, entity)) = found else {
             self.command_line
                 .push_error(crate::t!("POLYSOLID: select a polyline first.").as_ref());
             return Task::none();
         };
-        let mut segs: Vec<([f64; 2], [f64; 2])> = pts.windows(2).map(|w| (w[0], w[1])).collect();
-        if closed && pts.len() > 2 {
-            segs.push((pts[pts.len() - 1], pts[0]));
-        }
-        let mut acc: Option<Body> = None;
-        let mut used = 0usize;
-        for (a, b) in &segs {
-            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-            let len = (dx * dx + dy * dy).sqrt();
-            if len < 1e-9 {
-                continue;
-            }
-            let angle = dy.atan2(dx);
-            // Local box: X 0..len, Y -w/2..w/2, Z 0..h, then turned to lie
-            // along the segment and moved onto its start.
-            let (sin, cos) = angle.sin_cos();
-            let Some(bx) = solid_model::box_solid([len / 2.0, 0.0, height / 2.0], len, width, height)
-                .and_then(|bx| {
-                    solid_model::placed(
-                        &bx,
-                        [cos, sin, 0.0],
-                        [-sin, cos, 0.0],
-                        [0.0, 0.0, 1.0],
-                        [a[0], a[1], 0.0],
-                    )
-                })
-            else {
-                continue;
-            };
-            acc = Some(match acc {
-                None => bx,
-                Some(prev) => solid_model::boolean(Bool::Union, &prev, &bx).unwrap_or(prev),
-            });
-            used += 1;
-        }
-        let Some(result) = acc else {
+        let Some(result) = crate::scene::model::sweep_model::polysolid(&entity, width, height)
+        else {
             self.command_line
-                .push_error(crate::t!("POLYSOLID: the polyline has no usable segments.").as_ref());
+                .push_error(crate::t!("POLYSOLID: the kernel could not offset the polyline.").as_ref());
             return Task::none();
         };
+        if crate::scene::convert::acis_export::solid_to_sat(&result).is_none() {
+            self.command_line
+                .push_error(crate::t!("POLYSOLID: the result could not be encoded as ACIS.").as_ref());
+            return Task::none();
+        }
         self.push_undo_snapshot(i, "POLYSOLID");
         self.tabs[i].scene.erase_entities(&[handle]);
         let mut s3d = Solid3D::new();
@@ -329,11 +506,14 @@ impl super::OpenCADStudio {
         if !h.is_null() {
             self.tabs[i].scene.select_entity(h, false);
         }
-        self.tabs[i].dirty = true;
-        self.refresh_properties();
-        self.command_line.push_output(crate::tf!(
-            "POLYSOLID: built a wall solid from {used} segment(s) (width {width}, height {height})."
-        ).as_ref());
+        if !h.is_null() {
+            self.tabs[i].dirty = true;
+            self.refresh_properties();
+            self.command_line.push_output(
+                crate::tf!("POLYSOLID: created a wall solid (width {width}, height {height}).")
+                    .as_ref(),
+            );
+        }
         Task::none()
     }
 
@@ -343,14 +523,7 @@ impl super::OpenCADStudio {
     /// loop on the way through; without that the copy lights black.
     pub(super) fn solid_mirror3d(&mut self, axis: usize) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("3DMIRROR: select exactly one solid created this session.").as_ref());
@@ -395,14 +568,7 @@ impl super::OpenCADStudio {
         dst: [[f64; 3]; 3],
     ) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("3DALIGN: select exactly one solid created this session.").as_ref());
@@ -463,14 +629,7 @@ impl super::OpenCADStudio {
         use acadrust::Line;
 
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("SECTION: select exactly one solid created this session.").as_ref());
@@ -547,12 +706,12 @@ impl super::OpenCADStudio {
         self.tabs[i].scene.deselect_all();
         if !handle.is_null() {
             self.tabs[i].scene.select_entity(handle, false);
+            self.tabs[i].dirty = true;
+            self.refresh_properties();
+            self.command_line.push_output(crate::tf!(
+                "PYRAMID: created a {n}-sided pyramid (radius {radius}, height {height})."
+            ).as_ref());
         }
-        self.tabs[i].dirty = true;
-        self.refresh_properties();
-        self.command_line.push_output(crate::tf!(
-            "PYRAMID: created a {n}-sided pyramid (radius {radius}, height {height})."
-        ).as_ref());
         Task::none()
     }
 
@@ -570,15 +729,22 @@ impl super::OpenCADStudio {
             .selected_entities()
             .iter()
             .filter(|(h, _)| !self.tabs[i].scene.is_layer_locked(*h))
-            .find_map(|(h, e)| match e {
-                EntityType::LwPolyline(pl) => Some((
+            .find_map(|(h, e)| {
+                let EntityType::LwPolyline(_) = e else {
+                    return None;
+                };
+                let curve = crate::entities::curve::entity_curve(e)?;
+                let cadkernel::geom2d::Curve::Polyline(polyline) = &curve.curve else {
+                    return None;
+                };
+                Some((
                     *h,
-                    pl.vertices
+                    polyline
+                        .vertices
                         .iter()
-                        .map(|v| [v.location.x, v.location.y, 0.0])
+                        .map(|vertex| curve.plane.point_at(vertex.position))
                         .collect(),
-                )),
-                _ => None,
+                ))
             });
         let Some((handle, fit)) = found else {
             self.command_line
@@ -595,7 +761,7 @@ impl super::OpenCADStudio {
         let p = |k: usize| glam::DVec3::new(fit[k][0], fit[k][1], fit[k][2]);
         // Catmull-Rom → cubic Bézier control points: [P0, b1,b2,P1, b1,b2,P2, …].
         let mut ctrl: Vec<Vector3> = Vec::with_capacity(3 * m + 1);
-        ctrl.push(Vector3::new(fit[0][0], fit[0][1], 0.0));
+        ctrl.push(Vector3::new(fit[0][0], fit[0][1], fit[0][2]));
         for seg in 0..m {
             let p0 = p(seg);
             let p1 = p(seg + 1);
@@ -603,9 +769,9 @@ impl super::OpenCADStudio {
             let next = if seg + 2 <= m { p(seg + 2) } else { p1 };
             let b1 = p0 + (p1 - prev) / 6.0;
             let b2 = p1 - (next - p0) / 6.0;
-            ctrl.push(Vector3::new(b1.x, b1.y, 0.0));
-            ctrl.push(Vector3::new(b2.x, b2.y, 0.0));
-            ctrl.push(Vector3::new(p1.x, p1.y, 0.0));
+            ctrl.push(Vector3::new(b1.x, b1.y, b1.z));
+            ctrl.push(Vector3::new(b2.x, b2.y, b2.z));
+            ctrl.push(Vector3::new(p1.x, p1.y, p1.z));
         }
         // Clamped piecewise-Bézier knots (degree 3): len == ctrl.len()+degree+1.
         let mut knots: Vec<f64> = vec![0.0; 4];
@@ -617,7 +783,10 @@ impl super::OpenCADStudio {
         spl.degree = 3;
         spl.control_points = ctrl;
         spl.knots = knots;
-        spl.fit_points = fit.iter().map(|q| Vector3::new(q[0], q[1], 0.0)).collect();
+        spl.fit_points = fit
+            .iter()
+            .map(|q| Vector3::new(q[0], q[1], q[2]))
+            .collect();
         // flags.rational defaults to false (non-rational) — exactly what we want.
         self.push_undo_snapshot(i, "SPLINEFIT");
         self.tabs[i].scene.erase_entities(&[handle]);
@@ -636,14 +805,7 @@ impl super::OpenCADStudio {
         use acadrust::types::Vector3;
         use acadrust::Line;
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.is_empty() {
             self.command_line
                 .push_error(crate::t!("FLATSHOT: select a solid created this session.").as_ref());
@@ -677,14 +839,7 @@ impl super::OpenCADStudio {
         use acadrust::entities::{Surface, SurfaceKind, Wire as AWire};
         use acadrust::types::Vector3;
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.is_empty() {
             self.command_line
                 .push_error(crate::t!("CONVTOSURFACE: select a solid created this session.").as_ref());

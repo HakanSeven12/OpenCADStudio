@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="../../README.md">English</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
+  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center"><img src="../../assets/logo.svg" width="112" alt="Open-CAD-Studio-Logo"></p>
@@ -19,7 +19,7 @@
   <a href="https://github.com/HakanSeven12/OpenCADStudio/discussions"><strong>An Diskussionen teilnehmen</strong></a>
 </p>
 
-<p align="center"><img src="https://github.com/user-attachments/assets/10635ad0-454b-4c87-935f-1a3a46f24ccb" alt="Arbeitsbereich von Open CAD Studio" width="100%"></p>
+<p align="center"><img src="../../site/workspace.png" alt="Arbeitsbereich von Open CAD Studio" width="100%"></p>
 
 ## Überblick
 
@@ -36,7 +36,7 @@ Das Projekt wird aktiv entwickelt. Bewahre Sicherungskopien wichtiger Produktion
 - **GPU-Darstellung** — beschleunigte 2D- und 3D-Ansichten über `wgpu` mit orthografischen und perspektivischen Kameras.
 - **Erweiterbare Abläufe** — native Plugins, Befehlsskripte, Konvertierung ohne Oberfläche und zeilenbasierte JSON-Automatisierungs-API.
 
-<p align="center"><img src="https://github.com/user-attachments/assets/2a037a09-e8e8-498c-8ed3-58ecb8ae958d" alt="3D-Modell in Open CAD Studio" width="100%"></p>
+<p align="center"><img src="../../site/modeling.png" alt="3D-Modell in Open CAD Studio" width="100%"></p>
 
 ## Dateiabläufe
 
@@ -91,9 +91,9 @@ Die Anwendung ist ad hoc signiert, wird derzeit aber nicht von Apple notarisiert
 
 ## Sprachen
 
-Open CAD Studio kann der Systemsprache folgen oder eine dieser 19 Oberflächensprachen verwenden:
+Open CAD Studio kann der Systemsprache folgen oder eine dieser 20 Oberflächensprachen verwenden:
 
-> Arabisch · Brasilianisches Portugiesisch · Tschechisch · Niederländisch · Englisch · Finnisch · Französisch · Deutsch · Hindi · Ungarisch · Italienisch · Japanisch · Koreanisch · Polnisch · Russisch · Vereinfachtes Chinesisch · Spanisch · Traditionelles Chinesisch · Türkisch
+> Arabisch · Brasilianisches Portugiesisch · Bulgarisch · Tschechisch · Niederländisch · Englisch · Finnisch · Französisch · Deutsch · Hindi · Ungarisch · Italienisch · Japanisch · Koreanisch · Polnisch · Russisch · Vereinfachtes Chinesisch · Spanisch · Traditionelles Chinesisch · Türkisch
 
 Die Sprache lässt sich in den Anwendungseinstellungen ändern. Die Browserversion verwendet bei Auswahl von **System** ebenfalls das bevorzugte Gebietsschema des Browsers.
 

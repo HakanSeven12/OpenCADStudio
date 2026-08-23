@@ -1,7 +1,7 @@
 // Spline tool — ribbon definition + interactive command.
 //
 // Command:  SPLINE (SPL)
-//   Click to add control points.  Enter (≥2 pts) → commits EntityType::Spline.
+//   Click to add fit points. Enter (≥2 pts) → commits EntityType::Spline.
 
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Spline};
@@ -11,7 +11,6 @@ use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use glam::DVec3;
-use cadkernel::space::NurbsCurve3;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
@@ -36,70 +35,43 @@ impl SplineCommand {
         if self.pts.len() < 2 {
             return None;
         }
-        let control_points = self
+        let fit_points = self
             .pts
             .iter()
             .map(|p| Vector3::new(p.x, p.y, p.z))
             .collect();
-        let n = self.pts.len();
-        // Uniform open knot vector for degree-3 clamped B-spline
-        let degree = 3_i32.min((n - 1) as i32);
-        let knots = uniform_knots(n, degree as usize);
         let mut spline = Spline {
-            degree,
-            control_points,
-            knots,
+            degree: 3,
+            fit_points,
             ..Default::default()
         };
-        // Closed splines render with a segment bridging the last point back to
-        // the first (tessellation honours `flags.closed`).
         spline.flags.closed = closed;
         Some(EntityType::Spline(spline))
     }
 }
 
-fn uniform_knots(n: usize, d: usize) -> Vec<f64> {
-    let m = n + d + 1;
-    (0..m)
-        .map(|i| {
-            if i <= d {
-                0.0
-            } else if i >= m - d - 1 {
-                1.0
-            } else {
-                (i - d) as f64 / (n - d) as f64
-            }
-        })
-        .collect()
-}
-
-/// Sample the degree-3 clamped B-spline through `pts` into a dense polyline,
-/// built with the same control points + knot vector `build()` commits so the
-/// preview traces the exact final curve — not the straight control polygon.
-/// Fewer than 2 points has no curve; the points are returned as-is.
-fn sample_curve(pts: &[DVec3]) -> Vec<[f32; 3]> {
-    let n = pts.len();
-    if n < 2 {
+/// Preview through the same fit-point representation that `build()` commits.
+fn sample_curve(pts: &[DVec3], closed: bool) -> Vec<[f32; 3]> {
+    if pts.len() < 2 {
         return pts
             .iter()
             .map(|p| [p.x as f32, p.y as f32, p.z as f32])
             .collect();
     }
-    let degree = 3_usize.min(n - 1);
-    let ctrl: Vec<[f64; 3]> = pts.iter().map(|p| [p.x, p.y, p.z]).collect();
-    let Some(curve) = NurbsCurve3::new(degree, ctrl, uniform_knots(n, degree), None) else {
-        return pts
+    let mut spline = Spline {
+        degree: 3,
+        fit_points: pts
             .iter()
-            .map(|p| [p.x as f32, p.y as f32, p.z as f32])
-            .collect();
+            .map(|p| Vector3::new(p.x, p.y, p.z))
+            .collect(),
+        ..Default::default()
     };
-    // Resolution scales with span count so long splines stay smooth.
-    let steps = 24 * (n - 1);
-    (0..=steps)
-        .map(|i| {
-            let p = curve.point_at(i as f64 / steps as f64);
-            [p[0] as f32, p[1] as f32, p[2] as f32]
-        })
+    spline.flags.closed = closed;
+    crate::entities::curve::spline_curve(&spline)
+        .map(|curve| crate::entities::curve::curve_points(&curve))
+        .unwrap_or_else(|| crate::entities::spline::measurement_polyline(&spline))
+        .into_iter()
+        .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])
         .collect()
 }
 
@@ -110,7 +82,7 @@ impl CadCommand for SplineCommand {
 
     fn prompt(&self) -> String {
         if self.pts.is_empty() {
-            t!("SPLINE  Specify first control point:").into_owned()
+            t!("SPLINE  Specify first point:").into_owned()
         } else {
             let n = self.pts.len();
             t!("SPLINE  Specify next point  [%{n} pts]:", n = n).into_owned()
@@ -135,9 +107,6 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        // A spline gathers many points into ONE entity, so finishing must end
-        // the command (CommitAndExit) — CommitEntity keeps the command armed
-        // with the accumulated points and traps the cursor in a redraw loop.
         match self.build(false) {
             Some(e) => CmdResult::CommitAndExit(e),
             None => CmdResult::Cancel,
@@ -156,7 +125,6 @@ impl CadCommand for SplineCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        // Accept Close / Undo once a control point exists.
         !self.pts.is_empty()
     }
 
@@ -182,14 +150,12 @@ impl CadCommand for SplineCommand {
         if self.pts.is_empty() {
             return None;
         }
-        // Preview the actual B-spline curve, treating the cursor as the next
-        // control point, sampled exactly like the committed entity — not the
-        // straight control polygon.
+        // Preview the committed fit-point representation.
         let mut ctrl = self.pts.clone();
         ctrl.push(pt);
         Some(WireModel::solid(
             "rubber_band".into(),
-            sample_curve(&ctrl),
+            sample_curve(&ctrl, false),
             WireModel::CYAN,
             false,
         ))

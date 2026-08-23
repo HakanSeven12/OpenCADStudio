@@ -339,8 +339,48 @@ pub(crate) fn tessellate_entity_dim_text(
     }
     wires
 }
-
 pub(crate) fn tessellate_entity(
+    document: &acadrust::CadDocument,
+    selected: &HashSet<Handle>,
+    active_viewport: Option<Handle>,
+    bg_color: [f32; 4],
+    anno_scale: f32,
+    annotation_scale_handle: Option<Handle>,
+    e: &EntityType,
+    block_cache: Option<&cache::block_cache::BlockCache>,
+    view_aabb: Option<[f32; 4]>,
+    world_per_pixel: Option<f32>,
+    paper_space: bool,
+) -> Vec<WireModel> {
+    let mut wires = tessellate_entity_inner(
+        document,
+        selected,
+        active_viewport,
+        bg_color,
+        anno_scale,
+        annotation_scale_handle,
+        e,
+        block_cache,
+        view_aabb,
+        world_per_pixel,
+        paper_space,
+    );
+
+    let layer_plottable = document
+        .layers
+        .get(&e.common().layer)
+        .map(|layer| layer.is_plottable)
+        .unwrap_or(true);
+
+    if !layer_plottable {
+        for wire in &mut wires {
+            wire.plot_visible = false;
+        }
+    }
+
+    wires
+}
+fn tessellate_entity_inner(
     document: &acadrust::CadDocument,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
@@ -708,9 +748,12 @@ pub(crate) fn tessellate_entity(
             Vec::new()
         };
         return vec![WireModel {
+            point_marker: None,
             taper_widths: Vec::new(),
             world_width: 0.0,
             depth_override: None,
+            display_visible: true,
+            plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,
@@ -1054,15 +1097,23 @@ pub(crate) fn tessellate_entity(
                 _ => None,
             })
             .unwrap_or(0);
+        let ins_layer_plottable = document
+            .layers
+            .get(&ins.common.layer)
+            .map(|layer| layer.is_plottable)
+            .unwrap_or(true);
         let ip = glam::Vec3::new(
             (ins.insert_point.x) as f32,
             (ins.insert_point.y) as f32,
             (ins.insert_point.z) as f32,
         );
         let marker = WireModel {
+            point_marker: None,
             taper_widths: Vec::new(),
             world_width: 0.0,
             depth_override: None,
+            display_visible: true,
+            plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,
@@ -1123,6 +1174,7 @@ pub(crate) fn tessellate_entity(
             ins_lw_px,
             ins_layer,
             ins_layer_aci,
+            ins_layer_plottable,
             sel,
             pslt_factor,
             view_aabb,
@@ -1148,14 +1200,21 @@ pub(crate) fn tessellate_entity(
                     wire.render_instance = Some(instance);
                 }
             }
-            if document.header.xclip_frame != 0 && polygon.len() >= 3 {
-                wires.push(pick::xclip::frame_wire(
+            let frame_mode = crate::scene::frame::mode(
+                document,
+                crate::scene::frame::FrameKind::Xclip,
+            );
+            if polygon.len() >= 3 {
+                let mut frame = pick::xclip::frame_wire(
                     &polygon,
-                    format!("{}_xclipframe", h.value()),
+                    h.value().to_string(),
                     ins_color,
                     sel,
                     ins_lw_px,
-                ));
+                );
+                frame.display_visible = frame_mode != 0;
+                frame.plot_visible = frame_mode == 1;
+                wires.push(frame);
             }
         }
 
@@ -1170,6 +1229,7 @@ pub(crate) fn tessellate_entity(
             ins_pat,
             ins_lw_px,
             ins_layer,
+            ins_layer_plottable,
             bg_color,
             is_xref,
             pslt_factor,
@@ -1200,6 +1260,8 @@ pub(crate) fn tessellate_entity(
         bg_color,
         false,
     );
+    let frame_mode = crate::scene::frame::entity_kind(e)
+        .map(|kind| crate::scene::frame::mode(document, kind));
     for b in &mut bases {
         b.aci = aci;
         // SDF text wires carry a glyph-bounds AABB (the true text extent) set
@@ -1208,8 +1270,18 @@ pub(crate) fn tessellate_entity(
         if b.text_verts.is_empty() {
             set_wire_aabb(b, aabb);
         }
+        if let Some(mode) = frame_mode {
+            b.display_visible = mode != 0;
+            b.plot_visible = mode == 1;
+        }
+        if matches!(e, EntityType::Wipeout(_)) {
+            b.depth_override = Some(0.5);
+        }
     }
 
+    // A hidden mask frame remains selectable and appears while selected, but
+    // contributes no visible line work during normal display. The interior
+    // pick triangles remain intact.
     // Complex linetypes (with embedded shapes / text) expand the *base*
     // polyline along its tangent. Text-type entities never have a complex
     // linetype assigned, so we only consult the first wire here — multi-wire
@@ -1434,9 +1506,12 @@ fn lod_stub_wire(
     // LOD boundary. #19.
     let stored_color = if selected { WireModel::SELECTED } else { color };
     WireModel {
+        point_marker: None,
         taper_widths: Vec::new(),
         world_width: 0.0,
         depth_override: None,
+        display_visible: true,
+        plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
         render_instance: None,
@@ -1525,9 +1600,12 @@ fn lod_stub_wire_3d(
     }
     let stored_color = if selected { WireModel::SELECTED } else { color };
     WireModel {
+        point_marker: None,
         taper_widths: Vec::new(),
         world_width: 0.0,
         depth_override: None,
+        display_visible: true,
+        plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
         render_instance: None,
@@ -1630,12 +1708,32 @@ pub(crate) fn set_wire_aabb(w: &mut WireModel, entity_box: [f32; 4]) {
     w.aabb = out;
 }
 
+fn entity_bounds(e: &acadrust::EntityType) -> ([f64; 3], [f64; 3]) {
+    if let acadrust::EntityType::Line(line) = e {
+        if let Some(association) = acadrust::entities::CenterMarkAssociation::read(
+            &line.common.extended_data,
+        ) {
+            return crate::scene::centermark::mark_bounds(&association);
+        }
+    }
+    if let acadrust::EntityType::Solid(solid) = e {
+        if let Some(bounds) = crate::entities::solid::wcs_bounds(solid) {
+            return (bounds.min, bounds.max);
+        }
+    }
+    let bounds = e.as_entity().bounding_box();
+    (
+        [bounds.min.x, bounds.min.y, bounds.min.z],
+        [bounds.max.x, bounds.max.y, bounds.max.z],
+    )
+}
+
 pub(crate) fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {
-    let bbox = e.as_entity().bounding_box();
-    let min_x = (bbox.min.x) as f32;
-    let min_y = (bbox.min.y) as f32;
-    let max_x = (bbox.max.x) as f32;
-    let max_y = (bbox.max.y) as f32;
+    let (min, max) = entity_bounds(e);
+    let min_x = min[0] as f32;
+    let min_y = min[1] as f32;
+    let max_x = max[0] as f32;
+    let max_y = max[1] as f32;
     // The all-zero box is bounding_box()'s Default — returned by entities with
     // no usable box (unimplemented) — so treat it as UNBOUNDED (never
     // pre-rejected). A genuinely zero-size box *away* from the origin (e.g. a
@@ -1653,8 +1751,8 @@ pub(crate) fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {
 /// indexing uses this so changing `world_offset` doesn't invalidate
 /// the index.
 pub(crate) fn entity_world_aabb_f64(e: &acadrust::EntityType) -> Option<[f64; 4]> {
-    let bbox = e.as_entity().bounding_box();
-    let (xmin, ymin, xmax, ymax) = (bbox.min.x, bbox.min.y, bbox.max.x, bbox.max.y);
+    let (min, max) = entity_bounds(e);
+    let (xmin, ymin, xmax, ymax) = (min[0], min[1], max[0], max[1]);
     if xmin == xmax && ymin == ymax {
         return None;
     }

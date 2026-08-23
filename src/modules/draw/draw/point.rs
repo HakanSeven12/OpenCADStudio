@@ -1,7 +1,7 @@
 // Point tool — ribbon definition + interactive command.
 //
 // Command:  POINT (PO)
-//   Single click → commits EntityType::Point.  Stays active for more points.
+//   POINT commits one entity and exits. MULTIPOINT stays active.
 
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Point as CadPoint};
@@ -22,25 +22,35 @@ pub fn tool() -> ToolDef {
     }
 }
 
-pub struct PointCommand;
+pub struct PointCommand {
+    multiple: bool,
+}
 
 impl PointCommand {
     pub fn new() -> Self {
-        Self
+        Self { multiple: false }
+    }
+
+    pub fn multiple() -> Self {
+        Self { multiple: true }
     }
 }
 
 impl CadCommand for PointCommand {
     fn name(&self) -> &'static str {
-        "POINT"
+        if self.multiple { "MULTIPOINT" } else { "POINT" }
     }
     fn prompt(&self) -> String {
         crate::t!("POINT  Specify point:").into_owned()
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
-        use crate::command::CmdOption;
-        vec![CmdOption::enter(t!("Done").as_ref())]
+        if self.multiple {
+            use crate::command::CmdOption;
+            vec![CmdOption::enter(t!("Done").as_ref())]
+        } else {
+            Vec::new()
+        }
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
@@ -48,7 +58,11 @@ impl CadCommand for PointCommand {
             location: Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64),
             ..Default::default()
         };
-        CmdResult::CommitEntity(EntityType::Point(p))
+        if self.multiple {
+            CmdResult::CommitEntity(EntityType::Point(p))
+        } else {
+            CmdResult::CommitAndExit(EntityType::Point(p))
+        }
     }
 
     fn on_enter(&mut self) -> CmdResult {
@@ -64,7 +78,7 @@ impl CadCommand for PointCommand {
 
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["POINT"] });  // PointCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["POINT", "MULTIPOINT"] });  // PointCommand
 // Point display style system variables + dialog.
 inventory::submit!(crate::command::CommandRegistration {
     names: &["PDMODE", "PDSIZE", "DDPTYPE"]

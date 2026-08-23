@@ -312,12 +312,8 @@ pub struct Pipeline {
     /// a pick bumps only `selection_generation`, refreshing the overlay without
     /// touching the main wire buffers.
     pub cached_selection: (u64, u64),
-    /// `(wire_content_id, face3d_fill_active, show_2d_solid_fills)` the Face3D
-    /// edge/fill buffers were uploaded for. A stable content id avoids retaining
-    /// the resident wire Arc:
-    /// that Arc must stay uniquely owned by Scene so a small edit can splice it
-    /// in place instead of rebuilding the whole drawing.
-    pub cached_face3d_key: (u64, bool, bool),
+    /// Face upload key; keeps the resident wire Arc uniquely owned by Scene.
+    pub cached_face3d_key: (u64, bool, bool, u64),
     /// Handle → indices into the resident wire set, built once per wire upload
     /// (when `cached_wire_id` changes). Lets the selection/hover xray overlay
     /// gather just the highlighted entity's wires (`O(highlighted)`) instead of
@@ -560,9 +556,7 @@ impl Pipeline {
         );
 
         // ── Wire pipeline ──────────────────────────────────────────────────
-        // Select once from actual device limits. Any device whose compositor
-        // exposes the required storage limits uses the storage renderer; all
-        // other devices use the packed/texture compatibility renderer.
+        // Select the renderer tier from device limits.
         let device_caps = DeviceCapabilities::detect(device);
         #[cfg(not(target_arch = "wasm32"))]
         let force_compat_renderer = crate::cli::gui_config().compat_renderer;
@@ -950,10 +944,8 @@ impl Pipeline {
         );
 
         // ── Hatch pipeline ─────────────────────────────────────────────────
-        // binding 0 (HatchUniforms) is read by the vertex shader too — it
-        // pulls `origin` to undo the CPU-side hatch-local pre-shift when
-        // computing clip position. bindings 1 (Boundary) and 2
-        // (FamilyBatch) stay fragment-only.
+        // Binding 0 carries the fill plane; boundary and family data are
+        // fragment-only.
         let hatch_entry = |binding: u32, vis: wgpu::ShaderStages| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: vis,
@@ -2327,7 +2319,7 @@ impl Pipeline {
             cached_epoch: (u64::MAX, u64::MAX, u64::MAX),
             cached_wire_id: u64::MAX,
             cached_selection: (u64::MAX, u64::MAX),
-            cached_face3d_key: (u64::MAX, false, false),
+            cached_face3d_key: (u64::MAX, false, false, u64::MAX),
             wire_handle_index: std::sync::Arc::new(rustc_hash::FxHashMap::default()),
             render_sig: u64::MAX,
             skip_geometry: false,
@@ -2361,23 +2353,15 @@ impl Pipeline {
         // and alpha blending both depend on it. Scissor and mesh-edge stay
         // grouping keys because the draw loop sets one scissor per batch and
         // skips whole mesh-edge batches in shaded modes.
-        // A 3D mesh entity (PolyfaceMesh / PolygonMesh) emits its face fill and
-        // its outline edges as *separate* WireModels sharing the entity handle
-        // (`name`): the fill carries `fill_tris` + a non-empty `fill_tris_low`
-        // (real 3D depth, same test face3d uses); the edge carries `points`.
-        // Flag the edge wire as `is_3d_mesh_edge` so the draw loop can hide it in
-        // clean-shaded modes and draw it black in filled-with-edges modes.
-        let mesh_names: rustc_hash::FxHashSet<&str> = wires
-            .iter()
-            .filter(|w| !w.fill_tris.is_empty() && !w.fill_tris_low.is_empty())
-            .map(|w| w.name.as_str())
-            .collect();
-        let is_mesh_edge =
-            |w: &WireModel| !w.points.is_empty() && mesh_names.contains(w.name.as_str());
+        let is_mesh_edge = |w: &WireModel| !w.points.is_empty() && w.fill_is_3d;
         let mut batches: Vec<WireGpu> = Vec::new();
         let mut block_wires: Vec<&WireModel> = Vec::new();
         let mut i = 0;
         while i < wires.len() {
+            if !wires[i].display_visible {
+                i += 1;
+                continue;
+            }
             if wires[i].render_instance.is_some() {
                 block_wires.push(&wires[i]);
                 i += 1;
@@ -2386,6 +2370,7 @@ impl Pipeline {
             let mesh_edge = is_mesh_edge(&wires[i]);
             let mut j = i + 1;
             while j < wires.len()
+                && wires[j].display_visible
                 && wires[j].render_instance.is_none()
                 && is_mesh_edge(&wires[j]) == mesh_edge
             {
@@ -2405,7 +2390,6 @@ impl Pipeline {
             device,
             &block_wires,
             depth_map,
-            &mesh_names,
             None,
             &self.block_wire_const_bgl,
         );
@@ -2518,12 +2502,10 @@ impl Pipeline {
             self.wire_const_bgl.as_ref(),
         ));
         self.gpu_selected_wires = gpu;
-        let mesh_names = rustc_hash::FxHashSet::default();
         let mut block_gpu = BlockWireGpu::from_wires(
             device,
             &selected_blocks,
             depth_map,
-            &mesh_names,
             Some(WireModel::SELECTED),
             &self.block_wire_const_bgl,
         );
@@ -2531,7 +2513,6 @@ impl Pipeline {
             device,
             &hover_blocks,
             depth_map,
-            &mesh_names,
             Some(WireModel::HOVER),
             &self.block_wire_const_bgl,
         ));
@@ -3038,6 +3019,7 @@ impl Pipeline {
         all_wires: &[WireModel],
         wireframe_only: bool,
         show_2d_solid_fills: bool,
+        view_dir: glam::Vec3,
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
@@ -3071,6 +3053,7 @@ impl Pipeline {
                 all_wires,
                 keep_3d_mesh_fills,
                 show_2d_solid_fills,
+                view_dir,
                 depth_map,
             ));
         }
@@ -4048,7 +4031,11 @@ impl Pipeline {
         // pipeline in HiddenLine so wires hidden behind them disappear.
         // 2D fills (text greek, MultiLeader bg) always draw with colour.
         if let Some(ref fill) = self.gpu_face3d_fill {
-            if !fill.chunks_3d.is_empty() || !fill.chunks_2d.is_empty() {
+            if !fill.chunks_3d.is_empty()
+                || !fill.chunks_2d.is_empty()
+                || !fill.block_chunks_3d.is_empty()
+                || !fill.block_chunks_2d.is_empty()
+            {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("face3d.render_pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {

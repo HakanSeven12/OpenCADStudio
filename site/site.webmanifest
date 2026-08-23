@@ -1,0 +1,24 @@
+{
+  "name": "Open CAD Studio",
+  "short_name": "Open CAD Studio",
+  "description": "Open-source 2D drafting and 3D modeling for desktop and web.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1016",
+  "theme_color": "#0b1016",
+  "icons": [
+    {
+      "src": "/assets/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Launch web app",
+      "url": "/app/"
+    }
+  ]
+}

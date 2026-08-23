@@ -14,7 +14,7 @@ use crate::scene::pick::grip::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::plugin::v4_support;
-use crate::scene::model::object::GripApply;
+use crate::scene::model::object::{GripApply, PropValue};
 use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
@@ -1322,6 +1322,27 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     }
                 }
                 // One-shot action — apply immediately.
+                let unchanged = self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(popup.handle)
+                    .is_some_and(|entity| match (item.action, entity) {
+                        (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
+                            !spline.cv_frame_visible
+                                && crate::entities::spline::uses_fit_method(spline)
+                        }
+                        (
+                            GripMenuAction::ShowControlVertices,
+                            acadrust::EntityType::Spline(spline),
+                        ) => {
+                            spline.cv_frame_visible
+                                || !crate::entities::spline::uses_fit_method(spline)
+                        }
+                        _ => false,
+                    });
+                if unchanged {
+                    return Task::none();
+                }
                 self.push_undo_snapshot(i, item.label);
                 // For Add Leader, the new arrow becomes the last grip; remember
                 // its id so we can grab it for placement right after.
@@ -1705,6 +1726,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     entry.gpu,
                                     crate::scene::model::hatch_model::HatchPattern::Solid
                                 );
+                                dxf.pattern_type =
+                                    acadrust::entities::HatchPatternType::Predefined;
+                                dxf.gradient_color.enabled = false;
                             }
                             if let Some(model) = self.tabs[i].scene.hatches.get_mut(&handle) {
                                 model.pattern = entry.gpu.clone();
@@ -1728,6 +1752,91 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         let handles = self.property_target_handles(i);
 
         if !handles.is_empty() {
+            if matches!(
+                field,
+                "spline_method"
+                    | "knot_param"
+                    | "cv_frame"
+                    | "fill_type"
+                    | "gradient_type"
+                    | "style"
+                    | "pattern_type_label"
+            ) {
+                let unchanged = handles.iter().all(|handle| {
+                    match self.tabs[i].scene.document.get_entity(*handle) {
+                        Some(acadrust::EntityType::Spline(spline)) => match field {
+                            "spline_method" => {
+                                value
+                                    == if crate::entities::spline::shows_fit_points(spline) {
+                                        "Fit"
+                                    } else {
+                                        "Control Vertices"
+                                    }
+                            }
+                            "knot_param" => {
+                                let current = match spline.knot_parameterization {
+                                    0 => "Chord",
+                                    1 => "Square Root",
+                                    2 => "Uniform",
+                                    _ => "Custom",
+                                };
+                                value == current
+                            }
+                            "cv_frame" => {
+                                value
+                                    == if spline.cv_frame_visible {
+                                        "Show"
+                                    } else {
+                                        "Hide"
+                                    }
+                            }
+                            _ => false,
+                        },
+                        Some(acadrust::EntityType::Hatch(hatch)) => match field {
+                            "fill_type" => {
+                                value
+                                    == if hatch.gradient_color.is_single_color {
+                                        "One color"
+                                    } else {
+                                        "Two color"
+                                    }
+                            }
+                            "gradient_type" => {
+                                let (kind, inverted) =
+                                    crate::scene::model::hatch_model::GradientKind::from_name(
+                                        &hatch.gradient_color.name,
+                                    );
+                                value == kind.choice_label(inverted)
+                            }
+                            "style" => {
+                                value
+                                    == match hatch.style {
+                                        acadrust::entities::HatchStyleType::Normal => "Normal",
+                                        acadrust::entities::HatchStyleType::Outer => "Outer",
+                                        acadrust::entities::HatchStyleType::Ignore => "Ignore",
+                                    }
+                            }
+                            "pattern_type_label" => {
+                                value
+                                    == match hatch.pattern_type {
+                                        acadrust::entities::HatchPatternType::Predefined => {
+                                            "Predefined"
+                                        }
+                                        acadrust::entities::HatchPatternType::UserDefined => {
+                                            "User Defined"
+                                        }
+                                        acadrust::entities::HatchPatternType::Custom => "Custom",
+                                    }
+                            }
+                            _ => false,
+                        },
+                        _ => false,
+                    }
+                });
+                if unchanged {
+                    return Task::none();
+                }
+            }
             self.push_undo_snapshot(i, "CHPROP");
 
             if field == "vscale_std" {
@@ -2086,6 +2195,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             crate::command::WorkingPlane::default()
                         };
                         for &handle in &handles {
+                            let mline_style = self.tabs[i]
+                                .scene
+                                .document
+                                .get_entity(handle)
+                                .and_then(|entity| match entity {
+                                    acadrust::EntityType::MLine(mline) => {
+                                        crate::entities::mline::resolved_mline_style(
+                                            mline,
+                                            &self.tabs[i].scene.document,
+                                        )
+                                        .cloned()
+                                    }
+                                    _ => None,
+                                });
                             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
@@ -2094,11 +2217,26 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     &value,
                                     plane,
                                 );
+                                if matches!(field, "ml_justification" | "ml_scale") {
+                                    if let (
+                                        acadrust::EntityType::MLine(mline),
+                                        Some(style),
+                                    ) = (entity, mline_style.as_ref())
+                                    {
+                                        crate::modules::draw::draw::mline::sync_mline_element_parameters(
+                                            mline, style,
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
                     self.invalidate_property_targets(i, &handles);
                     self.tabs[i].dirty = true;
+                    if field == "spline_method" {
+                        self.tabs[i].properties.prop_vertex = 0;
+                        self.tabs[i].properties.prop_vertex_indicator_active = false;
+                    }
                     self.refresh_properties();
                 }
                 Task::none()
@@ -2109,18 +2247,56 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 self.tabs[i].properties.active_field = None;
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
+                    let evaluates_expression = self.tabs[i]
+                        .properties
+                        .sections
+                        .iter()
+                        .flat_map(|section| section.props.iter())
+                        .find(|property| property.field == field)
+                        .is_some_and(|property| {
+                            matches!(property.value, PropValue::EditText(_))
+                        });
                     if let Some(raw_val) = self.tabs[i]
                         .properties
                         .edit_buf
                         .remove(&crate::ui::properties::FieldKey::Geom(field))
                     {
-                        // Block names are free-form text — a name like "10-5"
-                        // must not be arithmetic-evaluated.
-                        let val = if field == "block" {
-                            raw_val
-                        } else {
+                        let val = if evaluates_expression {
                             crate::app::expr_eval::eval_to_string(&raw_val)
+                        } else {
+                            raw_val
                         };
+                        if matches!(field, "current_fit_point" | "current_control_point") {
+                            let count = handles
+                                .iter()
+                                .filter_map(|handle| {
+                                    let entity = self.tabs[i].scene.document.get_entity(*handle)?;
+                                    match (field, entity) {
+                                        (
+                                            "current_fit_point",
+                                            acadrust::EntityType::Spline(spline),
+                                        ) => Some(spline.fit_points.len()),
+                                        (
+                                            "current_control_point",
+                                            acadrust::EntityType::Spline(spline),
+                                        ) => Some(
+                                            crate::entities::spline::control_vertex_count(spline),
+                                        ),
+                                        _ => None,
+                                    }
+                                })
+                                .min()
+                                .unwrap_or(0);
+                            if let Ok(requested) = val.trim().parse::<usize>() {
+                                if count > 0 {
+                                    let next = requested.clamp(1, count) - 1;
+                                    self.tabs[i].properties.prop_vertex = next;
+                                    self.tabs[i].properties.prop_vertex_indicator_active = true;
+                                }
+                            }
+                            self.refresh_properties();
+                            return Task::none();
+                        }
                         self.push_undo_snapshot(i, "CHPROP");
                         if field == "block" {
                             // Name row on a block reference: an existing name
@@ -2248,6 +2424,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                             )
                                             .is_none()
                                         {
+                                            let mline_style = self.tabs[i]
+                                                .scene
+                                                .document
+                                                .get_entity(handle)
+                                                .and_then(|entity| match entity {
+                                                    acadrust::EntityType::MLine(mline) => {
+                                                        crate::entities::mline::resolved_mline_style(
+                                                            mline,
+                                                            &self.tabs[i].scene.document,
+                                                        )
+                                                        .cloned()
+                                                    }
+                                                    _ => None,
+                                                });
                                             if let Some(entity) = self.tabs[i]
                                                 .scene
                                                 .document
@@ -2259,6 +2449,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                     &val,
                                                     plane,
                                                 );
+                                                if field == "ml_scale" {
+                                                    if let (
+                                                        acadrust::EntityType::MLine(mline),
+                                                        Some(style),
+                                                    ) = (entity, mline_style.as_ref())
+                                                    {
+                                                        crate::modules::draw::draw::mline::sync_mline_element_parameters(
+                                                            mline, style,
+                                                        );
+                                                    }
+                                                }
                                             }
                                         }
                                     }

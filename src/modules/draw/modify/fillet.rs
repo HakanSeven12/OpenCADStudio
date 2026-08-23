@@ -1012,6 +1012,10 @@ pub struct FilletCommand {
 
 impl FilletCommand {
     pub fn new(radius: f64, all_entities: Vec<EntityType>) -> Self {
+        let all_entities: Vec<EntityType> = all_entities
+            .iter()
+            .map(crate::entities::curve::entity_with_lwpolyline_world_xy)
+            .collect();
         let entity_index = ModifyEntityIndex::build(&all_entities);
         Self {
             radius: radius as f64,
@@ -1392,6 +1396,10 @@ pub struct ChamferCommand {
 
 impl ChamferCommand {
     pub fn new(dist: f64, all_entities: Vec<EntityType>) -> Self {
+        let all_entities: Vec<EntityType> = all_entities
+            .iter()
+            .map(crate::entities::curve::entity_with_lwpolyline_world_xy)
+            .collect();
         let entity_index = ModifyEntityIndex::build(&all_entities);
         Self {
             dist1: dist as f64,

@@ -315,7 +315,9 @@ impl Scene {
         self.camera_generation = saved_generation;
 
         if let Some((min, max)) = refreshed {
-            self.camera.borrow_mut().fit_depth_to_bounds(min, max);
+            self.camera
+                .borrow_mut()
+                .fit_depth_to_bounds_f64(min, max);
             self.projection_bounds_epoch.set(self.geometry_epoch);
         }
     }
@@ -672,11 +674,7 @@ impl Scene {
         // The saved-view convention uses a 24 mm vertical aperture. This is
         // the inverse of the projection path's documented
         // `distance = view_height * lens / 24` relation.
-        let fov_y = if perspective {
-            2.0 * (12.0 / lens_length).atan()
-        } else {
-            45.0_f32.to_radians()
-        };
+        let fov_y = 2.0 * (12.0 / lens_length).atan();
         let distance = ((view_height as f32 / 2.0) / (fov_y * 0.5).tan()).max(0.001);
         Some(Camera {
             target,
@@ -729,9 +727,9 @@ impl Scene {
         let view_dir = cam.rotation * glam::Vec3::Z;
         let view_height = cam.ortho_size() * 2.0;
         let target_wcs = acadrust::types::Vector3 {
-            x: (cam.target.x as f64) + [0.0_f64; 3][0],
-            y: (cam.target.y as f64) + [0.0_f64; 3][1],
-            z: (cam.target.z as f64) + [0.0_f64; 3][2],
+            x: cam.target.x,
+            y: cam.target.y,
+            z: cam.target.z,
         };
         entry.lower_left = lower_left;
         entry.upper_right = upper_right;
@@ -1186,9 +1184,11 @@ impl Scene {
         if !ok {
             return;
         }
-        let min = glam::Vec3::new(lo.x as f32, lo.y as f32, lo.z as f32);
-        let max = glam::Vec3::new(hi.x as f32, hi.y as f32, hi.z as f32);
-        self.camera.borrow_mut().fit_depth_to_bounds(min, max);
+        let min = glam::DVec3::new(lo.x, lo.y, lo.z);
+        let max = glam::DVec3::new(hi.x, hi.y, hi.z);
+        self.camera
+            .borrow_mut()
+            .fit_depth_to_bounds_f64(min, max);
     }
 
     fn fit_paper_space_extents(&mut self) {
@@ -1557,7 +1557,7 @@ impl Scene {
             if index == active {
                 tile.camera = live_camera.clone();
             } else {
-                tile.camera.fit_to_bounds(min, max, aspect);
+                tile.camera.fit_to_bounds_f64(min, max, aspect);
             }
         }
         if let Some(aspect) = aspects.get(active) {

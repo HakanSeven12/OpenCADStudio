@@ -1,21 +1,9 @@
-// Arc tool — ribbon dropdown + all OpenCADStudio arc creation methods.
-//
-// Methods (dropdown order):
-//   ARC_3P  — 3-Point                (default)
-//   ARC_SCE — Start, Center, End
-//   ARC_SCA — Start, Center, Angle
-//   ARC_SCL — Start, Center, Length of chord
-//   ARC_SEA — Start, End, Angle      (sagitta-based pick)
-//   ARC_SED — Start, End, Direction  (tangent at start)
-//   ARC_SER — Start, End, Radius     (radius defined by dist cursor→start)
-//   ARC     — Center, Start, End     (CSE)
-//   ARC_CSA — Center, Start, Angle
-//   ARC_CSL — Center, Start, Length of chord
-//   ARC_CONT— Continue                (tangent to previous line/arc; pick end only)
+// Arc creation commands.
 
 use acadrust::types::Vector3;
 use acadrust::{Arc as CadArc, EntityType};
 use crate::t;
+use cadkernel::geom2d::{self, Curve as KernelCurve};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::IconKind;
@@ -60,7 +48,7 @@ pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
     ("ARC_SEA", "Start, End, Angle", ICON_SEA),
     ("ARC_SED", "Start, End, Direction", ICON_SED),
     ("ARC_SER", "Start, End, Radius", ICON_SER),
-    ("ARC", "Center, Start, End", ICON_CSE),
+    ("ARC_CSE", "Center, Start, End", ICON_CSE),
     ("ARC_CSA", "Center, Start, Angle", ICON_CSA),
     ("ARC_CSL", "Center, Start, Length", ICON_CSL),
     ("ARC_CONT", "Continue", ICON_CONT),
@@ -76,28 +64,31 @@ fn angle_xy(center: DVec3, pt: DVec3, plane: WorkingPlane) -> f64 {
     plane.angle(center, pt).unwrap_or(0.0)
 }
 
-/// Build a CCW arc polyline from `start_angle` to `end_angle` (radians).
 fn arc_preview(
     center: DVec3,
     radius: f64,
     start_angle: f64,
     end_angle: f64,
     plane: WorkingPlane,
-) -> WireModel {
-    let mut ea = end_angle;
-    while ea < start_angle {
-        ea += TAU;
-    }
-    let span = (ea - start_angle).min(TAU);
-    let segs = ((span / TAU) * 64.0).ceil().max(4.0) as u32;
-    let pts: Vec<[f64; 3]> = (0..=segs)
-        .map(|i| {
-            let a = start_angle + span * (i as f64 / segs as f64);
-            let point = center + plane.x * (radius * a.cos()) + plane.y * (radius * a.sin());
-            [point.x, point.y, point.z]
-        })
+) -> Option<WireModel> {
+    let center = plane.to_local(center);
+    let arc = geom2d::bounded_arc(
+        [center.x, center.y],
+        radius,
+        start_angle,
+        end_angle,
+    )?;
+    let points = KernelCurve::Arc(arc)
+        .tessellate_angle(TAU / 64.0)
+        .into_iter()
+        .map(|point| plane.to_world(DVec3::new(point[0], point[1], center.z)).to_array())
         .collect();
-    WireModel::solid_f64("rubber_band".into(), pts, WireModel::CYAN, false)
+    Some(WireModel::solid_f64(
+        "rubber_band".into(),
+        points,
+        WireModel::CYAN,
+        false,
+    ))
 }
 
 fn make_arc(
@@ -106,29 +97,34 @@ fn make_arc(
     start_angle: f64,
     end_angle: f64,
     plane: WorkingPlane,
-) -> EntityType {
+) -> Option<EntityType> {
     let center = plane.to_local(center);
-    plane.place_entity(EntityType::Arc(CadArc {
-        center: Vector3::new(center.x, center.y, center.z),
+    let arc = geom2d::bounded_arc(
+        [center.x, center.y],
         radius,
         start_angle,
         end_angle,
+    )?;
+    Some(plane.place_entity(EntityType::Arc(CadArc {
+        center: Vector3::new(center.x, center.y, center.z),
+        radius: arc.radius,
+        start_angle: arc.start_angle,
+        end_angle: arc.end_angle,
         ..Default::default()
-    }))
+    })))
 }
 
-/// Signed rotation from `prev` to `curr` around `center`.
-/// Positive = CCW, negative = CW.
-/// Signed angle (radians) swept from `prev` to `curr` about `center`.
-fn rot_delta(center: DVec3, prev: DVec3, curr: DVec3, plane: WorkingPlane) -> f64 {
-    let p = plane.vector_to_local(prev - center);
-    let c = plane.vector_to_local(curr - center);
-    (p.x * c.y - p.y * c.x).atan2(p.x * c.x + p.y * c.y)
+fn arc_result(
+    center: DVec3,
+    radius: f64,
+    start_angle: f64,
+    end_angle: f64,
+    plane: WorkingPlane,
+) -> CmdResult {
+    make_arc(center, radius, start_angle, end_angle, plane)
+        .map(CmdResult::CommitAndExit)
+        .unwrap_or(CmdResult::NeedPoint)
 }
-
-/// Minimum swept angle before the previewed arc may flip CW/CCW. Filters the
-/// per-frame cursor jitter that otherwise reverses the sweep on tiny moves.
-const DIR_TOL: f64 = 0.1745; // ~10°
 
 fn line_wire(a: DVec3, b: DVec3) -> WireModel {
     WireModel::solid_f64(
@@ -139,40 +135,16 @@ fn line_wire(a: DVec3, b: DVec3) -> WireModel {
     )
 }
 
-/// Circumscribed circle through three points.
-fn circumcircle(
+fn arc_through_points(
     a: DVec3,
     b: DVec3,
     c: DVec3,
     plane: WorkingPlane,
-) -> Option<(DVec3, f64)> {
+) -> Option<(DVec3, f64, f64, f64)> {
     let (a, b, c) = (plane.to_local(a), plane.to_local(b), plane.to_local(c));
-    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
-    if d.abs() < 1e-9 {
-        return None;
-    }
-    let ux = ((a.x * a.x + a.y * a.y) * (b.y - c.y)
-        + (b.x * b.x + b.y * b.y) * (c.y - a.y)
-        + (c.x * c.x + c.y * c.y) * (a.y - b.y))
-        / d;
-    let uy = ((a.x * a.x + a.y * a.y) * (c.x - b.x)
-        + (b.x * b.x + b.y * b.y) * (a.x - c.x)
-        + (c.x * c.x + c.y * c.y) * (b.x - a.x))
-        / d;
-    let center = DVec3::new(ux, uy, a.z);
-    Some((plane.to_world(center), center.distance(a)))
-}
-
-/// True if `angle` lies inside the CCW arc [start..end] (radians).
-fn ccw_contains(angle: f64, start: f64, end: f64) -> bool {
-    let a = angle.rem_euclid(TAU);
-    let s = start.rem_euclid(TAU);
-    let e = end.rem_euclid(TAU);
-    if s <= e {
-        a >= s && a <= e
-    } else {
-        a >= s || a <= e
-    }
+    let arc = geom2d::arc_through_points([a.x, a.y], [b.x, b.y], [c.x, c.y])?;
+    let center = plane.to_world(DVec3::new(arc.centre[0], arc.centre[1], a.z));
+    Some((center, arc.radius, arc.start_angle, arc.end_angle))
 }
 
 /// Arc center+radius from two endpoints and a cursor (sagitta / bow-toward-cursor).
@@ -180,8 +152,9 @@ fn arc_from_sagitta(
     s: DVec3,
     e: DVec3,
     cursor: DVec3,
+    flip_direction: bool,
     plane: WorkingPlane,
-) -> Option<(DVec3, f64)> {
+) -> Option<(DVec3, f64, f64, f64)> {
     let (s, e, cursor) = (plane.to_local(s), plane.to_local(e), plane.to_local(cursor));
     let chord_vec = e - s;
     let chord_len = (chord_vec.x * chord_vec.x + chord_vec.y * chord_vec.y).sqrt();
@@ -195,11 +168,23 @@ fn arc_from_sagitta(
     if h.abs() < 1e-3 {
         return None;
     }
-    let r = (chord_len * chord_len + 4.0 * h * h) / (8.0 * h.abs());
-    let d = (r * r - (chord_len * 0.5) * (chord_len * 0.5))
-        .max(0.0)
-        .sqrt();
-    Some((plane.to_world(mid - perp * h.signum() * d), r))
+    let sagitta = if flip_direction { -h } else { h };
+    let arc = geom2d::arc_from_sagitta([s.x, s.y], [e.x, e.y], sagitta)?;
+    let center = plane.to_world(DVec3::new(arc.centre[0], arc.centre[1], s.z));
+    Some((center, arc.radius, arc.start_angle, arc.end_angle))
+}
+
+/// Builds an arc from endpoints and a signed angle.
+fn arc_from_endpoints_angle(
+    s: DVec3,
+    e: DVec3,
+    included: f64,
+    plane: WorkingPlane,
+) -> Option<(DVec3, f64, f64, f64)> {
+    let (s, e) = (plane.to_local(s), plane.to_local(e));
+    let arc = geom2d::arc_from_endpoints_angle([s.x, s.y], [e.x, e.y], included)?;
+    let center = plane.to_world(DVec3::new(arc.centre[0], arc.centre[1], s.z));
+    Some((center, arc.radius, arc.start_angle, arc.end_angle))
 }
 
 /// Arc center+radius from start, end, and a radius-magnitude point (dist = dist(pt, start)).
@@ -207,66 +192,28 @@ fn arc_from_se_radius(
     s: DVec3,
     e: DVec3,
     radius_pt: DVec3,
+    clockwise: bool,
     plane: WorkingPlane,
-) -> Option<(DVec3, f64)> {
-    let (s, e, radius_pt) = (
-        plane.to_local(s),
-        plane.to_local(e),
-        plane.to_local(radius_pt),
-    );
-    let r = s.distance(radius_pt).max(1e-3);
-    let chord_len = s.distance(e);
-    if r < chord_len * 0.5 {
-        return None;
-    }
-    let unit_chord = (e - s) / chord_len;
-    let perp = DVec3::new(-unit_chord.y, unit_chord.x, 0.0);
-    let mid = (s + e) * 0.5;
-    let h_sign = (radius_pt - mid).dot(perp).signum();
-    let d = (r * r - (chord_len * 0.5) * (chord_len * 0.5))
-        .max(0.0)
-        .sqrt();
-    Some((plane.to_world(mid - perp * h_sign * d), r))
+) -> Option<(DVec3, f64, f64, f64)> {
+    let radius = plane.to_local(s).distance(plane.to_local(radius_pt));
+    arc_from_endpoints_radius(s, e, radius, clockwise, plane)
 }
 
-/// Arc center+radius from start, end, and a tangent-direction point at start.
-fn arc_from_direction(
+fn arc_from_endpoints_radius(
     s: DVec3,
     e: DVec3,
-    dir_pt: DVec3,
+    signed_radius: f64,
+    clockwise: bool,
     plane: WorkingPlane,
-) -> Option<(DVec3, f64)> {
-    let (s, e, dir_pt) = (
-        plane.to_local(s),
-        plane.to_local(e),
-        plane.to_local(dir_pt),
-    );
-    let t = (dir_pt - s).normalize_or_zero();
-    if t.length_squared() < 1e-12 {
-        return None;
-    }
-    let perp_t = DVec3::new(-t.y, t.x, 0.0); // rotate tangent 90° CCW
-    let chord = e - s;
-    let denom = perp_t.x * chord.x + perp_t.y * chord.y;
-    if denom.abs() < 1e-9 {
-        return None;
-    }
-    let lambda = chord.length_squared() * 0.5 / denom;
-    let center = s + perp_t * lambda;
-    Some((plane.to_world(center), center.distance(s)))
+) -> Option<(DVec3, f64, f64, f64)> {
+    let (s, e) = if clockwise { (e, s) } else { (s, e) };
+    let (s, e) = (plane.to_local(s), plane.to_local(e));
+    let arc = geom2d::arc_from_endpoints_radius([s.x, s.y], [e.x, e.y], signed_radius)?;
+    let center = plane.to_world(DVec3::new(arc.centre[0], arc.centre[1], s.z));
+    Some((center, arc.radius, arc.start_angle, arc.end_angle))
 }
 
-/// Tangent-continuing arc: starts at `s` leaving in unit direction `t` (forward,
-/// G1-continuous with the previous entity) and passes through `e`. Returns
-/// `(center, radius, start_angle, end_angle)` with the CCW sweep oriented so the
-/// drawn arc actually leaves `s` along `+t` (not the reflex complement).
-///
-/// `arc_from_direction` treats the tangent as an undirected line (±t give the
-/// same circle), so on its own the CCW-only renderer would draw the wrong arc
-/// whenever `e` lies to the right of `+t`. We fix the sweep direction here by
-/// checking the circle's CCW travel direction at `s` and swapping the angles
-/// when it opposes `+t`. `flip` (Ctrl) selects the complementary arc — the other
-/// way around the same circle.
+/// Builds an arc tangent to the preceding entity.
 fn arc_continue(
     s: DVec3,
     t: DVec3,
@@ -274,82 +221,55 @@ fn arc_continue(
     flip: bool,
     plane: WorkingPlane,
 ) -> Option<(DVec3, f64, f64, f64)> {
-    let (center, radius) = arc_from_direction(s, e, s + t, plane)?;
-    // CCW travel direction on this circle at s = (s - center) rotated +90°.
-    let rs = plane.vector_to_local(s - center);
-    let t = plane.vector_to_local(t);
-    let travel_s = DVec3::new(-rs.y, rs.x, 0.0);
-    let forward = travel_s.dot(t) >= 0.0;
-    // Draw CCW s→e when the CCW-from-s arc leaves along +t; else CCW e→s. `flip`
-    // inverts the choice to draw the complementary arc.
-    let (sa, ea) = if forward ^ flip {
-        (angle_xy(center, s, plane), angle_xy(center, e, plane))
-    } else {
-        (angle_xy(center, e, plane), angle_xy(center, s, plane))
-    };
-    Some((center, radius, sa, ea))
+    let (s, e) = (plane.to_local(s), plane.to_local(e));
+    let tangent = plane.vector_to_local(t);
+    let arc = geom2d::arc_from_start_tangent(
+        [s.x, s.y],
+        [tangent.x, tangent.y],
+        [e.x, e.y],
+        flip,
+    )?;
+    let center = plane.to_world(DVec3::new(arc.centre[0], arc.centre[1], s.z));
+    Some((center, arc.radius, arc.start_angle, arc.end_angle))
 }
 
-/// Continuation anchor for `ARC_CONT`: the point where drawing a line/arc ended
-/// plus the unit tangent leaving it, used to start a tangent-continuing arc.
-/// `last` (the final pick point) disambiguates which endpoint the drawing ended
-/// on — essential because a committed arc stores geometric CCW start/end angles,
-/// not the direction the pen travelled. Returns `None` for other entity kinds.
+/// Returns the last curve endpoint and outgoing tangent.
 pub fn continue_anchor(entity: &EntityType, last: Option<DVec3>) -> Option<(DVec3, DVec3)> {
-    let nearer_first = |a: DVec3, b: DVec3| match last {
-        Some(p) => p.distance(a) <= p.distance(b),
-        None => true, // default to the entity's stored end
-    };
-    match entity {
-        EntityType::Line(l) => {
-            let a = DVec3::new(l.start.x, l.start.y, l.start.z);
-            let b = DVec3::new(l.end.x, l.end.y, l.end.z);
-            let (p_end, p_start) = if nearer_first(b, a) { (b, a) } else { (a, b) };
-            let t = (p_end - p_start).normalize_or_zero();
-            (t.length_squared() > 1e-12).then_some((p_end, t))
-        }
-        EntityType::Arc(a) => {
-            let sp_v = a.start_point();
-            let ep_v = a.end_point();
-            let sp = DVec3::new(sp_v.x, sp_v.y, sp_v.z);
-            let ep = DVec3::new(ep_v.x, ep_v.y, ep_v.z);
-            let normal = (a.normal.x, a.normal.y, a.normal.z);
-            let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
-            let tangent = |angle: f64, ccw: bool| {
-                let sign = if ccw { 1.0 } else { -1.0 };
-                DVec3::new(
-                    sign * (-angle.sin() * ax.0 + angle.cos() * ay.0),
-                    sign * (-angle.sin() * ax.1 + angle.cos() * ay.1),
-                    sign * (-angle.sin() * ax.2 + angle.cos() * ay.2),
-                )
-            };
-            if nearer_first(ep, sp) {
-                // Ended at end_angle: outward tangent = CCW travel there.
-                Some((ep, tangent(a.end_angle, true)))
-            } else {
-                // Ended at start_angle: outward tangent = CW travel there.
-                Some((sp, tangent(a.start_angle, false)))
-            }
-        }
-        _ => None,
+    if !matches!(
+        entity,
+        EntityType::Line(_)
+            | EntityType::Arc(_)
+            | EntityType::LwPolyline(_)
+            | EntityType::Polyline2D(_)
+    ) {
+        return None;
     }
+    let curve = crate::entities::curve::entity_curve(entity)?;
+    let start = DVec3::from_array(curve.point_at(0.0));
+    let end = DVec3::from_array(curve.point_at(1.0));
+    let use_end = last.map_or(true, |point| point.distance(end) <= point.distance(start));
+    let (point, tangent) = if use_end {
+        (end, DVec3::from_array(curve.tangent_at(1.0)))
+    } else {
+        (start, -DVec3::from_array(curve.tangent_at(0.0)))
+    };
+    let tangent = tangent.normalize_or_zero();
+    (tangent.length_squared() > 1.0e-12).then_some((point, tangent))
 }
 
 /// Compute end_angle from a chord-length pick (SCL / CSL semantics).
-/// `chord_len` is clamped to [0, 2r].
-fn end_angle_from_chord_len(start_angle: f64, chord: f64, r: f64) -> f64 {
-    let half = (chord.min(2.0 * r) / (2.0 * r)).asin();
-    start_angle + 2.0 * half
+/// Positive length selects the minor arc; negative length selects the major.
+fn end_angle_from_chord_len(start_angle: f64, chord: f64, r: f64) -> Option<f64> {
+    geom2d::arc_sweep_from_chord(r, chord).map(|sweep| start_angle + sweep)
 }
 
-// ── Command 1: Center, Start, End  (ARC = CSE) ────────────────────────────
+// ── Command 1: Center, Start, End ─────────────────────────────────────────
 
 pub struct ArcCommand {
     step: u8,
     c: DVec3,
     r: f64,
     sa: f64,
-    prev_pt: Option<DVec3>,
     cw: bool,
     plane: WorkingPlane,
 }
@@ -361,7 +281,6 @@ impl ArcCommand {
             c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
-            prev_pt: None,
             cw: false,
             plane: WorkingPlane::default(),
         }
@@ -372,9 +291,12 @@ impl CadCommand for ArcCommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
     }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.cw = ctrl;
+    }
 
     fn name(&self) -> &'static str {
-        "ARC"
+        "ARC_CSE"
     }
     fn prompt(&self) -> String {
         match self.step {
@@ -431,12 +353,11 @@ impl CadCommand for ArcCommand {
             }
             _ => {
                 let ea = angle_xy(self.c, pt, self.plane);
-                let e = if self.cw {
-                    make_arc(self.c, self.r, ea, self.sa, self.plane)
+                if self.cw {
+                    arc_result(self.c, self.r, ea, self.sa, self.plane)
                 } else {
-                    make_arc(self.c, self.r, self.sa, ea, self.plane)
-                };
-                CmdResult::CommitAndExit(e)
+                    arc_result(self.c, self.r, self.sa, ea, self.plane)
+                }
             }
         }
     }
@@ -444,7 +365,7 @@ impl CadCommand for ArcCommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -469,24 +390,12 @@ impl CadCommand for ArcCommand {
         match self.step {
             1 => Some(line_wire(self.c, pt)),
             2 => {
-                if let Some(prev) = self.prev_pt {
-                    // Only flip the sweep once the cursor has moved a clear
-                    // angular step; keep the reference point until then so slow
-                    // moves accumulate and jitter is ignored.
-                    let d = rot_delta(self.c, prev, pt, self.plane);
-                    if d.abs() > DIR_TOL {
-                        self.cw = d < 0.0;
-                        self.prev_pt = Some(pt);
-                    }
-                } else {
-                    self.prev_pt = Some(pt);
-                }
                 let ea = angle_xy(self.c, pt, self.plane);
-                Some(if self.cw {
+                if self.cw {
                     arc_preview(self.c, self.r, ea, self.sa, self.plane)
                 } else {
                     arc_preview(self.c, self.r, self.sa, ea, self.plane)
-                })
+                }
             }
             _ => None,
         }
@@ -530,30 +439,25 @@ impl CadCommand for Arc3PCommand {
             return CmdResult::NeedPoint;
         }
         let (p1, p2, p3) = (self.pts[0], self.pts[1], self.pts[2]);
-        match circumcircle(p1, p2, p3, self.plane) {
+        match arc_through_points(p1, p2, p3, self.plane) {
             None => {
                 self.pts.pop();
                 CmdResult::NeedPoint
             } // collinear — retry
-            Some((center, radius)) => {
-                let a1 = angle_xy(center, p1, self.plane);
-                let a2 = angle_xy(center, p2, self.plane);
-                let a3 = angle_xy(center, p3, self.plane);
-                // Choose arc direction so that p2 lies on the arc from p1 to p3.
-                let (sa, ea) = if ccw_contains(a2, a1, a3) {
-                    (a1, a3)
-                } else {
-                    (a3, a1)
-                };
-                CmdResult::CommitAndExit(make_arc(center, radius, sa, ea, self.plane))
+            Some((center, radius, start, end)) => {
+                arc_result(center, radius, start, end, self.plane)
             }
         }
     }
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        if self.pts.is_empty() {
+            CmdResult::Dispatch("ARC_CONT".into())
+        } else {
+            CmdResult::Cancel
+        }
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.pts.is_empty()
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -564,16 +468,10 @@ impl CadCommand for Arc3PCommand {
             1 => Some(line_wire(self.pts[0], pt)),
             _ => {
                 let (p1, p2) = (self.pts[0], self.pts[1]);
-                if let Some((center, radius)) = circumcircle(p1, p2, pt, self.plane) {
-                    let a1 = angle_xy(center, p1, self.plane);
-                    let a2 = angle_xy(center, p2, self.plane);
-                    let a3 = angle_xy(center, pt, self.plane);
-                    let (sa, ea) = if ccw_contains(a2, a1, a3) {
-                        (a1, a3)
-                    } else {
-                        (a3, a1)
-                    };
-                    Some(arc_preview(center, radius, sa, ea, self.plane))
+                if let Some((center, radius, start, end)) =
+                    arc_through_points(p1, p2, pt, self.plane)
+                {
+                    arc_preview(center, radius, start, end, self.plane)
                 } else {
                     Some(WireModel::solid_f64(
                         "rubber_band".into(),
@@ -595,7 +493,6 @@ pub struct ArcSCECommand {
     c: DVec3,
     r: f64,
     sa: f64,
-    prev_pt: Option<DVec3>,
     cw: bool,
     plane: WorkingPlane,
 }
@@ -608,7 +505,6 @@ impl ArcSCECommand {
             c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
-            prev_pt: None,
             cw: false,
             plane: WorkingPlane::default(),
         }
@@ -618,6 +514,9 @@ impl ArcSCECommand {
 impl CadCommand for ArcSCECommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.cw = ctrl;
     }
 
     fn name(&self) -> &'static str {
@@ -649,12 +548,11 @@ impl CadCommand for ArcSCECommand {
             }
             _ => {
                 let ea = angle_xy(self.c, pt, self.plane);
-                let e = if self.cw {
-                    make_arc(self.c, self.r, ea, self.sa, self.plane)
+                if self.cw {
+                    arc_result(self.c, self.r, ea, self.sa, self.plane)
                 } else {
-                    make_arc(self.c, self.r, self.sa, ea, self.plane)
-                };
-                CmdResult::CommitAndExit(e)
+                    arc_result(self.c, self.r, self.sa, ea, self.plane)
+                }
             }
         }
     }
@@ -662,7 +560,7 @@ impl CadCommand for ArcSCECommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -671,24 +569,12 @@ impl CadCommand for ArcSCECommand {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
-                if let Some(prev) = self.prev_pt {
-                    // Only flip the sweep once the cursor has moved a clear
-                    // angular step; keep the reference point until then so slow
-                    // moves accumulate and jitter is ignored.
-                    let d = rot_delta(self.c, prev, pt, self.plane);
-                    if d.abs() > DIR_TOL {
-                        self.cw = d < 0.0;
-                        self.prev_pt = Some(pt);
-                    }
-                } else {
-                    self.prev_pt = Some(pt);
-                }
                 let ea = angle_xy(self.c, pt, self.plane);
-                Some(if self.cw {
+                if self.cw {
                     arc_preview(self.c, self.r, ea, self.sa, self.plane)
                 } else {
                     arc_preview(self.c, self.r, self.sa, ea, self.plane)
-                })
+                }
             }
             _ => None,
         }
@@ -704,7 +590,6 @@ pub struct ArcSCACommand {
     c: DVec3,
     r: f64,
     sa: f64,
-    prev_pt: Option<DVec3>,
     cw: bool,
     plane: WorkingPlane,
 }
@@ -717,7 +602,6 @@ impl ArcSCACommand {
             c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
-            prev_pt: None,
             cw: false,
             plane: WorkingPlane::default(),
         }
@@ -727,6 +611,9 @@ impl ArcSCACommand {
 impl CadCommand for ArcSCACommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.cw = ctrl;
     }
 
     fn name(&self) -> &'static str {
@@ -762,12 +649,11 @@ impl CadCommand for ArcSCACommand {
             }
             _ => {
                 let ea = angle_xy(self.c, pt, self.plane);
-                let e = if self.cw {
-                    make_arc(self.c, self.r, ea, self.sa, self.plane)
+                if self.cw {
+                    arc_result(self.c, self.r, ea, self.sa, self.plane)
                 } else {
-                    make_arc(self.c, self.r, self.sa, ea, self.plane)
-                };
-                CmdResult::CommitAndExit(e)
+                    arc_result(self.c, self.r, self.sa, ea, self.plane)
+                }
             }
         }
     }
@@ -775,19 +661,23 @@ impl CadCommand for ArcSCACommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let span: f64 = text.trim().replace(',', ".").parse().ok()?;
-            // Negative span = CW; positive = CCW.
+            let mut span: f64 = text.trim().replace(',', ".").parse().ok()?;
+            if self.cw {
+                span = -span;
+            }
             let ea = self.sa + span.to_radians();
-            return Some(CmdResult::CommitAndExit(make_arc(
-                self.c, self.r, self.sa, ea, self.plane,
-            )));
+            return Some(if span < 0.0 {
+                arc_result(self.c, self.r, ea, self.sa, self.plane)
+            } else {
+                arc_result(self.c, self.r, self.sa, ea, self.plane)
+            });
         }
         None
     }
@@ -818,24 +708,12 @@ impl CadCommand for ArcSCACommand {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
-                if let Some(prev) = self.prev_pt {
-                    // Only flip the sweep once the cursor has moved a clear
-                    // angular step; keep the reference point until then so slow
-                    // moves accumulate and jitter is ignored.
-                    let d = rot_delta(self.c, prev, pt, self.plane);
-                    if d.abs() > DIR_TOL {
-                        self.cw = d < 0.0;
-                        self.prev_pt = Some(pt);
-                    }
-                } else {
-                    self.prev_pt = Some(pt);
-                }
                 let ea = angle_xy(self.c, pt, self.plane);
-                Some(if self.cw {
+                if self.cw {
                     arc_preview(self.c, self.r, ea, self.sa, self.plane)
                 } else {
                     arc_preview(self.c, self.r, self.sa, ea, self.plane)
-                })
+                }
             }
             _ => None,
         }
@@ -852,6 +730,7 @@ pub struct ArcSCLCommand {
     c: DVec3,
     r: f64,
     sa: f64,
+    cw: bool,
     plane: WorkingPlane,
 }
 
@@ -863,6 +742,7 @@ impl ArcSCLCommand {
             c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
+            cw: false,
             plane: WorkingPlane::default(),
         }
     }
@@ -871,6 +751,9 @@ impl ArcSCLCommand {
 impl CadCommand for ArcSCLCommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.cw = ctrl;
     }
 
     fn name(&self) -> &'static str {
@@ -906,14 +789,14 @@ impl CadCommand for ArcSCLCommand {
             }
             _ => {
                 let chord = self.s.distance(pt);
-                let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                CmdResult::CommitAndExit(make_arc(
-                    self.c,
-                    self.r,
-                    self.sa,
-                    ea,
-                    self.plane,
-                ))
+                let Some(ea) = end_angle_from_chord_len(self.sa, chord, self.r) else {
+                    return CmdResult::NeedPoint;
+                };
+                if self.cw {
+                    arc_result(self.c, self.r, ea, self.sa, self.plane)
+                } else {
+                    arc_result(self.c, self.r, self.sa, ea, self.plane)
+                }
             }
         }
     }
@@ -921,7 +804,7 @@ impl CadCommand for ArcSCLCommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -929,11 +812,13 @@ impl CadCommand for ArcSCLCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
             let chord: f64 = text.trim().replace(',', ".").parse().ok()?;
-            if chord > 0.0 {
-                let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                return Some(CmdResult::CommitAndExit(make_arc(
-                    self.c, self.r, self.sa, ea, self.plane,
-                )));
+            if chord != 0.0 {
+                let ea = end_angle_from_chord_len(self.sa, chord, self.r)?;
+                return Some(if self.cw {
+                    arc_result(self.c, self.r, ea, self.sa, self.plane)
+                } else {
+                    arc_result(self.c, self.r, self.sa, ea, self.plane)
+                });
             }
         }
         None
@@ -959,8 +844,12 @@ impl CadCommand for ArcSCLCommand {
             1 => Some(line_wire(self.s, pt)),
             2 => {
                 let chord = self.s.distance(pt);
-                let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                Some(arc_preview(self.c, self.r, self.sa, ea, self.plane))
+                let ea = end_angle_from_chord_len(self.sa, chord, self.r)?;
+                if self.cw {
+                    arc_preview(self.c, self.r, ea, self.sa, self.plane)
+                } else {
+                    arc_preview(self.c, self.r, self.sa, ea, self.plane)
+                }
             }
             _ => None,
         }
@@ -974,6 +863,7 @@ pub struct ArcSEACommand {
     step: u8,
     s: DVec3,
     e: DVec3,
+    ctrl: bool,
     plane: WorkingPlane,
 }
 
@@ -983,6 +873,7 @@ impl ArcSEACommand {
             step: 0,
             s: DVec3::ZERO,
             e: DVec3::ZERO,
+            ctrl: false,
             plane: WorkingPlane::default(),
         }
     }
@@ -991,6 +882,9 @@ impl ArcSEACommand {
 impl CadCommand for ArcSEACommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.ctrl = ctrl;
     }
 
     fn name(&self) -> &'static str {
@@ -1015,13 +909,11 @@ impl CadCommand for ArcSEACommand {
                 self.step = 2;
                 CmdResult::NeedPoint
             }
-            _ => match arc_from_sagitta(self.s, self.e, pt, self.plane) {
-                Some((center, radius)) => {
-                    let sa = angle_xy(center, self.s, self.plane);
-                    let ea = angle_xy(center, self.e, self.plane);
-                    CmdResult::CommitAndExit(make_arc(center, radius, sa, ea, self.plane))
+            _ => match arc_from_sagitta(self.s, self.e, pt, self.ctrl, self.plane) {
+                Some((center, radius, sa, ea)) => {
+                    arc_result(center, radius, sa, ea, self.plane)
                 }
-                None => CmdResult::Cancel,
+                None => CmdResult::NeedPoint,
             },
         }
     }
@@ -1029,21 +921,43 @@ impl CadCommand for ArcSEACommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.step != 2 {
+            return None;
+        }
+        let mut included = text.trim().replace(',', ".").parse::<f64>().ok()?.to_radians();
+        if self.ctrl {
+            included = -included;
+        }
+        let (center, radius, sa, ea) =
+            arc_from_endpoints_angle(self.s, self.e, included, self.plane)?;
+        Some(arc_result(center, radius, sa, ea, self.plane))
+    }
+    fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
+        use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
+        (self.step == 2).then(|| DynSpec {
+            anchor: DynAnchor::Point((self.s + self.e) * 0.5),
+            fields: vec![DynFieldSpec::new(DynRole::Angle)],
+            guide: DynGuide::None,
+            ref_point: Some(self.s),
+        })
+    }
+    fn dyn_commit_as_text(&self) -> bool {
+        self.step == 2
     }
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
-                if let Some((center, radius)) =
-                    arc_from_sagitta(self.s, self.e, pt, self.plane)
+                if let Some((center, radius, sa, ea)) =
+                    arc_from_sagitta(self.s, self.e, pt, self.ctrl, self.plane)
                 {
-                    let sa = angle_xy(center, self.s, self.plane);
-                    let ea = angle_xy(center, self.e, self.plane);
-                    Some(arc_preview(center, radius, sa, ea, self.plane))
+                    arc_preview(center, radius, sa, ea, self.plane)
                 } else {
                     Some(line_wire(self.s, self.e))
                 }
@@ -1060,6 +974,7 @@ pub struct ArcSERCommand {
     step: u8,
     s: DVec3,
     e: DVec3,
+    ctrl: bool,
     plane: WorkingPlane,
 }
 
@@ -1069,6 +984,7 @@ impl ArcSERCommand {
             step: 0,
             s: DVec3::ZERO,
             e: DVec3::ZERO,
+            ctrl: false,
             plane: WorkingPlane::default(),
         }
     }
@@ -1077,6 +993,9 @@ impl ArcSERCommand {
 impl CadCommand for ArcSERCommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.ctrl = ctrl;
     }
 
     fn name(&self) -> &'static str {
@@ -1101,13 +1020,11 @@ impl CadCommand for ArcSERCommand {
                 self.step = 2;
                 CmdResult::NeedPoint
             }
-            _ => match arc_from_se_radius(self.s, self.e, pt, self.plane) {
-                Some((center, radius)) => {
-                    let sa = angle_xy(center, self.s, self.plane);
-                    let ea = angle_xy(center, self.e, self.plane);
-                    CmdResult::CommitAndExit(make_arc(center, radius, sa, ea, self.plane))
+            _ => match arc_from_se_radius(self.s, self.e, pt, self.ctrl, self.plane) {
+                Some((center, radius, sa, ea)) => {
+                    arc_result(center, radius, sa, ea, self.plane)
                 }
-                None => CmdResult::Cancel,
+                None => CmdResult::NeedPoint,
             },
         }
     }
@@ -1115,7 +1032,7 @@ impl CadCommand for ArcSERCommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -1123,23 +1040,9 @@ impl CadCommand for ArcSERCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
             let r: f64 = text.trim().replace(',', ".").parse().ok()?;
-            let s = self.plane.to_local(self.s);
-            let e = self.plane.to_local(self.e);
-            let chord = s.distance(e);
-            if r > 0.0 && r >= chord / 2.0 {
-                let mid = (s + e) * 0.5;
-                let perp = {
-                    let cv = (e - s) / chord;
-                    DVec3::new(-cv.y, cv.x, 0.0)
-                };
-                let d = (r * r - (chord / 2.0) * (chord / 2.0)).max(0.0).sqrt();
-                let center = self.plane.to_world(mid - perp * d);
-                let sa = angle_xy(center, self.s, self.plane);
-                let ea = angle_xy(center, self.e, self.plane);
-                return Some(CmdResult::CommitAndExit(make_arc(
-                    center, r, sa, ea, self.plane,
-                )));
-            }
+            let (center, radius, sa, ea) =
+                arc_from_endpoints_radius(self.s, self.e, r, self.ctrl, self.plane)?;
+            return Some(arc_result(center, radius, sa, ea, self.plane));
         }
         None
     }
@@ -1160,18 +1063,17 @@ impl CadCommand for ArcSERCommand {
         if self.step != 2 {
             return None;
         }
-        arc_from_se_radius(self.s, self.e, cursor, self.plane).map(|(_, r)| r)
+        arc_from_se_radius(self.s, self.e, cursor, self.ctrl, self.plane)
+            .map(|(_, r, _, _)| r)
     }
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
-                if let Some((center, radius)) =
-                    arc_from_se_radius(self.s, self.e, pt, self.plane)
+                if let Some((center, radius, sa, ea)) =
+                    arc_from_se_radius(self.s, self.e, pt, self.ctrl, self.plane)
                 {
-                    let sa = angle_xy(center, self.s, self.plane);
-                    let ea = angle_xy(center, self.e, self.plane);
-                    Some(arc_preview(center, radius, sa, ea, self.plane))
+                    arc_preview(center, radius, sa, ea, self.plane)
                 } else {
                     Some(line_wire(self.s, self.e))
                 }
@@ -1188,6 +1090,7 @@ pub struct ArcSEDCommand {
     step: u8,
     s: DVec3,
     e: DVec3,
+    ctrl: bool,
     plane: WorkingPlane,
 }
 
@@ -1197,6 +1100,7 @@ impl ArcSEDCommand {
             step: 0,
             s: DVec3::ZERO,
             e: DVec3::ZERO,
+            ctrl: false,
             plane: WorkingPlane::default(),
         }
     }
@@ -1205,6 +1109,9 @@ impl ArcSEDCommand {
 impl CadCommand for ArcSEDCommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.ctrl = ctrl;
     }
 
     fn name(&self) -> &'static str {
@@ -1229,13 +1136,11 @@ impl CadCommand for ArcSEDCommand {
                 self.step = 2;
                 CmdResult::NeedPoint
             }
-            _ => match arc_from_direction(self.s, self.e, pt, self.plane) {
-                Some((center, radius)) => {
-                    let sa = angle_xy(center, self.s, self.plane);
-                    let ea = angle_xy(center, self.e, self.plane);
-                    CmdResult::CommitAndExit(make_arc(center, radius, sa, ea, self.plane))
+            _ => match arc_continue(self.s, pt - self.s, self.e, self.ctrl, self.plane) {
+                Some((center, radius, sa, ea)) => {
+                    arc_result(center, radius, sa, ea, self.plane)
                 }
-                None => CmdResult::Cancel,
+                None => CmdResult::NeedPoint,
             },
         }
     }
@@ -1243,21 +1148,41 @@ impl CadCommand for ArcSEDCommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.step != 2 {
+            return None;
+        }
+        let angle = text.trim().replace(',', ".").parse::<f64>().ok()?.to_radians();
+        let tangent = self.plane.x * angle.cos() + self.plane.y * angle.sin();
+        let (center, radius, sa, ea) =
+            arc_continue(self.s, tangent, self.e, self.ctrl, self.plane)?;
+        Some(arc_result(center, radius, sa, ea, self.plane))
+    }
+    fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
+        use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
+        (self.step == 2).then(|| DynSpec {
+            anchor: DynAnchor::Point(self.s),
+            fields: vec![DynFieldSpec::new(DynRole::Angle)],
+            guide: DynGuide::Polar,
+            ref_point: Some(self.s + self.plane.x),
+        })
+    }
+    fn dyn_commit_as_text(&self) -> bool {
+        self.step == 2
     }
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.step {
             1 => Some(line_wire(self.s, pt)),
             2 => {
-                if let Some((center, radius)) =
-                    arc_from_direction(self.s, self.e, pt, self.plane)
+                if let Some((center, radius, sa, ea)) =
+                    arc_continue(self.s, pt - self.s, self.e, self.ctrl, self.plane)
                 {
-                    let sa = angle_xy(center, self.s, self.plane);
-                    let ea = angle_xy(center, self.e, self.plane);
-                    Some(arc_preview(center, radius, sa, ea, self.plane))
+                    arc_preview(center, radius, sa, ea, self.plane)
                 } else {
                     Some(line_wire(self.s, self.e))
                 }
@@ -1275,7 +1200,6 @@ pub struct ArcCSACommand {
     c: DVec3,
     r: f64,
     sa: f64,
-    prev_pt: Option<DVec3>,
     cw: bool,
     plane: WorkingPlane,
 }
@@ -1287,7 +1211,6 @@ impl ArcCSACommand {
             c: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
-            prev_pt: None,
             cw: false,
             plane: WorkingPlane::default(),
         }
@@ -1297,6 +1220,9 @@ impl ArcCSACommand {
 impl CadCommand for ArcCSACommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.cw = ctrl;
     }
 
     fn name(&self) -> &'static str {
@@ -1331,12 +1257,11 @@ impl CadCommand for ArcCSACommand {
             }
             _ => {
                 let ea = angle_xy(self.c, pt, self.plane);
-                let e = if self.cw {
-                    make_arc(self.c, self.r, ea, self.sa, self.plane)
+                if self.cw {
+                    arc_result(self.c, self.r, ea, self.sa, self.plane)
                 } else {
-                    make_arc(self.c, self.r, self.sa, ea, self.plane)
-                };
-                CmdResult::CommitAndExit(e)
+                    arc_result(self.c, self.r, self.sa, ea, self.plane)
+                }
             }
         }
     }
@@ -1344,18 +1269,23 @@ impl CadCommand for ArcCSACommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let span: f64 = text.trim().replace(',', ".").parse().ok()?;
+            let mut span: f64 = text.trim().replace(',', ".").parse().ok()?;
+            if self.cw {
+                span = -span;
+            }
             let ea = self.sa + span.to_radians();
-            return Some(CmdResult::CommitAndExit(make_arc(
-                self.c, self.r, self.sa, ea, self.plane,
-            )));
+            return Some(if span < 0.0 {
+                arc_result(self.c, self.r, ea, self.sa, self.plane)
+            } else {
+                arc_result(self.c, self.r, self.sa, ea, self.plane)
+            });
         }
         None
     }
@@ -1384,24 +1314,12 @@ impl CadCommand for ArcCSACommand {
         match self.step {
             1 => Some(line_wire(self.c, pt)),
             2 => {
-                if let Some(prev) = self.prev_pt {
-                    // Only flip the sweep once the cursor has moved a clear
-                    // angular step; keep the reference point until then so slow
-                    // moves accumulate and jitter is ignored.
-                    let d = rot_delta(self.c, prev, pt, self.plane);
-                    if d.abs() > DIR_TOL {
-                        self.cw = d < 0.0;
-                        self.prev_pt = Some(pt);
-                    }
-                } else {
-                    self.prev_pt = Some(pt);
-                }
                 let ea = angle_xy(self.c, pt, self.plane);
-                Some(if self.cw {
+                if self.cw {
                     arc_preview(self.c, self.r, ea, self.sa, self.plane)
                 } else {
                     arc_preview(self.c, self.r, self.sa, ea, self.plane)
-                })
+                }
             }
             _ => None,
         }
@@ -1417,6 +1335,7 @@ pub struct ArcCSLCommand {
     s: DVec3,
     r: f64,
     sa: f64,
+    cw: bool,
     plane: WorkingPlane,
 }
 
@@ -1428,6 +1347,7 @@ impl ArcCSLCommand {
             s: DVec3::ZERO,
             r: 0.0,
             sa: 0.0,
+            cw: false,
             plane: WorkingPlane::default(),
         }
     }
@@ -1436,6 +1356,9 @@ impl ArcCSLCommand {
 impl CadCommand for ArcCSLCommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.cw = ctrl;
     }
 
     fn name(&self) -> &'static str {
@@ -1471,14 +1394,14 @@ impl CadCommand for ArcCSLCommand {
             }
             _ => {
                 let chord = self.s.distance(pt);
-                let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                CmdResult::CommitAndExit(make_arc(
-                    self.c,
-                    self.r,
-                    self.sa,
-                    ea,
-                    self.plane,
-                ))
+                let Some(ea) = end_angle_from_chord_len(self.sa, chord, self.r) else {
+                    return CmdResult::NeedPoint;
+                };
+                if self.cw {
+                    arc_result(self.c, self.r, ea, self.sa, self.plane)
+                } else {
+                    arc_result(self.c, self.r, self.sa, ea, self.plane)
+                }
             }
         }
     }
@@ -1486,7 +1409,7 @@ impl CadCommand for ArcCSLCommand {
         CmdResult::Cancel
     }
     fn enter_accepts_default_start(&self) -> bool {
-        self.step == 0
+        false
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -1494,11 +1417,13 @@ impl CadCommand for ArcCSLCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
             let chord: f64 = text.trim().replace(',', ".").parse().ok()?;
-            if chord > 0.0 {
-                let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                return Some(CmdResult::CommitAndExit(make_arc(
-                    self.c, self.r, self.sa, ea, self.plane,
-                )));
+            if chord != 0.0 {
+                let ea = end_angle_from_chord_len(self.sa, chord, self.r)?;
+                return Some(if self.cw {
+                    arc_result(self.c, self.r, ea, self.sa, self.plane)
+                } else {
+                    arc_result(self.c, self.r, self.sa, ea, self.plane)
+                });
             }
         }
         None
@@ -1524,8 +1449,12 @@ impl CadCommand for ArcCSLCommand {
             1 => Some(line_wire(self.c, pt)),
             2 => {
                 let chord = self.s.distance(pt);
-                let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                Some(arc_preview(self.c, self.r, self.sa, ea, self.plane))
+                let ea = end_angle_from_chord_len(self.sa, chord, self.r)?;
+                if self.cw {
+                    arc_preview(self.c, self.r, ea, self.sa, self.plane)
+                } else {
+                    arc_preview(self.c, self.r, self.sa, ea, self.plane)
+                }
             }
             _ => None,
         }
@@ -1534,19 +1463,11 @@ impl CadCommand for ArcCSLCommand {
 
 
 // ── Command 11: Continue  (ARC_CONT) ──────────────────────────────────────
-// Tangent-continuing arc from the previous line/arc endpoint. The start point
-// and start tangent are seeded at dispatch (from `continue_anchor`); the user
-// picks only the end point, so the arc joins the previous entity smoothly.
-
 pub struct ArcContCommand {
     s: DVec3,
     tangent: DVec3,
     /// Live Ctrl state (set via `set_ctrl`): flips the arc to the other way.
     ctrl: bool,
-    /// Anchor history for mid-command Ctrl+Z: the (start, tangent) each
-    /// committed arc was drawn from, so undoing a segment resumes the run
-    /// from the prior anchor instead of ending it.
-    history: Vec<(DVec3, DVec3)>,
     plane: WorkingPlane,
 }
 
@@ -1557,7 +1478,6 @@ impl ArcContCommand {
             tangent,
             ctrl: false,
             plane: WorkingPlane::default(),
-            history: Vec::new(),
         }
     }
 }
@@ -1579,32 +1499,10 @@ impl CadCommand for ArcContCommand {
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match arc_continue(self.s, self.tangent, pt, self.ctrl, self.plane) {
             Some((center, radius, sa, ea)) => {
-                let arc = make_arc(center, radius, sa, ea, self.plane);
-                // Remember the anchor this arc was drawn from — mid-command
-                // Ctrl+Z reverts the commit and resumes from here.
-                self.history.push((self.s, self.tangent));
-                // Keep drawing: re-anchor at the arc just committed so the next
-                // click starts another tangent-continuing arc from its end,
-                // until the user ends the run with Enter/Esc (#327).
-                if let Some((end, tangent)) = continue_anchor(&arc, Some(pt)) {
-                    self.s = end;
-                    self.tangent = tangent;
-                }
-                CmdResult::CommitEntity(arc)
+                arc_result(center, radius, sa, ea, self.plane)
             }
-            // A degenerate pick (no arc through these points) shouldn't end the
-            // whole run — stay active and wait for the next end point.
             None => CmdResult::NeedPoint,
         }
-    }
-    fn on_undo_step(&mut self) -> Option<CmdResult> {
-        // Ctrl+Z mid-run: revert the last committed arc and resume from the
-        // anchor it was drawn from. With none committed this run, the
-        // document undo takes over.
-        let (s, tangent) = self.history.pop()?;
-        self.s = s;
-        self.tangent = tangent;
-        Some(CmdResult::UndoDocument)
     }
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -1614,19 +1512,17 @@ impl CadCommand for ArcContCommand {
     }
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match arc_continue(self.s, self.tangent, pt, self.ctrl, self.plane) {
-            Some((center, radius, sa, ea)) => {
-                Some(arc_preview(center, radius, sa, ea, self.plane))
-            }
+            Some((center, radius, sa, ea)) => arc_preview(center, radius, sa, ea, self.plane),
             None => Some(line_wire(self.s, pt)),
         }
     }
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["ARC_3P"] });  // Arc3PCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["ARC", "ARC_3P"] });  // Arc3PCommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_CSA"] });  // ArcCSACommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_CSL"] });  // ArcCSLCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["ARC"] });  // ArcCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["ARC_CSE"] });  // ArcCommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SCA"] });  // ArcSCACommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SCE"] });  // ArcSCECommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SCL"] });  // ArcSCLCommand

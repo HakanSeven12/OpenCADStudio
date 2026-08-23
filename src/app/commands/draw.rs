@@ -13,27 +13,27 @@ impl OpenCADStudio {
 
             "MLINE" => {
                 use crate::modules::draw::draw::mline::MlineCommand;
-                let style_name = self.tabs[i].scene.document.header.multiline_style.clone();
-                let style = self.tabs[i]
+                let header = &self.tabs[i].scene.document.header;
+                let style_name = header.multiline_style.clone();
+                let scale = header.multiline_scale;
+                let justification = header.multiline_justification;
+                let styles = self.tabs[i]
                     .scene
                     .document
                     .objects
                     .iter()
-                    .find_map(|(handle, object)| match object {
-                        acadrust::objects::ObjectType::MLineStyle(style)
-                            if style.name.eq_ignore_ascii_case(&style_name) =>
-                        {
-                            Some((*handle, style.elements.len()))
+                    .filter_map(|(handle, object)| match object {
+                        acadrust::objects::ObjectType::MLineStyle(style) => {
+                            Some((*handle, style.clone()))
                         }
                         _ => None,
-                    });
-                let (style_handle, element_count) = style
-                    .map(|(handle, count)| (Some(handle), count))
-                    .unwrap_or((None, 2));
-                let cmd_obj = MlineCommand::with_style(
+                    })
+                    .collect();
+                let cmd_obj = MlineCommand::with_styles(
+                    styles,
                     style_name,
-                    style_handle,
-                    element_count,
+                    scale,
+                    justification,
                 );
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
@@ -48,7 +48,11 @@ impl OpenCADStudio {
                 let wo_cmd = match args.as_str() {
                     "P" | "POLYLINE" => WipeoutCommand::new_polyline(),
                     "R" | "RECTANGULAR" => WipeoutCommand::new_rectangular(),
-                    _ => WipeoutCommand::new_polygonal(),
+                    _ => WipeoutCommand::new_polygonal(
+                        crate::modules::draw::draw::wipeout::wipeout_frame_mode(
+                            &self.tabs[i].scene.document,
+                        ),
+                    ),
                 };
                 self.command_line.push_info(&wo_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(wo_cmd));
@@ -60,7 +64,15 @@ impl OpenCADStudio {
 
             "REVCLOUD" => {
                 use crate::modules::draw::draw::revcloud::RevCloudCommand;
-                let cmd = RevCloudCommand::new();
+                let view_height = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0;
+                let default_arc_length = (view_height * 0.0125).max(1.0e-6);
+                let sources = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .map(|entity| (entity.common().handle, entity.clone()))
+                    .collect();
+                let cmd = RevCloudCommand::new(default_arc_length, sources);
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
@@ -288,14 +300,20 @@ impl OpenCADStudio {
             }
 
             "ARC" => {
-                use crate::modules::draw::draw::arc::ArcCommand;
-                let new_cmd = ArcCommand::new();
+                use crate::modules::draw::draw::arc::Arc3PCommand;
+                let new_cmd = Arc3PCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
             "ARC_3P" => {
                 use crate::modules::draw::draw::arc::Arc3PCommand;
                 let new_cmd = Arc3PCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+            "ARC_CSE" => {
+                use crate::modules::draw::draw::arc::ArcCommand;
+                let new_cmd = ArcCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -461,21 +479,82 @@ impl OpenCADStudio {
 
             "CENTERLINE" => {
                 use crate::modules::draw::draw::centerline::CenterLineCommand;
-                let new_cmd = CenterLineCommand::new();
+                let settings = self.tabs[i].scene.centerline_settings();
+                let new_cmd = CenterLineCommand::new(settings);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "DIMCENTER" | "CENTERMARK" => {
+            "CENTERRESET" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                self.push_undo_snapshot(i, "CENTERRESET");
+                let count = self.tabs[i].scene.reset_centerlines(&handles)
+                    + self.tabs[i].scene.reset_center_marks(&handles);
+                if count > 0 {
+                    self.tabs[i].dirty = true;
+                }
+                self.command_line
+                    .push_output(&format!("CENTERRESET: {count} center object(s) updated."));
+            }
+
+            "CENTERREASSOCIATE" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                let mark_targets: Vec<_> = handles.iter().copied().filter(|handle| {
+                    let Some(acadrust::EntityType::Line(line)) = self.tabs[i].scene.document.get_entity(*handle) else { return false; };
+                    acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data).is_some()
+                }).collect();
+                if mark_targets.len() == 1 && handles.len() == 1 {
+                    use crate::modules::draw::draw::dimcenter::CenterMarkReassociateCommand;
+                    let new_cmd = CenterMarkReassociateCommand::new(mark_targets[0]);
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                    return Some(self.finish_dispatch(cmd));
+                }
+                self.push_undo_snapshot(i, "CENTERREASSOCIATE");
+                let count = self.tabs[i].scene.set_centerline_association(&handles, true)
+                    + self.tabs[i].scene.set_center_mark_association(&handles, true);
+                if count > 0 {
+                    self.tabs[i].dirty = true;
+                }
+                self.command_line
+                    .push_output(&format!("CENTERREASSOCIATE: {count} center object(s) associated."));
+            }
+
+            "CENTERDISASSOCIATE" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                self.push_undo_snapshot(i, "CENTERDISASSOCIATE");
+                let count = self.tabs[i].scene.set_centerline_association(&handles, false)
+                    + self.tabs[i].scene.set_center_mark_association(&handles, false);
+                if count > 0 {
+                    self.tabs[i].dirty = true;
+                }
+                self.command_line
+                    .push_output(&format!("CENTERDISASSOCIATE: {count} center object(s) detached."));
+            }
+
+            "DIMCENTER" => {
                 use crate::modules::draw::draw::dimcenter::DimCenterCommand;
                 let new_cmd = DimCenterCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "CENTERMARK" => {
+                use crate::modules::draw::draw::dimcenter::CenterMarkCommand;
+                let settings = self.tabs[i].scene.centerline_settings();
+                let new_cmd = CenterMarkCommand::new(settings);
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             "SKETCH" => {
                 use crate::modules::draw::draw::sketch::SketchCommand;
-                let new_cmd = SketchCommand::new();
+                let header = &self.tabs[i].scene.document.header;
+                let new_cmd = SketchCommand::new(
+                    header.sketch_type,
+                    header.sketch_increment,
+                    header.sketch_tolerance,
+                );
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -595,9 +674,13 @@ impl OpenCADStudio {
                 }
             }
 
-            "POINT" => {
+            "POINT" | "MULTIPOINT" => {
                 use crate::modules::draw::draw::point::PointCommand;
-                let new_cmd = PointCommand::new();
+                let new_cmd = if cmd == "MULTIPOINT" {
+                    PointCommand::multiple()
+                } else {
+                    PointCommand::new()
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -618,8 +701,26 @@ impl OpenCADStudio {
 
             "HATCH" => {
                 use crate::modules::draw::draw::hatch::HatchCommand;
-                let outlines = self.tabs[i].scene.hatch_boundary_outlines();
-                let boundary_sources = self.tabs[i].scene.hatch_boundary_sources();
+                let working_plane = if self.tabs[i].editing_model_space() {
+                    self.tabs[i].ucs_xform().working_plane()
+                } else {
+                    crate::command::WorkingPlane::default()
+                };
+                let normal = working_plane.z.normalize_or(glam::DVec3::Z);
+                let elevation = working_plane.origin.dot(normal);
+                let storage = crate::entities::curve::ocs_plane(
+                    acadrust::types::Vector3::new(normal.x, normal.y, normal.z),
+                    elevation,
+                );
+                let plane = crate::command::WorkingPlane::new(
+                    glam::DVec3::from_array(storage.origin),
+                    glam::DVec3::from_array(storage.x_axis),
+                    glam::DVec3::from_array(storage.y_axis),
+                );
+                let boundary_sources = self.tabs[i]
+                    .scene
+                    .boundary_sources_on_plane(plane, 1.0e-6);
+                let outlines = crate::scene::boundary_faces(&boundary_sources, 1.0e-6);
                 let selected = self.tabs[i]
                     .scene
                     .selected_entities()
@@ -633,8 +734,13 @@ impl OpenCADStudio {
                         let common = self.tabs[i].scene.document.get_entity(*handle)?.common();
                         Some((model, common.color.clone(), common.transparency))
                     });
-                let new_cmd =
-                    HatchCommand::new(outlines, boundary_sources, selected, inherited);
+                let new_cmd = HatchCommand::new(
+                    outlines,
+                    boundary_sources,
+                    selected,
+                    inherited,
+                    plane,
+                );
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 self.refresh_area_preview(i);
@@ -647,11 +753,26 @@ impl OpenCADStudio {
                 if sel.len() == 1 {
                     let (h, _) = sel[0];
                     if let Some(model) = self.tabs[i].scene.hatches.get(&h).cloned() {
+                        let entity = self.tabs[i].scene.document.get_entity(h);
+                        let annotative = entity.is_some_and(|entity| {
+                                crate::scene::annotative::is_annotative(
+                                    &self.tabs[i].scene.document,
+                                    entity,
+                                )
+                            });
+                        let (scale, angle) = match entity {
+                            Some(acadrust::EntityType::Hatch(hatch)) => (
+                                hatch.pattern_scale as f32,
+                                hatch.pattern_angle.to_degrees() as f32,
+                            ),
+                            _ => (model.scale, model.angle_offset.to_degrees()),
+                        };
                         let cmd = HatcheditCommand::with_handle(
                             h,
                             model.name.clone(),
-                            model.scale,
-                            model.angle_offset,
+                            scale,
+                            angle,
+                            annotative,
                         );
                         self.command_line.push_info(&cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -668,16 +789,32 @@ impl OpenCADStudio {
 
             "GRADIENT" => {
                 use crate::modules::draw::draw::hatch::GradientCommand;
-                let outlines = self.tabs[i].scene.closed_outlines();
-                let new_cmd = GradientCommand::new(outlines);
+                let boundary_sources = self.tabs[i]
+                    .scene
+                    .boundary_sources_on_plane(crate::command::WorkingPlane::default(), 1.0e-6);
+                let outlines = crate::scene::boundary_faces(&boundary_sources, 1.0e-6);
+                let new_cmd = GradientCommand::new(outlines, boundary_sources);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
             "BOUNDARY" => {
                 use crate::modules::draw::draw::hatch::BoundaryCommand;
-                let outlines = self.tabs[i].scene.closed_outlines();
-                let new_cmd = BoundaryCommand::new(outlines);
+                let plane = if self.tabs[i].editing_model_space() {
+                    self.tabs[i].ucs_xform().working_plane()
+                } else {
+                    crate::command::WorkingPlane::default()
+                };
+                let sources = self.tabs[i]
+                    .scene
+                    .boundary_sources_on_plane(plane, 1.0e-6);
+                let selected = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(handle, _)| *handle)
+                    .collect();
+                let new_cmd = BoundaryCommand::new(sources, selected, plane);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -788,19 +925,64 @@ impl OpenCADStudio {
             }
 
             // ── Model commands (3D primitives) ─────────────────────────────
-            "BOX" | "WEDGE" | "CYLINDER" | "CONE" | "SPHERE" | "TORUS" => {
+            "BOX" | "WEDGE" | "CYLINDER" | "CONE" | "SPHERE" | "PYRAMID" | "PYR"
+            | "TORUS" => {
                 use crate::modules::model::primitive_cmd::PrimitiveCommand;
                 let new_cmd = PrimitiveCommand::new(cmd);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            // ── Design commands (solid booleans) ───────────────────────────
-            "UNION" | "SUBTRACT" | "INTERSECT" => {
+            // ── Solid booleans ─────────────────────────────────────────────
+            "UNION" | "INTERSECT" => {
                 use crate::modules::model::boolean_cmd::BoolOp;
                 if let Some(op) = BoolOp::from_id(cmd) {
-                    return Some(self.solid_boolean(op));
+                    let solid_count = {
+                        let scene = &self.tabs[i].scene;
+                        scene
+                            .selected_handles_in_order()
+                            .into_iter()
+                            .filter(|handle| !scene.is_layer_locked(*handle))
+                            .filter(|handle| {
+                                matches!(
+                                    scene.document.get_entity(*handle),
+                                    Some(acadrust::EntityType::Solid3D(_))
+                                )
+                            })
+                            .take(2)
+                            .count()
+                    };
+                    if solid_count < 2 {
+                        use crate::modules::draw::select::SelectObjectsCommand;
+                        let selection = SelectObjectsCommand::new(cmd);
+                        self.command_line.push_info(&selection.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(selection));
+                    } else {
+                        return Some(self.solid_boolean(op));
+                    }
                 }
+            }
+
+            "SUBTRACT" => {
+                use crate::modules::model::boolean_cmd::SubtractCommand;
+                let bases = {
+                    let scene = &self.tabs[i].scene;
+                    scene
+                        .selected_handles_in_order()
+                        .into_iter()
+                        .filter(|handle| !scene.is_layer_locked(*handle))
+                        .filter(|handle| {
+                            matches!(
+                                scene.document.get_entity(*handle),
+                                Some(acadrust::EntityType::Solid3D(_))
+                            )
+                        })
+                        .collect()
+                };
+                self.tabs[i].scene.deselect_all();
+                let subtract = SubtractCommand::new(bases);
+                self.command_line.push_info(&subtract.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(subtract));
             }
 
             // INTERFERE — non-destructive intersect: solid from the overlap.
@@ -857,33 +1039,21 @@ impl OpenCADStudio {
                 use acadrust::types::Vector3;
                 let mut loops: Vec<Vec<Vector3>> = Vec::new();
                 for (_, e) in self.tabs[i].scene.selected_entities().iter() {
-                    match e {
+                    let supported = matches!(
+                        e,
                         acadrust::EntityType::LwPolyline(pl)
-                            if pl.is_closed && pl.vertices.len() >= 3 =>
-                        {
-                            loops.push(
-                                pl.vertices
-                                    .iter()
-                                    .map(|v| Vector3::new(v.location.x, v.location.y, 0.0))
-                                    .collect(),
-                            );
-                        }
-                        acadrust::EntityType::Circle(c) => {
-                            let n = 64;
-                            loops.push(
-                                (0..n)
-                                    .map(|k| {
-                                        let a = std::f64::consts::TAU * k as f64 / n as f64;
-                                        Vector3::new(
-                                            c.center.x + c.radius * a.cos(),
-                                            c.center.y + c.radius * a.sin(),
-                                            c.center.z,
-                                        )
-                                    })
-                                    .collect(),
-                            );
-                        }
-                        _ => {}
+                            if pl.is_closed && pl.vertices.len() >= 3
+                    ) || matches!(e, acadrust::EntityType::Circle(_));
+                    if supported {
+                        let Some(curve) = crate::entities::curve::entity_curve(e) else {
+                            continue;
+                        };
+                        loops.push(
+                            crate::entities::curve::curve_points(&curve)
+                                .into_iter()
+                                .map(|point| Vector3::new(point[0], point[1], point[2]))
+                                .collect(),
+                        );
                     }
                 }
                 if loops.is_empty() {
@@ -908,17 +1078,7 @@ impl OpenCADStudio {
                 }
             }
 
-            // PYRAMID <radius> <height> [sides] — create an n-sided pyramid mesh.
-            "PYRAMID" | "PYR" => {
-                use crate::command::TwoValuePromptCommand;
-                let c = TwoValuePromptCommand::new(
-                    "PYRAMID",
-                    "PYRAMID  base radius:",
-                    "PYRAMID  height (add sides by typing a 3rd number):",
-                );
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
-            }
+            // PYRAMID <radius> <height> [sides] keeps the direct numeric form.
             cmd if cmd.starts_with("PYRAMID ") || cmd.starts_with("PYR ") => {
                 let nums: Vec<f64> = cmd
                     .split_whitespace()

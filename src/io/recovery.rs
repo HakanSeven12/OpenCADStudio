@@ -589,11 +589,17 @@ fn diagnostic_platform() -> String {
     format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unix_seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unix_seconds() -> u64 {
+    (js_sys::Date::now() / 1000.0) as u64
 }
 
 fn safe_stem(value: &str) -> String {
@@ -671,4 +677,42 @@ fn write_unique(directory: &Path, file_name: &str, body: &str) -> Result<PathBuf
         }
     }
     Err("Could not allocate a unique recovery-log name".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{report_id, RecoveryReport, RecoveryStatus};
+
+    #[test]
+    fn report_id_includes_timestamp_and_source_fingerprint() {
+        assert_eq!(
+            report_id(
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+                1_777_777_777,
+            ),
+            "R2-1777777777-0123456789ab"
+        );
+        assert_eq!(report_id(None, 1_777_777_777), "R2-1777777777-nohash");
+    }
+
+    #[test]
+    fn failed_report_uses_current_timestamp_in_report_id() {
+        let report = RecoveryReport::failed(
+            None,
+            "invalid.dwg".to_string(),
+            42,
+            None,
+            None,
+            "parse".to_string(),
+            "invalid drawing".to_string(),
+            7,
+        );
+
+        assert_eq!(report.status, RecoveryStatus::Failed);
+        assert!(report.created_unix_seconds > 0);
+        assert_eq!(
+            report.report_id,
+            report_id(report.source_sha256.as_deref(), report.created_unix_seconds)
+        );
+    }
 }

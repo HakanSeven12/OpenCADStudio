@@ -14,6 +14,7 @@ use acadrust::entities::Insert;
 use acadrust::objects::{ObjectType, SpatialFilter};
 use acadrust::types::{Handle, Transform, Vector3};
 use acadrust::CadDocument;
+use cadkernel::geom2d::{contains, Curve, Line, Tolerance};
 
 use crate::scene::model::wire_model::WireModel;
 
@@ -116,6 +117,12 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
         .iter()
         .map(|&[x, y]| [(x - rx) as f32, (y - ry) as f32])
         .collect();
+    let boundary: Vec<Curve> = poly
+        .iter()
+        .zip(poly.iter().cycle().skip(1))
+        .take(poly.len())
+        .map(|(&start, &end)| Curve::Line(Line { start, end }))
+        .collect();
 
     // Reconstruct an absolute-f64 wire point from its high/low pair, NaN-safe.
     let abs = |hi: [f32; 3], lo: [f32; 3]| -> [f64; 3] {
@@ -127,7 +134,18 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
     };
 
     for w in wires.iter_mut() {
-        if !w.points.is_empty() {
+        let keep_marker = w.point_marker.map(|marker| {
+            contains(
+                &boundary,
+                [marker.origin.x, marker.origin.y],
+                Tolerance::default(),
+            )
+        });
+        if keep_marker == Some(false) {
+            w.points.clear();
+            w.points_low.clear();
+            w.point_marker = None;
+        } else if keep_marker.is_none() && !w.points.is_empty() {
             // Absolute → local f32 (NaN separators preserved).
             let local: Vec<[f32; 3]> = (0..w.points.len())
                 .map(|i| {
@@ -257,9 +275,12 @@ pub fn frame_wire(
         lo.push([lx, ly, 0.0]);
     }
     WireModel {
+        point_marker: None,
         taper_widths: Vec::new(),
         world_width: 0.0,
         depth_override: None,
+        display_visible: true,
+        plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
         render_instance: None,

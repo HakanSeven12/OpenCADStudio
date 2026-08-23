@@ -1,5 +1,22 @@
 use super::*;
 
+fn selected_solid(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
+    let scene = &app.tabs.get(tab)?.scene;
+    let selected = scene.selected_handles_in_order();
+    let [handle] = selected.as_slice() else {
+        return None;
+    };
+
+    if matches!(
+        scene.document.get_entity(*handle),
+        Some(acadrust::EntityType::Solid3D(_))
+    ) {
+        Some(*handle)
+    } else {
+        None
+    }
+}
+
 impl OpenCADStudio {
     pub(super) fn dispatch_dim(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
@@ -920,30 +937,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            // Bare ZOOM prompts with the mode options as clickable keywords;
-            // the sub-keyword forms (ZOOM EXTENTS / WINDOW / …) run directly.
-            "ZOOM" => {
-                use crate::command::KeywordCommand;
-                let c = KeywordCommand::new(
-                    "ZOOM",
-                    "ZOOM  [Window / Extents / Previous / Object / All / Dynamic / Extents All / In / Out / Scale]:",
-                    vec![
-                        ("Window", "W", None),
-                        ("Extents", "E", None),
-                        ("Previous", "P", None),
-                        ("Object", "O", None),
-                        ("All", "A", None),
-                        ("Dynamic", "D", None),
-                        ("Extents All", "EA", None),
-                        ("In", "I", None),
-                        ("Out", "OUT", None),
-                        ("Scale", "S", Some("ZOOM  scale factor (e.g. 2 or 0.5):")),
-                    ],
-                );
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
-            }
-            "ZOOM WINDOW" | "ZOOM W" | "ZW" => {
+            "ZOOM" | "ZOOM WINDOW" | "ZOOM W" | "ZW" => {
                 use crate::modules::view::zoom_window::ZoomWindowCommand;
                 let new_cmd = ZoomWindowCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -971,6 +965,20 @@ impl OpenCADStudio {
                 let new_cmd = StretchCommand::new(handles, wires);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "SOLIDFILLET" => {
+                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
+                let command = SolidEdgeCommand::new(EdgeOperation::Fillet, selected_solid(self, i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            "FILLET" if selected_solid(self, i).is_some() => {
+                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
+                let command = SolidEdgeCommand::new(EdgeOperation::Fillet, selected_solid(self, i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "FILLET" => {
@@ -1104,6 +1112,20 @@ impl OpenCADStudio {
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 }
+            }
+
+            "SOLIDCHAMFER" => {
+                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
+                let command = SolidEdgeCommand::new(EdgeOperation::Chamfer, selected_solid(self, i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            "CHAMFER" if selected_solid(self, i).is_some() => {
+                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
+                let command = SolidEdgeCommand::new(EdgeOperation::Chamfer, selected_solid(self, i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "CHAMFER" => {

@@ -24,12 +24,26 @@ use printpdf::{
 use std::io::Write;
 use std::path::Path;
 
+#[derive(Clone, Debug)]
+pub struct PlotWire {
+    pub wire: WireModel,
+    pub draw_depth: f32,
+}
+
+impl std::ops::Deref for PlotWire {
+    type Target = WireModel;
+
+    fn deref(&self) -> &Self::Target {
+        &self.wire
+    }
+}
+
 // The web build has no `printpdf` (it pulls a wasm-incompatible `memchr` via
 // lopdf → nom_locate) and no filesystem, so PDF export is native-only; the web
 // build gets these stubs so the call sites still compile.
 #[cfg(target_arch = "wasm32")]
 pub fn export_pdf(
-    _wires: &[WireModel],
+    _wires: &[PlotWire],
     _hatches: &[HatchModel],
     _wipeouts: &[HatchModel],
     _paper_w: f64,
@@ -95,7 +109,7 @@ pub struct PlotGroupSplits {
 /// Owned render data for one page in a multi-page PDF.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct PdfPageInput {
-    pub wires: std::sync::Arc<Vec<WireModel>>,
+    pub wires: std::sync::Arc<Vec<PlotWire>>,
     pub hatches: Vec<HatchModel>,
     pub wipeouts: Vec<HatchModel>,
     pub paper_w: f64,
@@ -131,7 +145,7 @@ impl Default for PdfPlotOptions {
 /// - `rotation_deg`: 0 | 90 | 180 | 270 — rotates the entire drawing on the page.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn export_pdf(
-    wires: &[WireModel],
+    wires: &[PlotWire],
     hatches: &[HatchModel],
     wipeouts: &[HatchModel],
     paper_w: f64,
@@ -204,7 +218,7 @@ pub fn pick_pdf_path_owned(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn build_pdf(
-    wires: &[WireModel],
+    wires: &[PlotWire],
     hatches: &[HatchModel],
     wipeouts: &[HatchModel],
     paper_w: f32,
@@ -267,7 +281,7 @@ fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) 
 #[cfg(not(target_arch = "wasm32"))]
 fn append_pdf_page(
     doc: &mut PdfDocument,
-    wires: &[WireModel],
+    wires: &[PlotWire],
     hatches: &[HatchModel],
     wipeouts: &[HatchModel],
     paper_w: f32,
@@ -393,21 +407,36 @@ fn append_pdf_page(
         (first_wires, first_hatches, first_wipeouts),
         (second_wires, second_hatches, second_wipeouts),
     ] {
-    emit_wire_fills(&mut ops, wires, ox, oy, plot_style, options);
-
-    // Hatch / wipeout fills render before wires so linework stays visible.
-    for hatch in wipeouts.iter().chain(hatches.iter()) {
-        emit_hatch(
-            &mut ops,
-            hatch,
-            ox,
-            oy,
-            plot_style,
-            scale,
-            options,
-            normal_blend.as_ref(),
-        );
+    enum DrawItem<'a> {
+        WireFill(&'a PlotWire),
+        Hatch(&'a HatchModel),
+        Wire(&'a PlotWire),
+        Text(&'a PlotWire),
     }
+
+    let mut draw_items = Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len());
+    let mut sequence = 0usize;
+    for wire in wires {
+        if !wire.fill_tris.is_empty() {
+            draw_items.push((wire.draw_depth, 0u8, sequence, DrawItem::WireFill(wire)));
+            sequence += 1;
+        }
+        draw_items.push((wire.draw_depth, 2u8, sequence, DrawItem::Wire(wire)));
+        sequence += 1;
+        if !wire.text_verts.is_empty() {
+            draw_items.push((wire.draw_depth, 3u8, sequence, DrawItem::Text(wire)));
+            sequence += 1;
+        }
+    }
+    for hatch in wipeouts.iter().chain(hatches.iter()) {
+        draw_items.push((hatch.draw_depth, 1u8, sequence, DrawItem::Hatch(hatch)));
+        sequence += 1;
+    }
+    draw_items.sort_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
 
     let mut last_color: Option<[f32; 3]> = None;
     let mut last_lw: Option<f32> = None;
@@ -415,7 +444,55 @@ fn append_pdf_page(
     // re-emitted when it actually changes between wires.
     let mut last_dash: Option<Vec<i64>> = None;
 
-    for wire in wires {
+    for (_, _, _, item) in draw_items {
+        let wire = match item {
+            DrawItem::WireFill(wire) => {
+                emit_wire_fills(
+                    &mut ops,
+                    std::slice::from_ref(&wire.wire),
+                    ox,
+                    oy,
+                    plot_style,
+                    options,
+                );
+                last_color = None;
+                last_lw = None;
+                last_dash = None;
+                continue;
+            }
+            DrawItem::Hatch(hatch) => {
+                emit_hatch(
+                    &mut ops,
+                    hatch,
+                    ox,
+                    oy,
+                    plot_style,
+                    scale,
+                    options,
+                    normal_blend.as_ref(),
+                );
+                last_color = None;
+                last_lw = None;
+                last_dash = None;
+                continue;
+            }
+            DrawItem::Text(wire) => {
+                emit_text(
+                    &mut ops,
+                    std::slice::from_ref(&wire.wire),
+                    ox,
+                    oy,
+                    scale,
+                    plot_style,
+                    options,
+                );
+                last_color = None;
+                last_lw = None;
+                last_dash = None;
+                continue;
+            }
+            DrawItem::Wire(wire) => wire,
+        };
         let [mut r, mut g, mut b, a] = wire.color;
         if a < 0.01 {
             continue;
@@ -541,9 +618,9 @@ fn append_pdf_page(
                 flush_line(&mut ops, &segment, dot_radius);
                 segment.clear();
             } else {
-                let lo = wire.points_low.get(pi).copied().unwrap_or([0.0; 3]);
-                let wx = (x as f64 + lo[0] as f64 + ox) as f32;
-                let wy = (y as f64 + lo[1] as f64 + oy) as f32;
+                let point = wire.point_world(pi, paper_h as f64 / scale.max(1e-6) as f64);
+                let wx = (point.x + ox) as f32;
+                let wy = (point.y + oy) as f32;
                 segment.push(LinePoint {
                     p: Point::new(Mm(wx), Mm(wy)),
                     bezier: false,
@@ -552,13 +629,6 @@ fn append_pdf_page(
         }
         flush_line(&mut ops, &segment, dot_radius);
     }
-
-    // Text (SDF glyph quads) — re-emitted as vector strokes / fills. Text now
-    // renders on-screen only as textured SDF quads (`wire.text_verts`), which
-    // this CPU exporter can't sample, so without this pass all text — including
-    // dimension text — is missing from the PDF (issue #385). Drawn after the
-    // wires (on top) and under the same rotation/scale/clip CTM.
-    emit_text(&mut ops, wires, ox, oy, scale, plot_style, options);
     }
 
     if needs_state {

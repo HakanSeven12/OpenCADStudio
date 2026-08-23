@@ -378,7 +378,7 @@ impl shader::Primitive for Primitive {
                 inner.cached_wire_id = u64::MAX;
                 inner.cached_selection = (u64::MAX, u64::MAX);
                 inner.cached_mesh_content_id = u64::MAX;
-                inner.cached_face3d_key = (u64::MAX, false, false);
+                inner.cached_face3d_key = (u64::MAX, false, false, u64::MAX);
                 inner.cached_hatch_source = None;
                 inner.cached_preview_hatch_source = None;
                 inner.cached_wipeout_source = None;
@@ -484,6 +484,12 @@ impl shader::Primitive for Primitive {
             // the view toggle so 2D fills stay on even when the user picks
             // the Wireframe overlay style.
             let face3d_fill_active = fill_mode && !vp.view_wireframe;
+            let solid_fill_active = fill_mode && vp.show_2d_solid_fills;
+            let solid_visibility_key =
+                crate::scene::pipeline::face3d_gpu::planar_solid_visibility_key(
+                    &vp_wires,
+                    vp.view_dir,
+                );
             let fill_changed = inner.cached_fill_mode != fill_mode;
             let hatch_changed = inner
                 .cached_hatch_source
@@ -574,14 +580,16 @@ impl shader::Primitive for Primitive {
                     && !face_pass_unchanged);
             if face3d_changed
                 || face3d_fill_active != inner.cached_face3d_key.1
-                || vp.show_2d_solid_fills != inner.cached_face3d_key.2
+                || solid_fill_active != inner.cached_face3d_key.2
+                || solid_visibility_key != inner.cached_face3d_key.3
             {
                 inner.upload_face3d(
                     device,
                     &vp.face3d_wires[..],
                     &vp_wires[..],
                     !face3d_fill_active,
-                    vp.show_2d_solid_fills,
+                    solid_fill_active,
+                    vp.view_dir,
                     &draw_depths,
                 );
                 inner.cached_face3d_source = Some(Arc::clone(&vp.face3d_wires));
@@ -590,7 +598,8 @@ impl shader::Primitive for Primitive {
             inner.cached_face3d_key = (
                 vp.wire_content_id,
                 face3d_fill_active,
-                vp.show_2d_solid_fills,
+                solid_fill_active,
+                solid_visibility_key,
             );
             // Wire buffers are world-space, so a camera move alone doesn't
             // change them — only the view_proj uniform (uploaded every frame).
@@ -1345,6 +1354,7 @@ fn render_signature(vp: &ViewportData, clip_w: u32, clip_h: u32) -> u64 {
                 color2,
                 kind,
                 invert,
+                shift,
             } => {
                 2_u8.hash(&mut h);
                 angle_deg.to_bits().hash(&mut h);
@@ -1353,6 +1363,7 @@ fn render_signature(vp: &ViewportData, clip_w: u32, clip_h: u32) -> u64 {
                 }
                 kind.shader_kind().hash(&mut h);
                 invert.hash(&mut h);
+                shift.to_bits().hash(&mut h);
             }
         }
     }
@@ -2923,6 +2934,9 @@ impl Scene {
         }
         let mut out: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
         for w in wires {
+            if !w.display_visible {
+                continue;
+            }
             if w.render_instance.is_some() {
                 continue;
             }
@@ -3160,6 +3174,7 @@ impl Scene {
         model_render_mode: acadrust::entities::ViewportRenderMode,
         _hover_region: Option<usize>,
         show_viewcube: bool,
+        show_interaction: bool,
         viewcube_text_color: [f32; 4],
     ) -> Primitive {
         let nav_build_started = iced::time::Instant::now();
@@ -3167,7 +3182,7 @@ impl Scene {
         // Hover comes from the scene cell driven by the app-level
         // `CursorMoved` handler — the cube overlay sits above the shader
         // and would otherwise mask the move event from `Program::update`.
-        let hover_region = self.viewcube_hover.get();
+        let hover_region = show_interaction.then(|| self.viewcube_hover.get()).flatten();
         self.selection.borrow_mut().vp_size = (bounds.width, bounds.height);
         if bounds.height > 0.0 {
             self.set_render_aspect(bounds.width / bounds.height);
@@ -3183,7 +3198,14 @@ impl Scene {
             .iter()
             .filter_map(|inst| {
                 let force = self.refresh_consume(self.instance_id_for(inst));
-                self.viewport_data_for(inst, canvas, hover_region, show_viewcube, force)
+                self.viewport_data_for(
+                    inst,
+                    canvas,
+                    hover_region,
+                    show_viewcube,
+                    show_interaction,
+                    force,
+                )
             })
             .collect();
         // Empty viewports → blit nothing; the container background (model bg
@@ -3212,9 +3234,10 @@ impl Scene {
         tile_idx: usize,
         model_render_mode: acadrust::entities::ViewportRenderMode,
         show_viewcube: bool,
+        show_interaction: bool,
         viewcube_text_color: [f32; 4],
     ) -> Primitive {
-        let hover_region = self.viewcube_hover.get();
+        let hover_region = show_interaction.then(|| self.viewcube_hover.get()).flatten();
         let canvas = (bounds.width.max(1.0), bounds.height.max(1.0));
         let bg_color = [0.0, 0.0, 0.0, 0.0];
         let tiles = self.model_tiles.borrow();
@@ -3265,7 +3288,14 @@ impl Scene {
         };
         let force = self.refresh_consume(self.instance_id_for(&inst));
         let viewports = self
-            .viewport_data_for(&inst, canvas, hover_region, show_viewcube, force)
+            .viewport_data_for(
+                &inst,
+                canvas,
+                hover_region,
+                show_viewcube,
+                show_interaction,
+                force,
+            )
             .into_iter()
             .collect();
         let perf_nav = perf_nav.map(|mut sample| {
@@ -3290,6 +3320,7 @@ impl Scene {
         canvas: (f32, f32),
         hover_region: Option<usize>,
         show_viewcube: bool,
+        show_interaction: bool,
         force_rasterize: bool,
     ) -> Option<ViewportData> {
         let display = self.viewport_display_settings(inst);
@@ -3429,7 +3460,7 @@ impl Scene {
         // paper layout, model-space overlays go to all content viewports while
         // paper-space overlays stay on the sheet. This also keeps model-space
         // coordinates out of the full-canvas sheet pass (#540).
-        let show_live_overlay = if self.current_layout == "Model" {
+        let show_live_overlay = show_interaction && if self.current_layout == "Model" {
             true
         } else if self.active_viewport.is_some() {
             !inst.paper_sheet
@@ -3578,11 +3609,12 @@ impl Scene {
         // paper area. Content viewport model builders are block-filtered too;
         // the scissor only clips their already-correct Model Space set.
         let (hatches, wipeout_hatches, paper_images) = if inst.paper_sheet {
-            let (hatches, wipeouts, images) = self.paper_sheet_render_models();
+            let (hatches, wipeouts, images) =
+                self.paper_sheet_render_models_for_view(show_interaction);
             (hatches, wipeouts, Some(images))
         } else {
             (
-                self.hatch_models_for_viewport(inst.handle, &vp_frozen),
+                self.hatch_models_for_viewport(inst.handle, &vp_frozen, show_interaction),
                 self.wipeout_models_for_viewport(inst.handle, &vp_frozen),
                 None,
             )
@@ -3736,10 +3768,21 @@ impl Scene {
             camera_generation: self.camera_generation,
             wire_content_id,
             wire_patch,
-            selected_handles: Arc::new(self.selected.iter().copied().collect()),
-            hover_handles: Arc::new(self.hover_highlight_handles()),
-            selection_generation: self.selection_generation,
-            selected_sig: self.selected_set_sig(),
+            selected_handles: Arc::new(if show_interaction {
+                self.selected.iter().copied().collect()
+            } else {
+                rustc_hash::FxHashSet::default()
+            }),
+            hover_handles: Arc::new(if show_interaction {
+                self.hover_highlight_handles()
+            } else {
+                rustc_hash::FxHashSet::default()
+            }),
+            selection_generation: self
+                .selection_generation
+                .wrapping_mul(2)
+                .wrapping_add(u64::from(!show_interaction)),
+            selected_sig: if show_interaction { self.selected_set_sig() } else { 0 },
             screen_rect,
         })
     }

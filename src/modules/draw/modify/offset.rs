@@ -10,7 +10,7 @@
 //     3. Pick a point on the side to offset toward, or choose Multiple
 //        to keep offsetting the newly created result at the same distance
 
-use crate::entities::curve::entity_curve;
+use crate::entities::curve::{entity_curve, lwpolyline_world_xy};
 use crate::modules::draw::modify::spline_ops::spline_sample_xy;
 use acadrust::entities::LwVertex;
 use acadrust::entities::{
@@ -105,8 +105,8 @@ fn offset_xline(x: &XLineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
 // ── Circle offset ──────────────────────────────────────────────────────────
 
 fn offset_circle(c: &CircleEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
-    let px = side_pt.x as f64;
-    let py = side_pt.y as f64;
+    let plane = crate::entities::curve::circle_curve(c).plane;
+    let [px, py] = plane.project(side_pt.as_dvec3().to_array())?;
     let dc = ((px - c.center.x).powi(2) + (py - c.center.y).powi(2)).sqrt();
 
     let new_r = if dc < c.radius {
@@ -127,8 +127,8 @@ fn offset_circle(c: &CircleEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> 
 // ── Arc offset ─────────────────────────────────────────────────────────────
 
 fn offset_arc(a: &ArcEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
-    let px = side_pt.x as f64;
-    let py = side_pt.y as f64;
+    let plane = crate::entities::curve::arc_curve(a).plane;
+    let [px, py] = plane.project(side_pt.as_dvec3().to_array())?;
     let dc = ((px - a.center.x).powi(2) + (py - a.center.y).powi(2)).sqrt();
 
     let new_r = if dc < a.radius {
@@ -160,6 +160,9 @@ fn offset_arc(a: &ArcEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
 /// offset passed to the algorithm is always ±1. This avoids fixed-epsilon
 /// failures on tiny drawings and on UTM-scale coordinates.
 fn offset_lwpolylines(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Vec<EntityType> {
+    let Some(p) = lwpolyline_world_xy(p) else {
+        return Vec::new();
+    };
     let source = KernelPolyline {
         closed: p.is_closed,
         vertices: p

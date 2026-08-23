@@ -466,29 +466,53 @@ impl OpenCADStudio {
                 }
             }
 
-            // BOX / SPHERE / CYLINDER / CONE / WEDGE / TORUS are handled by the
-            // Model-tab primitive command above (with the kernel boolean caching).
-
             // ── EXTRUDE ────────────────────────────────────────────────────
-            // PRESSPULL on a closed boundary creates a solid by extruding it to a
-            // height — the same operation as EXTRUDE. THICKEN turns a closed planar
-            // profile into a solid of the given thickness, which is also an extrude.
-            "EXTRUDE" | "PRESSPULL" | "THICKEN" => {
+            "EXTRUDE" | "THICKEN" => {
                 use crate::modules::insert::solid3d_cmds::ExtrudeCommand;
                 // If a single entity is already selected, skip the pick step.
                 let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
                 if selected.len() == 1 {
                     let handle = selected[0].0;
-                    let mut cmd = ExtrudeCommand::new(color);
-                    cmd.on_entity_pick(handle, glam::DVec3::ZERO);
+                    let mut cmd = ExtrudeCommand::new_named(cmd, color);
+                    if let Some(curve) = crate::entities::curve::entity_curve(selected[0].1) {
+                        cmd.set_entity_pick_direction(
+                            curve.plane.normal().map(glam::DVec3::from_array),
+                        );
+                        cmd.on_entity_pick(
+                            handle,
+                            glam::DVec3::from_array(curve.plane.origin),
+                        );
+                    }
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let cmd = ExtrudeCommand::new(color);
+                    let cmd = ExtrudeCommand::new_named(cmd, color);
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }
+            }
+
+            "PRESSPULL" => {
+                use crate::modules::insert::solid3d_cmds::PresspullCommand;
+                let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let mut command = PresspullCommand::new(color);
+                if selected.len() == 1
+                    && !matches!(selected[0].1, acadrust::EntityType::Solid3D(_))
+                {
+                    if let Some(curve) = crate::entities::curve::entity_curve(selected[0].1) {
+                        command.set_entity_pick_direction(
+                            curve.plane.normal().map(glam::DVec3::from_array),
+                        );
+                        command.on_entity_pick(
+                            selected[0].0,
+                            glam::DVec3::from_array(curve.plane.origin),
+                        );
+                    }
+                }
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             // ── REVOLVE ────────────────────────────────────────────────────

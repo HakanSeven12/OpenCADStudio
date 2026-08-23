@@ -433,6 +433,9 @@ pub fn eval_to_string(input: &str) -> String {
         let mut found = false;
         // Try longest substring first (greedy)
         for end in (i + 1..=len).rev() {
+            if !starts_and_ends_on_word_boundary(&chars, i, end) {
+                continue;
+            }
             let sub: String = chars[i..end].iter().collect();
             if let Some(v) = eval_number(&sub) {
                 result.push_str(&format!("{}", v));
@@ -447,6 +450,37 @@ pub fn eval_to_string(input: &str) -> String {
         }
     }
     result
+}
+
+/// Rejects expression candidates cut from a surrounding identifier.
+fn starts_and_ends_on_word_boundary(chars: &[char], start: usize, end: usize) -> bool {
+    fn is_word(c: char) -> bool {
+        c.is_alphanumeric() || c == '_'
+    }
+    fn starts_ident(c: char) -> bool {
+        c.is_alphabetic() || c == '_'
+    }
+
+    // First token is an identifier: a word character just before it means this
+    // is the tail of a longer word rather than a name of its own.
+    if starts_ident(chars[start]) && start > 0 && is_word(chars[start - 1]) {
+        return false;
+    }
+
+    // Last token is an identifier when the trailing run of word characters
+    // begins with a letter or `_`. A word character just after `end` means that
+    // identifier continues past the candidate.
+    if end < chars.len() && is_word(chars[end]) {
+        let mut run = end;
+        while run > start && is_word(chars[run - 1]) {
+            run -= 1;
+        }
+        if run < end && starts_ident(chars[run]) {
+            return false;
+        }
+    }
+
+    true
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -613,6 +647,27 @@ mod tests {
     fn embedded_expr_with_functions() {
         assert_eq!(eval_to_string("sqrt(4),3"), "2,3");
         assert_eq!(eval_to_string("abs(-5),ceil(3.1)"), "5,4");
+    }
+
+    #[test]
+    fn embedded_identifier_inside_a_word_is_left_alone() {
+        // Known names must stay unchanged inside identifiers.
+        assert_eq!(eval_to_string("ASPIRATORE"), "ASPIRATORE");
+        assert_eq!(eval_to_string("PIRATE"), "PIRATE");
+        assert_eq!(eval_to_string("copies"), "copies");
+        assert_eq!(eval_to_string("TOPI"), "TOPI");
+        assert_eq!(eval_to_string("pi_2"), "pi_2");
+        assert_eq!(eval_to_string("şpiş"), "şpiş");
+        assert_eq!(eval_to_string("копияpi"), "копияpi");
+        // A standalone `pi` still is a constant.
+        assert_eq!(
+            eval_to_string("pipe,pi"),
+            format!("pipe,{}", std::f64::consts::PI)
+        );
+        assert_eq!(
+            eval_to_string("2*pi,0"),
+            format!("{},0", 2.0 * std::f64::consts::PI)
+        );
     }
 
     #[test]

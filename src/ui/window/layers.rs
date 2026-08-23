@@ -32,6 +32,7 @@ pub enum LayerSortCol {
     On,
     Freeze,
     Lock,
+    Plot,
     Color,
     Linetype,
     Lineweight,
@@ -86,6 +87,7 @@ pub struct Layer {
     pub visible: bool,
     pub frozen: bool,
     pub locked: bool,
+    pub plottable: bool,
     pub color: AcadColor,
     pub linetype: String,
     pub lineweight: LineWeight,
@@ -101,6 +103,7 @@ impl Layer {
             visible: true,
             frozen: false,
             locked: false,
+            plottable: true,
             color,
             linetype: "Continuous".to_string(),
             lineweight: LineWeight::Default,
@@ -214,6 +217,7 @@ impl LayerPanel {
                     visible: !l.flags.off,
                     frozen: l.flags.frozen,
                     locked: l.flags.locked,
+                    plottable: l.is_plottable,
                     color: l.color,
                     linetype: if l.line_type.is_empty() {
                         "Continuous".to_string()
@@ -249,6 +253,10 @@ impl LayerPanel {
         self.apply_sort();
     }
 
+    pub fn refresh_sort(&mut self) {
+        self.apply_sort();
+    }
+
     /// Reorder `self.layers` by the active sort column, preserving the current
     /// selection by name. No-op in document order (`sort_col == None`).
     fn apply_sort(&mut self) {
@@ -275,6 +283,7 @@ impl LayerPanel {
                 LayerSortCol::On => a.visible.cmp(&b.visible),
                 LayerSortCol::Freeze => a.frozen.cmp(&b.frozen),
                 LayerSortCol::Lock => a.locked.cmp(&b.locked),
+                LayerSortCol::Plot => a.plottable.cmp(&b.plottable),
                 LayerSortCol::Color => color_sort_key(a.color).cmp(&color_sort_key(b.color)),
                 LayerSortCol::Linetype => {
                     a.linetype.to_lowercase().cmp(&b.linetype.to_lowercase())
@@ -392,6 +401,7 @@ impl LayerPanel {
             sortable_header(t!("On"), LayerSortCol::On, Length::Fixed(COL_ICON), sc, sa),
             sortable_header(t!("Freeze"), LayerSortCol::Freeze, Length::Fixed(COL_ICON), sc, sa),
             sortable_header(t!("Lock"), LayerSortCol::Lock, Length::Fixed(COL_ICON), sc, sa),
+            sortable_header(t!("Plot"), LayerSortCol::Plot, Length::Fixed(COL_ICON), sc, sa),
             sortable_header(t!("Color"), LayerSortCol::Color, Length::Fixed(COL_COLOR), sc, sa),
             sortable_header(t!("Linetype"), LayerSortCol::Linetype, Length::Fixed(COL_LT), sc, sa),
             sortable_header(t!("Lineweight"), LayerSortCol::Lineweight, Length::Fixed(COL_LW), sc, sa),
@@ -719,6 +729,31 @@ fn layer_row<'a>(
     let vis_svg = crate::ui::icons::layer_visible(layer.visible);
     let frz_svg = crate::ui::icons::layer_freeze(layer.frozen);
     let lck_svg = crate::ui::icons::layer_lock(layer.locked);
+    let plot_icon: Element<'_, Message> = if layer.plottable {
+        crate::ui::icons::themed(crate::ui::icons::PRINT, ICON_SZ)
+    } else {
+        row![
+            crate::ui::icons::themed(crate::ui::icons::PRINT, ICON_SZ),
+            crate::ui::icons::themed_danger(crate::ui::icons::CLOSE, ICON_SZ * 0.65),
+        ]
+        .spacing(0)
+        .align_y(iced::Center)
+        .into()
+    };
+
+    let plot_btn: Element<'_, Message> = button(plot_icon)
+        .on_press(Message::LayerTogglePlot(index))
+        .style(move |theme: &Theme, status| {
+            layer_cell_button_style(theme, status, is_selected, index)
+        })
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 4.0,
+            right: 4.0,
+        })
+        .height(Length::Fixed(ROW_H))
+        .into();
 
     let status_dot: Element<'_, Message> = if is_current {
         crate::ui::icons::themed_success(crate::ui::icons::CHECK, 13.0)
@@ -875,6 +910,9 @@ fn layer_row<'a>(
             .width(Length::Fixed(COL_ICON))
             .align_x(iced::Center),
         container(svg_btn(lck_svg, Message::LayerToggleLock(index)))
+            .width(Length::Fixed(COL_ICON))
+            .align_x(iced::Center),
+        container(plot_btn)
             .width(Length::Fixed(COL_ICON))
             .align_x(iced::Center),
         color_cell,

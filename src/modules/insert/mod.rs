@@ -69,7 +69,7 @@ impl CadModule for InsertModule {
                                 ),
                                 (
                                     "FRAMES2",
-                                    "Frames & Print",
+                                    "Frames On, Not Plotted",
                                     IconKind::Svg(include_bytes!(
                                         "../../../assets/icons/underlay_frames.svg"
                                     )),

@@ -13,12 +13,21 @@ use acadrust::EntityType;
 pub fn ui_name(e: &EntityType) -> &'static str {
     match e {
         EntityType::Point(_) => "Point",
+        EntityType::Line(line)
+            if acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data).is_some() => "Center Mark",
+        EntityType::Line(line)
+            if acadrust::entities::CenterLineAssociation::read(&line.common.extended_data).is_some() => "Center Line",
         EntityType::Line(_) => "Line",
         EntityType::Circle(_) => "Circle",
         EntityType::Arc(_) => "Arc",
         EntityType::Ellipse(_) => "Ellipse",
         EntityType::Spline(_) => "Spline",
         EntityType::Helix(_) => "Helix",
+        EntityType::LwPolyline(polyline)
+            if crate::entities::lwpolyline::is_revision_cloud(polyline) =>
+        {
+            "Revcloud"
+        }
         EntityType::LwPolyline(_) => "Polyline",
         EntityType::Polyline(_) => "Polyline",
         EntityType::Polyline2D(_) => "Polyline2D",

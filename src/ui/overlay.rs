@@ -81,9 +81,7 @@ pub struct GripMarker {
     pub is_hot: bool,
     /// True → pointer is over this grip (drawn with the hover fill).
     pub is_hovered: bool,
-    /// World-XY direction vector — only consumed by the `Rectangle`
-    /// shape to orient the box along its segment. `None` for grips
-    /// that don't need rotation.
+    /// Screen-plane direction with positive Y pointing up.
     pub dir: Option<[f32; 2]>,
 }
 
@@ -263,6 +261,7 @@ pub fn selection_overlay<'a>(
     snap_ext_base: Option<Point>,
     snap_ext_base2: Option<Point>,
     grips: Vec<GripMarker>,
+    control_polygon: Option<(Vec<Point>, bool)>,
     grip_clip: Option<iced::Rectangle>,
     ucs_icons: Vec<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
@@ -284,6 +283,7 @@ pub fn selection_overlay<'a>(
         snap_ext_base,
         snap_ext_base2,
         grips,
+        control_polygon,
         grip_clip,
         ucs_icons,
         ost_points,
@@ -314,6 +314,8 @@ struct SelectionCanvas {
     /// both crossing extensions stay drawn when the crossing is caught. (#247, #259)
     snap_ext_base2: Option<Point>,
     grips: Vec<GripMarker>,
+    /// Selected spline control polygon and closed state.
+    control_polygon: Option<(Vec<Point>, bool)>,
     /// Active 3D pane / floating viewport rectangle. Grip markers are clipped
     /// here so orbiting cannot leak them into paper space or adjacent panes.
     grip_clip: Option<iced::Rectangle>,
@@ -386,12 +388,29 @@ fn draw_grip_marker(frame: &mut canvas::Frame, grip: &GripMarker, theme: &Theme)
             })
         }
         GripShape::Triangle => canvas::Path::new(|b| {
-            b.move_to(Point::new(sp.x, sp.y - h));
-            b.line_to(Point::new(sp.x + h, sp.y + h));
-            b.line_to(Point::new(sp.x - h, sp.y + h));
+            let (forward_x, forward_y) = match grip.dir {
+                Some([dx, dy]) if (dx * dx + dy * dy) > 1e-12 => {
+                    let length = (dx * dx + dy * dy).sqrt();
+                    (dx / length, -dy / length)
+                }
+                _ => (0.0, -1.0),
+            };
+            let side_x = -forward_y;
+            let side_y = forward_x;
+            let tip = Point::new(sp.x + forward_x * h, sp.y + forward_y * h);
+            let base = Point::new(sp.x - forward_x * h, sp.y - forward_y * h);
+            b.move_to(tip);
+            b.line_to(Point::new(base.x + side_x * h, base.y + side_y * h));
+            b.line_to(Point::new(base.x - side_x * h, base.y - side_y * h));
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
+        GripShape::Dropdown => canvas::Path::new(|b| {
+            b.move_to(Point::new(sp.x - h, sp.y - h * 0.5));
+            b.line_to(Point::new(sp.x + h, sp.y - h * 0.5));
+            b.line_to(Point::new(sp.x, sp.y + h));
+            b.close();
+        }),
     };
 
     if grip.is_hot {
@@ -410,10 +429,12 @@ fn draw_grip_marker(frame: &mut canvas::Frame, grip: &GripMarker, theme: &Theme)
     } else {
         let palette = theme.palette();
         let color = palette.primary.base.color;
-        frame.fill(
-            &path,
-            palette.background.base.color.scale_alpha(0.7),
-        );
+        let fill = if grip.shape == GripShape::Dropdown {
+            color
+        } else {
+            palette.background.base.color.scale_alpha(0.7)
+        };
+        frame.fill(&path, fill);
         frame.stroke(
             &path,
             canvas::Stroke {
@@ -686,6 +707,31 @@ impl canvas::Program<Message> for SelectionCanvas {
                 height: grip_y1 - grip_y0,
             };
             frame.with_clip(grip_clip, |frame| {
+                if let Some((points, closed)) = &self.control_polygon {
+                    if points.len() >= 2 {
+                        let polygon = canvas::Path::new(|builder| {
+                            builder.move_to(points[0]);
+                            for point in points.iter().skip(1) {
+                                builder.line_to(*point);
+                            }
+                            if *closed {
+                                builder.line_to(points[0]);
+                            }
+                        });
+                        frame.stroke(
+                            &polygon,
+                            canvas::Stroke {
+                                width: 1.0,
+                                style: canvas::Style::Solid(Color::from_rgb(0.72, 0.32, 0.15)),
+                                line_dash: canvas::LineDash {
+                                    segments: &[4.0, 4.0],
+                                    offset: 0,
+                                },
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
                 for grip in &self.grips {
                     draw_grip_marker(frame, grip, theme);
                 }

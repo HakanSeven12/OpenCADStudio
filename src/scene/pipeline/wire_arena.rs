@@ -127,11 +127,9 @@ fn handle_of(w: &WireModel) -> Option<Handle> {
     crate::scene::Scene::handle_from_wire_name(&w.name)
 }
 
-/// True when `w`'s edge segments belong to a mesh/solid whose fill is drawn in a
-/// separate pass — such wires need the draw loop's mesh-edge treatment, so they
-/// go in their own arena. `mesh_names` are the entities that emit a fill.
-pub fn is_mesh_edge(w: &WireModel, mesh_names: &rustc_hash::FxHashSet<u64>) -> bool {
-    !w.points.is_empty() && handle_of(w).map_or(false, |h| mesh_names.contains(&h.value()))
+/// True when `w` needs the shaded-mode edge treatment.
+pub fn is_mesh_edge(w: &WireModel, _mesh_names: &rustc_hash::FxHashSet<u64>) -> bool {
+    !w.points.is_empty() && w.fill_is_3d
 }
 
 /// True when appending a new entity at the tail could change the image, so the

@@ -46,15 +46,15 @@ struct HatchUniforms {
     grad_sin:     f32,        // 52: gradient direction sin
     grad_min:     f32,        // 56: gradient proj_min
     grad_range:   f32,        // 60: gradient proj_range
-    origin:       vec2<f32>,  // 64: hatch-local pattern origin (boundary
-    //                        //     centre). Pattern math runs against
-    //                        //     `xz - origin` so the f32 modulo doesn't
-    //                        //     catastrophically cancel when world coords
-    //                        //     are large and pattern spacing is small.
-    origin_low:   vec2<f32>,  // 72: anchor low residual (double-single)
+    origin:       vec2<f32>,  // 64: reserved pattern origin
+    origin_low:   vec2<f32>,  // 72: reserved low residual
     draw_depth:   f32,        // 80: signed (-1,1) draw-order bias; 0 = neutral
     _pad0:        f32,        // 84
     _pad1:        vec2<f32>,  // 88
+    plane_origin_high: vec4<f32>,
+    plane_origin_low:  vec4<f32>,
+    plane_x:           vec4<f32>,
+    plane_y:           vec4<f32>,
 }
 @group(1) @binding(0) var<uniform> h: HatchUniforms;
 
@@ -91,8 +91,8 @@ struct FamilyBatch {
 
 struct VIn  {
     @location(0) pos: vec3<f32>,
-    @location(1) translation: vec2<f32>,
-    @location(2) translation_low: vec2<f32>,
+    @location(1) translation: vec3<f32>,
+    @location(2) translation_low: vec3<f32>,
     @location(3) draw_depth: f32,
 }
 struct VOut {
@@ -102,22 +102,9 @@ struct VOut {
 
 @vertex fn vs_main(v: VIn) -> VOut {
     var o: VOut;
-    // v.pos comes in pre-shifted to hatch-local space (CPU subtracted
-    // h.origin from the quad). Add origin back inside the view_proj
-    // multiply to land at the correct world-space clip position. The
-    // f32+f32 addition can lose sub-mm precision at very far hatches
-    // but the result feeds view_proj for screen NDC where sub-pixel
-    // jitter is invisible. The local-space `xz` we export to the
-    // fragment shader stays at full f32 precision so the in_polygon /
-    // pattern math doesn't catastrophically cancel.
-    // Double-single relative-to-eye: anchor high cancels eye_high (Sterbenz);
-    // boundary-local v.pos + anchor low + (−eye_low) carry the residual.
-    let hi = vec3<f32>(h.origin.x + v.translation.x - u.eye_high.x,
-                       h.origin.y + v.translation.y - u.eye_high.y,
-                       -u.eye_high.z);
-    let lo = vec3<f32>(v.pos.x + h.origin_low.x + v.translation_low.x - u.eye_low.x,
-                       v.pos.y + h.origin_low.y + v.translation_low.y - u.eye_low.y,
-                       v.pos.z - u.eye_low.z);
+    let local_world = h.plane_x.xyz * v.pos.x + h.plane_y.xyz * v.pos.y;
+    let hi = h.plane_origin_high.xyz + v.translation - u.eye_high;
+    let lo = local_world + h.plane_origin_low.xyz + v.translation_low - u.eye_low;
     o.clip = u.view_rot * vec4<f32>(hi + lo, 1.0);
     // Draw-order bias (see wire.wgsl): the mask erases what draws BELOW its
     // entity and loses to what draws above — including its own frame wire,
@@ -303,12 +290,7 @@ fn check_family(
         }
     }
 
-    // 4. Pattern: v.xz is already in hatch-local space (CPU pre-shifted
-    //    quad + BoundaryData by h.origin). The PAT family origin
-    //    (typically (0,0)) is treated as relative to h.origin, so
-    //    pattern phase is per-hatch rather than world-aligned — that
-    //    trade-off is the price of f32 precision at large drawing
-    //    extents.
+    // 4. Pattern coordinates are fill-local.
     let cos_off = cos(h.angle_offset);
     let sin_off = sin(h.angle_offset);
     for (var i = 0u; i < f.n_families; i++) {

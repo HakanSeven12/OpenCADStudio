@@ -41,7 +41,10 @@ pub fn break_entity(entity: &EntityType, p1: DVec3, p2: DVec3) -> Option<Vec<Ent
         EntityType::Line(line) => Some(break_line(line, p1, p2)),
         EntityType::Arc(arc) => Some(break_arc(arc, p1, p2)),
         EntityType::Circle(c) => Some(break_circle(c, p1, p2)),
-        EntityType::LwPolyline(p) => Some(break_lwpolyline(p, p1, p2)),
+        EntityType::LwPolyline(p) => {
+            let p = crate::entities::curve::lwpolyline_world_xy(p)?;
+            Some(break_lwpolyline(&p, p1, p2))
+        }
         EntityType::Ellipse(e) => Some(break_ellipse(e, p1, p2)),
         EntityType::Spline(s) => Some(break_spline(s, p1, p2)),
         _ => None,
@@ -93,9 +96,15 @@ fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let cy = arc.center.y;
     let r = arc.radius;
 
-    // Project p1 and p2 onto the arc (world XY plane)
-    let a1 = angle_on_arc(cx, cy, p1);
-    let a2 = angle_on_arc(cx, cy, p2);
+    let plane = crate::entities::curve::arc_curve(arc).plane;
+    let Some(q1) = plane.project(p1.to_array()) else {
+        return vec![EntityType::Arc(arc.clone())];
+    };
+    let Some(q2) = plane.project(p2.to_array()) else {
+        return vec![EntityType::Arc(arc.clone())];
+    };
+    let a1 = angle_on_arc(cx, cy, DVec3::new(q1[0], q1[1], 0.0));
+    let a2 = angle_on_arc(cx, cy, DVec3::new(q2[0], q2[1], 0.0));
 
     let start = arc.start_angle;
     let end = arc.end_angle;
@@ -104,8 +113,7 @@ fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let a1_on = clamp_to_arc(a1, start, end);
     let a2_on = clamp_to_arc(a2, start, end);
 
-    // Resulting arc: from a2_on to a1_on (CCW, skipping the removed segment)
-    // This matches AutoCAD's break behavior: removes CCW from first to second point.
+    // Keep the span outside the two break points.
     if (a1_on - a2_on).abs() < 0.01 {
         // Single-point break: return original unchanged (no gap)
         return vec![EntityType::Arc(arc.clone())];
@@ -123,8 +131,15 @@ fn break_circle(circle: &acadrust::entities::Circle, p1: DVec3, p2: DVec3) -> Ve
     let cx = circle.center.x;
     let cy = circle.center.y;
 
-    let a1 = angle_on_arc(cx, cy, p1);
-    let a2 = angle_on_arc(cx, cy, p2);
+    let plane = crate::entities::curve::circle_curve(circle).plane;
+    let Some(q1) = plane.project(p1.to_array()) else {
+        return vec![EntityType::Circle(circle.clone())];
+    };
+    let Some(q2) = plane.project(p2.to_array()) else {
+        return vec![EntityType::Circle(circle.clone())];
+    };
+    let a1 = angle_on_arc(cx, cy, DVec3::new(q1[0], q1[1], 0.0));
+    let a2 = angle_on_arc(cx, cy, DVec3::new(q2[0], q2[1], 0.0));
 
     if (a1 - a2).abs() < 0.01 {
         return vec![EntityType::Circle(circle.clone())];
@@ -136,6 +151,7 @@ fn break_circle(circle: &acadrust::entities::Circle, p1: DVec3, p2: DVec3) -> Ve
     arc.common.handle = Handle::NULL;
     arc.center = circle.center.clone();
     arc.radius = circle.radius;
+    arc.thickness = circle.thickness;
     arc.normal = circle.normal.clone();
     arc.start_angle = a2;
     arc.end_angle = a1;

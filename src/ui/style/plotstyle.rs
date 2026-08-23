@@ -115,6 +115,7 @@ fn vsep<'a>(height: iced::Length) -> Element<'a, Message> {
 }
 
 pub fn view_window<'a>(
+    document: &'a acadrust::CadDocument,
     table: Option<&'a crate::io::plot_style::PlotStyleTable>,
     selected_aci: u8,
     color_buf: &'a str,
@@ -122,6 +123,25 @@ pub fn view_window<'a>(
     screen_buf: &'a str,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
+    let show_layer_usage = !table.is_some_and(|table| table.is_stb);
+
+let mut layer_usage = vec![Vec::<String>::new(); 256];
+
+    if show_layer_usage {
+        for layer in document.layers.iter() {
+            if let acadrust::types::Color::Index(aci) = &layer.color {
+                let index = *aci as usize;
+
+                if index > 0 && index < layer_usage.len() {
+                    layer_usage[index].push(layer.name.clone());
+                }
+            }
+        }
+
+        for layers in &mut layer_usage {
+            layers.sort_by_key(|name| name.to_ascii_lowercase());
+        }
+    }
     let table_name = table
         .map(|t| t.name.clone())
         .unwrap_or_else(|| t!("(no table loaded)").into_owned());
@@ -164,6 +184,16 @@ pub fn view_window<'a>(
     let aci_items: Vec<Element<'_, Message>> = (1u8..=255)
         .map(|aci| {
             let is_sel = aci == selected_aci;
+            let usage_count = layer_usage
+                .get(aci as usize)
+                .map(Vec::len)
+                .unwrap_or(0);
+
+            let usage_label = if show_layer_usage && usage_count > 0 {
+                format!("● {usage_count}")
+            } else {
+                String::new()
+            };
             let (aci_color, _) = crate::ui::properties::acad_color_display(
                 acadrust::types::Color::Index(aci),
             );
@@ -195,7 +225,16 @@ pub fn view_window<'a>(
             button(
                 row![
                     crate::ui::color_select::swatch(aci_color),
-                    text(label).size(10).font(iced::Font::MONOSPACE),
+
+                    text(label)
+                        .size(10)
+                        .font(iced::Font::MONOSPACE)
+                        .width(iced::Length::Fill),
+
+                    text(usage_label)
+                        .size(10)
+                        .font(iced::Font::MONOSPACE)
+                        .width(42),
                 ]
                 .spacing(6)
                 .align_y(iced::Center),
@@ -226,7 +265,18 @@ pub fn view_window<'a>(
 
     let aci_list = container(
         column![
-            text(t!("ACI Color Index")).size(10).style(muted_style),
+            row![
+                text(t!("ACI Color Index"))
+                    .size(10)
+                    .style(muted_style)
+                    .width(iced::Length::Fill),
+
+                text(t!("Layers"))
+                    .size(10)
+                    .style(muted_style)
+                    .width(42),
+            ]
+            .align_y(iced::Center),
             container(scrollable(column(aci_items).spacing(1)).height(sizing.height))
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
@@ -257,6 +307,16 @@ pub fn view_window<'a>(
     });
 
     // ── Right: Edit panel ─────────────────────────────────────────────────
+    let selected_layers = layer_usage
+        .get(selected_aci as usize)
+        .cloned()
+        .unwrap_or_default();
+
+    let selected_layers_text = if selected_layers.is_empty() {
+        t!("(none)").into_owned()
+    } else {
+        selected_layers.join(", ")
+    };
     let entry = table.and_then(|t| t.aci_entries.get(selected_aci as usize));
     let cur_color = entry
         .and_then(|e| e.color.map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}")))
@@ -302,6 +362,28 @@ pub fn view_window<'a>(
             ]
             .spacing(8)
             .align_y(iced::Center),
+            if show_layer_usage {
+                container(
+                    column![
+                        text(format!(
+                            "{}: {}",
+                            t!("Layers"),
+                            selected_layers.len()
+                        ))
+                        .size(10)
+                        .style(muted_style),
+
+                        text(selected_layers_text)
+                            .size(10)
+                            .width(iced::Length::Fill),
+                    ]
+                    .spacing(3),
+                )
+                .padding([5, 8])
+                .width(iced::Length::Fill)
+            } else {
+                container(Space::new().height(0))
+            },
 
             // ── Plot color ───────────────────────────────────────────────────
             lbl(t!("Plot color:")),
@@ -403,6 +485,63 @@ pub fn view_window<'a>(
                 cur_scr = cur_scr
             ))
             .size(10),
+
+            Space::new().height(12),
+
+            hdivider(iced::Length::Fill),
+
+            Space::new().height(8),
+
+            if show_layer_usage {
+                container(
+                    column![
+                        row![
+                            text(format!("Layers using ACI {selected_aci}"))
+                                .size(11),
+
+                            Space::new().width(iced::Length::Fill),
+
+                            text(format!(
+                                "{} {}",
+                                selected_layers.len(),
+                                if selected_layers.len() == 1 {
+                                    "layer"
+                                } else {
+                                    "layers"
+                                }
+                            ))
+                            .size(10)
+                            .style(muted_style),
+                        ]
+                        .align_y(iced::Center),
+
+                        if selected_layers.is_empty() {
+                            column![
+                                text("No layers use this ACI in the current drawing.")
+                                    .size(10)
+                                    .style(muted_style)
+                            ]
+                        } else {
+                            column(
+                                selected_layers
+                                    .iter()
+                                    .map(|name| {
+                                        text(format!("• {name}"))
+                                            .size(10)
+                                            .into()
+                                    })
+                                    .collect::<Vec<Element<'_, Message>>>()
+                            )
+                            .spacing(4)
+                        },
+                    ]
+                    .spacing(7),
+                )
+                .padding([8, 4])
+                .width(iced::Length::Fill)
+            } else {
+                container(Space::new().height(0))
+            },
 
             Space::new().height(sizing.height),
 

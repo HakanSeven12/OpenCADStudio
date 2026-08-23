@@ -1,12 +1,25 @@
 use acadrust::entities::Spline;
-use crate::t;
-use cadkernel::space::NurbsCurve3;
+use cadkernel::geom2d::Curve as KernelCurve;
+use cadkernel::space::{NurbsCurve3, Parameterization};
 
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
+use crate::entities::common::{
+    dropdown_grip, edit_prop as edit, edit_scalar_prop as edit_scalar, format_length,
+    parse_f64, ro_prop as ro, round_grip, square_grip,
+};
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::t;
+
+pub(crate) fn uses_fit_method(spline: &Spline) -> bool {
+    let degree = spline.degree.max(1) as usize;
+    !spline.fit_points.is_empty() && spline.control_points.len() <= degree
+}
+
+pub(crate) fn shows_fit_points(spline: &Spline) -> bool {
+    uses_fit_method(spline) && (!spline.cv_frame_visible || spline.flags.periodic)
+}
 
 fn to_render(spl: &Spline) -> RenderEntity {
     let n = spl.control_points.len();
@@ -28,7 +41,8 @@ fn to_render(spl: &Spline) -> RenderEntity {
                 // A fit spline through points in space is not a planar curve,
                 // so the kernel has nothing to say about it and the solve
                 // here remains the only description of its shape.
-                None if spl.flags.closed || spl.flags.periodic => {
+                None if spl.flags.periodic => periodic_fit_spline_polyline(spl),
+                None if spl.flags.closed => {
                     catmull_rom_polyline(&spl.fit_points, true)
                 }
                 None => fit_spline_polyline(spl),
@@ -86,22 +100,24 @@ fn to_render(spl: &Spline) -> RenderEntity {
     let (snap_pts, key_vertices) = match curve_snap {
         Some(snap) => {
             let mut points = snap.snap_pts;
-            points.extend(spl.fit_points.iter().map(|p| {
-                (
-                    glam::DVec3::new(p.x, p.y, p.z),
-                    crate::scene::model::wire_model::SnapHint::Endpoint,
-                )
-            }));
+            if uses_fit_method(spl) {
+                points.extend(spl.fit_points.iter().map(|p| {
+                    (
+                        glam::DVec3::new(p.x, p.y, p.z),
+                        crate::scene::model::wire_model::SnapHint::Endpoint,
+                    )
+                }));
+            }
             (points, Vec::new())
         }
         // A spline through points in space is not a planar curve, so the
         // kernel has nothing to say about it. Its stored points remain the
         // only thing to offer.
         None => {
-            let source = if spl.fit_points.is_empty() {
-                &spl.control_points
-            } else {
+            let source = if uses_fit_method(spl) {
                 &spl.fit_points
+            } else {
+                &spl.control_points
             };
             (
                 Vec::new(),
@@ -141,16 +157,22 @@ fn to_render(spl: &Spline) -> RenderEntity {
 }
 
 pub(crate) fn measurement_polyline(spl: &Spline) -> Vec<[f64; 3]> {
-    let count = spl.control_points.len();
-    if count < 2 {
+    if uses_fit_method(spl) {
         if spl.fit_points.len() < 2 {
-            return spl.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
+            return spl.fit_points.iter().map(|p| [p.x, p.y, p.z]).collect();
         }
-        return if spl.flags.closed || spl.flags.periodic {
+        return if spl.flags.periodic {
+            periodic_fit_spline_polyline(spl)
+        } else if spl.flags.closed {
             catmull_rom_polyline(&spl.fit_points, true)
         } else {
             fit_spline_polyline(spl)
         };
+    }
+
+    let count = spl.control_points.len();
+    if count < 2 {
+        return spl.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
     }
 
     let degree = spl.degree.max(0) as usize;
@@ -261,6 +283,76 @@ fn fit_spline_polyline(spl: &Spline) -> Vec<[f64; 3]> {
         return p;
     }
 
+    let Some((h, slopes)) = fit_spline_slopes(spl, &p) else {
+        return p;
+    };
+
+    // Evaluate each segment as a cubic Hermite (dP/du = slope · h_i).
+    let mut out = Vec::new();
+    for i in 0..n - 1 {
+        let point_at = |u: f64| {
+            let (u2, u3) = (u * u, u * u * u);
+            let h00 = 2.0 * u3 - 3.0 * u2 + 1.0;
+            let h10 = u3 - 2.0 * u2 + u;
+            let h01 = -2.0 * u3 + 3.0 * u2;
+            let h11 = u3 - u2;
+            let mut q = [0.0f64; 3];
+            for k in 0..3 {
+                let m0 = slopes[k][i] * h[i];
+                let m1 = slopes[k][i + 1] * h[i];
+                q[k] = h00 * p[i][k] + h10 * m0 + h01 * p[i + 1][k] + h11 * m1;
+            }
+            q
+        };
+        let tangent_at = |u: f64| {
+            let u2 = u * u;
+            let (h00, h10, h01, h11) = (
+                6.0 * u2 - 6.0 * u,
+                3.0 * u2 - 4.0 * u + 1.0,
+                -6.0 * u2 + 6.0 * u,
+                3.0 * u2 - 2.0 * u,
+            );
+            let mut q = [0.0; 3];
+            for k in 0..3 {
+                let m0 = slopes[k][i] * h[i];
+                let m1 = slopes[k][i + 1] * h[i];
+                q[k] = h00 * p[i][k] + h10 * m0 + h01 * p[i + 1][k] + h11 * m1;
+            }
+            q
+        };
+        let sampled = cadkernel::tessellation::sample_curve3_angle(
+            point_at,
+            tangent_at,
+            cadkernel::tessellation::DEFAULT_ANGLE,
+        );
+        out.extend(sampled.into_iter().skip(usize::from(i > 0)));
+    }
+    out
+}
+
+fn periodic_fit_spline_polyline(spl: &Spline) -> Vec<[f64; 3]> {
+    let points: Vec<[f64; 3]> = spl
+        .fit_points
+        .iter()
+        .map(|point| [point.x, point.y, point.z])
+        .collect();
+    let parameterization = match spl.knot_parameterization {
+        2 => Parameterization::Uniform,
+        1 => Parameterization::Centripetal,
+        _ => Parameterization::Chord,
+    };
+    NurbsCurve3::interpolate_periodic(&points, parameterization)
+        .map(|curve| curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE))
+        .unwrap_or_else(|| catmull_rom_polyline(&spl.fit_points, true))
+}
+
+/// Slopes used by spatial fit interpolation.
+fn fit_spline_slopes(spl: &Spline, p: &[[f64; 3]]) -> Option<(Vec<f64>, [Vec<f64>; 3])> {
+    let n = p.len();
+    if n < 2 {
+        return None;
+    }
+
     // Parameterise the fit points (unnormalised, so a unit end tangent — how the
     // tangents are stored — is a consistent dP/dt). Match the spline's knot
     // parameterisation: 2 = uniform, 1 = centripetal (√chord), else chord.
@@ -329,48 +421,7 @@ fn fit_spline_polyline(spl: &Spline) -> Vec<[f64; 3]> {
         thomas_solve(&a, &b, &c, &mut d);
         slopes[k] = d;
     }
-
-    // Evaluate each segment as a cubic Hermite (dP/du = slope · h_i).
-    let mut out = Vec::new();
-    for i in 0..n - 1 {
-        let point_at = |u: f64| {
-            let (u2, u3) = (u * u, u * u * u);
-            let h00 = 2.0 * u3 - 3.0 * u2 + 1.0;
-            let h10 = u3 - 2.0 * u2 + u;
-            let h01 = -2.0 * u3 + 3.0 * u2;
-            let h11 = u3 - u2;
-            let mut q = [0.0f64; 3];
-            for k in 0..3 {
-                let m0 = slopes[k][i] * h[i];
-                let m1 = slopes[k][i + 1] * h[i];
-                q[k] = h00 * p[i][k] + h10 * m0 + h01 * p[i + 1][k] + h11 * m1;
-            }
-            q
-        };
-        let tangent_at = |u: f64| {
-            let u2 = u * u;
-            let (h00, h10, h01, h11) = (
-                6.0 * u2 - 6.0 * u,
-                3.0 * u2 - 4.0 * u + 1.0,
-                -6.0 * u2 + 6.0 * u,
-                3.0 * u2 - 2.0 * u,
-            );
-            let mut q = [0.0; 3];
-            for k in 0..3 {
-                let m0 = slopes[k][i] * h[i];
-                let m1 = slopes[k][i + 1] * h[i];
-                q[k] = h00 * p[i][k] + h10 * m0 + h01 * p[i + 1][k] + h11 * m1;
-            }
-            q
-        };
-        let sampled = cadkernel::tessellation::sample_curve3_angle(
-            point_at,
-            tangent_at,
-            cadkernel::tessellation::DEFAULT_ANGLE,
-        );
-        out.extend(sampled.into_iter().skip(usize::from(i > 0)));
-    }
-    out
+    Some((h, slopes))
 }
 
 /// In-place Thomas solve for a tridiagonal system (`a` sub-, `b` main-, `c`
@@ -390,189 +441,523 @@ fn thomas_solve(a: &[f64], b: &[f64], c: &[f64], d: &mut [f64]) {
     }
 }
 
-fn grips(spline: &Spline) -> Vec<GripDef> {
-    // A fit-point spline carries no control points, so its editable points — and
-    // therefore its grips — are the fit points it interpolates. A CV spline
-    // grips its control vertices.
-    let source = if spline.control_points.is_empty() {
-        &spline.fit_points
-    } else {
-        &spline.control_points
+pub(crate) const SPLINE_MODE_GRIP_ID: usize = usize::MAX - 1;
+
+fn control_vertices(spline: &Spline) -> Vec<acadrust::types::Vector3> {
+    if !uses_fit_method(spline) {
+        return spline.control_points.clone();
+    }
+    let Some(planar) = crate::entities::curve::spline_curve(spline) else {
+        return Vec::new();
     };
-    source
+    let KernelCurve::Nurbs(curve) = &planar.curve else {
+        return Vec::new();
+    };
+    curve
+        .control_points()
         .iter()
-        .enumerate()
-        .map(|(i, p)| square_grip(i, glam::DVec3::new(p.x, p.y, p.z)))
+        .map(|point| {
+            let point = planar.plane.point_at(*point);
+            acadrust::types::Vector3::new(point[0], point[1], point[2])
+        })
         .collect()
 }
 
-fn properties(spline: &Spline) -> Vec<PropSection> {
-    let show = if spline.fit_points.is_empty() {
-        "Control Vertices"
-    } else {
-        "Fit Points"
-    };
-    let cp0 = spline.control_points.first();
-    let fp0 = spline.fit_points.first();
-    let w0 = spline.weights.first().copied();
+pub(crate) fn control_vertex_count(spline: &Spline) -> usize {
+    control_vertices(spline).len()
+}
 
-    // Polyline-approximation length over the effective defining points.
-    let pts = if spline.fit_points.is_empty() {
-        &spline.control_points
-    } else {
-        &spline.fit_points
+fn choice_prop(
+    label: &str,
+    field: &'static str,
+    selected: &str,
+    options: &[&str],
+) -> Property {
+    Property {
+        label: label.into(),
+        field,
+        value: PropValue::Choice {
+            selected: selected.to_string(),
+            options: options.iter().map(|option| option.to_string()).collect(),
+        },
+    }
+}
+
+fn index_prop(label: &str, field: &'static str, index: usize, count: usize) -> Property {
+    Property {
+        label: label.into(),
+        field,
+        value: PropValue::EditText(if count == 0 {
+            "0".to_string()
+        } else {
+            (index + 1).to_string()
+        }),
+    }
+}
+
+fn convert_to_control_method(spline: &mut Spline) -> bool {
+    if !uses_fit_method(spline) {
+        return true;
+    }
+    let Some(planar) = crate::entities::curve::spline_curve(spline) else {
+        return false;
     };
-    let mut length = 0.0;
-    for w in pts.windows(2) {
-        let dx = w[1].x - w[0].x;
-        let dy = w[1].y - w[0].y;
-        let dz = w[1].z - w[0].z;
-        length += (dx * dx + dy * dy + dz * dz).sqrt();
+    let KernelCurve::Nurbs(curve) = &planar.curve else {
+        return false;
+    };
+    spline.degree = curve.degree() as i32;
+    spline.knots = curve.knots().to_vec();
+    spline.control_points = curve
+        .control_points()
+        .iter()
+        .map(|point| {
+            let point = planar.plane.point_at(*point);
+            acadrust::types::Vector3::new(point[0], point[1], point[2])
+        })
+        .collect();
+    spline.weights = if curve.is_rational() {
+        curve.weights().to_vec()
+    } else {
+        Vec::new()
+    };
+    spline.flags.rational = curve.is_rational();
+    spline.flags.planar = true;
+    spline.fit_points.clear();
+    spline.begin_tangent = acadrust::types::Vector3::ZERO;
+    spline.end_tangent = acadrust::types::Vector3::ZERO;
+    true
+}
+
+fn convert_to_fit_method(spline: &mut Spline) -> bool {
+    uses_fit_method(spline)
+}
+
+fn tangent_is_set(tangent: &acadrust::types::Vector3) -> bool {
+    tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z > 1e-18
+}
+
+/// Stored or kernel-derived fit-curve end tangents.
+fn effective_fit_tangents(
+    spline: &Spline,
+) -> (acadrust::types::Vector3, acadrust::types::Vector3) {
+    let begin_set = tangent_is_set(&spline.begin_tangent);
+    let end_set = tangent_is_set(&spline.end_tangent);
+    if begin_set && end_set {
+        return (spline.begin_tangent, spline.end_tangent);
     }
 
-    let closed = spline.flags.closed || spline.flags.periodic;
-    let yes_no = |b: bool| if b { "Yes" } else { "No" };
+    let derived = crate::entities::curve::spline_curve(spline).and_then(|planar| {
+        let KernelCurve::Nurbs(curve) = &planar.curve else {
+            return None;
+        };
+        let (start, end) = curve.domain();
+        Some((
+            planar.plane.vector_at(curve.derivative_at_knot(start)),
+            planar.plane.vector_at(curve.derivative_at_knot(end)),
+        ))
+    });
 
-    // Knot parameterization method (R2013+ DWG); older splines report 0.
+    let Some((derived_begin, derived_end)) = derived else {
+        return (spline.begin_tangent, spline.end_tangent);
+    };
+    let vector = |value: [f64; 3]| {
+        acadrust::types::Vector3::new(value[0], value[1], value[2])
+    };
+    (
+        if begin_set {
+            spline.begin_tangent
+        } else {
+            vector(derived_begin)
+        },
+        if end_set {
+            spline.end_tangent
+        } else {
+            vector(derived_end)
+        },
+    )
+}
+
+fn grips(spline: &Spline) -> Vec<GripDef> {
+    let fit_method = uses_fit_method(spline);
+    let derived_control = control_vertices(spline);
+    let show_control_vertices = (spline.cv_frame_visible || !fit_method)
+        && !(fit_method && spline.flags.periodic)
+        && derived_control.len() >= 2;
+    let source = if show_control_vertices {
+        derived_control
+    } else if fit_method {
+        spline.fit_points.clone()
+    } else {
+        spline.control_points.clone()
+    };
+    let mut grips: Vec<_> = source
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let world = glam::DVec3::new(p.x, p.y, p.z);
+            if show_control_vertices {
+                round_grip(i, world)
+            } else {
+                square_grip(i, world)
+            }
+        })
+        .collect();
+    if let Some(first) = source.first() {
+        grips.push(dropdown_grip(
+            SPLINE_MODE_GRIP_ID,
+            glam::DVec3::new(first.x, first.y, first.z),
+        ));
+    }
+    grips
+}
+
+fn properties(spline: &Spline) -> Vec<PropSection> {
+    let fit_method = uses_fit_method(spline);
+    let show_fit = shows_fit_points(spline);
+    let method = if show_fit { "Fit" } else { "Control Vertices" };
+    let closed = spline.flags.closed || spline.flags.periodic;
+    let can_show_control = control_vertices(spline).len() >= 2
+        && !(fit_method && spline.flags.periodic);
+    let yes_no = |b: bool| if b { "Yes" } else { "No" };
     let knot_param = match spline.knot_parameterization {
         0 => "Chord",
         1 => "Square Root",
         2 => "Uniform",
+        15 => "Custom",
         _ => "Custom",
     };
-
-    // Closed splines enclose an area; approximate it with the shoelace
-    // formula over the defining points projected to the XY plane, matching
-    // the polyline approximation already used for Length.
-    let area = if closed && pts.len() >= 3 {
-        let mut acc = 0.0;
-        for w in pts.windows(2) {
-            acc += w[0].x * w[1].y - w[1].x * w[0].y;
-        }
-        if let (Some(first), Some(last)) = (pts.first(), pts.last()) {
-            acc += last.x * first.y - first.x * last.y;
-        }
-        format!("{:.4}", acc.abs() * 0.5)
+    let current = crate::scene::view::dispatch::prop_current_vertex();
+    let (effective_begin_tangent, effective_end_tangent) = effective_fit_tangents(spline);
+    let mut data_points = if show_fit {
+        let count = spline.fit_points.len();
+        let index = current.min(count.saturating_sub(1));
+        let point = spline.fit_points.get(index);
+        vec![
+            ro(
+                t!("Number of fit points").as_ref(),
+                "fit_pt_count",
+                count.to_string(),
+            ),
+            index_prop(
+                t!("Current Fit point").as_ref(),
+                "current_fit_point",
+                index,
+                count,
+            ),
+            edit(
+                t!("Fit point X").as_ref(),
+                "fit_pt_x",
+                point.map(|value| value.x).unwrap_or(0.0),
+            ),
+            edit(
+                t!("Fit point Y").as_ref(),
+                "fit_pt_y",
+                point.map(|value| value.y).unwrap_or(0.0),
+            ),
+            edit(
+                t!("Fit point Z").as_ref(),
+                "fit_pt_z",
+                point.map(|value| value.z).unwrap_or(0.0),
+            ),
+            if matches!(spline.knot_parameterization, 0..=2) {
+                choice_prop(
+                    t!("Knot parameterization").as_ref(),
+                    "knot_param",
+                    knot_param,
+                    &["Chord", "Square Root", "Uniform"],
+                )
+            } else {
+                ro(
+                    t!("Knot parameterization").as_ref(),
+                    "knot_param",
+                    crate::i18n::translate(knot_param).into_owned(),
+                )
+            },
+        ]
     } else {
-        String::new()
+        let controls = control_vertices(spline);
+        let count = controls.len();
+        let index = current.min(count.saturating_sub(1));
+        let point = controls.get(index);
+        let weight = spline.weights.get(index).copied().unwrap_or(1.0);
+        vec![
+            ro(
+                t!("Number of control points").as_ref(),
+                "ctrl_pt_count",
+                count.to_string(),
+            ),
+            index_prop(
+                t!("Current Control point").as_ref(),
+                "current_control_point",
+                index,
+                count,
+            ),
+            edit(
+                t!("Control point X").as_ref(),
+                "ctrl_pt_x",
+                point.map(|value| value.x).unwrap_or(0.0),
+            ),
+            edit(
+                t!("Control point Y").as_ref(),
+                "ctrl_pt_y",
+                point.map(|value| value.y).unwrap_or(0.0),
+            ),
+            edit(
+                t!("Control point Z").as_ref(),
+                "ctrl_pt_z",
+                point.map(|value| value.z).unwrap_or(0.0),
+            ),
+            edit_scalar(t!("Weight").as_ref(), "weight", weight),
+        ]
     };
+    data_points.push(if can_show_control {
+        choice_prop(
+            t!("CV frame").as_ref(),
+            "cv_frame",
+            if spline.cv_frame_visible { "Show" } else { "Hide" },
+            &["Hide", "Show"],
+        )
+    } else {
+        ro(t!("CV frame").as_ref(), "cv_frame", t!("Hide").into_owned())
+    });
+
+    let method_prop = if fit_method && can_show_control {
+        choice_prop(
+            t!("Method").as_ref(),
+            "spline_method",
+            method,
+            &["Fit", "Control Vertices"],
+        )
+    } else {
+        ro(
+            t!("Method").as_ref(),
+            "spline_method",
+            crate::i18n::translate(method).into_owned(),
+        )
+    };
+    let mut misc = vec![
+        method_prop,
+        ro(t!("Degree").as_ref(), "degree", spline.degree.to_string()),
+        ro(
+            t!("Closed").as_ref(),
+            "closed",
+            crate::i18n::translate(yes_no(closed)).into_owned(),
+        ),
+        ro(
+            t!("Periodic").as_ref(),
+            "periodic",
+            crate::i18n::translate(yes_no(spline.flags.periodic)).into_owned(),
+        ),
+        ro(
+            t!("Planar").as_ref(),
+            "planar",
+            crate::i18n::translate(yes_no(crate::entities::curve::spline_is_planar(spline)))
+                .into_owned(),
+        ),
+    ];
+    if show_fit && !spline.flags.periodic {
+        misc.extend([
+            edit_scalar(
+                t!("Start tangent vector X").as_ref(),
+                "start_tan_x",
+                effective_begin_tangent.x,
+            ),
+            edit_scalar(
+                t!("Start tangent vector Y").as_ref(),
+                "start_tan_y",
+                effective_begin_tangent.y,
+            ),
+            edit_scalar(
+                t!("Start tangent vector Z").as_ref(),
+                "start_tan_z",
+                effective_begin_tangent.z,
+            ),
+            edit_scalar(
+                t!("End tangent vector X").as_ref(),
+                "end_tan_x",
+                effective_end_tangent.x,
+            ),
+            edit_scalar(
+                t!("End tangent vector Y").as_ref(),
+                "end_tan_y",
+                effective_end_tangent.y,
+            ),
+            edit_scalar(
+                t!("End tangent vector Z").as_ref(),
+                "end_tan_z",
+                effective_end_tangent.z,
+            ),
+        ]);
+    }
+    if show_fit {
+        misc.push(ro(
+            t!("Fit tolerance").as_ref(),
+            "fit_tolerance",
+            format_length(spline.fit_tolerance),
+        ));
+    }
 
     vec![
         PropSection {
             title: t!("Data Points").into_owned(),
-            props: vec![
-                ro(t!("Show").as_ref(), "show", show),
-                ro(t!("Degree").as_ref(), "degree", spline.degree.to_string()),
-                ro(
-                    t!("Control Point Count").as_ref(),
-                    "ctrl_pt_count",
-                    spline.control_points.len().to_string(),
-                ),
-                ro(t!("Control Point").as_ref(), "ctrl_pt_index", "0"),
-                edit(
-                    t!("Control Point X").as_ref(),
-                    "ctrl_pt_x",
-                    cp0.map(|p| p.x).unwrap_or(0.0),
-                ),
-                edit(
-                    t!("Control Point Y").as_ref(),
-                    "ctrl_pt_y",
-                    cp0.map(|p| p.y).unwrap_or(0.0),
-                ),
-                edit(
-                    t!("Control Point Z").as_ref(),
-                    "ctrl_pt_z",
-                    cp0.map(|p| p.z).unwrap_or(0.0),
-                ),
-                edit(t!("Weight").as_ref(), "weight", w0.unwrap_or(1.0)),
-                ro(t!("Knot Parameterization").as_ref(), "knot_param", knot_param),
-                ro(
-                    t!("Fit Point Count").as_ref(),
-                    "fit_pt_count",
-                    spline.fit_points.len().to_string(),
-                ),
-                ro(t!("Fit Point").as_ref(), "fit_pt_index", "0"),
-                edit(t!("Fit Point X").as_ref(), "fit_pt_x", fp0.map(|p| p.x).unwrap_or(0.0)),
-                edit(t!("Fit Point Y").as_ref(), "fit_pt_y", fp0.map(|p| p.y).unwrap_or(0.0)),
-                edit(t!("Fit Point Z").as_ref(), "fit_pt_z", fp0.map(|p| p.z).unwrap_or(0.0)),
-                edit(t!("Fit Tolerance").as_ref(), "fit_tolerance", spline.fit_tolerance),
-                edit(t!("Start Tangent X").as_ref(), "start_tan_x", spline.begin_tangent.x),
-                edit(t!("Start Tangent Y").as_ref(), "start_tan_y", spline.begin_tangent.y),
-                edit(t!("Start Tangent Z").as_ref(), "start_tan_z", spline.begin_tangent.z),
-                edit(t!("End Tangent X").as_ref(), "end_tan_x", spline.end_tangent.x),
-                edit(t!("End Tangent Y").as_ref(), "end_tan_y", spline.end_tangent.y),
-                edit(t!("End Tangent Z").as_ref(), "end_tan_z", spline.end_tangent.z),
-            ],
+            props: data_points,
         },
         PropSection {
             title: t!("Misc").into_owned(),
-            props: vec![
-                ro(t!("Closed").as_ref(), "closed", yes_no(closed)),
-                ro(t!("Planar").as_ref(), "planar", yes_no(spline.flags.planar)),
-                ro(t!("Length").as_ref(), "length", format!("{length:.4}")),
-                ro(t!("Area").as_ref(), "area", area),
-            ],
+            props: misc,
         },
     ]
 }
 
 fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
+    match field {
+        "spline_method" => {
+            if value == "Fit" {
+                if convert_to_fit_method(spline) {
+                    spline.cv_frame_visible = false;
+                }
+            } else if value == "Control Vertices" {
+                if !spline.flags.periodic && control_vertices(spline).len() >= 2 {
+                    spline.cv_frame_visible = true;
+                }
+            }
+            return;
+        }
+        "knot_param" => {
+            spline.knot_parameterization = match value {
+                "Chord" => 0,
+                "Square Root" => 1,
+                "Uniform" => 2,
+                _ => return,
+            };
+            return;
+        }
+        "cv_frame" => {
+            spline.cv_frame_visible = value == "Show"
+                && !(uses_fit_method(spline) && spline.flags.periodic)
+                && control_vertices(spline).len() >= 2;
+            return;
+        }
+        _ => {}
+    }
+    if uses_fit_method(spline)
+        && spline.flags.periodic
+        && matches!(
+            field,
+            "ctrl_pt_x"
+                | "ctrl_pt_y"
+                | "ctrl_pt_z"
+                | "weight"
+                | "start_tan_x"
+                | "start_tan_y"
+                | "start_tan_z"
+                | "end_tan_x"
+                | "end_tan_y"
+                | "end_tan_z"
+        )
+    {
+        return;
+    }
+    if field == "fit_tolerance" {
+        return;
+    }
+    if matches!(field, "ctrl_pt_x" | "ctrl_pt_y" | "ctrl_pt_z" | "weight")
+        && uses_fit_method(spline)
+        && !convert_to_control_method(spline)
+    {
+        return;
+    }
+    let (effective_begin_tangent, effective_end_tangent) = effective_fit_tangents(spline);
     let Some(v) = parse_f64(value) else { return };
+    let control_index = crate::scene::view::dispatch::prop_current_vertex()
+        .min(spline.control_points.len().saturating_sub(1));
+    let fit_index = crate::scene::view::dispatch::prop_current_vertex()
+        .min(spline.fit_points.len().saturating_sub(1));
     match field {
         "ctrl_pt_x" => {
-            if let Some(cp) = spline.control_points.first_mut() {
+            if let Some(cp) = spline.control_points.get_mut(control_index) {
                 cp.x = v;
             }
         }
         "ctrl_pt_y" => {
-            if let Some(cp) = spline.control_points.first_mut() {
+            if let Some(cp) = spline.control_points.get_mut(control_index) {
                 cp.y = v;
             }
         }
         "ctrl_pt_z" => {
-            if let Some(cp) = spline.control_points.first_mut() {
+            if let Some(cp) = spline.control_points.get_mut(control_index) {
                 cp.z = v;
             }
         }
         "weight" => {
-            if let Some(w) = spline.weights.first_mut() {
-                *w = v;
+            if v > 0.0 && !spline.control_points.is_empty() {
+                if spline.weights.len() != spline.control_points.len() {
+                    spline.weights = vec![1.0; spline.control_points.len()];
+                }
+                spline.weights[control_index] = v;
+                spline.flags.rational = spline
+                    .weights
+                    .iter()
+                    .any(|weight| (*weight - spline.weights[0]).abs() > 1e-12);
             }
         }
         "fit_pt_x" => {
-            if let Some(fp) = spline.fit_points.first_mut() {
+            if let Some(fp) = spline.fit_points.get_mut(fit_index) {
                 fp.x = v;
             }
         }
         "fit_pt_y" => {
-            if let Some(fp) = spline.fit_points.first_mut() {
+            if let Some(fp) = spline.fit_points.get_mut(fit_index) {
                 fp.y = v;
             }
         }
         "fit_pt_z" => {
-            if let Some(fp) = spline.fit_points.first_mut() {
+            if let Some(fp) = spline.fit_points.get_mut(fit_index) {
                 fp.z = v;
             }
         }
-        "fit_tolerance" => spline.fit_tolerance = v,
-        "start_tan_x" => spline.begin_tangent.x = v,
-        "start_tan_y" => spline.begin_tangent.y = v,
-        "start_tan_z" => spline.begin_tangent.z = v,
-        "end_tan_x" => spline.end_tangent.x = v,
-        "end_tan_y" => spline.end_tangent.y = v,
-        "end_tan_z" => spline.end_tangent.z = v,
+        "start_tan_x" | "start_tan_y" | "start_tan_z" => {
+            if !tangent_is_set(&spline.begin_tangent) {
+                spline.begin_tangent = effective_begin_tangent;
+            }
+            match field {
+                "start_tan_x" => spline.begin_tangent.x = v,
+                "start_tan_y" => spline.begin_tangent.y = v,
+                "start_tan_z" => spline.begin_tangent.z = v,
+                _ => {}
+            }
+        }
+        "end_tan_x" | "end_tan_y" | "end_tan_z" => {
+            if !tangent_is_set(&spline.end_tangent) {
+                spline.end_tangent = effective_end_tangent;
+            }
+            match field {
+                "end_tan_x" => spline.end_tangent.x = v,
+                "end_tan_y" => spline.end_tangent.y = v,
+                "end_tan_z" => spline.end_tangent.z = v,
+                _ => {}
+            }
+        }
         _ => {}
     }
+    spline.flags.planar = crate::entities::curve::spline_is_planar(spline);
 }
 
 fn apply_grip(spline: &mut Spline, grip_id: usize, apply: GripApply) {
-    // Match the grip source: dragging a fit-point spline's grip moves the fit
-    // point (the curve re-fits through it on the next tessellation, keeping the
-    // stored end tangents); a CV spline moves the control vertex.
-    let target = if spline.control_points.is_empty() {
-        spline.fit_points.get_mut(grip_id)
-    } else {
+    if grip_id == SPLINE_MODE_GRIP_ID {
+        return;
+    }
+    // First CV edit makes the displayed kernel controls authoritative.
+    let fit_method = uses_fit_method(spline);
+    if spline.cv_frame_visible && fit_method && !spline.flags.periodic {
+        if !convert_to_control_method(spline) {
+            return;
+        }
+    }
+    let target = if (spline.cv_frame_visible && !spline.flags.periodic) || !fit_method {
         spline.control_points.get_mut(grip_id)
+    } else {
+        spline.fit_points.get_mut(grip_id)
     };
     if let Some(cp) = target {
         match apply {
@@ -591,6 +976,21 @@ fn apply_grip(spline: &mut Spline, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(spline: &mut Spline, t: &EntityTransform) {
+    if let EntityTransform::Mirror {
+        p1,
+        p2,
+        working_normal,
+    } = t
+    {
+        let transform = crate::scene::view::transform::reflection_about_working_line(
+            *p1,
+            *p2,
+            *working_normal,
+        );
+        acadrust::Entity::apply_transform(spline, &transform);
+        spline.flags.planar = crate::entities::curve::spline_is_planar(spline);
+        return;
+    }
     crate::scene::view::transform::apply_standard_entity_transform(spline, t, |entity, p1, p2| {
         for cp in &mut entity.control_points {
             crate::scene::view::transform::reflect_xy_point(&mut cp.x, &mut cp.y, p1, p2);
@@ -599,6 +999,7 @@ fn apply_transform(spline: &mut Spline, t: &EntityTransform) {
             crate::scene::view::transform::reflect_xy_point(&mut fp.x, &mut fp.y, p1, p2);
         }
     });
+    spline.flags.planar = crate::entities::curve::spline_is_planar(spline);
 }
 
 impl RenderConvertible for Spline {
@@ -614,96 +1015,66 @@ impl crate::entities::traits::Grippable for Spline {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
         use crate::scene::model::object::{GripMenuAction, GripMenuItem};
-        vec![
-            GripMenuItem {
-                label: "Stretch",
-                action: GripMenuAction::Stretch,
-            },
-            GripMenuItem {
-                label: "Add Vertex",
-                action: GripMenuAction::AddVertex,
-            },
-            GripMenuItem {
-                label: "Remove Vertex",
-                action: GripMenuAction::RemoveVertex,
-            },
-            GripMenuItem {
-                label: "Refine Vertices",
-                action: GripMenuAction::RefineVertices,
-            },
-        ]
+        if grip_id == SPLINE_MODE_GRIP_ID {
+            let fit_method = uses_fit_method(self);
+            let can_show_control = control_vertices(self).len() >= 2
+                && !(fit_method && self.flags.periodic);
+            return if !shows_fit_points(self) {
+                vec![
+                    (can_show_control && fit_method).then_some(GripMenuItem {
+                        label: "Fit",
+                        action: GripMenuAction::ShowFit,
+                    }),
+                    can_show_control.then_some(GripMenuItem {
+                        label: "✓ Control Vertices",
+                        action: GripMenuAction::ShowControlVertices,
+                    }),
+                ]
+                .into_iter()
+                .flatten()
+                .collect()
+            } else {
+                vec![
+                    Some(GripMenuItem {
+                        label: "✓ Fit",
+                        action: GripMenuAction::ShowFit,
+                    }),
+                    can_show_control.then_some(GripMenuItem {
+                        label: "Control Vertices",
+                        action: GripMenuAction::ShowControlVertices,
+                    }),
+                ]
+                .into_iter()
+                .flatten()
+                .collect()
+            };
+        }
+        vec![GripMenuItem {
+            label: "Stretch",
+            action: GripMenuAction::Stretch,
+        }]
     }
     fn apply_grip_menu(
         &mut self,
-        grip_id: usize,
+        _grip_id: usize,
         action: crate::scene::model::object::GripMenuAction,
     ) {
         use crate::scene::model::object::GripMenuAction as A;
-        let n = self.control_points.len();
-        let min_cv = (self.degree as usize).saturating_add(1).max(2);
         match action {
-            A::AddVertex if grip_id < n => {
-                let i1 = (grip_id + 1).min(n - 1);
-                if i1 == grip_id {
+            A::ShowFit => {
+                if convert_to_fit_method(self) {
+                    self.cv_frame_visible = false;
                     return;
                 }
-                let p0 = &self.control_points[grip_id];
-                let p1 = &self.control_points[i1];
-                let mid = acadrust::types::Vector3::new(
-                    (p0.x + p1.x) * 0.5,
-                    (p0.y + p1.y) * 0.5,
-                    (p0.z + p1.z) * 0.5,
-                );
-                self.control_points.insert(i1, mid);
-                if !self.weights.is_empty() && self.weights.len() == n {
-                    let w = (self.weights[grip_id] + self.weights[i1.min(self.weights.len() - 1)])
-                        * 0.5;
-                    self.weights.insert(i1, w);
-                }
-                // Clear knots so to_render rebuilds a uniform knot vector
-                // for the new CV count.
-                self.knots.clear();
             }
-            A::RemoveVertex if grip_id < n && n > min_cv => {
-                self.control_points.remove(grip_id);
-                if grip_id < self.weights.len() {
-                    self.weights.remove(grip_id);
-                }
-                self.knots.clear();
-            }
-            A::RefineVertices => {
-                // Insert a CV between every adjacent pair (chord midpoints)
-                // and rebuild a uniform knot vector.
-                if n >= 2 {
-                    let mut refined = Vec::with_capacity(n * 2 - 1);
-                    let mut refined_w = Vec::with_capacity(n * 2 - 1);
-                    let has_w = !self.weights.is_empty() && self.weights.len() == n;
-                    for i in 0..n {
-                        refined.push(self.control_points[i].clone());
-                        if has_w {
-                            refined_w.push(self.weights[i]);
-                        }
-                        if i + 1 < n {
-                            let a = &self.control_points[i];
-                            let b = &self.control_points[i + 1];
-                            refined.push(acadrust::types::Vector3::new(
-                                (a.x + b.x) * 0.5,
-                                (a.y + b.y) * 0.5,
-                                (a.z + b.z) * 0.5,
-                            ));
-                            if has_w {
-                                refined_w.push((self.weights[i] + self.weights[i + 1]) * 0.5);
-                            }
-                        }
-                    }
-                    self.control_points = refined;
-                    if has_w {
-                        self.weights = refined_w;
-                    }
-                    self.knots.clear();
-                }
+            A::ShowControlVertices
+                if !(uses_fit_method(self) && self.flags.periodic)
+                    && control_vertices(self).len() >= 2 =>
+            {
+                self.cv_frame_visible = true;
+                return;
             }
             _ => {}
         }

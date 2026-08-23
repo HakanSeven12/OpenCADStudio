@@ -872,6 +872,18 @@ impl OpenCADStudio {
                     min_eff = 1;
                 }
 
+                // Compute all sort-key assignments before any mutable step:
+                // the exhausted-floor path needs one more read-only pass over
+                // entities to find colliding siblings to lift.
+                let assigns = assign_back_group_keys(
+                    doc_ref,
+                    block_handle,
+                    &hatches_to_move,
+                    min_eff,
+                    overrides.as_ref(),
+                    &locked_layers,
+                );
+
                 // 4. Ultra-fast targeted Delta Undo (snapshots ONLY the SortEntitiesTable, zero full-drawing clone).
                 let pending_delta = self.begin_undo(i, "DRAWORDER", hatches_to_move.len(), true);
 
@@ -894,9 +906,8 @@ impl OpenCADStudio {
                 if let Some(ObjectType::SortEntitiesTable(table)) =
                     self.tabs[i].scene.document.objects.get_mut(&th)
                 {
-                    for (k, h) in hatches_to_move.iter().enumerate() {
-                        let sort = min_eff.saturating_sub(1 + k as u64).max(1);
-                        table.add_entry(*h, acadrust::Handle::new(sort));
+                    for (h, sort) in &assigns {
+                        table.add_entry(*h, acadrust::Handle::new(*sort));
                     }
                 }
 
@@ -974,6 +985,7 @@ impl OpenCADStudio {
                         // entities land strictly above/below every sibling —
                         // including ones not yet in the table, which sort by
                         // their own handle. (min_eff, max_eff) over siblings.
+                        let mut back_assigns: Option<Vec<(acadrust::Handle, u64)>> = None;
                         let fb_baseline: Option<(u64, u64)> = if to_front_opt.is_some() {
                             let selected_set: rustc_hash::FxHashSet<u64> =
                                 selected.iter().map(|h| h.value()).collect();
@@ -1017,6 +1029,24 @@ impl OpenCADStudio {
                             if min_eff == u64::MAX {
                                 min_eff = 1;
                             }
+                            if to_front_opt == Some(false) {
+                                // Same exhausted-floor handling as HATCHTOBACK:
+                                // never clamp the group onto tied keys.
+                                let locked_layers: rustc_hash::FxHashSet<&str> = doc_ref
+                                    .layers
+                                    .iter()
+                                    .filter(|l| l.is_locked())
+                                    .map(|l| l.name.as_str())
+                                    .collect();
+                                back_assigns = Some(assign_back_group_keys(
+                                    doc_ref,
+                                    block_handle,
+                                    &selected,
+                                    min_eff,
+                                    Some(&overrides),
+                                    &locked_layers,
+                                ));
+                            }
                             Some((min_eff, max_eff))
                         } else {
                             None
@@ -1034,28 +1064,6 @@ impl OpenCADStudio {
                                 None
                             }
                         });
-                        let get_or_create =
-                            |doc: &mut acadrust::CadDocument, block_handle| -> acadrust::Handle {
-                                if let Some(th) = doc.objects.iter().find_map(|(h, obj)| {
-                                    if let ObjectType::SortEntitiesTable(t) = obj {
-                                        if t.block_owner_handle == block_handle {
-                                            Some(*h)
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }) {
-                                    th
-                                } else {
-                                    let nh = acadrust::Handle::new(doc.next_handle());
-                                    let mut table = SortEntitiesTable::for_block(block_handle);
-                                    table.handle = nh;
-                                    doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
-                                    nh
-                                }
-                            };
                         let th = table_handle.unwrap_or_else(|| {
                             let nh = acadrust::Handle::new(doc.next_handle());
                             let mut table = SortEntitiesTable::for_block(block_handle);
@@ -1063,24 +1071,37 @@ impl OpenCADStudio {
                             doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
                             nh
                         });
-                        let _ = get_or_create; // suppress unused warning
                         if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th)
                         {
                             if let Some((above, target)) = relative_target {
-                                // move_above/move_below read the target's sort
-                                // handle from the table and no-op when it is
-                                // absent. A reference object that was never
-                                // reordered isn't in the table yet, so seed it
-                                // with its own handle as the implicit sort key.
-                                if !table.contains(target) {
-                                    table.add_entry(target, target);
-                                }
-                                for h in &selected {
-                                    if above {
-                                        table.move_above(*h, target);
-                                    } else {
-                                        table.move_below(*h, target);
+                                // move_above/move_below recompute target±1 per
+                                // call, so looping them over N selected entities
+                                // ties the whole group onto one key. Read the
+                                // reference key once and hand out per-index
+                                // keys instead, keeping the moved entities a
+                                // distinct, selection-ordered block adjacent to
+                                // the reference.
+                                let target_sort = match table.get_sort_handle(target) {
+                                    Some(h) => h.value(),
+                                    None => {
+                                        // A reference object that was never
+                                        // reordered isn't in the table yet;
+                                        // seed it with its own handle as the
+                                        // implicit sort key.
+                                        table.add_entry(target, target);
+                                        table
+                                            .get_sort_handle(target)
+                                            .map_or(target.value(), |h| h.value())
                                     }
+                                };
+                                for (k, h) in selected.iter().enumerate() {
+                                    let offset = 1 + k as u64;
+                                    let sort = if above {
+                                        target_sort.saturating_add(offset)
+                                    } else {
+                                        target_sort.saturating_sub(offset).max(1)
+                                    };
+                                    table.add_entry(*h, acadrust::Handle::new(sort));
                                 }
                                 let rel = if above { "above" } else { "below" };
                                 self.command_line.push_info(crate::tf!(
@@ -1090,14 +1111,16 @@ impl OpenCADStudio {
                                     target.value()
                                 ).as_ref());
                             } else if let Some(to_front) = to_front_opt {
-                                let (min_eff, max_eff) = fb_baseline.unwrap_or((1, 0));
-                                for (k, h) in selected.iter().enumerate() {
-                                    let sort = if to_front {
-                                        max_eff.saturating_add(1 + k as u64)
-                                    } else {
-                                        min_eff.saturating_sub(1 + k as u64).max(1)
-                                    };
-                                    table.add_entry(*h, acadrust::Handle::new(sort));
+                                if to_front {
+                                    let (_, max_eff) = fb_baseline.unwrap_or((1, 0));
+                                    for (k, h) in selected.iter().enumerate() {
+                                        let sort = max_eff.saturating_add(1 + k as u64);
+                                        table.add_entry(*h, acadrust::Handle::new(sort));
+                                    }
+                                } else if let Some(assigns) = &back_assigns {
+                                    for (h, sort) in assigns {
+                                        table.add_entry(*h, acadrust::Handle::new(*sort));
+                                    }
                                 }
                                 let dir = if to_front { "front" } else { "back" };
                                 self.command_line.push_info(crate::tf!(
@@ -1378,6 +1401,65 @@ impl CadCommand for DrawOrderCommand {
     }
 }
 
+/// Sort-key assignments sending `group` to the back of the active space.
+///
+/// Normal case: the floor is the lowest effective sort key among non-moved
+/// siblings, and there are enough unused slots below it — hand them out in
+/// ascending order so the group lands as one block strictly behind everything
+/// else with its internal stacking order preserved.
+///
+/// Exhausted case (`floor <= group.len()`, e.g. a sibling already pinned at
+/// key 1 or 2): decrementing would clamp every member onto one tied key via
+/// `.max(1)`. Instead pin the group to keys 1..=n and lift every other
+/// in-space sibling whose effective key collides with that range above it,
+/// shifted by `n` so lifted siblings keep their relative order. Locked-layer
+/// entities are never moved or lifted.
+fn assign_back_group_keys(
+    doc: &acadrust::CadDocument,
+    block_handle: acadrust::Handle,
+    group: &[acadrust::Handle],
+    floor: u64,
+    overrides: Option<&rustc_hash::FxHashMap<u64, u64>>,
+    locked_layers: &rustc_hash::FxHashSet<&str>,
+) -> Vec<(acadrust::Handle, u64)> {
+    let n = group.len() as u64;
+    let mut out: Vec<(acadrust::Handle, u64)> = Vec::with_capacity(group.len());
+    if n == 0 {
+        return out;
+    }
+    if floor > n {
+        for (k, h) in group.iter().enumerate() {
+            out.push((*h, floor - n + k as u64));
+        }
+        return out;
+    }
+    for (k, h) in group.iter().enumerate() {
+        out.push((*h, 1 + k as u64));
+    }
+    let moved: rustc_hash::FxHashSet<u64> = group.iter().map(|h| h.value()).collect();
+    let has_locked = !locked_layers.is_empty();
+    let mut lifts: Vec<(acadrust::Handle, u64)> = Vec::new();
+    for e in doc.entities() {
+        let c = e.common();
+        if c.owner_handle != block_handle && !c.owner_handle.is_null() {
+            continue;
+        }
+        let hv = c.handle.value();
+        if moved.contains(&hv) {
+            continue;
+        }
+        if has_locked && locked_layers.contains(c.layer.as_str()) {
+            continue;
+        }
+        let eff = overrides.map_or(hv, |m| m.get(&hv).copied().unwrap_or(hv));
+        if eff <= n {
+            lifts.push((c.handle, eff.saturating_add(n)));
+        }
+    }
+    out.extend(lifts);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1635,6 +1717,73 @@ mod tests {
         assert!(hatch_sort < line_sort);
     }
 
+    // HATCHTOBACK must preserve the moved group's internal stacking order.
+    // Written while auditing the descending key assignment, which silently
+    // REVERSES hatch-to-hatch order; this test fails while that holds.
+    #[test]
+    fn hatchtoback_preserves_hatch_stacking_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch3 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let entries = effective_sort_map(&app);
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+        let s1 = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let s2 = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+        let s3 = entries.get(&h_hatch3.value()).copied().unwrap_or(h_hatch3.value());
+
+        assert!(s3 > s2 && s2 > s1, "stacking order must be preserved, got {s1}, {s2}, {s3}");
+        assert!(s1 < line_sort && s2 < line_sort && s3 < line_sort, "all hatches must stay behind the line");
+    }
+
+    // When the key space below the floor is exhausted (an entity already sits
+    // at a very low sort key), HATCHTOBACK must not clamp every hatch onto one
+    // tied key: hatches stay pairwise distinct and no sibling may sink below
+    // them. Fails while `.max(1)` clamping is in place.
+    #[test]
+    fn hatchtoback_exhausted_floor_keeps_hatches_distinct_and_behind() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let h_line = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch3 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        // Pin the line to sort key 2: only ONE slot below the floor exists,
+        // but three hatches need to fit behind it.
+        {
+            use acadrust::objects::{ObjectType, SortEntitiesTable};
+            let doc = &mut app.tabs[i].scene.document;
+            let nh = acadrust::Handle::new(doc.next_handle());
+            let mut table = SortEntitiesTable::for_block(block_handle);
+            table.handle = nh;
+            table.add_entry(h_line, acadrust::Handle::new(2));
+            doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
+        }
+
+        let _ = app.run_command_line("HATCHTOBACK");
+
+        let entries = effective_sort_map(&app);
+        let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
+        let s1 = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let s2 = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+        let s3 = entries.get(&h_hatch3.value()).copied().unwrap_or(h_hatch3.value());
+
+        assert_ne!(s1, s2, "hatches must not tie on one clamped key");
+        assert_ne!(s1, s3, "hatches must not tie on one clamped key");
+        assert_ne!(s2, s3, "hatches must not tie on one clamped key");
+        assert!(
+            line_sort > s1.max(s2).max(s3),
+            "the pinned line ({line_sort}) must still render above every hatch ({s1}, {s2}, {s3})"
+        );
+    }
+
     #[test]
     fn hatchtoback_undo_restores_draw_order() {
         let mut app = fresh_app();
@@ -1723,6 +1872,106 @@ mod tests {
         assert!(
             line1_sort < hatch_sort,
             "second BACK must land strictly below the first ({line1_sort} vs {hatch_sort})"
+        );
+    }
+
+    // Regression test for a suspected multi-select tie in DRAWORDER
+    // ABOVE/UNDER: the loop called move_above/move_below per entity, and each
+    // call recomputes target±1, so N selected entities should all collapse to
+    // one key. This test must fail while that bug exists.
+    // Same floor-exhaustion scenario as hatchtoback_exhausted_floor_…, but
+    // through the interactive DRAWORDER BACK path: two selected lines must
+    // land distinct and strictly behind a sibling pinned at key 2, instead of
+    // both clamping onto key 1.
+    #[test]
+    fn draworder_back_exhausted_floor_keeps_distinct_and_behind() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let block_handle = app.tabs[i].scene.current_layout_block_handle_pub();
+        let h_pinned = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_line1 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_line2 = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+
+        {
+            use acadrust::objects::{ObjectType, SortEntitiesTable};
+            let doc = &mut app.tabs[i].scene.document;
+            let nh = acadrust::Handle::new(doc.next_handle());
+            let mut table = SortEntitiesTable::for_block(block_handle);
+            table.handle = nh;
+            table.add_entry(h_pinned, acadrust::Handle::new(2));
+            doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
+        }
+
+        app.tabs[i]
+            .scene
+            .replace_selection([h_line1, h_line2].into_iter().collect());
+        let _ = app.run_command_line("DRAWORDER BACK");
+
+        let entries = effective_sort_map(&app);
+        let pinned_sort = entries.get(&h_pinned.value()).copied().unwrap_or(h_pinned.value());
+        let s1 = entries.get(&h_line1.value()).copied().unwrap_or(h_line1.value());
+        let s2 = entries.get(&h_line2.value()).copied().unwrap_or(h_line2.value());
+
+        assert_ne!(s1, s2, "BACK must not clamp both selected entities onto one tied key");
+        assert!(
+            pinned_sort > s1.max(s2),
+            "pinned sibling ({pinned_sort}) must stay above the moved pair ({s1}, {s2})"
+        );
+    }
+
+    #[test]
+    fn draworder_above_multi_select_keeps_distinct_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        app.tabs[i]
+            .scene
+            .replace_selection([h_hatch1, h_hatch2].into_iter().collect());
+        let cmd = format!("DRAWORDER ABOVE {:x}", h_ref.value());
+        let _ = app.run_command_line(&cmd);
+
+        let entries = effective_sort_map(&app);
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+        let hatch1_sort = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let hatch2_sort = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+
+        assert!(hatch1_sort > ref_sort, "hatch 1 ({hatch1_sort}) must be above reference ({ref_sort})");
+        assert!(hatch2_sort > ref_sort, "hatch 2 ({hatch2_sort}) must be above reference ({ref_sort})");
+        assert_ne!(hatch1_sort, hatch2_sort, "multi-select ABOVE must not tie selected entities");
+        assert!(
+            hatch2_sort > hatch1_sort,
+            "selection order must be preserved within the moved group ({hatch1_sort}, {hatch2_sort})"
+        );
+    }
+
+    #[test]
+    fn draworder_under_multi_select_keeps_distinct_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let h_hatch1 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+        let h_hatch2 = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
+
+        app.tabs[i]
+            .scene
+            .replace_selection([h_hatch1, h_hatch2].into_iter().collect());
+        let cmd = format!("DRAWORDER UNDER {:x}", h_ref.value());
+        let _ = app.run_command_line(&cmd);
+
+        let entries = effective_sort_map(&app);
+        let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
+        let hatch1_sort = entries.get(&h_hatch1.value()).copied().unwrap_or(h_hatch1.value());
+        let hatch2_sort = entries.get(&h_hatch2.value()).copied().unwrap_or(h_hatch2.value());
+
+        assert!(hatch1_sort < ref_sort, "hatch 1 ({hatch1_sort}) must be under reference ({ref_sort})");
+        assert!(hatch2_sort < ref_sort, "hatch 2 ({hatch2_sort}) must be under reference ({ref_sort})");
+        assert_ne!(hatch1_sort, hatch2_sort, "multi-select UNDER must not tie selected entities");
+        assert!(
+            hatch1_sort > hatch2_sort,
+            "selection order must be preserved within the moved group ({hatch1_sort}, {hatch2_sort})"
         );
     }
 

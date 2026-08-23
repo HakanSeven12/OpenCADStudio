@@ -461,11 +461,7 @@ impl Camera {
         }
     }
 
-    /// The camera's roll — rotation about the view axis, in radians — the
-    /// inverse of the `roll` argument to [`yaw_pitch_to_quat`]. Recovered by
-    /// removing the yaw/pitch frame from the live rotation, so a saved view can
-    /// store its twist and round-trip it. Exact for a plan view (the twisted-
-    /// UCS case); approximate after a free 3D orbit.
+    /// The camera's rotation about its view axis.
     pub fn roll(&self) -> f32 {
         let q_yp = yaw_pitch_to_quat(self.yaw, self.pitch, 0.0);
         let q_roll = q_yp.conjugate() * self.rotation;
@@ -767,16 +763,15 @@ impl Camera {
 
     // ── Internal helpers ───────────────────────────────────────────────────
 
-    /// Derive yaw and pitch from the current quaternion for the ViewCube
-    /// hit-test functions (hit_test / hover_id). These use yaw/pitch to
-    /// compute the same rotation matrix as the shader, so they must match.
+    /// Derive yaw and pitch from the current quaternion.
     fn sync_yaw_pitch(&mut self) {
-        // Eye direction in world space (canonical eye dir is +Z).
         let eye_dir = self.rotation * Vec3::Z;
-        // pitch: angle above/below the XY plane.
-        self.pitch = eye_dir.z.clamp(-0.999, 0.999).asin();
-        // yaw: atan2(x, y) matches from_rotation_z(yaw) used in view_rotation_mat.
-        self.yaw = eye_dir.x.atan2(eye_dir.y);
+        self.pitch = eye_dir.z.clamp(-1.0, 1.0).asin();
+        self.yaw = if eye_dir.x.abs() < 1e-6 && eye_dir.y.abs() < 1e-6 {
+            0.0
+        } else {
+            eye_dir.x.atan2(-eye_dir.y)
+        };
     }
 }
 
@@ -787,7 +782,7 @@ impl Camera {
 /// so snap angles continue to work unchanged.
 ///
 /// Convention (Z-up, Y-forward):
-///   yaw   = 0          → camera looks along +Y axis (front view)
+///   yaw   = 0          → camera looks along -Y axis (front view)
 ///   pitch = PI/2       → camera looks down -Z (top view)
 ///   pitch = 0          → camera in the XY plane
 /// Build a rotation quaternion from yaw, pitch and roll.
@@ -795,7 +790,7 @@ impl Camera {
 /// Roll rotates the camera around its own view axis (post-multiplied so it
 /// composes after the yaw/pitch gaze direction is set).
 pub fn yaw_pitch_to_quat(yaw: f32, pitch: f32, roll: f32) -> Quat {
-    // +yaw so ViewCube faces match camera direction (FRONT at yaw=0 = +Y world axis).
+    // +yaw keeps the ViewCube faces aligned with the camera direction.
     let q_yaw = Quat::from_rotation_z(yaw);
     let q_pitch = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2 - pitch);
     let q_roll = Quat::from_rotation_z(roll);

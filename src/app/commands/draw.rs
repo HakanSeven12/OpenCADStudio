@@ -925,14 +925,15 @@ impl OpenCADStudio {
             }
 
             // ── Model commands (3D primitives) ─────────────────────────────
-            "BOX" | "WEDGE" | "CYLINDER" | "CONE" | "SPHERE" | "TORUS" => {
+            "BOX" | "WEDGE" | "CYLINDER" | "CONE" | "SPHERE" | "PYRAMID" | "PYR"
+            | "TORUS" => {
                 use crate::modules::model::primitive_cmd::PrimitiveCommand;
                 let new_cmd = PrimitiveCommand::new(cmd);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            // ── Design commands (solid booleans) ───────────────────────────
+            // ── Solid booleans ─────────────────────────────────────────────
             "UNION" | "SUBTRACT" | "INTERSECT" => {
                 use crate::modules::model::boolean_cmd::BoolOp;
                 if let Some(op) = BoolOp::from_id(cmd) {
@@ -1033,17 +1034,7 @@ impl OpenCADStudio {
                 }
             }
 
-            // PYRAMID <radius> <height> [sides] — create an n-sided pyramid mesh.
-            "PYRAMID" | "PYR" => {
-                use crate::command::TwoValuePromptCommand;
-                let c = TwoValuePromptCommand::new(
-                    "PYRAMID",
-                    "PYRAMID  base radius:",
-                    "PYRAMID  height (add sides by typing a 3rd number):",
-                );
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
-            }
+            // PYRAMID <radius> <height> [sides] keeps the direct numeric form.
             cmd if cmd.starts_with("PYRAMID ") || cmd.starts_with("PYR ") => {
                 let nums: Vec<f64> = cmd
                     .split_whitespace()

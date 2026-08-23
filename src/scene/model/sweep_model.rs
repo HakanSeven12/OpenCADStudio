@@ -1,20 +1,8 @@
-// EXTRUDE / REVOLVE: turning a drawn profile into a solid.
-//
-// The profile comes from `entities::curve`, which is where every entity's
-// geometry is already defined once, so a circle, an arc-bulged polyline and a
-// closed spline all arrive as the same thing: a plane plus a chain of curves
-// in that plane's coordinates. The kernel sweeps that chain into analytic
-// surfaces — a straight run into a plane, an arc into a cylinder, a profile
-// turned about an axis into a cone, a sphere or a torus — so the result can
-// be written back out as ACIS rather than as facets.
-//
-// A spline profile has no analytic side wall, so it is refused rather than
-// approximated into a surface nobody asked for. That is the kernel's answer
-// and this module passes it on.
+// Exact profile sweeps stored as kernel B-reps and ACIS.
 
 use cadkernel::brep::{self, Body};
-use cadkernel::geom2d::Curve;
-use cadkernel::space::{PlanarCurve, Plane};
+use cadkernel::geom2d::{offset_polyline, Arc, Curve, EllipseArc, Line, Polyline};
+use cadkernel::space::{PlanarCurve, Plane, Vec3};
 use acadrust::EntityType;
 
 use crate::entities::curve::entity_curve;
@@ -40,13 +28,17 @@ pub fn profile_of(entity: &EntityType) -> Option<Profile> {
         return None;
     }
     let pieces = match &planar.curve {
-        // A polyline is already a chain. Its own segments carry the bulges,
-        // so an arc stays an arc rather than becoming a run of chords.
         Curve::Polyline(_) => planar.curve.segments(),
-        // Everything else closed on itself is cut into quarters, which is
-        // both the fewest pieces a chain may have and the fewest that leave
-        // each one unambiguous about which way round it goes.
         Curve::Circle(circle) => quarters(circle.centre, circle.radius),
+        Curve::Arc(arc) => split_arc(*arc),
+        Curve::Ellipse(arc) => split_ellipse(*arc),
+        Curve::Nurbs(curve) => (0..4)
+            .map(|part| {
+                curve
+                    .trimmed(part as f64 / 4.0, (part + 1) as f64 / 4.0)
+                    .map(Curve::Nurbs)
+            })
+            .collect::<Option<Vec<_>>>()?,
         _ => return None,
     };
     (pieces.len() >= 3).then_some(Profile {
@@ -57,7 +49,6 @@ pub fn profile_of(entity: &EntityType) -> Option<Profile> {
 
 /// A circle as four arcs.
 fn quarters(centre: [f64; 2], radius: f64) -> Vec<Curve> {
-    use cadkernel::geom2d::Arc;
     use std::f64::consts::FRAC_PI_2;
     (0..4)
         .map(|quarter| {
@@ -67,6 +58,34 @@ fn quarters(centre: [f64; 2], radius: f64) -> Vec<Curve> {
                 radius,
                 start_angle: start,
                 end_angle: start + FRAC_PI_2,
+            })
+        })
+        .collect()
+}
+
+fn split_arc(arc: Arc) -> Vec<Curve> {
+    let start = arc.start_angle;
+    let step = arc.sweep() / 4.0;
+    (0..4)
+        .map(|part| {
+            Curve::Arc(Arc {
+                start_angle: start + step * part as f64,
+                end_angle: start + step * (part + 1) as f64,
+                ..arc
+            })
+        })
+        .collect()
+}
+
+fn split_ellipse(arc: EllipseArc) -> Vec<Curve> {
+    let start = arc.start_parameter;
+    let step = arc.sweep() / 4.0;
+    (0..4)
+        .map(|part| {
+            Curve::Ellipse(EllipseArc {
+                ellipse: arc.ellipse,
+                start_parameter: start + step * part as f64,
+                end_parameter: start + step * (part + 1) as f64,
             })
         })
         .collect()
@@ -84,6 +103,13 @@ pub fn extruded(entity: &EntityType, height: f64) -> Option<Body> {
         &profile.pieces,
         [normal[0] * height, normal[1] * height, normal[2] * height],
     )
+}
+
+/// Signed distance of a drag along a profile's normal.
+pub fn projected_drag(entity: &EntityType, from: glam::DVec3, to: glam::DVec3) -> Option<f64> {
+    let normal = entity_curve(entity)?.plane.normal()?;
+    let distance = (to - from).dot(glam::DVec3::from_array(normal));
+    (distance.is_finite() && distance.abs() > 1e-6).then_some(distance)
 }
 
 /// REVOLVE: turn the profile about the axis from `from` to `to` by `angle`
@@ -108,85 +134,191 @@ pub fn revolved(
     )
 }
 
-use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
-
-/// SWEEP through the kernel's tolerance-driven mesh API.
-pub fn swept(profile: &EntityType, path: &EntityType, color: [f32; 4]) -> Option<MeshLodSet> {
-    let max_angle = cadkernel::tessellation::DEFAULT_ANGLE;
-    let surface = brep::mesh::sweep_surface(
-        &entity_curve(profile)?,
-        &entity_curve(path)?,
-        max_angle,
-    )?;
-    mesh_set(surface, color, 1e-9)
+/// SWEEP as an exact B-rep along straight and circular path pieces.
+pub fn swept(profile: &EntityType, path: &EntityType) -> Option<Body> {
+    let profile = profile_of(profile)?;
+    let path = entity_curve(path)?;
+    let pieces = match &path.curve {
+        Curve::Line(line) => vec![Curve::Line(*line)],
+        Curve::Arc(arc) => vec![Curve::Arc(*arc)],
+        Curve::Polyline(_) => path.curve.segments(),
+        _ => return None,
+    };
+    brep::sweep_along(profile.plane, &profile.pieces, path.plane, &pieces)
 }
 
-/// LOFT through the kernel's tolerance-driven mesh API.
-pub fn lofted(profiles: &[EntityType], color: [f32; 4]) -> Option<MeshLodSet> {
-    let curves: Vec<PlanarCurve> = profiles.iter().filter_map(entity_curve).collect();
-    let max_angle = cadkernel::tessellation::DEFAULT_ANGLE;
-    mesh_set(brep::mesh::loft_surface(&curves, max_angle)?, color, 1e-9)
+/// LOFT as an exact B-rep through compatible closed sections.
+pub fn lofted(profiles: &[EntityType]) -> Option<Body> {
+    if let Some(body) = circular_loft(profiles) {
+        return Some(body);
+    }
+    let sections = profiles
+        .iter()
+        .map(|entity| {
+            let profile = profile_of(entity)?;
+            Some((profile.plane, profile.pieces))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    brep::loft(&sections)
 }
 
-fn mesh_set(
-    surface: brep::mesh::SurfaceMesh,
-    color: [f32; 4],
-    precision: f64,
-) -> Option<MeshLodSet> {
-    if surface.mesh.is_empty() {
+/// Builds an exact wall solid around a polyline centreline.
+pub fn polysolid(entity: &EntityType, width: f64, height: f64) -> Option<Body> {
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height.abs() <= 1e-12 {
         return None;
     }
-    let mut verts = Vec::with_capacity(surface.mesh.positions.len());
-    let mut verts_low = Vec::with_capacity(surface.mesh.positions.len());
-    for point in &surface.mesh.positions {
-        push_point(&mut verts, &mut verts_low, *point);
+    let planar = entity_curve(entity)?;
+    let Curve::Polyline(source) = planar.curve else {
+        return None;
+    };
+    let (left_pick, right_pick) = offset_picks(&source, width)?;
+    let mut left = offset_polyline(&source, width * 0.5, left_pick);
+    let mut right = offset_polyline(&source, width * 0.5, right_pick);
+    if left.len() != 1 || right.len() != 1 {
+        return None;
     }
-    let silhouette = surface.silhouette_source(precision);
-    let mut set = MeshLodSet::from_single(MeshModel {
-        name: String::new(),
-        verts,
-        verts_low,
-        normals: surface
-            .mesh
-            .normals
-            .iter()
-            .map(|normal| [normal[0] as f32, normal[1] as f32, normal[2] as f32])
-            .collect(),
-        indices: surface
-            .mesh
-            .triangles
-            .iter()
-            .flatten()
-            .map(|index| *index as u32)
-            .collect(),
-        triangle_material_handles: Vec::new(),
-        triangle_colors: Vec::new(),
-        color,
-        selected: false,
-    });
-    {
-        let (high, low) = (&mut set.edge_verts, &mut set.edge_verts_low);
-        for edge in surface.edges {
-            for segment in edge.windows(2) {
-                for point in segment {
-                    push_point(high, low, *point);
-                }
-            }
+    let left = left.remove(0);
+    let right = right.remove(0);
+    let normal = Vec3::from(planar.plane.normal()?);
+    let direction = (normal * height).to_array();
+
+    if source.closed {
+        if !left.closed || !right.closed {
+            return None;
         }
+        let mut profiles = [left, right]
+            .into_iter()
+            .map(|polyline| {
+                let area = Curve::Polyline(polyline.clone()).enclosed_area().abs();
+                (area, Curve::Polyline(polyline).segments())
+            })
+            .collect::<Vec<_>>();
+        profiles.sort_by(|first, second| second.0.total_cmp(&first.0));
+        if profiles[0].0 <= profiles[1].0 || profiles[1].0 <= 1e-12 {
+            return None;
+        }
+        return brep::extrude_region(
+            planar.plane,
+            &[profiles.remove(0).1, profiles.remove(0).1],
+            direction,
+        );
     }
-    set.curved_gens
-        .push(super::mesh_model::CurvedGen { source: silhouette });
-    Some(set)
+
+    if left.closed || right.closed {
+        return None;
+    }
+    let left_start = left.vertices.first()?.position;
+    let left_end = left.vertices.last()?.position;
+    let right_start = right.vertices.first()?.position;
+    let right_end = right.vertices.last()?.position;
+    let mut outline = Curve::Polyline(left).segments();
+    outline.push(Curve::Line(Line {
+        start: left_end,
+        end: right_end,
+    }));
+    let mut back = Curve::Polyline(right).segments();
+    back.reverse();
+    outline.extend(back);
+    outline.push(Curve::Line(Line {
+        start: right_start,
+        end: left_start,
+    }));
+    brep::extrude(planar.plane, &outline, direction)
 }
 
-fn push_point(high: &mut Vec<[f32; 3]>, low: &mut Vec<[f32; 3]>, point: [f64; 3]) {
-    let coarse = [point[0] as f32, point[1] as f32, point[2] as f32];
-    high.push(coarse);
-    low.push([
-        (point[0] - coarse[0] as f64) as f32,
-        (point[1] - coarse[1] as f64) as f32,
-        (point[2] - coarse[2] as f64) as f32,
-    ]);
+fn offset_picks(polyline: &Polyline, width: f64) -> Option<([f64; 2], [f64; 2])> {
+    let start = polyline.vertices.first()?.position;
+    let next = polyline.vertices.get(1)?.position;
+    let along = if let Some(arc) = polyline.segment_arc(0) {
+        let near = arc.sample(1e-6);
+        [near[0] - start[0], near[1] - start[1]]
+    } else {
+        [next[0] - start[0], next[1] - start[1]]
+    };
+    let length = along[0].hypot(along[1]);
+    if length <= 1e-12 {
+        return None;
+    }
+    let side = [-along[1] / length * width, along[0] / length * width];
+    Some((
+        [start[0] + side[0], start[1] + side[1]],
+        [start[0] - side[0], start[1] - side[1]],
+    ))
+}
+
+fn circular_loft(profiles: &[EntityType]) -> Option<Body> {
+    if profiles.len() < 2 {
+        return None;
+    }
+    let sections = profiles
+        .iter()
+        .map(|entity| {
+            let planar = entity_curve(entity)?;
+            let Curve::Circle(circle) = planar.curve else {
+                return None;
+            };
+            Some((
+                Vec3::from(planar.plane.point_at(circle.centre)),
+                circle.radius,
+                Vec3::from(planar.plane.normal()?),
+                Vec3::from(planar.plane.x_axis),
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let first = sections.first()?;
+    let direction = (sections.last()?.0 - first.0).normalize()?;
+    let scale = sections
+        .iter()
+        .map(|(centre, radius, _, _)| centre.length().max(*radius))
+        .fold(1.0_f64, f64::max);
+    let tolerance = scale * 1e-9;
+    let mut heights = Vec::with_capacity(sections.len());
+    for (centre, radius, normal, _) in &sections {
+        if !radius.is_finite()
+            || *radius <= tolerance
+            || normal.dot(direction).abs() < 1.0 - 1e-9
+        {
+            return None;
+        }
+        let offset = *centre - first.0;
+        if (offset - direction * offset.dot(direction)).length() > tolerance {
+            return None;
+        }
+        heights.push(offset.dot(direction));
+    }
+    if heights
+        .windows(2)
+        .any(|pair| pair[1] <= pair[0] + tolerance)
+    {
+        return None;
+    }
+    let radial_seed = first.3 - direction * first.3.dot(direction);
+    let radial = radial_seed.normalize()?;
+    let profile_plane = Plane::from_axes(first.0.to_array(), radial.to_array(), direction.to_array());
+    let mut points = Vec::with_capacity(sections.len() + 2);
+    points.push([0.0, 0.0]);
+    points.extend(
+        sections
+            .iter()
+            .zip(&heights)
+            .map(|((_, radius, _, _), height)| [*radius, *height]),
+    );
+    points.push([0.0, *heights.last()?]);
+    let profile = (0..points.len())
+        .map(|index| {
+            Curve::Line(Line {
+                start: points[index],
+                end: points[(index + 1) % points.len()],
+            })
+        })
+        .collect::<Vec<_>>();
+    brep::revolve(
+        profile_plane,
+        &profile,
+        first.0.to_array(),
+        direction.to_array(),
+        std::f64::consts::TAU,
+    )
 }
 
 #[cfg(test)]

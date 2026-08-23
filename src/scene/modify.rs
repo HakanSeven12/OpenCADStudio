@@ -807,7 +807,7 @@ impl Scene {
         let Ok(body) = cadkernel::acis::rebuild_body(&operation) else {
             return false;
         };
-        let Some(document) = crate::scene::convert::acis_export::planar_solid_to_sat(&body) else {
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
             return false;
         };
         self.record_solid_history_before(handle);
@@ -833,7 +833,7 @@ impl Scene {
         let Ok(body) = cadkernel::acis::rebuild_body(&operation) else {
             return false;
         };
-        let Some(document) = crate::scene::convert::acis_export::planar_solid_to_sat(&body) else {
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
             return false;
         };
         let Some(EntityType::Solid3D(entity)) = self.document.get_entity_mut(handle) else {

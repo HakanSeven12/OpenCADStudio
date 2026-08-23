@@ -3454,6 +3454,38 @@ impl OpenCADStudio {
                     })?
                 });
                 if let Some(handle) = hit {
+                    let uses_surface_point = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|command| command.entity_pick_uses_surface_point());
+                    let entity_pick_point = if uses_surface_point {
+                        self.tabs[i]
+                            .scene
+                            .solid_click_point_for(p, view_rot2, eye2, bounds, handle)
+                            .unwrap_or(pick_wcs)
+                    } else {
+                        pick_wcs
+                    };
+                    let entity_pick_direction = if uses_surface_point {
+                        if matches!(
+                            self.tabs[i].scene.document.get_entity(handle),
+                            Some(acadrust::EntityType::Solid3D(_))
+                        ) {
+                            self.tabs[i]
+                                .scene
+                                .solid_planar_face_normal_at(handle, entity_pick_point)
+                        } else {
+                            self.tabs[i]
+                                .scene
+                                .document
+                                .get_entity(handle)
+                                .and_then(crate::entities::curve::entity_curve)
+                                .and_then(|curve| curve.plane.normal())
+                                .map(glam::DVec3::from_array)
+                        }
+                    } else {
+                        None
+                    };
                     // Some commands (e.g. SS_CATCHMENT) need the entity
                     // body before `on_entity_pick` can advance.
                     let inject_first = self.tabs[i]
@@ -3484,7 +3516,8 @@ impl OpenCADStudio {
                     let result = self.tabs[i].active_cmd.as_mut().map(|c| {
                         // Shift-swap state for TRIM/EXTEND (#336).
                         c.set_shift(shift);
-                        c.on_entity_pick(handle, pick_wcs)
+                        c.set_entity_pick_direction(entity_pick_direction);
+                        c.on_entity_pick(handle, entity_pick_point)
                     });
                     // HATCHEDIT: after pick, inject hatch model data into the command.
                     if self.tabs[i]
@@ -4011,8 +4044,7 @@ impl OpenCADStudio {
                             )
                         })
                         .or_else(|| {
-                            // Block-internal hatch: resolve to the
-                            // parent Insert (AutoCAD behaviour).
+                            // Block-internal hatch: resolve to the parent Insert.
                             scene::pick::hit_test::click_hit_insert_hatch(
                                 p,
                                 self.tabs[i].scene.insert_hatches_for_click().as_ref(),

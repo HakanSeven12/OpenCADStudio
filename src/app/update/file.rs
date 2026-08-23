@@ -258,7 +258,7 @@ impl OpenCADStudio {
             let body = scene.solid_models.get(&h);
             let sat = needs_acis
                 .then(|| {
-                    body.and_then(crate::scene::convert::acis_export::planar_solid_to_sat)
+                    body.and_then(crate::scene::convert::acis_export::solid_to_sat)
                 })
                 .flatten();
             let wires = needs_wires.then(|| {

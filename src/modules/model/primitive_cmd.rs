@@ -1,22 +1,15 @@
-// 3D primitive creation — BOX / CYLINDER / CONE / SPHERE / WEDGE / PYRAMID /
-// TORUS. Each is placed CAD-style with a few clicks (planar footprint first,
-// then a height value), then built as a real ACIS `Solid3D` via acadrust's
-// `acis::primitives` builders. `Scene::add_entity` tessellates the SAT B-rep
-// into the 3D mesh pipeline, so the solid renders, selects, and saves to DXF.
-//
-// A matching the kernel `Solid` is cached on the scene (see model/mod.rs) when the
-// entity is committed, so the Design-group boolean tools can combine it.
+// Interactive kernel primitives stored as ACIS Solid3D entities.
 
 use acadrust::entities::Solid3D;
 use acadrust::objects::SolidHistoryOperation;
-use acadrust::{primitives, EntityType};
-use glam::DVec3;
-use crate::t;
+use acadrust::EntityType;
 use cadkernel::brep::Body;
+use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::scene::model::solid_model;
 use crate::scene::model::wire_model::WireModel;
+use crate::t;
 
 /// Which primitive a `PrimitiveCommand` builds.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -26,6 +19,7 @@ pub enum Shape {
     Cylinder,
     Cone,
     Sphere,
+    Pyramid,
     Torus,
 }
 
@@ -37,6 +31,7 @@ impl Shape {
             "CYLINDER" => Shape::Cylinder,
             "CONE" => Shape::Cone,
             "SPHERE" => Shape::Sphere,
+            "PYRAMID" | "PYR" => Shape::Pyramid,
             "TORUS" => Shape::Torus,
             _ => return None,
         })
@@ -48,6 +43,7 @@ impl Shape {
             Shape::Cylinder => "CYLINDER",
             Shape::Cone => "CONE",
             Shape::Sphere => "SPHERE",
+            Shape::Pyramid => "PYRAMID",
             Shape::Torus => "TORUS",
         }
     }
@@ -129,12 +125,11 @@ impl PrimitiveCommand {
         .to_cols_array()
     }
 
-    /// Build both the acadrust `Solid3D` (ACIS, for persistence) and the
-    /// kernel `Body` (rendering + booleans) from the footprint + `height`.
-    fn build(&self, height: f64) -> Option<(EntityType, Body, SolidHistoryOperation)> {
+    /// Build the persistent kernel body and its history node.
+    fn build(&self, height: f64) -> Option<(Body, SolidHistoryOperation)> {
         use crate::scene::model::solid_history;
 
-        let (doc, solid, history) = match self.shape {
+        let (solid, history) = match self.shape {
             Shape::Box | Shape::Wedge => {
                 let (a, b) = (self.pts[0], self.pts[1]);
                 let length = (b.x - a.x).abs();
@@ -150,7 +145,6 @@ impl PrimitiveCommand {
                         a.z + height / 2.0,
                     ];
                     (
-                        primitives::build_box(center, length, width, height),
                         solid_model::box_solid(center, length, width, height),
                         solid_history::box_op(
                             self.history_transform(origin),
@@ -162,7 +156,6 @@ impl PrimitiveCommand {
                 } else {
                     let origin = [a.x.min(b.x), a.y.min(b.y), a.z];
                     (
-                        primitives::build_wedge(origin, length, width, height),
                         solid_model::wedge_solid(origin, length, width, height),
                         solid_history::wedge_op(
                             self.history_transform(DVec3::from_array(origin)),
@@ -182,7 +175,6 @@ impl PrimitiveCommand {
                 let center = [c.x, c.y, c.z];
                 if self.shape == Shape::Cylinder {
                     (
-                        primitives::build_cylinder(center, r, height),
                         solid_model::cylinder_solid(center, r, height),
                         solid_history::cylinder_op(
                             self.history_transform(c),
@@ -192,7 +184,6 @@ impl PrimitiveCommand {
                     )
                 } else {
                     (
-                        primitives::build_cone(center, r, height),
                         solid_model::cone_solid(center, r, height),
                         solid_history::cone_op(
                             self.history_transform(c),
@@ -210,9 +201,19 @@ impl PrimitiveCommand {
                 }
                 let center = [c.x, c.y, c.z];
                 (
-                    primitives::build_sphere(center, r),
                     solid_model::sphere_solid(center, r),
                     solid_history::sphere_op(self.history_transform(c), r),
+                )
+            }
+            Shape::Pyramid => {
+                let c = self.pts[0];
+                let r = (self.pts[1] - c).length();
+                if r < 1e-6 || height < 1e-6 {
+                    return None;
+                }
+                (
+                    solid_model::pyramid_solid([c.x, c.y, c.z], r, height, 4),
+                    solid_history::pyramid_op(self.history_transform(c), r, height, 4),
                 )
             }
             Shape::Torus => {
@@ -228,7 +229,6 @@ impl PrimitiveCommand {
                 let minor = (outer - inner) * 0.5;
                 let center = [c.x, c.y, c.z];
                 (
-                    primitives::build_torus(center, major, minor),
                     solid_model::torus_solid(center, major, minor),
                     solid_history::torus_op(
                         self.history_transform(c),
@@ -239,14 +239,12 @@ impl PrimitiveCommand {
             }
         };
         let solid = solid?;
-        let mut s3d = Solid3D::new();
-        s3d.set_sat_document(&doc);
-        Some((EntityType::Solid3D(s3d), solid, history))
+        Some((solid, history))
     }
 
     fn commit(&self, height: f64) -> CmdResult {
         match self.build(height) {
-            Some((entity, solid, history)) => {
+            Some((solid, history)) => {
                 // Built upright in its own frame, then put on the working
                 // plane — the same move `place_entity` makes for the ACIS
                 // copy, so the two stay on top of each other.
@@ -262,11 +260,21 @@ impl PrimitiveCommand {
                     ],
                 );
                 match placed {
-                    Some(placed) => CmdResult::CommitSolid {
-                        entity: self.plane.place_entity(entity),
-                        solid: Box::new(placed),
-                        history,
-                    },
+                    Some(placed) => {
+                        let Some(document) =
+                            crate::scene::convert::acis_export::solid_to_sat(&placed)
+                        else {
+                            return CmdResult::Cancel;
+                        };
+                        let mut entity = Solid3D::new();
+                        entity.set_sat_document(&document);
+                        entity.wires = solid_model::edge_wires(&placed);
+                        CmdResult::CommitSolid {
+                            entity: EntityType::Solid3D(entity),
+                            solid: Box::new(placed),
+                            history,
+                        }
+                    }
                     None => CmdResult::Cancel,
                 }
             }
@@ -390,7 +398,15 @@ impl CadCommand for PrimitiveCommand {
 
 fn footprint_wire(shape: Shape, pts: &[DVec3]) -> WireModel {
     let mut points: Vec<[f32; 3]> = Vec::new();
-    if shape.radial() {
+    if shape == Shape::Pyramid {
+        let center = pts[0];
+        let radius = (pts[1] - center).length();
+        let corners: [DVec3; 4] = std::array::from_fn(|index| {
+            let angle = index as f64 * std::f64::consts::FRAC_PI_2;
+            center + DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0)
+        });
+        push_loop(&mut points, &corners);
+    } else if shape.radial() {
         let c = pts[0];
         let r = (pts[1] - c).length();
         circle_points(&mut points, c, r);
@@ -446,9 +462,21 @@ fn height_wire(shape: Shape, pts: &[DVec3], height: f64) -> WireModel {
                 push_segment(&mut points, low[i], high[i]);
             }
         }
-        Shape::Cylinder | Shape::Cone => {
+        Shape::Cylinder | Shape::Cone | Shape::Pyramid => {
             let center = pts[0];
             let radius = (pts[1] - center).length();
+            if shape == Shape::Pyramid {
+                let base: [DVec3; 4] = std::array::from_fn(|index| {
+                    let angle = index as f64 * std::f64::consts::FRAC_PI_2;
+                    center + DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0)
+                });
+                push_loop(&mut points, &base);
+                let apex = center + DVec3::Z * height;
+                for corner in base {
+                    push_segment(&mut points, corner, apex);
+                }
+                return wire("primitive_height_preview", points);
+            }
             push_circle(&mut points, center, radius);
             if shape == Shape::Cylinder {
                 push_circle(&mut points, center + DVec3::Z * height, radius);
@@ -506,7 +534,7 @@ fn circle_points(out: &mut Vec<[f32; 3]>, c: DVec3, r: f64) {
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["BOX", "WEDGE", "CYLINDER", "CONE", "SPHERE", "TORUS"]
+    names: &["BOX", "WEDGE", "CYLINDER", "CONE", "SPHERE", "PYRAMID", "PYR", "TORUS"]
 });
 
 fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
@@ -522,9 +550,9 @@ fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: name.into(),
         points,
         points_low: Vec::new(),

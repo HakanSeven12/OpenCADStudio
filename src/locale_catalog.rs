@@ -3,6 +3,15 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Boolean" => Some(("model", "boolean")),
+        "Create" => Some(("model", "create")),
+        "Extrude" => Some(("model", "extrude")),
+        "Loft" => Some(("model", "loft")),
+        "Polysolid" => Some(("model", "polysolid")),
+        "Presspull" => Some(("model", "presspull")),
+        "Pyramid" => Some(("model", "pyramid")),
+        "Revolve" => Some(("model", "revolve")),
+        "Sweep" => Some(("model", "sweep")),
         "    {:?}" => Some(("view", "message")),
         "  (none — use: SHORTCUTS SET <key> <command>)" => Some(("common", "none-use-shortcuts-set-key-command")),
         "  Alignment:" => Some(("common", "alignment-indented-label-title-case")),

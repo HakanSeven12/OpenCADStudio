@@ -1,8 +1,8 @@
-// Boolean operations on 3D solids (Design group). The actual CSG runs in
+// Boolean operations on 3D solids. The actual CSG runs in
 // `App::solid_boolean` (src/app/model_ops.rs) using the kernel on the
 // cached B-reps; this module just names the operations.
 
-/// Which boolean a Design-group tool performs on the two selected solids.
+/// Which boolean operation to apply to selected solids.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BoolOp {
     Union,

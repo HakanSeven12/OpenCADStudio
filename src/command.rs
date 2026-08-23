@@ -1425,15 +1425,18 @@ pub enum CmdResult {
         /// Translation vector applied once to every selected point.
         delta: DVec3,
     },
-    /// Create a Solid3D placeholder entity + associated MeshModel.
-    /// `mesh_fn` is called with the entity's handle string to build the mesh.
-    CommitSolid3D {
-        mesh_fn: Box<dyn FnOnce(String) -> Option<crate::scene::model::mesh_model::MeshModel> + Send>,
-    },
-    /// Extrude the profile entity `handle` by `height` along Z.
+    /// Extrude the profile entity `handle` along its plane normal.
     ExtrudeEntity {
         handle: Handle,
         height: f64,
+        color: [f32; 4],
+    },
+    /// Pull a closed profile or a planar solid face by a signed distance.
+    PresspullEntity {
+        handle: Handle,
+        pick: DVec3,
+        distance: f64,
+        drag: Option<DVec3>,
         color: [f32; 4],
     },
     /// Revolve the profile entity `handle` around the given axis by `angle_deg`.
@@ -1454,6 +1457,13 @@ pub enum CmdResult {
     LoftEntities {
         handles: Vec<Handle>,
         color: [f32; 4],
+    },
+    /// Round or bevel the straight edge nearest `pick` on a solid.
+    SolidEdgeBlend {
+        handle: Handle,
+        pick: DVec3,
+        value: f64,
+        fillet: bool,
     },
     /// INSERT landed on a block that has AttributeDefinitions.
     /// The host should look up the attdefs for `block_name` from the document
@@ -1766,6 +1776,14 @@ pub trait CadCommand: Send {
     fn entity_pick_includes_fills(&self) -> bool {
         false
     }
+
+    /// Supply the mesh surface hit instead of the working-plane projection.
+    fn entity_pick_uses_surface_point(&self) -> bool {
+        false
+    }
+
+    /// Supply the picked surface or profile direction when available.
+    fn set_entity_pick_direction(&mut self, _direction: Option<DVec3>) {}
 
     /// Render the entity under the cursor through the normal rollover
     /// highlight while this command is waiting for an entity pick.

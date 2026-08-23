@@ -1,5 +1,15 @@
 use super::*;
 
+fn selected_solid(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
+    let selected = app.tabs[tab].scene.selected_handles_in_order();
+    (selected.len() == 1
+        && matches!(
+            app.tabs[tab].scene.document.get_entity(selected[0]),
+            Some(acadrust::EntityType::Solid3D(_))
+        ))
+    .then_some(selected[0])
+}
+
 impl OpenCADStudio {
     pub(super) fn dispatch_dim(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
@@ -950,6 +960,20 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "SOLIDFILLET" => {
+                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
+                let command = SolidEdgeCommand::new(EdgeOperation::Fillet, selected_solid(self, i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            "FILLET" if selected_solid(self, i).is_some() => {
+                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
+                let command = SolidEdgeCommand::new(EdgeOperation::Fillet, selected_solid(self, i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
             "FILLET" => {
                 use crate::modules::draw::modify::fillet::FilletCommand;
                 let entities: Vec<_> = self.tabs[i]
@@ -1081,6 +1105,20 @@ impl OpenCADStudio {
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 }
+            }
+
+            "SOLIDCHAMFER" => {
+                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
+                let command = SolidEdgeCommand::new(EdgeOperation::Chamfer, selected_solid(self, i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            "CHAMFER" if selected_solid(self, i).is_some() => {
+                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
+                let command = SolidEdgeCommand::new(EdgeOperation::Chamfer, selected_solid(self, i));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "CHAMFER" => {

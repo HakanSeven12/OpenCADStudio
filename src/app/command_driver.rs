@@ -1204,15 +1204,17 @@ impl OpenCADStudio {
             } => {
                 let label = self.history_label_from_active_cmd(i, "SOLID");
                 let pending = self.begin_undo(i, label, 1, true);
-                self.add_solid_model(entity, *solid, history);
-                self.tabs[i].dirty = true;
+                let handle = self.add_solid_model(entity, *solid, history);
+                if !handle.is_null() {
+                    self.tabs[i].dirty = true;
+                    if let Some(pd) = pending {
+                        self.commit_undo_delta(i, pd);
+                    }
+                }
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.restore_pre_cmd_tangent();
-                if let Some(pd) = pending {
-                    self.commit_undo_delta(i, pd);
-                }
             }
             CmdResult::CommitAndEditText(entity) => {
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
@@ -3001,80 +3003,32 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pending);
                 }
             }
-            // ── Solid3D creation (BOX / SPHERE / CYLINDER) ────────────────
-            CmdResult::CommitSolid3D { mesh_fn } => {
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                let pending = self.begin_undo(i, "SOLID3D", 1, true);
-                let entity = empty_solid3d();
-                let handle = self.tabs[i].scene.add_entity(entity);
-                if !handle.is_null() {
-                    let name = format!("{}", handle.value());
-                    let color = [0.6f32, 0.6, 0.8, 1.0]; // default colour; command embedded it
-                    let _ = color; // color is captured inside mesh_fn
-                    if let Some(mesh) = mesh_fn(name) {
-                        let set = crate::scene::MeshLodSet::from_single(mesh);
-                        if let Some(acadrust::EntityType::Solid3D(entity)) =
-                            self.tabs[i].scene.document.get_entity_mut(handle)
-                        {
-                            let center = set.metrics.centroid;
-                            entity.point_of_reference = acadrust::types::Vector3::new(
-                                center[0], center[1], center[2],
-                            );
-                        }
-                        self.tabs[i].scene.meshes.insert(handle, set);
-                    }
-                    self.tabs[i].dirty = true;
-                    self.command_line.push_output(crate::t!("Solid created.").as_ref());
-                }
-                if let Some(pd) = pending {
-                    self.commit_undo_delta(i, pd);
-                }
-                self.tabs[i].active_cmd = None;
-                self.tabs[i].snap_result = None;
-                self.tabs[i].scene.clear_preview_wire();
-                self.restore_pre_cmd_tangent();
-            }
-
             // ── EXTRUDE ────────────────────────────────────────────────────
             CmdResult::ExtrudeEntity {
                 handle,
                 height,
-                color,
+                color: _,
             } => {
                 if self.reject_locked_edit(i, handle) {
                     self.tabs[i].active_cmd = None;
                     return Task::none();
                 }
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::{solid_model, sweep_model};
+                use crate::scene::model::sweep_model;
 
                 let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
                 if let Some(entity) = entity_opt {
-                    // The kernel sweeps the profile into analytic surfaces —
-                    // a straight run becomes a plane and an arc a cylinder —
-                    // so the solid saves as exact ACIS rather than facets.
-                    let result = sweep_model::extruded(&entity, height as f64)
-                        .and_then(|body| Some((solid_model::mesh_from_solid(&body, color)?, body)));
-                    if let Some((mesh, solid)) = result {
-                        let history = crate::scene::model::solid_history::extrusion_op(
-                            &entity,
-                            height as f64,
-                        );
+                    if let Some(solid) = sweep_model::extruded(&entity, height) {
+                        let history = crate::scene::model::solid_history::brep_op(&solid);
                         let pending = self.begin_undo(i, "EXTRUDE", 1, true);
-                        let mut s3d = empty_solid3d();
-                        if let acadrust::EntityType::Solid3D(inner) = &mut s3d {
-                            inner.wires = solid_model::edge_wires(&solid);
-                        }
-                        let new_handle = self.tabs[i].scene.add_entity(s3d);
-                        self.tabs[i]
-                            .scene
-                            .create_solid_history(new_handle, history);
-                        self.tabs[i].scene.register_solid_model(new_handle, solid);
-                        let _ = mesh;
-                        self.tabs[i].dirty = true;
-                        self.command_line.push_output(crate::t!("EXTRUDE: solid created.").as_ref());
-                        if let Some(pd) = pending {
-                            self.commit_undo_delta(i, pd);
+                        let created = self.add_solid_model(empty_solid3d(), solid, history);
+                        if !created.is_null() {
+                            self.tabs[i].dirty = true;
+                            self.command_line
+                                .push_output(crate::t!("EXTRUDE: solid created.").as_ref());
+                            if let Some(pd) = pending {
+                                self.commit_undo_delta(i, pd);
+                            }
                         }
                     } else {
                         self.command_line.push_error(crate::t!("EXTRUDE: could not build profile. Select a closed 2D entity (Circle, LwPolyline, etc.).").as_ref());
@@ -3088,26 +3042,80 @@ impl OpenCADStudio {
                 self.restore_pre_cmd_tangent();
             }
 
+            CmdResult::PresspullEntity {
+                handle,
+                pick,
+                distance,
+                drag,
+                color,
+            } => {
+                if matches!(
+                    self.tabs[i].scene.document.get_entity(handle),
+                    Some(acadrust::EntityType::Solid3D(_))
+                ) {
+                    let task = self.solid_face_presspull(handle, pick, distance, drag);
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.tabs[i].scene.clear_preview_wire();
+                    self.restore_pre_cmd_tangent();
+                    return task;
+                }
+                if self.reject_locked_edit(i, handle) {
+                    self.tabs[i].active_cmd = None;
+                    return Task::none();
+                }
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                use crate::scene::model::{solid_history, sweep_model};
+
+                let result = self.tabs[i].scene.document.get_entity(handle).and_then(|entity| {
+                    let distance = match drag {
+                        Some(point) => sweep_model::projected_drag(entity, pick, point)?,
+                        None => distance,
+                    };
+                    sweep_model::extruded(entity, distance)
+                });
+                if let Some(solid) = result {
+                    let pending = self.begin_undo(i, "PRESSPULL", 1, true);
+                    let history = solid_history::brep_op(&solid);
+                    let created = self.add_solid_model(empty_solid3d(), solid, history);
+                    let _ = color;
+                    if !created.is_null() {
+                        self.tabs[i].dirty = true;
+                        self.command_line
+                            .push_output(crate::t!("PRESSPULL: solid created.").as_ref());
+                        if let Some(delta) = pending {
+                            self.commit_undo_delta(i, delta);
+                        }
+                    }
+                } else {
+                    self.command_line.push_error(
+                        crate::t!("PRESSPULL: select a closed profile or planar solid face.")
+                            .as_ref(),
+                    );
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+
             // ── REVOLVE ────────────────────────────────────────────────────
             CmdResult::RevolveEntity {
                 handle,
                 axis_start,
                 axis_end,
                 angle_deg,
-                color,
+                color: _,
             } => {
                 if self.reject_locked_edit(i, handle) {
                     self.tabs[i].active_cmd = None;
                     return Task::none();
                 }
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::{solid_model, sweep_model};
+                use crate::scene::model::sweep_model;
 
                 let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
                 if let Some(entity) = entity_opt {
-                    // A line turned about the axis sweeps into a plane, a
-                    // cylinder or a cone, and an arc into a sphere or a
-                    // torus, so a revolved solid keeps exact geometry too.
                     let result = sweep_model::revolved(
                         &entity,
                         [
@@ -3117,31 +3125,19 @@ impl OpenCADStudio {
                         ],
                         [axis_end.x as f64, axis_end.y as f64, axis_end.z as f64],
                         (angle_deg as f64).to_radians(),
-                    )
-                    .and_then(|body| Some((solid_model::mesh_from_solid(&body, color)?, body)));
-                    if let Some((mesh, solid)) = result {
-                        let history = crate::scene::model::solid_history::revolve_op(
-                            &entity,
-                            axis_start.to_array(),
-                            axis_end.to_array(),
-                            (angle_deg as f64).to_radians(),
-                        );
+                    );
+                    if let Some(solid) = result {
+                        let history = crate::scene::model::solid_history::brep_op(&solid);
                         let pending = self.begin_undo(i, "REVOLVE", 1, true);
-                        let mut s3d = empty_solid3d();
-                        if let acadrust::EntityType::Solid3D(inner) = &mut s3d {
-                            inner.wires = solid_model::edge_wires(&solid);
-                        }
-                        let new_handle = self.tabs[i].scene.add_entity(s3d);
-                        self.tabs[i]
-                            .scene
-                            .create_solid_history(new_handle, history);
-                        self.tabs[i].scene.register_solid_model(new_handle, solid);
-                        let _ = mesh;
-                        self.tabs[i].dirty = true;
-                        self.command_line
-                            .push_output(crate::tf!("REVOLVE: solid created ({:.0}°).", angle_deg).as_ref());
-                        if let Some(pd) = pending {
-                            self.commit_undo_delta(i, pd);
+                        let created = self.add_solid_model(empty_solid3d(), solid, history);
+                        if !created.is_null() {
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(
+                                crate::tf!("REVOLVE: solid created ({:.0}°).", angle_deg).as_ref(),
+                            );
+                            if let Some(pd) = pending {
+                                self.commit_undo_delta(i, pd);
+                            }
                         }
                     } else {
                         self.command_line
@@ -3160,7 +3156,7 @@ impl OpenCADStudio {
             CmdResult::SweepEntity {
                 profile_handle,
                 path_handle,
-                color,
+                color: _,
             } => {
                 if self.reject_locked_edit(i, profile_handle)
                     || self.reject_locked_edit(i, path_handle)
@@ -3169,7 +3165,7 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::sweep_model;
+                use crate::scene::model::{solid_history, sweep_model};
 
                 let profile_ent = self.tabs[i]
                     .scene
@@ -3177,39 +3173,21 @@ impl OpenCADStudio {
                     .get_entity(profile_handle)
                     .cloned();
                 let path_ent = self.tabs[i].scene.document.get_entity(path_handle).cloned();
-                let history = profile_ent
-                    .as_ref()
-                    .zip(path_ent.as_ref())
-                    .map(|(profile, path)| {
-                        crate::scene::model::solid_history::sweep_op(profile, path)
-                    });
                 let result = profile_ent
                     .zip(path_ent)
-                    .and_then(|(profile, path)| sweep_model::swept(&profile, &path, color));
+                    .and_then(|(profile, path)| sweep_model::swept(&profile, &path));
 
-                if let Some(mut set) = result {
+                if let Some(solid) = result {
                     let pending = self.begin_undo(i, "SWEEP", 1, true);
-                    let mut entity = empty_solid3d();
-                    if let acadrust::EntityType::Solid3D(solid) = &mut entity {
-                        let center = set.metrics.centroid;
-                        solid.point_of_reference = acadrust::types::Vector3::new(
-                            center[0], center[1], center[2],
-                        );
-                    }
-                    let new_handle = self.tabs[i].scene.add_entity(entity);
-                    if let Some(history) = history {
-                        self.tabs[i]
-                            .scene
-                            .create_solid_history(new_handle, history);
-                    }
-                    for mesh in &mut set.lods {
-                        mesh.name = format!("{}", new_handle.value());
-                    }
-                    self.tabs[i].scene.meshes.insert(new_handle, set);
-                    self.tabs[i].dirty = true;
-                    self.command_line.push_output(crate::t!("SWEEP: solid created.").as_ref());
-                    if let Some(pd) = pending {
-                        self.commit_undo_delta(i, pd);
+                    let history = solid_history::brep_op(&solid);
+                    let created = self.add_solid_model(empty_solid3d(), solid, history);
+                    if !created.is_null() {
+                        self.tabs[i].dirty = true;
+                        self.command_line
+                            .push_output(crate::t!("SWEEP: solid created.").as_ref());
+                        if let Some(pd) = pending {
+                            self.commit_undo_delta(i, pd);
+                        }
                     }
                 } else {
                     self.command_line.push_error(crate::t!("SWEEP: could not sweep the profile along the path.").as_ref());
@@ -3221,7 +3199,7 @@ impl OpenCADStudio {
             }
 
             // ── LOFT ──────────────────────────────────────────────────────
-            CmdResult::LoftEntities { handles, color } => {
+            CmdResult::LoftEntities { handles, color: _ } => {
                 if let Some(handle) = handles
                     .iter()
                     .find(|handle| self.tabs[i].scene.is_layer_locked(**handle))
@@ -3232,34 +3210,23 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::sweep_model;
+                use crate::scene::model::{solid_history, sweep_model};
 
                 let profiles: Vec<acadrust::EntityType> = handles
                     .iter()
                     .filter_map(|handle| self.tabs[i].scene.document.get_entity(*handle).cloned())
                     .collect();
-                if let Some(mut set) = sweep_model::lofted(&profiles, color) {
-                    let history = crate::scene::model::solid_history::loft_op(&profiles);
+                if let Some(solid) = sweep_model::lofted(&profiles) {
                     let pending = self.begin_undo(i, "LOFT", 1, true);
-                    let mut entity = empty_solid3d();
-                    if let acadrust::EntityType::Solid3D(solid) = &mut entity {
-                        let center = set.metrics.centroid;
-                        solid.point_of_reference = acadrust::types::Vector3::new(
-                            center[0], center[1], center[2],
-                        );
-                    }
-                    let new_handle = self.tabs[i].scene.add_entity(entity);
-                    self.tabs[i]
-                        .scene
-                        .create_solid_history(new_handle, history);
-                    for mesh in &mut set.lods {
-                        mesh.name = format!("{}", new_handle.value());
-                    }
-                    self.tabs[i].scene.meshes.insert(new_handle, set);
-                    self.tabs[i].dirty = true;
-                    self.command_line.push_output(crate::t!("LOFT: solid created.").as_ref());
-                    if let Some(pd) = pending {
-                        self.commit_undo_delta(i, pd);
+                    let history = solid_history::brep_op(&solid);
+                    let created = self.add_solid_model(empty_solid3d(), solid, history);
+                    if !created.is_null() {
+                        self.tabs[i].dirty = true;
+                        self.command_line
+                            .push_output(crate::t!("LOFT: solid created.").as_ref());
+                        if let Some(pd) = pending {
+                            self.commit_undo_delta(i, pd);
+                        }
                     }
                 } else {
                     self.command_line.push_error(crate::t!("LOFT: select at least two closed profiles.").as_ref());
@@ -3268,6 +3235,20 @@ impl OpenCADStudio {
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
+            }
+
+            CmdResult::SolidEdgeBlend {
+                handle,
+                pick,
+                value,
+                fillet,
+            } => {
+                let task = self.solid_edge_blend(handle, pick, value, fillet);
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                return task;
             }
 
             CmdResult::HatcheditApply {

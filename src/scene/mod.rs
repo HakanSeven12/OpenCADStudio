@@ -518,10 +518,8 @@ pub(crate) fn wire_gpu_patch_enabled() -> bool {
 /// Resolve a viewport's paper-to-model scale ratio from its two
 /// DXF-derived sources.
 ///
-/// `view_height` (model-space view extent) is the canonical source — it
-/// is what AutoCAD actually uses to draw, and what we keep in sync on
-/// every write. `custom_scale` is consulted only when `view_height` is
-/// missing or zero (some third-party exporters omit it).
+/// `view_height` is canonical. `custom_scale` is the fallback when it is
+/// missing or zero.
 #[inline]
 pub fn vp_effective_scale(custom_scale: f64, view_height: f64, vp_height: f64) -> f64 {
     if view_height.abs() > 1e-9 {
@@ -2945,8 +2943,8 @@ impl Scene {
     }
 
     /// Guarantee that a paper layout has its full-screen overall (`id == 1`)
-    /// sheet viewport. AutoCAD always writes one, and `add_layout` creates it,
-    /// but this is a safety net for layouts that arrive without it. The sheet
+    /// sheet viewport. `add_layout` creates it; this is a safety net for layouts
+    /// that arrive without it. The sheet
     /// viewport is the authoritative paper-space view and the canvas every
     /// floating viewport overlays.
     pub fn ensure_sheet_viewport(&mut self, layout_name: &str) {
@@ -3016,9 +3014,8 @@ impl Scene {
         let mut vp = acadrust::entities::Viewport::new();
         vp.id = 1;
         vp.status = acadrust::entities::ViewportStatusFlags::default_on();
-        // Paper-space center is a 2D (x, y) point with z = 0 — the same
-        // convention MVIEW uses for floating viewports. AutoCAD/TrueView read
-        // the viewport center as (x, y); putting the paper-height midpoint in z
+        // Paper-space center is a 2D (x, y) point with z = 0. Putting the
+        // paper-height midpoint in z
         // (with y = 0) left the sheet view centered at y = 0, shifting the whole
         // layout half a page down. See issue #156.
         vp.center = acadrust::types::Vector3::new(
@@ -3242,8 +3239,7 @@ impl Scene {
     }
 
     /// Dashed rectangle marking the printable area — the paper inset by the
-    /// layout's plot margins. AutoCAD draws this guide on every layout; with the
-    /// margins now preserved we can reflect it too. `None` in model space, when
+    /// layout's plot margins. `None` in model space, when
     /// the layout has no margins, or when the inset would be degenerate.
     pub(super) fn printable_area_wire(&self) -> Option<WireModel> {
         if self.current_layout == "Model" {
@@ -3311,8 +3307,7 @@ impl Scene {
     /// The effective plot settings for the current layout: a standalone
     /// PlotSettings page setup if one exists, otherwise the settings embedded in
     /// the LAYOUT object (paper size, margins, origin, rotation, scale). Loaded
-    /// AutoCAD files keep their settings embedded, so without this fallback the
-    /// plot/PDF path would ignore the file's rotation, origin and scale.
+    /// The fallback preserves rotation, origin and scale from loaded files.
     pub fn effective_plot_settings(&self) -> Option<acadrust::objects::PlotSettings> {
         self.plot_settings_for(&self.current_layout)
     }
@@ -7974,6 +7969,44 @@ impl Scene {
         )
     }
 
+    pub fn solid_click_point_for(
+        &self,
+        cursor: iced::Point,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        target: Handle,
+    ) -> Option<glam::DVec3> {
+        let meshes = self.interaction_meshes_arc();
+        pick::hit_test::mesh_click_point(
+            cursor,
+            meshes.iter().filter_map(|set| {
+                (set.entity_handle()? == target).then_some(())?;
+                let mesh = set.geometry_lods().first()?;
+                Some((
+                    target,
+                    mesh,
+                    set.instance_transform,
+                    mesh_interaction_aabb(set)?,
+                ))
+            }),
+            view_rot,
+            eye,
+            bounds,
+        )
+    }
+
+    pub fn solid_planar_face_normal_at(
+        &mut self,
+        handle: Handle,
+        pick: glam::DVec3,
+    ) -> Option<glam::DVec3> {
+        self.restore_solid_models(&[handle]);
+        let body = self.solid_models.get(&handle)?;
+        let face = model::solid_model::nearest_planar_face(body, pick.to_array())?;
+        model::solid_model::planar_face_normal(body, face).map(glam::DVec3::from_array)
+    }
+
     pub fn view_center_surface_pivot(
         &self,
         bounds: iced::Rectangle,
@@ -9374,9 +9407,7 @@ impl Scene {
         if any {
             return Some((min, max));
         }
-        // Last-resort: the header's saved EXTMIN/EXTMAX. AutoCAD writes these
-        // on save so opening a file gives ZOOM EXTENTS a useful answer before
-        // the wire cache is built.
+        // Last resort: saved EXTMIN/EXTMAX before the wire cache is built.
         const SANE_EXTENT: f64 = 1.0e16;
         let h = &self.document.header;
         let hmin = h.model_space_extents_min;

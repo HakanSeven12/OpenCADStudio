@@ -1,27 +1,19 @@
-// 2D→3D modelling commands — EXTRUDE, REVOLVE, SWEEP, LOFT.
-//
-// Each picks profile/path entities and emits a `CmdResult` whose handler
-// builds a solid and inserts its MeshModel into scene.meshes under a
-// minimal placeholder Solid3D entity (empty ACIS — saving will not restore
-// the mesh). The standalone primitives (BOX/CYLINDER/CONE/SPHERE/WEDGE/TORUS)
-// live in the Model tab (`modules::model::primitive_cmd`).
+// Profile-based kernel solid commands stored as exact ACIS data.
 
 use acadrust::{entities::Solid3D, EntityType};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
-
-// BOX / SPHERE / CYLINDER (and CONE / WEDGE / TORUS) now live in the Model tab
-// (`modules::model::primitive_cmd`), which builds them as B-reps cached
-// for the Design-group boolean tools. EXTRUDE / REVOLVE / SWEEP / LOFT remain
-// here as 2D→3D operations.
+use crate::t;
 
 // ── EXTRUDE command ────────────────────────────────────────────────────────
 
 pub struct ExtrudeCommand {
+    command_name: &'static str,
     step: ExtrudeStep,
     pub target_handle: acadrust::Handle,
+    anchor: DVec3,
+    direction: Option<DVec3>,
     color: [f32; 4],
 }
 
@@ -32,10 +24,16 @@ enum ExtrudeStep {
 }
 
 impl ExtrudeCommand {
-    pub fn new(color: [f32; 4]) -> Self {
+    pub fn new_named(name: &str, color: [f32; 4]) -> Self {
         Self {
+            command_name: match name {
+                "THICKEN" => "THICKEN",
+                _ => "EXTRUDE",
+            },
             step: ExtrudeStep::Pick,
             target_handle: acadrust::Handle::NULL,
+            anchor: DVec3::ZERO,
+            direction: None,
             color,
         }
     }
@@ -43,7 +41,7 @@ impl ExtrudeCommand {
 
 impl CadCommand for ExtrudeCommand {
     fn name(&self) -> &'static str {
-        "EXTRUDE"
+        self.command_name
     }
     fn prompt(&self) -> String {
         match self.step {
@@ -55,19 +53,33 @@ impl CadCommand for ExtrudeCommand {
     fn needs_entity_pick(&self) -> bool {
         self.step == ExtrudeStep::Pick
     }
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
+    fn entity_pick_uses_surface_point(&self) -> bool {
+        true
+    }
+    fn set_entity_pick_direction(&mut self, direction: Option<DVec3>) {
+        self.direction = direction.and_then(DVec3::try_normalize);
+    }
+    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
         self.target_handle = handle;
+        self.anchor = point;
         self.step = ExtrudeStep::Height;
         CmdResult::NeedPoint
     }
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         if self.step == ExtrudeStep::Height {
+            let height = self
+                .direction
+                .map(|direction| (pt - self.anchor).dot(direction))
+                .unwrap_or_else(|| pt.distance(self.anchor));
+            if !height.is_finite() || height.abs() <= 1e-6 {
+                return CmdResult::NeedPoint;
+            }
             return CmdResult::ExtrudeEntity {
                 handle: self.target_handle,
-                height: pt.y.abs().max(1e-4),
+                height,
                 color: self.color,
             };
         }
@@ -81,12 +93,150 @@ impl CadCommand for ExtrudeCommand {
             .filter(|&h| h.abs() > 1e-6)
             .map(|h| CmdResult::ExtrudeEntity {
                 handle: self.target_handle,
-                height: h.abs(),
+                height: h,
                 color: self.color,
             })
     }
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+    fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
+        (self.step == ExtrudeStep::Height).then_some((self.anchor, self.direction?))
+    }
+    fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
+        (self.step == ExtrudeStep::Height).then_some(crate::command::DynSpec {
+            anchor: crate::command::DynAnchor::Point(self.anchor),
+            fields: vec![crate::command::DynFieldSpec::new(
+                crate::command::DynRole::Distance,
+            )],
+            guide: crate::command::DynGuide::Radius,
+            ref_point: None,
+        })
+    }
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        Some((cursor - self.anchor).dot(self.direction?))
+    }
+}
+
+// ── PRESSPULL command ─────────────────────────────────────────────────────
+
+pub struct PresspullCommand {
+    picked: Option<(acadrust::Handle, DVec3)>,
+    direction: Option<DVec3>,
+    color: [f32; 4],
+}
+
+impl PresspullCommand {
+    pub fn new(color: [f32; 4]) -> Self {
+        Self {
+            picked: None,
+            direction: None,
+            color,
+        }
+    }
+}
+
+impl CadCommand for PresspullCommand {
+    fn name(&self) -> &'static str {
+        "PRESSPULL"
+    }
+
+    fn prompt(&self) -> String {
+        if self.picked.is_none() {
+            t!("PRESSPULL  Select a closed profile or planar solid face:").into_owned()
+        } else {
+            t!("PRESSPULL  Signed distance:").into_owned()
+        }
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        self.picked.is_none()
+    }
+
+    fn entity_pick_includes_fills(&self) -> bool {
+        true
+    }
+
+    fn entity_pick_uses_surface_point(&self) -> bool {
+        true
+    }
+
+    fn set_entity_pick_direction(&mut self, direction: Option<DVec3>) {
+        self.direction = direction.and_then(|value| value.try_normalize());
+    }
+
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+
+    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        self.picked = Some((handle, point));
+        CmdResult::NeedPoint
+    }
+
+    fn on_point(&mut self, point: DVec3) -> CmdResult {
+        let Some((handle, pick)) = self.picked else {
+            return CmdResult::NeedPoint;
+        };
+        let distance = self
+            .direction
+            .map(|direction| (point - pick).dot(direction))
+            .unwrap_or_else(|| point.distance(pick));
+        if !distance.is_finite() || distance.abs() <= 1e-6 {
+            return CmdResult::NeedPoint;
+        }
+        CmdResult::PresspullEntity {
+            handle,
+            pick,
+            distance,
+            drag: Some(point),
+            color: self.color,
+        }
+    }
+
+    fn wants_text_input(&self) -> bool {
+        self.picked.is_some()
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let (handle, pick) = self.picked?;
+        crate::entities::common::parse_typed_length(text)
+            .filter(|distance| distance.abs() > 1e-6)
+            .map(|distance| CmdResult::PresspullEntity {
+                handle,
+                pick,
+                distance,
+                drag: None,
+                color: self.color,
+            })
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
+        Some((self.picked?.1, self.direction?))
+    }
+
+    fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
+        let (_, anchor) = self.picked?;
+        Some(crate::command::DynSpec {
+            anchor: crate::command::DynAnchor::Point(anchor),
+            fields: vec![crate::command::DynFieldSpec::new(
+                crate::command::DynRole::Distance,
+            )],
+            guide: crate::command::DynGuide::Radius,
+            ref_point: None,
+        })
+    }
+
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        let (_, anchor) = self.picked?;
+        Some((cursor - anchor).dot(self.direction?))
     }
 }
 
@@ -171,7 +321,7 @@ impl CadCommand for RevolveCommand {
                 .ok()
                 .filter(|&a| a.abs() > 1e-3)?
         };
-        Some(self.make_revolve(angle.abs()))
+        Some(self.make_revolve(angle))
     }
     fn on_enter(&mut self) -> CmdResult {
         if self.step == RevolveStep::Angle {
@@ -323,16 +473,16 @@ impl CadCommand for LoftCommand {
     }
 }
 
-// ── Placeholder Solid3D entity construction ────────────────────────────────
+// ── Solid3D entity construction ────────────────────────────────────────────
 
-/// Create a minimal Solid3D entity with empty ACIS data (placeholder only).
 pub fn empty_solid3d() -> EntityType {
     EntityType::Solid3D(Solid3D::new())
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["EXTRUDE"] });  // ExtrudeCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["LOFT"] });  // LoftCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["REVOLVE"] });  // RevolveCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["SWEEP"] });  // SweepCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["EXTRUDE", "THICKEN", "PRESSPULL"]
+});
+inventory::submit!(crate::command::CommandRegistration { names: &["LOFT"] });
+inventory::submit!(crate::command::CommandRegistration { names: &["REVOLVE"] });
+inventory::submit!(crate::command::CommandRegistration { names: &["SWEEP"] });

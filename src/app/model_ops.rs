@@ -1,5 +1,5 @@
 // 3D solid modelling support on the App: committing Model-tab primitives,
-// and the Design-group boolean operations over the scene's session-cached
+// and the Design-group boolean operations over the scene's cached
 // B-reps.
 //
 // The bodies come from the geometry kernel, so every operation here is on
@@ -36,18 +36,30 @@ impl super::OpenCADStudio {
         handle
     }
 
-    /// Run a boolean (`union` / `subtract` / `intersect`) on exactly two
-    /// selected solids whose B-reps are in the session cache.
-    pub(super) fn solid_boolean(&mut self, op: BoolOp) -> Task<Message> {
+    fn selected_solid_handles(&mut self) -> Vec<Handle> {
         let i = self.active_tab;
-        // Selected entities that have a cached B-rep.
-        let handles: Vec<Handle> = self.tabs[i]
+        let mut handles: Vec<Handle> = self.tabs[i]
             .scene
             .selected_handles_in_order()
             .into_iter()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .filter(|handle| {
+                matches!(
+                    self.tabs[i].scene.document.get_entity(*handle),
+                    Some(EntityType::Solid3D(_))
+                )
+            })
             .collect();
+        self.tabs[i].scene.restore_solid_models(&handles);
+        handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        handles
+    }
+
+    /// Run a boolean (`union` / `subtract` / `intersect`) on exactly two
+    /// selected solids whose B-reps can be restored by the kernel.
+    pub(super) fn solid_boolean(&mut self, op: BoolOp) -> Task<Message> {
+        let i = self.active_tab;
+        let handles = self.selected_solid_handles();
         if handles.len() != 2 {
             self.command_line
                 .push_error(crate::t!("Boolean: select exactly two solids created this session.").as_ref());
@@ -91,14 +103,7 @@ impl super::OpenCADStudio {
     /// the same boolean path the Design-group tools use.
     pub(super) fn solid_slice(&mut self, axis: usize, value: f64, keep_low: bool) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("SLICE: select exactly one solid created this session.").as_ref());
@@ -167,14 +172,7 @@ impl super::OpenCADStudio {
     /// leaving the originals in place (a non-destructive boolean intersect).
     pub(super) fn solid_interfere(&mut self) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 2 {
             self.command_line
                 .push_error(crate::t!("INTERFERE: select exactly two solids created this session.").as_ref());
@@ -207,14 +205,7 @@ impl super::OpenCADStudio {
     /// orientation, so it reuses the cached B-rep directly.
     pub(super) fn solid_rotate3d(&mut self, axis: usize, angle_deg: f64) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("3DROTATE: select exactly one solid created this session.").as_ref());
@@ -333,14 +324,7 @@ impl super::OpenCADStudio {
     /// loop on the way through; without that the copy lights black.
     pub(super) fn solid_mirror3d(&mut self, axis: usize) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("3DMIRROR: select exactly one solid created this session.").as_ref());
@@ -385,14 +369,7 @@ impl super::OpenCADStudio {
         dst: [[f64; 3]; 3],
     ) -> Task<Message> {
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("3DALIGN: select exactly one solid created this session.").as_ref());
@@ -453,14 +430,7 @@ impl super::OpenCADStudio {
         use acadrust::Line;
 
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.len() != 1 {
             self.command_line
                 .push_error(crate::t!("SECTION: select exactly one solid created this session.").as_ref());
@@ -636,14 +606,7 @@ impl super::OpenCADStudio {
         use acadrust::types::Vector3;
         use acadrust::Line;
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.is_empty() {
             self.command_line
                 .push_error(crate::t!("FLATSHOT: select a solid created this session.").as_ref());
@@ -677,14 +640,7 @@ impl super::OpenCADStudio {
         use acadrust::entities::{Surface, SurfaceKind, Wire as AWire};
         use acadrust::types::Vector3;
         let i = self.active_tab;
-        let handles: Vec<Handle> = self.tabs[i]
-            .scene
-            .selected
-            .iter()
-            .copied()
-            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
-            .filter(|h| self.tabs[i].scene.solid_models.contains_key(h))
-            .collect();
+        let handles = self.selected_solid_handles();
         if handles.is_empty() {
             self.command_line
                 .push_error(crate::t!("CONVTOSURFACE: select a solid created this session.").as_ref());

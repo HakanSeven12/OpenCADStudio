@@ -586,11 +586,28 @@ impl Scene {
             self.images.insert(handle, model);
         }
         self.refresh_meshes_for_handles(&[handle]);
-        if let Some(operation) = self.document.solid_history_operation(handle).cloned() {
-            if let Ok(body) = cadkernel::acis::rebuild_body(&operation) {
-                self.solid_models.insert(handle, body);
-            }
-        }
+        self.restore_solid_models(&[handle]);
+    }
+
+    pub fn restore_solid_models(&mut self, handles: &[Handle]) {
+        let bodies: Vec<(Handle, cadkernel::brep::Body)> = handles
+            .iter()
+            .filter(|handle| !self.solid_models.contains_key(handle))
+            .filter_map(|&handle| {
+                let from_history = self
+                    .document
+                    .solid_history_operation(handle)
+                    .and_then(|operation| cadkernel::acis::rebuild_body(operation).ok());
+                let body = from_history.or_else(|| match self.document.get_entity(handle) {
+                    Some(EntityType::Solid3D(solid)) => {
+                        crate::scene::convert::solid3d_tess::kernel_body(solid)
+                    }
+                    _ => None,
+                })?;
+                Some((handle, body))
+            })
+            .collect();
+        self.solid_models.extend(bodies);
     }
 
     /// Re-tessellate only the named ACIS entities. The former edit path

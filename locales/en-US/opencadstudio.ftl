@@ -2563,6 +2563,7 @@ properties =
     .ext-line-lineweight = Ext line lineweight
     .ext-line-offset = Ext line offset
     .extended-entity = Extended Entity
+    .extended-data = Extended Data
     .extended-lighting = Extended Lighting
     .extents-max = Extents Max
     .extents-min = Extents Min

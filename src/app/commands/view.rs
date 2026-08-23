@@ -1467,6 +1467,74 @@ mod tests {
     use acadrust::objects::ObjectType;
     use acadrust::EntityType;
 
+    // Benchmark, not a correctness test: measures end-to-end latency of
+    // HATCHTOBACK and interactive DRAWORDER BACK on a large synthetic drawing.
+    // Ignored by default; A/B across commits with:
+    //   BENCH_LINES=100000 BENCH_HATCHES=350 BENCH_RUNS=5 \
+    //   cargo test --release --lib bench_draworder_large_drawing -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_draworder_large_drawing() {
+        let lines_n: usize = std::env::var("BENCH_LINES").ok().and_then(|v| v.parse().ok()).unwrap_or(100_000);
+        let hatches_n: usize = std::env::var("BENCH_HATCHES").ok().and_then(|v| v.parse().ok()).unwrap_or(350);
+        let runs: usize = std::env::var("BENCH_RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+        let sel_n: usize = std::env::var("BENCH_SEL").ok().and_then(|v| v.parse().ok()).unwrap_or(100);
+
+        fn median(v: &mut [f64]) -> f64 {
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[v.len() / 2]
+        }
+
+        // --- HATCHTOBACK ---
+        let mut hb_ms: Vec<f64> = Vec::new();
+        for _ in 0..runs {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let t0 = std::time::Instant::now();
+            let lines: Vec<EntityType> =
+                (0..lines_n).map(|_| EntityType::Line(Default::default())).collect();
+            let _ = app.tabs[i].scene.add_entities(lines);
+            let hatches: Vec<EntityType> =
+                (0..hatches_n).map(|_| EntityType::Hatch(Default::default())).collect();
+            app.tabs[i].scene.add_entities(hatches);
+            eprintln!(
+                "[bench] setup ({} lines + {} hatches): {:.1} ms",
+                lines_n,
+                hatches_n,
+                t0.elapsed().as_secs_f64() * 1e3
+            );
+            let t1 = std::time::Instant::now();
+            let _ = app.run_command_line("HATCHTOBACK");
+            hb_ms.push(t1.elapsed().as_secs_f64() * 1e3);
+        }
+        eprintln!("[bench] HATCHTOBACK median: {:.3} ms over {} runs", median(&mut hb_ms), runs);
+
+        // --- DRAWORDER BACK (interactive path) ---
+        let mut db_ms: Vec<f64> = Vec::new();
+        for _ in 0..runs {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let lines: Vec<EntityType> =
+                (0..lines_n).map(|_| EntityType::Line(Default::default())).collect();
+            let _ = app.tabs[i].scene.add_entities(lines);
+            let hatches: Vec<EntityType> =
+                (0..hatches_n).map(|_| EntityType::Hatch(Default::default())).collect();
+            let handles = app.tabs[i].scene.add_entities(hatches);
+            app.tabs[i]
+                .scene
+                .replace_selection(handles.into_iter().take(sel_n).collect());
+            let t1 = std::time::Instant::now();
+            let _ = app.run_command_line("DRAWORDER BACK");
+            db_ms.push(t1.elapsed().as_secs_f64() * 1e3);
+        }
+        eprintln!(
+            "[bench] DRAWORDER BACK ({} selected) median: {:.3} ms over {} runs",
+            sel_n, median(&mut db_ms), runs
+        );
+    }
+
     fn fresh_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);

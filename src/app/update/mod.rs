@@ -6320,8 +6320,32 @@ impl OpenCADStudio {
 
             Message::AutoSave => self.on_autosave(),
 
+            Message::ThumbnailCaptureFrame => self.on_thumbnail_capture_frame(),
+
+            Message::ThumbnailCaptureFinished => {
+                self.thumbnail_capture_clean = false;
+                Task::none()
+            }
+
             #[cfg(not(target_arch = "wasm32"))]
             Message::SaveFinished(outcome) => self.on_save_finished(outcome),
+
+            #[cfg(target_arch = "wasm32")]
+            Message::WebSaveScreenshot {
+                tab_id,
+                filename,
+                ext,
+                version,
+                bounds,
+                screenshot,
+            } => self.on_web_save_screenshot(
+                tab_id,
+                filename,
+                ext,
+                version,
+                bounds,
+                screenshot,
+            ),
 
             #[cfg(not(target_arch = "wasm32"))]
             Message::SaveFileInUseRetry => self.on_save_file_in_use_retry(),

@@ -32,6 +32,8 @@ use viewcube::{viewcube_nav_controls, viewcube_ucs_picker, UCS_PICKER_W};
 // the `view::` path as before the split.
 pub(in crate::app) use overlay::{MTEXT_TEXT_ID, TEXT_INLINE_ID};
 
+pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bounds";
+
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
 /// The desk shown around the sheet, as the widget wants it. One definition,
 /// shared with the renderer that clears the sheet viewport to the same thing.
@@ -184,6 +186,7 @@ impl OpenCADStudio {
     pub fn view_main(&self) -> Element<'_, Message> {
         let i = self.active_tab;
         let tab = &self.tabs[i];
+        let thumbnail_capture_clean = self.thumbnail_capture_clean;
         let theme_text = self.active_theme.palette().background.base.text;
         let viewcube_text_color = [
             theme_text.r,
@@ -229,8 +232,10 @@ impl OpenCADStudio {
             let (vw, vh) = tab.scene.selection.borrow().vp_size;
             tab.scene.active_model_tile_bounds(vw, vh).width
         };
-        let viewcube_visible =
-            self.show_viewcube && !tab.is_start && viewcube_has_room(render_bar_w, active_vp_w);
+        let viewcube_visible = self.show_viewcube
+            && !thumbnail_capture_clean
+            && !tab.is_start
+            && viewcube_has_room(render_bar_w, active_vp_w);
         // Start tab: render welcome page in place of the viewport.
         // Surrounding chrome (tab bar, status bar) stays; the welcome widget
         // returned here also flags the rest of `view` to skip drawing-only
@@ -258,6 +263,7 @@ impl OpenCADStudio {
             shader(ViewportPane::model(
                 &tab.scene,
                 viewcube_visible,
+                !thumbnail_capture_clean,
                 viewport_render_mode,
                 viewcube_text_color,
             ))
@@ -276,6 +282,7 @@ impl OpenCADStudio {
             // mouse_areas' hover state and drops their move events).
             let scene = &tab.scene;
             let show_viewcube = viewcube_visible;
+            let show_interaction = !thumbnail_capture_clean;
             let render_mode = viewport_render_mode;
             let size_probe: Element<'_, Message> = responsive(move |size| {
                 {
@@ -293,6 +300,7 @@ impl OpenCADStudio {
                         shader(ViewportPane::for_pane(
                             scene,
                             show_viewcube,
+                            show_interaction,
                             render_mode,
                             idx,
                             viewcube_text_color,
@@ -868,6 +876,20 @@ impl OpenCADStudio {
                 .height(Fill)]
             .width(Fill)
             .height(Fill)
+        } else if thumbnail_capture_clean {
+            let capture_bg = if is_paper { PAPER_SPACE_BACKGROUND } else { bg_color };
+            stack![
+                container(Space::new())
+                    .style(move |_: &Theme| container::Style {
+                        background: Some(Background::Color(capture_bg)),
+                        ..Default::default()
+                    })
+                    .width(Fill)
+                    .height(Fill),
+                viewport_3d,
+            ]
+            .width(Fill)
+            .height(Fill)
         } else if is_paper {
             // Keep the grid above the opaque GPU sheet and below interaction UI.
             stack![
@@ -902,6 +924,7 @@ impl OpenCADStudio {
             .height(Fill)
         };
 
+        if !thumbnail_capture_clean {
         // Per-pane input pane_grid goes ABOVE the crosshair overlay so it
         // receives mouse events (the overlay's `Hidden` cursor would otherwise
         // starve any layer beneath it). The controls bar is pushed on top of it.
@@ -1481,6 +1504,7 @@ impl OpenCADStudio {
                 viewport_stack = viewport_stack.push(text_inline_overlay(ed, canvas));
             }
         }
+        }
 
         // Docked side panels (Properties, block palette, future palettes) live
         // in an ordered vertical stack on the left/right edge of the drawing
@@ -1535,7 +1559,13 @@ impl OpenCADStudio {
         if let Some(e) = left_edge {
             parts.push(e);
         }
-        parts.push(viewport_stack.into());
+        parts.push(
+            crate::ui::wrap_bar::PosReport::new(
+                VIEWPORT_CAPTURE_BOUNDS_ID,
+                viewport_stack,
+            )
+            .into(),
+        );
         if let Some(e) = right_edge {
             parts.push(e);
         }
@@ -1712,7 +1742,9 @@ impl OpenCADStudio {
             &self.history_content,
             self.win_size.1,
         );
-        let center_stack: Element<'_, Message> = if tab.is_start {
+        let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
+            workspace
+        } else if tab.is_start {
             column![
                 workspace,
                 iced::widget::container(command_line)
@@ -2096,6 +2128,11 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        let thumbnail_capture = if self.thumbnail_capture_clean {
+            window::frames().map(|_| Message::ThumbnailCaptureFrame)
+        } else {
+            Subscription::none()
+        };
         // Blink the MText preview caret while the editor is open.
         let caret_blink = if self.mtext_editor.is_some() {
             iced::time::every(std::time::Duration::from_millis(530))
@@ -2154,6 +2191,7 @@ impl OpenCADStudio {
             grip_dwell,
             hover_dwell,
             nav_settle,
+            thumbnail_capture,
             caret_blink,
             web_fonts,
             autosave,

@@ -237,36 +237,72 @@ fn plot_scene_content(
 }
 
 impl OpenCADStudio {
-    /// Before a save, give every cached solid that still has no ACIS
-    /// geometry (EXTRUDE/REVOLVE/SWEEP/LOFT/boolean results) an exact modeler
-    /// body derived from its B-rep, so the written DWG/DXF carries real
-    /// 3-D geometry other CAD apps can open instead of an empty data stream.
-    /// A body holding something the kernel has no ACIS record form for is
-    /// left untouched rather than written out half-complete.
-    fn sync_solid_models_to_acis(&mut self, i: usize) {
+    /// Persist exact ACIS bodies and kernel-derived edge caches before saving.
+    fn sync_solid_models_for_save(&mut self, i: usize) {
         use acadrust::EntityType;
         let scene = &mut self.tabs[i].scene;
-        let targets: Vec<acadrust::Handle> = scene
-            .solid_models
-            .keys()
-            .copied()
-            .filter(|h| {
-                matches!(
-                    scene.document.get_entity(*h),
-                    Some(EntityType::Solid3D(s)) if !s.acis_data.has_data()
-                )
+        let targets: Vec<(acadrust::Handle, bool, bool)> = scene
+            .document
+            .entities()
+            .filter_map(|entity| {
+                let EntityType::Solid3D(solid) = entity else {
+                    return None;
+                };
+                let h = solid.common.handle;
+                let needs_acis = !solid.acis_data.has_data();
+                let needs_wires = solid.wires.is_empty();
+                (needs_acis || needs_wires).then_some((h, needs_acis, needs_wires))
             })
             .collect();
-        for h in targets {
-            // Build the SAT while borrowing solid_models; the returned document
-            // is owned, so the borrow ends before we mutate the entity.
-            let sat = scene
-                .solid_models
-                .get(&h)
-                .and_then(crate::scene::convert::acis_export::planar_solid_to_sat);
-            if let Some(sat) = sat {
-                if let Some(EntityType::Solid3D(s)) = scene.document.get_entity_mut(h) {
-                    s.set_sat_document(&sat);
+        for (h, needs_acis, needs_wires) in targets {
+            let body = scene.solid_models.get(&h);
+            let sat = needs_acis
+                .then(|| {
+                    body.and_then(crate::scene::convert::acis_export::planar_solid_to_sat)
+                })
+                .flatten();
+            let wires = needs_wires.then(|| {
+                if let Some(body) = body {
+                    return crate::scene::model::solid_model::edge_wires(body);
+                }
+                let Some(mesh) = scene.meshes.get(&h).or_else(|| scene.block_meshes.get(&h)) else {
+                    return Vec::new();
+                };
+                mesh.edge_verts
+                    .chunks_exact(2)
+                    .enumerate()
+                    .map(|(index, points)| {
+                        let first_low = mesh
+                            .edge_verts_low
+                            .get(index * 2)
+                            .copied()
+                            .unwrap_or([0.0; 3]);
+                        let second_low = mesh
+                            .edge_verts_low
+                            .get(index * 2 + 1)
+                            .copied()
+                            .unwrap_or([0.0; 3]);
+                        acadrust::entities::Wire::from_points(vec![
+                            acadrust::types::Vector3::new(
+                                points[0][0] as f64 + first_low[0] as f64,
+                                points[0][1] as f64 + first_low[1] as f64,
+                                points[0][2] as f64 + first_low[2] as f64,
+                            ),
+                            acadrust::types::Vector3::new(
+                                points[1][0] as f64 + second_low[0] as f64,
+                                points[1][1] as f64 + second_low[1] as f64,
+                                points[1][2] as f64 + second_low[2] as f64,
+                            ),
+                        ])
+                    })
+                    .collect()
+            });
+            if let Some(EntityType::Solid3D(solid)) = scene.document.get_entity_mut(h) {
+                if let Some(sat) = sat {
+                    solid.set_sat_document(&sat);
+                }
+                if let Some(wires) = wires.filter(|wires| !wires.is_empty()) {
+                    solid.wires = wires;
                 }
             }
         }
@@ -1408,14 +1444,23 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             move |result| Message::ObjImportFinished(tab_id, path, result),)
     }
 
+    fn sync_view_state_for_save(&mut self, i: usize) {
+        self.sync_vport_display(i);
+        if self.tabs[i].active_block_edit.is_none() {
+            self.tabs[i].scene.sync_camera_to_document();
+            self.tabs[i].last_synced_camera_gen =
+                self.tabs[i].scene.camera_generation;
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn prepare_native_save(&mut self, i: usize) {
-        self.sync_vport_display(i);
+        self.sync_view_state_for_save(i);
         sync_annotation_scale_header(&mut self.tabs[i].scene);
         self.stamp_header_sysvars(i);
         self.tabs[i].scene.document.header.user_real1 =
             self.tabs[i].scene.annotation_scale as f64;
-        self.sync_solid_models_to_acis(i);
+        self.sync_solid_models_for_save(i);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1470,16 +1515,120 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn stamp_thumbnail(&mut self, i: usize, version: acadrust::DxfVersion) {
-        let scene = &self.tabs[i].scene;
-        let preview = crate::io::thumbnail::from_snapshot(
-            &scene.entity_wires(),
-            &scene.camera.borrow(),
-            scene.bg_color,
-            version >= acadrust::DxfVersion::AC1027,
-            self.vp_size,
-        );
-        self.tabs[i].scene.document.preview = preview;
+    pub(super) fn on_thumbnail_capture_frame(&mut self) -> Task<Message> {
+        let Some(pending) = self.pending_web_thumbnail_save.take() else {
+            return Task::none();
+        };
+        iced::window::latest()
+            .then(|window| match window {
+                Some(window) => iced::window::screenshot(window).map(Some),
+                None => Task::done(None),
+            })
+            .map(move |screenshot| Message::WebSaveScreenshot {
+                tab_id: pending.tab_id,
+                filename: pending.filename.clone(),
+                ext: pending.ext.clone(),
+                version: pending.version,
+                bounds: Some(pending.bounds),
+                screenshot,
+            })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn on_thumbnail_capture_frame(&mut self) -> Task<Message> {
+        let Some(pending) = self.pending_native_thumbnail_save.take() else {
+            return Task::none();
+        };
+        let Some(i) = self.tabs.iter().position(|tab| tab.id == pending.tab_id) else {
+            self.thumbnail_capture_clean = false;
+            return Task::none();
+        };
+        self.queue_native_save(
+            i,
+            pending.path,
+            pending.version,
+            pending.purpose,
+            pending.continuation,
+            pending.set_current_path,
+            pending.check_external_change,
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_web_save_screenshot(
+        &mut self,
+        tab_id: u64,
+        filename: String,
+        ext: String,
+        version: acadrust::DxfVersion,
+        bounds: Option<iced::Rectangle>,
+        screenshot: Option<iced::window::Screenshot>,
+    ) -> Task<Message> {
+        self.thumbnail_capture_clean = false;
+        let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Task::none();
+        };
+        let preview = screenshot.as_ref().and_then(|screenshot| {
+            bounds.and_then(|bounds| {
+                crate::io::thumbnail::from_screenshot(
+                    screenshot,
+                    bounds,
+                    version >= acadrust::DxfVersion::AC1027,
+                )
+            })
+        });
+        if let Some(preview) = preview {
+            self.tabs[i].scene.document.preview = Some(preview);
+        }
+
+        let mut recent_task = Task::none();
+        let saved = match crate::io::save_to_bytes(
+            &self.tabs[i].scene.document,
+            &ext,
+            version,
+        ) {
+            Ok(bytes) => {
+                crate::sys::download_bytes(&filename, &bytes);
+                let cache_name = std::path::Path::new(&filename)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| filename.clone());
+                let path = std::path::PathBuf::from(cache_name);
+                self.tabs[i].current_path = Some(path.clone());
+                self.tabs[i].scene.document.version = version;
+                self.tabs[i].dirty = false;
+                self.tabs[i].recovery_save_as_required = false;
+                recent_task = Task::perform(
+                    async move {
+                        crate::io::web_recent::store(&path.to_string_lossy(), &bytes)
+                            .await
+                            .map(|_| path)
+                    },
+                    Message::WebRecentStored,
+                );
+                self.command_line
+                    .push_output(crate::tf!("Saved: {filename}").as_ref());
+                true
+            }
+            Err(error) => {
+                self.command_line
+                    .push_error(crate::tf!("Save failed: {error}").as_ref());
+                false
+            }
+        };
+        if self.save_dialog_for_unsaved {
+            if saved {
+                if let Some(crate::app::PendingClose::Tab(index)) = self.pending_close.take() {
+                    let continuation = self.update(Message::TabClose(index));
+                    let rest = self.continue_tab_close_queue();
+                    return Task::batch([recent_task, continuation, rest]);
+                }
+            } else if self.pending_close.is_some() {
+                let retry = self.open_unsaved_dialog_window();
+                return Task::batch([recent_task, retry]);
+            }
+        }
+        recent_task
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1494,10 +1643,26 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         check_external_change: bool,
     ) -> Task<Message> {
         let tab_id = self.tabs[i].id;
+        if self
+            .pending_native_thumbnail_save
+            .as_ref()
+            .is_some_and(|pending| pending.tab_id == tab_id)
+        {
+            if purpose != crate::app::SavePurpose::Autosave {
+                self.command_line
+                    .push_info(crate::t!("Save already running for this drawing.").as_ref());
+            }
+            return Task::none();
+        }
+        let capture_ready =
+            self.thumbnail_capture_clean && self.pending_native_thumbnail_save.is_none();
         if self.active_save_jobs.contains_key(&tab_id) {
             if purpose != crate::app::SavePurpose::Autosave {
                 self.command_line
                     .push_info(crate::t!("Save already running for this drawing.").as_ref());
+            }
+            if capture_ready {
+                self.thumbnail_capture_clean = false;
             }
             return Task::none();
         }
@@ -1516,6 +1681,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             self.active_tab = i;
             self.save_dialog_for_unsaved =
                 continuation != crate::app::SaveContinuation::None;
+            if capture_ready {
+                self.thumbnail_capture_clean = false;
+            }
             return self.open_save_dialog_window(i);
         }
         if purpose != crate::app::SavePurpose::Autosave
@@ -1540,6 +1708,33 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             });
             self.restore_failed_save_continuation(continuation, i);
             self.active_modal = Some(crate::app::ModalKind::FileInUse);
+            if capture_ready {
+                self.thumbnail_capture_clean = false;
+            }
+            return Task::none();
+        }
+
+        if purpose != crate::app::SavePurpose::Autosave
+            && i == self.active_tab
+            && !self.thumbnail_capture_clean
+            && self.main_window.is_some()
+            && crate::ui::wrap_bar::dropdown_bounds(
+                crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,
+            )
+            .is_some()
+        {
+            self.pending_native_thumbnail_save = Some(
+                crate::app::PendingNativeThumbnailSave {
+                    tab_id,
+                    path,
+                    version,
+                    purpose,
+                    continuation,
+                    set_current_path,
+                    check_external_change,
+                },
+            );
+            self.thumbnail_capture_clean = true;
             return Task::none();
         }
 
@@ -1566,6 +1761,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     });
                     self.restore_failed_save_continuation(continuation, i);
                     self.active_modal = Some(crate::app::ModalKind::FileInUse);
+                    if capture_ready {
+                        self.thumbnail_capture_clean = false;
+                    }
                     return Task::none();
                 }
                 Err(crate::io::edit_lock::EditLeaseError::Unavailable(error)) => {
@@ -1579,32 +1777,15 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         let epoch = self.tabs[i].scene.geometry_epoch;
         let revision = self.tabs[i].edit_revision;
         let camera_generation = self.tabs[i].scene.camera_generation;
-        let thumbnail_key = (purpose != crate::app::SavePurpose::Autosave).then(|| {
-            let scene = &self.tabs[i].scene;
-            crate::app::ThumbnailCacheKey {
-                epoch,
-                camera_generation,
-                bg_color: scene.bg_color.map(f32::to_bits),
-                png: version >= acadrust::DxfVersion::AC1027,
-                viewport: [self.vp_size.0.to_bits(), self.vp_size.1.to_bits()],
-            }
+        let thumbnail = (purpose != crate::app::SavePurpose::Autosave && i == self.active_tab)
+            .then_some(version >= acadrust::DxfVersion::AC1027);
+        let capture_bounds = thumbnail.and_then(|_| {
+            crate::ui::wrap_bar::dropdown_bounds(
+                crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,
+            )
         });
-        let thumbnail = if thumbnail_key == self.tabs[i].thumbnail_cache_key {
-            None
-        } else {
-            thumbnail_key.map(|key| {
-                let scene = &self.tabs[i].scene;
-                (
-                    scene.entity_wires(),
-                    scene.camera.borrow().clone(),
-                    scene.bg_color,
-                    key.png,
-                    self.vp_size,
-                )
-            })
-        };
         let clone_started = iced::time::Instant::now();
-        let mut snapshot = self.tabs[i].scene.document.clone();
+        let snapshot = self.tabs[i].scene.document.clone();
         let clone_ms = clone_started.elapsed().as_secs_f64() * 1000.0;
         if crate::perf::enabled() {
             crate::perf_record!(
@@ -1650,6 +1831,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         let (expected_fingerprint, verify_reader) = match verification {
             Ok(verification) => verification,
             Err(error) => {
+                if capture_ready {
+                    self.thumbnail_capture_clean = false;
+                }
                 return Task::perform(
                     async move {
                         crate::app::SaveOutcome {
@@ -1664,7 +1848,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                             set_current_path,
                             purpose,
                             continuation,
-                            thumbnail_key,
                             refreshed_preview: None,
                             result: Err(error),
                         }
@@ -1674,65 +1857,97 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             }
         };
         let worker_path = path.clone();
-
-        Task::perform(
-            async move {
-                let (result, refreshed_preview) = std::thread::spawn(move || {
-                    let mut refreshed_preview = None;
-                    if let Some((wires, camera, bg_color, png, viewport)) = thumbnail {
-                        let started = iced::time::Instant::now();
-                        snapshot.preview = crate::io::thumbnail::from_snapshot(
-                            &wires,
-                            &camera,
-                            bg_color,
-                            png,
-                            viewport,
-                        );
-                        if crate::perf::enabled() {
-                            crate::perf_record!(
-                                "[perf] save-thumbnail {:.1}ms wires={}",
-                                started.elapsed().as_secs_f64() * 1000.0,
-                                wires.len(),
-                            );
+        let capture_window = thumbnail.and(capture_bounds).and(self.main_window);
+        let mut work = Some((
+            snapshot,
+            thumbnail,
+            capture_bounds,
+            worker_path,
+            expected_fingerprint,
+            verify_reader,
+            path,
+            previous_autosave,
+        ));
+        let mut run_save = move |screenshot: Option<iced::window::Screenshot>| {
+            let (
+                mut snapshot,
+                thumbnail,
+                capture_bounds,
+                worker_path,
+                expected_fingerprint,
+                verify_reader,
+                path,
+                previous_autosave,
+            ) = work.take().expect("save capture produced more than one result");
+            Task::perform(
+                async move {
+                    let (result, refreshed_preview) = std::thread::spawn(move || {
+                        let mut refreshed_preview = None;
+                        if let Some(png) = thumbnail {
+                            let started = iced::time::Instant::now();
+                            if let Some(preview) = screenshot.as_ref().and_then(|screenshot| {
+                                capture_bounds.and_then(|bounds| {
+                                    crate::io::thumbnail::from_screenshot(screenshot, bounds, png)
+                                })
+                            }) {
+                                snapshot.preview = Some(preview);
+                                refreshed_preview = Some(snapshot.preview.clone());
+                            }
+                            if crate::perf::enabled() {
+                                crate::perf_record!(
+                                    "[perf] save-thumbnail {:.1}ms",
+                                    started.elapsed().as_secs_f64() * 1000.0,
+                                );
+                            }
                         }
-                        refreshed_preview = Some(snapshot.preview.clone());
-                    }
-                    let result = crate::io::save_owned_as_version_atomic(
-                        snapshot,
-                        &worker_path,
+                        let result = crate::io::save_owned_as_version_atomic(
+                            snapshot,
+                            &worker_path,
+                            version,
+                            backup,
+                            expected_fingerprint,
+                            verify_reader,
+                        );
+                        (result, refreshed_preview)
+                    })
+                    .join()
+                    .unwrap_or_else(|_| {
+                        (
+                            Err(crate::io::SaveFailure::other("save worker panicked")),
+                            None,
+                        )
+                    });
+                    crate::app::SaveOutcome {
+                        job_id,
+                        tab_id,
+                        epoch,
+                        revision,
+                        camera_generation,
+                        path,
                         version,
-                        backup,
-                        expected_fingerprint,
-                        verify_reader,
-                    );
-                    (result, refreshed_preview)
-                })
-                .join()
-                .unwrap_or_else(|_| {
-                    (
-                        Err(crate::io::SaveFailure::other("save worker panicked")),
-                        None,
-                    )
-                });
-                crate::app::SaveOutcome {
-                    job_id,
-                    tab_id,
-                    epoch,
-                    revision,
-                    camera_generation,
-                    path,
-                    version,
-                    previous_autosave,
-                    set_current_path,
-                    purpose,
-                    continuation,
-                    thumbnail_key,
-                    refreshed_preview,
-                    result,
-                }
-            },
-            Message::SaveFinished,
-        )
+                        previous_autosave,
+                        set_current_path,
+                        purpose,
+                        continuation,
+                        refreshed_preview,
+                        result,
+                    }
+                },
+                Message::SaveFinished,
+            )
+        };
+        match capture_window {
+            Some(window) => iced::window::screenshot(window).map(Some).then(move |screenshot| {
+                Task::batch([
+                    Task::done(Message::ThumbnailCaptureFinished),
+                    run_save(screenshot),
+                ])
+            }),
+            None => {
+                self.thumbnail_capture_clean = false;
+                run_save(None)
+            }
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1836,7 +2051,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             if let Some(preview) = outcome.refreshed_preview {
                 self.tabs[i].scene.document.preview = preview;
             }
-            self.tabs[i].thumbnail_cache_key = outcome.thumbnail_key;
         }
         let mut tasks = Vec::new();
         match outcome.purpose {
@@ -1850,10 +2064,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                         .as_deref()
                         .is_none_or(|current| {
                             !native_paths_match(current, &outcome.path)
-                        });
+                });
                 self.command_line
                     .push_output(crate::tf!("Saved: {}", outcome.path.display()).as_ref());
-                self.recent_thumbs.remove(&outcome.path);
                 if let Some(previous) = outcome.previous_autosave {
                     if previous != outcome.path {
                         let _ = std::fs::remove_file(previous);
@@ -1865,8 +2078,8 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     if outcome.purpose == crate::app::SavePurpose::SaveAs {
                         self.tabs[i].recovery_save_as_required = false;
                     }
-                    tasks.push(self.push_recent(outcome.path.clone()));
                 }
+                tasks.push(self.push_recent(outcome.path.clone()));
                 self.refresh_native_edit_guard_after_save(
                     i,
                     &outcome.path,
@@ -2064,7 +2277,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 // once after the destination/version is known.
                 #[cfg(target_arch = "wasm32")]
                 {
-                    self.sync_vport_display(i);
+                    self.sync_view_state_for_save(i);
                     self.stamp_header_sysvars(i);
                 }
                 // Native: save straight to the known path. Web has no path
@@ -2199,62 +2412,38 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 #[cfg(target_arch = "wasm32")]
                 {
                     let close = self.close_save_dialog_window();
+                    self.sync_view_state_for_save(i);
                     sync_annotation_scale_header(&mut self.tabs[i].scene);
                     self.stamp_header_sysvars(i);
-                    self.sync_solid_models_to_acis(i);
-                    self.stamp_thumbnail(i, version);
-                    let mut recent_task = Task::none();
-                    let saved = match crate::io::save_to_bytes(
-                        &self.tabs[i].scene.document,
-                        ext,
-                        version,
-                    ) {
-                        Ok(bytes) => {
-                            crate::sys::download_bytes(&filename, &bytes);
-                            let cache_name = std::path::Path::new(&filename)
-                                .file_name()
-                                .map(|name| name.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| filename.clone());
-                            let path = std::path::PathBuf::from(cache_name);
-                            self.tabs[i].current_path = Some(path.clone());
-                            self.tabs[i].scene.document.version = version;
-                            self.tabs[i].dirty = false;
-                            self.tabs[i].recovery_save_as_required = false;
-                            recent_task = Task::perform(
-                                async move {
-                                    crate::io::web_recent::store(
-                                        &path.to_string_lossy(),
-                                        &bytes,
-                                    )
-                                    .await
-                                    .map(|_| path)
-                                },
-                                Message::WebRecentStored,
-                            );
-                            self.command_line.push_output(crate::tf!("Saved: {filename}").as_ref());
-                            true
-                        }
-                        Err(e) => {
-                            self.command_line.push_error(crate::tf!("Save failed: {e}").as_ref());
-                            false
-                        }
+                    self.sync_solid_models_for_save(i);
+                    let tab_id = self.tabs[i].id;
+                    let bounds = crate::ui::wrap_bar::dropdown_bounds(
+                        crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,
+                    );
+                    let Some(bounds) = bounds else {
+                        return Task::batch([
+                            close,
+                            Task::done(Message::WebSaveScreenshot {
+                                tab_id,
+                                filename,
+                                ext: ext.to_string(),
+                                version,
+                                bounds: None,
+                                screenshot: None,
+                            }),
+                        ]);
                     };
-                    // Continue a pending tab close.
-                    if self.save_dialog_for_unsaved {
-                        if saved {
-                            if let Some(crate::app::PendingClose::Tab(idx)) =
-                                self.pending_close.take()
-                            {
-                                let cont = self.update(Message::TabClose(idx));
-                                let rest = self.continue_tab_close_queue();
-                                return Task::batch([close, recent_task, cont, rest]);
-                            }
-                        } else if self.pending_close.is_some() {
-                            let retry = self.open_unsaved_dialog_window();
-                            return Task::batch([close, recent_task, retry]);
-                        }
-                    }
-                    Task::batch([close, recent_task])
+                    self.pending_web_thumbnail_save = Some(
+                        crate::app::PendingWebThumbnailSave {
+                            tab_id,
+                            filename,
+                            ext: ext.to_string(),
+                            version,
+                            bounds,
+                        },
+                    );
+                    self.thumbnail_capture_clean = true;
+                    close
                 }
     }
 
@@ -2365,6 +2554,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             {
                 continue;
             }
+            self.prepare_native_save(i);
             let version = self.tabs[i].scene.document.version;
             let target = self.autosave_target(i);
             tasks.push(self.queue_native_save(

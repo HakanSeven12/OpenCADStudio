@@ -61,7 +61,7 @@ pub struct Camera {
     /// that span, clipping the drawing (#473). Re-projecting the box each frame
     /// keeps near/far exactly as deep as the current view needs. `None` falls
     /// back to `depth_half_range`.
-    pub model_bounds: Option<(Vec3, Vec3)>,
+    pub model_bounds: Option<(DVec3, DVec3)>,
 }
 
 impl Default for Camera {
@@ -435,25 +435,24 @@ impl Camera {
 
         if let Some((min, max)) = self.model_bounds {
             let corners = [
-                Vec3::new(min.x, min.y, min.z),
-                Vec3::new(max.x, min.y, min.z),
-                Vec3::new(min.x, max.y, min.z),
-                Vec3::new(max.x, max.y, min.z),
-                Vec3::new(min.x, min.y, max.z),
-                Vec3::new(max.x, min.y, max.z),
-                Vec3::new(min.x, max.y, max.z),
-                Vec3::new(max.x, max.y, max.z),
+                DVec3::new(min.x, min.y, min.z),
+                DVec3::new(max.x, min.y, min.z),
+                DVec3::new(min.x, max.y, min.z),
+                DVec3::new(max.x, max.y, min.z),
+                DVec3::new(min.x, min.y, max.z),
+                DVec3::new(max.x, min.y, max.z),
+                DVec3::new(min.x, max.y, max.z),
+                DVec3::new(max.x, max.y, max.z),
             ];
-            let mut new_min = Vec3::splat(f32::INFINITY);
-            let mut new_max = Vec3::splat(f32::NEG_INFINITY);
+            let mut new_min = DVec3::splat(f64::INFINITY);
+            let mut new_max = DVec3::splat(f64::NEG_INFINITY);
             for corner in corners {
                 let transformed = transform.apply(acadrust::types::Vector3::new(
-                    corner.x as f64,
-                    corner.y as f64,
-                    corner.z as f64,
+                    corner.x,
+                    corner.y,
+                    corner.z,
                 ));
-                let transformed =
-                    Vec3::new(transformed.x as f32, transformed.y as f32, transformed.z as f32);
+                let transformed = DVec3::new(transformed.x, transformed.y, transformed.z);
                 new_min = new_min.min(transformed);
                 new_max = new_max.max(transformed);
             }
@@ -578,16 +577,16 @@ impl Camera {
     /// current target: `x`/`y` span the screen plane, `z` runs along the eye
     /// direction. The offset is taken in f64 before the cast, so a corner at
     /// UTM scale doesn't lose the difference to cancellation.
-    fn bounds_in_view(&self, min: Vec3, max: Vec3) -> [Vec3; 8] {
+    fn bounds_in_view(&self, min: DVec3, max: DVec3) -> [Vec3; 8] {
         let inv = self.rotation.inverse();
         let mut out = [Vec3::ZERO; 8];
         for (i, slot) in out.iter_mut().enumerate() {
-            let corner = Vec3::new(
+            let corner = DVec3::new(
                 if i & 1 == 0 { min.x } else { max.x },
                 if i & 2 == 0 { min.y } else { max.y },
                 if i & 4 == 0 { min.z } else { max.z },
             );
-            *slot = inv * (corner.as_dvec3() - self.target).as_vec3();
+            *slot = inv * (corner - self.target).as_vec3();
         }
         out
     }
@@ -595,7 +594,7 @@ impl Camera {
     /// Half-extent of `min..max` along the current eye direction (with the
     /// same 5% margin `ortho_depth_range` needs), measured from the target.
     /// This is exactly what `distance ± r` has to contain to avoid clipping.
-    fn depth_extent_in_view(&self, min: Vec3, max: Vec3) -> f32 {
+    fn depth_extent_in_view(&self, min: DVec3, max: DVec3) -> f32 {
         let depth_r = self
             .bounds_in_view(min, max)
             .iter()
@@ -613,7 +612,11 @@ impl Camera {
     /// 800 km below its plane zoomed out to 800 km and became a dot. The two
     /// agree on a flat drawing, which is why it went unnoticed.
     pub fn fit_to_bounds(&mut self, min: Vec3, max: Vec3, aspect: f32) {
-        self.target = ((min + max) * 0.5).as_dvec3();
+        self.fit_to_bounds_f64(min.as_dvec3(), max.as_dvec3(), aspect);
+    }
+
+    pub fn fit_to_bounds_f64(&mut self, min: DVec3, max: DVec3, aspect: f32) {
+        self.target = (min + max) * 0.5;
         let corners = self.bounds_in_view(min, max);
         // Half-height the view needs so the box fits BOTH axes at the given
         // viewport aspect. The old circumscribed-radius rule fitted the box's
@@ -628,7 +631,7 @@ impl Camera {
         // that to get the distance which just contains `half_h`, plus a small
         // border margin.
         self.distance = (half_h / (self.fov_y * 0.5).tan() * 1.1).max(1e-3);
-        self.fit_depth_to_bounds(min, max);
+        self.fit_depth_to_bounds_f64(min, max);
     }
 
     /// Size only the near/far span to `min..max`, leaving the pose alone.
@@ -636,7 +639,7 @@ impl Camera {
     /// Split out of [`fit_to_bounds`] for the camera restored from a file's
     /// saved view: that pose must not move, but its depth range still has to
     /// cover the model or geometry outside it is silently clipped away.
-    pub fn fit_depth_to_bounds(&mut self, min: Vec3, max: Vec3) {
+    pub fn fit_depth_to_bounds_f64(&mut self, min: DVec3, max: DVec3) {
         // Cache the box so `ortho_depth_range` re-derives the near/far depth for
         // the live eye direction every frame — orbiting off the fitted pose then
         // never clips the drawing (#473). Keeping it tied to the model (not to
@@ -648,7 +651,7 @@ impl Camera {
         self.depth_half_range = self.depth_extent_in_view(min, max);
     }
 
-    pub(crate) fn fitted_model_bounds(&self) -> Option<(Vec3, Vec3)> {
+    pub(crate) fn fitted_model_bounds(&self) -> Option<(DVec3, DVec3)> {
         self.model_bounds
     }
 

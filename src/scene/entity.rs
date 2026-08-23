@@ -924,6 +924,7 @@ impl Scene {
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
         viewport: Option<Handle>,
+        tint_selected: bool,
     ) -> Vec<HatchModel> {
         let layer_hidden = |layer: &str| {
             self.document
@@ -1098,7 +1099,7 @@ impl Scene {
                         }
                     }
                 }
-                if self.selected.contains(&handle) {
+                if tint_selected && self.selected.contains(&handle) {
                     m.color = [0.15, 0.55, 1.00, m.color[3]];
                 }
                 let d = depth_map.get(&handle.value()).map_or(0.0, |d| d[0]);
@@ -1115,7 +1116,7 @@ impl Scene {
         models.extend(self.instanced_hatch_models(
             target_block,
             hatch_bg,
-            true,
+            tint_selected,
             frozen,
             annotation_scale_handle,
             all_visible,

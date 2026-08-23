@@ -1,9 +1,7 @@
 //! DWG preview thumbnails.
 //!
-//! - [`from_snapshot`] rasterizes the drawing exactly as it is framed on screen —
-//!   the live camera's pan / zoom / rotation, only the currently visible region,
-//!   not the whole extent — into a small [`acadrust::Preview`] embedded on save
-//!   so OCS drawings show a thumbnail in file browsers and other CAD apps.
+//! - [`from_screenshot`] crops the visible drawing area into a small
+//!   [`acadrust::Preview`] embedded on save.
 //! - [`read_handle`] / [`extract_to_png`] read a DWG's *embedded* preview back
 //!   for the Start page and the OS file-manager thumbnailer. Extraction lives in
 //!   the shared [`dwg_thumbnailer`] core crate (also used by the Windows/macOS
@@ -11,66 +9,54 @@
 
 use acadrust::{Preview, PreviewFormat};
 use iced::Rectangle;
-use image::{ImageFormat, Rgb, RgbImage};
+use image::{ImageFormat, RgbImage};
 use std::io::Cursor;
 
-use crate::scene::WireModel;
-use crate::scene::view::camera::Camera;
+/// Build a preview from the visible drawing area of an Iced window screenshot.
+pub fn from_screenshot(
+    screenshot: &iced::window::Screenshot,
+    bounds: Rectangle,
+    png: bool,
+) -> Option<Preview> {
+    let scale = screenshot.scale_factor;
+    if !scale.is_finite() || scale <= 0.0 || bounds.width <= 0.0 || bounds.height <= 0.0 {
+        return None;
+    }
+
+    let width = screenshot.size.width as f32;
+    let height = screenshot.size.height as f32;
+    let left = (bounds.x * scale).floor().clamp(0.0, width) as u32;
+    let top = (bounds.y * scale).floor().clamp(0.0, height) as u32;
+    let right = ((bounds.x + bounds.width) * scale)
+        .ceil()
+        .clamp(0.0, width) as u32;
+    let bottom = ((bounds.y + bounds.height) * scale)
+        .ceil()
+        .clamp(0.0, height) as u32;
+    if right <= left || bottom <= top {
+        return None;
+    }
+
+    let cropped = screenshot
+        .crop(Rectangle {
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top,
+        })
+        .ok()?;
+    let rgba = image::RgbaImage::from_raw(
+        cropped.size.width,
+        cropped.size.height,
+        cropped.rgba.to_vec(),
+    )?;
+    let (cw, ch) = canvas_dims(cropped.size.width as f64 / cropped.size.height as f64);
+    let resized = image::imageops::resize(&rgba, cw, ch, image::imageops::FilterType::Triangle);
+    encode(image::DynamicImage::ImageRgba8(resized).into_rgb8(), png)
+}
 
 /// Longest edge of the generated thumbnail, in pixels.
 const MAX_DIM: u32 = 256;
-
-/// Build a preview matching what is currently on screen: the drawing's wires
-/// projected through the live camera into a `viewport`-aspect canvas, so the
-/// thumbnail is the visible framing (pan / zoom / rotation, only the on-screen
-/// region), not the whole extent. `viewport` is the model pane's pixel size.
-/// `None` when the drawing is empty (clears any stale preview).
-///
-/// `png` picks the encoding: a line drawing on a flat background is almost all
-/// one colour, so a **PNG** collapses to a few KB where the uncompressed
-/// **BMP/DIB** stays ~180 KB at 256². PNG previews are only valid from R2013
-/// (AC1027) on, so the caller passes `false` for older targets → BMP/DIB.
-///
-/// Native background saves retain
-/// the resident wire `Arc` and a small camera copy, then run the point scan and
-/// image encoding on the save worker instead of blocking the UI thread.
-pub fn from_snapshot(
-    wires: &[WireModel],
-    camera: &Camera,
-    bg_color: [f32; 4],
-    png: bool,
-    viewport: (f32, f32),
-) -> Option<Preview> {
-    if wires.is_empty() {
-        return None;
-    }
-    let (vw, vh) = viewport;
-    if !(vw > 0.0 && vh > 0.0) {
-        return None;
-    }
-
-    // Canvas keeps the viewport's aspect so the framing is undistorted; longest
-    // edge = MAX_DIM. Projecting with the canvas rectangle as the camera bounds
-    // makes `project` return pixel coordinates already in canvas space.
-    let (cw, ch) = canvas_dims((vw / vh) as f64);
-    let bounds = Rectangle {
-        x: 0.0,
-        y: 0.0,
-        width: cw as f32,
-        height: ch as f32,
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        rasterize_snapshot_parallel(wires, camera, bounds, cw, ch, bg_color, png)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        rasterize(wires, cw, ch, bg_color, png, |x, y, z| {
-            camera.project(glam::DVec3::new(x, y, z), bounds)
-                .map(|s| (s.x.round() as i32, s.y.round() as i32))
-        })
-    }
-}
 
 /// Canvas dimensions for an aspect ratio, longest edge = [`MAX_DIM`].
 fn canvas_dims(aspect: f64) -> (u32, u32) {
@@ -81,184 +67,7 @@ fn canvas_dims(aspect: f64) -> (u32, u32) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn rasterize_snapshot_parallel(
-    wires: &[WireModel],
-    camera: &Camera,
-    bounds: Rectangle,
-    cw: u32,
-    ch: u32,
-    bg: [f32; 4],
-    png: bool,
-) -> Option<Preview> {
-    use crate::par::prelude::*;
-
-    let total_segments: usize = wires
-        .iter()
-        .map(|wire| wire.points.len().saturating_sub(1))
-        .sum();
-    if total_segments < 100_000 {
-        return rasterize(wires, cw, ch, bg, png, |x, y, z| {
-            camera.project(glam::DVec3::new(x, y, z), bounds)
-                .map(|point| (point.x.round() as i32, point.y.round() as i32))
-        });
-    }
-
-    let task_count = (rayon::current_num_threads().max(1) * 2).min(total_segments);
-    let target_work = total_segments.div_ceil(task_count).max(1);
-    let mut tasks: Vec<Vec<(usize, usize, usize)>> = Vec::with_capacity(task_count);
-    let mut task = Vec::new();
-    let mut task_work = 0usize;
-    for (wire_index, wire) in wires.iter().enumerate() {
-        let segment_count = wire.points.len().saturating_sub(1);
-        let mut start = 0usize;
-        while start < segment_count {
-            let take = (target_work - task_work).min(segment_count - start);
-            task.push((wire_index, start, start + take));
-            task_work += take;
-            start += take;
-            if task_work == target_work {
-                tasks.push(std::mem::take(&mut task));
-                task_work = 0;
-            }
-        }
-    }
-    if !task.is_empty() {
-        tasks.push(task);
-    }
-
-    let layers: Vec<Vec<u32>> = tasks
-        .par_iter()
-        .map(|task| {
-            let mut pixels = vec![u32::MAX; (cw * ch) as usize];
-            for &(wire_index, start, end) in task {
-                let wire = &wires[wire_index];
-                let color = to_rgb(wire.color);
-                let packed =
-                    color[0] as u32 | (color[1] as u32) << 8 | (color[2] as u32) << 16;
-                let mut previous = projected_wire_point(wire, start, camera, bounds);
-                for index in start + 1..=end {
-                    let current = projected_wire_point(wire, index, camera, bounds);
-                    if let (Some(a), Some(b)) = (previous, current) {
-                        draw_line_layer(&mut pixels, cw, ch, a, b, packed);
-                    }
-                    previous = current;
-                }
-            }
-            pixels
-        })
-        .collect();
-
-    let mut image = RgbImage::from_pixel(cw, ch, Rgb(to_rgb(bg)));
-    for layer in layers {
-        for (pixel, packed) in image.pixels_mut().zip(layer) {
-            if packed != u32::MAX {
-                *pixel = Rgb([
-                    packed as u8,
-                    (packed >> 8) as u8,
-                    (packed >> 16) as u8,
-                ]);
-            }
-        }
-    }
-    encode(image, png)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn projected_wire_point(
-    wire: &WireModel,
-    index: usize,
-    camera: &Camera,
-    bounds: Rectangle,
-) -> Option<(i32, i32)> {
-    let point = wire.points.get(index)?;
-    if !point[0].is_finite() || !point[1].is_finite() {
-        return None;
-    }
-    let (x, y, z) = abs_xyz(wire, index, point);
-    camera
-        .project(glam::DVec3::new(x, y, z), bounds)
-        .map(|screen| (screen.x.round() as i32, screen.y.round() as i32))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn draw_line_layer(
-    pixels: &mut [u32],
-    width: u32,
-    height: u32,
-    (x0, y0): (i32, i32),
-    (x1, y1): (i32, i32),
-    color: u32,
-) {
-    let (width, height) = (width as i32, height as i32);
-    let Some(((mut x0, mut y0), (x1, y1))) =
-        clip_line_to_rect((x0, y0), (x1, y1), width, height)
-    else {
-        return;
-    };
-    let dx = (x1 - x0).abs();
-    let dy = -(y1 - y0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut error = dx + dy;
-    loop {
-        if x0 >= 0 && x0 < width && y0 >= 0 && y0 < height {
-            pixels[y0 as usize * width as usize + x0 as usize] = color;
-        }
-        if x0 == x1 && y0 == y1 {
-            break;
-        }
-        let twice = 2 * error;
-        if twice >= dy {
-            error += dy;
-            x0 += sx;
-        }
-        if twice <= dx {
-            error += dx;
-            y0 += sy;
-        }
-    }
-}
-
-/// Rasterize `wires` onto a `bg`-filled `cw`×`ch` canvas, placing each vertex
-/// with `project` (world XYZ → canvas pixel, `None` = not projectable), and
-/// encode the result. A `None` from `project` breaks the polyline run, as does a
-/// NaN separator, so off-screen / clipped segments simply don't draw.
-fn rasterize(
-    wires: &[WireModel],
-    cw: u32,
-    ch: u32,
-    bg: [f32; 4],
-    png: bool,
-    project: impl Fn(f64, f64, f64) -> Option<(i32, i32)>,
-) -> Option<Preview> {
-    let mut img = RgbImage::from_pixel(cw, ch, Rgb(to_rgb(bg)));
-    for w in wires {
-        let col = Rgb(to_rgb(w.color));
-        let mut prev: Option<(i32, i32)> = None;
-        for (i, p) in w.points.iter().enumerate() {
-            if !p[0].is_finite() || !p[1].is_finite() {
-                prev = None; // NaN separator breaks the run
-                continue;
-            }
-            let (x, y, z) = abs_xyz(w, i, p);
-            let cur = project(x, y, z);
-            if let (Some(a), Some(b)) = (prev, cur) {
-                draw_line(&mut img, a, b, col);
-            }
-            prev = cur;
-        }
-    }
-    encode(img, png)
-}
-
-/// Encode the canvas. PNG for R2013+ targets (few KB); else a BMP → DIB (no
-/// 14-byte BITMAPFILEHEADER, which the DWG preview container doesn't carry).
-/// The BMP is an 8-bit **RLE8**-compressed DIB — a line drawing on a flat
-/// background is a few distinct colours with long single-colour runs, so it
-/// collapses from the ~180 KB of a 24-bit DIB to a handful of KB. A view with
-/// more than 256 distinct colours (rare) can't be palettised, so it falls back
-/// to the 24-bit uncompressed DIB.
+/// Encode PNG for R2013+; older targets receive a BMP/DIB.
 fn encode(img: RgbImage, png: bool) -> Option<Preview> {
     if png {
         let mut buf = Cursor::new(Vec::new());
@@ -347,25 +156,6 @@ fn bmp24_dib(img: &RgbImage) -> Option<Vec<u8>> {
     (bmp.len() > 14).then(|| bmp[14..].to_vec())
 }
 
-/// Absolute world XYZ of vertex `i`, reconstructing the double-single residual.
-#[inline]
-fn abs_xyz(w: &WireModel, i: usize, p: &[f32; 3]) -> (f64, f64, f64) {
-    let (lx, ly, lz) = w
-        .points_low
-        .get(i)
-        .map_or((0.0, 0.0, 0.0), |l| (l[0] as f64, l[1] as f64, l[2] as f64));
-    (p[0] as f64 + lx, p[1] as f64 + ly, p[2] as f64 + lz)
-}
-
-#[inline]
-fn to_rgb(c: [f32; 4]) -> [u8; 3] {
-    [
-        (c[0].clamp(0.0, 1.0) * 255.0).round() as u8,
-        (c[1].clamp(0.0, 1.0) * 255.0).round() as u8,
-        (c[2].clamp(0.0, 1.0) * 255.0).round() as u8,
-    ]
-}
-
 /// Read a DWG's embedded preview and write it as a PNG at `output`, scaled so
 /// its longest edge is at most `size`. Returns `false` on any failure (no
 /// preview, undecodable, write error) so the OS thumbnailer falls back to a
@@ -399,14 +189,6 @@ pub fn read_handle(path: &std::path::Path) -> Option<iced::widget::image::Handle
 mod tests {
     use super::*;
 
-    fn wire(pts: &[[f32; 2]], color: [f32; 4]) -> WireModel {
-        WireModel {
-            points: pts.iter().map(|&[x, y]| [x, y, 0.0]).collect(),
-            color,
-            ..Default::default()
-        }
-    }
-
     /// Prepend a `BITMAPFILEHEADER` so `image` can decode the DIB. Mirrors the
     /// palette-aware offset the shared `dwg_thumbnailer::dib_to_bmp` computes.
     fn dib_to_bmp(dib: &[u8]) -> Vec<u8> {
@@ -430,34 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn rasterize_draws_a_valid_non_blank_dib() {
-        let bg = [0.1, 0.1, 0.1, 1.0];
-        // A closed square (connected polyline) in a distinct colour.
-        let sq = wire(
-            &[[10.0, 10.0], [90.0, 10.0], [90.0, 90.0], [10.0, 90.0], [10.0, 10.0]],
-            [1.0, 0.0, 0.0, 1.0],
-        );
-        // Trivial projector: world XY straight to pixels (Y flipped), z ignored.
-        let p = rasterize(&[sq], MAX_DIM, MAX_DIM, bg, false, |x, y, _| {
-            Some((x.round() as i32, (MAX_DIM as f64 - y).round() as i32))
-        })
-        .expect("some preview");
-        assert_eq!(p.format, PreviewFormat::Bmp);
-        // DIB starts with a 40-byte BITMAPINFOHEADER.
-        assert_eq!(&p.data[0..4], &40u32.to_le_bytes());
-        let img = image::load_from_memory(&dib_to_bmp(&p.data)).expect("decodes").to_rgb8();
-        assert_eq!((img.width(), img.height()), (MAX_DIM, MAX_DIM));
-        let bg_px = to_rgb(bg);
-        assert!(img.pixels().any(|px| px.0 != bg_px), "nothing drawn");
-        assert!(img.pixels().any(|px| px.0[0] > 128 && px.0[1] < 64), "square not red");
-    }
-
-    #[test]
     fn rle8_bmp_is_8bit_compressed_and_round_trips() {
-        let bg = [1.0, 1.0, 1.0, 1.0];
-        let sq = wire(&[[10.0, 10.0], [90.0, 90.0]], [0.0, 0.0, 0.0, 1.0]);
-        let proj = |x: f64, y: f64, _z: f64| Some((x.round() as i32, y.round() as i32));
-        let bmp = rasterize(&[sq], MAX_DIM, MAX_DIM, bg, false, proj).unwrap();
+        let mut image = RgbImage::from_pixel(MAX_DIM, MAX_DIM, image::Rgb([255, 255, 255]));
+        for i in 10..90 {
+            image.put_pixel(i, i, image::Rgb([0, 0, 0]));
+        }
+        let bmp = encode(image, false).unwrap();
         assert_eq!(bmp.format, PreviewFormat::Bmp);
         // 8-bit, BI_RLE8.
         assert_eq!(u16::from_le_bytes([bmp.data[14], bmp.data[15]]), 8, "bitcount");
@@ -476,90 +236,10 @@ mod tests {
 
     #[test]
     fn png_preview_decodes() {
-        let bg = [1.0, 1.0, 1.0, 1.0];
-        let sq = wire(&[[10.0, 10.0], [90.0, 90.0]], [0.0, 0.0, 0.0, 1.0]);
-        let p = rasterize(&[sq], MAX_DIM, MAX_DIM, bg, true, |x, y, _| {
-            Some((x.round() as i32, y.round() as i32))
-        })
-        .unwrap();
+        let image = RgbImage::from_pixel(MAX_DIM, MAX_DIM, image::Rgb([255, 255, 255]));
+        let p = encode(image, true).unwrap();
         assert_eq!(p.format, PreviewFormat::Png);
         let img = image::load_from_memory_with_format(&p.data, ImageFormat::Png).expect("png decodes");
         assert_eq!((img.width(), img.height()), (MAX_DIM, MAX_DIM));
     }
-}
-
-/// Bresenham line, clipped to the image bounds.
-fn draw_line(img: &mut RgbImage, (x0, y0): (i32, i32), (x1, y1): (i32, i32), col: Rgb<u8>) {
-    let (w, h) = (img.width() as i32, img.height() as i32);
-    let Some(((mut x0, mut y0), (x1, y1))) =
-        clip_line_to_rect((x0, y0), (x1, y1), w, h)
-    else {
-        return;
-    };
-    let dx = (x1 - x0).abs();
-    let dy = -(y1 - y0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx + dy;
-    loop {
-        if x0 >= 0 && x0 < w && y0 >= 0 && y0 < h {
-            img.put_pixel(x0 as u32, y0 as u32, col);
-        }
-        if x0 == x1 && y0 == y1 {
-            break;
-        }
-        let e2 = 2 * err;
-        if e2 >= dy {
-            err += dy;
-            x0 += sx;
-        }
-        if e2 <= dx {
-            err += dx;
-            y0 += sy;
-        }
-    }
-}
-
-fn clip_line_to_rect(
-    (x0, y0): (i32, i32),
-    (x1, y1): (i32, i32),
-    width: i32,
-    height: i32,
-) -> Option<((i32, i32), (i32, i32))> {
-    if width <= 0 || height <= 0 {
-        return None;
-    }
-    let (x0, y0, x1, y1) = (x0 as f64, y0 as f64, x1 as f64, y1 as f64);
-    let (dx, dy) = (x1 - x0, y1 - y0);
-    let mut enter = 0.0f64;
-    let mut leave = 1.0f64;
-    for (p, q) in [
-        (-dx, x0),
-        (dx, width.saturating_sub(1) as f64 - x0),
-        (-dy, y0),
-        (dy, height.saturating_sub(1) as f64 - y0),
-    ] {
-        if p == 0.0 {
-            if q < 0.0 {
-                return None;
-            }
-            continue;
-        }
-        let ratio = q / p;
-        if p < 0.0 {
-            enter = enter.max(ratio);
-        } else {
-            leave = leave.min(ratio);
-        }
-        if enter > leave {
-            return None;
-        }
-    }
-    let point = |t: f64| {
-        (
-            (x0 + t * dx).round().clamp(0.0, width.saturating_sub(1) as f64) as i32,
-            (y0 + t * dy).round().clamp(0.0, height.saturating_sub(1) as f64) as i32,
-        )
-    };
-    Some((point(enter), point(leave)))
 }

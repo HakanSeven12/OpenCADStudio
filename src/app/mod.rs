@@ -608,6 +608,12 @@ pub(super) struct OpenCADStudio {
     /// OS window Id for the floating Layer Properties Manager (None when closed).
     /// OS window Id of the primary application window.
     main_window: Option<window::Id>,
+    /// Hides drawing UI overlays for one thumbnail capture frame.
+    thumbnail_capture_clean: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_native_thumbnail_save: Option<PendingNativeThumbnailSave>,
+    #[cfg(target_arch = "wasm32")]
+    pending_web_thumbnail_save: Option<PendingWebThumbnailSave>,
     // ── Floating panel windows ────────────────────────────────────────────
     /// Active `iced_aw` colour picker: destination plus its initial colour.
     color_pick_target: Option<(ColorPickTarget, AcadColor)>,
@@ -1133,6 +1139,28 @@ pub(super) enum SaveContinuation {
 
 #[derive(Debug, Clone)]
 #[cfg(not(target_arch = "wasm32"))]
+pub(super) struct PendingNativeThumbnailSave {
+    tab_id: u64,
+    path: PathBuf,
+    version: acadrust::DxfVersion,
+    purpose: SavePurpose,
+    continuation: SaveContinuation,
+    set_current_path: bool,
+    check_external_change: bool,
+}
+
+#[derive(Debug, Clone)]
+#[cfg(target_arch = "wasm32")]
+pub(super) struct PendingWebThumbnailSave {
+    tab_id: u64,
+    filename: String,
+    ext: String,
+    version: acadrust::DxfVersion,
+    bounds: iced::Rectangle,
+}
+
+#[derive(Debug, Clone)]
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct PendingSaveFailure {
     tab_id: u64,
     path: PathBuf,
@@ -1154,16 +1182,6 @@ pub(super) struct PendingExternalChange {
     set_current_path: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) struct ThumbnailCacheKey {
-    epoch: u64,
-    camera_generation: u64,
-    bg_color: [u32; 4],
-    png: bool,
-    viewport: [u32; 2],
-}
-
 #[derive(Debug, Clone)]
 #[cfg(not(target_arch = "wasm32"))]
 pub struct SaveOutcome {
@@ -1178,7 +1196,6 @@ pub struct SaveOutcome {
     set_current_path: bool,
     purpose: SavePurpose,
     continuation: SaveContinuation,
-    thumbnail_key: Option<ThumbnailCacheKey>,
     refreshed_preview: Option<Option<acadrust::Preview>>,
     result: Result<(), crate::io::SaveFailure>,
 }
@@ -1915,9 +1932,23 @@ pub enum Message {
     AecDropBack,
     /// Periodic autosave tick — write `.sv$` recovery files for dirty tabs.
     AutoSave,
+    /// A clean viewport frame is ready for thumbnail capture.
+    ThumbnailCaptureFrame,
+    /// Restore drawing UI after the compositor screenshot is captured.
+    ThumbnailCaptureFinished,
     /// Native background save/autosave completed.
     #[cfg(not(target_arch = "wasm32"))]
     SaveFinished(SaveOutcome),
+    /// Web viewport capture completed; serialize and download the drawing.
+    #[cfg(target_arch = "wasm32")]
+    WebSaveScreenshot {
+        tab_id: u64,
+        filename: String,
+        ext: String,
+        version: acadrust::DxfVersion,
+        bounds: Option<iced::Rectangle>,
+        screenshot: Option<iced::window::Screenshot>,
+    },
     /// Retry the failed save after the other application releases the file.
     #[cfg(not(target_arch = "wasm32"))]
     SaveFileInUseRetry,
@@ -3161,6 +3192,11 @@ impl OpenCADStudio {
             show_layout_tabs: true,
             last_point: None,
             main_window: None,
+            thumbnail_capture_clean: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_native_thumbnail_save: None,
+            #[cfg(target_arch = "wasm32")]
+            pending_web_thumbnail_save: None,
             color_pick_target: None,
             color_picker_tab: ColorPickerTab::Index,
             recent_colors: Vec::new(),

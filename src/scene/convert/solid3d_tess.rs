@@ -42,6 +42,8 @@ pub(crate) fn body_transform(
             values.extend_from_slice(&components[..len]);
         } else if let Some(value) = token.as_float() {
             values.push(value);
+        } else if let Some(value) = token.as_integer() {
+            values.push(value as f64);
         } else if let Some(text) = token.as_string() {
             for word in text.split_ascii_whitespace() {
                 let Ok(value) = word.parse::<f64>() else {

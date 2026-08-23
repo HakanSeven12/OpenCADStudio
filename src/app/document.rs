@@ -195,10 +195,6 @@ pub(super) struct DocumentTab {
     pub(super) active_mleader_style: String,
     /// Last camera_generation value written back to the document.
     pub(super) last_synced_camera_gen: u64,
-    /// Render-state key of `scene.document.preview`. Matching saves reuse the
-    /// encoded DWG thumbnail instead of rescanning every resident wire.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(super) thumbnail_cache_key: Option<super::ThumbnailCacheKey>,
     /// Sentinel "Welcome / Start" tab. Always at index 0 when present.
     /// Cannot be closed; the viewport area renders a welcome page instead
     /// of the model-space shader. The scene is still constructed so the
@@ -486,8 +482,6 @@ impl DocumentTab {
             active_block_edit: None,
             active_mleader_style: "Standard".to_string(),
             last_synced_camera_gen: 0,
-            #[cfg(not(target_arch = "wasm32"))]
-            thumbnail_cache_key: None,
             is_start: false,
             pan_mode: false,
             orbit_mode: false,

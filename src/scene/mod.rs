@@ -5674,14 +5674,19 @@ impl Scene {
         arc
     }
 
+    #[cfg(test)]
     pub(super) fn hatch_models_arc(&self) -> Arc<Vec<HatchModel>> {
+        self.hatch_models_arc_for_view(true)
+    }
+
+    fn hatch_models_arc_for_view(&self, tint_selected: bool) -> Arc<Vec<HatchModel>> {
         // Hatch models bake the selection tint (issue #71), so they depend on
         // the *selected set* — but NOT on hover. Keying on `selection_generation`
         // (which also bumps on every hover) made each hover-over a new entity
         // rebuild every hatch model: an O(N-hatch) stutter on hatch-heavy
         // drawings. Key on a signature of `selected` instead, so hover (which
         // never changes `selected`) keeps the cache warm.
-        let sel_sig = self.selected_hatch_sig();
+        let sel_sig = if tint_selected { self.selected_hatch_sig() } else { 0 };
         let target_block = self.content_render_block_handle();
         let key = (target_block, self.current_layout.clone());
         {
@@ -5728,6 +5733,7 @@ impl Scene {
             scale,
             self.annotation_all_visible(),
             None,
+            tint_selected,
         ));
         self.hatch_cache.borrow_mut().insert(
             key,
@@ -6324,9 +6330,10 @@ impl Scene {
         &self,
         viewport: Handle,
         frozen: &HashSet<Handle>,
+        tint_selected: bool,
     ) -> Arc<Vec<HatchModel>> {
         if viewport.is_null() && frozen.is_empty() {
-            return self.hatch_models_arc();
+            return self.hatch_models_arc_for_view(tint_selected);
         }
         let target_block = self.content_render_block_handle();
         let scale = self.viewport_scale_handle(viewport);
@@ -6336,7 +6343,7 @@ impl Scene {
             ^ self.viewport_style_key(Some(viewport)).rotate_left(23);
         let sig = Self::frozen_layers_sig(frozen) ^ context_sig;
         let key = (target_block, self.current_layout.clone(), sig);
-        let sel = self.selected_hatch_sig();
+        let sel = if tint_selected { self.selected_hatch_sig() } else { 0 };
         if let Some((e, s, arc)) = self.frozen_hatch_cache.borrow().get(&key) {
             if *e == self.geometry_epoch && *s == sel {
                 return Arc::clone(arc);
@@ -6348,6 +6355,7 @@ impl Scene {
             scale,
             all_visible,
             Some(viewport),
+            tint_selected,
         ));
         self.frozen_hatch_cache
             .borrow_mut()

@@ -185,10 +185,7 @@ impl ProxyPluginRequestSender {
     /// [`POLL_INTERVAL`] while waiting. This lets Python callers run
     /// `py.check_signals()` so that `Ctrl+C`/`KeyboardInterrupt` is raised
     /// promptly instead of waiting for the full socket timeout.
-    ///
-    /// The response is read byte-by-byte with polling so that a short timeout
-    /// can never leave the TCP stream in a partially-read state between the
-    /// length prefix and the payload.
+    /// Partial reads are preserved across timeouts to keep framing synchronized.
     pub fn request_with_poll(
         &self,
         req: PluginRequest,
@@ -209,9 +206,7 @@ impl ProxyPluginRequestSender {
         let result = match recv_framed_with_poll(&mut *stream, poll) {
             Ok(resp) => Ok(resp),
             Err(PollError::Interrupted(e)) => {
-                // The caller (e.g. Python's Ctrl+C handler) asked us to stop
-                // waiting. Shut down the stream immediately so the proxy server
-                // and any spawned runners can observe the disconnect.
+                // A partial response cannot be reused after interruption.
                 let _ = stream.shutdown(Shutdown::Both);
                 Err(e)
             }

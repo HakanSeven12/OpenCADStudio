@@ -695,16 +695,17 @@ async fn load_web_bytes(
     Ok((name.to_string(), path, doc, caches))
 }
 
-/// Parse a CAD document from in-memory bytes, choosing the format from
-/// `name`'s extension. Used by the web build, where files arrive as bytes from
-/// a browser file picker (no filesystem path). Shares the post-load fixups with
-/// [`load_file`]; raster-image path resolution is skipped (there is no sibling
-/// directory to search on the web).
+/// Parse a drawing from bytes using its name or recovery-file signature.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
     use std::io::Cursor;
     let ext = name.rsplit('.').next().unwrap_or_default().to_lowercase();
-    match ext.as_str() {
+    let format = if matches!(ext.as_str(), "bak" | "sv$") {
+        sniff_dwg_or_dxf_bytes(&bytes)
+    } else {
+        ext.as_str()
+    };
+    match format {
         "dwg" => {
             let mut doc = DwgReader::from_stream(Cursor::new(bytes))
                 .read()
@@ -737,10 +738,14 @@ fn sniff_dwg_or_dxf(path: &Path) -> String {
     if let Ok(mut f) = std::fs::File::open(path) {
         let _ = f.read(&mut buf);
     }
-    if buf.starts_with(b"AC10") {
-        "dwg".to_string()
+    sniff_dwg_or_dxf_bytes(&buf).to_string()
+}
+
+fn sniff_dwg_or_dxf_bytes(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"AC10") {
+        "dwg"
     } else {
-        "dxf".to_string()
+        "dxf"
     }
 }
 
@@ -1345,7 +1350,7 @@ fn validate_save_extension(path: &Path) -> Result<(), SaveFailure> {
         .extension()
         .map(|value| value.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if matches!(extension.as_str(), "dwg" | "dxf") {
+    if matches!(extension.as_str(), "dwg" | "dxf" | "sv$") {
         return Ok(());
     }
 

@@ -11,7 +11,7 @@
 //! formats or enum variants.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -79,6 +79,29 @@ pub fn recv_framed<R: Read, T: serde::de::DeserializeOwned>(reader: &mut R) -> R
     Ok(msg)
 }
 
+/// Error during a polled read: either an IO error on the stream, or an
+/// interrupt reported by the poll callback (e.g. the user pressed Ctrl+C).
+#[derive(Debug)]
+enum PollError {
+    Io(ProxyError),
+    Interrupted(PluginRequestError),
+}
+
+impl From<ProxyError> for PollError {
+    fn from(e: ProxyError) -> Self {
+        PollError::Io(e)
+    }
+}
+
+impl From<PollError> for PluginRequestError {
+    fn from(e: PollError) -> Self {
+        match e {
+            PollError::Io(err) => err.into(),
+            PollError::Interrupted(err) => err,
+        }
+    }
+}
+
 /// Read exactly `buf.len()` bytes from `reader`, calling `poll` whenever no
 /// data is currently available. Unlike `read_exact`, this preserves partial
 /// progress across short read timeouts so the stream can never get out of sync.
@@ -86,17 +109,22 @@ fn read_with_poll<R: Read>(
     reader: &mut R,
     buf: &mut [u8],
     poll: &mut dyn FnMut() -> Result<(), PluginRequestError>,
-) -> Result<(), PluginRequestError> {
+) -> Result<(), PollError> {
     use std::io::ErrorKind;
     let mut off = 0;
     while off < buf.len() {
         match reader.read(&mut buf[off..]) {
-            Ok(0) => return Err(PluginRequestError("proxy disconnected".to_string())),
+            Ok(0) => return Err(PollError::Io(ProxyError::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "proxy disconnected",
+            )))),
             Ok(n) => off += n,
             Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
-                poll()?;
+                if let Err(err) = poll() {
+                    return Err(PollError::Interrupted(err));
+                }
             }
-            Err(e) => return Err(ProxyError::Io(e).into()),
+            Err(e) => return Err(PollError::Io(ProxyError::Io(e))),
         }
     }
     Ok(())
@@ -107,7 +135,7 @@ fn read_with_poll<R: Read>(
 fn recv_framed_with_poll<R: Read>(
     reader: &mut R,
     poll: &mut dyn FnMut() -> Result<(), PluginRequestError>,
-) -> Result<PluginResponse, PluginRequestError> {
+) -> Result<PluginResponse, PollError> {
     let mut len_buf = [0u8; 8];
     read_with_poll(reader, &mut len_buf, poll)?;
     let len = u64::from_le_bytes(len_buf) as usize;
@@ -178,7 +206,17 @@ impl ProxyPluginRequestSender {
             .set_read_timeout(Some(POLL_INTERVAL))
             .map_err(|e| PluginRequestError(e.to_string()))?;
 
-        let result = recv_framed_with_poll(&mut *stream, poll);
+        let result = match recv_framed_with_poll(&mut *stream, poll) {
+            Ok(resp) => Ok(resp),
+            Err(PollError::Interrupted(e)) => {
+                // The caller (e.g. Python's Ctrl+C handler) asked us to stop
+                // waiting. Shut down the stream immediately so the proxy server
+                // and any spawned runners can observe the disconnect.
+                let _ = stream.shutdown(Shutdown::Both);
+                Err(e)
+            }
+            Err(PollError::Io(e)) => Err(e.into()),
+        };
 
         let _ = stream.set_read_timeout(original_timeout);
         result

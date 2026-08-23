@@ -2335,6 +2335,7 @@ view =
     .zoom-extents =
         Zoomen
         Maten
+    .cmd-no-hatch-objects = __ocs_fmt_0__: geen arceerobjecten.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: geen tekst- of maatobjecten.
     .cmd-not-yet-implemented = __ocs_fmt_0__: nog niet geïmplementeerd.
     .viewport-s-in-layout = __ocs_fmt_0__ weergavevenster(s) in indeling "__ocs_fmt_1__":

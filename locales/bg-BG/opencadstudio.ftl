@@ -2334,6 +2334,7 @@ view =
     .zoom-extents =
         Мащаб
         Обхват
+    .cmd-no-hatch-objects = __ocs_fmt_0__: ð¢ÐÅð╝ð░ ÐëÐÇð©Ðàð¥ð▓ÐèÐçð¢ð© ð¥ð▒ðÁð║Ðéð©.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: няма текстови обекти или оразмерявания.
     .cmd-not-yet-implemented = __ocs_fmt_0__: все още не е реализирано.
     .viewport-s-in-layout = __ocs_fmt_0__ изглед(а) в оформление "__ocs_fmt_1__":

@@ -3070,6 +3070,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "those objects" => Some(("modal", "those-objects")),
         "units" => Some(("common", "units")),
         "{cmd}: cannot create folder ({e})." => Some(("file", "cmd-cannot-create-folder-e")),
+        "{cmd}: no hatch objects." => Some(("view", "cmd-no-hatch-objects")),
         "{cmd}: no text or dimension objects." => Some(("view", "cmd-no-text-or-dimension-objects")),
         "{cmd}: not yet implemented." => Some(("view", "cmd-not-yet-implemented")),
         "{cmd}: packaged {copied} file(s) into {}" => Some(("file", "cmd-packaged-copied-file-s-into")),

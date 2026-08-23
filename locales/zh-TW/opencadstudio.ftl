@@ -2330,6 +2330,7 @@ view =
     .zoom-extents =
         縮放
         範圍
+    .cmd-no-hatch-objects = __ocs_fmt_0__:µ▓Æµ£ëÕí½ÕààþÀÜþë®õ╗ÂÒÇé
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__:沒有文字或維度物件。
     .cmd-not-yet-implemented = __ocs_fmt_0__:尚未實作。
     .viewport-s-in-layout = 配置“__ocs_fmt_1__”中的視口（__ocs_fmt_0__ 個）：

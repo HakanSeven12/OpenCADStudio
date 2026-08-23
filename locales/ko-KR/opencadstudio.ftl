@@ -2334,6 +2334,7 @@ view =
     .zoom-extents =
         줌
         범위
+    .cmd-no-hatch-objects = __ocs_fmt_0__: Ýò┤ý╣ÿ Û░Øý▓┤Û░Ç ýùåýèÁÙïêÙïñ.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: 문자 또는 치수 객체가 없습니다.
     .cmd-not-yet-implemented = __ocs_fmt_0__: 아직 구현되지 않았습니다.
     .viewport-s-in-layout ="__ocs_fmt_1__" 레이아웃의 __ocs_fmt_0__ 뷰포트:

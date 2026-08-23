@@ -2334,6 +2334,7 @@ view =
     .zoom-extents =
         Přiblížení
         Rozsahy
+    .cmd-no-hatch-objects = __ocs_fmt_0__: ┼¥├ídn├® ┼írafovac├¡ objekty.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: žádný text ani kótovací objekty.
     .cmd-not-yet-implemented = __ocs_fmt_0__: dosud neimplementováno.
     .viewport-s-in-layout =Výřezy __ocs_fmt_0__ v rozložení "__ocs_fmt_1__":

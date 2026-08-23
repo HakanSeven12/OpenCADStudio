@@ -2335,6 +2335,7 @@ view =
     .zoom-extents =
         Zoom
         Extensión
+    .cmd-no-hatch-objects = __ocs_fmt_0__: no hay objetos de sombreado.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: no hay objetos de texto ni de cota.
     .cmd-not-yet-implemented = __ocs_fmt_0__: aún no implementado.
     .viewport-s-in-layout = __ocs_fmt_0__ ventanas gráficas en la presentación «__ocs_fmt_1__»:

@@ -2334,6 +2334,7 @@ view =
     .zoom-extents =
         Powiększ
         Zakresy
+    .cmd-no-hatch-objects = __ocs_fmt_0__: brak obiekt├│w kreskowania.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: brak obiektów tekstowych i wymiarowych.
     .cmd-not-yet-implemented = __ocs_fmt_0__: jeszcze nie wdrożony.
     .viewport-s-in-layout =Okna widokowe __ocs_fmt_0__ w układzie „__ocs_fmt_1__”:

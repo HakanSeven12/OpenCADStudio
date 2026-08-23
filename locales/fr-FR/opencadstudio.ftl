@@ -2335,6 +2335,7 @@ view =
     .zoom-extents =
         Zoom
         Portée
+    .cmd-no-hatch-objects = __ocs_fmt_0__: aucun objet de hachure.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: aucun objet texte ou dimensionnel.
     .cmd-not-yet-implemented = __ocs_fmt_0__: pas encore mis en œuvre.
     .viewport-s-in-layout = __ocs_fmt_0__ fenêtre(s) dans la présentation « __ocs_fmt_1__ » :

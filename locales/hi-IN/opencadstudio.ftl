@@ -2323,6 +2323,7 @@ view =
     .zoom-extents =
         ज़ूम
         बहार
+    .cmd-no-hatch-objects = __ocs_fmt_0__: ÓñòÓÑïÓñê Óñ╣ÓÑêÓñÜ ÓñæÓñ¼ÓÑìÓñ£ÓÑçÓñòÓÑìÓñƒ Óñ¿Óñ╣ÓÑÇÓñéÓÑñ
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: कोई टेक्स्ट या डाइमेंशन ऑब्जेक्ट नहीं।
     .cmd-not-yet-implemented = __ocs_fmt_0__: अभी तक लागू नहीं है।
     .viewport-s-in-layout = लेआउट "__ocs_fmt_1__" में __ocs_fmt_0__ व्यूपोर्ट:

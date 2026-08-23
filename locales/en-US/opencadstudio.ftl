@@ -2363,6 +2363,7 @@ view =
     .zoom-extents =
         Zoom
         Extents
+    .cmd-no-hatch-objects = __ocs_fmt_0__: no hatch objects.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: no text or dimension objects.
     .cmd-not-yet-implemented = __ocs_fmt_0__: not yet implemented.
     .viewport-s-in-layout = __ocs_fmt_0__ viewport(s) in layout "__ocs_fmt_1__":

@@ -82,7 +82,7 @@ fn block_internal_hatch_reaches_export() {
         .expect("wrap hatch into a block + insert");
     scene.populate_hatches_from_document();
 
-    let hatches = scene.paper_canvas_hatches();
+    let hatches = scene.paper_plot_hatches();
     let blue = hatches.iter().filter(|m| is_blue(&m.color)).count();
     assert!(
         blue > 0,
@@ -103,7 +103,7 @@ fn pattern_hatch_uses_stored_line_spacing() {
     scene.add_entity(EntityType::Hatch(ansi31_stored(0.5, 10.0)));
     scene.populate_hatches_from_document();
 
-    let hatches = scene.paper_canvas_hatches();
+    let hatches = scene.paper_plot_hatches();
     let m = hatches
         .iter()
         .find(|m| matches!(m.pattern, HatchPattern::Pattern(_)))
@@ -144,7 +144,7 @@ fn far_from_origin_pattern_hatch_still_fills() {
     scene.add_entity(EntityType::Hatch(ansi31_stored_at(0.3, 1.0, 4000.0, 0.0)));
     scene.populate_hatches_from_document();
 
-    let hatches = scene.paper_canvas_hatches();
+    let hatches = scene.paper_plot_hatches();
     let m = hatches
         .iter()
         .find(|m| matches!(m.pattern, HatchPattern::Pattern(_)))
@@ -189,7 +189,7 @@ fn textbox_boundary_path_is_not_filled() {
     scene.add_entity(EntityType::Hatch(hatch));
     scene.populate_hatches_from_document();
 
-    let hatches = scene.paper_canvas_hatches();
+    let hatches = scene.paper_plot_hatches();
     let m = hatches.first().expect("hatch present");
     // The boundary must not extend into the 200x50 TEXTBOX rectangle.
     let max_x = m
@@ -244,8 +244,12 @@ fn app_created_hatch_roundtrips_catalog_spacing() {
         world_origin: [0.0, 0.0],
         boundary: Arc::new(boundary),
         boundary_wcs: None,
+        fill_plane: None,
+        fill_plane_boundary: None,
         boundary_exterior: None,
         boundary_sources: None,
+        boundary_paths: None,
+        style: acadrust::entities::HatchStyleType::Normal,
         pattern: entry.gpu.clone(),
         name: "ANSI31".into(),
         color: [0.75, 0.75, 0.75, 0.85],
@@ -258,7 +262,7 @@ fn app_created_hatch_roundtrips_catalog_spacing() {
     scene.add_hatch(model, None, None);
     scene.populate_hatches_from_document();
 
-    let hatches = scene.paper_canvas_hatches();
+    let hatches = scene.paper_plot_hatches();
     let m = hatches
         .iter()
         .find(|m| matches!(m.pattern, HatchPattern::Pattern(_)))
@@ -298,8 +302,12 @@ fn nested_hatch_serializes_only_outer_as_external() {
         world_origin: [0.0, 0.0],
         boundary: Arc::new(boundary_f32),
         boundary_wcs: Some(Arc::new(wcs)),
+        fill_plane: None,
+        fill_plane_boundary: None,
         boundary_exterior: None,
         boundary_sources: None,
+        boundary_paths: None,
+        style: acadrust::entities::HatchStyleType::Normal,
         pattern: HatchPattern::Solid,
         name: "SOLID".into(),
         color: [0.45, 0.45, 0.45, 0.60],

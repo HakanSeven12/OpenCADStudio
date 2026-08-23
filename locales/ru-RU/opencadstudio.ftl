@@ -2338,6 +2338,7 @@ view =
     .zoom-extents =
         Зум
         размеры
+    .cmd-no-hatch-objects = __ocs_fmt_0__: ð¢ðÁÐé ð¥ð▒ÐèðÁð║Ðéð¥ð▓ ÐêÐéÐÇð©Ðàð¥ð▓ð║ð©.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: нет текстовых или размерных объектов.
     .cmd-not-yet-implemented = __ocs_fmt_0__: еще не реализовано.
     .viewport-s-in-layout = Видовые экраны (__ocs_fmt_0__) на листе «__ocs_fmt_1__»:

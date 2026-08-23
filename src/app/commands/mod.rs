@@ -18,7 +18,7 @@ mod view;
 // `DrawOrderRefCommand` lives in the `view` family file but is referenced by
 // path (`commands::DrawOrderRefCommand`) from `update.rs`, so re-export it at
 // the module root to keep that path valid.
-pub(crate) use view::DrawOrderRefCommand;
+pub(crate) use view::DrawOrderCommand;
 
 impl OpenCADStudio {
     /// First `"{prefix}{n}"` (n ≥ 1) not already used by a block record in the
@@ -397,9 +397,11 @@ inventory::submit!(crate::command::CommandRegistration {
         "CUILOAD",
         // Save every open drawing.
         "SAVEALL",
-        // Draw-order: all text/dims to front or back.
+        // Draw-order: all text/dims to front or back; hatches to back.
         "TEXTTOFRONT",
         "TEXTTOBACK",
+        "HATCHTOBACK",
+        "HB",
         // Criteria-based selection (same as QSELECT) + copy with picked base.
         "FILTER",
         "FI",

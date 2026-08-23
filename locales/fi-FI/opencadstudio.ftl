@@ -2334,6 +2334,7 @@ view =
     .zoom-extents =
         Zoomaa
         Laajuudet
+    .cmd-no-hatch-objects = __ocs_fmt_0__: ei t├ñytt├Âobjekteja.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: ei tekstiä tai mittaobjekteja.
     .cmd-not-yet-implemented = __ocs_fmt_0__: ei vielä otettu käyttöön.
     .viewport-s-in-layout =__ocs_fmt_0__-näkymä(t) asettelussa "__ocs_fmt_1__":

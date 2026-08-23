@@ -2347,6 +2347,7 @@ view =
     .zoom-extents =
         تكبير إلى
         النطاقات
+    .cmd-no-hatch-objects = __ocs_fmt_0__: ┘äÏº Ï¬┘êÏ¼Ï» ┘âÏºÏª┘åÏºÏ¬ Ï¬Ï©┘ä┘è┘ä.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: لا توجد كائنات نص أو أبعاد.
     .cmd-not-yet-implemented = __ocs_fmt_0__: لم يُنفّذ بعد.
     .viewport-s-in-layout = __ocs_fmt_0__ منفذ عرض في التخطيط "__ocs_fmt_1__":

@@ -2334,6 +2334,7 @@ view =
     .zoom-extents =
         Zoom
         Estensioni
+    .cmd-no-hatch-objects = __ocs_fmt_0__: nessun oggetto tratteggio.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: nessun testo o oggetto dimensione.
     .cmd-not-yet-implemented = __ocs_fmt_0__: non ancora implementato.
     .viewport-s-in-layout =Finestre __ocs_fmt_0__ nel layout "__ocs_fmt_1__":

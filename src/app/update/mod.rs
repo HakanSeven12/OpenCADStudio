@@ -4129,7 +4129,7 @@ impl OpenCADStudio {
                         .push_error(crate::t!("DRAWORDER: select entities first.").as_ref());
                 } else {
                     use crate::command::CadCommand;
-                    let cmd = super::commands::DrawOrderRefCommand::new(to_move, above);
+                    let cmd = super::commands::DrawOrderCommand::for_reference_pick(to_move, above);
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }

@@ -2333,6 +2333,7 @@ view =
     .zoom-extents =
         Zoom
         Umfang
+    .cmd-no-hatch-objects = __ocs_fmt_0__: keine Schraffurobjekte.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: keine Text- oder Dimensionsobjekte.
     .cmd-not-yet-implemented = __ocs_fmt_0__: noch nicht umgesetzt.
     .viewport-s-in-layout = __ocs_fmt_0__ Ansichtsfenster(s) im Layout "__ocs_fmt_1__":

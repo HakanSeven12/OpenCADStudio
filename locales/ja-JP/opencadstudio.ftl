@@ -2323,6 +2323,7 @@ view =
     .zoom-extents =
         全体表示
         ズーム
+    .cmd-no-hatch-objects = __ocs_fmt_0__: ÒâÅÒââÒâüÒâ│Òé░ Òé¬ÒâûÒé©ÒéºÒé»ÒâêÒüîÒüéÒéèÒü¥ÒüøÒéôÒÇé
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: テキストまたは寸法オブジェクトがありません。
     .cmd-not-yet-implemented = __ocs_fmt_0__: まだ実装されていません。
     .viewport-s-in-layout = レイアウト「__ocs_fmt_1__」内の __ocs_fmt_0__ 個のビューポート:

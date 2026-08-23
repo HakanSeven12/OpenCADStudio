@@ -2303,6 +2303,7 @@ view =
     .zoom-window-specify-first-corner = ZOOM WINDOW  İlk köşeyi belirtin:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW  Karşı köşeyi belirtin:
     .zoom-extents = Sınırlara Yakınlaştır
+    .cmd-no-hatch-objects = __ocs_fmt_0__: Tarama nesnesi yok.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: Metin veya ölçü nesnesi yok.
     .cmd-not-yet-implemented = __ocs_fmt_0__: Henüz uygulanmadı.
     .viewport-s-in-layout = "__ocs_fmt_1__" yerleşiminde __ocs_fmt_0__ görünüm alanı:

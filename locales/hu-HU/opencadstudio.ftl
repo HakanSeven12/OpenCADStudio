@@ -2334,6 +2334,7 @@ view =
     .zoom-extents =
         Zoom
         Terjedelem
+    .cmd-no-hatch-objects = __ocs_fmt_0__: nincs sraffoz├ísi objektum.
     .cmd-no-text-or-dimension-objects = __ocs_fmt_0__: nincs szöveg vagy méretobjektum.
     .cmd-not-yet-implemented = __ocs_fmt_0__: még nincs implementálva.
     .viewport-s-in-layout =__ocs_fmt_0__ nézetablak(ok) a „__ocs_fmt_1__” elrendezésben:

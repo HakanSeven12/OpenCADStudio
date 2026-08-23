@@ -2399,8 +2399,6 @@ impl Scene {
                 let mut bits = 0;
                 if is_outer {
                     bits |= acadrust::entities::hatch::BoundaryPathFlags::OUTERMOST.bits();
-                }
-                if !handles.is_empty() {
                     bits |= acadrust::entities::hatch::BoundaryPathFlags::EXTERNAL.bits();
                 }
                 let mut path = BoundaryPath::with_flags(

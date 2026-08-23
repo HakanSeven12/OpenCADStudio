@@ -5458,6 +5458,11 @@ impl Scene {
             .collect()
     }
 
+    /// Invalidate only the draw-order depth cache without dropping geometry tessellation.
+    pub fn invalidate_draw_depth(&self) {
+        *self.draw_depth_cache.borrow_mut() = None;
+    }
+
     /// Per-entity stable draw-order depth, keyed by entity handle value.
     /// A full build assigns sparse labels in effective draw order. Incremental
     /// Add/Remove then changes only the named handle: existing siblings retain

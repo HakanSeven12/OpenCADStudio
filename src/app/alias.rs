@@ -73,8 +73,9 @@ const WEB_ALIAS_KEY: &str = "opencadstudio.aliases";
 /// Version of the shipped default alias table. Bump this whenever the embedded
 /// defaults add aliases or change a default target, so existing profiles can be
 /// migrated forward (see `introduced_at` / `migrate_aliases`). Version 1 shipped
-/// the pre-REDRAW table; version 2 introduced the REDRAW-family aliases.
-const DEFAULT_ALIASES_VERSION: u32 = 2;
+/// the pre-REDRAW table; version 2 introduced the REDRAW-family aliases; version 3
+/// introduced HB (HATCHTOBACK).
+const DEFAULT_ALIASES_VERSION: u32 = 3;
 
 #[cfg(target_arch = "wasm32")]
 const WEB_ALIAS_VERSION_KEY: &str = "opencadstudio.aliases.version";
@@ -91,6 +92,7 @@ fn introduced_at(version: u32) -> &'static [(&'static str, &'static str)] {
             ("RE", "REGEN"),
             ("REA", "REGENALL"),
         ],
+        3 => &[("HB", "HATCHTOBACK")],
         _ => &[],
     }
 }
@@ -330,17 +332,18 @@ mod tests {
             .collect()
     }
 
-    /// An existing profile that predates the REDRAW aliases gains exactly the
+    /// An existing profile that predates the REDRAW and HB aliases gains exactly the
     /// new defaults, with every pre-existing mapping kept.
     #[test]
     fn migration_adds_new_defaults_preserving_existing() {
         let mut stored = map(&[("L", "LINE"), ("Z", "ZOOM"), ("HI", "HIDE")]);
         let changed = migrate_aliases(&mut stored, 0);
-        assert!(changed, "migrating from v0 to v2 must add defaults");
+        assert!(changed, "migrating from v0 to v3 must add defaults");
         assert_eq!(stored.get("R").map(String::as_str), Some("REDRAW"));
         assert_eq!(stored.get("RA").map(String::as_str), Some("REDRAWALL"));
         assert_eq!(stored.get("RE").map(String::as_str), Some("REGEN"));
         assert_eq!(stored.get("REA").map(String::as_str), Some("REGENALL"));
+        assert_eq!(stored.get("HB").map(String::as_str), Some("HATCHTOBACK"));
         // Existing entries must survive untouched.
         assert_eq!(stored.get("L").map(String::as_str), Some("LINE"));
         assert_eq!(stored.get("Z").map(String::as_str), Some("ZOOM"));
@@ -375,10 +378,10 @@ mod tests {
         assert_eq!(stored.get("L").map(String::as_str), Some("LINE"));
     }
 
-    /// Migrating a mid-range profile (one that saw v1) only pulls in v2's
+    /// Migrating a mid-range profile (one that saw v1) pulls in v2's and v3's
     /// additions, not hypothetical earlier ones.
     #[test]
-    fn migration_from_version_one_adds_v2_aliases() {
+    fn migration_from_version_one_adds_v2_and_v3_aliases() {
         let mut stored = map(&[("L", "LINE")]);
         let changed = migrate_aliases(&mut stored, 1);
         assert!(changed);
@@ -386,5 +389,16 @@ mod tests {
         assert_eq!(stored.get("RA").map(String::as_str), Some("REDRAWALL"));
         assert_eq!(stored.get("RE").map(String::as_str), Some("REGEN"));
         assert_eq!(stored.get("REA").map(String::as_str), Some("REGENALL"));
+        assert_eq!(stored.get("HB").map(String::as_str), Some("HATCHTOBACK"));
+    }
+
+    /// Migrating a profile that saw v2 pulls in v3's HB addition only.
+    #[test]
+    fn migration_from_version_two_adds_v3_aliases() {
+        let mut stored = map(&[("L", "LINE")]);
+        let changed = migrate_aliases(&mut stored, 2);
+        assert!(changed);
+        assert_eq!(stored.get("R"), None);
+        assert_eq!(stored.get("HB").map(String::as_str), Some("HATCHTOBACK"));
     }
 }

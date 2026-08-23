@@ -542,6 +542,34 @@ impl KeywordCommand {
     }
 }
 
+fn match_cmd_option<'a>(
+    options: &'a [(&'static str, &'static str, Option<&'static str>)],
+    text: &str,
+) -> Option<&'a (&'static str, &'static str, Option<&'static str>)> {
+    let t = text.trim();
+    let up = t.to_uppercase();
+    if up.is_empty() {
+        return None;
+    }
+    // 1. Exact match on keyword or label (case-insensitive)
+    if let Some(opt) = options.iter().find(|(label, k, _)| {
+        k.eq_ignore_ascii_case(&up) || label.eq_ignore_ascii_case(t)
+    }) {
+        return Some(opt);
+    }
+    // 2. Unambiguous prefix match on keyword or label (e.g. "A" -> "ABOVE", "L" -> "LEFT")
+    let matches: Vec<_> = options
+        .iter()
+        .filter(|(label, k, _)| {
+            k.to_uppercase().starts_with(&up) || label.to_uppercase().starts_with(&up)
+        })
+        .collect();
+    if matches.len() == 1 {
+        return Some(matches[0]);
+    }
+    None
+}
+
 impl CadCommand for KeywordCommand {
     fn name(&self) -> &'static str {
         self.name
@@ -581,10 +609,7 @@ impl CadCommand for KeywordCommand {
             // Consumed inputs that keep prompting return `Some(NeedPoint)` —
             // `None` would hand the same text to the command a second time.
             None => {
-                let up = t.to_uppercase();
-                let Some((_, keyword, value_prompt)) = self.options.iter().find(|(label, k, _)| {
-                    k.eq_ignore_ascii_case(&up) || label.eq_ignore_ascii_case(t)
-                })
+                let Some((_, keyword, value_prompt)) = match_cmd_option(&self.options, t)
                 else {
                     // Unknown verb — keep prompting rather than dispatch garbage.
                     return Some(CmdResult::NeedPoint);
@@ -783,11 +808,18 @@ impl CadCommand for SelectThenKeywordCommand {
             return None;
         }
         match self.pending {
-            Some((keyword, _)) => Some(CmdResult::Dispatch(format!("{} {keyword} {t}", self.name))),
+            Some((keyword, _)) => {
+                if self.selected.is_empty() {
+                    Some(CmdResult::Dispatch(format!("{} {keyword} {t}", self.name)))
+                } else {
+                    Some(CmdResult::Relaunch(
+                        format!("{} {keyword} {t}", self.name),
+                        std::mem::take(&mut self.selected),
+                    ))
+                }
+            }
             None => {
-                let up = t.to_uppercase();
-                let Some((_, keyword, value_prompt)) =
-                    self.options.iter().find(|(_, k, _)| k.eq_ignore_ascii_case(&up))
+                let Some((_, keyword, value_prompt)) = match_cmd_option(&self.options, t)
                 else {
                     // Unknown verb — consumed, keep prompting (`None` would
                     // feed the same text to the command a second time).
@@ -798,7 +830,16 @@ impl CadCommand for SelectThenKeywordCommand {
                         self.pending = Some((keyword, vp));
                         Some(CmdResult::NeedPoint)
                     }
-                    None => Some(CmdResult::Dispatch(format!("{} {keyword}", self.name))),
+                    None => {
+                        if self.selected.is_empty() {
+                            Some(CmdResult::Dispatch(format!("{} {keyword}", self.name)))
+                        } else {
+                            Some(CmdResult::Relaunch(
+                                format!("{} {keyword}", self.name),
+                                std::mem::take(&mut self.selected),
+                            ))
+                        }
+                    }
                 }
             }
         }

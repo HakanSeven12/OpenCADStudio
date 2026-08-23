@@ -1,13 +1,20 @@
 use super::*;
 
 fn selected_solid(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
-    let selected = app.tabs[tab].scene.selected_handles_in_order();
-    (selected.len() == 1
-        && matches!(
-            app.tabs[tab].scene.document.get_entity(selected[0]),
-            Some(acadrust::EntityType::Solid3D(_))
-        ))
-    .then_some(selected[0])
+    let scene = &app.tabs.get(tab)?.scene;
+    let selected = scene.selected_handles_in_order();
+    let [handle] = selected.as_slice() else {
+        return None;
+    };
+
+    if matches!(
+        scene.document.get_entity(*handle),
+        Some(acadrust::EntityType::Solid3D(_))
+    ) {
+        Some(*handle)
+    } else {
+        None
+    }
 }
 
 impl OpenCADStudio {

@@ -1465,6 +1465,10 @@ pub enum CmdResult {
         value: f64,
         fillet: bool,
     },
+    SolidSubtract {
+        bases: Vec<Handle>,
+        cutters: Vec<Handle>,
+    },
     /// INSERT landed on a block that has AttributeDefinitions.
     /// The host should look up the attdefs for `block_name` from the document
     /// and call `attreq_set_attdefs()` on the command, then loop on text input.

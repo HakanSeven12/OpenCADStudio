@@ -934,11 +934,55 @@ impl OpenCADStudio {
             }
 
             // ── Solid booleans ─────────────────────────────────────────────
-            "UNION" | "SUBTRACT" | "INTERSECT" => {
+            "UNION" | "INTERSECT" => {
                 use crate::modules::model::boolean_cmd::BoolOp;
                 if let Some(op) = BoolOp::from_id(cmd) {
-                    return Some(self.solid_boolean(op));
+                    let solid_count = {
+                        let scene = &self.tabs[i].scene;
+                        scene
+                            .selected_handles_in_order()
+                            .into_iter()
+                            .filter(|handle| !scene.is_layer_locked(*handle))
+                            .filter(|handle| {
+                                matches!(
+                                    scene.document.get_entity(*handle),
+                                    Some(acadrust::EntityType::Solid3D(_))
+                                )
+                            })
+                            .take(2)
+                            .count()
+                    };
+                    if solid_count < 2 {
+                        use crate::modules::draw::select::SelectObjectsCommand;
+                        let selection = SelectObjectsCommand::new(cmd);
+                        self.command_line.push_info(&selection.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(selection));
+                    } else {
+                        return Some(self.solid_boolean(op));
+                    }
                 }
+            }
+
+            "SUBTRACT" => {
+                use crate::modules::model::boolean_cmd::SubtractCommand;
+                let bases = {
+                    let scene = &self.tabs[i].scene;
+                    scene
+                        .selected_handles_in_order()
+                        .into_iter()
+                        .filter(|handle| !scene.is_layer_locked(*handle))
+                        .filter(|handle| {
+                            matches!(
+                                scene.document.get_entity(*handle),
+                                Some(acadrust::EntityType::Solid3D(_))
+                            )
+                        })
+                        .collect()
+                };
+                self.tabs[i].scene.deselect_all();
+                let subtract = SubtractCommand::new(bases);
+                self.command_line.push_info(&subtract.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(subtract));
             }
 
             // INTERFERE — non-destructive intersect: solid from the overlap.

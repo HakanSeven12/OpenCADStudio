@@ -683,8 +683,12 @@ impl OpenCADStudio {
             }
         }
         let was_active = self.tabs[self.active_tab].active_cmd.is_some();
-        let preserve_selection =
-            matches!(result, CmdResult::Relaunch(..) | CmdResult::Dispatch(..));
+        let preserve_selection = matches!(
+            &result,
+            CmdResult::Relaunch(..)
+                | CmdResult::Dispatch(..)
+                | CmdResult::SolidSubtract { .. }
+        );
         let task = self.apply_cmd_result_inner(result);
         let i = self.active_tab;
         let preview_hidden = self.tabs[i]
@@ -3244,6 +3248,15 @@ impl OpenCADStudio {
                 fillet,
             } => {
                 let task = self.solid_edge_blend(handle, pick, value, fillet);
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                return task;
+            }
+
+            CmdResult::SolidSubtract { bases, cutters } => {
+                let task = self.solid_subtract(&bases, &cutters);
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();

@@ -248,6 +248,80 @@ impl super::OpenCADStudio {
         Task::none()
     }
 
+    pub(super) fn solid_subtract(
+        &mut self,
+        bases: &[Handle],
+        cutters: &[Handle],
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let valid_solid = |handle: &Handle| {
+            !self.tabs[i].scene.is_layer_locked(*handle)
+                && matches!(
+                    self.tabs[i].scene.document.get_entity(*handle),
+                    Some(EntityType::Solid3D(_))
+                )
+        };
+        let mut base_handles: Vec<_> = bases.iter().copied().filter(valid_solid).collect();
+        let mut cutter_handles: Vec<_> = cutters.iter().copied().filter(valid_solid).collect();
+        cutter_handles.retain(|handle| !base_handles.contains(handle));
+
+        let mut operands = base_handles.clone();
+        operands.extend(cutter_handles.iter().copied());
+        self.tabs[i].scene.restore_solid_models(&operands);
+        base_handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        cutter_handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        if base_handles.is_empty() || cutter_handles.is_empty() {
+            self.command_line.push_error(
+                crate::t!("SUBTRACT: select at least one base solid and one cutter solid.")
+                    .as_ref(),
+            );
+            return Task::none();
+        }
+
+        let mut result = self.tabs[i].scene.solid_models[&base_handles[0]].clone();
+        for handle in &base_handles[1..] {
+            let operand = &self.tabs[i].scene.solid_models[handle];
+            let Some(combined) = solid_model::boolean(Bool::Union, &result, operand) else {
+                self.command_line.push_error(
+                    crate::t!("SUBTRACT failed while combining the base solids.").as_ref(),
+                );
+                return Task::none();
+            };
+            result = combined;
+        }
+        for handle in &cutter_handles {
+            let operand = &self.tabs[i].scene.solid_models[handle];
+            let Some(difference) = solid_model::boolean(Bool::Subtract, &result, operand) else {
+                self.command_line.push_error(
+                    crate::t!("SUBTRACT failed while removing the selected solids.").as_ref(),
+                );
+                return Task::none();
+            };
+            result = difference;
+        }
+        if crate::scene::convert::acis_export::solid_to_sat(&result).is_none() {
+            self.command_line
+                .push_error(crate::t!("The boolean result could not be encoded as ACIS.").as_ref());
+            return Task::none();
+        }
+
+        operands = base_handles;
+        operands.extend(cutter_handles);
+        self.push_undo_snapshot(i, "SUBTRACT");
+        self.tabs[i].scene.erase_entities(&operands);
+        let mut entity = Solid3D::new();
+        entity.wires = solid_model::edge_wires(&result);
+        let history = solid_history::brep_op(&result);
+        let handle = self.add_solid_model(EntityType::Solid3D(entity), result, history);
+        self.tabs[i].scene.deselect_all();
+        if !handle.is_null() {
+            self.tabs[i].scene.select_entity(handle, false);
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        Task::none()
+    }
+
     /// Slice the one selected solid with an axis-aligned plane (axis 0/1/2 =
     /// X/Y/Z at `value`), keeping the lower side when `keep_low` is true. The
     /// kept half is the intersection of the solid with a half-space box, reusing

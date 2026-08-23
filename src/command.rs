@@ -1945,10 +1945,13 @@ pub trait CadCommand: Send {
         None
     }
 
-    /// Inject the block's attribute definitions for ATTREQ attr-filling after
-    /// the INSERT point is picked. Carries the full definitions so the created
-    /// attributes inherit their geometry, not just tag / prompt / default (#255).
-    fn attreq_set_attdefs(&mut self, _attdefs: Vec<acadrust::entities::AttributeDefinition>) {}
+    /// Inject block attribute definitions after the INSERT point is picked.
+    fn attreq_set_attdefs(
+        &mut self,
+        _attdefs: Vec<acadrust::entities::AttributeDefinition>,
+    ) -> Option<acadrust::EntityType> {
+        None
+    }
 
     /// Returns the INSERT entity built so far (pending attr fill) if this is an
     /// ATTREQ-aware INSERT command waiting for attdef injection.

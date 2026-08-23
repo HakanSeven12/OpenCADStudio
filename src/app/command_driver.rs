@@ -1731,9 +1731,12 @@ impl OpenCADStudio {
                         }
                     }
                 } else {
-                    // Inject attdefs so the command enters attr-filling mode.
-                    if let Some(cmd) = &mut self.tabs[i].active_cmd {
-                        cmd.attreq_set_attdefs(attdefs);
+                    let completed = self.tabs[i]
+                        .active_cmd
+                        .as_mut()
+                        .and_then(|cmd| cmd.attreq_set_attdefs(attdefs));
+                    if let Some(entity) = completed {
+                        return self.apply_cmd_result(CmdResult::CommitAndExit(entity));
                     }
                     let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
                     if let Some(p) = prompt {

@@ -813,6 +813,7 @@ fn layer_row<'a>(
         crate::ui::color_select::ColorExtras {
             by_layer: false,
             by_block: false,
+            ..Default::default()
         },
         Message::LayerColorSet,
         Message::LayerColorPickerToggle(index),

@@ -412,6 +412,7 @@ fn editor_layer_row<'a>(
         crate::ui::color_select::ColorExtras {
             by_layer: false,
             by_block: false,
+            ..Default::default()
         },
         move |color| Message::LayerStateEditorLayerColor(index, color),
         Message::LayerStateEditorLayerColorToggle(index),

@@ -16,6 +16,8 @@ use crate::t;
 pub struct ColorExtras {
     pub by_layer: bool,
     pub by_block: bool,
+    pub none: bool,
+    pub background: bool,
 }
 
 /// Encode a colour as the ACI integer string the style editors store
@@ -38,7 +40,7 @@ pub fn iced_to_acad_color(color: Color) -> AcadColor {
     AcadColor::Rgb { r, g, b }
 }
 
-/// Return the closest AutoCAD Color Index for an RGB colour.
+/// Return the closest CAD Color Index for an RGB colour.
 pub fn nearest_aci(r: u8, g: u8, b: u8) -> u8 {
     let mut best = 7;
     let mut best_distance = u32::MAX;
@@ -209,7 +211,27 @@ pub fn color_list<'a>(
         .into()
     };
 
+    let logical_row = |color: AcadColor, label: &'static str| -> Element<'a, Message> {
+        let (bg, _) = acad_color_display(color);
+        button(
+            row![swatch(bg), text(t!(label)).size(11)]
+                .spacing(5)
+                .align_y(iced::Center),
+        )
+        .on_press(on_select(color))
+        .style(list_row_style)
+        .padding([2, 4])
+        .width(Length::Fill)
+        .into()
+    };
+
     let mut list = column![].spacing(1);
+    if extras.none {
+        list = list.push(named_row(AcadColor::None));
+    }
+    if extras.background {
+        list = list.push(logical_row(AcadColor::ByBlock, "Background"));
+    }
     if extras.by_layer {
         list = list.push(named_row(AcadColor::ByLayer));
     }
@@ -297,7 +319,7 @@ pub fn index_color_page<'a>(
         .into()
     };
 
-    // AutoCAD's first standard indexed colours.
+    // The first standard indexed CAD colours.
     let mut standard = row![].spacing(4);
     for idx in 1u8..=9 {
         standard = standard.push(swatch_button(AcadColor::Index(idx), 22.0));
@@ -402,7 +424,7 @@ pub fn index_color_page<'a>(
             tabs,
             text("Standard colors").size(11),
             standard,
-            text("AutoCAD Color Index (ACI) 10–249").size(11),
+            text("CAD Color Index (ACI) 10–249").size(11),
 
             text("Color family  →    ·    Shade / intensity  ↓")
                 .size(9)

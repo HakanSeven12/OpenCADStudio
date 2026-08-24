@@ -4841,6 +4841,11 @@ impl OpenCADStudio {
                         | "dim_text_color"
                         | "dim_text_fill_color"
                 ) {
+                    let fill_mode = (field == "dim_text_fill_color").then(|| match color {
+                        acadrust::types::Color::None => 0,
+                        acadrust::types::Color::ByBlock => 1,
+                        _ => 2,
+                    });
                     let aci = color.approximate_index();
                     let code = match field.as_str() {
                         "dim_ext_line_color" => crate::entities::dim_override::DIMCLRE,
@@ -4862,6 +4867,19 @@ impl OpenCADStudio {
                     if !targets.is_empty() {
                         self.push_undo_snapshot(i, "CHPROP");
                         for &handle in &targets {
+                            if field == "dim_text_fill_color" {
+                                crate::entities::dim_override::set(
+                                    &mut self.tabs[i].scene.document,
+                                    handle,
+                                    crate::entities::dim_override::DIMTFILL,
+                                    Some(acadrust::xdata::XDataValue::Integer16(
+                                        fill_mode.unwrap_or(2),
+                                    )),
+                                );
+                                if fill_mode != Some(2) {
+                                    continue;
+                                }
+                            }
                             crate::entities::dim_override::set(
                                 &mut self.tabs[i].scene.document,
                                 handle,
@@ -7539,6 +7557,7 @@ impl OpenCADStudio {
 
                 let i = self.active_tab;
                 self.tabs[i].properties.color_picker_open = false;
+                self.tabs[i].properties.open_color_field = None;
                 self.tabs[i].layers.color_picker_row = None;
 
                 Task::none()

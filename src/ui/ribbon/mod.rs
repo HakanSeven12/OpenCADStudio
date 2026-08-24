@@ -1135,6 +1135,7 @@ impl Ribbon {
             crate::ui::color_select::ColorExtras {
                 by_layer: true,
                 by_block: true,
+                ..Default::default()
             },
             Message::RibbonColorChanged,
             Message::OpenColorWindow(

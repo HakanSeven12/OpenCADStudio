@@ -1218,6 +1218,8 @@ pub enum ColorPickTarget {
     Properties,
     /// Selected entities' background colour (hatch / MTEXT background row).
     PropertiesBg,
+    /// A named per-entity Properties colour field.
+    PropertiesField(String),
     /// Current creation colour (ribbon).
     Ribbon,
     /// A layer's colour, by panel row index.

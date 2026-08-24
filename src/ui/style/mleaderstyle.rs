@@ -115,7 +115,11 @@ fn color_row<'a>(
     let selector = crate::ui::color_select::color_selector(
         current,
         open,
-        crate::ui::color_select::ColorExtras { by_layer: true, by_block: true },
+        crate::ui::color_select::ColorExtras {
+            by_layer: true,
+            by_block: true,
+            ..Default::default()
+        },
         move |color| Message::MLeaderStyleEdit {
             field,
             value: crate::ui::color_select::color_to_aci_string(color),

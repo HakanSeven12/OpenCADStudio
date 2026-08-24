@@ -852,8 +852,24 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
     let v = pline.vertices.get(vi);
     let vx = v.map_or(0.0, |v| v.location.x);
     let vy = v.map_or(0.0, |v| v.location.y);
-    let start_w = v.map_or(0.0, |v| v.start_width);
-    let end_w = v.map_or(0.0, |v| v.end_width);
+    // A constant width is the effective width of every segment whose
+    // per-vertex value is not overridden.  Showing the raw zero stored on
+    // those vertices made wide polylines (notably rings) claim that their
+    // visible segment width was zero even though the global width was active.
+    let start_w = v.map_or(0.0, |v| {
+        if v.start_width.abs() > 1.0e-12 {
+            v.start_width
+        } else {
+            pline.constant_width
+        }
+    });
+    let end_w = v.map_or(0.0, |v| {
+        if v.end_width.abs() > 1.0e-12 {
+            v.end_width
+        } else {
+            pline.constant_width
+        }
+    });
     let mp = <LwPolyline as crate::entities::traits::MassPropsCalc>::mass_props(pline);
     let cloud_arc_length = revision_cloud_arc_length(pline);
     let vertex_label = if n == 0 {

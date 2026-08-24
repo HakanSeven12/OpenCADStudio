@@ -195,7 +195,7 @@ pub fn drawn_vertices2d(
     (kept.len() >= 2).then_some(kept)
 }
 
-fn tessellate_polyline2d(pl: &Polyline2D) -> RenderEntity {
+fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
     let filtered = drawn_vertices2d(pl);
     let verts: &[acadrust::entities::Vertex2D] = filtered.as_deref().unwrap_or(&pl.vertices);
     if verts.is_empty() {
@@ -223,6 +223,47 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> RenderEntity {
         let (wx, wy, wz) = to_wcs(v.location.x, v.location.y);
         [wx, wy, wz]
     };
+
+    if !fill_mode {
+        let continuous = pl.flags.bits()
+            & acadrust::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
+            != 0;
+        let mut boundary = crate::entities::common::wide_band_outline(
+            &band_verts_2d(pl),
+            pl.is_closed(),
+            !continuous,
+            &to_wcs,
+        );
+        if !boundary.points.is_empty() {
+            if pl.thickness.abs() > 1e-10 {
+                boundary = crate::entities::common::extrude_wide_band_outline(
+                    boundary,
+                    [
+                        pl.thickness * normal.0,
+                        pl.thickness * normal.1,
+                        pl.thickness * normal.2,
+                    ],
+                );
+            }
+            let (tangent_geoms, key_vertices) =
+                centerline_metadata_2d(verts, pl.is_closed(), &to_wcs);
+            return RenderEntity {
+                pick_tris: Vec::new(),
+                object: RenderObject::BoundaryLines {
+                    points: boundary.points,
+                    stations: boundary.stations,
+                    point_segments: boundary.point_segments,
+                    station_pieces: boundary.station_pieces,
+                    source_length: boundary.source_length,
+                    plinegen: continuous,
+                },
+                snap_pts: vec![],
+                tangent_geoms,
+                key_vertices,
+                fill_tris: vec![],
+            };
+        }
+    }
 
     if pl.thickness.abs() > 1e-10 {
         let (nx, ny, nz) = normal;
@@ -348,13 +389,14 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> RenderEntity {
         key_verts.push([p1[0], p1[1], p1[2]]);
     }
 
+    let band_verts = band_verts_2d(pl);
     let (fill_origin, fills) = wide_fills(pl);
     // A wide Polyline2D whose per-vertex widths VARY renders a smooth taper; a
     // uniform-width one keeps the constant-band Contour.
-    let object = match tapered_band_verts_2d(pl) {
+    let object = match tapered_band_verts_2d(&band_verts) {
         Some(band_verts) => {
             let (pts, widths) = crate::entities::common::tapered_band_points(
-                &band_verts,
+                band_verts,
                 pl.is_closed(),
                 &to_wcs,
             );
@@ -376,16 +418,15 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> RenderEntity {
     }
 }
 
-/// Per-vertex `(location, bulge, start_width, end_width)` band description for a
-/// wide Polyline2D whose width VARIES — `None` when the width is uniform.
-fn tapered_band_verts_2d(
+/// Effective segment widths for a Polyline2D band.
+fn band_verts_2d(
     pl: &acadrust::entities::Polyline2D,
-) -> Option<Vec<([f64; 2], f64, f64, f64)>> {
+) -> Vec<([f64; 2], f64, f64, f64)> {
     let default_start = pl.start_width;
     let default_end = pl.end_width;
     let filtered = drawn_vertices2d(pl);
     let verts: &[acadrust::entities::Vertex2D] = filtered.as_deref().unwrap_or(&pl.vertices);
-    let band: Vec<([f64; 2], f64, f64, f64)> = verts
+    verts
         .iter()
         .map(|v| {
             let sw = if v.start_width > 1e-9 {
@@ -400,7 +441,12 @@ fn tapered_band_verts_2d(
             };
             ([v.location.x, v.location.y], v.bulge, sw, ew)
         })
-        .collect();
+        .collect()
+}
+
+fn tapered_band_verts_2d(
+    band: &[([f64; 2], f64, f64, f64)],
+) -> Option<&[([f64; 2], f64, f64, f64)]> {
     let w0 = band.first().map_or(0.0, |v| v.2);
     let varies = band
         .iter()
@@ -412,9 +458,51 @@ fn tapered_band_verts_2d(
     }
 }
 
+fn centerline_metadata_2d(
+    verts: &[acadrust::entities::Vertex2D],
+    closed: bool,
+    to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+) -> (Vec<TangentGeom>, Vec<[f64; 3]>) {
+    let count = verts.len();
+    let segment_count = if closed {
+        count
+    } else {
+        count.saturating_sub(1)
+    };
+    let mut tangents = Vec::with_capacity(segment_count);
+    let mut key_vertices = Vec::with_capacity(segment_count + 1);
+    for index in 0..segment_count {
+        let start = &verts[index];
+        let end = &verts[(index + 1) % count];
+        let p0 = to_wcs(start.location.x, start.location.y);
+        let p1 = to_wcs(end.location.x, end.location.y);
+        if start.bulge.abs() < 1e-9 {
+            tangents.push(TangentGeom::Line {
+                p1: [p0.0 as f32, p0.1 as f32, p0.2 as f32],
+                p2: [p1.0 as f32, p1.1 as f32, p1.2 as f32],
+            });
+        } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
+            [start.location.x, start.location.y],
+            [end.location.x, end.location.y],
+            start.bulge,
+        ) {
+            let center = to_wcs(arc.center[0], arc.center[1]);
+            tangents.push(TangentGeom::Circle {
+                center: [center.0 as f32, center.1 as f32, center.2 as f32],
+                radius: arc.radius as f32,
+            });
+        }
+        if index == 0 {
+            key_vertices.push([p0.0, p0.1, p0.2]);
+        }
+        key_vertices.push([p1.0, p1.1, p1.2]);
+    }
+    (tangents, key_vertices)
+}
+
 impl RenderConvertible for Polyline2D {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
-        Some(tessellate_polyline2d(self))
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(tessellate_polyline2d(self, document.header.fill_mode))
     }
 }
 

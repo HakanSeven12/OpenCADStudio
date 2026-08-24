@@ -87,6 +87,7 @@ impl CadCommand for RayCommand {
         Some(WireModel {
             point_marker: None,
             taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -190,6 +191,7 @@ impl CadCommand for XLineCommand {
         Some(WireModel {
             point_marker: None,
             taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,

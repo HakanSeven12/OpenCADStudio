@@ -671,6 +671,31 @@ impl OpenCADStudio {
                         entity,
                     ));
 
+                    {
+                        use crate::entities::common::ro_prop;
+                        let xd = &source_entity.common().extended_data;
+                        if !xd.is_empty() {
+                            let mut xd_props = Vec::new();
+                            for rec in xd.records() {
+                                let value_text = rec
+                                    .values
+                                    .iter()
+                                    .map(|value| format!("{value:?}"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                xd_props.push(ro_prop(
+                                    t!("Application").as_ref(),
+                                    "xdata_value",
+                                    format!("{}: {value_text}", rec.application_name),
+                                ));
+                            }
+                            sections.push(crate::scene::model::object::PropSection {
+                                title: t!("Extended Data").into_owned(),
+                                props: xd_props,
+                            });
+                        }
+                    }
+
                     // Uniform-scale checkbox for block references (#427):
                     // while the three scale factors are equal (and the user
                     // hasn't opted into per-axis editing) the panel shows one

@@ -61,6 +61,15 @@ pub enum RenderObject {
     Lines(Vec<[f64; 3]>),
     /// Like Lines but linetype pattern restarts at each NaN-separated segment (plinegen=false).
     SegmentedLines(Vec<[f64; 3]>),
+    /// Kernel band boundary with centreline-based linetype stations.
+    BoundaryLines {
+        points: Vec<[f64; 3]>,
+        stations: Vec<f32>,
+        point_segments: Vec<i32>,
+        station_pieces: Vec<crate::scene::model::wire_model::PatternStationPiece>,
+        source_length: f32,
+        plinegen: bool,
+    },
     /// A wide polyline whose band width VARIES (a taper): a continuous WCS point
     /// list paired index-for-index with a per-point full band width. The wire
     /// shader interpolates the two endpoint widths of each segment so the band

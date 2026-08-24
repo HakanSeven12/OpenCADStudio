@@ -5,7 +5,7 @@ struct Uniforms {
     flat_shade: f32,
     transparency_enable: f32,
     linetype_scale: f32,
-    fillmode_enable: f32,
+    _pad: f32,
     view_rot: mat4x4<f32>,
     eye_high: vec3<f32>,
     _pad_eh: f32,
@@ -58,7 +58,6 @@ struct VertexOut {
     @location(7) @interpolate(flat) align_total: f32,
     @location(8) cap: vec2<f32>,
     @location(9) @interpolate(flat) cap_ends: vec3<f32>,
-    @location(10) @interpolate(flat) world_band: f32,
 }
 
 fn resolve_hw(taper_ratio: f32, world_hw: f32, px_hw: f32) -> f32 {
@@ -176,11 +175,6 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         half_width * side,
     );
     out.cap_ends = vec3<f32>(segment_length, half_width_a, half_width_b);
-    out.world_band = select(
-        0.0,
-        1.0,
-        wire_const.world_half_width > 0.0 || in.taper_ratio.x > 0.0 || in.taper_ratio.y > 0.0
-    );
     return out;
 }
 
@@ -250,26 +244,8 @@ fn clipped_cap(cap: vec2<f32>, ends: vec3<f32>) -> bool {
     return false;
 }
 
-fn band_interior_clipped(in: VertexOut) -> bool {
-    if u.fillmode_enable > 0.5 || in.world_band < 0.5 {
-        return false;
-    }
-    if in.cap.x < 0.0 || in.cap.x > in.cap_ends.x {
-        return true;
-    }
-    var along = 0.0;
-    if in.cap_ends.x > 1e-4 {
-        along = clamp(in.cap.x / in.cap_ends.x, 0.0, 1.0);
-    }
-    let half_width = mix(in.cap_ends.y, in.cap_ends.z, along);
-    return abs(in.cap.y) < max(half_width - 1.0, 0.0);
-}
-
 fn visible_fragment(in: VertexOut) -> bool {
     if clipped_cap(in.cap, in.cap_ends) {
-        return false;
-    }
-    if band_interior_clipped(in) {
         return false;
     }
     if in.pattern_length > 0.0 && in.min_elem >= u.world_per_pixel {

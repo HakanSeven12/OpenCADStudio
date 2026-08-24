@@ -3721,6 +3721,7 @@ fn preview_wire(points: Vec<[f32; 3]>, color: [f32; 4], name: &str) -> WireModel
     WireModel {
         point_marker: None,
         taper_widths: Vec::new(),
+        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,

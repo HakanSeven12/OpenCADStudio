@@ -16,7 +16,9 @@ use acadrust::types::{Handle, Transform, Vector3};
 use acadrust::CadDocument;
 use cadkernel::geom2d::{contains, Curve, Line, Tolerance};
 
-use crate::scene::model::wire_model::WireModel;
+use crate::scene::model::wire_model::{
+    decode_pattern_station_map, encode_pattern_stations, pattern_station_values, WireModel,
+};
 
 const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
 
@@ -144,6 +146,7 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
         if keep_marker == Some(false) {
             w.points.clear();
             w.points_low.clear();
+            w.pattern_stations.clear();
             w.point_marker = None;
         } else if keep_marker.is_none() && !w.points.is_empty() {
             // Absolute → local f32 (NaN separators preserved).
@@ -158,7 +161,15 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
                     [(a[0] - rx) as f32, (a[1] - ry) as f32, a[2] as f32]
                 })
                 .collect();
-            let clipped = clip_polyline(&local, &lpoly);
+            let station_data = pattern_station_values(&w.pattern_stations, w.points.len());
+            let source_length = station_data.map(|(_, source_length)| source_length);
+            let station_map = decode_pattern_station_map(&w.pattern_stations, w.points.len());
+            let (clipped, clipped_stations, clipped_segments) = clip_polyline_stationed(
+                &local,
+                &lpoly,
+                station_data.map(|(stations, _)| stations),
+                station_map.as_ref().map(|map| map.point_segments.as_slice()),
+            );
             // Local → absolute, re-split into double-single high/low.
             let mut hi = Vec::with_capacity(clipped.len());
             let mut lo = Vec::with_capacity(clipped.len());
@@ -176,6 +187,16 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
             }
             w.points = hi;
             w.points_low = lo;
+            if let Some(source_length) = source_length {
+                w.pattern_stations = encode_pattern_stations(
+                    clipped_stations,
+                    source_length,
+                    &clipped_segments,
+                    station_map.as_ref().map_or(&[], |map| map.pieces.as_slice()),
+                );
+            } else {
+                w.pattern_stations.clear();
+            }
         }
         if !w.fill_tris.is_empty() {
             let local: Vec<[f32; 3]> = (0..w.fill_tris.len())
@@ -277,6 +298,7 @@ pub fn frame_wire(
     WireModel {
         point_marker: None,
         taper_widths: Vec::new(),
+        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
@@ -438,8 +460,20 @@ fn point_in_poly(x: f32, y: f32, poly: &[[f32; 2]]) -> bool {
 
 /// Clip a NaN-separated polyline to `poly`, returning a NaN-separated polyline
 /// of only the inside portions.
+#[cfg(test)]
 fn clip_polyline(pts: &[[f32; 3]], poly: &[[f32; 2]]) -> Vec<[f32; 3]> {
+    clip_polyline_stationed(pts, poly, None, None).0
+}
+
+fn clip_polyline_stationed(
+    pts: &[[f32; 3]],
+    poly: &[[f32; 2]],
+    stations: Option<&[f32]>,
+    point_segments: Option<&[i32]>,
+) -> (Vec<[f32; 3]>, Vec<f32>, Vec<i32>) {
     let mut out: Vec<[f32; 3]> = Vec::new();
+    let mut out_stations = Vec::new();
+    let mut out_segments = Vec::new();
     let mut i = 0;
     while i < pts.len() {
         if !pts[i][0].is_finite() || !pts[i][1].is_finite() {
@@ -453,32 +487,80 @@ fn clip_polyline(pts: &[[f32; 3]], poly: &[[f32; 2]]) -> Vec<[f32; 3]> {
         let seg = &pts[start..i];
         let mut last: Option<[f32; 3]> = None;
         for j in 0..seg.len().saturating_sub(1) {
-            for (a, b) in clip_segment(seg[j], seg[j + 1], poly) {
+            for (ta, tb) in clip_segment_params(seg[j], seg[j + 1], poly) {
+                let lerp_point = |t: f32| {
+                    [
+                        seg[j][0] + (seg[j + 1][0] - seg[j][0]) * t,
+                        seg[j][1] + (seg[j + 1][1] - seg[j][1]) * t,
+                        seg[j][2] + (seg[j + 1][2] - seg[j][2]) * t,
+                    ]
+                };
+                let a = lerp_point(ta);
+                let b = lerp_point(tb);
+                let station = |t: f32| {
+                    stations.map_or(0.0, |values| {
+                        let a = values[start + j];
+                        a + (values[start + j + 1] - a) * t
+                    })
+                };
                 let contiguous = last.is_some_and(|l| {
                     (l[0] - a[0]).abs() <= 1e-4 && (l[1] - a[1]).abs() <= 1e-4
                 });
                 if !contiguous {
                     if !out.is_empty() {
                         out.push(NAN3);
+                        if stations.is_some() {
+                            out_stations.push(0.0);
+                        }
+                        if point_segments.is_some() {
+                            out_segments.push(-1);
+                        }
                     }
                     out.push(a);
+                    if stations.is_some() {
+                        out_stations.push(station(ta));
+                    }
+                    if let Some(segments) = point_segments {
+                        out_segments.push(segments[start + j]);
+                    }
                 }
                 out.push(b);
+                if stations.is_some() {
+                    out_stations.push(station(tb));
+                }
+                if let Some(segments) = point_segments {
+                    out_segments.push(segments[start + j]);
+                }
                 last = Some(b);
             }
         }
     }
-    out
+    (out, out_stations, out_segments)
 }
 
 /// Return the inside-the-polygon sub-segments of `p0`→`p1` as endpoint pairs.
 /// Handles convex and concave boundaries by testing the midpoint of every
 /// interval between consecutive boundary crossings.
+#[cfg(test)]
 fn clip_segment(
     p0: [f32; 3],
     p1: [f32; 3],
     poly: &[[f32; 2]],
 ) -> Vec<([f32; 3], [f32; 3])> {
+    let lerp = |t: f32| {
+        [
+            p0[0] + (p1[0] - p0[0]) * t,
+            p0[1] + (p1[1] - p0[1]) * t,
+            p0[2] + (p1[2] - p0[2]) * t,
+        ]
+    };
+    clip_segment_params(p0, p1, poly)
+        .into_iter()
+        .map(|(a, b)| (lerp(a), lerp(b)))
+        .collect()
+}
+
+fn clip_segment_params(p0: [f32; 3], p1: [f32; 3], poly: &[[f32; 2]]) -> Vec<(f32, f32)> {
     let mut ts: Vec<f32> = vec![0.0, 1.0];
     let n = poly.len();
     let mut j = n - 1;
@@ -493,7 +575,7 @@ fn clip_segment(
     ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     ts.dedup_by(|a, b| (*a - *b).abs() < 1e-7);
 
-    let lerp = |t: f32| {
+    let point = |t: f32| {
         [
             p0[0] + (p1[0] - p0[0]) * t,
             p0[1] + (p1[1] - p0[1]) * t,
@@ -502,9 +584,9 @@ fn clip_segment(
     };
     let mut out = Vec::new();
     for w in ts.windows(2) {
-        let mid = lerp(0.5 * (w[0] + w[1]));
+        let mid = point(0.5 * (w[0] + w[1]));
         if point_in_poly(mid[0], mid[1], poly) {
-            out.push((lerp(w[0]), lerp(w[1])));
+            out.push((w[0], w[1]));
         }
     }
     out

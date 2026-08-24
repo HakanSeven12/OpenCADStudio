@@ -935,6 +935,8 @@ impl OpenCADStudio {
                     | "SKETCHINC"
                     | "SKPOLY"
                     | "SKTOLERANCE"
+                    | "DONUTID"
+                    | "DONUTOD"
                     | "CENTEREXE"
                     | "CENTERLAYER"
                     | "CENTERLTYPE"
@@ -965,7 +967,7 @@ impl OpenCADStudio {
                 let value = it.next().map(|s| s.trim().to_string());
                 if name.is_empty() || name == "?" {
                     self.command_line.push_info(
-                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG ATTREQ ATTDIA DIMASSOC ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE | CLAYER CELTYPE TEXTSTYLE (read-only)",
+                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG ATTREQ ATTDIA DIMASSOC ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE | CLAYER CELTYPE TEXTSTYLE (read-only)",
                     );
                 } else {
                     let frame_kind = crate::scene::frame::kind_for_name(&name);
@@ -1072,6 +1074,49 @@ impl OpenCADStudio {
                                     self.command_line.push_output(&message);
                                 }
                                 Err(error) => self.command_line.push_error(&error),
+                            }
+                        } else {
+                            self.command_line.push_output(crate::tf!(
+                                "Enter new value for {name} <{current}>:"
+                            ).as_ref());
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if matches!(name.as_str(), "DONUTID" | "DONUTOD") {
+                        let current = if name == "DONUTID" {
+                            crate::modules::draw::defaults::get_donut_inner_diameter()
+                        } else {
+                            crate::modules::draw::defaults::get_donut_outer_diameter()
+                        };
+                        if let Some(value) = &value {
+                            let parsed = value
+                                .trim()
+                                .replace(',', ".")
+                                .parse::<f64>()
+                                .ok()
+                                .filter(|number| number.is_finite());
+                            let valid = parsed.filter(|number| {
+                                if name == "DONUTID" {
+                                    *number >= 0.0
+                                } else {
+                                    *number > 0.0
+                                }
+                            });
+                            if let Some(number) = valid {
+                                if name == "DONUTID" {
+                                    crate::modules::draw::defaults::set_donut_inner_diameter(number);
+                                } else {
+                                    crate::modules::draw::defaults::set_donut_outer_diameter(number);
+                                }
+                                self.command_line
+                                    .push_output(&format!("{name} = {number}"));
+                            } else {
+                                self.command_line.push_error(if name == "DONUTID" {
+                                    "SETVAR: DONUTID requires a finite value greater than or equal to zero."
+                                } else {
+                                    "SETVAR: DONUTOD requires a finite value greater than zero."
+                                });
                             }
                         } else {
                             self.command_line.push_output(crate::tf!(
@@ -1848,6 +1893,9 @@ impl OpenCADStudio {
                                     self.persist_settings_if_changed();
                                 } else {
                                     self.tabs[i].dirty = true;
+                                }
+                                if name == "FILLMODE" {
+                                    self.tabs[i].scene.bump_geometry();
                                 }
                                 self.command_line.push_output(&msg);
                             } else {

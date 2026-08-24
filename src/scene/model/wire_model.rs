@@ -59,6 +59,72 @@ pub struct PointMarker {
     pub viewport_percent: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PatternStationPiece {
+    pub source_segment: u32,
+    pub source_distances: [f32; 2],
+    pub segment_distances: [f32; 2],
+    pub vector: [f32; 3],
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PatternStationMap {
+    pub point_segments: Vec<i32>,
+    pub pieces: Vec<PatternStationPiece>,
+}
+
+pub(crate) fn pattern_station_values(data: &[f32], point_count: usize) -> Option<(&[f32], f32)> {
+    (data.len() >= point_count + 1).then(|| (&data[..point_count], data[point_count]))
+}
+
+pub(crate) fn encode_pattern_stations(
+    mut stations: Vec<f32>,
+    source_length: f32,
+    point_segments: &[i32],
+    pieces: &[PatternStationPiece],
+) -> Vec<f32> {
+    let point_count = stations.len();
+    stations.push(source_length);
+    if point_segments.len() != point_count || pieces.is_empty() {
+        return stations;
+    }
+    stations.extend(point_segments.iter().map(|segment| *segment as f32));
+    for piece in pieces {
+        stations.push(piece.source_segment as f32);
+        stations.extend(piece.source_distances);
+        stations.extend(piece.segment_distances);
+        stations.extend(piece.vector);
+    }
+    stations
+}
+
+pub(crate) fn decode_pattern_station_map(
+    data: &[f32],
+    point_count: usize,
+) -> Option<PatternStationMap> {
+    let metadata_start = point_count.checked_mul(2)?.checked_add(1)?;
+    if data.len() < metadata_start || (data.len() - metadata_start) % 8 != 0 {
+        return None;
+    }
+    let point_segments = data[point_count + 1..metadata_start]
+        .iter()
+        .map(|value| *value as i32)
+        .collect();
+    let pieces = data[metadata_start..]
+        .chunks_exact(8)
+        .map(|values| PatternStationPiece {
+            source_segment: values[0] as u32,
+            source_distances: [values[1], values[2]],
+            segment_distances: [values[3], values[4]],
+            vector: [values[5], values[6], values[7]],
+        })
+        .collect();
+    Some(PatternStationMap {
+        point_segments,
+        pieces,
+    })
+}
+
 impl PointMarker {
     pub fn resolve(self, point: glam::DVec3, view_height: f64) -> glam::DVec3 {
         let normal = self.normal.normalize_or(glam::DVec3::Z);
@@ -111,6 +177,8 @@ pub struct WireModel {
     /// constant band of `world_width`. The wire shader reads the two endpoint
     /// widths of each segment and interpolates, so the band tapers smoothly.
     pub taper_widths: Vec<f32>,
+    /// Centreline stations and optional source-piece transform metadata.
+    pub pattern_stations: Vec<f32>,
     /// ACI color index (1-255).  0 means true-color or unknown (no CTB lookup).
     pub aci: u8,
     /// Pre-baked snap candidates (Center, Node, Quadrant, Insertion).
@@ -249,6 +317,7 @@ impl WireModel {
         Self {
             point_marker: None,
             taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -625,6 +694,7 @@ impl Default for WireModel {
             line_weight_px: 1.0,
             world_width: 0.0,
             taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
             aci: 0,
             snap_pts: Vec::new(),
             tangent_geoms: Vec::new(),

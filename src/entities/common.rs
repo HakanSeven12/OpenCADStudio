@@ -1,6 +1,8 @@
 use std::cell::Cell;
+use std::collections::HashSet;
 
 use crate::scene::model::object::{GripDef, GripShape, PropValue, Property};
+use crate::scene::model::wire_model::PatternStationPiece;
 
 /// Linear / angular unit format pulled from the document header so the
 /// per-thread properties pipeline can format values consistently without
@@ -787,6 +789,158 @@ pub(crate) fn tapered_band_points(
         }
     }
     (pts, widths)
+}
+
+pub(crate) struct WideBandOutline {
+    pub points: Vec<[f64; 3]>,
+    pub stations: Vec<f32>,
+    pub point_segments: Vec<i32>,
+    pub station_pieces: Vec<PatternStationPiece>,
+    pub source_length: f32,
+}
+
+/// Builds the boundary of a variable-width band through the kernel.
+pub(crate) fn wide_band_outline(
+    verts: &[([f64; 2], f64, f64, f64)],
+    is_closed: bool,
+    restart_per_segment: bool,
+    to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+) -> WideBandOutline {
+    let source = cadkernel::geom2d::Polyline {
+        vertices: verts
+            .iter()
+            .map(|(position, bulge, _, _)| cadkernel::geom2d::PolylineVertex {
+                position: *position,
+                bulge: *bulge,
+            })
+            .collect(),
+        closed: is_closed,
+    };
+    let segment_count = if is_closed {
+        verts.len()
+    } else {
+        verts.len().saturating_sub(1)
+    };
+    let widths: Vec<[f64; 2]> = verts
+        .iter()
+        .take(segment_count)
+        .map(|(_, _, start, end)| [*start, *end])
+        .collect();
+    let boundary = cadkernel::geom2d::polyline_band_boundary(
+        &source,
+        &widths,
+        cadkernel::tessellation::DEFAULT_ANGLE,
+    );
+    let mut points = Vec::new();
+    let mut stations = Vec::new();
+    let mut point_segments = Vec::new();
+    for edge in boundary.edges {
+        if !points.is_empty() {
+            points.push([f64::NAN; 3]);
+            stations.push(0.0);
+            point_segments.push(-1);
+        }
+        points.extend(edge.points.into_iter().map(|point| {
+            let (x, y, z) = to_wcs(point[0], point[1]);
+            [x, y, z]
+        }));
+        stations.extend(
+            if restart_per_segment {
+                edge.segment_distances
+            } else {
+                edge.source_distances
+            }
+            .map(|distance| distance as f32),
+        );
+        point_segments.extend([edge.source_segment as i32; 2]);
+    }
+    let station_pieces = boundary
+        .station_pieces
+        .into_iter()
+        .map(|piece| {
+            let start = to_wcs(piece.points[0][0], piece.points[0][1]);
+            let end = to_wcs(piece.points[1][0], piece.points[1][1]);
+            PatternStationPiece {
+                source_segment: piece.source_segment as u32,
+                source_distances: piece.source_distances.map(|distance| distance as f32),
+                segment_distances: piece.segment_distances.map(|distance| distance as f32),
+                vector: [
+                    (end.0 - start.0) as f32,
+                    (end.1 - start.1) as f32,
+                    (end.2 - start.2) as f32,
+                ],
+            }
+        })
+        .collect();
+    WideBandOutline {
+        points,
+        stations,
+        point_segments,
+        station_pieces,
+        source_length: boundary.source_length as f32,
+    }
+}
+
+pub(crate) fn extrude_wide_band_outline(
+    outline: WideBandOutline,
+    extrusion: [f64; 3],
+) -> WideBandOutline {
+    let base_points = outline.points;
+    let base_stations = outline.stations;
+    let base_segments = outline.point_segments;
+    let mut points = base_points.clone();
+    let mut stations = base_stations.clone();
+    let mut point_segments = base_segments.clone();
+    points.push([f64::NAN; 3]);
+    stations.push(0.0);
+    point_segments.push(-1);
+    points.extend(base_points.iter().map(|point| {
+        if point[0].is_finite() {
+            [
+                point[0] + extrusion[0],
+                point[1] + extrusion[1],
+                point[2] + extrusion[2],
+            ]
+        } else {
+            *point
+        }
+    }));
+    stations.extend_from_slice(&base_stations);
+    point_segments.extend_from_slice(&base_segments);
+
+    let mut emitted = HashSet::new();
+    for ((&point, &station), &segment) in base_points
+        .iter()
+        .zip(&base_stations)
+        .zip(&base_segments)
+    {
+        if !point[0].is_finite() {
+            continue;
+        }
+        let key = (point.map(f64::to_bits), station.to_bits(), segment);
+        if !emitted.insert(key) {
+            continue;
+        }
+        points.push([f64::NAN; 3]);
+        stations.push(0.0);
+        point_segments.push(-1);
+        points.push(point);
+        points.push([
+            point[0] + extrusion[0],
+            point[1] + extrusion[1],
+            point[2] + extrusion[2],
+        ]);
+        stations.push(station);
+        stations.push(station);
+        point_segments.extend([segment; 2]);
+    }
+    WideBandOutline {
+        points,
+        stations,
+        point_segments,
+        station_pieces: outline.station_pieces,
+        source_length: outline.source_length,
+    }
 }
 
 /// Compute the filled boundary polygon for one polyline segment.

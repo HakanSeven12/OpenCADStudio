@@ -406,40 +406,45 @@ fn pack_color(color: [f32; 4]) -> [u8; 4] {
 /// non-dash-first patterns keep the legacy centred phase.
 fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
     let n = wire.points.len();
-    let mut dists = vec![0.0_f32; n];
-    let mut has_break = false;
-    // Accumulate arc-length in f64 from double-single deltas (high + low). An
-    // f32-high-only delta `q[0] - p[0]` quantises ~0.1 at UTM coordinates
-    // (−1.2M), which shifts the dash phase and drifts parallel lines out of sync
-    // — the reason MLINE elements were CPU-dashed. `points_low` may be empty for
-    // non-RTE wires → treat the low half as zero (same as the old behaviour).
-    let mut acc = 0.0_f64;
-    for i in 1..n {
-        let p = wire.points[i - 1];
-        let q = wire.points[i];
-        if !p[0].is_finite() || !q[0].is_finite() {
-            has_break = true;
-            // plinegen=false: reset to 0 at the first real point after a NaN separator.
-            if !wire.plinegen && !p[0].is_finite() && q[0].is_finite() {
-                acc = 0.0;
+    let explicit = wire.pattern_stations.len() >= n + 1;
+    let (mut dists, has_break, total) = if explicit {
+        (
+            wire.pattern_stations[..n].to_vec(),
+            !wire.plinegen,
+            wire.pattern_stations[n],
+        )
+    } else {
+        let mut dists = vec![0.0_f32; n];
+        let mut has_break = false;
+        // Accumulate arc-length in f64 from double-single deltas (high + low).
+        let mut acc = 0.0_f64;
+        for i in 1..n {
+            let p = wire.points[i - 1];
+            let q = wire.points[i];
+            if !p[0].is_finite() || !q[0].is_finite() {
+                has_break = true;
+                if !wire.plinegen && !p[0].is_finite() && q[0].is_finite() {
+                    acc = 0.0;
+                }
+                dists[i] = acc as f32;
+            } else {
+                let pl = wire.points_low.get(i - 1).copied().unwrap_or([0.0; 3]);
+                let ql = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+                let dx = (q[0] as f64 - p[0] as f64) + (ql[0] as f64 - pl[0] as f64);
+                let dy = (q[1] as f64 - p[1] as f64) + (ql[1] as f64 - pl[1] as f64);
+                let dz = (q[2] as f64 - p[2] as f64) + (ql[2] as f64 - pl[2] as f64);
+                acc += (dx * dx + dy * dy + dz * dz).sqrt();
+                dists[i] = acc as f32;
             }
-            dists[i] = acc as f32;
-        } else {
-            let pl = wire.points_low.get(i - 1).copied().unwrap_or([0.0; 3]);
-            let ql = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
-            let dx = (q[0] as f64 - p[0] as f64) + (ql[0] as f64 - pl[0] as f64);
-            let dy = (q[1] as f64 - p[1] as f64) + (ql[1] as f64 - pl[1] as f64);
-            let dz = (q[2] as f64 - p[2] as f64) + (ql[2] as f64 - pl[2] as f64);
-            acc += (dx * dx + dy * dy + dz * dz).sqrt();
-            dists[i] = acc as f32;
         }
-    }
+        let total = dists.last().copied().unwrap_or(0.0);
+        (dists, has_break, total)
+    };
 
     let pat_len = wire.pattern_length;
     if pat_len <= 1e-6 || has_break || n < 2 {
         return (dists, 0.0, 0.0);
     }
-    let total = dists[n - 1];
     if total <= 1e-6 {
         return (dists, 0.0, 0.0);
     }

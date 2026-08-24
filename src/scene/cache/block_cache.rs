@@ -23,7 +23,10 @@ use acadrust::{CadDocument, EntityType, Handle};
 use cadkernel::space::{Plane as KernelPlane, Vec3 as KernelVec3};
 
 use crate::scene::convert::tessellate;
-use crate::scene::model::wire_model::{PointMarker, SnapHint, TangentGeom, WireModel};
+use crate::scene::model::wire_model::{
+    decode_pattern_station_map, encode_pattern_stations, pattern_station_values, PatternStationMap,
+    PatternStationPiece, PointMarker, SnapHint, TangentGeom, WireModel,
+};
 
 const MAX_NESTING_DEPTH: usize = 32;
 /// Skip wires whose world-AABB projects to fewer than this many pixels in
@@ -70,6 +73,7 @@ pub struct LocalWire {
     pub pattern_length: f32,
     pub pattern: [f32; 8],
     pub line_weight_px: f32,
+    pub pattern_stations: Vec<f32>,
     /// World-space band width for a wide polyline (see `WireModel.world_width`).
     /// Block-local; the expand-time transform scales it by the insert so the
     /// shader band grows with a scaled insert. `0.0` = a normal wire.
@@ -865,6 +869,7 @@ fn tessellate_sub_local(
             pattern_length: pat_len,
             pattern: pat,
             line_weight_px: lw_px,
+            pattern_stations: wire.pattern_stations,
             world_width: wire.world_width,
             plinegen: wire.plinegen,
             plot_visible: frame_mode.is_none_or(|mode| mode == 1)
@@ -1433,6 +1438,7 @@ struct StyleKey {
     pattern_length: u32,
     pattern: [u32; 8],
     line_weight_px: u32,
+    source_length: u32,
     /// Wide-polyline band width (bit-cast). Keeps bands of different widths — and
     /// bands vs thin wires of the same colour/style — in separate batches so the
     /// finalized WireModel carries one correct `world_width`.
@@ -1475,6 +1481,10 @@ struct BatchEntry {
     pattern_length: f32,
     pattern: [f32; 8],
     line_weight_px: f32,
+    pattern_stations: Vec<f32>,
+    pattern_station_segments: Vec<i32>,
+    pattern_station_pieces: Vec<PatternStationPiece>,
+    source_length: f32,
     world_width: f32,
     point_marker: Option<PointMarker>,
     aci: u8,
@@ -1555,6 +1565,7 @@ impl BatchEntry {
         pat_len: f32,
         pat: [f32; 8],
         lw_px: f32,
+        source_length: f32,
         world_width: f32,
         point_marker: Option<PointMarker>,
         aci: u8,
@@ -1578,6 +1589,7 @@ impl BatchEntry {
             pattern_length: pat_len,
             pattern: pat,
             line_weight_px: lw_px,
+            source_length,
             world_width,
             point_marker,
             aci,
@@ -1606,6 +1618,9 @@ impl Batches {
                 if b.hide_unselected && !selected {
                     b.points.clear();
                     b.points_low.clear();
+                    b.pattern_stations.clear();
+                    b.pattern_station_segments.clear();
+                    b.pattern_station_pieces.clear();
                 }
                 let aabb = if b.min_x.is_infinite() {
                     WireModel::UNBOUNDED_AABB
@@ -1628,9 +1643,18 @@ impl Batches {
                         );
                     }
                 }
+                if !b.pattern_stations.is_empty() {
+                    b.pattern_stations = encode_pattern_stations(
+                        std::mem::take(&mut b.pattern_stations),
+                        b.source_length,
+                        &b.pattern_station_segments,
+                        &b.pattern_station_pieces,
+                    );
+                }
                 WireModel {
                     point_marker: b.point_marker,
                     taper_widths: Vec::new(),
+                    pattern_stations: b.pattern_stations,
                     world_width: b.world_width,
                     depth_override: b.local_depth,
                     display_visible: !b.hide_unselected || selected,
@@ -1681,6 +1705,7 @@ fn style_key(
     pat_len: f32,
     pat: [f32; 8],
     lw_px: f32,
+    source_length: f32,
     world_width: f32,
     point_marker: Option<PointMarker>,
     aci: u8,
@@ -1714,6 +1739,7 @@ fn style_key(
             pat[7].to_bits(),
         ],
         line_weight_px: lw_px.to_bits(),
+        source_length: source_length.to_bits(),
         world_width: world_width.to_bits(),
         point_marker: point_marker.map(|marker| PointMarkerKey {
             origin: marker.origin.to_array().map(f64::to_bits),
@@ -2060,6 +2086,116 @@ fn transformed_wire_length_scale(lw: &LocalWire, xform: &Transform) -> f32 {
     }
 }
 
+struct TransformedStationData {
+    values: Vec<f32>,
+    source_length: f32,
+    point_segments: Vec<i32>,
+    pieces: Vec<PatternStationPiece>,
+}
+
+fn transformed_station_data(
+    values: &[f32],
+    map: &PatternStationMap,
+    plinegen: bool,
+    xform: &Transform,
+) -> Option<TransformedStationData> {
+    if values.len() != map.point_segments.len() || map.pieces.is_empty() {
+        return None;
+    }
+
+    let mut pieces = Vec::with_capacity(map.pieces.len());
+    let mut global = 0.0_f32;
+    let mut local = 0.0_f32;
+    let mut current_segment = None;
+    for piece in &map.pieces {
+        if current_segment != Some(piece.source_segment) {
+            current_segment = Some(piece.source_segment);
+            local = 0.0;
+        }
+        let vector = Vector3::new(
+            piece.vector[0] as f64,
+            piece.vector[1] as f64,
+            piece.vector[2] as f64,
+        );
+        let mapped = xform.matrix.transform_direction(vector);
+        let chord = vector.length();
+        let mapped_chord = mapped.length();
+        let original_length = (piece.source_distances[1] - piece.source_distances[0]).abs();
+        let length = if chord > 1e-12 && mapped_chord.is_finite() {
+            original_length * (mapped_chord / chord) as f32
+        } else {
+            original_length
+        };
+        pieces.push(PatternStationPiece {
+            source_segment: piece.source_segment,
+            source_distances: [global, global + length],
+            segment_distances: [local, local + length],
+            vector: [mapped.x as f32, mapped.y as f32, mapped.z as f32],
+        });
+        global += length;
+        local += length;
+    }
+
+    let fallback_scale = map
+        .pieces
+        .last()
+        .map(|piece| piece.source_distances[1])
+        .filter(|length| length.abs() > 1e-12)
+        .map_or(1.0, |length| global / length);
+    let mapped_values = values
+        .iter()
+        .zip(&map.point_segments)
+        .map(|(&value, &segment)| {
+            if segment < 0 {
+                return 0.0;
+            }
+            let segment = segment as u32;
+            let range = |piece: &PatternStationPiece| {
+                if plinegen {
+                    piece.source_distances
+                } else {
+                    piece.segment_distances
+                }
+            };
+            let distance_to = |piece: &PatternStationPiece| {
+                let [start, end] = range(piece);
+                if value < start {
+                    start - value
+                } else if value > end {
+                    value - end
+                } else {
+                    0.0
+                }
+            };
+            let Some((old_piece, new_piece)) = map
+                .pieces
+                .iter()
+                .zip(&pieces)
+                .filter(|(piece, _)| piece.source_segment == segment)
+                .min_by(|(a, _), (b, _)| distance_to(a).total_cmp(&distance_to(b)))
+            else {
+                return value * fallback_scale;
+            };
+            let old = range(old_piece);
+            let new = range(new_piece);
+            let span = old[1] - old[0];
+            let t = if span.abs() > 1e-12 {
+                ((value - old[0]) / span).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            new[0] + (new[1] - new[0]) * t
+        })
+        .collect();
+
+    Some(TransformedStationData {
+        values: mapped_values,
+        source_length: global,
+        point_segments: map.point_segments.clone(),
+        pieces,
+    })
+}
+
 fn transformed_point_marker(marker: PointMarker, xform: &Transform) -> (PointMarker, f64) {
     let origin = xform.apply(Vector3::new(marker.origin.x, marker.origin.y, marker.origin.z));
     let map_direction = |direction: glam::DVec3| {
@@ -2163,16 +2299,38 @@ fn emit_wire(
         lw.line_weight_px
     };
 
-    // Pattern distances are stored in block-local units. Scale them by the
-    // wire's actual path-length ratio so uniform and non-uniform INSERTs both
-    // stay dimensionally consistent with their transformed geometry.
-    let pattern_scale = if final_pat_len > 0.0 {
-        transformed_wire_length_scale(lw, accum_xform)
-    } else {
-        1.0
-    };
+    let station_values = pattern_station_values(&lw.pattern_stations, lw.points.len());
+    let station_map = decode_pattern_station_map(&lw.pattern_stations, lw.points.len());
+    let transformed_stations = station_values.and_then(|(values, _)| {
+        station_map.as_ref().and_then(|map| {
+            transformed_station_data(values, map, lw.plinegen, accum_xform)
+        })
+    });
+    let has_stations = station_values.is_some();
+    let pattern_scale = transformed_stations.as_ref().map_or_else(
+        || {
+            if final_pat_len > 0.0 || has_stations {
+                transformed_wire_length_scale(lw, accum_xform)
+            } else {
+                1.0
+            }
+        },
+        |data| {
+            station_values.map_or(1.0, |(_, source_length)| {
+                if source_length.abs() > 1e-12 {
+                    data.source_length / source_length
+                } else {
+                    1.0
+                }
+            })
+        },
+    );
     let final_pat_len = final_pat_len * ctx.pslt_factor * pattern_scale;
     let final_pat = final_pat.map(|v| v * ctx.pslt_factor * pattern_scale);
+    let source_length = transformed_stations.as_ref().map_or_else(
+        || station_values.map_or(0.0, |(_, length)| length * pattern_scale),
+        |data| data.source_length,
+    );
 
     // A wide polyline's band width is baked in block-local units; scale it by
     // the insert transform so the shader band matches the scaled geometry.
@@ -2211,6 +2369,7 @@ fn emit_wire(
         final_pat_len,
         final_pat,
         final_lw_px,
+        source_length,
         final_world_width,
         point_marker,
         final_aci,
@@ -2222,6 +2381,12 @@ fn emit_wire(
         lw.hide_unselected,
         local_depth,
     );
+
+    if transformed_stations.is_some() {
+        if let Some(closed) = out.by_style.remove(&key) {
+            out.closed.push(closed);
+        }
+    }
 
     // If the open batch for this style would exceed wgpu's per-buffer limit
     // after appending this wire, finalize it now and start a fresh batch.
@@ -2241,6 +2406,7 @@ fn emit_wire(
             final_pat_len,
             final_pat,
             final_lw_px,
+            source_length,
             final_world_width,
             point_marker,
             final_aci,
@@ -2253,6 +2419,9 @@ fn emit_wire(
         )
     });
     entry.local_depth = local_depth;
+    if let Some(data) = &transformed_stations {
+        entry.pattern_station_pieces.clone_from(&data.pieces);
+    }
 
     // NaN separator between previously-appended geometry and this wire so the
     // GPU shader treats them as disconnected polylines within one buffer.
@@ -2263,14 +2432,33 @@ fn emit_wire(
         if needs_sep {
             entry.points.push([f32::NAN; 3]);
             entry.points_low.push([0.0; 3]);
+            if has_stations {
+                entry.pattern_stations.push(0.0);
+            }
+            if transformed_stations.is_some() {
+                entry.pattern_station_segments.push(-1);
+            }
         }
         // Iterate paired with the matching low residual so the GPU keeps
         // sub-f32 precision once the INSERT transform lands the wire in
         // world space at UTM-scale coordinates.
         for (idx, p) in lw.points.iter().enumerate() {
+            let station = transformed_stations
+                .as_ref()
+                .map(|data| data.values[idx])
+                .or_else(|| has_stations.then(|| lw.pattern_stations[idx] * pattern_scale));
+            let station_segment = transformed_stations
+                .as_ref()
+                .map(|data| data.point_segments[idx]);
             if p[0].is_nan() {
                 entry.points.push([f32::NAN; 3]);
                 entry.points_low.push([0.0; 3]);
+                if let Some(station) = station {
+                    entry.pattern_stations.push(station);
+                }
+                if let Some(segment) = station_segment {
+                    entry.pattern_station_segments.push(segment);
+                }
                 continue;
             }
             let pl = lw.points_low.get(idx).copied().unwrap_or([0.0; 3]);
@@ -2311,6 +2499,12 @@ fn emit_wire(
             }
             entry.points.push(q);
             entry.points_low.push([qx_l, qy_l, qz_l]);
+            if let Some(station) = station {
+                entry.pattern_stations.push(station);
+            }
+            if let Some(segment) = station_segment {
+                entry.pattern_station_segments.push(segment);
+            }
         }
     }
 

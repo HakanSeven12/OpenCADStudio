@@ -16,6 +16,15 @@ use crate::scene::model::wire_model::TangentGeom;
 const TAU: f64 = std::f64::consts::TAU;
 const REVCLOUD_BULGE: f64 = 0.5;
 const MAX_REVCLOUD_VERTICES: usize = 100_000;
+const WIDTH_EPSILON: f64 = 1.0e-9;
+
+fn effective_width(width: f64, constant_width: f64) -> f64 {
+    if width > WIDTH_EPSILON {
+        width
+    } else {
+        constant_width
+    }
+}
 
 /// Midpoint position on an arc segment defined by its bulge.
 fn arc_midpoint(p0: [f64; 2], p1: [f64; 2], bulge: f64) -> [f64; 2] {
@@ -251,7 +260,7 @@ fn thick_wide_band(
     }
 }
 
-fn to_render(pline: &LwPolyline) -> RenderEntity {
+fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
     let verts = &pline.vertices;
     if verts.is_empty() {
         return RenderEntity {
@@ -268,9 +277,6 @@ fn to_render(pline: &LwPolyline) -> RenderEntity {
     let normal = (pline.normal.x, pline.normal.y, pline.normal.z);
     let count = verts.len();
     let seg_count = if pline.is_closed { count } else { count - 1 };
-    let mut tangents: Vec<TangentGeom> = Vec::new();
-    let mut key_verts: Vec<[f64; 3]> = Vec::new();
-
     // Convert OCS (x, y, elevation) to a WCS point.
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
         crate::scene::view::transform::ocs_point_to_wcs((x, y, elev), normal)
@@ -279,6 +285,44 @@ fn to_render(pline: &LwPolyline) -> RenderEntity {
         let (wx, wy, wz) = to_wcs(v.location.x, v.location.y);
         [wx, wy, wz]
     };
+
+    let band_verts = band_verts(pline);
+    if !fill_mode {
+        let mut boundary = crate::entities::common::wide_band_outline(
+            &band_verts,
+            pline.is_closed,
+            !pline.plinegen,
+            &to_wcs,
+        );
+        if !boundary.points.is_empty() {
+            if pline.thickness.abs() > 1e-10 {
+                boundary = crate::entities::common::extrude_wide_band_outline(
+                    boundary,
+                    [
+                        pline.thickness * normal.0,
+                        pline.thickness * normal.1,
+                        pline.thickness * normal.2,
+                    ],
+                );
+            }
+            let (tangent_geoms, key_vertices) = centerline_metadata(pline, &to_wcs);
+            return RenderEntity {
+                pick_tris: Vec::new(),
+                object: RenderObject::BoundaryLines {
+                    points: boundary.points,
+                    stations: boundary.stations,
+                    point_segments: boundary.point_segments,
+                    station_pieces: boundary.station_pieces,
+                    source_length: boundary.source_length,
+                    plinegen: pline.plinegen,
+                },
+                snap_pts: vec![],
+                tangent_geoms,
+                key_vertices,
+                fill_tris: vec![],
+            };
+        }
+    }
 
     if pline.thickness.abs() > 1e-10 {
         let mut path: Vec<[f64; 3]> = Vec::new();
@@ -341,7 +385,7 @@ fn to_render(pline: &LwPolyline) -> RenderEntity {
     // A wide polyline whose per-vertex widths VARY renders a smooth taper —
     // handled here, before the PLINEGEN split, so both cases get it. A
     // uniform-width polyline falls through to the constant-band paths below.
-    if let Some(band_verts) = tapered_band_verts(pline) {
+    if tapered_band_verts(&band_verts).is_some() {
         let mut kv: Vec<[f64; 3]> = Vec::new();
         let mut tgs: Vec<TangentGeom> = Vec::new();
         for i in 0..seg_count {
@@ -370,8 +414,11 @@ fn to_render(pline: &LwPolyline) -> RenderEntity {
                 });
             }
         }
-        let (pts, widths) =
-            crate::entities::common::tapered_band_points(&band_verts, pline.is_closed, &to_wcs);
+        let (pts, widths) = crate::entities::common::tapered_band_points(
+            &band_verts,
+            pline.is_closed,
+            &to_wcs,
+        );
         let (fill_origin, fills) = wide_fills(pline);
         return RenderEntity {
             pick_tris: crate::entities::common::wide_band_tris(fill_origin, &fills),
@@ -444,36 +491,7 @@ fn to_render(pline: &LwPolyline) -> RenderEntity {
         };
     }
 
-    for i in 0..seg_count {
-        let v0 = &verts[i];
-        let v1 = &verts[(i + 1) % count];
-        let p0 = to_pt(v0);
-        let p1 = to_pt(v1);
-        let bulge = v0.bulge;
-
-        if bulge.abs() < 1e-9 {
-            tangents.push(TangentGeom::Line {
-                p1: [p0[0] as f32, p0[1] as f32, p0[2] as f32],
-                p2: [p1[0] as f32, p1[1] as f32, p1[2] as f32],
-            });
-        } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
-            [v0.location.x, v0.location.y],
-            [v1.location.x, v1.location.y],
-            bulge as f64,
-        ) {
-            let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
-            tangents.push(TangentGeom::Circle {
-                center: [wcx as f32, wcy as f32, wcz as f32],
-                radius: arc.radius as f32,
-            });
-        }
-
-        if i == 0 {
-            key_verts.push([p0[0], p0[1], p0[2]]);
-        }
-        key_verts.push([p1[0], p1[1], p1[2]]);
-    }
-
+    let (tangents, key_verts) = centerline_metadata(pline, &to_wcs);
     let (fill_origin, fills) = wide_fills(pline);
     RenderEntity {
         pick_tris: crate::entities::common::wide_band_tris(fill_origin, &fills),
@@ -491,20 +509,23 @@ fn to_render(pline: &LwPolyline) -> RenderEntity {
     }
 }
 
-/// The per-vertex `(location, bulge, start_width, end_width)` band description
-/// for a wide LwPolyline whose width VARIES — `None` when the width is uniform
-/// (a constant band) so the caller keeps the cheaper constant-width path.
-fn tapered_band_verts(pline: &LwPolyline) -> Option<Vec<([f64; 2], f64, f64, f64)>> {
+/// Effective segment widths for an LwPolyline band.
+fn band_verts(pline: &LwPolyline) -> Vec<([f64; 2], f64, f64, f64)> {
     let c = pline.constant_width;
-    let band: Vec<([f64; 2], f64, f64, f64)> = pline
+    pline
         .vertices
         .iter()
         .map(|v| {
-            let sw = if v.start_width > 1e-9 { v.start_width } else { c };
-            let ew = if v.end_width > 1e-9 { v.end_width } else { c };
+            let sw = effective_width(v.start_width, c);
+            let ew = effective_width(v.end_width, c);
             ([v.location.x, v.location.y], v.bulge, sw, ew)
         })
-        .collect();
+        .collect()
+}
+
+fn tapered_band_verts(
+    band: &[([f64; 2], f64, f64, f64)],
+) -> Option<&[([f64; 2], f64, f64, f64)]> {
     let w0 = band.first().map_or(0.0, |v| v.2);
     let varies = band
         .iter()
@@ -515,6 +536,47 @@ fn tapered_band_verts(pline: &LwPolyline) -> Option<Vec<([f64; 2], f64, f64, f64
     } else {
         None
     }
+}
+
+fn centerline_metadata(
+    pline: &LwPolyline,
+    to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+) -> (Vec<TangentGeom>, Vec<[f64; 3]>) {
+    let count = pline.vertices.len();
+    let segment_count = if pline.is_closed {
+        count
+    } else {
+        count.saturating_sub(1)
+    };
+    let mut tangents = Vec::with_capacity(segment_count);
+    let mut key_vertices = Vec::with_capacity(segment_count + 1);
+    for index in 0..segment_count {
+        let start = &pline.vertices[index];
+        let end = &pline.vertices[(index + 1) % count];
+        let p0 = to_wcs(start.location.x, start.location.y);
+        let p1 = to_wcs(end.location.x, end.location.y);
+        if start.bulge.abs() < 1e-9 {
+            tangents.push(TangentGeom::Line {
+                p1: [p0.0 as f32, p0.1 as f32, p0.2 as f32],
+                p2: [p1.0 as f32, p1.1 as f32, p1.2 as f32],
+            });
+        } else if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(
+            [start.location.x, start.location.y],
+            [end.location.x, end.location.y],
+            start.bulge,
+        ) {
+            let center = to_wcs(arc.center[0], arc.center[1]);
+            tangents.push(TangentGeom::Circle {
+                center: [center.0 as f32, center.1 as f32, center.2 as f32],
+                radius: arc.radius as f32,
+            });
+        }
+        if index == 0 {
+            key_vertices.push([p0.0, p0.1, p0.2]);
+        }
+        key_vertices.push([p1.0, p1.1, p1.2]);
+    }
+    (tangents, key_vertices)
 }
 
 /// Split at vertex `idx`: a closed polyline re-opens there (one piece); an
@@ -852,8 +914,12 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
     let v = pline.vertices.get(vi);
     let vx = v.map_or(0.0, |v| v.location.x);
     let vy = v.map_or(0.0, |v| v.location.y);
-    let start_w = v.map_or(0.0, |v| v.start_width);
-    let end_w = v.map_or(0.0, |v| v.end_width);
+    let start_w = v.map_or(0.0, |v| {
+        effective_width(v.start_width, pline.constant_width)
+    });
+    let end_w = v.map_or(0.0, |v| {
+        effective_width(v.end_width, pline.constant_width)
+    });
     let mp = <LwPolyline as crate::entities::traits::MassPropsCalc>::mass_props(pline);
     let cloud_arc_length = revision_cloud_arc_length(pline);
     let vertex_label = if n == 0 {
@@ -964,16 +1030,7 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
     };
     match field {
         "elevation" => pline.elevation = v,
-        "global_width" if v.is_finite() && v >= 0.0 => {
-            pline.constant_width = v;
-            // Global width replaces every segment override. Keeping old
-            // start/end values would make this editable row appear to work
-            // while the renderer continued using the stale per-segment data.
-            for vertex in &mut pline.vertices {
-                vertex.start_width = 0.0;
-                vertex.end_width = 0.0;
-            }
-        }
+        "global_width" if v.is_finite() && v >= 0.0 => pline.constant_width = v,
         "vertex_x" => {
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.location.x = v;
@@ -985,27 +1042,11 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
             }
         }
         "start_width" if v.is_finite() && v >= 0.0 => {
-            if pline.constant_width > 0.0 {
-                let width = pline.constant_width;
-                for vertex in &mut pline.vertices {
-                    vertex.start_width = width;
-                    vertex.end_width = width;
-                }
-                pline.constant_width = 0.0;
-            }
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.start_width = v;
             }
         }
         "end_width" if v.is_finite() && v >= 0.0 => {
-            if pline.constant_width > 0.0 {
-                let width = pline.constant_width;
-                for vertex in &mut pline.vertices {
-                    vertex.start_width = width;
-                    vertex.end_width = width;
-                }
-                pline.constant_width = 0.0;
-            }
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.end_width = v;
             }
@@ -1104,8 +1145,8 @@ fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
 }
 
 impl RenderConvertible for LwPolyline {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
-        Some(to_render(self))
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        Some(to_render(self, document.header.fill_mode))
     }
 }
 
@@ -1226,16 +1267,8 @@ impl crate::entities::traits::Grippable for LwPolyline {
                 new_v.location.x = midpoint[0];
                 new_v.location.y = midpoint[1];
                 new_v.vertex_id = 0;
-                let effective_start = if v0.start_width > 1e-9 {
-                    v0.start_width
-                } else {
-                    self.constant_width
-                };
-                let effective_end = if v0.end_width > 1e-9 {
-                    v0.end_width
-                } else {
-                    self.constant_width
-                };
+                let effective_start = effective_width(v0.start_width, self.constant_width);
+                let effective_end = effective_width(v0.end_width, self.constant_width);
                 let middle_width = (effective_start + effective_end) * 0.5;
                 self.vertices[i0].end_width = middle_width;
                 new_v.start_width = middle_width;
@@ -1296,7 +1329,6 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::LwPolyline) -> ([f64; 2], Vec<
     // Feeding the stored width in whole draws every wide polyline twice as wide
     // as the file asks for, which on a donut (a closed 2-vertex bulge-1 polyline)
     // shows up as a disc 1.5× its real radius.
-    let hw_const = pl.constant_width as f32 * 0.5;
     let verts = &pl.vertices;
     let n = verts.len();
     if n < 2 {
@@ -1308,16 +1340,8 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::LwPolyline) -> ([f64; 2], Vec<
     for i in 0..seg_count {
         let v0 = &verts[i];
         let v1 = &verts[(i + 1) % n];
-        let hw0 = if v0.start_width > 1e-9 {
-            v0.start_width as f32 * 0.5
-        } else {
-            hw_const
-        };
-        let hw1 = if v0.end_width > 1e-9 {
-            v0.end_width as f32 * 0.5
-        } else {
-            hw_const
-        };
+        let hw0 = effective_width(v0.start_width, pl.constant_width) as f32 * 0.5;
+        let hw1 = effective_width(v0.end_width, pl.constant_width) as f32 * 0.5;
         if hw0 < 1e-6 && hw1 < 1e-6 {
             continue;
         }

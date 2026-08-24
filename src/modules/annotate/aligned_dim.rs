@@ -222,6 +222,7 @@ impl CadCommand for AlignedDimensionCommand {
         Some(WireModel {
             point_marker: None,
             taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -281,6 +282,7 @@ fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
     WireModel {
         point_marker: None,
         taper_widths: Vec::new(),
+        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,

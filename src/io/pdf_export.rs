@@ -593,6 +593,43 @@ fn append_pdf_page(
         // Linetype dash pattern. Without this every wire exported as a solid
         // line regardless of its linetype (dashed / centre / dash-dot). (#155)
         let dash_arr = dash_array_from_pattern(wire.pattern_length, &wire.pattern, MM_TO_PT);
+        let stationed =
+            !dash_arr.is_empty() && wire.pattern_stations.len() > wire.points.len();
+        if stationed {
+            if last_dash.as_ref().is_none_or(|dash| !dash.is_empty()) {
+                ops.push(Op::SetLineDashPattern {
+                    dash: LineDashPattern::default(),
+                });
+                last_dash = Some(Vec::new());
+            }
+            for index in 0..wire.points.len().saturating_sub(1) {
+                if !wire.points[index][0].is_finite()
+                    || !wire.points[index + 1][0].is_finite()
+                {
+                    continue;
+                }
+                let start = wire.point_world(index, paper_h as f64 / scale.max(1e-6) as f64);
+                let end = wire.point_world(index + 1, paper_h as f64 / scale.max(1e-6) as f64);
+                for [from, to] in visible_station_ranges(
+                    wire.pattern_stations[index],
+                    wire.pattern_stations[index + 1],
+                    wire.pattern_length,
+                    &wire.pattern,
+                ) {
+                    let point = |t: f32| {
+                        LinePoint {
+                            p: Point::new(
+                                Mm((start.x + (end.x - start.x) * t as f64 + ox) as f32),
+                                Mm((start.y + (end.y - start.y) * t as f64 + oy) as f32),
+                            ),
+                            bezier: false,
+                        }
+                    };
+                    flush_line(&mut ops, &[point(from), point(to)], None);
+                }
+            }
+            continue;
+        }
         if last_dash.as_deref() != Some(dash_arr.as_slice()) {
             let dash = if dash_arr.is_empty() {
                 LineDashPattern::default()
@@ -600,7 +637,7 @@ fn append_pdf_page(
                 LineDashPattern::from_array(&dash_arr, 0)
             };
             ops.push(Op::SetLineDashPattern { dash });
-            last_dash = Some(dash_arr);
+            last_dash = Some(dash_arr.clone());
         }
 
         // Emit segments (NaN = pen-up). Points are the "high" half of a
@@ -668,6 +705,76 @@ fn dash_array_from_pattern(pattern_length: f32, pattern: &[f32; 8], mm_to_pt: f3
         // 1 pt floor so a zero-length dot still prints as a short mark.
         .map(|&v| (((v.abs() * mm_to_pt).round()) as i64).max(1))
         .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn visible_station_ranges(
+    start: f32,
+    end: f32,
+    pattern_length: f32,
+    pattern: &[f32; 8],
+) -> Vec<[f32; 2]> {
+    let count = pattern.iter().rposition(|value| *value != 0.0).map_or(0, |i| i + 1);
+    if count == 0 || pattern_length <= 1e-6 {
+        return vec![[0.0, 1.0]];
+    }
+    let dot = 1.0 / MM_TO_PT;
+    let mut elements: Vec<(f32, bool)> = pattern[..count]
+        .iter()
+        .map(|value| (if *value == 0.0 { dot } else { value.abs() }, *value >= 0.0))
+        .collect();
+    let total: f32 = elements.iter().map(|(length, _)| *length).sum();
+    if total <= 1e-6 {
+        return vec![[0.0, 1.0]];
+    }
+    let factor = pattern_length / total;
+    for (length, _) in &mut elements {
+        *length *= factor;
+    }
+    let delta = end - start;
+    let state = |station: f32, forward: bool| {
+        let mut phase = station.rem_euclid(pattern_length);
+        if !forward && phase <= 1e-6 {
+            phase = pattern_length;
+        }
+        let mut offset = 0.0;
+        if forward {
+            for &(length, drawn) in &elements {
+                let end = offset + length;
+                if phase < end - 1e-6 {
+                    return (drawn, end - phase);
+                }
+                offset = end;
+            }
+            (elements[0].1, elements[0].0)
+        } else {
+            offset = pattern_length;
+            for &(length, drawn) in elements.iter().rev() {
+                offset -= length;
+                if phase > offset + 1e-6 {
+                    return (drawn, phase - offset);
+                }
+            }
+            let last = elements[elements.len() - 1];
+            (last.1, last.0)
+        }
+    };
+    if delta.abs() <= 1e-6 {
+        return state(start, true).0.then_some([0.0, 1.0]).into_iter().collect();
+    }
+
+    let mut ranges = Vec::new();
+    let mut t = 0.0;
+    while t < 1.0 - 1e-6 {
+        let station = start + delta * t;
+        let (drawn, remaining) = state(station, delta > 0.0);
+        let next = (t + remaining / delta.abs()).clamp(t + 1e-6, 1.0);
+        if drawn {
+            ranges.push([t, next]);
+        }
+        t = next;
+    }
+    ranges
 }
 
 #[cfg(not(target_arch = "wasm32"))]

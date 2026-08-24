@@ -1,19 +1,12 @@
-// DONUT command — create a filled circular ring (thick LwPolyline).
-//
-// A donut is an LwPolyline with:
-//   - 2 vertices at (cx ± r_avg, 0), both with bulge = 1.0  (two 180° CCW arcs)
-//   - constant_width = (outer - inner) / 2
-//   - is_closed = true
-//
-// Workflow:
-//   1. Type inner diameter (or 0 for a filled circle)
-//   2. Type outer diameter
-//   3. Click center point(s); Enter to finish
+// DONUT creates a ring as a closed, constant-width LwPolyline.
 
 use acadrust::entities::{LwPolyline, LwVertex};
 use acadrust::EntityType;
-use cadkernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve};
+use cadkernel::geom2d::{
+    Circle as KernelCircle, Curve as KernelCurve, Vec2 as KernelVec2,
+};
 use glam::DVec3;
+
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
@@ -44,8 +37,6 @@ impl DonutCommand {
         let mut outer_diameter = defaults::get_donut_outer_diameter();
         if inner_diameter > outer_diameter {
             std::mem::swap(&mut inner_diameter, &mut outer_diameter);
-            defaults::set_donut_inner_diameter(inner_diameter);
-            defaults::set_donut_outer_diameter(outer_diameter);
         }
         Self {
             state: DonutState::AskInner,
@@ -71,8 +62,23 @@ impl DonutCommand {
     }
 
     fn point_distance(&self, first: DVec3, second: DVec3) -> f64 {
-        let delta = self.plane.vector_to_local(second - first);
-        delta.x.hypot(delta.y)
+        let first = self.plane.to_local(first);
+        let second = self.plane.to_local(second);
+        KernelVec2::new(first.x, first.y).distance(KernelVec2::new(second.x, second.y))
+    }
+
+    fn project_to_plane(&self, point: DVec3) -> DVec3 {
+        let local = self.plane.to_local(point);
+        self.plane.to_world(DVec3::new(local.x, local.y, 0.0))
+    }
+}
+
+fn prompt_with_default(prompt: &str, value: f64) -> String {
+    match prompt.char_indices().next_back() {
+        Some((index, suffix @ (':' | '：'))) => {
+            format!("{} <{value:.4}>{suffix}", &prompt[..index])
+        }
+        _ => format!("{prompt} <{value:.4}>"),
     }
 }
 
@@ -92,10 +98,9 @@ impl CadCommand for DonutCommand {
             DonutState::AskInnerSecond(_) => {
                 t!("DONUT  Specify second point for inside diameter:").into_owned()
             }
-            DonutState::AskOuter => format!(
-                "{} <{:.4}>:",
-                t!("DONUT  Specify outside diameter:").trim_end_matches(':'),
-                self.outer_r * 2.0
+            DonutState::AskOuter => prompt_with_default(
+                t!("DONUT  Specify outside diameter:").as_ref(),
+                self.outer_r * 2.0,
             ),
             DonutState::AskOuterSecond(_) => {
                 t!("DONUT  Specify second point for outside diameter:").into_owned()
@@ -147,7 +152,7 @@ impl CadCommand for DonutCommand {
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.state {
             DonutState::AskInner => {
-                self.state = DonutState::AskInnerSecond(pt);
+                self.state = DonutState::AskInnerSecond(self.project_to_plane(pt));
                 CmdResult::NeedPoint
             }
             DonutState::AskInnerSecond(first) => {
@@ -159,7 +164,7 @@ impl CadCommand for DonutCommand {
                 CmdResult::NeedPoint
             }
             DonutState::AskOuter => {
-                self.state = DonutState::AskOuterSecond(pt);
+                self.state = DonutState::AskOuterSecond(self.project_to_plane(pt));
                 CmdResult::NeedPoint
             }
             DonutState::AskOuterSecond(first) => {
@@ -197,9 +202,10 @@ impl CadCommand for DonutCommand {
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.state {
             DonutState::AskInnerSecond(first) | DonutState::AskOuterSecond(first) => {
+                let point = self.project_to_plane(pt);
                 Some(WireModel::solid_f64(
                     "rubber_band".into(),
-                    vec![first.to_array(), pt.to_array()],
+                    vec![first.to_array(), point.to_array()],
                     WireModel::CYAN,
                     false,
                 ))
@@ -257,8 +263,7 @@ fn make_donut(cx: f64, cy: f64, elevation: f64, inner_r: f64, outer_r: f64) -> E
     p.constant_width = width;
     p.elevation = elevation;
 
-    // Constant width is stored once on the polyline. Per-segment width fields
-    // stay zero so a later Global width edit controls the whole ring.
+    // Segment widths inherit the polyline's constant width.
     let mut v0 = LwVertex::new(Vector2::new(cx - r_avg, cy));
     v0.bulge = 1.0;
 

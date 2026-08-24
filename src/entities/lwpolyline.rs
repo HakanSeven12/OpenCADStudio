@@ -16,6 +16,15 @@ use crate::scene::model::wire_model::TangentGeom;
 const TAU: f64 = std::f64::consts::TAU;
 const REVCLOUD_BULGE: f64 = 0.5;
 const MAX_REVCLOUD_VERTICES: usize = 100_000;
+const WIDTH_EPSILON: f64 = 1.0e-9;
+
+fn effective_width(width: f64, constant_width: f64) -> f64 {
+    if width > WIDTH_EPSILON {
+        width
+    } else {
+        constant_width
+    }
+}
 
 /// Midpoint position on an arc segment defined by its bulge.
 fn arc_midpoint(p0: [f64; 2], p1: [f64; 2], bulge: f64) -> [f64; 2] {
@@ -500,8 +509,8 @@ fn tapered_band_verts(pline: &LwPolyline) -> Option<Vec<([f64; 2], f64, f64, f64
         .vertices
         .iter()
         .map(|v| {
-            let sw = if v.start_width > 1e-9 { v.start_width } else { c };
-            let ew = if v.end_width > 1e-9 { v.end_width } else { c };
+            let sw = effective_width(v.start_width, c);
+            let ew = effective_width(v.end_width, c);
             ([v.location.x, v.location.y], v.bulge, sw, ew)
         })
         .collect();
@@ -852,23 +861,11 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
     let v = pline.vertices.get(vi);
     let vx = v.map_or(0.0, |v| v.location.x);
     let vy = v.map_or(0.0, |v| v.location.y);
-    // A constant width is the effective width of every segment whose
-    // per-vertex value is not overridden.  Showing the raw zero stored on
-    // those vertices made wide polylines (notably rings) claim that their
-    // visible segment width was zero even though the global width was active.
     let start_w = v.map_or(0.0, |v| {
-        if v.start_width.abs() > 1.0e-12 {
-            v.start_width
-        } else {
-            pline.constant_width
-        }
+        effective_width(v.start_width, pline.constant_width)
     });
     let end_w = v.map_or(0.0, |v| {
-        if v.end_width.abs() > 1.0e-12 {
-            v.end_width
-        } else {
-            pline.constant_width
-        }
+        effective_width(v.end_width, pline.constant_width)
     });
     let mp = <LwPolyline as crate::entities::traits::MassPropsCalc>::mass_props(pline);
     let cloud_arc_length = revision_cloud_arc_length(pline);
@@ -1217,16 +1214,8 @@ impl crate::entities::traits::Grippable for LwPolyline {
                 new_v.location.x = midpoint[0];
                 new_v.location.y = midpoint[1];
                 new_v.vertex_id = 0;
-                let effective_start = if v0.start_width > 1e-9 {
-                    v0.start_width
-                } else {
-                    self.constant_width
-                };
-                let effective_end = if v0.end_width > 1e-9 {
-                    v0.end_width
-                } else {
-                    self.constant_width
-                };
+                let effective_start = effective_width(v0.start_width, self.constant_width);
+                let effective_end = effective_width(v0.end_width, self.constant_width);
                 let middle_width = (effective_start + effective_end) * 0.5;
                 self.vertices[i0].end_width = middle_width;
                 new_v.start_width = middle_width;
@@ -1287,7 +1276,6 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::LwPolyline) -> ([f64; 2], Vec<
     // Feeding the stored width in whole draws every wide polyline twice as wide
     // as the file asks for, which on a donut (a closed 2-vertex bulge-1 polyline)
     // shows up as a disc 1.5× its real radius.
-    let hw_const = pl.constant_width as f32 * 0.5;
     let verts = &pl.vertices;
     let n = verts.len();
     if n < 2 {
@@ -1299,16 +1287,8 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::LwPolyline) -> ([f64; 2], Vec<
     for i in 0..seg_count {
         let v0 = &verts[i];
         let v1 = &verts[(i + 1) % n];
-        let hw0 = if v0.start_width > 1e-9 {
-            v0.start_width as f32 * 0.5
-        } else {
-            hw_const
-        };
-        let hw1 = if v0.end_width > 1e-9 {
-            v0.end_width as f32 * 0.5
-        } else {
-            hw_const
-        };
+        let hw0 = effective_width(v0.start_width, pl.constant_width) as f32 * 0.5;
+        let hw1 = effective_width(v0.end_width, pl.constant_width) as f32 * 0.5;
         if hw0 < 1e-6 && hw1 < 1e-6 {
             continue;
         }

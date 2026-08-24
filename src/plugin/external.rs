@@ -73,9 +73,14 @@ impl ExternalPlugin {
 
     /// True when the package's `acadrust` fingerprint matches the host.
     ///
-    /// If the manifest does not declare `acadrust_source`, the gate is skipped
-    /// (legacy fallback). If declared but empty or mismatched, incompatible.
+    /// The acadrust gate only applies to plugins targeting API v4 or newer;
+    /// older API versions predate the gate and are treated as compatible.
+    /// If the manifest does not declare `acadrust_source`, the gate is skipped.
+    /// If declared but empty or mismatched, incompatible.
     pub fn acadrust_compatible(&self) -> bool {
+        if self.api_version < ocs_plugin_api::API_VERSION {
+            return true;
+        }
         if !self.acadrust_declared {
             return true;
         }
@@ -343,13 +348,13 @@ mod loader {
             if !d.lib_present {
                 continue;
             }
-            if d.acadrust_declared && d.acadrust_source.is_none() {
+            if d.api_version >= ocs_plugin_api::API_VERSION && d.acadrust_declared && d.acadrust_source.is_none() {
                 eprintln!(
                     "[plugin] {} declares acadrust metadata but has no fingerprint; cannot verify compatibility",
                     d.id
                 );
             }
-            if !d.acadrust_compatible() {
+            if d.api_version >= ocs_plugin_api::API_VERSION && !d.acadrust_compatible() {
                 let host_src = ocs_plugin_api::version_info::host_acadrust_source();
                 let plugin_hash = d
                     .acadrust_source
@@ -555,6 +560,28 @@ acadrust_source = "{host}"
         let p = parse_plugin_toml(&toml).expect("parsed");
         assert!(p.acadrust_declared);
         assert!(p.acadrust_compatible(), "matching acadrust fingerprint should be compatible");
+    }
+
+    #[test]
+    fn acadrust_gate_only_applies_to_api_v4_and_newer() {
+        let toml = r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 2
+
+[opencad]
+acadrust_source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
+"#;
+        let mut p = parse_plugin_toml(toml).expect("parsed");
+        p.lib_present = true;
+        assert!(p.acadrust_declared);
+        assert!(
+            p.acadrust_compatible(),
+            "API v2 plugin should bypass acadrust gate"
+        );
+        assert!(p.loadable());
     }
 
     /// Integration smoke test for the out-of-process plugin path.

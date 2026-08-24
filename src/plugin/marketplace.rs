@@ -221,9 +221,11 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
                 .ok_or_else(|| format!("release {} plugin.toml is missing an id", release.tag))?;
             let acadrust_source = manifest.acadrust_source.clone();
             let acadrust_declared = manifest.acadrust_declared;
-            let acadrust_compatible = if !acadrust_declared {
-                // Legacy release that predates acadrust metadata: defer the
-                // decision to the repo-level policy below.
+            let acadrust_compatible = if manifest.api_version < ocs_plugin_api::API_VERSION {
+                // API versions below v4 predate the acadrust gate.
+                true
+            } else if !acadrust_declared {
+                // Legacy v4+ release without metadata: defer to repo-level policy.
                 true
             } else {
                 match acadrust_source.as_deref() {
@@ -249,10 +251,9 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
     }
 
     // Repo-level policy: if any release in this repo declares an acadrust
-    // fingerprint, treat undeclared releases from the same repo as
-    // incompatible — but only for releases targeting the current host API
-    // generation (v4 and above). This preserves API v2/v3 backwards
-    // compatibility for legacy plugins that predate acadrust metadata.
+    // fingerprint, treat undeclared v4+ releases from the same repo as
+    // incompatible. API v2/v3 releases predate the gate and are preserved as
+    // legacy-compatible.
     let any_declared = info.iter().any(|r| r.acadrust_declared);
     if any_declared {
         for r in &mut info {
@@ -333,7 +334,7 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
         ));
     }
 
-    if manifest.acadrust_declared {
+    if manifest.api_version >= ocs_plugin_api::API_VERSION && manifest.acadrust_declared {
         let Some(source) = manifest.acadrust_source.as_deref() else {
             return Err(
                 "Release declares acadrust metadata but has no source; cannot verify ABI compatibility".to_string(),

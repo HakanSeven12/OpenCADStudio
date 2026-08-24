@@ -1015,6 +1015,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Ext line offset" => Some(("properties", "ext-line-offset")),
         "Ext line weight (DIMLWE)" => Some(("draw", "ext-line-weight-dimlwe")),
         "Extend" => Some(("modify", "extend")),
+        "Extended Data" => Some(("properties", "extended-data")),
         "Extended Entity" => Some(("properties", "extended-entity")),
         "Extended Lighting" => Some(("properties", "extended-lighting")),
         "Extension" => Some(("common", "extension")),

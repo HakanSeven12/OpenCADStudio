@@ -4392,6 +4392,104 @@ impl OpenCADStudio {
                         ).as_ref());
                         return Task::none();
                     }
+                    let table_editor = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .and_then(|entity| match entity {
+                            AcadEntityType::Table(table) => {
+                                let horizontal = glam::DVec3::new(
+                                    table.horizontal_direction.x,
+                                    table.horizontal_direction.y,
+                                    table.horizontal_direction.z,
+                                )
+                                .normalize_or(glam::DVec3::X);
+                                let normal = glam::DVec3::new(
+                                    table.normal.x,
+                                    table.normal.y,
+                                    table.normal.z,
+                                )
+                                .normalize_or(glam::DVec3::Z);
+                                let mut down = horizontal
+                                    .cross(normal)
+                                    .normalize_or(glam::DVec3::NEG_Y);
+                                let table_style = table.table_style_handle.and_then(|style_handle| {
+                                    self.tabs[i]
+                                        .scene
+                                        .document
+                                        .objects
+                                        .get(&style_handle)
+                                        .and_then(|object| match object {
+                                            acadrust::objects::ObjectType::TableStyle(style) => {
+                                                Some(style)
+                                            }
+                                            _ => None,
+                                        })
+                                });
+                                let flows_up = crate::entities::table::resolved_flow_up(
+                                    table,
+                                    table_style,
+                                );
+                                if flows_up {
+                                    down = -down;
+                                }
+                                let origin = glam::DVec3::new(
+                                    table.insertion_point.x,
+                                    table.insertion_point.y,
+                                    table.insertion_point.z,
+                                );
+                                let relative = click_world - origin;
+                                let x = relative.dot(horizontal);
+                                let y = relative.dot(down);
+                                if x < 0.0 || y < 0.0 {
+                                    return None;
+                                }
+                                let column = table
+                                    .columns
+                                    .iter()
+                                    .scan(0.0, |offset, column| {
+                                        *offset += column.width;
+                                        Some(*offset)
+                                    })
+                                    .position(|end| x <= end)?;
+                                let row = table
+                                    .rows
+                                    .iter()
+                                    .scan(0.0, |offset, row| {
+                                        *offset += row.height;
+                                        Some(*offset)
+                                    })
+                                    .position(|end| y <= end)?;
+                                let locked = table.cell(row, column).is_some_and(|cell| {
+                                    use acadrust::entities::table::CellStateFlags;
+                                    cell.state.intersects(
+                                        CellStateFlags::CONTENT_LOCKED
+                                            | CellStateFlags::CONTENT_READ_ONLY,
+                                    )
+                                });
+                                Some((
+                                    (!locked).then(|| {
+                                        crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+                                            handle, table, row, column,
+                                        )
+                                    }),
+                                    row * table.column_count() + column,
+                                ))
+                            }
+                            _ => None,
+                        });
+                    if let Some((command, cell_index)) = table_editor {
+                        self.tabs[i].properties.prop_vertex = cell_index;
+                        self.tabs[i].properties.prop_vertex_indicator_active = true;
+                        crate::entities::table::set_prop_current_cell(cell_index);
+                        self.refresh_properties();
+                        if let Some(command) = command {
+                            self.command_line
+                                .push_info(&crate::command::CadCommand::prompt(&command));
+                            self.tabs[i].active_cmd = Some(Box::new(command));
+                        }
+                        return Task::none();
+                    }
                     // Any text-bearing entity opens its in-place editor
                     // (plain box or rich MText editor, per type). A
                     // Leader resolves to the entity it annotates.

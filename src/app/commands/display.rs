@@ -12,60 +12,327 @@ impl OpenCADStudio {
                     .push_output(crate::t!("PAN: drag with the left mouse button. Press Esc to exit.").as_ref());
             }
 
-            // ── TABLE cell editing ─────────────────────────────────────────────
-            // TABLE CELL <row> <col> <text> — set text for a cell in the selected Table
+            // ── TABLE structure and cell editing ───────────────────────────────
             cmd if cmd.starts_with("TABLE ") => {
                 let rest = cmd.trim_start_matches("TABLE").trim();
-                let sub_up = rest.split_whitespace().next().unwrap_or("").to_uppercase();
-                if sub_up == "CELL" {
-                    let parts: Vec<&str> = rest.splitn(4, char::is_whitespace).collect();
-                    // parts: ["CELL", "<row>", "<col>", "<text>"]
-                    let row_res = parts.get(1).and_then(|s| s.parse::<usize>().ok());
-                    let col_res = parts.get(2).and_then(|s| s.parse::<usize>().ok());
-                    let text = parts.get(3).copied().unwrap_or("");
-                    match (row_res, col_res) {
-                        (Some(row), Some(col)) => {
-                            let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
-                                .scene
-                                .selected_entities()
-                                .iter()
-                                .map(|(h, _)| *h)
-                                .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
-                                .collect();
-                            let mut found = false;
-                            for sh in &selected_handles {
-                                if let Some(acadrust::EntityType::Table(tbl)) = self.tabs[i]
-                                    .scene
-                                    .document
-                                    .entities_mut()
-                                    .find(|e| e.common().handle == *sh)
-                                {
-                                    if tbl.set_cell_text(row, col, text) {
-                                        found = true;
-                                    }
-                                }
-                            }
-                            if found {
-                                self.push_undo_snapshot(i, "TABLE CELL");
-                                self.tabs[i].dirty = true;
-                                self.command_line.push_output(crate::tf!(
-                                    "TABLE CELL: set [{row},{col}] = \"{text}\"."
-                                ).as_ref());
-                            } else {
-                                self.command_line.push_error(
-                                    crate::t!("TABLE CELL: select a Table entity first, or row/col out of range.").as_ref()
-                                );
-                            }
-                        }
-                        _ => {
-                            self.command_line
-                                .push_info(crate::t!("Usage: TABLE CELL <row> <col> <text>").as_ref());
+                #[derive(Clone)]
+                enum TableAction {
+                    Cell(usize, usize, String),
+                    InsertRow(usize),
+                    DeleteRow(usize),
+                    InsertColumn(usize),
+                    DeleteColumn(usize),
+                    Merge(usize, usize, usize, usize),
+                    Unmerge(usize, usize),
+                    RowHeight(usize, f64),
+                    ColumnWidth(usize, f64),
+                    Lock(usize, usize, bool),
+                    Block(usize, usize, String),
+                    Formula(usize, usize, String),
+                    Field(usize, usize, acadrust::Handle),
+                }
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let integer = |index: usize| {
+                    words.get(index).and_then(|value| value.parse::<usize>().ok())
+                };
+                let real = |index: usize| {
+                    words.get(index).and_then(|value| value.parse::<f64>().ok())
+                };
+                let action = match words.first().map(|word| word.to_ascii_uppercase()).as_deref() {
+                    Some("CELL") => {
+                        let parts: Vec<&str> = rest.splitn(4, char::is_whitespace).collect();
+                        match (integer(1), integer(2)) {
+                            (Some(row), Some(column)) => Some(TableAction::Cell(
+                                row,
+                                column,
+                                parts.get(3).copied().unwrap_or("").to_string(),
+                            )),
+                            _ => None,
                         }
                     }
-                } else {
+                    Some("INSERTROW") => integer(1).map(TableAction::InsertRow),
+                    Some("DELETEROW") => integer(1).map(TableAction::DeleteRow),
+                    Some("INSERTCOLUMN") | Some("INSERTCOL") => {
+                        integer(1).map(TableAction::InsertColumn)
+                    }
+                    Some("DELETECOLUMN") | Some("DELETECOL") => {
+                        integer(1).map(TableAction::DeleteColumn)
+                    }
+                    Some("MERGE") => match (integer(1), integer(2), integer(3), integer(4)) {
+                        (Some(r1), Some(c1), Some(r2), Some(c2)) => {
+                            Some(TableAction::Merge(r1, c1, r2, c2))
+                        }
+                        _ => None,
+                    },
+                    Some("UNMERGE") => match (integer(1), integer(2)) {
+                        (Some(row), Some(column)) => Some(TableAction::Unmerge(row, column)),
+                        _ => None,
+                    },
+                    Some("ROWHEIGHT") => match (integer(1), real(2)) {
+                        (Some(row), Some(height)) if height > 0.0 => {
+                            Some(TableAction::RowHeight(row, height))
+                        }
+                        _ => None,
+                    },
+                    Some("COLUMNWIDTH") | Some("COLWIDTH") => match (integer(1), real(2)) {
+                        (Some(column), Some(width)) if width > 0.0 => {
+                            Some(TableAction::ColumnWidth(column, width))
+                        }
+                        _ => None,
+                    },
+                    Some("LOCK") => match (integer(1), integer(2), words.get(3)) {
+                        (Some(row), Some(column), Some(value)) => Some(TableAction::Lock(
+                            row,
+                            column,
+                            !value.eq_ignore_ascii_case("OFF"),
+                        )),
+                        _ => None,
+                    },
+                    Some("BLOCK") => {
+                        let parts: Vec<&str> = rest.splitn(4, char::is_whitespace).collect();
+                        match (integer(1), integer(2), parts.get(3)) {
+                            (Some(row), Some(column), Some(name)) if !name.trim().is_empty() => {
+                                Some(TableAction::Block(row, column, name.trim().to_string()))
+                            }
+                            _ => None,
+                        }
+                    }
+                    Some("FORMULA") => {
+                        let parts: Vec<&str> = rest.splitn(4, char::is_whitespace).collect();
+                        match (integer(1), integer(2), parts.get(3)) {
+                            (Some(row), Some(column), Some(expression))
+                                if !expression.trim().is_empty() =>
+                            {
+                                Some(TableAction::Formula(
+                                    row,
+                                    column,
+                                    expression.trim().to_string(),
+                                ))
+                            }
+                            _ => None,
+                        }
+                    }
+                    Some("FIELD") => match (integer(1), integer(2), words.get(3)) {
+                        (Some(row), Some(column), Some(value)) => {
+                            u64::from_str_radix(value.trim_start_matches("0x"), 16)
+                                .ok()
+                                .map(|handle| {
+                                    TableAction::Field(
+                                        row,
+                                        column,
+                                        acadrust::Handle::new(handle),
+                                    )
+                                })
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(action) = action else {
                     self.command_line.push_info(
-                        "Usage: TABLE  (creates new table)  or  TABLE CELL <row> <col> <text>",
+                        crate::t!("Usage: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD").as_ref(),
                     );
+                    return Some(Task::none());
+                };
+                let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(handle, _)| *handle)
+                    .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+                    .collect();
+                if selected_handles.is_empty() {
+                    self.command_line
+                        .push_error(crate::t!("TABLE: select a table first.").as_ref());
+                    return Some(Task::none());
+                }
+                let block_handle = if let TableAction::Block(_, _, name) = &action {
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .block_records
+                        .iter()
+                        .find(|record| record.name.eq_ignore_ascii_case(name))
+                        .map(|record| record.handle)
+                } else {
+                    None
+                };
+                if matches!(action, TableAction::Block(_, _, _)) && block_handle.is_none() {
+                    self.command_line.push_error(
+                        crate::t!("TABLE: block definition not found.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                if let TableAction::Field(_, _, field_handle) = &action {
+                    if !self.tabs[i].scene.document.fields.contains_key(field_handle) {
+                        self.command_line.push_error(
+                            crate::t!("TABLE: field handle not found.").as_ref(),
+                        );
+                        return Some(Task::none());
+                    }
+                }
+                self.push_undo_snapshot(i, "TABLE EDIT");
+                let mut changed = false;
+                for handle in &selected_handles {
+                    let Some(acadrust::EntityType::Table(table)) =
+                        self.tabs[i].scene.document.get_entity_mut(*handle)
+                    else {
+                        continue;
+                    };
+                    match &action {
+                        TableAction::Cell(row, column, text) => {
+                            if let Some(cell) = table.cell_mut(*row, *column) {
+                                use acadrust::entities::table::CellStateFlags;
+                                if !cell.state.intersects(
+                                    CellStateFlags::CONTENT_LOCKED
+                                        | CellStateFlags::CONTENT_READ_ONLY,
+                                ) {
+                                    cell.set_text(text);
+                                    changed = true;
+                                }
+                            }
+                        }
+                        TableAction::InsertRow(row) if *row <= table.row_count() => {
+                            let height = table
+                                .rows
+                                .get((*row).min(table.row_count().saturating_sub(1)))
+                                .map(|row| row.height)
+                                .unwrap_or(0.5);
+                            table.insert_row(*row);
+                            table.set_row_height(*row, height);
+                            changed = true;
+                        }
+                        TableAction::DeleteRow(row)
+                            if table.row_count() > 1 && *row < table.row_count() =>
+                        {
+                            table.remove_row(*row);
+                            changed = true;
+                        }
+                        TableAction::InsertColumn(column) if *column <= table.column_count() => {
+                            let width = table
+                                .columns
+                                .get((*column).min(table.column_count().saturating_sub(1)))
+                                .map(|column| column.width)
+                                .unwrap_or(2.0);
+                            table.insert_column(*column, width);
+                            changed = true;
+                        }
+                        TableAction::DeleteColumn(column)
+                            if table.column_count() > 1 && *column < table.column_count() =>
+                        {
+                            table.remove_column(*column);
+                            changed = true;
+                        }
+                        TableAction::Merge(r1, c1, r2, c2)
+                            if *r1 < table.row_count()
+                                && *r2 < table.row_count()
+                                && *c1 < table.column_count()
+                                && *c2 < table.column_count() =>
+                        {
+                            table.merge_cells(acadrust::entities::table::CellRange::new(
+                                (*r1).min(*r2),
+                                (*c1).min(*c2),
+                                (*r1).max(*r2),
+                                (*c1).max(*c2),
+                            ));
+                            changed = true;
+                        }
+                        TableAction::Unmerge(row, column) => {
+                            table.unmerge_cell(*row, *column);
+                            changed = true;
+                        }
+                        TableAction::RowHeight(row, height) if *row < table.row_count() => {
+                            table.set_row_height(*row, *height);
+                            changed = true;
+                        }
+                        TableAction::ColumnWidth(column, width)
+                            if *column < table.column_count() =>
+                        {
+                            table.set_column_width(*column, *width);
+                            changed = true;
+                        }
+                        TableAction::Lock(row, column, locked) => {
+                            if let Some(cell) = table.cell_mut(*row, *column) {
+                                use acadrust::entities::table::CellStateFlags;
+                                cell.state.set(CellStateFlags::CONTENT_LOCKED, *locked);
+                                cell.state.set(CellStateFlags::FORMAT_LOCKED, *locked);
+                                changed = true;
+                            }
+                        }
+                        TableAction::Block(row, column, _) => {
+                            if let (Some(handle), Some(cell)) =
+                                (block_handle, table.cell_mut(*row, *column))
+                            {
+                                use acadrust::entities::table::{
+                                    CellContent, CellStateFlags, CellType,
+                                };
+                                if !cell.state.intersects(
+                                    CellStateFlags::CONTENT_LOCKED
+                                        | CellStateFlags::CONTENT_READ_ONLY,
+                                ) {
+                                    cell.contents.clear();
+                                    cell.contents.push(CellContent::block(handle));
+                                    cell.cell_type = CellType::Block;
+                                    changed = true;
+                                }
+                            }
+                        }
+                        TableAction::Formula(row, column, expression) => {
+                            if let Some(cell) = table.cell_mut(*row, *column) {
+                                use acadrust::entities::table::CellStateFlags;
+                                if !cell.state.intersects(
+                                    CellStateFlags::CONTENT_LOCKED
+                                        | CellStateFlags::CONTENT_READ_ONLY,
+                                ) {
+                                    let formula = if expression.starts_with('=') {
+                                        expression.clone()
+                                    } else {
+                                        format!("={expression}")
+                                    };
+                                    cell.set_text(&formula);
+                                    changed = true;
+                                }
+                            }
+                        }
+                        TableAction::Field(row, column, field_handle) => {
+                            let mut attached = false;
+                            if let Some(cell) = table.cell_mut(*row, *column) {
+                                use acadrust::entities::table::{
+                                    CellContent, CellStateFlags, CellType,
+                                };
+                                if !cell.state.intersects(
+                                    CellStateFlags::CONTENT_LOCKED
+                                        | CellStateFlags::CONTENT_READ_ONLY,
+                                ) {
+                                    let mut content = CellContent::text("");
+                                    content.field_handle = Some(*field_handle);
+                                    cell.contents.clear();
+                                    cell.contents.push(content);
+                                    cell.cell_type = CellType::Text;
+                                    attached = true;
+                                }
+                            }
+                            if attached {
+                                if !table.field_handles.contains(field_handle) {
+                                    table.field_handles.push(*field_handle);
+                                }
+                                changed = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if changed {
+                    self.invalidate_property_targets(i, &selected_handles);
+                    self.tabs[i].dirty = true;
+                    self.refresh_properties();
+                    self.command_line
+                        .push_output(crate::t!("TABLE: edit applied.").as_ref());
+                } else {
+                    self.command_line
+                        .push_error(crate::t!(
+                            "TABLE: row/column is out of range or the cell is locked."
+                        ).as_ref());
                 }
             }
 
@@ -1161,8 +1428,7 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::AnnoObjectScaleOpen));
             }
 
-            // DATALINK <path.csv> — import a CSV file into a table placed at the
-            // origin (one-time import; a live re-reading link is future work).
+            // DATALINK <path.csv> — create a persistent linked table.
             "DATALINK" => {
                 use crate::command::ValuePromptCommand;
                 let c = ValuePromptCommand::new("DATALINK", "DATALINK  path to the .csv file:");
@@ -1173,17 +1439,13 @@ impl OpenCADStudio {
                 let path = cmd.trim_start_matches("DATALINK").trim();
                 if path.is_empty() {
                     self.command_line.push_info(
-                        "Usage: DATALINK <path-to-.csv>  — imports the CSV into a table at the origin.",
+                        "Usage: DATALINK <path-to-.csv>",
                     );
                     return Some(Task::none());
                 }
                 match std::fs::read_to_string(path) {
                     Ok(text) => {
-                        let rows_data: Vec<Vec<String>> = text
-                            .lines()
-                            .filter(|l| !l.trim().is_empty())
-                            .map(|line| line.split(',').map(|s| s.trim().to_string()).collect())
-                            .collect();
+                        let rows_data = parse_csv_table(&text);
                         let nrows = rows_data.len();
                         let ncols = rows_data.iter().map(|r| r.len()).max().unwrap_or(0);
                         if nrows == 0 || ncols == 0 {
@@ -1203,20 +1465,178 @@ impl OpenCADStudio {
                                 table.set_cell_text(r, c, cell);
                             }
                         }
-                        self.push_undo_snapshot(i, "DATALINK");
-                        self.tabs[i]
-                            .scene
-                            .add_entity_clone(acadrust::EntityType::Table(table));
-                        self.tabs[i].dirty = true;
-                        self.command_line.push_output(crate::tf!(
-                            "DATALINK: imported {nrows}×{ncols} cells into a table at the origin."
-                        ).as_ref());
+                        let doc = &self.tabs[i].scene.document;
+                        let current_style = doc.header.current_table_style_name.clone();
+                        table.table_style_handle = doc.objects.iter().find_map(|(handle, object)| {
+                            match object {
+                                acadrust::objects::ObjectType::TableStyle(style)
+                                    if style.name.eq_ignore_ascii_case(&current_style) =>
+                                {
+                                    Some(*handle)
+                                }
+                                _ => None,
+                            }
+                        });
+                        let link_path = std::fs::canonicalize(path)
+                            .map(|value| value.to_string_lossy().into_owned())
+                            .unwrap_or_else(|_| path.to_string());
+                        let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::new(
+                            table, &link_path,
+                        );
+                        self.command_line
+                            .push_info(&crate::command::CadCommand::prompt(&command));
+                        self.tabs[i].active_cmd = Some(Box::new(command));
                     }
                     Err(e) => {
                         self.command_line
                             .push_error(crate::tf!("DATALINK: cannot read \"{path}\": {e}").as_ref());
                     }
                 }
+            }
+
+            cmd if cmd == "DATALINKUPDATE" || cmd.starts_with("DATALINKUPDATE ") => {
+                let write_back = cmd
+                    .trim_start_matches("DATALINKUPDATE")
+                    .trim()
+                    .eq_ignore_ascii_case("WRITE");
+                let selected: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .filter_map(|(handle, entity)| {
+                        matches!(entity, acadrust::EntityType::Table(_)).then_some(handle)
+                    })
+                    .collect();
+                let table_handles = if selected.is_empty() {
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .entities()
+                        .filter_map(|entity| {
+                            matches!(entity, acadrust::EntityType::Table(_))
+                                .then_some(entity.common().handle)
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    selected
+                };
+                let mut jobs = Vec::new();
+                for handle in &table_handles {
+                    let Some(acadrust::EntityType::Table(table)) =
+                        self.tabs[i].scene.document.get_entity(*handle)
+                    else {
+                        continue;
+                    };
+                    let link_handle = table
+                        .rows
+                        .iter()
+                        .flat_map(|row| row.cells.iter())
+                        .find_map(|cell| cell.data_link_handle);
+                    let Some(link_handle) = link_handle else {
+                        continue;
+                    };
+                    let path = match self.tabs[i].scene.document.objects.get(&link_handle) {
+                        Some(acadrust::objects::ObjectType::ClassObject(object)) => {
+                            match &object.data {
+                                acadrust::objects::ClassObjectData::DataLink(link) => {
+                                    Some(link.connection_string.clone())
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(path) = path {
+                        jobs.push((*handle, link_handle, path));
+                    }
+                }
+                if jobs.is_empty() {
+                    self.command_line
+                        .push_error("DATALINKUPDATE: no linked tables found.");
+                    return Some(Task::none());
+                }
+                if write_back {
+                    let mut written = 0usize;
+                    for (table_handle, _, path) in &jobs {
+                        let Some(acadrust::EntityType::Table(table)) =
+                            self.tabs[i].scene.document.get_entity(*table_handle)
+                        else {
+                            continue;
+                        };
+                        let csv = table_to_csv(table);
+                        if std::fs::write(path, csv).is_ok() {
+                            written += 1;
+                        }
+                    }
+                    self.command_line.push_output(
+                        crate::tf!("DATALINKUPDATE: wrote {} linked source(s).", written).as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let updates: Vec<_> = jobs
+                    .into_iter()
+                    .filter_map(|(table_handle, link_handle, path)| {
+                        std::fs::read_to_string(&path)
+                            .ok()
+                            .map(|text| (table_handle, link_handle, parse_csv_table(&text)))
+                    })
+                    .filter(|(_, _, rows)| !rows.is_empty())
+                    .collect();
+                if updates.is_empty() {
+                    self.command_line
+                        .push_error("DATALINKUPDATE: linked sources could not be read.");
+                    return Some(Task::none());
+                }
+                self.push_undo_snapshot(i, "DATALINKUPDATE");
+                use acadrust::entities::table::CellStateFlags;
+                let mut changed_handles = Vec::new();
+                for (table_handle, link_handle, rows) in updates {
+                    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+                    let Some(acadrust::EntityType::Table(table)) =
+                        self.tabs[i].scene.document.get_entity_mut(table_handle)
+                    else {
+                        continue;
+                    };
+                    while table.row_count() < rows.len() {
+                        table.add_row();
+                    }
+                    while table.row_count() > rows.len() {
+                        table.remove_row(table.row_count() - 1);
+                    }
+                    while table.column_count() < columns {
+                        let width = table.columns.last().map(|column| column.width).unwrap_or(2.0);
+                        table.add_column(width);
+                    }
+                    while table.column_count() > columns {
+                        table.remove_column(table.column_count() - 1);
+                    }
+                    for row in 0..rows.len() {
+                        for column in 0..columns {
+                            if let Some(cell) = table.cell_mut(row, column) {
+                                cell.set_text(
+                                    rows[row].get(column).map(String::as_str).unwrap_or(""),
+                                );
+                                cell.has_linked_data = true;
+                                cell.data_link_handle = Some(link_handle);
+                                cell.data_link_rows = rows.len() as i32;
+                                cell.data_link_columns = columns as i32;
+                                cell.state.insert(
+                                    CellStateFlags::LINKED
+                                        | CellStateFlags::CONTENT_LOCKED
+                                        | CellStateFlags::FORMAT_LOCKED,
+                                );
+                            }
+                        }
+                    }
+                    changed_handles.push(table_handle);
+                }
+                self.invalidate_property_targets(i, &changed_handles);
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+                self.command_line.push_output(
+                    crate::tf!("DATALINKUPDATE: updated {} linked table(s).", changed_handles.len())
+                        .as_ref(),
+                );
             }
 
             // LANDXMLIMPORT <path> — import survey points (LandXML <CgPoint>
@@ -1311,6 +1731,68 @@ fn parse_landxml_cgpoints(xml: &str) -> Vec<[f64; 3]> {
         rest = &body[close + "</CgPoint>".len()..];
     }
     out
+}
+
+fn parse_csv_table(text: &str) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            ',' if !quoted => row.push(std::mem::take(&mut field)),
+            '\n' if !quoted => {
+                if field.ends_with('\r') {
+                    field.pop();
+                }
+                row.push(std::mem::take(&mut field));
+                if row.iter().any(|value| !value.is_empty()) {
+                    rows.push(std::mem::take(&mut row));
+                } else {
+                    row.clear();
+                }
+            }
+            _ => field.push(ch),
+        }
+    }
+    if field.ends_with('\r') {
+        field.pop();
+    }
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        if row.iter().any(|value| !value.is_empty()) {
+            rows.push(row);
+        }
+    }
+    rows
+}
+
+fn table_to_csv(table: &acadrust::entities::Table) -> String {
+    fn escape(value: &str) -> String {
+        if value.contains([',', '"', '\r', '\n']) {
+            format!("\"{}\"", value.replace('"', "\"\""))
+        } else {
+            value.to_string()
+        }
+    }
+    table
+        .rows
+        .iter()
+        .map(|row| {
+            row.cells
+                .iter()
+                .map(|cell| escape(cell.text_value()))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n")
 }
 
 #[cfg(test)]

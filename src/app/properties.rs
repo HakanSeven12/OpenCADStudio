@@ -128,6 +128,9 @@ impl OpenCADStudio {
                             crate::entities::spline::control_vertex_count(spline)
                         })
                     }
+                    acadrust::EntityType::Table(table) => {
+                        Some(table.row_count().saturating_mul(table.column_count()))
+                    }
                     _ => None,
                 });
             vertex_count.map_or(prop_vertex, |count| prop_vertex.min(count.saturating_sub(1)))
@@ -140,6 +143,8 @@ impl OpenCADStudio {
             false
         };
         crate::scene::view::dispatch::set_prop_current_vertex(prop_vertex);
+        crate::entities::table::set_prop_current_cell(prop_vertex);
+        crate::entities::table::set_prop_current_cell_active(prop_vertex_indicator_active);
 
         let annotation_scale_handle = self.tabs[i].scene.displayed_annotation_scale_handle();
         let new_panel = {
@@ -1350,6 +1355,354 @@ impl OpenCADStudio {
                                 }
                             }
                         }
+                        acadrust::EntityType::Table(table) => {
+                            use acadrust::entities::table::{
+                                CellEdgeFlags, CellStylePropertyFlags, CellValueType,
+                            };
+
+                            let mut names: Vec<String> = doc
+                                .objects
+                                .values()
+                                .filter_map(|object| match object {
+                                    acadrust::objects::ObjectType::TableStyle(style)
+                                        if !style.name.trim().is_empty() =>
+                                    {
+                                        Some(style.name.clone())
+                                    }
+                                    _ => None,
+                                })
+                                .collect();
+                            names.sort_by_key(|name| name.to_ascii_lowercase());
+                            names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+                            let selected_style = table
+                                .table_style_handle
+                                .and_then(|handle| doc.objects.get(&handle))
+                                .and_then(|object| match object {
+                                    acadrust::objects::ObjectType::TableStyle(style) => {
+                                        Some(style)
+                                    }
+                                    _ => None,
+                                });
+                            let selected = selected_style
+                                .map(|style| style.name.clone())
+                                .unwrap_or_else(|| "Standard".to_string());
+                            if !names.iter().any(|name| name.eq_ignore_ascii_case(&selected)) {
+                                names.insert(0, selected.clone());
+                            }
+                            set_row_value(
+                                &mut sections,
+                                "tbl_style_handle",
+                                crate::scene::model::object::PropValue::Choice {
+                                    selected,
+                                    options: names,
+                                },
+                            );
+
+                            let title_suppressed =
+                                crate::entities::table::resolved_title_suppressed(
+                                    table,
+                                    selected_style,
+                                );
+                            let header_suppressed =
+                                crate::entities::table::resolved_header_suppressed(
+                                    table,
+                                    selected_style,
+                                );
+                            let flow_up = crate::entities::table::resolved_flow_up(
+                                table,
+                                selected_style,
+                            );
+                            let (horizontal_margin, vertical_margin) =
+                                crate::entities::table::resolved_table_margins(
+                                    table,
+                                    selected_style,
+                                );
+                            update_row_toggle(
+                                &mut sections,
+                                "tbl_title_suppressed",
+                                title_suppressed,
+                            );
+                            update_row_toggle(
+                                &mut sections,
+                                "tbl_header_suppressed",
+                                header_suppressed,
+                            );
+                            update_row_text(
+                                &mut sections,
+                                "tbl_flow_direction",
+                                if flow_up { "Up" } else { "Down" }.to_string(),
+                            );
+                            update_row_text(
+                                &mut sections,
+                                "tbl_horizontal_margin",
+                                crate::entities::common::format_length(horizontal_margin),
+                            );
+                            update_row_text(
+                                &mut sections,
+                                "tbl_vertical_margin",
+                                crate::entities::common::format_length(vertical_margin),
+                            );
+
+                            let columns = table.column_count();
+                            if columns > 0 {
+                                let cell_index = prop_vertex.min(
+                                    table.row_count()
+                                        .saturating_mul(columns)
+                                        .saturating_sub(1),
+                                );
+                                let row_index = cell_index / columns;
+                                let column_index = cell_index % columns;
+                                if let (Some(row), Some(cell)) = (
+                                    table.rows.get(row_index),
+                                    table.cell(row_index, column_index),
+                                ) {
+                                    let document_row_style = selected_style.map(|style| {
+                                        let kind = match (
+                                            title_suppressed,
+                                            header_suppressed,
+                                            row_index,
+                                        ) {
+                                            (false, _, 0) => 0,
+                                            (false, false, 1) | (true, false, 0) => 1,
+                                            _ => 2,
+                                        };
+                                        match kind {
+                                            0 => &style.title_row_style,
+                                            1 => &style.header_row_style,
+                                            _ => &style.data_row_style,
+                                        }
+                                    });
+                                    let local = |property| {
+                                        crate::entities::table::style_for_property(
+                                            table,
+                                            row,
+                                            column_index,
+                                            cell,
+                                            property,
+                                        )
+                                    };
+                                    let alignment = local(CellStylePropertyFlags::ALIGNMENT)
+                                        .map(|style| style.alignment)
+                                        .or_else(|| {
+                                            document_row_style.map(|style| style.alignment as i32)
+                                        })
+                                        .unwrap_or(5);
+                                    let alignment = match alignment {
+                                        1 => "Top Left",
+                                        2 => "Top Center",
+                                        3 => "Top Right",
+                                        4 => "Middle Left",
+                                        6 => "Middle Right",
+                                        7 => "Bottom Left",
+                                        8 => "Bottom Center",
+                                        9 => "Bottom Right",
+                                        _ => "Middle Center",
+                                    };
+                                    update_row_text(
+                                        &mut sections,
+                                        "tbl_cell_alignment",
+                                        alignment.to_string(),
+                                    );
+
+                                    let text_style_name = local(CellStylePropertyFlags::TEXT_STYLE)
+                                        .map(|style| style.text_style_name.clone())
+                                        .filter(|name| !name.is_empty())
+                                        .or_else(|| {
+                                            document_row_style
+                                                .map(|style| style.text_style_name.clone())
+                                                .filter(|name| !name.is_empty())
+                                        })
+                                        .unwrap_or_else(|| "Standard".to_string());
+                                    update_row_text(
+                                        &mut sections,
+                                        "tbl_cell_text_style",
+                                        text_style_name,
+                                    );
+                                    let text_height = local(CellStylePropertyFlags::TEXT_HEIGHT)
+                                        .map(|style| style.text_height)
+                                        .or_else(|| {
+                                            document_row_style.map(|style| style.text_height)
+                                        })
+                                        .unwrap_or(0.18);
+                                    update_row_text(
+                                        &mut sections,
+                                        "tbl_cell_text_height",
+                                        crate::entities::common::format_length(text_height),
+                                    );
+                                    let content_color = local(
+                                        CellStylePropertyFlags::CONTENT_COLOR,
+                                    )
+                                    .map(|style| style.content_color)
+                                    .or_else(|| {
+                                        document_row_style.map(|style| style.text_color)
+                                    })
+                                    .unwrap_or(acadrust::types::Color::ByBlock);
+                                    update_row_color(
+                                        &mut sections,
+                                        "tbl_cell_content_color",
+                                        content_color,
+                                    );
+                                    let background_style =
+                                        local(CellStylePropertyFlags::BACKGROUND_COLOR);
+                                    let background_color = background_style
+                                        .map(|style| style.background_color)
+                                        .or_else(|| {
+                                            document_row_style.map(|style| style.fill_color)
+                                        })
+                                        .unwrap_or(acadrust::types::Color::ByBlock);
+                                    update_row_color(
+                                        &mut sections,
+                                        "tbl_cell_background_color",
+                                        background_color,
+                                    );
+                                    update_row_toggle(
+                                        &mut sections,
+                                        "tbl_cell_fill",
+                                        background_style
+                                            .map(|style| style.fill_enabled)
+                                            .or_else(|| {
+                                                document_row_style
+                                                    .map(|style| style.fill_enabled)
+                                            })
+                                            .unwrap_or(false),
+                                    );
+                                    let format = local(CellStylePropertyFlags::DATA_FORMAT)
+                                        .map(|style| style.value_format.clone())
+                                        .or_else(|| {
+                                            document_row_style
+                                                .map(|style| style.format_string.clone())
+                                        })
+                                        .unwrap_or_default();
+                                    update_row_text(
+                                        &mut sections,
+                                        "tbl_cell_format",
+                                        format,
+                                    );
+                                    let data_type = cell
+                                        .contents
+                                        .first()
+                                        .map(|content| content.value.value_type)
+                                        .filter(|kind| *kind != CellValueType::Unknown)
+                                        .or_else(|| {
+                                            local(CellStylePropertyFlags::DATA_TYPE)
+                                                .map(|style| {
+                                                    CellValueType::from(
+                                                        style.value_data_type.max(0) as u32,
+                                                    )
+                                                })
+                                        })
+                                        .or_else(|| {
+                                            document_row_style.map(|style| {
+                                                CellValueType::from(style.data_type.max(0) as u32)
+                                            })
+                                        })
+                                        .unwrap_or(CellValueType::String);
+                                    let data_type = match data_type {
+                                        CellValueType::Long => "Integer",
+                                        CellValueType::Double => "Decimal",
+                                        CellValueType::Date => "Date",
+                                        CellValueType::Point2D => "Point 2D",
+                                        CellValueType::Point3D => "Point 3D",
+                                        CellValueType::Handle => "Handle",
+                                        _ => "Text",
+                                    };
+                                    update_row_text(
+                                        &mut sections,
+                                        "tbl_cell_data_type",
+                                        data_type.to_string(),
+                                    );
+                                    for (field, property, fallback) in [
+                                        (
+                                            "tbl_cell_margin_left",
+                                            CellStylePropertyFlags::MARGIN_LEFT,
+                                            horizontal_margin,
+                                        ),
+                                        (
+                                            "tbl_cell_margin_top",
+                                            CellStylePropertyFlags::MARGIN_TOP,
+                                            vertical_margin,
+                                        ),
+                                        (
+                                            "tbl_cell_margin_right",
+                                            CellStylePropertyFlags::MARGIN_RIGHT,
+                                            horizontal_margin,
+                                        ),
+                                        (
+                                            "tbl_cell_margin_bottom",
+                                            CellStylePropertyFlags::MARGIN_BOTTOM,
+                                            vertical_margin,
+                                        ),
+                                    ] {
+                                        let value = local(property)
+                                            .map(|style| match field {
+                                                "tbl_cell_margin_left" => style.margin_left,
+                                                "tbl_cell_margin_top" => style.margin_top,
+                                                "tbl_cell_margin_right" => style.margin_right,
+                                                _ => style.margin_bottom,
+                                            })
+                                            .unwrap_or(fallback);
+                                        update_row_text(
+                                            &mut sections,
+                                            field,
+                                            crate::entities::common::format_length(value),
+                                        );
+                                    }
+
+                                    let border_visible = |edge: CellEdgeFlags| {
+                                        let local_style = [
+                                            cell.style.as_ref(),
+                                            row.style.as_ref(),
+                                            table
+                                                .columns
+                                                .get(column_index)
+                                                .and_then(|column| column.style.as_ref()),
+                                            table.base_style.as_ref(),
+                                        ]
+                                        .into_iter()
+                                        .flatten()
+                                        .find(|style| {
+                                            style.applied_border_edges.contains(edge)
+                                        });
+                                        if let Some(style) = local_style {
+                                            return if edge == CellEdgeFlags::TOP {
+                                                !style.top_border.invisible
+                                            } else if edge == CellEdgeFlags::RIGHT {
+                                                !style.right_border.invisible
+                                            } else if edge == CellEdgeFlags::BOTTOM {
+                                                !style.bottom_border.invisible
+                                            } else {
+                                                !style.left_border.invisible
+                                            };
+                                        }
+                                        document_row_style
+                                            .map(|style| {
+                                                if edge == CellEdgeFlags::TOP {
+                                                    !style.top_border.is_invisible
+                                                } else if edge == CellEdgeFlags::RIGHT {
+                                                    !style.right_border.is_invisible
+                                                } else if edge == CellEdgeFlags::BOTTOM {
+                                                    !style.bottom_border.is_invisible
+                                                } else {
+                                                    !style.left_border.is_invisible
+                                                }
+                                            })
+                                            .unwrap_or(true)
+                                    };
+                                    for (field, edge) in [
+                                        ("tbl_cell_border_top", CellEdgeFlags::TOP),
+                                        ("tbl_cell_border_right", CellEdgeFlags::RIGHT),
+                                        ("tbl_cell_border_bottom", CellEdgeFlags::BOTTOM),
+                                        ("tbl_cell_border_left", CellEdgeFlags::LEFT),
+                                    ] {
+                                        update_row_toggle(
+                                            &mut sections,
+                                            field,
+                                            border_visible(edge),
+                                        );
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     }
 
@@ -1939,6 +2292,51 @@ impl OpenCADStudio {
         mut entity: acadrust::EntityType,
     ) -> Option<Handle> {
         let i = self.active_tab;
+        if let acadrust::EntityType::Table(table) = &mut entity {
+            const PREFIX: &str = "__OPENCAD_LINK_PENDING__";
+            if let Some(path) = table.name.strip_prefix(PREFIX).map(str::to_string) {
+                use acadrust::entities::table::CellStateFlags;
+                use acadrust::objects::{
+                    ClassObject, ClassObjectData, DataLink, ObjectType,
+                };
+                let document = &mut self.tabs[i].scene.document;
+                let link_handle = document.allocate_handle();
+                let mut object = ClassObject::new(ClassObjectData::DataLink(DataLink {
+                    data_adapter: "CSV".to_string(),
+                    description: path.clone(),
+                    tooltip: path.clone(),
+                    connection_string: path.clone(),
+                    status_flags: 1,
+                    update_status: "Linked".to_string(),
+                    ..DataLink::default()
+                }));
+                object.handle = link_handle;
+                document
+                    .objects
+                    .insert(link_handle, ObjectType::ClassObject(object));
+                let rows = table.row_count() as i32;
+                let columns = table.column_count() as i32;
+                for row in &mut table.rows {
+                    for cell in &mut row.cells {
+                        cell.has_linked_data = true;
+                        cell.data_link_handle = Some(link_handle);
+                        cell.data_link_rows = rows;
+                        cell.data_link_columns = columns;
+                        cell.state.insert(
+                            CellStateFlags::LINKED
+                                | CellStateFlags::CONTENT_LOCKED
+                                | CellStateFlags::FORMAT_LOCKED,
+                        );
+                    }
+                }
+                table.name = std::path::Path::new(&path)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("Linked table")
+                    .to_string();
+                table.description = path;
+            }
+        }
         let tracks_draw_anchor = self.tabs[i].active_cmd.is_some()
             && matches!(
                 &entity,
@@ -2445,6 +2843,79 @@ fn set_row_value(
             row.value = value;
             return;
         }
+    }
+}
+
+fn update_row_text(
+    sections: &mut [crate::scene::model::object::PropSection],
+    field: &str,
+    value: String,
+) {
+    use crate::scene::model::object::PropValue;
+    for section in sections.iter_mut() {
+        let Some(row) = section.props.iter_mut().find(|property| property.field == field) else {
+            continue;
+        };
+        match &mut row.value {
+            PropValue::ReadOnly(current)
+            | PropValue::EditText(current)
+            | PropValue::PlainText(current) => *current = value,
+            PropValue::ReadOnlyWithTooltip { value: current, .. } => *current = value,
+            PropValue::Choice { selected, .. } => *selected = value,
+            _ => {}
+        }
+        return;
+    }
+}
+
+fn update_row_toggle(
+    sections: &mut [crate::scene::model::object::PropSection],
+    field: &str,
+    value: bool,
+) {
+    use crate::scene::model::object::PropValue;
+    for section in sections.iter_mut() {
+        let Some(row) = section.props.iter_mut().find(|property| property.field == field) else {
+            continue;
+        };
+        match &mut row.value {
+            PropValue::BoolToggle { value: current, .. } => *current = value,
+            PropValue::ReadOnly(current) => {
+                *current = if value { t!("Yes") } else { t!("No") }.into_owned()
+            }
+            PropValue::ReadOnlyWithTooltip { value: current, .. } => {
+                *current = if value { t!("Yes") } else { t!("No") }.into_owned()
+            }
+            _ => {}
+        }
+        return;
+    }
+}
+
+fn update_row_color(
+    sections: &mut [crate::scene::model::object::PropSection],
+    field: &str,
+    color: acadrust::types::Color,
+) {
+    use crate::scene::model::object::PropValue;
+    let label = match color {
+        acadrust::types::Color::None => "None".to_string(),
+        acadrust::types::Color::ByLayer => "ByLayer".to_string(),
+        acadrust::types::Color::ByBlock => "ByBlock".to_string(),
+        acadrust::types::Color::Index(index) => index.to_string(),
+        acadrust::types::Color::Rgb { r, g, b } => format!("{r},{g},{b}"),
+    };
+    for section in sections.iter_mut() {
+        let Some(row) = section.props.iter_mut().find(|property| property.field == field) else {
+            continue;
+        };
+        match &mut row.value {
+            PropValue::ColorChoice(current) => *current = color,
+            PropValue::ReadOnly(current) => *current = label,
+            PropValue::ReadOnlyWithTooltip { value: current, .. } => *current = label,
+            _ => {}
+        }
+        return;
     }
 }
 

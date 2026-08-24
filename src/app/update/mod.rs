@@ -4651,6 +4651,47 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
+                            "tbl_title_suppressed" | "tbl_header_suppressed" => {
+                                let next = {
+                                    let document = &self.tabs[i].scene.document;
+                                    let Some(acadrust::EntityType::Table(table)) =
+                                        document.get_entity(handle)
+                                    else {
+                                        continue;
+                                    };
+                                    let table_style = table.table_style_handle.and_then(|style_handle| {
+                                        document.objects.get(&style_handle).and_then(|object| {
+                                            match object {
+                                                acadrust::objects::ObjectType::TableStyle(style) => {
+                                                    Some(style)
+                                                }
+                                                _ => None,
+                                            }
+                                        })
+                                    });
+                                    let current = if field == "tbl_title_suppressed" {
+                                        crate::entities::table::resolved_title_suppressed(
+                                            table,
+                                            table_style,
+                                        )
+                                    } else {
+                                        crate::entities::table::resolved_header_suppressed(
+                                            table,
+                                            table_style,
+                                        )
+                                    };
+                                    !current
+                                };
+                                if let Some(entity) =
+                                    self.tabs[i].scene.document.get_entity_mut(handle)
+                                {
+                                    crate::scene::view::dispatch::apply_geom_prop(
+                                        entity,
+                                        field,
+                                        if next { "true" } else { "false" },
+                                    );
+                                }
+                            }
                             _ => {
                                 if let Some(entity) =
                                     self.tabs[i].scene.document.get_entity_mut(handle)
@@ -4659,6 +4700,15 @@ impl OpenCADStudio {
                                         entity, field, "toggle",
                                     );
                                 }
+                            }
+                        }
+                    }
+                    if field.starts_with("tbl_") {
+                        for &handle in &handles {
+                            if let Some(acadrust::EntityType::Table(table)) =
+                                self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                table.block_record_handle = None;
                             }
                         }
                     }
@@ -4677,6 +4727,9 @@ impl OpenCADStudio {
                     match self.tabs[i].scene.document.get_entity(handles[0]) {
                         Some(acadrust::EntityType::LwPolyline(p)) => p.vertices.len(),
                         Some(acadrust::EntityType::Polyline2D(p)) => p.vertices.len(),
+                        Some(acadrust::EntityType::Table(table)) => {
+                            table.row_count().saturating_mul(table.column_count())
+                        }
                         _ => 0,
                     }
                 } else {
@@ -4688,6 +4741,7 @@ impl OpenCADStudio {
                     let next = (cur + delta as i64).rem_euclid(n as i64) as usize;
                     self.tabs[i].properties.prop_vertex = next;
                     self.tabs[i].properties.prop_vertex_indicator_active = next != cur as usize;
+                    crate::entities::table::set_prop_current_cell(next);
                     self.refresh_properties();
                 }
                 Task::none()
@@ -4888,6 +4942,57 @@ impl OpenCADStudio {
                             );
                         }
                         self.invalidate_property_targets(i, &targets);
+                        self.tabs[i].properties.open_color_field = None;
+                        self.tabs[i].dirty = true;
+                        self.refresh_properties();
+                    }
+                    return Task::none();
+                }
+                if matches!(
+                    field.as_str(),
+                    "tbl_cell_content_color" | "tbl_cell_background_color"
+                ) {
+                    let cell_index = self.tabs[i].properties.prop_vertex;
+                    if !handles.is_empty() {
+                        self.push_undo_snapshot(i, "TABLE CELL COLOR");
+                        for &handle in &handles {
+                            let Some(acadrust::EntityType::Table(table)) =
+                                self.tabs[i].scene.document.get_entity_mut(handle)
+                            else {
+                                continue;
+                            };
+                            let columns = table.column_count();
+                            if columns == 0 {
+                                continue;
+                            }
+                            if let Some(cell) = table.cell_mut(
+                                cell_index / columns,
+                                cell_index % columns,
+                            ) {
+                                use acadrust::entities::table::CellStateFlags;
+                                if cell.state.intersects(
+                                    CellStateFlags::FORMAT_LOCKED
+                                        | CellStateFlags::FORMAT_READ_ONLY,
+                                ) {
+                                    continue;
+                                }
+                                let style = cell.style.get_or_insert_with(Default::default);
+                                if field == "tbl_cell_content_color" {
+                                    style.content_color = color;
+                                    style.property_flags.insert(
+                                        acadrust::entities::table::CellStylePropertyFlags::CONTENT_COLOR,
+                                    );
+                                } else {
+                                    style.background_color = color;
+                                    style.fill_enabled = true;
+                                    style.property_flags.insert(
+                                        acadrust::entities::table::CellStylePropertyFlags::BACKGROUND_COLOR,
+                                    );
+                                }
+                            }
+                            table.block_record_handle = None;
+                        }
+                        self.invalidate_property_targets(i, &handles);
                         self.tabs[i].properties.open_color_field = None;
                         self.tabs[i].dirty = true;
                         self.refresh_properties();

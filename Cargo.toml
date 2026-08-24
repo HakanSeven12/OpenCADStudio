@@ -27,7 +27,7 @@ glam = { version = "0.33", features = ["bytemuck"] }
 rfd = "0.17"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
-acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "94df2c3", features = ["serde"] }
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "1fa0a5e", features = ["serde"] }
 cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "76de3b3", features = ["acis", "offset"] }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
@@ -59,6 +59,9 @@ ashpd = { version = "0.13.13", default-features = false, features = ["async-io",
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
+
+[patch."https://github.com/HakanSeven12/cadcodec.git"]
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "1fa0a5e" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ocs_plugin_api = { path = "crates/ocs_plugin_api", features = ["host"] }

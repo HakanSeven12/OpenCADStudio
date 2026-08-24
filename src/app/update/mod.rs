@@ -4651,6 +4651,47 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
+                            "tbl_title_suppressed" | "tbl_header_suppressed" => {
+                                let next = {
+                                    let document = &self.tabs[i].scene.document;
+                                    let Some(acadrust::EntityType::Table(table)) =
+                                        document.get_entity(handle)
+                                    else {
+                                        continue;
+                                    };
+                                    let table_style = table.table_style_handle.and_then(|style_handle| {
+                                        document.objects.get(&style_handle).and_then(|object| {
+                                            match object {
+                                                acadrust::objects::ObjectType::TableStyle(style) => {
+                                                    Some(style)
+                                                }
+                                                _ => None,
+                                            }
+                                        })
+                                    });
+                                    let current = if field == "tbl_title_suppressed" {
+                                        crate::entities::table::resolved_title_suppressed(
+                                            table,
+                                            table_style,
+                                        )
+                                    } else {
+                                        crate::entities::table::resolved_header_suppressed(
+                                            table,
+                                            table_style,
+                                        )
+                                    };
+                                    !current
+                                };
+                                if let Some(entity) =
+                                    self.tabs[i].scene.document.get_entity_mut(handle)
+                                {
+                                    crate::scene::view::dispatch::apply_geom_prop(
+                                        entity,
+                                        field,
+                                        if next { "true" } else { "false" },
+                                    );
+                                }
+                            }
                             _ => {
                                 if let Some(entity) =
                                     self.tabs[i].scene.document.get_entity_mut(handle)
@@ -4659,6 +4700,15 @@ impl OpenCADStudio {
                                         entity, field, "toggle",
                                     );
                                 }
+                            }
+                        }
+                    }
+                    if field.starts_with("tbl_") {
+                        for &handle in &handles {
+                            if let Some(acadrust::EntityType::Table(table)) =
+                                self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                table.block_record_handle = None;
                             }
                         }
                     }
@@ -4889,6 +4939,13 @@ impl OpenCADStudio {
                                 cell_index / columns,
                                 cell_index % columns,
                             ) {
+                                use acadrust::entities::table::CellStateFlags;
+                                if cell.state.intersects(
+                                    CellStateFlags::FORMAT_LOCKED
+                                        | CellStateFlags::FORMAT_READ_ONLY,
+                                ) {
+                                    continue;
+                                }
                                 let style = cell.style.get_or_insert_with(Default::default);
                                 if field == "tbl_cell_content_color" {
                                     style.content_color = color;
@@ -4903,6 +4960,7 @@ impl OpenCADStudio {
                                     );
                                 }
                             }
+                            table.block_record_handle = None;
                         }
                         self.invalidate_property_targets(i, &handles);
                         self.tabs[i].properties.open_color_field = None;

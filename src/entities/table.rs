@@ -15,14 +15,23 @@ use crate::t;
 
 thread_local! {
     static PROPERTY_CELL: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static PROPERTY_CELL_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 pub fn set_prop_current_cell(index: usize) {
     PROPERTY_CELL.with(|cell| cell.set(index));
 }
 
+pub fn set_prop_current_cell_active(active: bool) {
+    PROPERTY_CELL_ACTIVE.with(|cell| cell.set(active));
+}
+
 fn prop_current_cell() -> usize {
     PROPERTY_CELL.with(std::cell::Cell::get)
+}
+
+fn prop_current_cell_active() -> bool {
+    PROPERTY_CELL_ACTIVE.with(std::cell::Cell::get)
 }
 
 fn v3(v: &acadrust::types::Vector3) -> Vec3 {
@@ -78,7 +87,7 @@ fn merged_owner_and_span(
     Some((row, column, row, column))
 }
 
-fn style_for_property<'a>(
+pub(crate) fn style_for_property<'a>(
     table: &'a Table,
     row: &'a acadrust::entities::table::TableRow,
     column: usize,
@@ -89,7 +98,12 @@ fn style_for_property<'a>(
         .columns
         .get(column)
         .and_then(|column| column.style.as_ref());
-    for style in [cell.style.as_ref(), row.style.as_ref(), column_style]
+    for style in [
+        cell.style.as_ref(),
+        row.style.as_ref(),
+        column_style,
+        table.base_style.as_ref(),
+    ]
         .into_iter()
         .flatten()
     {
@@ -97,12 +111,99 @@ fn style_for_property<'a>(
             return Some(style);
         }
     }
-    table.base_style.as_ref().or_else(|| {
-        [cell.style.as_ref(), row.style.as_ref(), column_style]
-            .into_iter()
-            .flatten()
-            .next()
-    })
+    None
+}
+
+fn style_for_border<'a>(
+    table: &'a Table,
+    row: &'a acadrust::entities::table::TableRow,
+    column: usize,
+    cell: &'a acadrust::entities::table::TableCell,
+    edge: acadrust::entities::table::CellEdgeFlags,
+) -> Option<&'a acadrust::entities::table::CellStyle> {
+    let column_style = table
+        .columns
+        .get(column)
+        .and_then(|column| column.style.as_ref());
+    [
+        cell.style.as_ref(),
+        row.style.as_ref(),
+        column_style,
+        table.base_style.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|style| style.applied_border_edges.contains(edge))
+}
+
+pub(crate) fn resolved_title_suppressed(
+    table: &Table,
+    table_style: Option<&acadrust::objects::TableStyle>,
+) -> bool {
+    table
+        .legacy_style_override
+        .as_ref()
+        .and_then(|style| style.title_suppressed)
+        .or_else(|| table_style.map(|style| style.title_suppressed))
+        .unwrap_or(false)
+}
+
+pub(crate) fn resolved_header_suppressed(
+    table: &Table,
+    table_style: Option<&acadrust::objects::TableStyle>,
+) -> bool {
+    table
+        .legacy_style_override
+        .as_ref()
+        .and_then(|style| style.header_suppressed)
+        .or_else(|| table_style.map(|style| style.header_suppressed))
+        .unwrap_or(false)
+}
+
+pub(crate) fn resolved_flow_up(
+    table: &Table,
+    table_style: Option<&acadrust::objects::TableStyle>,
+) -> bool {
+    use acadrust::entities::table::CellStylePropertyFlags;
+
+    table
+        .legacy_style_override
+        .as_ref()
+        .and_then(|style| style.flow_direction)
+        .map(|flow| flow != 0)
+        .or_else(|| {
+            table.base_style.as_ref().and_then(|style| {
+                style
+                    .property_flags
+                    .contains(CellStylePropertyFlags::FLOW_DIRECTION_BOTTOM_TO_TOP)
+                    .then_some(true)
+            })
+        })
+        .unwrap_or_else(|| {
+            matches!(
+                table_style.map(|style| style.flow_direction),
+                Some(acadrust::objects::TableFlowDirection::Up)
+            )
+        })
+}
+
+pub(crate) fn resolved_table_margins(
+    table: &Table,
+    table_style: Option<&acadrust::objects::TableStyle>,
+) -> (f64, f64) {
+    let horizontal = table
+        .legacy_style_override
+        .as_ref()
+        .and_then(|style| style.horizontal_cell_margin)
+        .or_else(|| table_style.map(|style| style.horizontal_margin))
+        .unwrap_or(0.0);
+    let vertical = table
+        .legacy_style_override
+        .as_ref()
+        .and_then(|style| style.vertical_cell_margin)
+        .or_else(|| table_style.map(|style| style.vertical_margin))
+        .unwrap_or(0.0);
+    (horizontal, vertical)
 }
 
 fn table_offsets(table: &Table, scale: f32) -> (Vec<f32>, Vec<f32>) {
@@ -120,40 +221,68 @@ fn table_offsets(table: &Table, scale: f32) -> (Vec<f32>, Vec<f32>) {
     (columns, rows)
 }
 
-fn break_frame_for_row(
+#[derive(Clone, Copy)]
+struct TableBreakSegment {
+    start_row: usize,
+    end_row: usize,
+    origin: Vec3,
+}
+
+fn table_break_segments(
     table: &Table,
-    row: usize,
     h: Vec3,
     down: Vec3,
     row_offsets: &[f32],
     scale: f32,
-) -> (Vec3, f32) {
+) -> Vec<TableBreakSegment> {
     use acadrust::entities::table::BreakOptionFlags;
 
     let insertion = v3(&table.insertion_point);
-    let offset_to_world =
-        |offset: &acadrust::types::Vector3| insertion + v3(offset);
+    if table.rows.is_empty() {
+        return Vec::new();
+    }
     if !table.break_options.contains(BreakOptionFlags::ENABLE_BREAKS) {
-        return (insertion, row_offsets.get(row).copied().unwrap_or(0.0));
+        return vec![TableBreakSegment {
+            start_row: 0,
+            end_row: table.rows.len() - 1,
+            origin: insertion,
+        }];
     }
 
-    if let Some(range) = table
+    let offset_to_world = |offset: &acadrust::types::Vector3| insertion + v3(offset);
+    let mut cached: Vec<_> = table
         .break_ranges
         .iter()
-        .find(|range| row as i32 >= range.start_row && row as i32 <= range.end_row)
-    {
-        let start = range.start_row.max(0) as usize;
-        let position = offset_to_world(&range.position);
-        let origin = if position.is_finite() {
-            position
-        } else {
-            insertion
-        };
-        let top = row_offsets.get(row).copied().unwrap_or(0.0)
-            - row_offsets.get(start).copied().unwrap_or(0.0);
-        return (origin, top);
+        .filter_map(|range| {
+            let start = range.start_row.max(0) as usize;
+            let end = range.end_row.max(0) as usize;
+            (start <= end && end < table.rows.len()).then(|| TableBreakSegment {
+                start_row: start,
+                end_row: end,
+                origin: {
+                    let position = offset_to_world(&range.position);
+                    if position.is_finite() {
+                        position
+                    } else {
+                        insertion
+                    }
+                },
+            })
+        })
+        .collect();
+    cached.sort_by_key(|segment| segment.start_row);
+    let cached_complete = cached.first().is_some_and(|segment| segment.start_row == 0)
+        && cached
+            .last()
+            .is_some_and(|segment| segment.end_row + 1 == table.rows.len())
+        && cached
+            .windows(2)
+            .all(|pair| pair[0].end_row + 1 == pair[1].start_row);
+    if cached_complete {
+        return cached;
     }
 
+    let mut segments = Vec::new();
     let mut start_row = 0usize;
     let mut segment = 0usize;
     while start_row < table.rows.len() {
@@ -173,46 +302,152 @@ fn break_frame_for_row(
         {
             end_row += 1;
         }
-        if row <= end_row {
-            let manual_positions = table
-                .break_options
-                .contains(BreakOptionFlags::ALLOW_MANUAL_POSITIONS);
-            let manual_origin = manual_positions
-                .then(|| table.break_data.get(segment))
-                .flatten()
-                .map(|data| offset_to_world(&data.position))
-                .filter(|position| position.is_finite());
-            let origin = manual_origin.unwrap_or_else(|| {
-                let spacing = table.break_spacing as f32 * scale;
-                let horizontal_step =
-                    table.total_width() as f32 * scale + spacing;
-                let vertical_step = if max_height.is_finite() {
-                    max_height + spacing
-                } else {
-                    table.total_height() as f32 * scale + spacing
-                };
-                match table.break_flow_direction {
-                    acadrust::entities::table::BreakFlowDirection::Left => {
-                        insertion - h * segment as f32 * horizontal_step
-                    }
-                    acadrust::entities::table::BreakFlowDirection::Vertical => {
-                        insertion + down * segment as f32 * vertical_step
-                    }
-                    acadrust::entities::table::BreakFlowDirection::Right => {
-                        insertion + h * segment as f32 * horizontal_step
-                    }
+        let manual_positions = table
+            .break_options
+            .contains(BreakOptionFlags::ALLOW_MANUAL_POSITIONS);
+        let manual_origin = manual_positions
+            .then(|| table.break_data.get(segment))
+            .flatten()
+            .map(|data| offset_to_world(&data.position))
+            .filter(|position| position.is_finite());
+        let origin = manual_origin.unwrap_or_else(|| {
+            let spacing = table.break_spacing as f32 * scale;
+            let horizontal_step = table.total_width() as f32 * scale + spacing;
+            let vertical_step = if max_height.is_finite() {
+                max_height + spacing
+            } else {
+                table.total_height() as f32 * scale + spacing
+            };
+            match table.break_flow_direction {
+                acadrust::entities::table::BreakFlowDirection::Left => {
+                    insertion - h * segment as f32 * horizontal_step
                 }
-            });
-            return (
-                origin,
-                row_offsets.get(row).copied().unwrap_or(0.0) - start_offset,
-            );
-        }
+                acadrust::entities::table::BreakFlowDirection::Vertical => {
+                    insertion + down * segment as f32 * vertical_step
+                }
+                acadrust::entities::table::BreakFlowDirection::Right => {
+                    insertion + h * segment as f32 * horizontal_step
+                }
+            }
+        });
+        segments.push(TableBreakSegment {
+            start_row,
+            end_row,
+            origin,
+        });
         start_row = end_row.saturating_add(1);
         segment = segment.saturating_add(1);
     }
 
+    segments
+}
+
+fn break_frame_for_row(
+    table: &Table,
+    row: usize,
+    h: Vec3,
+    down: Vec3,
+    row_offsets: &[f32],
+    scale: f32,
+) -> (Vec3, f32) {
+    let insertion = v3(&table.insertion_point);
+    if let Some(segment) = table_break_segments(table, h, down, row_offsets, scale)
+        .into_iter()
+        .find(|segment| row >= segment.start_row && row <= segment.end_row)
+    {
+        return (
+            segment.origin,
+            row_offsets.get(row).copied().unwrap_or(0.0)
+                - row_offsets
+                    .get(segment.start_row)
+                    .copied()
+                    .unwrap_or(0.0),
+        );
+    }
+
     (insertion, row_offsets.get(row).copied().unwrap_or(0.0))
+}
+
+fn break_frames_for_row(
+    table: &Table,
+    row: usize,
+    h: Vec3,
+    down: Vec3,
+    row_offsets: &[f32],
+    scale: f32,
+    top_label_rows: usize,
+    bottom_label_rows: usize,
+) -> Vec<(Vec3, f32)> {
+    use acadrust::entities::table::BreakOptionFlags;
+
+    let segments = table_break_segments(table, h, down, row_offsets, scale);
+    let Some((segment_index, segment)) = segments
+        .iter()
+        .enumerate()
+        .find(|(_, segment)| row >= segment.start_row && row <= segment.end_row)
+    else {
+        return vec![break_frame_for_row(table, row, h, down, row_offsets, scale)];
+    };
+    let repeat_top = table
+        .break_options
+        .contains(BreakOptionFlags::REPEAT_TOP_LABELS)
+        && top_label_rows > 0;
+    let repeat_bottom = table
+        .break_options
+        .contains(BreakOptionFlags::REPEAT_BOTTOM_LABELS)
+        && bottom_label_rows > 0;
+    let top_label_rows = top_label_rows.min(table.rows.len());
+    let bottom_label_rows = bottom_label_rows.min(table.rows.len());
+    let bottom_start = table.rows.len().saturating_sub(bottom_label_rows);
+    let top_height = row_offsets
+        .get(top_label_rows)
+        .copied()
+        .unwrap_or(0.0);
+    let mut primary_top = row_offsets.get(row).copied().unwrap_or(0.0)
+        - row_offsets
+            .get(segment.start_row)
+            .copied()
+            .unwrap_or(0.0);
+    if repeat_top && segment_index > 0 {
+        primary_top += top_height;
+    }
+    let mut frames = vec![(segment.origin, primary_top)];
+
+    if repeat_top && row < top_label_rows {
+        for repeated_segment in segments.iter().skip(1) {
+            frames.push((
+                repeated_segment.origin,
+                row_offsets.get(row).copied().unwrap_or(0.0),
+            ));
+        }
+    }
+    if repeat_bottom && row >= bottom_start {
+        let label_offset = row_offsets.get(row).copied().unwrap_or(0.0)
+            - row_offsets.get(bottom_start).copied().unwrap_or(0.0);
+        for (index, repeated_segment) in segments
+            .iter()
+            .enumerate()
+            .take(segments.len().saturating_sub(1))
+        {
+            let content_height = row_offsets
+                .get(repeated_segment.end_row + 1)
+                .copied()
+                .unwrap_or(0.0)
+                - row_offsets
+                    .get(repeated_segment.start_row)
+                    .copied()
+                    .unwrap_or(0.0);
+            let repeated_top = content_height
+                + if repeat_top && index > 0 {
+                    top_height
+                } else {
+                    0.0
+                }
+                + label_offset;
+            frames.push((repeated_segment.origin, repeated_top));
+        }
+    }
+    frames
 }
 
 fn format_cell_value(value: &acadrust::entities::table::CellValue) -> String {
@@ -484,10 +719,7 @@ pub(crate) fn block_cell_inserts(
             _ => None,
         })
     });
-    let flow = if matches!(
-        table_style.map(|style| style.flow_direction),
-        Some(acadrust::objects::TableFlowDirection::Up)
-    ) {
+    let flow = if resolved_flow_up(table, table_style) {
         -down
     } else {
         down
@@ -915,8 +1147,8 @@ impl RenderConvertible for Table {
                     _ => None,
                 })
             });
-        let title_suppressed = table_style.map(|t| t.title_suppressed).unwrap_or(false);
-        let header_suppressed = table_style.map(|t| t.header_suppressed).unwrap_or(false);
+        let title_suppressed = resolved_title_suppressed(self, table_style);
+        let header_suppressed = resolved_header_suppressed(self, table_style);
 
         let font_for_handle = |handle: Option<acadrust::Handle>| -> Option<String> {
             handle.and_then(|h| lookup_style(h)).and_then(|s| {
@@ -1179,20 +1411,19 @@ pub fn tessellate_table(
                 _ => None,
             })
         });
-    let flow_up = matches!(
-        table_style.map(|t| t.flow_direction),
-        Some(acadrust::objects::TableFlowDirection::Up)
-    );
+    let flow_up = resolved_flow_up(tab, table_style);
     let v_flow = if flow_up { -v_down } else { v_down };
 
     let (col_offsets, row_offsets) = table_offsets(tab, anno_scale);
 
-    let title_suppressed = table_style.map(|t| t.title_suppressed).unwrap_or(false);
-    let header_suppressed = table_style.map(|t| t.header_suppressed).unwrap_or(false);
-    let h_margin = table_style
-        .map(|t| t.horizontal_margin as f32)
-        .unwrap_or(0.0) * anno_scale;
-    let v_margin = table_style.map(|t| t.vertical_margin as f32).unwrap_or(0.0) * anno_scale;
+    let title_suppressed = resolved_title_suppressed(tab, table_style);
+    let header_suppressed = resolved_header_suppressed(tab, table_style);
+    let top_label_rows = (usize::from(!title_suppressed) + usize::from(!header_suppressed))
+        .min(tab.rows.len());
+    let bottom_label_rows = usize::from(!tab.rows.is_empty());
+    let (horizontal_margin, vertical_margin) = resolved_table_margins(tab, table_style);
+    let h_margin = horizontal_margin as f32 * anno_scale;
+    let v_margin = vertical_margin as f32 * anno_scale;
 
     let lookup_style = |hh: acadrust::Handle| -> Option<&acadrust::tables::TextStyle> {
         document.text_styles.iter().find(|s| s.handle == hh)
@@ -1287,8 +1518,17 @@ pub fn tessellate_table(
             else {
                 continue;
             };
-            let (origin, row_top) =
-                break_frame_for_row(tab, ri, h, v_flow, &row_offsets, anno_scale);
+            let frames = break_frames_for_row(
+                tab,
+                ri,
+                h,
+                v_flow,
+                &row_offsets,
+                anno_scale,
+                top_label_rows,
+                bottom_label_rows,
+            );
+            for (origin, row_top) in frames {
             let merged_height = row_offsets
                 .get(row_end + 1)
                 .copied()
@@ -1306,13 +1546,6 @@ pub fn tessellate_table(
             let tr = origin + h * col_right + v_flow * row_top;
             let br_ = origin + h * col_right + v_flow * row_bot;
             let bl = origin + h * col_left + v_flow * row_bot;
-            let cell_style = cell
-                .style
-                .as_ref()
-                .or(row.style.as_ref())
-                .or_else(|| tab.columns.get(ci).and_then(|column| column.style.as_ref()))
-                .or(tab.base_style.as_ref());
-
             // ── Fill ──────────────────────────────────────────────────────
             let fill_style = style_for_property(
                 tab,
@@ -1342,7 +1575,13 @@ pub fn tessellate_table(
             // ── Borders (per edge: cell override → row style → default) ───
             // (top, right, bottom, left)
             let edge = |which: u8| -> (bool, [f32; 4], f32) {
-                if let Some(cs) = cell_style {
+                let edge_flag = match which {
+                    0 => acadrust::entities::table::CellEdgeFlags::TOP,
+                    1 => acadrust::entities::table::CellEdgeFlags::RIGHT,
+                    2 => acadrust::entities::table::CellEdgeFlags::BOTTOM,
+                    _ => acadrust::entities::table::CellEdgeFlags::LEFT,
+                };
+                if let Some(cs) = style_for_border(tab, row, ci, cell, edge_flag) {
                     let b = match which {
                         0 => &cs.top_border,
                         1 => &cs.right_border,
@@ -1737,6 +1976,7 @@ pub fn tessellate_table(
                     }
                 }
             }
+            }
         }
     }
 
@@ -1936,20 +2176,88 @@ impl Grippable for Table {
 }
 
 impl PropertyEditable for Table {
-    fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
+    fn geometry_properties(&self, text_style_names: &[String]) -> Vec<PropSection> {
         use crate::entities::common::edit_prop as edit;
-        use acadrust::entities::table::BreakOptionFlags;
-        let toggle = |label: &str, field: &'static str, b: bool| -> Property {
+        use acadrust::entities::table::{BreakOptionFlags, CellStateFlags, CellStylePropertyFlags};
+        let bool_text = |value: bool| if value { t!("Yes") } else { t!("No") }.into_owned();
+        let toggle = |label: &str, field: &'static str, value: bool, enabled: bool| -> Property {
             Property {
                 label: label.into(),
                 field,
-                value: PropValue::BoolToggle { field, value: b },
+                value: if enabled {
+                    PropValue::BoolToggle { field, value }
+                } else {
+                    PropValue::ReadOnly(bool_text(value))
+                },
+            }
+        };
+        let choice = |label: &str,
+                      field: &'static str,
+                      selected: String,
+                      options: Vec<String>,
+                      enabled: bool|
+         -> Property {
+            Property {
+                label: label.into(),
+                field,
+                value: if enabled {
+                    PropValue::Choice { selected, options }
+                } else {
+                    PropValue::ReadOnly(selected)
+                },
+            }
+        };
+        let number = |label: &str, field: &'static str, value: f64, enabled: bool| -> Property {
+            if enabled {
+                edit(label, field, value)
+            } else {
+                ro(label, field, crate::entities::common::format_length(value))
+            }
+        };
+        let text = |label: &str, field: &'static str, value: String, enabled: bool| -> Property {
+            Property {
+                label: label.into(),
+                field,
+                value: if enabled {
+                    PropValue::PlainText(value)
+                } else {
+                    PropValue::ReadOnly(value)
+                },
+            }
+        };
+        let color_text = |color: acadrust::types::Color| match color {
+            acadrust::types::Color::None => "None".to_string(),
+            acadrust::types::Color::ByLayer => "ByLayer".to_string(),
+            acadrust::types::Color::ByBlock => "ByBlock".to_string(),
+            acadrust::types::Color::Index(index) => index.to_string(),
+            acadrust::types::Color::Rgb { r, g, b } => format!("{r},{g},{b}"),
+        };
+        let color = |label: &str,
+                     field: &'static str,
+                     value: acadrust::types::Color,
+                     enabled: bool|
+         -> Property {
+            Property {
+                label: label.into(),
+                field,
+                value: if enabled {
+                    PropValue::ColorChoice(value)
+                } else {
+                    PropValue::ReadOnly(color_text(value))
+                },
             }
         };
         // Direction = angle of the horizontal direction vector in the XY plane.
         let direction_deg =
             (self.horizontal_direction.y.atan2(self.horizontal_direction.x)).to_degrees();
         let break_height = self.break_data.first().map(|data| data.height).unwrap_or(0.0);
+        let breaks_enabled = self.break_options.contains(BreakOptionFlags::ENABLE_BREAKS);
+        let manual_positions = self
+            .break_options
+            .contains(BreakOptionFlags::ALLOW_MANUAL_POSITIONS);
+        let manual_heights = self
+            .break_options
+            .contains(BreakOptionFlags::ALLOW_MANUAL_HEIGHTS);
         let cell_count = self.rows.len().saturating_mul(self.columns.len());
         let cell_index = prop_current_cell().min(cell_count.saturating_sub(1));
         let cell_row = if self.columns.is_empty() {
@@ -1962,9 +2270,22 @@ impl PropertyEditable for Table {
         } else {
             cell_index % self.columns.len()
         };
+        let table_row = self.rows.get(cell_row);
         let cell = self.cell(cell_row, cell_column);
-        let cell_style = cell.and_then(|cell| cell.style.as_ref());
-        let alignment = match cell_style.map(|style| style.alignment).unwrap_or(5) {
+        let row_style = table_row.and_then(|row| row.style.as_ref());
+        let column_style = self
+            .columns
+            .get(cell_column)
+            .and_then(|column| column.style.as_ref());
+        let style_for = |property| {
+            table_row.and_then(|row| {
+                cell.and_then(|cell| {
+                    style_for_property(self, row, cell_column, cell, property)
+                })
+            })
+        };
+        let alignment_style = style_for(CellStylePropertyFlags::ALIGNMENT);
+        let alignment = match alignment_style.map(|style| style.alignment).unwrap_or(5) {
             1 => "Top Left",
             2 => "Top Center",
             3 => "Top Right",
@@ -1975,36 +2296,210 @@ impl PropertyEditable for Table {
             9 => "Bottom Right",
             _ => "Middle Center",
         };
-        let cell_locked = cell.is_some_and(|cell| {
-            use acadrust::entities::table::CellStateFlags;
-            cell.state.intersects(
-                CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY,
-            )
-        });
+        let state = cell.map(|cell| cell.state).unwrap_or_default();
+        let content_editable = !state.intersects(
+            CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY,
+        );
+        let format_editable = !state.intersects(
+            CellStateFlags::FORMAT_LOCKED | CellStateFlags::FORMAT_READ_ONLY,
+        );
+        let immutable_lock = state.intersects(
+            CellStateFlags::CONTENT_READ_ONLY | CellStateFlags::FORMAT_READ_ONLY,
+        );
+        let cell_locked = state.intersects(
+            CellStateFlags::CONTENT_LOCKED
+                | CellStateFlags::CONTENT_READ_ONLY
+                | CellStateFlags::FORMAT_LOCKED
+                | CellStateFlags::FORMAT_READ_ONLY,
+        );
+        let table_flow_up = self
+            .legacy_style_override
+            .as_ref()
+            .and_then(|style| style.flow_direction)
+            .map(|flow| flow != 0)
+            .unwrap_or_else(|| {
+                self.base_style.as_ref().is_some_and(|style| {
+                    style
+                        .property_flags
+                        .contains(CellStylePropertyFlags::FLOW_DIRECTION_BOTTOM_TO_TOP)
+                })
+            });
+        let legacy = self.legacy_style_override.as_ref();
+        let title_suppressed = legacy
+            .and_then(|style| style.title_suppressed)
+            .unwrap_or(false);
+        let header_suppressed = legacy
+            .and_then(|style| style.header_suppressed)
+            .unwrap_or(false);
+        let horizontal_margin = legacy
+            .and_then(|style| style.horizontal_cell_margin)
+            .or_else(|| self.base_style.as_ref().map(|style| style.margin_left))
+            .unwrap_or(0.06);
+        let vertical_margin = legacy
+            .and_then(|style| style.vertical_cell_margin)
+            .or_else(|| self.base_style.as_ref().map(|style| style.margin_top))
+            .unwrap_or(0.06);
+        let uniform_column_width = self.columns.first().map(|column| column.width).unwrap_or(0.0);
+        let columns_uniform = self
+            .columns
+            .iter()
+            .all(|column| (column.width - uniform_column_width).abs() <= 1.0e-9);
+        let uniform_row_height = self.rows.first().map(|row| row.height).unwrap_or(0.0);
+        let rows_uniform = self
+            .rows
+            .iter()
+            .all(|row| (row.height - uniform_row_height).abs() <= 1.0e-9);
+        let uniform_number = |label: &str,
+                              field: &'static str,
+                              value: f64,
+                              uniform: bool|
+         -> Property {
+            if uniform {
+                edit(label, field, value)
+            } else {
+                Property {
+                    label: label.into(),
+                    field,
+                    value: PropValue::PlainText(t!("Varies").into_owned()),
+                }
+            }
+        };
+        let override_count = self
+            .rows
+            .iter()
+            .filter(|row| row.style.is_some())
+            .count()
+            + self
+                .columns
+                .iter()
+                .filter(|column| column.style.is_some())
+                .count()
+            + self
+                .rows
+                .iter()
+                .flat_map(|row| row.cells.iter())
+                .filter(|cell| cell.style.is_some())
+                .count()
+            + usize::from(self.base_style.is_some() || self.legacy_style_override.is_some());
 
-        vec![
+        let mut sections = vec![
             PropSection {
                 title: t!("Table").into_owned(),
                 props: vec![
-                    ro(
-                        t!("Table style").as_ref(),
-                        "tbl_style_handle",
-                        "Standard",
+                    ro(t!("Table style").as_ref(), "tbl_style_handle", "Standard"),
+                    toggle(
+                        t!("Title suppressed").as_ref(),
+                        "tbl_title_suppressed",
+                        title_suppressed,
+                        true,
                     ),
-                    edit(t!("Insertion X").as_ref(), "tbl_insert_x", self.insertion_point.x),
-                    edit(t!("Insertion Y").as_ref(), "tbl_insert_y", self.insertion_point.y),
-                    edit(t!("Insertion Z").as_ref(), "tbl_insert_z", self.insertion_point.z),
+                    toggle(
+                        t!("Header suppressed").as_ref(),
+                        "tbl_header_suppressed",
+                        header_suppressed,
+                        true,
+                    ),
+                    choice(
+                        t!("Flow direction").as_ref(),
+                        "tbl_flow_direction",
+                        if table_flow_up { "Up" } else { "Down" }.to_string(),
+                        vec!["Down".into(), "Up".into()],
+                        true,
+                    ),
                     edit(t!("Direction").as_ref(), "tbl_direction", direction_deg),
                     edit(t!("Rows").as_ref(), "tbl_rows", self.rows.len() as f64),
                     edit(t!("Columns").as_ref(), "tbl_cols", self.columns.len() as f64),
+                    uniform_number(
+                        t!("Column width").as_ref(),
+                        "tbl_column_width",
+                        uniform_column_width,
+                        columns_uniform,
+                    ),
+                    uniform_number(
+                        t!("Row height").as_ref(),
+                        "tbl_row_height",
+                        uniform_row_height,
+                        rows_uniform,
+                    ),
                     edit(t!("Table width").as_ref(), "tbl_width", self.total_width()),
                     edit(t!("Table height").as_ref(), "tbl_height", self.total_height()),
+                    edit(
+                        t!("Horizontal cell margin").as_ref(),
+                        "tbl_horizontal_margin",
+                        horizontal_margin,
+                    ),
+                    edit(
+                        t!("Vertical cell margin").as_ref(),
+                        "tbl_vertical_margin",
+                        vertical_margin,
+                    ),
+                    ro(
+                        t!("Table overrides").as_ref(),
+                        "tbl_overrides",
+                        if override_count == 0 {
+                            t!("None").into_owned()
+                        } else {
+                            override_count.to_string()
+                        },
+                    ),
+                ],
+            },
+            PropSection {
+                title: t!("Geometry").into_owned(),
+                props: vec![
+                    edit(t!("Insertion X").as_ref(), "tbl_insert_x", self.insertion_point.x),
+                    edit(t!("Insertion Y").as_ref(), "tbl_insert_y", self.insertion_point.y),
+                    edit(t!("Insertion Z").as_ref(), "tbl_insert_z", self.insertion_point.z),
                     ro(t!("Normal X").as_ref(), "tbl_normal_x", format!("{:.4}", self.normal.x)),
                     ro(t!("Normal Y").as_ref(), "tbl_normal_y", format!("{:.4}", self.normal.y)),
                     ro(t!("Normal Z").as_ref(), "tbl_normal_z", format!("{:.4}", self.normal.z)),
                 ],
             },
-            PropSection {
+        ];
+
+        if prop_current_cell_active() {
+            let cell_type = match cell.map(|cell| cell.cell_type) {
+                Some(acadrust::entities::table::CellType::Block) => "Block",
+                _ => "Text",
+            };
+            let data_type = cell
+                .and_then(|cell| cell.contents.first())
+                .map(|content| match content.value.value_type {
+                    acadrust::entities::table::CellValueType::Long => "Integer",
+                    acadrust::entities::table::CellValueType::Double => "Decimal",
+                    acadrust::entities::table::CellValueType::Date => "Date",
+                    acadrust::entities::table::CellValueType::Point2D => "Point 2D",
+                    acadrust::entities::table::CellValueType::Point3D => "Point 3D",
+                    acadrust::entities::table::CellValueType::Handle => "Handle",
+                    _ => "Text",
+                })
+                .unwrap_or("Text");
+            let style_source = if cell.and_then(|cell| cell.style.as_ref()).is_some() {
+                "Cell override"
+            } else if row_style.is_some() {
+                "Row override"
+            } else if column_style.is_some() {
+                "Column override"
+            } else {
+                "Table style"
+            };
+            let text_style = style_for(CellStylePropertyFlags::TEXT_STYLE)
+                .map(|style| style.text_style_name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "Standard".to_string());
+            let mut available_text_styles = text_style_names.to_vec();
+            if !available_text_styles
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&text_style))
+            {
+                available_text_styles.insert(0, text_style.clone());
+            }
+            let rotation = style_for(CellStylePropertyFlags::ROTATION)
+                .map(|style| style.rotation)
+                .or_else(|| cell.map(|cell| cell.rotation))
+                .unwrap_or(0.0)
+                .to_degrees();
+            sections.push(PropSection {
                 title: t!("Cell").into_owned(),
                 props: vec![
                     Property {
@@ -2027,144 +2522,291 @@ impl PropertyEditable for Table {
                         "tbl_cell_column",
                         cell_column.to_string(),
                     ),
-                    Property {
-                        label: t!("Contents").into_owned(),
-                        field: "tbl_cell_text",
-                        value: PropValue::PlainText(
-                            cell.map(|cell| cell.text_value().to_string()).unwrap_or_default(),
-                        ),
-                    },
-                    Property {
-                        label: t!("Alignment").into_owned(),
-                        field: "tbl_cell_alignment",
-                        value: PropValue::Choice {
-                            selected: alignment.to_string(),
-                            options: vec![
-                                "Top Left".into(),
-                                "Top Center".into(),
-                                "Top Right".into(),
-                                "Middle Left".into(),
-                                "Middle Center".into(),
-                                "Middle Right".into(),
-                                "Bottom Left".into(),
-                                "Bottom Center".into(),
-                                "Bottom Right".into(),
-                            ],
-                        },
-                    },
-                    edit(
+                    ro(t!("Cell style").as_ref(), "tbl_cell_style", style_source),
+                    choice(
+                        t!("Cell type").as_ref(),
+                        "tbl_cell_type",
+                        cell_type.to_string(),
+                        vec!["Text".into(), "Block".into()],
+                        content_editable,
+                    ),
+                    text(
+                        t!("Contents").as_ref(),
+                        "tbl_cell_text",
+                        cell.map(|cell| cell.text_value().to_string()).unwrap_or_default(),
+                        content_editable,
+                    ),
+                    choice(
+                        t!("Alignment").as_ref(),
+                        "tbl_cell_alignment",
+                        alignment.to_string(),
+                        vec![
+                            "Top Left".into(),
+                            "Top Center".into(),
+                            "Top Right".into(),
+                            "Middle Left".into(),
+                            "Middle Center".into(),
+                            "Middle Right".into(),
+                            "Bottom Left".into(),
+                            "Bottom Center".into(),
+                            "Bottom Right".into(),
+                        ],
+                        format_editable,
+                    ),
+                    choice(
+                        t!("Text style").as_ref(),
+                        "tbl_cell_text_style",
+                        text_style,
+                        available_text_styles,
+                        format_editable,
+                    ),
+                    choice(
+                        t!("Text rotation").as_ref(),
+                        "tbl_cell_rotation",
+                        format!("{rotation:.0}"),
+                        vec!["0".into(), "90".into(), "180".into(), "270".into()],
+                        format_editable,
+                    ),
+                    number(
                         t!("Text height").as_ref(),
                         "tbl_cell_text_height",
-                        cell_style.map(|style| style.text_height).unwrap_or(0.18),
+                        style_for(CellStylePropertyFlags::TEXT_HEIGHT)
+                            .map(|style| style.text_height)
+                            .unwrap_or(0.18),
+                        format_editable,
                     ),
-                    Property {
-                        label: t!("Content color").into_owned(),
-                        field: "tbl_cell_content_color",
-                        value: PropValue::ColorChoice(
-                            cell_style
-                                .map(|style| style.content_color)
-                                .unwrap_or(acadrust::types::Color::ByBlock),
-                        ),
-                    },
-                    Property {
-                        label: t!("Background color").into_owned(),
-                        field: "tbl_cell_background_color",
-                        value: PropValue::ColorChoice(
-                            cell_style
-                                .map(|style| style.background_color)
-                                .unwrap_or(acadrust::types::Color::ByBlock),
-                        ),
-                    },
-                    Property {
-                        label: t!("Data format").into_owned(),
-                        field: "tbl_cell_format",
-                        value: PropValue::PlainText(
-                            cell_style.map(|style| style.value_format.clone()).unwrap_or_default(),
-                        ),
-                    },
+                    color(
+                        t!("Content color").as_ref(),
+                        "tbl_cell_content_color",
+                        style_for(CellStylePropertyFlags::CONTENT_COLOR)
+                            .map(|style| style.content_color)
+                            .unwrap_or(acadrust::types::Color::ByBlock),
+                        format_editable,
+                    ),
+                    color(
+                        t!("Background color").as_ref(),
+                        "tbl_cell_background_color",
+                        style_for(CellStylePropertyFlags::BACKGROUND_COLOR)
+                            .map(|style| style.background_color)
+                            .unwrap_or(acadrust::types::Color::ByBlock),
+                        format_editable,
+                    ),
+                    choice(
+                        t!("Data type").as_ref(),
+                        "tbl_cell_data_type",
+                        data_type.to_string(),
+                        vec![
+                            "Text".into(),
+                            "Integer".into(),
+                            "Decimal".into(),
+                            "Date".into(),
+                            "Point 2D".into(),
+                            "Point 3D".into(),
+                            "Handle".into(),
+                        ],
+                        format_editable,
+                    ),
+                    text(
+                        t!("Data format").as_ref(),
+                        "tbl_cell_format",
+                        style_for(CellStylePropertyFlags::DATA_FORMAT)
+                            .map(|style| style.value_format.clone())
+                            .unwrap_or_default(),
+                        format_editable,
+                    ),
                     toggle(
                         t!("Background fill").as_ref(),
                         "tbl_cell_fill",
-                        cell_style.is_some_and(|style| style.fill_enabled),
+                        style_for(CellStylePropertyFlags::BACKGROUND_COLOR)
+                            .is_some_and(|style| style.fill_enabled),
+                        format_editable,
+                    ),
+                    number(
+                        t!("Left margin").as_ref(),
+                        "tbl_cell_margin_left",
+                        style_for(CellStylePropertyFlags::MARGIN_LEFT)
+                            .map(|style| style.margin_left)
+                            .unwrap_or(horizontal_margin),
+                        format_editable,
+                    ),
+                    number(
+                        t!("Top margin").as_ref(),
+                        "tbl_cell_margin_top",
+                        style_for(CellStylePropertyFlags::MARGIN_TOP)
+                            .map(|style| style.margin_top)
+                            .unwrap_or(vertical_margin),
+                        format_editable,
+                    ),
+                    number(
+                        t!("Right margin").as_ref(),
+                        "tbl_cell_margin_right",
+                        style_for(CellStylePropertyFlags::MARGIN_RIGHT)
+                            .map(|style| style.margin_right)
+                            .unwrap_or(horizontal_margin),
+                        format_editable,
+                    ),
+                    number(
+                        t!("Bottom margin").as_ref(),
+                        "tbl_cell_margin_bottom",
+                        style_for(CellStylePropertyFlags::MARGIN_BOTTOM)
+                            .map(|style| style.margin_bottom)
+                            .unwrap_or(vertical_margin),
+                        format_editable,
                     ),
                     toggle(
                         t!("Top border").as_ref(),
                         "tbl_cell_border_top",
-                        cell_style.is_none_or(|style| !style.top_border.invisible),
+                        table_row
+                            .and_then(|row| {
+                                cell.and_then(|cell| {
+                                    style_for_border(
+                                        self,
+                                        row,
+                                        cell_column,
+                                        cell,
+                                        acadrust::entities::table::CellEdgeFlags::TOP,
+                                    )
+                                })
+                            })
+                            .is_none_or(|style| !style.top_border.invisible),
+                        format_editable,
                     ),
                     toggle(
                         t!("Right border").as_ref(),
                         "tbl_cell_border_right",
-                        cell_style.is_none_or(|style| !style.right_border.invisible),
+                        table_row
+                            .and_then(|row| {
+                                cell.and_then(|cell| {
+                                    style_for_border(
+                                        self,
+                                        row,
+                                        cell_column,
+                                        cell,
+                                        acadrust::entities::table::CellEdgeFlags::RIGHT,
+                                    )
+                                })
+                            })
+                            .is_none_or(|style| !style.right_border.invisible),
+                        format_editable,
                     ),
                     toggle(
                         t!("Bottom border").as_ref(),
                         "tbl_cell_border_bottom",
-                        cell_style.is_none_or(|style| !style.bottom_border.invisible),
+                        table_row
+                            .and_then(|row| {
+                                cell.and_then(|cell| {
+                                    style_for_border(
+                                        self,
+                                        row,
+                                        cell_column,
+                                        cell,
+                                        acadrust::entities::table::CellEdgeFlags::BOTTOM,
+                                    )
+                                })
+                            })
+                            .is_none_or(|style| !style.bottom_border.invisible),
+                        format_editable,
                     ),
                     toggle(
                         t!("Left border").as_ref(),
                         "tbl_cell_border_left",
-                        cell_style.is_none_or(|style| !style.left_border.invisible),
+                        table_row
+                            .and_then(|row| {
+                                cell.and_then(|cell| {
+                                    style_for_border(
+                                        self,
+                                        row,
+                                        cell_column,
+                                        cell,
+                                        acadrust::entities::table::CellEdgeFlags::LEFT,
+                                    )
+                                })
+                            })
+                            .is_none_or(|style| !style.left_border.invisible),
+                        format_editable,
                     ),
-                    toggle(t!("Locked").as_ref(), "tbl_cell_locked", cell_locked),
+                    toggle(
+                        t!("Locked").as_ref(),
+                        "tbl_cell_locked",
+                        cell_locked,
+                        !immutable_lock,
+                    ),
                 ],
-            },
+            });
+        }
+
+        sections.push(
             PropSection {
                 title: t!("Table Breaks").into_owned(),
                 props: vec![
                     toggle(
                         t!("Enabled").as_ref(),
                         "tbl_break_enabled",
-                        self.break_options.contains(BreakOptionFlags::ENABLE_BREAKS),
+                        breaks_enabled,
+                        true,
                     ),
-                    Property {
-                        label: t!("Direction").into_owned(),
-                        field: "tbl_break_direction",
-                        value: PropValue::Choice {
-                            selected: match self.break_flow_direction {
-                                acadrust::entities::table::BreakFlowDirection::Right => "Right",
-                                acadrust::entities::table::BreakFlowDirection::Left => "Left",
-                                acadrust::entities::table::BreakFlowDirection::Vertical => "Down",
-                            }
-                            .to_string(),
-                            options: vec!["Right".into(), "Left".into(), "Down".into()],
-                        },
-                    },
+                    choice(
+                        t!("Direction").as_ref(),
+                        "tbl_break_direction",
+                        match self.break_flow_direction {
+                            acadrust::entities::table::BreakFlowDirection::Right => "Right",
+                            acadrust::entities::table::BreakFlowDirection::Left => "Left",
+                            acadrust::entities::table::BreakFlowDirection::Vertical => "Down",
+                        }
+                        .to_string(),
+                        vec!["Right".into(), "Left".into(), "Down".into()],
+                        breaks_enabled && !manual_positions,
+                    ),
                     toggle(
                         t!("Repeat top labels").as_ref(),
                         "tbl_break_repeat_top",
                         self.break_options
                             .contains(BreakOptionFlags::REPEAT_TOP_LABELS),
+                        breaks_enabled,
                     ),
                     toggle(
                         t!("Repeat bottom labels").as_ref(),
                         "tbl_break_repeat_bottom",
                         self.break_options
                             .contains(BreakOptionFlags::REPEAT_BOTTOM_LABELS),
+                        breaks_enabled,
                     ),
                     toggle(
                         t!("Manual positions").as_ref(),
                         "tbl_break_manual_positions",
-                        self.break_options
-                            .contains(BreakOptionFlags::ALLOW_MANUAL_POSITIONS),
+                        manual_positions,
+                        breaks_enabled,
                     ),
                     toggle(
                         t!("Manual heights").as_ref(),
                         "tbl_break_manual_heights",
-                        self.break_options
-                            .contains(BreakOptionFlags::ALLOW_MANUAL_HEIGHTS),
+                        manual_heights,
+                        breaks_enabled,
                     ),
-                    edit(t!("Maximum height").as_ref(), "tbl_break_height", break_height),
-                    edit(t!("Spacing").as_ref(), "tbl_break_spacing", self.break_spacing),
+                    number(
+                        t!("Maximum height").as_ref(),
+                        "tbl_break_height",
+                        break_height,
+                        breaks_enabled && !manual_heights,
+                    ),
+                    number(
+                        t!("Spacing").as_ref(),
+                        "tbl_break_spacing",
+                        self.break_spacing,
+                        breaks_enabled && !manual_positions,
+                    ),
                 ],
             },
-        ]
+        );
+
+        sections
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         use crate::entities::common::parse_f64;
-        use acadrust::entities::table::BreakOptionFlags;
+        use acadrust::entities::table::{
+            BreakOptionFlags, CellStateFlags, CellStyle, CellStylePropertyFlags,
+        };
         let flag = match field {
             "tbl_break_enabled" => Some(BreakOptionFlags::ENABLE_BREAKS),
             "tbl_break_repeat_top" => Some(BreakOptionFlags::REPEAT_TOP_LABELS),
@@ -2174,32 +2816,104 @@ impl PropertyEditable for Table {
             _ => None,
         };
         if let Some(flag) = flag {
+            if flag != BreakOptionFlags::ENABLE_BREAKS
+                && !self.break_options.contains(BreakOptionFlags::ENABLE_BREAKS)
+            {
+                return;
+            }
             let on = if value == "toggle" {
                 !self.break_options.contains(flag)
             } else {
                 value == "true"
             };
             self.break_options.set(flag, on);
+            self.break_ranges.clear();
             return;
+        }
+        match field {
+            "tbl_title_suppressed" | "tbl_header_suppressed" => {
+                let enabled = if value == "toggle" {
+                    let current = if field == "tbl_title_suppressed" {
+                        self.legacy_style_override
+                            .as_ref()
+                            .and_then(|style| style.title_suppressed)
+                            .unwrap_or(false)
+                    } else {
+                        self.legacy_style_override
+                            .as_ref()
+                            .and_then(|style| style.header_suppressed)
+                            .unwrap_or(false)
+                    };
+                    !current
+                } else {
+                    value == "true"
+                };
+                let style = self.legacy_style_override.get_or_insert_with(Default::default);
+                if field == "tbl_title_suppressed" {
+                    style.flags |= 0x0001;
+                    style.title_suppressed = Some(enabled);
+                } else {
+                    style.flags |= 0x0002;
+                    style.header_suppressed = Some(enabled);
+                }
+                self.override_flag = true;
+                return;
+            }
+            "tbl_flow_direction" => {
+                let up = value.trim().eq_ignore_ascii_case("up");
+                let style = self.base_style.get_or_insert_with(Default::default);
+                style
+                    .property_flags
+                    .set(CellStylePropertyFlags::FLOW_DIRECTION_BOTTOM_TO_TOP, up);
+                let legacy = self.legacy_style_override.get_or_insert_with(Default::default);
+                legacy.flags |= 0x0004;
+                legacy.flow_direction = Some(if up { 1 } else { 0 });
+                self.override_flag = true;
+                return;
+            }
+            _ => {}
         }
         let cell_index = prop_current_cell();
         let columns = self.columns.len();
         let cell_position = (columns > 0).then_some((cell_index / columns, cell_index % columns));
         if let Some((row, column)) = cell_position {
+            let state = self
+                .cell(row, column)
+                .map(|cell| cell.state)
+                .unwrap_or_default();
+            let content_editable = !state.intersects(
+                CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY,
+            );
+            let format_editable = !state.intersects(
+                CellStateFlags::FORMAT_LOCKED | CellStateFlags::FORMAT_READ_ONLY,
+            );
             match field {
                 "tbl_cell_text" => {
+                    if !content_editable {
+                        return;
+                    }
                     if let Some(cell) = self.cell_mut(row, column) {
-                        use acadrust::entities::table::CellStateFlags;
-                        if !cell.state.intersects(
-                            CellStateFlags::CONTENT_LOCKED
-                                | CellStateFlags::CONTENT_READ_ONLY,
-                        ) {
-                            cell.set_text(value);
-                        }
+                        cell.set_text(value);
+                    }
+                    return;
+                }
+                "tbl_cell_type" => {
+                    if !content_editable {
+                        return;
+                    }
+                    if let Some(cell) = self.cell_mut(row, column) {
+                        cell.cell_type = if value.trim().eq_ignore_ascii_case("block") {
+                            acadrust::entities::table::CellType::Block
+                        } else {
+                            acadrust::entities::table::CellType::Text
+                        };
                     }
                     return;
                 }
                 "tbl_cell_alignment" => {
+                    if !format_editable {
+                        return;
+                    }
                     let alignment = match value.trim().to_ascii_uppercase().as_str() {
                         "TOP LEFT" => 1,
                         "TOP CENTER" => 2,
@@ -2212,7 +2926,7 @@ impl PropertyEditable for Table {
                         _ => 5,
                     };
                     if let Some(cell) = self.cell_mut(row, column) {
-                        let style = cell.style.get_or_insert_with(Default::default);
+                        let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.alignment = alignment;
                         style.property_flags.insert(
                             acadrust::entities::table::CellStylePropertyFlags::ALIGNMENT,
@@ -2220,9 +2934,67 @@ impl PropertyEditable for Table {
                     }
                     return;
                 }
-                "tbl_cell_format" => {
+                "tbl_cell_text_style" => {
+                    if !format_editable {
+                        return;
+                    }
                     if let Some(cell) = self.cell_mut(row, column) {
-                        let style = cell.style.get_or_insert_with(Default::default);
+                        let style = cell.style.get_or_insert_with(CellStyle::new);
+                        style.text_style_name = value.trim().to_string();
+                        style
+                            .property_flags
+                            .insert(CellStylePropertyFlags::TEXT_STYLE);
+                    }
+                    return;
+                }
+                "tbl_cell_rotation" => {
+                    if !format_editable {
+                        return;
+                    }
+                    if let Some(rotation) = parse_f64(value) {
+                        if let Some(cell) = self.cell_mut(row, column) {
+                            let style = cell.style.get_or_insert_with(CellStyle::new);
+                            style.rotation = rotation.to_radians();
+                            style
+                                .property_flags
+                                .insert(CellStylePropertyFlags::ROTATION);
+                        }
+                    }
+                    return;
+                }
+                "tbl_cell_data_type" => {
+                    if !format_editable {
+                        return;
+                    }
+                    if let Some(cell) = self.cell_mut(row, column) {
+                        if cell.contents.is_empty() {
+                            cell.set_text("");
+                        }
+                        if let Some(content) = cell.contents.first_mut() {
+                            content.value.value_type = match value.trim().to_ascii_uppercase().as_str() {
+                                "INTEGER" => acadrust::entities::table::CellValueType::Long,
+                                "DECIMAL" => acadrust::entities::table::CellValueType::Double,
+                                "DATE" => acadrust::entities::table::CellValueType::Date,
+                                "POINT 2D" => acadrust::entities::table::CellValueType::Point2D,
+                                "POINT 3D" => acadrust::entities::table::CellValueType::Point3D,
+                                "HANDLE" => acadrust::entities::table::CellValueType::Handle,
+                                _ => acadrust::entities::table::CellValueType::String,
+                            };
+                            content.value.raw_type_code = content.value.value_type as i32;
+                        }
+                        let style = cell.style.get_or_insert_with(CellStyle::new);
+                        style
+                            .property_flags
+                            .insert(CellStylePropertyFlags::DATA_TYPE);
+                    }
+                    return;
+                }
+                "tbl_cell_format" => {
+                    if !format_editable {
+                        return;
+                    }
+                    if let Some(cell) = self.cell_mut(row, column) {
+                        let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.value_format = value.to_string();
                         style.property_flags.insert(
                             acadrust::entities::table::CellStylePropertyFlags::DATA_FORMAT,
@@ -2231,8 +3003,11 @@ impl PropertyEditable for Table {
                     return;
                 }
                 "tbl_cell_fill" => {
+                    if !format_editable {
+                        return;
+                    }
                     if let Some(cell) = self.cell_mut(row, column) {
-                        let style = cell.style.get_or_insert_with(Default::default);
+                        let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.fill_enabled = if value == "toggle" {
                             !style.fill_enabled
                         } else {
@@ -2248,11 +3023,14 @@ impl PropertyEditable for Table {
                 | "tbl_cell_border_right"
                 | "tbl_cell_border_bottom"
                 | "tbl_cell_border_left" => {
+                    if !format_editable {
+                        return;
+                    }
                     if let Some(cell) = self.cell_mut(row, column) {
                         use acadrust::entities::table::{
                             BorderPropertyFlags, CellEdgeFlags,
                         };
-                        let style = cell.style.get_or_insert_with(Default::default);
+                        let style = cell.style.get_or_insert_with(CellStyle::new);
                         let (border, edge) = match field {
                             "tbl_cell_border_top" => (&mut style.top_border, CellEdgeFlags::TOP),
                             "tbl_cell_border_right" => {
@@ -2275,10 +3053,16 @@ impl PropertyEditable for Table {
                     return;
                 }
                 "tbl_cell_locked" => {
+                    if state.intersects(
+                        CellStateFlags::CONTENT_READ_ONLY | CellStateFlags::FORMAT_READ_ONLY,
+                    ) {
+                        return;
+                    }
                     if let Some(cell) = self.cell_mut(row, column) {
-                        use acadrust::entities::table::CellStateFlags;
                         let locked = if value == "toggle" {
-                            !cell.state.contains(CellStateFlags::CONTENT_LOCKED)
+                            !cell.state.intersects(
+                                CellStateFlags::CONTENT_LOCKED | CellStateFlags::FORMAT_LOCKED,
+                            )
                         } else {
                             value == "true"
                         };
@@ -2292,6 +3076,13 @@ impl PropertyEditable for Table {
         }
         let Some(number) = parse_f64(value) else {
             if field == "tbl_break_direction" {
+                if !self.break_options.contains(BreakOptionFlags::ENABLE_BREAKS)
+                    || self
+                        .break_options
+                        .contains(BreakOptionFlags::ALLOW_MANUAL_POSITIONS)
+                {
+                    return;
+                }
                 self.break_flow_direction = match value.trim().to_ascii_uppercase().as_str() {
                     "LEFT" => acadrust::entities::table::BreakFlowDirection::Left,
                     "DOWN" | "VERTICAL" => {
@@ -2299,6 +3090,7 @@ impl PropertyEditable for Table {
                     }
                     _ => acadrust::entities::table::BreakFlowDirection::Right,
                 };
+                self.break_ranges.clear();
             }
             return;
         };
@@ -2320,6 +3112,7 @@ impl PropertyEditable for Table {
                 while self.rows.len() > requested {
                     self.remove_row(self.rows.len() - 1);
                 }
+                self.break_ranges.clear();
             }
             "tbl_cols" => {
                 let requested = number.round().max(1.0) as usize;
@@ -2330,6 +3123,19 @@ impl PropertyEditable for Table {
                 while self.columns.len() > requested {
                     self.remove_column(self.columns.len() - 1);
                 }
+                self.break_ranges.clear();
+            }
+            "tbl_column_width" if number > 0.0 => {
+                for column in &mut self.columns {
+                    column.width = number;
+                }
+                self.break_ranges.clear();
+            }
+            "tbl_row_height" if number > 0.0 => {
+                for row in &mut self.rows {
+                    row.height = number;
+                }
+                self.break_ranges.clear();
             }
             "tbl_width" if number > 0.0 => {
                 let current = self.total_width();
@@ -2338,6 +3144,7 @@ impl PropertyEditable for Table {
                         column.width *= number / current;
                     }
                 }
+                self.break_ranges.clear();
             }
             "tbl_height" if number > 0.0 => {
                 let current = self.total_height();
@@ -2346,11 +3153,45 @@ impl PropertyEditable for Table {
                         row.height *= number / current;
                     }
                 }
+                self.break_ranges.clear();
+            }
+            "tbl_horizontal_margin" if number >= 0.0 => {
+                let style = self.base_style.get_or_insert_with(Default::default);
+                style.margin_left = number;
+                style.margin_right = number;
+                style.property_flags.insert(
+                    CellStylePropertyFlags::MARGIN_LEFT | CellStylePropertyFlags::MARGIN_RIGHT,
+                );
+                let legacy = self.legacy_style_override.get_or_insert_with(Default::default);
+                legacy.flags |= 0x0008;
+                legacy.horizontal_cell_margin = Some(number);
+                self.override_flag = true;
+            }
+            "tbl_vertical_margin" if number >= 0.0 => {
+                let style = self.base_style.get_or_insert_with(Default::default);
+                style.margin_top = number;
+                style.margin_bottom = number;
+                style.property_flags.insert(
+                    CellStylePropertyFlags::MARGIN_TOP | CellStylePropertyFlags::MARGIN_BOTTOM,
+                );
+                let legacy = self.legacy_style_override.get_or_insert_with(Default::default);
+                legacy.flags |= 0x0010;
+                legacy.vertical_cell_margin = Some(number);
+                self.override_flag = true;
             }
             "tbl_cell_text_height" if number > 0.0 => {
                 if let Some((row, column)) = cell_position {
+                    let state = self
+                        .cell(row, column)
+                        .map(|cell| cell.state)
+                        .unwrap_or_default();
+                    if state.intersects(
+                        CellStateFlags::FORMAT_LOCKED | CellStateFlags::FORMAT_READ_ONLY,
+                    ) {
+                        return;
+                    }
                     if let Some(cell) = self.cell_mut(row, column) {
-                        let style = cell.style.get_or_insert_with(Default::default);
+                        let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.text_height = number;
                         style.property_flags.insert(
                             acadrust::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
@@ -2358,7 +3199,53 @@ impl PropertyEditable for Table {
                     }
                 }
             }
-            "tbl_break_height" if number >= 0.0 => {
+            "tbl_cell_margin_left"
+            | "tbl_cell_margin_top"
+            | "tbl_cell_margin_right"
+            | "tbl_cell_margin_bottom"
+                if number >= 0.0 =>
+            {
+                if let Some((row, column)) = cell_position {
+                    let state = self
+                        .cell(row, column)
+                        .map(|cell| cell.state)
+                        .unwrap_or_default();
+                    if state.intersects(
+                        CellStateFlags::FORMAT_LOCKED | CellStateFlags::FORMAT_READ_ONLY,
+                    ) {
+                        return;
+                    }
+                    if let Some(cell) = self.cell_mut(row, column) {
+                        let style = cell.style.get_or_insert_with(CellStyle::new);
+                        let flag = match field {
+                            "tbl_cell_margin_left" => {
+                                style.margin_left = number;
+                                CellStylePropertyFlags::MARGIN_LEFT
+                            }
+                            "tbl_cell_margin_top" => {
+                                style.margin_top = number;
+                                CellStylePropertyFlags::MARGIN_TOP
+                            }
+                            "tbl_cell_margin_right" => {
+                                style.margin_right = number;
+                                CellStylePropertyFlags::MARGIN_RIGHT
+                            }
+                            _ => {
+                                style.margin_bottom = number;
+                                CellStylePropertyFlags::MARGIN_BOTTOM
+                            }
+                        };
+                        style.property_flags.insert(flag);
+                    }
+                }
+            }
+            "tbl_break_height"
+                if number >= 0.0
+                    && self.break_options.contains(BreakOptionFlags::ENABLE_BREAKS)
+                    && !self
+                        .break_options
+                        .contains(BreakOptionFlags::ALLOW_MANUAL_HEIGHTS) =>
+            {
                 if self.break_data.is_empty() {
                     self.break_data.push(acadrust::entities::table::TableBreakData {
                         position: acadrust::types::Vector3::ZERO,
@@ -2370,8 +3257,18 @@ impl PropertyEditable for Table {
                         data.height = number;
                     }
                 }
+                self.break_ranges.clear();
             }
-            "tbl_break_spacing" if number >= 0.0 => self.break_spacing = number,
+            "tbl_break_spacing"
+                if number >= 0.0
+                    && self.break_options.contains(BreakOptionFlags::ENABLE_BREAKS)
+                    && !self
+                        .break_options
+                        .contains(BreakOptionFlags::ALLOW_MANUAL_POSITIONS) =>
+            {
+                self.break_spacing = number;
+                self.break_ranges.clear();
+            }
             _ => {}
         }
     }

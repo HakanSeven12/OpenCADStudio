@@ -4412,25 +4412,23 @@ impl OpenCADStudio {
                                 let mut down = horizontal
                                     .cross(normal)
                                     .normalize_or(glam::DVec3::NEG_Y);
-                                let flows_up = table
-                                    .table_style_handle
-                                    .and_then(|style_handle| {
-                                        self.tabs[i]
-                                            .scene
-                                            .document
-                                            .objects
-                                            .get(&style_handle)
-                                    })
-                                    .is_some_and(|object| {
-                                        matches!(
-                                            object,
-                                            acadrust::objects::ObjectType::TableStyle(style)
-                                                if matches!(
-                                                    style.flow_direction,
-                                                    acadrust::objects::TableFlowDirection::Up
-                                                )
-                                        )
-                                    });
+                                let table_style = table.table_style_handle.and_then(|style_handle| {
+                                    self.tabs[i]
+                                        .scene
+                                        .document
+                                        .objects
+                                        .get(&style_handle)
+                                        .and_then(|object| match object {
+                                            acadrust::objects::ObjectType::TableStyle(style) => {
+                                                Some(style)
+                                            }
+                                            _ => None,
+                                        })
+                                });
+                                let flows_up = crate::entities::table::resolved_flow_up(
+                                    table,
+                                    table_style,
+                                );
                                 if flows_up {
                                     down = -down;
                                 }
@@ -4461,10 +4459,19 @@ impl OpenCADStudio {
                                         Some(*offset)
                                     })
                                     .position(|end| y <= end)?;
+                                let locked = table.cell(row, column).is_some_and(|cell| {
+                                    use acadrust::entities::table::CellStateFlags;
+                                    cell.state.intersects(
+                                        CellStateFlags::CONTENT_LOCKED
+                                            | CellStateFlags::CONTENT_READ_ONLY,
+                                    )
+                                });
                                 Some((
-                                    crate::modules::annotate::table_cmd::TableCellEditCommand::new(
-                                        handle, table, row, column,
-                                    ),
+                                    (!locked).then(|| {
+                                        crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+                                            handle, table, row, column,
+                                        )
+                                    }),
                                     row * table.column_count() + column,
                                 ))
                             }
@@ -4475,9 +4482,11 @@ impl OpenCADStudio {
                         self.tabs[i].properties.prop_vertex_indicator_active = true;
                         crate::entities::table::set_prop_current_cell(cell_index);
                         self.refresh_properties();
-                        self.command_line
-                            .push_info(&crate::command::CadCommand::prompt(&command));
-                        self.tabs[i].active_cmd = Some(Box::new(command));
+                        if let Some(command) = command {
+                            self.command_line
+                                .push_info(&crate::command::CadCommand::prompt(&command));
+                            self.tabs[i].active_cmd = Some(Box::new(command));
+                        }
                         return Task::none();
                     }
                     // Any text-bearing entity opens its in-place editor

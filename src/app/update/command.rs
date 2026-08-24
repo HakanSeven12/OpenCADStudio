@@ -2109,6 +2109,29 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 self.tabs[i].scene.bump_entities(&changes);
                             }
                         }
+                    } else if field == "tbl_style_handle" {
+                        let style_handle = self.tabs[i]
+                            .scene
+                            .document
+                            .objects
+                            .iter()
+                            .find_map(|(handle, object)| match object {
+                                acadrust::objects::ObjectType::TableStyle(style)
+                                    if style.name.eq_ignore_ascii_case(value.trim()) =>
+                                {
+                                    Some(*handle)
+                                }
+                                _ => None,
+                            });
+                        if let Some(style_handle) = style_handle {
+                            for &handle in &handles {
+                                if let Some(acadrust::EntityType::Table(table)) =
+                                    self.tabs[i].scene.document.get_entity_mut(handle)
+                                {
+                                    table.table_style_handle = Some(style_handle);
+                                }
+                            }
+                        }
                     } else if field == "transparency" {
                         for &handle in &handles {
                             if self.tabs[i].scene.is_layer_locked(handle) {
@@ -2245,6 +2268,15 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         );
                                     }
                                 }
+                            }
+                        }
+                    }
+                    if field.starts_with("tbl_") {
+                        for &handle in &handles {
+                            if let Some(acadrust::EntityType::Table(table)) =
+                                self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                table.block_record_handle = None;
                             }
                         }
                     }
@@ -2552,6 +2584,15 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                        if field.starts_with("tbl_") {
+                            for &handle in &handles {
+                                if let Some(acadrust::EntityType::Table(table)) =
+                                    self.tabs[i].scene.document.get_entity_mut(handle)
+                                {
+                                    table.block_record_handle = None;
                                 }
                             }
                         }

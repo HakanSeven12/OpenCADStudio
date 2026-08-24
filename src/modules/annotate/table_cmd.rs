@@ -520,6 +520,7 @@ impl CadCommand for TableCellEditCommand {
             return Some(CmdResult::Cancel);
         }
         cell.set_text(text);
+        self.table.block_record_handle = None;
         Some(CmdResult::ReplaceMany(
             vec![(self.handle, vec![EntityType::Table(self.table.clone())])],
             Vec::new(),

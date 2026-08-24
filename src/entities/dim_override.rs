@@ -331,28 +331,34 @@ pub fn set_property(
 ) -> bool {
     let trimmed = value.trim();
     let handle_field = match field {
-        "dim_arrowhead_1" => Some((DIMBLK1, true)),
-        "dim_arrowhead_2" => Some((DIMBLK2, true)),
-        "dim_linetype" => Some((DIMLTYPE, false)),
-        "dim_ext_linetype_1" => Some((DIMLTEX1, false)),
-        "dim_ext_linetype_2" => Some((DIMLTEX2, false)),
+        "dim_arrowhead_1" => Some(DIMBLK1),
+        "dim_arrowhead_2" => Some(DIMBLK2),
+        "dim_linetype" => Some(DIMLTYPE),
+        "dim_ext_linetype_1" => Some(DIMLTEX1),
+        "dim_ext_linetype_2" => Some(DIMLTEX2),
+        "dim_text_style" => Some(DIMTXSTY),
         _ => None,
     };
-    if let Some((code, block)) = handle_field {
-        let resolved = if block {
-            (trimmed != "Closed filled")
+    if let Some(code) = handle_field {
+        let resolved = match field {
+            "dim_arrowhead_1" | "dim_arrowhead_2" => (trimmed != "Closed filled")
                 .then(|| {
                     doc.block_records
                         .iter()
                         .find(|record| record.name == trimmed)
                         .map(|record| record.handle)
                 })
-                .flatten()
-        } else {
-            doc.line_types
+                .flatten(),
+            "dim_text_style" => doc
+                .text_styles
+                .iter()
+                .find(|style| style.name == trimmed)
+                .map(|style| style.handle),
+            _ => doc
+                .line_types
                 .iter()
                 .find(|line_type| line_type.name == trimmed)
-                .map(|line_type| line_type.handle)
+                .map(|line_type| line_type.handle),
         };
         set(doc, handle, code, resolved.map(XDataValue::Handle));
         return true;

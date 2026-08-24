@@ -2409,18 +2409,7 @@ fn set_row_value(
 /// The lineweight dropdown options (named defaults + the standard millimetre
 /// steps), matching the labels `dim_lineweight_label` produces.
 pub(crate) fn lineweight_options() -> Vec<String> {
-    let mut v = vec![
-        "ByLayer".to_string(),
-        "ByBlock".to_string(),
-        "Default".to_string(),
-    ];
-    for lw in [
-        0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158,
-        200, 211,
-    ] {
-        v.push(format!("{:.2} mm", lw as f64 / 100.0));
-    }
-    v
+    crate::entities::common::lineweight_options()
 }
 
 /// Inverse of `dim_lineweight_label`: a lineweight label → DIMLWD enum value.
@@ -2546,13 +2535,7 @@ fn leader_arrow_label(
 
 /// DIMLWD lineweight enum → label.
 fn dim_lineweight_label(dimlwd: i16) -> String {
-    match dimlwd {
-        -1 => "ByLayer".to_string(),
-        -2 => "ByBlock".to_string(),
-        -3 => "Default".to_string(),
-        v if v >= 0 => format!("{:.2} mm", v as f64 / 100.0),
-        _ => "Default".to_string(),
-    }
+    crate::entities::common::lineweight_label(dimlwd)
 }
 
 /// Human-readable INSUNITS name (DXF group 70 unit codes).

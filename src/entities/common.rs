@@ -573,6 +573,33 @@ pub fn edit_scalar_prop(label: &str, field: &'static str, value: f64) -> Propert
     }
 }
 
+/// Standard lineweight choices shared by entity-specific Properties rows.
+pub fn lineweight_options() -> Vec<String> {
+    let mut options = vec![
+        "ByLayer".to_string(),
+        "ByBlock".to_string(),
+        "Default".to_string(),
+    ];
+    for value in [
+        0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120,
+        140, 158, 200, 211,
+    ] {
+        options.push(format!("{:.2} mm", value as f64 / 100.0));
+    }
+    options
+}
+
+/// DIMLWD/DIMLWE lineweight value displayed by a Properties dropdown.
+pub fn lineweight_label(value: i16) -> String {
+    match value {
+        -1 => "ByLayer".to_string(),
+        -2 => "ByBlock".to_string(),
+        -3 => "Default".to_string(),
+        value if value >= 0 => format!("{:.2} mm", value as f64 / 100.0),
+        _ => "Default".to_string(),
+    }
+}
+
 pub fn ro_prop(label: &str, field: &'static str, value: impl Into<String>) -> Property {
     Property {
         label: label.into(),

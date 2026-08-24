@@ -8,7 +8,8 @@ use glam::{DVec3, Vec3};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    center_grip, edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
+    center_grip, edit_angle_prop as edit_angle, edit_prop as edit, lineweight_label,
+    lineweight_options, parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
@@ -1461,39 +1462,22 @@ pub fn style_sections(
         PropSection {
             title: t!("Lines & Arrows").into_owned(),
             props: vec![
-                ro(t!("Arrow size").as_ref(), "dim_arrow_size", f(s.dimasz)),
                 ro(
-                    t!("Arrowhead 1").as_ref(),
+                    t!("Arrow 1").as_ref(),
                     "dim_arrowhead_1",
                     block_name(document, s.dimblk1, &s.dimblk1_name),
                 ),
                 ro(
-                    t!("Arrowhead 2").as_ref(),
+                    t!("Arrow 2").as_ref(),
                     "dim_arrowhead_2",
                     block_name(document, s.dimblk2, &s.dimblk2_name),
                 ),
-                ro(
-                    t!("Dimension linetype").as_ref(),
-                    "dim_linetype",
-                    linetype_name(document, s.dimltex_handle),
-                ),
-                ro(
-                    t!("Extension linetype 1").as_ref(),
-                    "dim_ext_linetype_1",
-                    linetype_name(document, s.dimltex1_handle),
-                ),
-                ro(
-                    t!("Extension linetype 2").as_ref(),
-                    "dim_ext_linetype_2",
-                    linetype_name(document, s.dimltex2_handle),
-                ),
-                ro(t!("Dim line color").as_ref(), "dim_line_color", s.dimclrd.to_string()),
+                ro(t!("Arrow size").as_ref(), "dim_arrow_size", f(s.dimasz)),
                 ro(
                     t!("Dim line lineweight").as_ref(),
                     "dim_line_lineweight",
                     s.dimlwd.to_string(),
                 ),
-                ro(t!("Ext line color").as_ref(), "dim_ext_line_color", s.dimclre.to_string()),
                 ro(
                     t!("Ext line lineweight").as_ref(),
                     "dim_ext_line_lineweight",
@@ -1501,17 +1485,34 @@ pub fn style_sections(
                 ),
                 ro(t!("Dim line 1").as_ref(), "dim_line_1", onoff(!s.dimsd1)),
                 ro(t!("Dim line 2").as_ref(), "dim_line_2", onoff(!s.dimsd2)),
+                ro(t!("Dim line color").as_ref(), "dim_line_color", s.dimclrd.to_string()),
+                ro(
+                    t!("Dim line linetype").as_ref(),
+                    "dim_linetype",
+                    linetype_name(document, s.dimltex_handle),
+                ),
+                ro(t!("Dim line ext").as_ref(), "dim_line_ext", f(s.dimdle)),
+                ro(
+                    t!("Ext line 1 linetype").as_ref(),
+                    "dim_ext_linetype_1",
+                    linetype_name(document, s.dimltex1_handle),
+                ),
+                ro(
+                    t!("Ext line 2 linetype").as_ref(),
+                    "dim_ext_linetype_2",
+                    linetype_name(document, s.dimltex2_handle),
+                ),
                 ro(t!("Ext line 1").as_ref(), "dim_ext_line_1", onoff(!s.dimse1)),
                 ro(t!("Ext line 2").as_ref(), "dim_ext_line_2", onoff(!s.dimse2)),
-                ro(t!("Dim line ext").as_ref(), "dim_line_ext", f(s.dimdle)),
-                ro(t!("Ext line ext").as_ref(), "dim_ext_line_ext", f(s.dimexe)),
-                ro(t!("Ext line offset").as_ref(), "dim_ext_line_offset", f(s.dimexo)),
                 ro(t!("Ext line fixed").as_ref(), "dim_ext_line_fixed", yn(s.dimfxlon)),
                 ro(
                     t!("Ext line fixed length").as_ref(),
                     "dim_ext_line_fixed_length",
                     f(s.dimfxl),
                 ),
+                ro(t!("Ext line color").as_ref(), "dim_ext_line_color", s.dimclre.to_string()),
+                ro(t!("Ext line ext").as_ref(), "dim_ext_line_ext", f(s.dimexe)),
+                ro(t!("Ext line offset").as_ref(), "dim_ext_line_offset", f(s.dimexo)),
             ],
         },
         PropSection {
@@ -1726,6 +1727,17 @@ pub fn style_sections(
                     },
                     &["Bottom", "Middle", "Top"],
                 ),
+                "dim_line_lineweight" | "dim_ext_line_lineweight" => {
+                    let inherited = if property.field == "dim_line_lineweight" {
+                        s.dimlwd
+                    } else {
+                        s.dimlwe
+                    };
+                    crate::scene::model::object::PropValue::Choice {
+                        selected: lineweight_label(number.unwrap_or(inherited)),
+                        options: lineweight_options(),
+                    }
+                }
                 _ => crate::scene::model::object::PropValue::EditText(value),
             };
         }
@@ -1785,6 +1797,12 @@ pub fn style_sections(
         .map(|line_type| line_type.name.clone())
         .filter(|name| !name.is_empty())
         .collect();
+    let text_style_options: Vec<String> = document
+        .text_styles
+        .iter()
+        .map(|style| style.name.clone())
+        .filter(|name| !name.is_empty())
+        .collect();
     for property in sections
         .iter_mut()
         .flat_map(|section| section.props.iter_mut())
@@ -1821,6 +1839,22 @@ pub fn style_sections(
             property.value = crate::scene::model::object::PropValue::Choice {
                 selected: current,
                 options: linetype_options.clone(),
+            };
+        } else if property.field == "dim_text_style" {
+            if let Some(handle) = crate::entities::dim_override::handle(
+                data,
+                crate::entities::dim_override::DIMTXSTY,
+            ) {
+                current = document
+                    .text_styles
+                    .iter()
+                    .find(|style| style.handle == handle)
+                    .map(|style| style.name.clone())
+                    .unwrap_or(current);
+            }
+            property.value = crate::scene::model::object::PropValue::Choice {
+                selected: current,
+                options: text_style_options.clone(),
             };
         }
     }

@@ -128,6 +128,9 @@ impl OpenCADStudio {
                             crate::entities::spline::control_vertex_count(spline)
                         })
                     }
+                    acadrust::EntityType::Table(table) => {
+                        Some(table.row_count().saturating_mul(table.column_count()))
+                    }
                     _ => None,
                 });
             vertex_count.map_or(prop_vertex, |count| prop_vertex.min(count.saturating_sub(1)))
@@ -140,6 +143,7 @@ impl OpenCADStudio {
             false
         };
         crate::scene::view::dispatch::set_prop_current_vertex(prop_vertex);
+        crate::entities::table::set_prop_current_cell(prop_vertex);
 
         let annotation_scale_handle = self.tabs[i].scene.displayed_annotation_scale_handle();
         let new_panel = {
@@ -1294,6 +1298,43 @@ impl OpenCADStudio {
                                 }
                             }
                         }
+                        acadrust::EntityType::Table(table) => {
+                            let mut names: Vec<String> = doc
+                                .objects
+                                .values()
+                                .filter_map(|object| match object {
+                                    acadrust::objects::ObjectType::TableStyle(style)
+                                        if !style.name.trim().is_empty() =>
+                                    {
+                                        Some(style.name.clone())
+                                    }
+                                    _ => None,
+                                })
+                                .collect();
+                            names.sort_by_key(|name| name.to_ascii_lowercase());
+                            names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+                            let selected = table
+                                .table_style_handle
+                                .and_then(|handle| doc.objects.get(&handle))
+                                .and_then(|object| match object {
+                                    acadrust::objects::ObjectType::TableStyle(style) => {
+                                        Some(style.name.clone())
+                                    }
+                                    _ => None,
+                                })
+                                .unwrap_or_else(|| "Standard".to_string());
+                            if !names.iter().any(|name| name.eq_ignore_ascii_case(&selected)) {
+                                names.insert(0, selected.clone());
+                            }
+                            set_row_value(
+                                &mut sections,
+                                "tbl_style_handle",
+                                crate::scene::model::object::PropValue::Choice {
+                                    selected,
+                                    options: names,
+                                },
+                            );
+                        }
                         _ => {}
                     }
 
@@ -1874,6 +1915,51 @@ impl OpenCADStudio {
         mut entity: acadrust::EntityType,
     ) -> Option<Handle> {
         let i = self.active_tab;
+        if let acadrust::EntityType::Table(table) = &mut entity {
+            const PREFIX: &str = "__OPENCAD_LINK_PENDING__";
+            if let Some(path) = table.name.strip_prefix(PREFIX).map(str::to_string) {
+                use acadrust::entities::table::CellStateFlags;
+                use acadrust::objects::{
+                    ClassObject, ClassObjectData, DataLink, ObjectType,
+                };
+                let document = &mut self.tabs[i].scene.document;
+                let link_handle = document.allocate_handle();
+                let mut object = ClassObject::new(ClassObjectData::DataLink(DataLink {
+                    data_adapter: "CSV".to_string(),
+                    description: path.clone(),
+                    tooltip: path.clone(),
+                    connection_string: path.clone(),
+                    status_flags: 1,
+                    update_status: "Linked".to_string(),
+                    ..DataLink::default()
+                }));
+                object.handle = link_handle;
+                document
+                    .objects
+                    .insert(link_handle, ObjectType::ClassObject(object));
+                let rows = table.row_count() as i32;
+                let columns = table.column_count() as i32;
+                for row in &mut table.rows {
+                    for cell in &mut row.cells {
+                        cell.has_linked_data = true;
+                        cell.data_link_handle = Some(link_handle);
+                        cell.data_link_rows = rows;
+                        cell.data_link_columns = columns;
+                        cell.state.insert(
+                            CellStateFlags::LINKED
+                                | CellStateFlags::CONTENT_LOCKED
+                                | CellStateFlags::FORMAT_LOCKED,
+                        );
+                    }
+                }
+                table.name = std::path::Path::new(&path)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("Linked table")
+                    .to_string();
+                table.description = path;
+            }
+        }
         let tracks_draw_anchor = self.tabs[i].active_cmd.is_some()
             && matches!(
                 &entity,

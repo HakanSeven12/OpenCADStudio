@@ -2364,7 +2364,30 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             return Task::none();
                         }
                         self.push_undo_snapshot(i, "CHPROP");
-                        if field == "block" {
+                        if field == "tbl_style_handle" {
+                            let style_handle = self.tabs[i]
+                                .scene
+                                .document
+                                .objects
+                                .iter()
+                                .find_map(|(handle, object)| match object {
+                                    acadrust::objects::ObjectType::TableStyle(style)
+                                        if style.name.eq_ignore_ascii_case(val.trim()) =>
+                                    {
+                                        Some(*handle)
+                                    }
+                                    _ => None,
+                                });
+                            if let Some(style_handle) = style_handle {
+                                for &handle in &handles {
+                                    if let Some(acadrust::EntityType::Table(table)) =
+                                        self.tabs[i].scene.document.get_entity_mut(handle)
+                                    {
+                                        table.table_style_handle = Some(style_handle);
+                                    }
+                                }
+                            }
+                        } else if field == "block" {
                             // Name row on a block reference: an existing name
                             // re-points the selected inserts; a new one renames
                             // the definition they share. Commit closes the list.

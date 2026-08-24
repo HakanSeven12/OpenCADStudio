@@ -390,6 +390,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "OBJECTSCALE",
         // Import CSV into a table + LandXML survey points.
         "DATALINK",
+        "DATALINKUPDATE",
         "LANDXMLIMPORT",
         // Keyboard-shortcut (CUI) export / import.
         "CUIEXPORT",

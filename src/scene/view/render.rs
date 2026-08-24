@@ -3527,6 +3527,7 @@ impl Scene {
         };
         let mut uniforms =
             Uniforms::new(&inst.camera, full_bounds, self.document.header.lineweight_display);
+        uniforms._pad = if self.document.header.fill_mode { 1.0 } else { 0.0 };
         if self.document.header.paper_space_linetype_scaling
             && !inst.paper_sheet
             && inst.tile_idx.is_none()

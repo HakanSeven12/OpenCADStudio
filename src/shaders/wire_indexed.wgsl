@@ -12,7 +12,7 @@ struct Uniforms {
     flat_shade: f32,
     transparency_enable: f32,
     linetype_scale: f32,
-    _pad: f32,
+    fillmode_enable: f32,
     view_rot:         mat4x4<f32>,
     eye_high:         vec3<f32>,
     _pad_eh:          f32,
@@ -71,6 +71,7 @@ struct VertexOut {
     @location(8)                    cap:            vec2<f32>,
     // (segment pixel length, end half-width at A, end half-width at B).
     @location(9) @interpolate(flat) cap_ends:       vec3<f32>,
+    @location(10) @interpolate(flat) world_band:    f32,
 }
 
 // Half-width of one segment end: a tapered band's own end width wins, then a
@@ -181,6 +182,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         + ext * hw * u.world_per_pixel;
     out.cap            = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
     out.cap_ends       = vec3<f32>(seg_len, hw_a, hw_b);
+    out.world_band     = select(0.0, 1.0, c.world_half_width > 0.0 || in.taper_ratio.x > 0.0 || in.taper_ratio.y > 0.0);
     out.pattern_length = c.pattern_length * lt_scale;
     out.pat0           = c.pat0 * lt_scale;
     out.pat1           = c.pat1 * lt_scale;
@@ -244,6 +246,21 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
     return false;
 }
 
+fn band_interior_clipped(in: VertexOut) -> bool {
+    if u.fillmode_enable > 0.5 || in.world_band < 0.5 {
+        return false;
+    }
+    if in.cap.x < 0.0 || in.cap.x > in.cap_ends.x {
+        return true;
+    }
+    var along = 0.0;
+    if in.cap_ends.x > 1e-4 {
+        along = clamp(in.cap.x / in.cap_ends.x, 0.0, 1.0);
+    }
+    let half_width = mix(in.cap_ends.y, in.cap_ends.z, along);
+    return abs(in.cap.y) < max(half_width - 1.0, 0.0);
+}
+
 @fragment fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // Negative pattern length is the persistent-arena tombstone sentinel.
     // Discard before cap/alpha work so deleted slabs cannot write color/depth.
@@ -251,6 +268,9 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
         discard;
     }
     if cap_clipped(in.cap, in.cap_ends) {
+        discard;
+    }
+    if band_interior_clipped(in) {
         discard;
     }
     if in.pattern_length > 0.0 {
@@ -272,6 +292,9 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
         discard;
     }
     if cap_clipped(in.cap, in.cap_ends) {
+        discard;
+    }
+    if band_interior_clipped(in) {
         discard;
     }
     if in.pattern_length > 0.0 {

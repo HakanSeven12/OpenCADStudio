@@ -964,7 +964,16 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
     };
     match field {
         "elevation" => pline.elevation = v,
-        "global_width" => pline.constant_width = v,
+        "global_width" if v.is_finite() && v >= 0.0 => {
+            pline.constant_width = v;
+            // Global width replaces every segment override. Keeping old
+            // start/end values would make this editable row appear to work
+            // while the renderer continued using the stale per-segment data.
+            for vertex in &mut pline.vertices {
+                vertex.start_width = 0.0;
+                vertex.end_width = 0.0;
+            }
+        }
         "vertex_x" => {
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.location.x = v;
@@ -975,12 +984,28 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
                 vtx.location.y = v;
             }
         }
-        "start_width" => {
+        "start_width" if v.is_finite() && v >= 0.0 => {
+            if pline.constant_width > 0.0 {
+                let width = pline.constant_width;
+                for vertex in &mut pline.vertices {
+                    vertex.start_width = width;
+                    vertex.end_width = width;
+                }
+                pline.constant_width = 0.0;
+            }
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.start_width = v;
             }
         }
-        "end_width" => {
+        "end_width" if v.is_finite() && v >= 0.0 => {
+            if pline.constant_width > 0.0 {
+                let width = pline.constant_width;
+                for vertex in &mut pline.vertices {
+                    vertex.start_width = width;
+                    vertex.end_width = width;
+                }
+                pline.constant_width = 0.0;
+            }
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.end_width = v;
             }

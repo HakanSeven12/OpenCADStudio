@@ -25,7 +25,8 @@ pub struct Uniforms {
     /// zooming inside MSPACE changes one scalar instead of re-tessellating and
     /// re-uploading every dashed wire.
     pub linetype_scale: f32,
-    /// Pads the struct to the uniform alignment required by wgpu.
+    /// FILLMODE toggle. Wire shaders use this slot to draw wide polylines as
+    /// boundary outlines when fills are disabled.
     pub _pad: f32,
 
     // ── Relative-to-eye (double-single) additions ───────────────────────────

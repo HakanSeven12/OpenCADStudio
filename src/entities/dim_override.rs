@@ -77,7 +77,12 @@ pub const DIMATFIT: i16 = 289;
 pub const DIMFXLON: i16 = 290;
 pub const DIMTFILL: i16 = 69;
 pub const DIMTFILLCLR: i16 = 70;
-pub const DIMTXTDIRECTION: i16 = 295;
+pub const DIMTXTDIRECTION: i16 = 294;
+pub const DIMALTMZF: i16 = 295;
+pub const DIMALTMZS: i16 = 296;
+pub const DIMMZF: i16 = 297;
+pub const DIMMZS: i16 = 298;
+pub const DIMTALN: i16 = 392;
 pub const DIMTXSTY: i16 = 340;
 pub const DIMBLK: i16 = 342;
 pub const DIMBLK1: i16 = 343;
@@ -243,7 +248,9 @@ pub fn property_real_code(field: &str) -> Option<i16> {
         "dim_roundoff" => DIMRND,
         "dim_scale_linear" => DIMLFAC,
         "dim_alt_scale_factor" => DIMALTF,
+        "dim_alt_sub_units_scale" => DIMALTMZF,
         "dim_alt_roundoff" => DIMALTRND,
+        "dim_sub_units_scale" => DIMMZF,
         "dim_tolerance_limit_lower" => DIMTM,
         "dim_tolerance_limit_upper" => DIMTP,
         "dim_tolerance_text_height" => DIMTFAC,
@@ -268,21 +275,23 @@ pub fn property_int_code(field: &str) -> Option<i16> {
         "dim_units" => DIMLUNIT,
         "dim_precision" => DIMDEC,
         "dim_decimal_separator" => DIMDSEP,
-        "dim_angle_format" => DIMAUNIT,
-        "dim_angle_precision" => DIMADEC,
+        "dim_fractional_type" => DIMFRAC,
+        "dim_text_view_direction" => DIMTXTDIRECTION,
         "dim_alt_enabled" => DIMALT,
         "dim_alt_format" => DIMALTU,
         "dim_alt_precision" => DIMALTD,
+        "dim_alt_tolerance_precision" => DIMALTTD,
         "dim_tolerance_precision" => DIMTDEC,
         "dim_tolerance_pos_vert" => DIMTOLJ,
+        "dim_tolerance_alignment" => DIMTALN,
         _ => return None,
     })
 }
 
 pub fn property_string_code(field: &str) -> Option<i16> {
     Some(match field {
-        "dim_prefix_suffix" => DIMPOST,
-        "dim_alt_prefix_suffix" => DIMAPOST,
+        "dim_sub_units_suffix" => DIMMZS,
+        "dim_alt_sub_units_suffix" => DIMALTMZS,
         _ => return None,
     })
 }
@@ -317,10 +326,61 @@ fn inherited_int(doc: &CadDocument, handle: Handle, code: i16) -> i16 {
         DIMZIN => style.dimzin,
         DIMALTZ => style.dimaltz,
         DIMTZIN => style.dimtzin,
+        DIMALTTZ => style.dimalttz,
         DIMTOL => style.dimtol as i16,
         DIMLIM => style.dimlim as i16,
+        DIMALT => style.dimalt as i16,
+        DIMTFILL => style.dimtfill,
+        DIMTALN => 0,
         _ => 0,
     }
+}
+
+fn inherited_real(doc: &CadDocument, handle: Handle, code: i16) -> f64 {
+    let Some(EntityType::Dimension(dimension)) = doc.get_entity(handle) else {
+        return 0.0;
+    };
+    if let Some(value) = real(&dimension.base().common.extended_data, code) {
+        return value;
+    }
+    let Some(style) = doc.dim_styles.iter().find(|style| {
+        style.name.eq_ignore_ascii_case(&dimension.base().style_name)
+            || (dimension.base().style_name.trim().is_empty()
+                && style.name.eq_ignore_ascii_case("Standard"))
+    }) else {
+        return 0.0;
+    };
+    match code {
+        DIMGAP => style.dimgap,
+        DIMTP => style.dimtp,
+        DIMTM => style.dimtm,
+        _ => 0.0,
+    }
+}
+
+fn inherited_string(doc: &CadDocument, handle: Handle, code: i16) -> String {
+    let Some(EntityType::Dimension(dimension)) = doc.get_entity(handle) else {
+        return String::new();
+    };
+    if let Some(value) = string(&dimension.base().common.extended_data, code) {
+        return value;
+    }
+    let Some(style) = doc.dim_styles.iter().find(|style| {
+        style.name.eq_ignore_ascii_case(&dimension.base().style_name)
+            || (dimension.base().style_name.trim().is_empty()
+                && style.name.eq_ignore_ascii_case("Standard"))
+    }) else {
+        return String::new();
+    };
+    match code {
+        DIMPOST => style.dimpost.clone(),
+        DIMAPOST => style.dimapost.clone(),
+        _ => String::new(),
+    }
+}
+
+fn split_template(value: &str) -> (&str, &str) {
+    value.split_once("<>").unwrap_or(("", value))
 }
 
 pub fn set_property(
@@ -341,14 +401,16 @@ pub fn set_property(
     };
     if let Some(code) = handle_field {
         let resolved = match field {
-            "dim_arrowhead_1" | "dim_arrowhead_2" => (trimmed != "Closed filled")
-                .then(|| {
+            "dim_arrowhead_1" | "dim_arrowhead_2" => {
+                if trimmed == "Closed filled" {
+                    Some(Handle::NULL)
+                } else {
                     doc.block_records
                         .iter()
                         .find(|record| record.name == trimmed)
                         .map(|record| record.handle)
-                })
-                .flatten(),
+                }
+            }
             "dim_text_style" => doc
                 .text_styles
                 .iter()
@@ -360,7 +422,10 @@ pub fn set_property(
                 .find(|line_type| line_type.name == trimmed)
                 .map(|line_type| line_type.handle),
         };
-        set(doc, handle, code, resolved.map(XDataValue::Handle));
+        let Some(resolved) = resolved else {
+            return false;
+        };
+        set(doc, handle, code, Some(XDataValue::Handle(resolved)));
         return true;
     }
     let inverse_boolean_code = match field {
@@ -384,6 +449,8 @@ pub fn set_property(
         "dim_alt_suppress_trailing_zeros" => Some((DIMALTZ, 8)),
         "dim_tolerance_suppress_leading_zeros" => Some((DIMTZIN, 4)),
         "dim_tolerance_suppress_trailing_zeros" => Some((DIMTZIN, 8)),
+        "dim_alt_tolerance_suppress_leading_zeros" => Some((DIMALTTZ, 4)),
+        "dim_alt_tolerance_suppress_trailing_zeros" => Some((DIMALTTZ, 8)),
         _ => None,
     };
     if let Some((code, bit)) = bit_field {
@@ -399,21 +466,124 @@ pub fn set_property(
         set(doc, handle, code, Some(XDataValue::Integer16(value)));
         return true;
     }
+    let zero_base = match field {
+        "dim_suppress_zero_feet" => Some((DIMZIN, true)),
+        "dim_suppress_zero_inches" => Some((DIMZIN, false)),
+        "dim_alt_suppress_zero_feet" => Some((DIMALTZ, true)),
+        "dim_alt_suppress_zero_inches" => Some((DIMALTZ, false)),
+        "dim_tolerance_suppress_zero_feet" => Some((DIMTZIN, true)),
+        "dim_tolerance_suppress_zero_inches" => Some((DIMTZIN, false)),
+        "dim_alt_tolerance_suppress_zero_feet" => Some((DIMALTTZ, true)),
+        "dim_alt_tolerance_suppress_zero_inches" => Some((DIMALTTZ, false)),
+        _ => None,
+    };
+    if let Some((code, feet_field)) = zero_base {
+        let Some(enabled) = yes(trimmed).map(|value| value != 0) else {
+            return false;
+        };
+        let current = inherited_int(doc, handle, code);
+        let mut suppress_feet = matches!(current & 3, 0 | 3);
+        let mut suppress_inches = matches!(current & 3, 0 | 2);
+        if feet_field {
+            suppress_feet = enabled;
+        } else {
+            suppress_inches = enabled;
+        }
+        let base = match (suppress_feet, suppress_inches) {
+            (true, true) => 0,
+            (false, false) => 1,
+            (false, true) => 2,
+            (true, false) => 3,
+        };
+        set(
+            doc,
+            handle,
+            code,
+            Some(XDataValue::Integer16((current & !3) | base)),
+        );
+        return true;
+    }
+    if field == "dim_text_fill_color" {
+        let mode = match trimmed.to_ascii_lowercase().as_str() {
+            "none" => 0,
+            "background" => 1,
+            "color" => 2,
+            _ => return false,
+        };
+        set(doc, handle, DIMTFILL, Some(XDataValue::Integer16(mode)));
+        return true;
+    }
+    if matches!(
+        field,
+        "dim_prefix" | "dim_suffix" | "dim_alt_prefix" | "dim_alt_suffix"
+    ) {
+        let code = if field.starts_with("dim_alt_") {
+            DIMAPOST
+        } else {
+            DIMPOST
+        };
+        let current = inherited_string(doc, handle, code);
+        let (old_prefix, old_suffix) = split_template(&current);
+        let (prefix, suffix) = if field.ends_with("prefix") {
+            (value, old_suffix)
+        } else {
+            (old_prefix, value)
+        };
+        set(
+            doc,
+            handle,
+            code,
+            Some(XDataValue::String(format!("{prefix}<>{suffix}"))),
+        );
+        return true;
+    }
     if field == "dim_tolerance_display" {
-        let (tolerance, limits) = match trimmed.to_ascii_lowercase().as_str() {
-            "deviation" => (1, 0),
-            "limits" => (0, 1),
-            "none" => (0, 0),
+        let current_gap = inherited_real(doc, handle, DIMGAP).abs();
+        let upper = inherited_real(doc, handle, DIMTP);
+        let lower = inherited_real(doc, handle, DIMTM);
+        let (tolerance, limits, basic) = match trimmed.to_ascii_lowercase().as_str() {
+            "symmetrical" => {
+                set(doc, handle, DIMTM, Some(XDataValue::Real(upper)));
+                (1, 0, false)
+            }
+            "deviation" => {
+                if (upper - lower).abs() <= 1e-12 {
+                    let distinct_lower = if upper.abs() > 1e-12 { 0.0 } else { 0.0001 };
+                    set(
+                        doc,
+                        handle,
+                        DIMTM,
+                        Some(XDataValue::Real(distinct_lower)),
+                    );
+                }
+                (1, 0, false)
+            }
+            "limits" => (0, 1, false),
+            "basic" => (0, 0, true),
+            "none" => (0, 0, false),
             _ => return false,
         };
         set(doc, handle, DIMTOL, Some(XDataValue::Integer16(tolerance)));
         set(doc, handle, DIMLIM, Some(XDataValue::Integer16(limits)));
+        let gap = if basic {
+            -current_gap.max(0.0001)
+        } else {
+            current_gap
+        };
+        set(doc, handle, DIMGAP, Some(XDataValue::Real(gap)));
         return true;
     }
     if let Some(code) = property_real_code(field) {
         if trimmed.is_empty() {
             set(doc, handle, code, None);
         } else if let Ok(number) = trimmed.parse::<f64>() {
+            let number = if field == "dim_text_offset"
+                && inherited_real(doc, handle, DIMGAP) < 0.0
+            {
+                -number.abs()
+            } else {
+                number
+            };
             set(doc, handle, code, Some(XDataValue::Real(number)));
         } else {
             return false;
@@ -431,6 +601,9 @@ pub fn set_property(
     }
     if let Some(code) = property_int_code(field) {
         let parsed = match field {
+            "dim_line_lineweight" | "dim_ext_line_lineweight" => {
+                parse_lineweight_label(trimmed)
+            }
             "dim_ext_line_fixed"
             | "dim_text_outside_align"
             | "dim_text_inside_align"
@@ -451,12 +624,15 @@ pub fn set_property(
                 "desktop" => Some(6),
                 _ => trimmed.parse().ok(),
             },
-            "dim_angle_format" => match trimmed.to_ascii_lowercase().as_str() {
-                "decimal degrees" => Some(0),
-                "degrees/minutes/seconds" => Some(1),
-                "gradians" => Some(2),
-                "radians" => Some(3),
-                "surveyors units" => Some(4),
+            "dim_fractional_type" => match trimmed.to_ascii_lowercase().as_str() {
+                "horizontal" => Some(0),
+                "diagonal" => Some(1),
+                "not stacked" => Some(2),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_text_view_direction" => match trimmed.to_ascii_lowercase().as_str() {
+                "left-to-right" => Some(0),
+                "right-to-left" => Some(1),
                 _ => trimmed.parse().ok(),
             },
             "dim_text_pos_vert" => match trimmed.to_ascii_lowercase().as_str() {
@@ -476,23 +652,38 @@ pub fn set_property(
                 _ => trimmed.parse().ok(),
             },
             "dim_fit" => match trimmed.to_ascii_lowercase().as_str() {
-                "either text or arrows" => Some(0),
+                "both text and arrows" => Some(0),
                 "arrows" => Some(1),
                 "text" => Some(2),
-                "both text and arrows" => Some(3),
-                "always keep text" => Some(4),
+                "best fit" => Some(3),
                 _ => trimmed.parse().ok(),
             },
             "dim_text_movement" => match trimmed.to_ascii_lowercase().as_str() {
-                "move dimension line" => Some(0),
-                "add leader" => Some(1),
-                "move text freely" => Some(2),
+                "keep dim line with text" => Some(0),
+                "move text, add leader" => Some(1),
+                "move text, no leader" => Some(2),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_alt_format" => match trimmed.to_ascii_lowercase().as_str() {
+                "scientific" => Some(1),
+                "decimal" => Some(2),
+                "engineering" => Some(3),
+                "architectural stacked" => Some(4),
+                "fractional stacked" => Some(5),
+                "architectural" => Some(6),
+                "fractional" => Some(7),
+                "desktop" => Some(8),
                 _ => trimmed.parse().ok(),
             },
             "dim_tolerance_pos_vert" => match trimmed.to_ascii_lowercase().as_str() {
                 "bottom" => Some(0),
                 "middle" => Some(1),
                 "top" => Some(2),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_tolerance_alignment" => match trimmed.to_ascii_lowercase().as_str() {
+                "align decimal separators" => Some(0),
+                "align operational symbols" => Some(1),
                 _ => trimmed.parse().ok(),
             },
             _ => trimmed.parse().ok(),
@@ -504,4 +695,18 @@ pub fn set_property(
         return true;
     }
     false
+}
+
+fn parse_lineweight_label(value: &str) -> Option<i16> {
+    match value.trim() {
+        "ByLayer" => Some(-1),
+        "ByBlock" => Some(-2),
+        "Default" => Some(-3),
+        value => value
+            .trim_end_matches("mm")
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|millimetres| (millimetres * 100.0).round() as i16),
+    }
 }

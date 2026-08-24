@@ -27,27 +27,6 @@ fn visual_style_properties_text(style: &acadrust::objects::VisualStyle) -> Strin
         .join("\n")
 }
 
-/// Format an XDATA value for display in the Properties panel.
-fn format_xdata_value(value: &acadrust::xdata::XDataValue) -> String {
-    use acadrust::xdata::XDataValue;
-    match value {
-        XDataValue::String(s) => s.clone(),
-        XDataValue::ControlString(s) => format!("ControlString: {s}"),
-        XDataValue::LayerName(s) => format!("Layer: {s}"),
-        XDataValue::BinaryData(b) => format!("Binary: {} bytes", b.len()),
-        XDataValue::Handle(h) => format!("Handle: {:X}", h.value()),
-        XDataValue::Point3D(v)
-        | XDataValue::Position3D(v)
-        | XDataValue::Displacement3D(v)
-        | XDataValue::Direction3D(v) => format!("{:.6}, {:.6}, {:.6}", v.x, v.y, v.z),
-        XDataValue::Real(r) | XDataValue::Distance(r) | XDataValue::ScaleFactor(r) => {
-            format!("{r}")
-        }
-        XDataValue::Integer16(i) => format!("{i}"),
-        XDataValue::Integer32(i) => format!("{i}"),
-    }
-}
-
 impl OpenCADStudio {
     /// Rebuild the PropertiesPanel from the current entity selection.
     /// Preserves UI state (open pickers, edit buffer) across refreshes.
@@ -634,7 +613,6 @@ impl OpenCADStudio {
                         entity,
                     ));
 
-                    // Extended Data (XDATA) section: show attached app records.
                     {
                         use crate::entities::common::ro_prop;
                         let xd = &source_entity.common().extended_data;
@@ -644,13 +622,13 @@ impl OpenCADStudio {
                                 let value_text = rec
                                     .values
                                     .iter()
-                                    .map(format_xdata_value)
+                                    .map(|value| format!("{value:?}"))
                                     .collect::<Vec<_>>()
                                     .join(", ");
                                 xd_props.push(ro_prop(
-                                    &rec.application_name,
+                                    t!("Application").as_ref(),
                                     "xdata_value",
-                                    value_text,
+                                    format!("{}: {value_text}", rec.application_name),
                                 ));
                             }
                             sections.push(crate::scene::model::object::PropSection {

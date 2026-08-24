@@ -26,6 +26,8 @@ thread_local! {
     static RECT_CHAMFER1:   Cell<f64> = Cell::new(0.0);
     static RECT_CHAMFER2:   Cell<f64> = Cell::new(0.0);
     static RECT_FILLET:     Cell<f64> = Cell::new(0.0);
+    static DONUT_INNER_DIAMETER: Cell<f64> = Cell::new(0.5);
+    static DONUT_OUTER_DIAMETER: Cell<f64> = Cell::new(1.0);
 }
 
 macro_rules! accessors {
@@ -68,3 +70,13 @@ accessors!(get_rect_rotation, set_rect_rotation, RECT_ROTATION);
 accessors!(get_rect_chamfer1, set_rect_chamfer1, RECT_CHAMFER1);
 accessors!(get_rect_chamfer2, set_rect_chamfer2, RECT_CHAMFER2);
 accessors!(get_rect_fillet, set_rect_fillet, RECT_FILLET);
+accessors!(
+    get_donut_inner_diameter,
+    set_donut_inner_diameter,
+    DONUT_INNER_DIAMETER
+);
+accessors!(
+    get_donut_outer_diameter,
+    set_donut_outer_diameter,
+    DONUT_OUTER_DIAMETER
+);

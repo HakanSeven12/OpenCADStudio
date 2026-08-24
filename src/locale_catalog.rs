@@ -786,6 +786,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "DONUT  Specify center of donut (Enter to exit):" => Some(("draw", "donut-specify-center-of-donut-enter-to-exit")),
         "DONUT  Specify inside diameter <0>:" => Some(("draw", "donut-specify-inside-diameter-0")),
         "DONUT  Specify outside diameter:" => Some(("draw", "donut-specify-outside-diameter")),
+        "DONUT  Specify second point for inside diameter:" => Some(("draw", "donut-specify-second-point-for-inside-diameter")),
+        "DONUT  Specify second point for outside diameter:" => Some(("draw", "donut-specify-second-point-for-outside-diameter")),
         "DRAWORDER  Select reference object (move selection above):" => Some(("view", "draworder-select-reference-object-move-selection-above")),
         "DRAWORDER  Select reference object (move selection under):" => Some(("view", "draworder-select-reference-object-move-selection-under")),
         "DRAWORDER  [Front / Back]  (Above/Under <handle> by typing):" => Some(("view", "draworder-front-back-above-under-handle-by-typ")),

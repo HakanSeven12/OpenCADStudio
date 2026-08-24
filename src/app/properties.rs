@@ -981,6 +981,21 @@ impl OpenCADStudio {
 
                     // Inject DimStyle picker + style-derived groups for Dimensions.
                     if let acadrust::EntityType::Dimension(d) = entity {
+                        if let Some(general) = sections.first_mut() {
+                            general.props.retain(|property| property.field != "handle");
+                            let associative =
+                                crate::scene::dimension_assoc::dimension_is_associative(
+                                    &self.tabs[i].scene.document,
+                                    d.base().common.handle,
+                                );
+                            general.props.push(crate::scene::model::object::Property {
+                                label: t!("Associative").into_owned(),
+                                field: "associative",
+                                value: crate::scene::model::object::PropValue::ReadOnly(
+                                    if associative { "Yes" } else { "No" }.to_string(),
+                                ),
+                            });
+                        }
                         let dim_style_names: Vec<String> = self.tabs[i]
                             .scene
                             .document
@@ -1027,10 +1042,8 @@ impl OpenCADStudio {
                                 &self.tabs[i].scene.document,
                             ));
 
-                            // The style groups are a read-only mirror, but the
-                            // dim-line colour is an editable per-object override:
-                            // prefer the ACAD_DSTYLE code-176 (ACI) override, else
-                            // the style's DIMCLRD.
+                            // Prefer entity-level dimension-variable overrides;
+                            // fall back to the assigned style values.
                             use crate::entities::dim_override as dov;
                             use crate::scene::model::object::PropValue;
                             let dim_c = dov::color(&d.base().common.extended_data, dov::DIMCLRD)
@@ -1043,11 +1056,6 @@ impl OpenCADStudio {
                             for (field, code, inherited) in [
                                 ("dim_ext_line_color", dov::DIMCLRE, style.dimclre),
                                 ("dim_text_color", dov::DIMCLRT, style.dimclrt),
-                                (
-                                    "dim_text_fill_color",
-                                    dov::DIMTFILLCLR,
-                                    style.dimtfillclr,
-                                ),
                             ] {
                                 let color = dov::color(&d.base().common.extended_data, code)
                                     .unwrap_or_else(|| {
@@ -1321,10 +1329,8 @@ impl OpenCADStudio {
                     }
 
                     // Annotative Yes/No + a conditional "Annotative scale" row.
-                    // Read-only: annotative state comes from the entity's style
-                    // (or its own flag) and the assigned annotation-scale name(s)
-                    // are walked from the entity's extension dictionary — both
-                    // need the document, so they are resolved here.
+                    // Annotative state and assigned scale names need the
+                    // document, so they are resolved here.
                     {
                         // Which entities show an Annotative row, the field it uses,
                         // and — for those that don't already carry the row
@@ -1366,7 +1372,7 @@ impl OpenCADStudio {
                             // (MTEXT via its native flag, single-line TEXT via the
                             // context alone) get an editable toggle: turning it on
                             // synthesizes a real per-scale representation. The
-                            // remaining types are style-driven and stay read-only.
+                            // remaining style-only types stay read-only.
                             if anno_field == "annotative" {
                                 match entity {
                                     acadrust::EntityType::MText(t) => set_row_value(
@@ -1379,7 +1385,8 @@ impl OpenCADStudio {
                                     ),
                                     acadrust::EntityType::Text(_)
                                     | acadrust::EntityType::Insert(_)
-                                    | acadrust::EntityType::Hatch(_) => set_row_value(
+                                    | acadrust::EntityType::Hatch(_)
+                                    | acadrust::EntityType::Dimension(_) => set_row_value(
                                         &mut sections,
                                         "annotative",
                                         crate::scene::model::object::PropValue::BoolToggle {
@@ -1395,16 +1402,26 @@ impl OpenCADStudio {
                                 }
                             }
                             if is_anno {
-                                // The applied annotation scale follows the current
-                                // annotation scale (CANNOSCALE / the status-bar
-                                // scale pill), not a per-object stored value.
+                                let memberships = crate::scene::annotative::object_scale_memberships(
+                                    doc,
+                                    entity.common().handle,
+                                );
+                                let assigned_scales = if memberships.is_empty() {
+                                    doc.header.current_annotation_scale.clone()
+                                } else {
+                                    memberships
+                                        .into_iter()
+                                        .map(|(name, _)| name)
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                };
                                 insert_row_after(
                                     &mut sections,
                                     anno_field,
                                     crate::entities::common::ro_prop(
                                         t!("Annotative scale").as_ref(),
                                         "annotative_scale",
-                                        doc.header.current_annotation_scale.clone(),
+                                        assigned_scales,
                                     ),
                                 );
                             }

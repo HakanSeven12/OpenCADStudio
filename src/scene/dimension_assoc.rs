@@ -54,6 +54,28 @@ fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Opti
         .copied()
 }
 
+pub(crate) fn dimension_is_associative(
+    document: &acadrust::CadDocument,
+    dimension: Handle,
+) -> bool {
+    document.objects.values().any(|object| {
+        let ObjectType::Associative(object) = object else {
+            return false;
+        };
+        let AssociativeData::DimensionAssociation(association) = &object.data else {
+            return false;
+        };
+        association.dimension == dimension
+            && association.associativity != 0
+            && association.references.iter().flatten().any(|reference| {
+                reference
+                    .xrefs
+                    .iter()
+                    .any(|source| document.get_entity(*source).is_some())
+            })
+    })
+}
+
 impl Scene {
     pub(crate) fn attach_linear_dimension_association(
         &mut self,

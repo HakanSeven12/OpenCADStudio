@@ -196,17 +196,22 @@ fn trim_version_prefix(value: &str) -> &str {
     value.trim_start_matches(|c| c == 'v' || c == 'V')
 }
 
-fn newest_update(installed: &str, tags: &[String]) -> Option<String> {
+fn newest_update(installed: &str, releases: &[ReleaseInfo]) -> Option<String> {
     let installed = semver::Version::parse(trim_version_prefix(installed)).ok()?;
-    tags.iter()
-        .filter_map(|tag| {
-            semver::Version::parse(trim_version_prefix(tag))
+    releases
+        .iter()
+        .filter(|release| {
+            ocs_plugin_api::manifest::host_accepts_plugin_version(release.api_version)
+                && release.acadrust_compatible
+        })
+        .filter_map(|release| {
+            semver::Version::parse(trim_version_prefix(&release.tag))
                 .ok()
-                .map(|version| (version, tag))
+                .map(|version| (version, release.tag.clone()))
         })
         .filter(|(version, _)| version > &installed)
         .max_by(|(left, _), (right, _)| left.cmp(right))
-        .map(|(_, tag)| tag.clone())
+        .map(|(_, tag)| tag)
 }
 
 fn external_card<'a>(
@@ -219,12 +224,15 @@ fn external_card<'a>(
     selected: bool,
 ) -> Element<'a, Message> {
     let failed_old_api = load_error.is_some() && !p.api_compatible();
+    let acadrust_mismatch = p.acadrust_declared && !p.acadrust_compatible();
     let (status, kind) = if loaded && disabled {
         (t!("Disabled"), StatusKind::Muted)
     } else if loaded {
         (t!("Loaded"), StatusKind::Success)
     } else if !p.api_compatible() || failed_old_api {
         (t!("API incompatible"), StatusKind::Danger)
+    } else if acadrust_mismatch {
+        (t!("acadrust mismatch"), StatusKind::Danger)
     } else if load_error.is_some() {
         (t!("Load failed"), StatusKind::Danger)
     } else if !p.lib_present {
@@ -352,11 +360,8 @@ fn install_controls<'a>(
         .iter()
         .map(|release| release.tag.clone())
         .collect::<Vec<_>>();
-    let selected_api = selected.as_ref().and_then(|selected| {
-        releases
-            .iter()
-            .find(|release| release.tag == *selected)
-            .map(|release| release.api_version)
+    let selected_release = selected.as_ref().and_then(|selected| {
+        releases.iter().find(|release| release.tag == *selected)
     });
     let picker: Element<'_, Message> = if tags.is_empty() {
         text(t!("no releases")).size(11).style(muted_style).into()
@@ -367,9 +372,10 @@ fn install_controls<'a>(
         .text_size(12)
         .into()
     };
-    let action = match selected_api {
-        Some(api_version)
-            if ocs_plugin_api::manifest::host_accepts_plugin_version(api_version) =>
+    let action = match selected_release {
+        Some(release)
+            if ocs_plugin_api::manifest::host_accepts_plugin_version(release.api_version)
+                && release.acadrust_compatible =>
         {
             pill_button(
                 t!("Install"),
@@ -842,18 +848,7 @@ pub fn view_window<'a>(
             let update_tag = repository
                 .as_ref()
                 .and_then(|repo| market.release_tags.get(repo))
-                .and_then(|releases| {
-                    let compatible_tags = releases
-                        .iter()
-                        .filter(|release| {
-                            ocs_plugin_api::manifest::host_accepts_plugin_version(
-                                release.api_version,
-                            )
-                        })
-                        .map(|release| release.tag.clone())
-                        .collect::<Vec<_>>();
-                    newest_update(&p.version, &compatible_tags)
-                });
+                .and_then(|releases| newest_update(&p.version, releases));
             list = list.push(external_card(
                 p,
                 repository,
@@ -984,16 +979,60 @@ pub fn view_web_notice<'a>() -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::{newest_update, registry_error_message, repository_display_name};
+    use crate::plugin::external::ReleaseInfo;
 
     #[test]
     fn newest_update_uses_semver_not_release_order() {
-        let tags = vec![
-            "v1.4.0".to_string(),
-            "v2.0.0".to_string(),
-            "v1.9.9".to_string(),
+        let releases = vec![
+            ReleaseInfo {
+                tag: "v1.4.0".to_string(),
+                api_version: 4,
+                acadrust_source: None,
+                acadrust_declared: false,
+                acadrust_compatible: true,
+            },
+            ReleaseInfo {
+                tag: "v2.0.0".to_string(),
+                api_version: 4,
+                acadrust_source: None,
+                acadrust_declared: false,
+                acadrust_compatible: true,
+            },
+            ReleaseInfo {
+                tag: "v1.9.9".to_string(),
+                api_version: 4,
+                acadrust_source: None,
+                acadrust_declared: false,
+                acadrust_compatible: true,
+            },
         ];
-        assert_eq!(newest_update("1.3.0", &tags).as_deref(), Some("v2.0.0"));
-        assert_eq!(newest_update("2.0.0", &tags), None);
+        assert_eq!(newest_update("1.3.0", &releases).as_deref(), Some("v2.0.0"));
+        assert_eq!(newest_update("2.0.0", &releases), None);
+    }
+
+    #[test]
+    fn newest_update_ignores_incompatible_releases() {
+        let releases = vec![
+            ReleaseInfo {
+                tag: "v1.4.0".to_string(),
+                api_version: 4,
+                acadrust_source: Some(
+                    "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd".to_string(),
+                ),
+                acadrust_declared: true,
+                acadrust_compatible: true,
+            },
+            ReleaseInfo {
+                tag: "v2.0.0".to_string(),
+                api_version: 4,
+                acadrust_source: Some(
+                    "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb".to_string(),
+                ),
+                acadrust_declared: true,
+                acadrust_compatible: false,
+            },
+        ];
+        assert_eq!(newest_update("1.3.0", &releases).as_deref(), Some("v1.4.0"));
     }
 
     #[test]

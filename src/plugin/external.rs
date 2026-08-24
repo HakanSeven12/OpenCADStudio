@@ -30,6 +30,13 @@ pub struct RegistryEntry {
 pub struct ReleaseInfo {
     pub tag: String,
     pub api_version: u32,
+    /// Full `acadrust` git source the release was built against.
+    pub acadrust_source: Option<String>,
+    /// Whether the manifest explicitly declares `acadrust_source` under
+    /// `[opencad]`. When false, the acadrust gate is skipped.
+    pub acadrust_declared: bool,
+    /// Whether the release's `acadrust_source` matches this host.
+    pub acadrust_compatible: bool,
 }
 
 /// An add-on package found on disk (not necessarily loaded or compatible).
@@ -44,6 +51,12 @@ pub struct ExternalPlugin {
     /// an older `plugin.toml` does not declare `repository`.
     pub repository: Option<String>,
     pub api_version: u32,
+    /// Full `acadrust` git source the plugin was built against.
+    pub acadrust_source: Option<String>,
+    /// Whether the manifest explicitly declares `acadrust_source` under
+    /// `[opencad]`. When false, the acadrust gate is skipped and only the
+    /// API-version gate is applied (legacy plugins).
+    pub acadrust_declared: bool,
     pub ribbon_order: i32,
     pub command_prefixes: Vec<String>,
     /// The package directory under the plugins folder.
@@ -58,11 +71,28 @@ impl ExternalPlugin {
         ocs_plugin_api::manifest::host_accepts_plugin_version(self.api_version)
     }
 
-    /// True when the package can be loaded today: compatible API *and* a native
-    /// library present for this platform.
+    /// True when the package's `acadrust` fingerprint matches the host.
+    ///
+    /// If the manifest does not declare `acadrust_source`, the gate is skipped
+    /// (legacy fallback). If declared but empty or mismatched, incompatible.
+    pub fn acadrust_compatible(&self) -> bool {
+        if !self.acadrust_declared {
+            return true;
+        }
+        match self.acadrust_source.as_deref() {
+            None | Some("") => false,
+            Some(source) => ocs_plugin_api::version_info::acadrust_sources_compatible(
+                source,
+                ocs_plugin_api::version_info::host_acadrust_source(),
+            ),
+        }
+    }
+
+    /// True when the package can be loaded today: compatible API *and* matching
+    /// `acadrust` fingerprint (if declared) *and* a native library present.
     #[allow(dead_code)] // plugin-host surface (issue #100); not yet wired
     pub fn loadable(&self) -> bool {
-        self.api_compatible() && self.lib_present
+        self.api_compatible() && self.acadrust_compatible() && self.lib_present
     }
 }
 
@@ -176,6 +206,8 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
     let mut description = String::new();
     let mut repository = None;
     let mut api_version: u32 = 0;
+    let mut acadrust_source: Option<String> = None;
+    let mut acadrust_declared = false;
     let mut ribbon_order: i32 = 0;
     let mut command_prefixes: Vec<String> = Vec::new();
 
@@ -196,6 +228,11 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
             "description" => description = unquote(value),
             "repository" => repository = normalize_repository(&unquote(value)),
             "api_version" => api_version = value.parse().unwrap_or(0),
+            "acadrust_source" => {
+                acadrust_declared = true;
+                let v = unquote(value);
+                acadrust_source = if v.is_empty() { None } else { Some(v) };
+            }
             "ribbon_order" => ribbon_order = value.parse().unwrap_or(0),
             "command_prefixes" => command_prefixes = parse_string_array(value),
             _ => {}
@@ -209,6 +246,8 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
         description,
         repository,
         api_version,
+        acadrust_source,
+        acadrust_declared,
         ribbon_order,
         command_prefixes,
         dir: PathBuf::new(),
@@ -298,7 +337,33 @@ mod loader {
         manager.set_notification_handler(v4_support::notification_handler());
         let mut out = Vec::new();
         for d in &discovered {
-            if !d.api_compatible() || !d.lib_present {
+            if !d.api_compatible() {
+                continue;
+            }
+            if !d.lib_present {
+                continue;
+            }
+            if d.acadrust_declared && d.acadrust_source.is_none() {
+                eprintln!(
+                    "[plugin] {} declares acadrust metadata but has no fingerprint; cannot verify compatibility",
+                    d.id
+                );
+            }
+            if !d.acadrust_compatible() {
+                let host_src = ocs_plugin_api::version_info::host_acadrust_source();
+                let plugin_hash = d
+                    .acadrust_source
+                    .as_deref()
+                    .and_then(ocs_plugin_api::version_info::acadrust_source_hash)
+                    .unwrap_or("unknown");
+                let host_hash = ocs_plugin_api::version_info::acadrust_source_hash(host_src)
+                    .unwrap_or("unknown");
+                out.push((
+                    d.id.clone(),
+                    Err(format!(
+                        "Plugin built for acadrust @{plugin_hash}, but this host uses @{host_hash}"
+                    )),
+                ));
                 continue;
             }
             let Some(path) = lib_file(&d.dir) else {
@@ -410,6 +475,86 @@ xdata_apps = ["MYPLUGIN_RECORD"]
         let p = parse_plugin_toml("id=\"a\"\napi_version = 9999").unwrap();
         assert!(!p.api_compatible());
         assert!(!p.loadable());
+    }
+
+    #[test]
+    fn undeclared_acadrust_falls_back_to_api_gate() {
+        let toml = r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 4
+"#;
+        let p = parse_plugin_toml(toml).expect("parsed");
+        assert!(!p.acadrust_declared);
+        assert!(p.acadrust_source.is_none());
+        assert!(p.acadrust_compatible(), "undeclared acadrust is treated as compatible");
+    }
+
+    #[test]
+    fn declared_empty_acadrust_source_is_incompatible() {
+        let toml = r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 4
+
+[opencad]
+acadrust_source = ""
+"#;
+        let p = parse_plugin_toml(toml).expect("parsed");
+        assert!(p.acadrust_declared);
+        assert!(p.acadrust_source.is_none());
+        assert!(!p.acadrust_compatible(), "declared but empty source is incompatible");
+        assert!(!p.loadable());
+    }
+
+    #[test]
+    fn acadrust_mismatch_detected() {
+        let host = ocs_plugin_api::version_info::host_acadrust_source();
+        let other = if host.contains("94df2c3") {
+            "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
+        } else {
+            "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd"
+        };
+        let toml = format!(
+            r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 4
+
+[opencad]
+acadrust_source = "{other}"
+"#
+        );
+        let p = parse_plugin_toml(&toml).expect("parsed");
+        assert!(p.acadrust_declared);
+        assert!(!p.acadrust_compatible(), "mismatched acadrust fingerprint should be incompatible");
+        assert!(!p.loadable());
+    }
+
+    #[test]
+    fn acadrust_match_detected() {
+        let host = ocs_plugin_api::version_info::host_acadrust_source();
+        let toml = format!(
+            r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 4
+
+[opencad]
+acadrust_source = "{host}"
+"#
+        );
+        let p = parse_plugin_toml(&toml).expect("parsed");
+        assert!(p.acadrust_declared);
+        assert!(p.acadrust_compatible(), "matching acadrust fingerprint should be compatible");
     }
 
     /// Integration smoke test for the out-of-process plugin path.

@@ -1021,7 +1021,11 @@ impl OpenCADStudio {
                                         && s.name.eq_ignore_ascii_case("Standard"))
                             })
                         {
-                            sections.extend(crate::entities::dimension::style_sections(style));
+                            sections.extend(crate::entities::dimension::style_sections(
+                                style,
+                                d,
+                                &self.tabs[i].scene.document,
+                            ));
 
                             // The style groups are a read-only mirror, but the
                             // dim-line colour is an editable per-object override:
@@ -1036,6 +1040,25 @@ impl OpenCADStudio {
                                 "dim_line_color",
                                 PropValue::ColorChoice(dim_c),
                             );
+                            for (field, code, inherited) in [
+                                ("dim_ext_line_color", dov::DIMCLRE, style.dimclre),
+                                ("dim_text_color", dov::DIMCLRT, style.dimclrt),
+                                (
+                                    "dim_text_fill_color",
+                                    dov::DIMTFILLCLR,
+                                    style.dimtfillclr,
+                                ),
+                            ] {
+                                let color = dov::color(&d.base().common.extended_data, code)
+                                    .unwrap_or_else(|| {
+                                        acadrust::types::Color::from_index(inherited)
+                                    });
+                                set_row_value(
+                                    &mut sections,
+                                    field,
+                                    PropValue::ColorChoice(color),
+                                );
+                            }
                         }
                     }
 

@@ -1140,6 +1140,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 if matches!(
                     item.action,
                     GripMenuAction::Stretch
+                        | GripMenuAction::MoveWithDimLine
                         | GripMenuAction::MoveWithLeader
                         | GripMenuAction::MoveIndependent
                 ) {
@@ -1839,7 +1840,24 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
             }
             self.push_undo_snapshot(i, "CHPROP");
 
-            if field == "vscale_std" {
+            if field.starts_with("dim_") {
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    if matches!(
+                        self.tabs[i].scene.document.get_entity(handle),
+                        Some(acadrust::EntityType::Dimension(_))
+                    ) {
+                        crate::entities::dim_override::set_property(
+                            &mut self.tabs[i].scene.document,
+                            handle,
+                            field,
+                            &value,
+                        );
+                    }
+                }
+            } else if field == "vscale_std" {
                 for &handle in &handles {
                     if matches!(
                         self.tabs[i].scene.document.get_entity(handle),
@@ -2410,6 +2428,19 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     continue;
                                 }
                                 match field {
+                                    _ if field.starts_with("dim_") => {
+                                        if matches!(
+                                            self.tabs[i].scene.document.get_entity(handle),
+                                            Some(acadrust::EntityType::Dimension(_))
+                                        ) {
+                                            crate::entities::dim_override::set_property(
+                                                &mut self.tabs[i].scene.document,
+                                                handle,
+                                                field,
+                                                &val,
+                                            );
+                                        }
+                                    }
                                     "hyperlink" => {
                                         // Stored in the standard PE_URL XDATA
                                         // record; an empty value clears it.

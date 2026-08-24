@@ -60,6 +60,44 @@ fn base_props(base: &DimensionBase) -> Vec<crate::scene::model::object::Property
 }
 
 fn properties(dim: &Dimension) -> Vec<PropSection> {
+    if let Dimension::Linear(d) = dim {
+        let base = &d.base;
+        return vec![PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![
+                crate::scene::model::object::Property {
+                    label: t!("Dimension style").into_owned(),
+                    field: "style_name",
+                    value: crate::scene::model::object::PropValue::PlainText(
+                        base.style_name.clone(),
+                    ),
+                },
+                ro(
+                    t!("Measurement").as_ref(),
+                    "measurement",
+                    format!("{:.4}", d.measurement()),
+                ),
+                crate::scene::model::object::Property {
+                    label: t!("Text override").into_owned(),
+                    field: "text_override",
+                    value: crate::scene::model::object::PropValue::PlainText(
+                        base.text_override().unwrap_or("").to_string(),
+                    ),
+                },
+                edit_angle(
+                    t!("Text rotation").as_ref(),
+                    "text_rotation",
+                    base.text_rotation.to_degrees(),
+                ),
+                edit_angle(t!("Dim line angle").as_ref(), "rotation", d.rotation.to_degrees()),
+                edit_angle(
+                    t!("Extension line angle").as_ref(),
+                    "ext_line_rotation",
+                    d.ext_line_rotation.to_degrees(),
+                ),
+            ],
+        }];
+    }
     let mut props = base_props(dim.base());
     match dim {
         Dimension::Aligned(d) => {
@@ -234,16 +272,12 @@ fn angular_props(
 
 fn apply_base_prop(base: &mut DimensionBase, field: &str, value: &str) -> bool {
     match field {
-        "text" => {
-            base.text = value.to_string();
-            true
-        }
-        "user_text" => {
-            base.user_text = if value.trim().is_empty() {
+        "text" | "user_text" | "text_override" => {
+            base.set_text_override(if value.trim().is_empty() {
                 None
             } else {
                 Some(value.to_string())
-            };
+            });
             true
         }
         "style_name" => {
@@ -305,6 +339,8 @@ fn apply_geom_prop(dim: &mut Dimension, field: &str, value: &str) {
         Dimension::Arc(d) => apply_arc_fields(d, field, value),
         Dimension::LargeRadial(d) => apply_large_radial_fields(d, field, value),
     }
+    let definition_point = dim.definition_point();
+    dim.base_mut().definition_point = definition_point;
     dim.base_mut().actual_measurement = dim.measurement();
 }
 
@@ -1031,6 +1067,24 @@ fn dimension_line_grip_position(dim: &Dimension) -> Option<DVec3> {
     Some((p1 + p2) * 0.5)
 }
 
+fn above_dimension_text_position(dim: &Dimension) -> Option<DVec3> {
+    let center = dimension_line_grip_position(dim)?;
+    let (ax, ay) = match dim {
+        Dimension::Linear(d) => (d.rotation.cos(), d.rotation.sin()),
+        Dimension::Aligned(d) => {
+            let dx = d.second_point.x - d.first_point.x;
+            let dy = d.second_point.y - d.first_point.y;
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= 1e-12 {
+                return None;
+            }
+            (dx / length, dy / length)
+        }
+        _ => return Some(center + DVec3::Y),
+    };
+    Some(center + DVec3::new(-ay, ax, 0.0))
+}
+
 impl Grippable for Dimension {
     fn grips(&self) -> Vec<GripDef> {
         // Auto-placed dimensions carry a zero text_middle_point sentinel; put
@@ -1212,6 +1266,8 @@ impl Grippable for Dimension {
             restore_dim_text_relative_position(self, saved);
         }
 
+        let definition_point = self.definition_point();
+        self.base_mut().definition_point = definition_point;
         self.base_mut().actual_measurement = self.measurement();
     }
 
@@ -1301,31 +1357,60 @@ impl Grippable for Dimension {
                 b.text_middle_point.x = 0.0;
                 b.text_middle_point.y = 0.0;
                 b.text_middle_point.z = 0.0;
+                b.text_user_positioned = false;
             }
             A::Center if grip_id == text_grip => {
-                // Snap text to the centre of the dimension line.
-                // Approximate as midpoint of first/second extension
-                // origins for Linear / Aligned dimensions.
-                match self {
-                    Dimension::Linear(d) => {
-                        let mx = (d.first_point.x + d.second_point.x) * 0.5;
-                        let my = (d.first_point.y + d.second_point.y) * 0.5;
-                        d.base.text_middle_point.x = mx;
-                        d.base.text_middle_point.y = my;
-                    }
-                    Dimension::Aligned(d) => {
-                        let mx = (d.first_point.x + d.second_point.x) * 0.5;
-                        let my = (d.first_point.y + d.second_point.y) * 0.5;
-                        d.base.text_middle_point.x = mx;
-                        d.base.text_middle_point.y = my;
-                    }
-                    _ => {}
+                if let Some(point) = dimension_line_grip_position(self) {
+                    let base = self.base_mut();
+                    base.text_middle_point = Vector3::new(point.x, point.y, point.z);
+                    base.text_user_positioned = true;
                 }
             }
-            // Stretch / Move-variants / Reverse Arrows / Rotate Text /
-            // Above Dim Line need either a follow-up drag or a numeric
-            // prompt — wired to default Stretch behaviour for now.
+            A::ReverseArrows => {
+                let base = self.base_mut();
+                base.flip_arrow1 = !base.flip_arrow1;
+                base.flip_arrow2 = !base.flip_arrow2;
+            }
+            A::AboveDimLine if grip_id == text_grip => {
+                if let Some(point) = above_dimension_text_position(self) {
+                    let base = self.base_mut();
+                    base.text_middle_point = Vector3::new(point.x, point.y + 1.0, point.z);
+                    base.text_user_positioned = true;
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn grip_menu_value_prompt(
+        &self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) -> Option<&'static str> {
+        use crate::scene::model::object::GripMenuAction as A;
+        let text_grip = match self {
+            Dimension::Linear(_) | Dimension::Aligned(_) => 3,
+            Dimension::Radius(_) | Dimension::Diameter(_) => 2,
+            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => 4,
+            Dimension::Ordinate(_) => 3,
+            Dimension::Arc(d) => if d.has_leader { 6 } else { 4 },
+            Dimension::LargeRadial(_) => 4,
+        };
+        (grip_id == text_grip && matches!(action, A::RotateText))
+            .then_some("Specify text rotation")
+    }
+
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+        value: f64,
+    ) {
+        use crate::scene::model::object::GripMenuAction as A;
+        if self.grip_menu_value_prompt(grip_id, action).is_some()
+            && matches!(action, A::RotateText)
+        {
+            self.base_mut().text_rotation = value.to_radians();
         }
     }
 }
@@ -1347,7 +1432,11 @@ use acadrust::types::{Color as AcadColor, Vector3};
 /// Units, Alternate Units, Tolerances) built from the resolved DimStyle. These
 /// are read-only mirrors of the style's dimension variables, injected by the
 /// panel after the entity's own Misc/Geometry groups.
-pub fn style_sections(style: &DimStyle) -> Vec<crate::scene::model::object::PropSection> {
+pub fn style_sections(
+    style: &DimStyle,
+    dimension: &Dimension,
+    document: &CadDocument,
+) -> Vec<crate::scene::model::object::PropSection> {
     let s = style;
     let yn = |b: bool| if b { "Yes" } else { "No" };
     let onoff = |b: bool| if b { "On" } else { "Off" };
@@ -1368,11 +1457,36 @@ pub fn style_sections(style: &DimStyle) -> Vec<crate::scene::model::object::Prop
         "None"
     };
 
-    vec![
+    let mut sections = vec![
         PropSection {
             title: t!("Lines & Arrows").into_owned(),
             props: vec![
                 ro(t!("Arrow size").as_ref(), "dim_arrow_size", f(s.dimasz)),
+                ro(
+                    t!("Arrowhead 1").as_ref(),
+                    "dim_arrowhead_1",
+                    block_name(document, s.dimblk1, &s.dimblk1_name),
+                ),
+                ro(
+                    t!("Arrowhead 2").as_ref(),
+                    "dim_arrowhead_2",
+                    block_name(document, s.dimblk2, &s.dimblk2_name),
+                ),
+                ro(
+                    t!("Dimension linetype").as_ref(),
+                    "dim_linetype",
+                    linetype_name(document, s.dimltex_handle),
+                ),
+                ro(
+                    t!("Extension linetype 1").as_ref(),
+                    "dim_ext_linetype_1",
+                    linetype_name(document, s.dimltex1_handle),
+                ),
+                ro(
+                    t!("Extension linetype 2").as_ref(),
+                    "dim_ext_linetype_2",
+                    linetype_name(document, s.dimltex2_handle),
+                ),
                 ro(t!("Dim line color").as_ref(), "dim_line_color", s.dimclrd.to_string()),
                 ro(
                     t!("Dim line lineweight").as_ref(),
@@ -1502,7 +1616,271 @@ pub fn style_sections(style: &DimStyle) -> Vec<crate::scene::model::object::Prop
                 ),
             ],
         },
-    ]
+    ];
+
+    let data = &dimension.base().common.extended_data;
+    let yes_no = |value: bool| if value { "Yes" } else { "No" }.to_string();
+    for property in sections
+        .iter_mut()
+        .flat_map(|section| section.props.iter_mut())
+    {
+        let inherited = match &property.value {
+            crate::scene::model::object::PropValue::ReadOnly(value) => value.clone(),
+            _ => continue,
+        };
+        if let Some(code) = crate::entities::dim_override::property_real_code(property.field) {
+            let value = crate::entities::dim_override::real(data, code)
+                .map(|number| number.to_string())
+                .unwrap_or(inherited);
+            property.value = crate::scene::model::object::PropValue::EditText(value);
+            continue;
+        }
+        if let Some(code) = crate::entities::dim_override::property_string_code(property.field) {
+            let value = crate::entities::dim_override::string(data, code).unwrap_or(inherited);
+            property.value = crate::scene::model::object::PropValue::PlainText(value);
+            continue;
+        }
+        if let Some(code) = crate::entities::dim_override::property_int_code(property.field) {
+            let number = crate::entities::dim_override::int(data, code);
+            let value = number.map(|number| number.to_string()).unwrap_or(inherited);
+            property.value = match property.field {
+                "dim_ext_line_fixed"
+                | "dim_text_outside_align"
+                | "dim_text_inside_align"
+                | "dim_text_inside"
+                | "dim_line_forced"
+                | "dim_line_inside"
+                | "dim_alt_enabled" => crate::scene::model::object::PropValue::Choice {
+                    selected: number.map(|number| yes_no(number != 0)).unwrap_or(value),
+                    options: vec!["Yes".to_string(), "No".to_string()],
+                },
+                "dim_units" => crate::scene::model::object::PropValue::Choice {
+                    selected: linear_unit_label(number.unwrap_or(s.dimlunit)).to_string(),
+                    options: vec![
+                        "Scientific", "Decimal", "Engineering", "Architectural",
+                        "Fractional", "Desktop",
+                    ]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+                },
+                "dim_angle_format" => crate::scene::model::object::PropValue::Choice {
+                    selected: angle_unit_label(number.unwrap_or(s.dimaunit)).to_string(),
+                    options: vec![
+                        "Decimal degrees", "Degrees/minutes/seconds", "Gradians",
+                        "Radians", "Surveyors units",
+                    ]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+                },
+                "dim_text_pos_vert" => choice_value(
+                    match number.unwrap_or(s.dimtad) {
+                        1 => "Above",
+                        2 => "Outside",
+                        3 => "JIS",
+                        4 => "Below",
+                        _ => "Centered",
+                    },
+                    &["Centered", "Above", "Outside", "JIS", "Below"],
+                ),
+                "dim_text_pos_hor" => choice_value(
+                    match number.unwrap_or(s.dimjust) {
+                        1 => "At extension line 1",
+                        2 => "At extension line 2",
+                        3 => "Over extension line 1",
+                        4 => "Over extension line 2",
+                        _ => "Centered",
+                    },
+                    &[
+                        "Centered", "At extension line 1", "At extension line 2",
+                        "Over extension line 1", "Over extension line 2",
+                    ],
+                ),
+                "dim_fit" => choice_value(
+                    match number.unwrap_or(s.dimatfit) {
+                        1 => "Arrows",
+                        2 => "Text",
+                        3 => "Both text and arrows",
+                        4 => "Always keep text",
+                        _ => "Either text or arrows",
+                    },
+                    &[
+                        "Either text or arrows", "Arrows", "Text",
+                        "Both text and arrows", "Always keep text",
+                    ],
+                ),
+                "dim_text_movement" => choice_value(
+                    match number.unwrap_or(s.dimtmove) {
+                        1 => "Add leader",
+                        2 => "Move text freely",
+                        _ => "Move dimension line",
+                    },
+                    &["Move dimension line", "Add leader", "Move text freely"],
+                ),
+                "dim_tolerance_pos_vert" => choice_value(
+                    match number.unwrap_or(s.dimtolj) {
+                        1 => "Middle",
+                        2 => "Top",
+                        _ => "Bottom",
+                    },
+                    &["Bottom", "Middle", "Top"],
+                ),
+                _ => crate::scene::model::object::PropValue::EditText(value),
+            };
+        }
+    }
+
+    let integer_or = |code, inherited| {
+        crate::entities::dim_override::int(data, code).unwrap_or(inherited)
+    };
+    for property in sections
+        .iter_mut()
+        .flat_map(|section| section.props.iter_mut())
+    {
+        let selected = match property.field {
+            "dim_line_1" => Some(if integer_or(crate::entities::dim_override::DIMSD1, s.dimsd1 as i16) == 0 { "On" } else { "Off" }),
+            "dim_line_2" => Some(if integer_or(crate::entities::dim_override::DIMSD2, s.dimsd2 as i16) == 0 { "On" } else { "Off" }),
+            "dim_ext_line_1" => Some(if integer_or(crate::entities::dim_override::DIMSE1, s.dimse1 as i16) == 0 { "On" } else { "Off" }),
+            "dim_ext_line_2" => Some(if integer_or(crate::entities::dim_override::DIMSE2, s.dimse2 as i16) == 0 { "On" } else { "Off" }),
+            "dim_suppress_leading_zeros" => Some(if integer_or(crate::entities::dim_override::DIMZIN, s.dimzin) & 4 != 0 { "Yes" } else { "No" }),
+            "dim_suppress_trailing_zeros" => Some(if integer_or(crate::entities::dim_override::DIMZIN, s.dimzin) & 8 != 0 { "Yes" } else { "No" }),
+            "dim_alt_suppress_leading_zeros" => Some(if integer_or(crate::entities::dim_override::DIMALTZ, s.dimaltz) & 4 != 0 { "Yes" } else { "No" }),
+            "dim_alt_suppress_trailing_zeros" => Some(if integer_or(crate::entities::dim_override::DIMALTZ, s.dimaltz) & 8 != 0 { "Yes" } else { "No" }),
+            "dim_tolerance_suppress_leading_zeros" => Some(if integer_or(crate::entities::dim_override::DIMTZIN, s.dimtzin) & 4 != 0 { "Yes" } else { "No" }),
+            "dim_tolerance_suppress_trailing_zeros" => Some(if integer_or(crate::entities::dim_override::DIMTZIN, s.dimtzin) & 8 != 0 { "Yes" } else { "No" }),
+            _ => None,
+        };
+        if let Some(selected) = selected {
+            let options = if matches!(
+                property.field,
+                "dim_line_1" | "dim_line_2" | "dim_ext_line_1" | "dim_ext_line_2"
+            ) {
+                &["On", "Off"][..]
+            } else {
+                &["Yes", "No"][..]
+            };
+            property.value = choice_value(selected, options);
+        }
+        if property.field == "dim_tolerance_display" {
+            let limits = integer_or(crate::entities::dim_override::DIMLIM, s.dimlim as i16) != 0;
+            let tolerance = integer_or(crate::entities::dim_override::DIMTOL, s.dimtol as i16) != 0;
+            let selected = if limits { "Limits" } else if tolerance { "Deviation" } else { "None" };
+            property.value = choice_value(selected, &["None", "Deviation", "Limits"]);
+        }
+    }
+
+    let arrow_options: Vec<String> = std::iter::once("Closed filled".to_string())
+        .chain(
+            document
+                .block_records
+                .iter()
+                .map(|record| record.name.clone())
+                .filter(|name| !name.is_empty()),
+        )
+        .collect();
+    let linetype_options: Vec<String> = document
+        .line_types
+        .iter()
+        .map(|line_type| line_type.name.clone())
+        .filter(|name| !name.is_empty())
+        .collect();
+    for property in sections
+        .iter_mut()
+        .flat_map(|section| section.props.iter_mut())
+    {
+        let mut current = match &property.value {
+            crate::scene::model::object::PropValue::ReadOnly(value) => value.clone(),
+            _ => continue,
+        };
+        if matches!(property.field, "dim_arrowhead_1" | "dim_arrowhead_2") {
+            let code = if property.field == "dim_arrowhead_1" {
+                crate::entities::dim_override::DIMBLK1
+            } else {
+                crate::entities::dim_override::DIMBLK2
+            };
+            if let Some(handle) = crate::entities::dim_override::handle(data, code) {
+                current = block_name(document, handle, "");
+            }
+            property.value = crate::scene::model::object::PropValue::Choice {
+                selected: current,
+                options: arrow_options.clone(),
+            };
+        } else if matches!(
+            property.field,
+            "dim_linetype" | "dim_ext_linetype_1" | "dim_ext_linetype_2"
+        ) {
+            let code = match property.field {
+                "dim_linetype" => crate::entities::dim_override::DIMLTYPE,
+                "dim_ext_linetype_1" => crate::entities::dim_override::DIMLTEX1,
+                _ => crate::entities::dim_override::DIMLTEX2,
+            };
+            if let Some(handle) = crate::entities::dim_override::handle(data, code) {
+                current = linetype_name(document, handle);
+            }
+            property.value = crate::scene::model::object::PropValue::Choice {
+                selected: current,
+                options: linetype_options.clone(),
+            };
+        }
+    }
+    sections
+}
+
+fn choice_value(
+    selected: &str,
+    options: &[&str],
+) -> crate::scene::model::object::PropValue {
+    crate::scene::model::object::PropValue::Choice {
+        selected: selected.to_string(),
+        options: options.iter().map(|value| (*value).to_string()).collect(),
+    }
+}
+
+fn block_name(document: &CadDocument, handle: acadrust::Handle, fallback: &str) -> String {
+    if handle.is_null() {
+        return if fallback.is_empty() {
+            "Closed filled".to_string()
+        } else {
+            fallback.to_string()
+        };
+    }
+    document
+        .block_records
+        .iter()
+        .find(|record| record.handle == handle)
+        .map(|record| record.name.clone())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn linetype_name(document: &CadDocument, handle: acadrust::Handle) -> String {
+    document
+        .line_types
+        .iter()
+        .find(|line_type| line_type.handle == handle)
+        .map(|line_type| line_type.name.clone())
+        .unwrap_or_else(|| "ByBlock".to_string())
+}
+
+fn linear_unit_label(value: i16) -> &'static str {
+    match value {
+        1 => "Scientific",
+        3 => "Engineering",
+        4 => "Architectural",
+        5 => "Fractional",
+        6 => "Desktop",
+        _ => "Decimal",
+    }
+}
+
+fn angle_unit_label(value: i16) -> &'static str {
+    match value {
+        1 => "Degrees/minutes/seconds",
+        2 => "Gradians",
+        3 => "Radians",
+        4 => "Surveyors units",
+        _ => "Decimal degrees",
+    }
 }
 use acadrust::{CadDocument, EntityType, Handle};
 
@@ -4143,4 +4521,3 @@ mod arch_format_tests {
         assert_eq!(format_fractional(6.5, 0), "6 1/2");
     }
 }
-

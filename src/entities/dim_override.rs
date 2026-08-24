@@ -9,7 +9,7 @@
 
 use acadrust::types::Color;
 use acadrust::xdata::{ExtendedData, XDataValue};
-use acadrust::{CadDocument, Handle};
+use acadrust::{CadDocument, EntityType, Handle};
 
 // DXF group codes of the dimension variables surfaced on the leader panel.
 pub const DIMSCALE: i16 = 40; // overall scale       (real)
@@ -228,4 +228,274 @@ pub fn set(doc: &mut CadDocument, handle: Handle, code: i16, value: Option<XData
         kept.push((code, v));
     }
     write_pairs(doc, handle, kept);
+}
+
+pub fn property_real_code(field: &str) -> Option<i16> {
+    Some(match field {
+        "dim_arrow_size" => DIMASZ,
+        "dim_line_ext" => DIMDLE,
+        "dim_ext_line_ext" => DIMEXE,
+        "dim_ext_line_offset" => DIMEXO,
+        "dim_ext_line_fixed_length" => DIMFXL,
+        "dim_text_height" => DIMTXT,
+        "dim_text_offset" => DIMGAP,
+        "dim_scale_overall" => DIMSCALE,
+        "dim_roundoff" => DIMRND,
+        "dim_scale_linear" => DIMLFAC,
+        "dim_alt_scale_factor" => DIMALTF,
+        "dim_alt_roundoff" => DIMALTRND,
+        "dim_tolerance_limit_lower" => DIMTM,
+        "dim_tolerance_limit_upper" => DIMTP,
+        "dim_tolerance_text_height" => DIMTFAC,
+        _ => return None,
+    })
+}
+
+pub fn property_int_code(field: &str) -> Option<i16> {
+    Some(match field {
+        "dim_line_lineweight" => DIMLWD,
+        "dim_ext_line_lineweight" => DIMLWE,
+        "dim_ext_line_fixed" => DIMFXLON,
+        "dim_text_pos_vert" => DIMTAD,
+        "dim_text_pos_hor" => DIMJUST,
+        "dim_text_outside_align" => DIMTOH,
+        "dim_text_inside_align" => DIMTIH,
+        "dim_fit" => DIMATFIT,
+        "dim_text_inside" => DIMTIX,
+        "dim_text_movement" => DIMTMOVE,
+        "dim_line_forced" => DIMTOFL,
+        "dim_line_inside" => DIMSOXD,
+        "dim_units" => DIMLUNIT,
+        "dim_precision" => DIMDEC,
+        "dim_decimal_separator" => DIMDSEP,
+        "dim_angle_format" => DIMAUNIT,
+        "dim_angle_precision" => DIMADEC,
+        "dim_alt_enabled" => DIMALT,
+        "dim_alt_format" => DIMALTU,
+        "dim_alt_precision" => DIMALTD,
+        "dim_tolerance_precision" => DIMTDEC,
+        "dim_tolerance_pos_vert" => DIMTOLJ,
+        _ => return None,
+    })
+}
+
+pub fn property_string_code(field: &str) -> Option<i16> {
+    Some(match field {
+        "dim_prefix_suffix" => DIMPOST,
+        "dim_alt_prefix_suffix" => DIMAPOST,
+        _ => return None,
+    })
+}
+
+fn yes(value: &str) -> Option<i16> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "yes" | "on" | "true" | "1" => Some(1),
+        "no" | "off" | "false" | "0" => Some(0),
+        _ => None,
+    }
+}
+
+fn inherited_int(doc: &CadDocument, handle: Handle, code: i16) -> i16 {
+    let Some(EntityType::Dimension(dimension)) = doc.get_entity(handle) else {
+        return 0;
+    };
+    if let Some(value) = int(&dimension.base().common.extended_data, code) {
+        return value;
+    }
+    let Some(style) = doc.dim_styles.iter().find(|style| {
+        style.name.eq_ignore_ascii_case(&dimension.base().style_name)
+            || (dimension.base().style_name.trim().is_empty()
+                && style.name.eq_ignore_ascii_case("Standard"))
+    }) else {
+        return 0;
+    };
+    match code {
+        DIMSD1 => style.dimsd1 as i16,
+        DIMSD2 => style.dimsd2 as i16,
+        DIMSE1 => style.dimse1 as i16,
+        DIMSE2 => style.dimse2 as i16,
+        DIMZIN => style.dimzin,
+        DIMALTZ => style.dimaltz,
+        DIMTZIN => style.dimtzin,
+        DIMTOL => style.dimtol as i16,
+        DIMLIM => style.dimlim as i16,
+        _ => 0,
+    }
+}
+
+pub fn set_property(
+    doc: &mut CadDocument,
+    handle: Handle,
+    field: &str,
+    value: &str,
+) -> bool {
+    let trimmed = value.trim();
+    let handle_field = match field {
+        "dim_arrowhead_1" => Some((DIMBLK1, true)),
+        "dim_arrowhead_2" => Some((DIMBLK2, true)),
+        "dim_linetype" => Some((DIMLTYPE, false)),
+        "dim_ext_linetype_1" => Some((DIMLTEX1, false)),
+        "dim_ext_linetype_2" => Some((DIMLTEX2, false)),
+        _ => None,
+    };
+    if let Some((code, block)) = handle_field {
+        let resolved = if block {
+            (trimmed != "Closed filled")
+                .then(|| {
+                    doc.block_records
+                        .iter()
+                        .find(|record| record.name == trimmed)
+                        .map(|record| record.handle)
+                })
+                .flatten()
+        } else {
+            doc.line_types
+                .iter()
+                .find(|line_type| line_type.name == trimmed)
+                .map(|line_type| line_type.handle)
+        };
+        set(doc, handle, code, resolved.map(XDataValue::Handle));
+        return true;
+    }
+    let inverse_boolean_code = match field {
+        "dim_line_1" => Some(DIMSD1),
+        "dim_line_2" => Some(DIMSD2),
+        "dim_ext_line_1" => Some(DIMSE1),
+        "dim_ext_line_2" => Some(DIMSE2),
+        _ => None,
+    };
+    if let Some(code) = inverse_boolean_code {
+        let Some(visible) = yes(trimmed) else {
+            return false;
+        };
+        set(doc, handle, code, Some(XDataValue::Integer16((visible == 0) as i16)));
+        return true;
+    }
+    let bit_field = match field {
+        "dim_suppress_leading_zeros" => Some((DIMZIN, 4)),
+        "dim_suppress_trailing_zeros" => Some((DIMZIN, 8)),
+        "dim_alt_suppress_leading_zeros" => Some((DIMALTZ, 4)),
+        "dim_alt_suppress_trailing_zeros" => Some((DIMALTZ, 8)),
+        "dim_tolerance_suppress_leading_zeros" => Some((DIMTZIN, 4)),
+        "dim_tolerance_suppress_trailing_zeros" => Some((DIMTZIN, 8)),
+        _ => None,
+    };
+    if let Some((code, bit)) = bit_field {
+        let Some(enabled) = yes(trimmed) else {
+            return false;
+        };
+        let current = inherited_int(doc, handle, code);
+        let value = if enabled != 0 {
+            current | bit
+        } else {
+            current & !bit
+        };
+        set(doc, handle, code, Some(XDataValue::Integer16(value)));
+        return true;
+    }
+    if field == "dim_tolerance_display" {
+        let (tolerance, limits) = match trimmed.to_ascii_lowercase().as_str() {
+            "deviation" => (1, 0),
+            "limits" => (0, 1),
+            "none" => (0, 0),
+            _ => return false,
+        };
+        set(doc, handle, DIMTOL, Some(XDataValue::Integer16(tolerance)));
+        set(doc, handle, DIMLIM, Some(XDataValue::Integer16(limits)));
+        return true;
+    }
+    if let Some(code) = property_real_code(field) {
+        if trimmed.is_empty() {
+            set(doc, handle, code, None);
+        } else if let Ok(number) = trimmed.parse::<f64>() {
+            set(doc, handle, code, Some(XDataValue::Real(number)));
+        } else {
+            return false;
+        }
+        return true;
+    }
+    if let Some(code) = property_string_code(field) {
+        set(
+            doc,
+            handle,
+            code,
+            (!trimmed.is_empty()).then(|| XDataValue::String(value.to_string())),
+        );
+        return true;
+    }
+    if let Some(code) = property_int_code(field) {
+        let parsed = match field {
+            "dim_ext_line_fixed"
+            | "dim_text_outside_align"
+            | "dim_text_inside_align"
+            | "dim_text_inside"
+            | "dim_line_forced"
+            | "dim_line_inside"
+            | "dim_alt_enabled" => yes(trimmed),
+            "dim_decimal_separator" => trimmed
+                .chars()
+                .next()
+                .map(|character| character as i16),
+            "dim_units" => match trimmed.to_ascii_lowercase().as_str() {
+                "scientific" => Some(1),
+                "decimal" => Some(2),
+                "engineering" => Some(3),
+                "architectural" => Some(4),
+                "fractional" => Some(5),
+                "desktop" => Some(6),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_angle_format" => match trimmed.to_ascii_lowercase().as_str() {
+                "decimal degrees" => Some(0),
+                "degrees/minutes/seconds" => Some(1),
+                "gradians" => Some(2),
+                "radians" => Some(3),
+                "surveyors units" => Some(4),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_text_pos_vert" => match trimmed.to_ascii_lowercase().as_str() {
+                "centered" => Some(0),
+                "above" => Some(1),
+                "outside" => Some(2),
+                "jis" => Some(3),
+                "below" => Some(4),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_text_pos_hor" => match trimmed.to_ascii_lowercase().as_str() {
+                "centered" => Some(0),
+                "at extension line 1" => Some(1),
+                "at extension line 2" => Some(2),
+                "over extension line 1" => Some(3),
+                "over extension line 2" => Some(4),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_fit" => match trimmed.to_ascii_lowercase().as_str() {
+                "either text or arrows" => Some(0),
+                "arrows" => Some(1),
+                "text" => Some(2),
+                "both text and arrows" => Some(3),
+                "always keep text" => Some(4),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_text_movement" => match trimmed.to_ascii_lowercase().as_str() {
+                "move dimension line" => Some(0),
+                "add leader" => Some(1),
+                "move text freely" => Some(2),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_tolerance_pos_vert" => match trimmed.to_ascii_lowercase().as_str() {
+                "bottom" => Some(0),
+                "middle" => Some(1),
+                "top" => Some(2),
+                _ => trimmed.parse().ok(),
+            },
+            _ => trimmed.parse().ok(),
+        };
+        let Some(number) = parsed else {
+            return false;
+        };
+        set(doc, handle, code, Some(XDataValue::Integer16(number)));
+        return true;
+    }
+    false
 }

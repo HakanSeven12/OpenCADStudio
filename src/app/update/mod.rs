@@ -4834,8 +4834,20 @@ impl OpenCADStudio {
                 // line with the rest of the dim-colour stack (index-only through
                 // the file layer). Guarded to leaders / dimensions so a mixed
                 // selection can't stamp the override onto other entities.
-                if field == "dim_line_color" {
+                if matches!(
+                    field.as_str(),
+                    "dim_line_color"
+                        | "dim_ext_line_color"
+                        | "dim_text_color"
+                        | "dim_text_fill_color"
+                ) {
                     let aci = color.approximate_index();
+                    let code = match field.as_str() {
+                        "dim_ext_line_color" => crate::entities::dim_override::DIMCLRE,
+                        "dim_text_color" => crate::entities::dim_override::DIMCLRT,
+                        "dim_text_fill_color" => crate::entities::dim_override::DIMTFILLCLR,
+                        _ => crate::entities::dim_override::DIMCLRD,
+                    };
                     let targets: Vec<acadrust::Handle> = handles
                         .iter()
                         .copied()
@@ -4853,7 +4865,7 @@ impl OpenCADStudio {
                             crate::entities::dim_override::set(
                                 &mut self.tabs[i].scene.document,
                                 handle,
-                                crate::entities::dim_override::DIMCLRD,
+                                code,
                                 Some(acadrust::xdata::XDataValue::Integer16(aci)),
                             );
                         }

@@ -1006,6 +1006,21 @@ impl OpenCADStudio {
 
                     // Inject DimStyle picker + style-derived groups for Dimensions.
                     if let acadrust::EntityType::Dimension(d) = entity {
+                        if let Some(general) = sections.first_mut() {
+                            general.props.retain(|property| property.field != "handle");
+                            let associative =
+                                crate::scene::dimension_assoc::dimension_is_associative(
+                                    &self.tabs[i].scene.document,
+                                    d.base().common.handle,
+                                );
+                            general.props.push(crate::scene::model::object::Property {
+                                label: t!("Associative").into_owned(),
+                                field: "associative",
+                                value: crate::scene::model::object::PropValue::ReadOnly(
+                                    if associative { "Yes" } else { "No" }.to_string(),
+                                ),
+                            });
+                        }
                         let dim_style_names: Vec<String> = self.tabs[i]
                             .scene
                             .document
@@ -1046,12 +1061,14 @@ impl OpenCADStudio {
                                         && s.name.eq_ignore_ascii_case("Standard"))
                             })
                         {
-                            sections.extend(crate::entities::dimension::style_sections(style));
+                            sections.extend(crate::entities::dimension::style_sections(
+                                style,
+                                d,
+                                &self.tabs[i].scene.document,
+                            ));
 
-                            // The style groups are a read-only mirror, but the
-                            // dim-line colour is an editable per-object override:
-                            // prefer the ACAD_DSTYLE code-176 (ACI) override, else
-                            // the style's DIMCLRD.
+                            // Prefer entity-level dimension-variable overrides;
+                            // fall back to the assigned style values.
                             use crate::entities::dim_override as dov;
                             use crate::scene::model::object::PropValue;
                             let dim_c = dov::color(&d.base().common.extended_data, dov::DIMCLRD)
@@ -1061,6 +1078,20 @@ impl OpenCADStudio {
                                 "dim_line_color",
                                 PropValue::ColorChoice(dim_c),
                             );
+                            for (field, code, inherited) in [
+                                ("dim_ext_line_color", dov::DIMCLRE, style.dimclre),
+                                ("dim_text_color", dov::DIMCLRT, style.dimclrt),
+                            ] {
+                                let color = dov::color(&d.base().common.extended_data, code)
+                                    .unwrap_or_else(|| {
+                                        acadrust::types::Color::from_index(inherited)
+                                    });
+                                set_row_value(
+                                    &mut sections,
+                                    field,
+                                    PropValue::ColorChoice(color),
+                                );
+                            }
                         }
                     }
 
@@ -1323,10 +1354,8 @@ impl OpenCADStudio {
                     }
 
                     // Annotative Yes/No + a conditional "Annotative scale" row.
-                    // Read-only: annotative state comes from the entity's style
-                    // (or its own flag) and the assigned annotation-scale name(s)
-                    // are walked from the entity's extension dictionary — both
-                    // need the document, so they are resolved here.
+                    // Annotative state and assigned scale names need the
+                    // document, so they are resolved here.
                     {
                         // Which entities show an Annotative row, the field it uses,
                         // and — for those that don't already carry the row
@@ -1368,7 +1397,7 @@ impl OpenCADStudio {
                             // (MTEXT via its native flag, single-line TEXT via the
                             // context alone) get an editable toggle: turning it on
                             // synthesizes a real per-scale representation. The
-                            // remaining types are style-driven and stay read-only.
+                            // remaining style-only types stay read-only.
                             if anno_field == "annotative" {
                                 match entity {
                                     acadrust::EntityType::MText(t) => set_row_value(
@@ -1381,7 +1410,8 @@ impl OpenCADStudio {
                                     ),
                                     acadrust::EntityType::Text(_)
                                     | acadrust::EntityType::Insert(_)
-                                    | acadrust::EntityType::Hatch(_) => set_row_value(
+                                    | acadrust::EntityType::Hatch(_)
+                                    | acadrust::EntityType::Dimension(_) => set_row_value(
                                         &mut sections,
                                         "annotative",
                                         crate::scene::model::object::PropValue::BoolToggle {
@@ -1397,16 +1427,26 @@ impl OpenCADStudio {
                                 }
                             }
                             if is_anno {
-                                // The applied annotation scale follows the current
-                                // annotation scale (CANNOSCALE / the status-bar
-                                // scale pill), not a per-object stored value.
+                                let memberships = crate::scene::annotative::object_scale_memberships(
+                                    doc,
+                                    entity.common().handle,
+                                );
+                                let assigned_scales = if memberships.is_empty() {
+                                    doc.header.current_annotation_scale.clone()
+                                } else {
+                                    memberships
+                                        .into_iter()
+                                        .map(|(name, _)| name)
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                };
                                 insert_row_after(
                                     &mut sections,
                                     anno_field,
                                     crate::entities::common::ro_prop(
                                         t!("Annotative scale").as_ref(),
                                         "annotative_scale",
-                                        doc.header.current_annotation_scale.clone(),
+                                        assigned_scales,
                                     ),
                                 );
                             }
@@ -2411,18 +2451,7 @@ fn set_row_value(
 /// The lineweight dropdown options (named defaults + the standard millimetre
 /// steps), matching the labels `dim_lineweight_label` produces.
 pub(crate) fn lineweight_options() -> Vec<String> {
-    let mut v = vec![
-        "ByLayer".to_string(),
-        "ByBlock".to_string(),
-        "Default".to_string(),
-    ];
-    for lw in [
-        0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158,
-        200, 211,
-    ] {
-        v.push(format!("{:.2} mm", lw as f64 / 100.0));
-    }
-    v
+    crate::entities::common::lineweight_options()
 }
 
 /// Inverse of `dim_lineweight_label`: a lineweight label → DIMLWD enum value.
@@ -2548,13 +2577,7 @@ fn leader_arrow_label(
 
 /// DIMLWD lineweight enum → label.
 fn dim_lineweight_label(dimlwd: i16) -> String {
-    match dimlwd {
-        -1 => "ByLayer".to_string(),
-        -2 => "ByBlock".to_string(),
-        -3 => "Default".to_string(),
-        v if v >= 0 => format!("{:.2} mm", v as f64 / 100.0),
-        _ => "Default".to_string(),
-    }
+    crate::entities::common::lineweight_label(dimlwd)
 }
 
 /// Human-readable INSUNITS name (DXF group 70 unit codes).

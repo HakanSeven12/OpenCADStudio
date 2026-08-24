@@ -518,6 +518,7 @@ pub fn view_window<'a>(
             crate::ui::color_select::ColorExtras {
                 by_layer: true,
                 by_block: true,
+                ..Default::default()
             },
             move |c| Message::DsEdit(f_sel.clone(), crate::ui::color_select::color_to_aci_string(c)),
             Message::DsColorMore(fld.clone()),

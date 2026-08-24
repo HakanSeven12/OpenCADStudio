@@ -474,6 +474,7 @@ fn mtext_editor_content<'a>(
         crate::ui::color_select::ColorExtras {
             by_layer: true,
             by_block: false,
+            ..Default::default()
         },
         Message::MTextColorChanged,
         Message::MTextColorPickerToggle,

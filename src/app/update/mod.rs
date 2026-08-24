@@ -4834,8 +4834,25 @@ impl OpenCADStudio {
                 // line with the rest of the dim-colour stack (index-only through
                 // the file layer). Guarded to leaders / dimensions so a mixed
                 // selection can't stamp the override onto other entities.
-                if field == "dim_line_color" {
+                if matches!(
+                    field.as_str(),
+                    "dim_line_color"
+                        | "dim_ext_line_color"
+                        | "dim_text_color"
+                        | "dim_text_fill_color"
+                ) {
+                    let fill_mode = (field == "dim_text_fill_color").then(|| match color {
+                        acadrust::types::Color::None => 0,
+                        acadrust::types::Color::ByBlock => 1,
+                        _ => 2,
+                    });
                     let aci = color.approximate_index();
+                    let code = match field.as_str() {
+                        "dim_ext_line_color" => crate::entities::dim_override::DIMCLRE,
+                        "dim_text_color" => crate::entities::dim_override::DIMCLRT,
+                        "dim_text_fill_color" => crate::entities::dim_override::DIMTFILLCLR,
+                        _ => crate::entities::dim_override::DIMCLRD,
+                    };
                     let targets: Vec<acadrust::Handle> = handles
                         .iter()
                         .copied()
@@ -4850,10 +4867,23 @@ impl OpenCADStudio {
                     if !targets.is_empty() {
                         self.push_undo_snapshot(i, "CHPROP");
                         for &handle in &targets {
+                            if field == "dim_text_fill_color" {
+                                crate::entities::dim_override::set(
+                                    &mut self.tabs[i].scene.document,
+                                    handle,
+                                    crate::entities::dim_override::DIMTFILL,
+                                    Some(acadrust::xdata::XDataValue::Integer16(
+                                        fill_mode.unwrap_or(2),
+                                    )),
+                                );
+                                if fill_mode != Some(2) {
+                                    continue;
+                                }
+                            }
                             crate::entities::dim_override::set(
                                 &mut self.tabs[i].scene.document,
                                 handle,
-                                crate::entities::dim_override::DIMCLRD,
+                                code,
                                 Some(acadrust::xdata::XDataValue::Integer16(aci)),
                             );
                         }
@@ -7527,6 +7557,7 @@ impl OpenCADStudio {
 
                 let i = self.active_tab;
                 self.tabs[i].properties.color_picker_open = false;
+                self.tabs[i].properties.open_color_field = None;
                 self.tabs[i].layers.color_picker_row = None;
 
                 Task::none()

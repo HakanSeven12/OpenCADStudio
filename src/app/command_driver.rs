@@ -801,7 +801,21 @@ impl OpenCADStudio {
                 // the structure snapshot fallback.
                 let delta_safe = self.delta_add_safe(i, &entity);
                 let pending = self.begin_undo(i, label, 1, delta_safe);
-                self.commit_entity(entity);
+                let is_linear_dimension = matches!(
+                    entity,
+                    acadrust::EntityType::Dimension(acadrust::entities::Dimension::Linear(_))
+                );
+                let committed = self.commit_entity_handle(entity);
+                if is_linear_dimension {
+                    if let Some(handle) = committed {
+                        let sources = self.tabs[i]
+                            .scene
+                            .infer_linear_dimension_sources(handle);
+                        self.tabs[i]
+                            .scene
+                            .attach_linear_dimension_association(handle, sources);
+                    }
+                }
                 self.tabs[i].dirty = true;
                 let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
                 if let Some(p) = prompt {
@@ -1191,7 +1205,21 @@ impl OpenCADStudio {
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
                 let delta_safe = self.delta_add_safe(i, &entity);
                 let pending = self.begin_undo(i, label, 1, delta_safe);
-                self.commit_entity(entity);
+                let is_linear_dimension = matches!(
+                    entity,
+                    acadrust::EntityType::Dimension(acadrust::entities::Dimension::Linear(_))
+                );
+                let committed = self.commit_entity_handle(entity);
+                if is_linear_dimension {
+                    if let Some(handle) = committed {
+                        let sources = self.tabs[i]
+                            .scene
+                            .infer_linear_dimension_sources(handle);
+                        self.tabs[i]
+                            .scene
+                            .attach_linear_dimension_association(handle, sources);
+                    }
+                }
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
@@ -1199,6 +1227,27 @@ impl OpenCADStudio {
                 self.restore_pre_cmd_tangent();
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
+                }
+            }
+            CmdResult::CommitAssociativeDimension { entity, source } => {
+                let label = self.history_label_from_active_cmd(i, "DIMLINEAR");
+                let pending = self.begin_undo(i, label, 1, false);
+                if let Some(handle) = self.commit_entity_handle(entity) {
+                    self.tabs[i]
+                        .scene
+                        .attach_linear_dimension_association(handle, [Some(source), Some(source)]);
+                    self.tabs[i].scene.bump_entities(&[
+                        (handle, crate::scene::ChangeKind::Modified),
+                        (source, crate::scene::ChangeKind::Modified),
+                    ]);
+                }
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                if let Some(pending) = pending {
+                    self.commit_undo_delta(i, pending);
                 }
             }
             CmdResult::CommitSolid {

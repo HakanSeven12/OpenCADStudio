@@ -8,11 +8,37 @@ use glam::{DVec3, Vec3};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    center_grip, edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
+    center_grip, edit_angle_prop as edit_angle, edit_prop as edit, lineweight_label,
+    lineweight_options, parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::t;
+
+pub(crate) fn dimension_text_override(base: &DimensionBase) -> Option<&str> {
+    base.user_text
+        .as_deref()
+        .or_else(|| (!base.text.is_empty()).then_some(base.text.as_str()))
+}
+
+pub(crate) fn set_dimension_text_override(base: &mut DimensionBase, text: Option<String>) {
+    base.text = text.clone().unwrap_or_default();
+    base.user_text = text;
+}
+
+fn dimension_definition_point(dim: &Dimension) -> acadrust::types::Vector3 {
+    match dim {
+        Dimension::Aligned(d) => d.definition_point,
+        Dimension::Linear(d) => d.definition_point,
+        Dimension::Radius(d) => d.definition_point,
+        Dimension::Diameter(d) => d.definition_point,
+        Dimension::Angular2Ln(d) => d.definition_point,
+        Dimension::Angular3Pt(d) => d.definition_point,
+        Dimension::Ordinate(d) => d.definition_point,
+        Dimension::Arc(d) => d.definition_point,
+        Dimension::LargeRadial(d) => d.definition_point,
+    }
+}
 
 fn base_props(base: &DimensionBase) -> Vec<crate::scene::model::object::Property> {
     vec![
@@ -60,6 +86,27 @@ fn base_props(base: &DimensionBase) -> Vec<crate::scene::model::object::Property
 }
 
 fn properties(dim: &Dimension) -> Vec<PropSection> {
+    if let Dimension::Linear(d) = dim {
+        let base = &d.base;
+        return vec![PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![
+                crate::scene::model::object::Property {
+                    label: t!("Dimension style").into_owned(),
+                    field: "style_name",
+                    value: crate::scene::model::object::PropValue::PlainText(
+                        base.style_name.clone(),
+                    ),
+                },
+                edit_angle(t!("Dim line angle").as_ref(), "rotation", d.rotation.to_degrees()),
+                edit_angle(
+                    t!("Extension line angle").as_ref(),
+                    "ext_line_rotation",
+                    d.ext_line_rotation.to_degrees(),
+                ),
+            ],
+        }];
+    }
     let mut props = base_props(dim.base());
     match dim {
         Dimension::Aligned(d) => {
@@ -234,16 +281,12 @@ fn angular_props(
 
 fn apply_base_prop(base: &mut DimensionBase, field: &str, value: &str) -> bool {
     match field {
-        "text" => {
-            base.text = value.to_string();
-            true
-        }
-        "user_text" => {
-            base.user_text = if value.trim().is_empty() {
+        "text" | "user_text" | "text_override" => {
+            set_dimension_text_override(base, if value.trim().is_empty() {
                 None
             } else {
                 Some(value.to_string())
-            };
+            });
             true
         }
         "style_name" => {
@@ -305,6 +348,8 @@ fn apply_geom_prop(dim: &mut Dimension, field: &str, value: &str) {
         Dimension::Arc(d) => apply_arc_fields(d, field, value),
         Dimension::LargeRadial(d) => apply_large_radial_fields(d, field, value),
     }
+    let definition_point = dimension_definition_point(dim);
+    dim.base_mut().definition_point = definition_point;
     dim.base_mut().actual_measurement = dim.measurement();
 }
 
@@ -1031,6 +1076,24 @@ fn dimension_line_grip_position(dim: &Dimension) -> Option<DVec3> {
     Some((p1 + p2) * 0.5)
 }
 
+fn above_dimension_text_position(dim: &Dimension) -> Option<DVec3> {
+    let center = dimension_line_grip_position(dim)?;
+    let (ax, ay) = match dim {
+        Dimension::Linear(d) => (d.rotation.cos(), d.rotation.sin()),
+        Dimension::Aligned(d) => {
+            let dx = d.second_point.x - d.first_point.x;
+            let dy = d.second_point.y - d.first_point.y;
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= 1e-12 {
+                return None;
+            }
+            (dx / length, dy / length)
+        }
+        _ => return Some(center + DVec3::Y),
+    };
+    Some(center + DVec3::new(-ay, ax, 0.0))
+}
+
 impl Grippable for Dimension {
     fn grips(&self) -> Vec<GripDef> {
         // Auto-placed dimensions carry a zero text_middle_point sentinel; put
@@ -1212,6 +1275,8 @@ impl Grippable for Dimension {
             restore_dim_text_relative_position(self, saved);
         }
 
+        let definition_point = dimension_definition_point(self);
+        self.base_mut().definition_point = definition_point;
         self.base_mut().actual_measurement = self.measurement();
     }
 
@@ -1301,31 +1366,60 @@ impl Grippable for Dimension {
                 b.text_middle_point.x = 0.0;
                 b.text_middle_point.y = 0.0;
                 b.text_middle_point.z = 0.0;
+                b.text_user_positioned = false;
             }
             A::Center if grip_id == text_grip => {
-                // Snap text to the centre of the dimension line.
-                // Approximate as midpoint of first/second extension
-                // origins for Linear / Aligned dimensions.
-                match self {
-                    Dimension::Linear(d) => {
-                        let mx = (d.first_point.x + d.second_point.x) * 0.5;
-                        let my = (d.first_point.y + d.second_point.y) * 0.5;
-                        d.base.text_middle_point.x = mx;
-                        d.base.text_middle_point.y = my;
-                    }
-                    Dimension::Aligned(d) => {
-                        let mx = (d.first_point.x + d.second_point.x) * 0.5;
-                        let my = (d.first_point.y + d.second_point.y) * 0.5;
-                        d.base.text_middle_point.x = mx;
-                        d.base.text_middle_point.y = my;
-                    }
-                    _ => {}
+                if let Some(point) = dimension_line_grip_position(self) {
+                    let base = self.base_mut();
+                    base.text_middle_point = Vector3::new(point.x, point.y, point.z);
+                    base.text_user_positioned = true;
                 }
             }
-            // Stretch / Move-variants / Reverse Arrows / Rotate Text /
-            // Above Dim Line need either a follow-up drag or a numeric
-            // prompt — wired to default Stretch behaviour for now.
+            A::ReverseArrows => {
+                let base = self.base_mut();
+                base.flip_arrow1 = !base.flip_arrow1;
+                base.flip_arrow2 = !base.flip_arrow2;
+            }
+            A::AboveDimLine if grip_id == text_grip => {
+                if let Some(point) = above_dimension_text_position(self) {
+                    let base = self.base_mut();
+                    base.text_middle_point = Vector3::new(point.x, point.y + 1.0, point.z);
+                    base.text_user_positioned = true;
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn grip_menu_value_prompt(
+        &self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) -> Option<&'static str> {
+        use crate::scene::model::object::GripMenuAction as A;
+        let text_grip = match self {
+            Dimension::Linear(_) | Dimension::Aligned(_) => 3,
+            Dimension::Radius(_) | Dimension::Diameter(_) => 2,
+            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => 4,
+            Dimension::Ordinate(_) => 3,
+            Dimension::Arc(d) => if d.has_leader { 6 } else { 4 },
+            Dimension::LargeRadial(_) => 4,
+        };
+        (grip_id == text_grip && matches!(action, A::RotateText))
+            .then_some("Specify text rotation")
+    }
+
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+        value: f64,
+    ) {
+        use crate::scene::model::object::GripMenuAction as A;
+        if self.grip_menu_value_prompt(grip_id, action).is_some()
+            && matches!(action, A::RotateText)
+        {
+            self.base_mut().text_rotation = value.to_radians();
         }
     }
 }
@@ -1343,167 +1437,982 @@ use acadrust::entities::{MText, Text};
 use acadrust::tables::DimStyle;
 use acadrust::types::{Color as AcadColor, Vector3};
 
-/// Dimension-style-derived property groups (Lines & Arrows, Text, Fit, Primary
-/// Units, Alternate Units, Tolerances) built from the resolved DimStyle. These
-/// are read-only mirrors of the style's dimension variables, injected by the
-/// panel after the entity's own Misc/Geometry groups.
-pub fn style_sections(style: &DimStyle) -> Vec<crate::scene::model::object::PropSection> {
-    let s = style;
-    let yn = |b: bool| if b { "Yes" } else { "No" };
-    let onoff = |b: bool| if b { "On" } else { "Off" };
-    let f = |v: f64| format!("{v:.4}");
-    let dsep = {
-        let c = s.dimdsep as u8 as char;
-        if s.dimdsep > 0 && !c.is_control() {
-            c.to_string()
-        } else {
-            s.dimdsep.to_string()
-        }
+/// Build the linear-dimension property groups from the assigned style plus
+/// any entity-level DSTYLE overrides. Conditional rows remain visible but are
+/// read-only while their controlling option is disabled.
+pub fn style_sections(
+    style: &DimStyle,
+    dimension: &Dimension,
+    document: &CadDocument,
+) -> Vec<PropSection> {
+    use crate::entities::dim_override as ov;
+
+    let data = &dimension.base().common.extended_data;
+    let real = |code, inherited| ov::real(data, code).unwrap_or(inherited);
+    let int = |code, inherited| ov::int(data, code).unwrap_or(inherited);
+    let string = |code, inherited: &str| {
+        ov::string(data, code).unwrap_or_else(|| inherited.to_string())
     };
-    let tol_display = if s.dimlim {
+    let on = |value: bool| if value { "On" } else { "Off" };
+    let yes = |value: bool| if value { "Yes" } else { "No" };
+    let number = |label: &str, field: &'static str, value: f64, editable: bool| {
+        property(
+            label,
+            field,
+            if editable {
+                PropValue::EditText(format!("{value:.4}"))
+            } else {
+                PropValue::ReadOnly(format!("{value:.4}"))
+            },
+        )
+    };
+    let text = |label: &str, field: &'static str, value: String, editable: bool| {
+        property(
+            label,
+            field,
+            if editable {
+                PropValue::PlainText(value)
+            } else {
+                PropValue::ReadOnly(value)
+            },
+        )
+    };
+    let choice = |label: &str,
+                  field: &'static str,
+                  selected: &str,
+                  options: &[&str],
+                  editable: bool| {
+        property(
+            label,
+            field,
+            if editable {
+                choice_value(selected, options)
+            } else {
+                PropValue::ReadOnly(selected.to_string())
+            },
+        )
+    };
+
+    let s = style;
+    let dimfxlon = int(ov::DIMFXLON, s.dimfxlon as i16) != 0;
+    let dimlunit = int(ov::DIMLUNIT, s.dimlunit);
+    let dimfrac = int(ov::DIMFRAC, s.dimfrac);
+    let dimalt = int(ov::DIMALT, s.dimalt as i16) != 0;
+    let dimtol = int(ov::DIMTOL, s.dimtol as i16) != 0;
+    let dimlim = int(ov::DIMLIM, s.dimlim as i16) != 0;
+    let dimtp = real(ov::DIMTP, s.dimtp);
+    let dimtm = real(ov::DIMTM, s.dimtm);
+    let dimgap = real(ov::DIMGAP, s.dimgap);
+    let tolerance_display = if dimgap < 0.0 {
+        "Basic"
+    } else if dimlim {
         "Limits"
-    } else if s.dimtol {
+    } else if dimtol && (dimtp - dimtm).abs() <= 1e-12 {
+        "Symmetrical"
+    } else if dimtol {
         "Deviation"
     } else {
         "None"
+    };
+    let tolerance_enabled = matches!(
+        tolerance_display,
+        "Symmetrical" | "Deviation" | "Limits"
+    );
+    let alternate_tolerance_enabled = tolerance_enabled && dimalt;
+    let dimzin = int(ov::DIMZIN, s.dimzin);
+    let dimaltz = int(ov::DIMALTZ, s.dimaltz);
+    let dimtzin = int(ov::DIMTZIN, s.dimtzin);
+    let dimalttz = int(ov::DIMALTTZ, s.dimalttz);
+    let annotative = s.annotative
+        || !crate::scene::annotative::object_scale_memberships(
+            document,
+            dimension.base().common.handle,
+        )
+        .is_empty();
+
+    let overridden_text_style = ov::handle(data, ov::DIMTXSTY);
+    let text_style_name = overridden_text_style
+        .and_then(|handle| {
+            document
+                .text_styles
+                .iter()
+                .find(|record| record.handle == handle)
+                .map(|record| record.name.clone())
+        })
+        .unwrap_or_else(|| s.dimtxsty.clone());
+    let text_height_editable = document
+        .text_styles
+        .iter()
+        .find(|record| {
+            overridden_text_style
+                .is_some_and(|handle| record.handle == handle)
+                || (overridden_text_style.is_none()
+                    && record.name.eq_ignore_ascii_case(&text_style_name))
+        })
+        .is_none_or(|record| !record.has_fixed_height());
+
+    let (dim_prefix, dim_suffix) =
+        split_measurement_template(&string(ov::DIMPOST, &s.dimpost));
+    let (alt_prefix, alt_suffix) =
+        split_measurement_template(&string(ov::DIMAPOST, &s.dimapost));
+    let decimal_separator = {
+        let value = int(ov::DIMDSEP, s.dimdsep);
+        let character = value as u8 as char;
+        if value > 0 && !character.is_control() {
+            character.to_string()
+        } else {
+            value.to_string()
+        }
+    };
+
+    let mut arrow_options: Vec<String> = std::iter::once("Closed filled".to_string())
+        .chain(
+            document
+                .block_records
+                .iter()
+                .map(|record| record.name.clone())
+                .filter(|name| !name.is_empty()),
+        )
+        .collect();
+    let mut linetype_options: Vec<String> = document
+        .line_types
+        .iter()
+        .map(|line_type| line_type.name.clone())
+        .filter(|name| !name.is_empty())
+        .collect();
+    let text_style_options: Vec<String> = document
+        .text_styles
+        .iter()
+        .map(|record| record.name.clone())
+        .filter(|name| !name.is_empty())
+        .collect();
+
+    let arrow_name = |code, inherited_handle, inherited_name: &str| {
+        ov::handle(data, code)
+            .map(|handle| block_name(document, handle, inherited_name))
+            .unwrap_or_else(|| block_name(document, inherited_handle, inherited_name))
+    };
+    let linetype = |code, inherited| {
+        linetype_name(document, ov::handle(data, code).unwrap_or(inherited))
+    };
+    let arrow_1 = arrow_name(ov::DIMBLK1, s.dimblk1, &s.dimblk1_name);
+    let arrow_2 = arrow_name(ov::DIMBLK2, s.dimblk2, &s.dimblk2_name);
+    for current in [&arrow_1, &arrow_2] {
+        if !arrow_options.contains(current) {
+            arrow_options.push(current.clone());
+        }
+    }
+    for current in [
+        linetype(ov::DIMLTYPE, s.dimltex_handle),
+        linetype(ov::DIMLTEX1, s.dimltex1_handle),
+        linetype(ov::DIMLTEX2, s.dimltex2_handle),
+    ] {
+        if !linetype_options.contains(&current) {
+            linetype_options.push(current);
+        }
+    }
+
+    let precision_options: Vec<String> = (0..=8).map(|value| value.to_string()).collect();
+    let linear_units = [
+        "Scientific",
+        "Decimal",
+        "Engineering",
+        "Architectural",
+        "Fractional",
+        "Desktop",
+    ];
+    let alternate_unit_options = [
+        "Scientific",
+        "Decimal",
+        "Engineering",
+        "Architectural stacked",
+        "Fractional stacked",
+        "Architectural",
+        "Fractional",
+        "Desktop",
+    ];
+
+    let fill_mode = int(ov::DIMTFILL, s.dimtfill);
+    let fill_color = ov::color(data, ov::DIMTFILLCLR)
+        .unwrap_or_else(|| AcadColor::from_index(s.dimtfillclr));
+    let fill_value = match fill_mode {
+        1 => choice_value("Background", &["None", "Background", "Color"]),
+        2 => PropValue::ColorChoice(fill_color),
+        _ => choice_value("None", &["None", "Background", "Color"]),
     };
 
     vec![
         PropSection {
             title: t!("Lines & Arrows").into_owned(),
             props: vec![
-                ro(t!("Arrow size").as_ref(), "dim_arrow_size", f(s.dimasz)),
-                ro(t!("Dim line color").as_ref(), "dim_line_color", s.dimclrd.to_string()),
-                ro(
+                property(
+                    t!("Arrow 1").as_ref(),
+                    "dim_arrowhead_1",
+                    PropValue::Choice {
+                        selected: arrow_1,
+                        options: arrow_options.clone(),
+                    },
+                ),
+                property(
+                    t!("Arrow 2").as_ref(),
+                    "dim_arrowhead_2",
+                    PropValue::Choice {
+                        selected: arrow_2,
+                        options: arrow_options,
+                    },
+                ),
+                number(
+                    t!("Arrow size").as_ref(),
+                    "dim_arrow_size",
+                    real(ov::DIMASZ, s.dimasz),
+                    true,
+                ),
+                property(
                     t!("Dim line lineweight").as_ref(),
                     "dim_line_lineweight",
-                    s.dimlwd.to_string(),
+                    PropValue::Choice {
+                        selected: lineweight_label(int(ov::DIMLWD, s.dimlwd)),
+                        options: lineweight_options(),
+                    },
                 ),
-                ro(t!("Ext line color").as_ref(), "dim_ext_line_color", s.dimclre.to_string()),
-                ro(
+                property(
                     t!("Ext line lineweight").as_ref(),
                     "dim_ext_line_lineweight",
-                    s.dimlwe.to_string(),
+                    PropValue::Choice {
+                        selected: lineweight_label(int(ov::DIMLWE, s.dimlwe)),
+                        options: lineweight_options(),
+                    },
                 ),
-                ro(t!("Dim line 1").as_ref(), "dim_line_1", onoff(!s.dimsd1)),
-                ro(t!("Dim line 2").as_ref(), "dim_line_2", onoff(!s.dimsd2)),
-                ro(t!("Ext line 1").as_ref(), "dim_ext_line_1", onoff(!s.dimse1)),
-                ro(t!("Ext line 2").as_ref(), "dim_ext_line_2", onoff(!s.dimse2)),
-                ro(t!("Dim line ext").as_ref(), "dim_line_ext", f(s.dimdle)),
-                ro(t!("Ext line ext").as_ref(), "dim_ext_line_ext", f(s.dimexe)),
-                ro(t!("Ext line offset").as_ref(), "dim_ext_line_offset", f(s.dimexo)),
-                ro(t!("Ext line fixed").as_ref(), "dim_ext_line_fixed", yn(s.dimfxlon)),
-                ro(
+                choice(
+                    t!("Dim line 1").as_ref(),
+                    "dim_line_1",
+                    on(int(ov::DIMSD1, s.dimsd1 as i16) == 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                choice(
+                    t!("Dim line 2").as_ref(),
+                    "dim_line_2",
+                    on(int(ov::DIMSD2, s.dimsd2 as i16) == 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                property(
+                    t!("Dim line color").as_ref(),
+                    "dim_line_color",
+                    PropValue::ColorChoice(
+                        ov::color(data, ov::DIMCLRD)
+                            .unwrap_or_else(|| AcadColor::from_index(s.dimclrd)),
+                    ),
+                ),
+                property(
+                    t!("Dim line linetype").as_ref(),
+                    "dim_linetype",
+                    PropValue::Choice {
+                        selected: linetype(ov::DIMLTYPE, s.dimltex_handle),
+                        options: linetype_options.clone(),
+                    },
+                ),
+                number(
+                    t!("Dim line ext").as_ref(),
+                    "dim_line_ext",
+                    real(ov::DIMDLE, s.dimdle),
+                    true,
+                ),
+                property(
+                    t!("Ext line 1 linetype").as_ref(),
+                    "dim_ext_linetype_1",
+                    PropValue::Choice {
+                        selected: linetype(ov::DIMLTEX1, s.dimltex1_handle),
+                        options: linetype_options.clone(),
+                    },
+                ),
+                property(
+                    t!("Ext line 2 linetype").as_ref(),
+                    "dim_ext_linetype_2",
+                    PropValue::Choice {
+                        selected: linetype(ov::DIMLTEX2, s.dimltex2_handle),
+                        options: linetype_options,
+                    },
+                ),
+                choice(
+                    t!("Ext line 1").as_ref(),
+                    "dim_ext_line_1",
+                    on(int(ov::DIMSE1, s.dimse1 as i16) == 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                choice(
+                    t!("Ext line 2").as_ref(),
+                    "dim_ext_line_2",
+                    on(int(ov::DIMSE2, s.dimse2 as i16) == 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                choice(
+                    t!("Ext line fixed").as_ref(),
+                    "dim_ext_line_fixed",
+                    on(dimfxlon),
+                    &["On", "Off"],
+                    true,
+                ),
+                number(
                     t!("Ext line fixed length").as_ref(),
                     "dim_ext_line_fixed_length",
-                    f(s.dimfxl),
+                    real(ov::DIMFXL, s.dimfxl),
+                    dimfxlon,
+                ),
+                property(
+                    t!("Ext line color").as_ref(),
+                    "dim_ext_line_color",
+                    PropValue::ColorChoice(
+                        ov::color(data, ov::DIMCLRE)
+                            .unwrap_or_else(|| AcadColor::from_index(s.dimclre)),
+                    ),
+                ),
+                number(
+                    t!("Ext line ext").as_ref(),
+                    "dim_ext_line_ext",
+                    real(ov::DIMEXE, s.dimexe),
+                    true,
+                ),
+                number(
+                    t!("Ext line offset").as_ref(),
+                    "dim_ext_line_offset",
+                    real(ov::DIMEXO, s.dimexo),
+                    true,
                 ),
             ],
         },
         PropSection {
             title: t!("Text").into_owned(),
             props: vec![
-                ro(t!("Fill color").as_ref(), "dim_text_fill_color", s.dimtfillclr.to_string()),
-                ro(t!("Text color").as_ref(), "dim_text_color", s.dimclrt.to_string()),
-                ro(t!("Text height").as_ref(), "dim_text_height", f(s.dimtxt)),
-                ro(t!("Text offset").as_ref(), "dim_text_offset", f(s.dimgap)),
-                ro(t!("Text pos vert").as_ref(), "dim_text_pos_vert", s.dimtad.to_string()),
-                ro(t!("Text pos hor").as_ref(), "dim_text_pos_hor", s.dimjust.to_string()),
-                ro(t!("Text outside align").as_ref(), "dim_text_outside_align", yn(s.dimtoh)),
-                ro(t!("Text inside align").as_ref(), "dim_text_inside_align", yn(s.dimtih)),
-                ro(t!("Text style").as_ref(), "dim_text_style", s.dimtxsty.clone()),
+                property(
+                    t!("Fill color").as_ref(),
+                    "dim_text_fill_color",
+                    fill_value,
+                ),
+                choice(
+                    t!("Fractional type").as_ref(),
+                    "dim_fractional_type",
+                    fraction_type_label(dimfrac),
+                    &["Horizontal", "Diagonal", "Not stacked"],
+                    matches!(dimlunit, 4 | 5),
+                ),
+                property(
+                    t!("Text color").as_ref(),
+                    "dim_text_color",
+                    PropValue::ColorChoice(
+                        ov::color(data, ov::DIMCLRT)
+                            .unwrap_or_else(|| AcadColor::from_index(s.dimclrt)),
+                    ),
+                ),
+                number(
+                    t!("Text height").as_ref(),
+                    "dim_text_height",
+                    real(ov::DIMTXT, s.dimtxt),
+                    text_height_editable,
+                ),
+                number(
+                    t!("Text offset").as_ref(),
+                    "dim_text_offset",
+                    dimgap.abs(),
+                    true,
+                ),
+                choice(
+                    t!("Text outside align").as_ref(),
+                    "dim_text_outside_align",
+                    on(int(ov::DIMTOH, s.dimtoh as i16) != 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                choice(
+                    t!("Text pos hor").as_ref(),
+                    "dim_text_pos_hor",
+                    text_horizontal_label(int(ov::DIMJUST, s.dimjust)),
+                    &[
+                        "Centered",
+                        "At extension line 1",
+                        "At extension line 2",
+                        "Over extension line 1",
+                        "Over extension line 2",
+                    ],
+                    true,
+                ),
+                choice(
+                    t!("Text pos vert").as_ref(),
+                    "dim_text_pos_vert",
+                    text_vertical_label(int(ov::DIMTAD, s.dimtad)),
+                    &["Centered", "Above", "Outside", "JIS", "Below"],
+                    true,
+                ),
+                property(
+                    t!("Text style").as_ref(),
+                    "dim_text_style",
+                    PropValue::Choice {
+                        selected: text_style_name,
+                        options: text_style_options,
+                    },
+                ),
+                choice(
+                    t!("Text inside align").as_ref(),
+                    "dim_text_inside_align",
+                    on(int(ov::DIMTIH, s.dimtih as i16) != 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                property(
+                    t!("Text position X").as_ref(),
+                    "text_x",
+                    PropValue::EditText(format!(
+                        "{:.4}",
+                        dimension.base().text_middle_point.x
+                    )),
+                ),
+                property(
+                    t!("Text position Y").as_ref(),
+                    "text_y",
+                    PropValue::EditText(format!(
+                        "{:.4}",
+                        dimension.base().text_middle_point.y
+                    )),
+                ),
+                property(
+                    t!("Text rotation").as_ref(),
+                    "text_rotation",
+                    PropValue::EditText(format!(
+                        "{:.4}",
+                        dimension.base().text_rotation.to_degrees()
+                    )),
+                ),
+                choice(
+                    t!("Text view direction").as_ref(),
+                    "dim_text_view_direction",
+                    if int(ov::DIMTXTDIRECTION, s.dimtxtdirection as i16) != 0 {
+                        "Right-to-left"
+                    } else {
+                        "Left-to-right"
+                    },
+                    &["Left-to-right", "Right-to-left"],
+                    true,
+                ),
+                property(
+                    t!("Measurement").as_ref(),
+                    "measurement",
+                    PropValue::ReadOnly(format!("{:.4}", dimension.measurement())),
+                ),
+                property(
+                    t!("Text override").as_ref(),
+                    "text_override",
+                    PropValue::PlainText(
+                        dimension_text_override(dimension.base())
+                            .unwrap_or("")
+                            .to_string(),
+                    ),
+                ),
             ],
         },
         PropSection {
             title: t!("Fit").into_owned(),
             props: vec![
-                ro(t!("Fit").as_ref(), "dim_fit", s.dimatfit.to_string()),
-                ro(t!("Text inside").as_ref(), "dim_text_inside", yn(s.dimtix)),
-                ro(t!("Text movement").as_ref(), "dim_text_movement", s.dimtmove.to_string()),
-                ro(t!("Dim scale overall").as_ref(), "dim_scale_overall", f(s.dimscale)),
-                ro(t!("Dim line forced").as_ref(), "dim_line_forced", yn(s.dimtofl)),
-                ro(t!("Dim line inside").as_ref(), "dim_line_inside", yn(s.dimsoxd)),
+                choice(
+                    t!("Fit").as_ref(),
+                    "dim_fit",
+                    fit_label(int(ov::DIMATFIT, s.dimatfit)),
+                    &["Both text and arrows", "Arrows", "Text", "Best fit"],
+                    true,
+                ),
+                choice(
+                    t!("Text inside").as_ref(),
+                    "dim_text_inside",
+                    on(int(ov::DIMTIX, s.dimtix as i16) != 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                choice(
+                    t!("Text movement").as_ref(),
+                    "dim_text_movement",
+                    text_movement_label(int(ov::DIMTMOVE, s.dimtmove)),
+                    &[
+                        "Keep dim line with text",
+                        "Move text, add leader",
+                        "Move text, no leader",
+                    ],
+                    true,
+                ),
+                number(
+                    t!("Dim scale overall").as_ref(),
+                    "dim_scale_overall",
+                    real(ov::DIMSCALE, s.dimscale),
+                    !annotative,
+                ),
+                choice(
+                    t!("Dim line forced").as_ref(),
+                    "dim_line_forced",
+                    on(int(ov::DIMTOFL, s.dimtofl as i16) != 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                choice(
+                    t!("Dim line inside").as_ref(),
+                    "dim_line_inside",
+                    on(int(ov::DIMSOXD, s.dimsoxd as i16) != 0),
+                    &["On", "Off"],
+                    true,
+                ),
             ],
         },
         PropSection {
             title: t!("Primary Units").into_owned(),
             props: vec![
-                ro(t!("Dim units").as_ref(), "dim_units", s.dimlunit.to_string()),
-                ro(t!("Precision").as_ref(), "dim_precision", s.dimdec.to_string()),
-                ro(t!("Decimal separator").as_ref(), "dim_decimal_separator", dsep),
-                ro(t!("Dim prefix/suffix").as_ref(), "dim_prefix_suffix", s.dimpost.clone()),
-                ro(t!("Dim roundoff").as_ref(), "dim_roundoff", f(s.dimrnd)),
-                ro(
+                text(
+                    t!("Decimal separator").as_ref(),
+                    "dim_decimal_separator",
+                    decimal_separator,
+                    true,
+                ),
+                text(
+                    t!("Dim prefix").as_ref(),
+                    "dim_prefix",
+                    dim_prefix,
+                    true,
+                ),
+                text(
+                    t!("Dim suffix").as_ref(),
+                    "dim_suffix",
+                    dim_suffix,
+                    true,
+                ),
+                text(
+                    t!("Dim sub-units suffix").as_ref(),
+                    "dim_sub_units_suffix",
+                    string(ov::DIMMZS, &s.dimmzs),
+                    dimzin & 4 != 0,
+                ),
+                number(
+                    t!("Dim roundoff").as_ref(),
+                    "dim_roundoff",
+                    real(ov::DIMRND, s.dimrnd),
+                    true,
+                ),
+                number(
+                    t!("Dim scale linear").as_ref(),
+                    "dim_scale_linear",
+                    real(ov::DIMLFAC, s.dimlfac),
+                    true,
+                ),
+                number(
+                    t!("Dim sub-units scale").as_ref(),
+                    "dim_sub_units_scale",
+                    real(ov::DIMMZF, s.dimmzf),
+                    dimzin & 4 != 0,
+                ),
+                choice(
+                    t!("Dim units").as_ref(),
+                    "dim_units",
+                    linear_unit_label(dimlunit),
+                    &linear_units,
+                    true,
+                ),
+                choice(
                     t!("Suppress leading zeros").as_ref(),
                     "dim_suppress_leading_zeros",
-                    yn(s.dimzin & 4 != 0),
+                    yes(dimzin & 4 != 0),
+                    &["Yes", "No"],
+                    true,
                 ),
-                ro(
+                choice(
                     t!("Suppress trailing zeros").as_ref(),
                     "dim_suppress_trailing_zeros",
-                    yn(s.dimzin & 8 != 0),
+                    yes(dimzin & 8 != 0),
+                    &["Yes", "No"],
+                    true,
                 ),
-                ro(t!("Dim scale linear").as_ref(), "dim_scale_linear", f(s.dimlfac)),
-                ro(t!("Angle format").as_ref(), "dim_angle_format", s.dimaunit.to_string()),
-                ro(t!("Angle precision").as_ref(), "dim_angle_precision", s.dimadec.to_string()),
+                choice(
+                    t!("Suppress zero feet").as_ref(),
+                    "dim_suppress_zero_feet",
+                    yes(suppresses_zero_feet(dimzin)),
+                    &["Yes", "No"],
+                    true,
+                ),
+                choice(
+                    t!("Suppress zero inches").as_ref(),
+                    "dim_suppress_zero_inches",
+                    yes(suppresses_zero_inches(dimzin)),
+                    &["Yes", "No"],
+                    true,
+                ),
+                property(
+                    t!("Precision").as_ref(),
+                    "dim_precision",
+                    PropValue::Choice {
+                        selected: int(ov::DIMDEC, s.dimdec).to_string(),
+                        options: precision_options.clone(),
+                    },
+                ),
             ],
         },
         PropSection {
             title: t!("Alternate Units").into_owned(),
             props: vec![
-                ro(t!("Alt enabled").as_ref(), "dim_alt_enabled", yn(s.dimalt)),
-                ro(t!("Alt format").as_ref(), "dim_alt_format", s.dimaltu.to_string()),
-                ro(t!("Alt precision").as_ref(), "dim_alt_precision", s.dimaltd.to_string()),
-                ro(t!("Alt scale factor").as_ref(), "dim_alt_scale_factor", f(s.dimaltf)),
-                ro(t!("Alt roundoff").as_ref(), "dim_alt_roundoff", f(s.dimaltrnd)),
-                ro(t!("Alt prefix/suffix").as_ref(), "dim_alt_prefix_suffix", s.dimapost.clone()),
-                ro(
+                choice(
+                    t!("Alt enabled").as_ref(),
+                    "dim_alt_enabled",
+                    on(dimalt),
+                    &["On", "Off"],
+                    true,
+                ),
+                choice(
+                    t!("Alt format").as_ref(),
+                    "dim_alt_format",
+                    alternate_unit_label(int(ov::DIMALTU, s.dimaltu)),
+                    &alternate_unit_options,
+                    dimalt,
+                ),
+                property(
+                    t!("Alt precision").as_ref(),
+                    "dim_alt_precision",
+                    if dimalt {
+                        PropValue::Choice {
+                            selected: int(ov::DIMALTD, s.dimaltd).to_string(),
+                            options: precision_options.clone(),
+                        }
+                    } else {
+                        PropValue::ReadOnly(int(ov::DIMALTD, s.dimaltd).to_string())
+                    },
+                ),
+                number(
+                    t!("Alt scale factor").as_ref(),
+                    "dim_alt_scale_factor",
+                    real(ov::DIMALTF, s.dimaltf),
+                    dimalt,
+                ),
+                number(
+                    t!("Alt sub-units scale").as_ref(),
+                    "dim_alt_sub_units_scale",
+                    real(ov::DIMALTMZF, s.dimaltmzf),
+                    dimalt && dimaltz & 4 != 0,
+                ),
+                number(
+                    t!("Alt roundoff").as_ref(),
+                    "dim_alt_roundoff",
+                    real(ov::DIMALTRND, s.dimaltrnd),
+                    dimalt,
+                ),
+                text(
+                    t!("Alt prefix").as_ref(),
+                    "dim_alt_prefix",
+                    alt_prefix,
+                    dimalt,
+                ),
+                text(
+                    t!("Alt suffix").as_ref(),
+                    "dim_alt_suffix",
+                    alt_suffix,
+                    dimalt,
+                ),
+                text(
+                    t!("Alt sub-units suffix").as_ref(),
+                    "dim_alt_sub_units_suffix",
+                    string(ov::DIMALTMZS, &s.dimaltmzs),
+                    dimalt && dimaltz & 4 != 0,
+                ),
+                choice(
                     t!("Alt suppress leading zeros").as_ref(),
                     "dim_alt_suppress_leading_zeros",
-                    yn(s.dimaltz & 4 != 0),
+                    yes(dimaltz & 4 != 0),
+                    &["Yes", "No"],
+                    dimalt,
                 ),
-                ro(
+                choice(
                     t!("Alt suppress trailing zeros").as_ref(),
                     "dim_alt_suppress_trailing_zeros",
-                    yn(s.dimaltz & 8 != 0),
+                    yes(dimaltz & 8 != 0),
+                    &["Yes", "No"],
+                    dimalt,
+                ),
+                choice(
+                    t!("Alt suppress zero feet").as_ref(),
+                    "dim_alt_suppress_zero_feet",
+                    yes(suppresses_zero_feet(dimaltz)),
+                    &["Yes", "No"],
+                    dimalt,
+                ),
+                choice(
+                    t!("Alt suppress zero inches").as_ref(),
+                    "dim_alt_suppress_zero_inches",
+                    yes(suppresses_zero_inches(dimaltz)),
+                    &["Yes", "No"],
+                    dimalt,
                 ),
             ],
         },
         PropSection {
             title: t!("Tolerances").into_owned(),
             props: vec![
-                ro(t!("Tolerance display").as_ref(), "dim_tolerance_display", tol_display),
-                ro(t!("Tolerance limit lower").as_ref(), "dim_tolerance_limit_lower", f(s.dimtm)),
-                ro(t!("Tolerance limit upper").as_ref(), "dim_tolerance_limit_upper", f(s.dimtp)),
-                ro(
+                choice(
+                    t!("Tolerance display").as_ref(),
+                    "dim_tolerance_display",
+                    tolerance_display,
+                    &["None", "Symmetrical", "Deviation", "Limits", "Basic"],
+                    true,
+                ),
+                property(
                     t!("Tolerance precision").as_ref(),
                     "dim_tolerance_precision",
-                    s.dimtdec.to_string(),
+                    if tolerance_enabled {
+                        PropValue::Choice {
+                            selected: int(ov::DIMTDEC, s.dimtdec).to_string(),
+                            options: precision_options.clone(),
+                        }
+                    } else {
+                        PropValue::ReadOnly(int(ov::DIMTDEC, s.dimtdec).to_string())
+                    },
                 ),
-                ro(
+                number(
+                    t!("Tolerance limit lower").as_ref(),
+                    "dim_tolerance_limit_lower",
+                    dimtm,
+                    matches!(tolerance_display, "Deviation" | "Limits"),
+                ),
+                number(
+                    t!("Tolerance limit upper").as_ref(),
+                    "dim_tolerance_limit_upper",
+                    dimtp,
+                    tolerance_enabled,
+                ),
+                number(
                     t!("Tolerance text height").as_ref(),
                     "dim_tolerance_text_height",
-                    f(s.dimtfac),
+                    real(ov::DIMTFAC, s.dimtfac),
+                    tolerance_enabled,
                 ),
-                ro(
+                choice(
                     t!("Tolerance pos vert").as_ref(),
                     "dim_tolerance_pos_vert",
-                    s.dimtolj.to_string(),
+                    tolerance_vertical_label(int(ov::DIMTOLJ, s.dimtolj)),
+                    &["Bottom", "Middle", "Top"],
+                    tolerance_enabled,
                 ),
-                ro(
+                choice(
+                    t!("Tolerance alignment").as_ref(),
+                    "dim_tolerance_alignment",
+                    tolerance_alignment_label(int(ov::DIMTALN, 0)),
+                    &["Align decimal separators", "Align operational symbols"],
+                    tolerance_display == "Deviation",
+                ),
+                choice(
                     t!("Tolerance suppress leading zeros").as_ref(),
                     "dim_tolerance_suppress_leading_zeros",
-                    yn(s.dimtzin & 4 != 0),
+                    yes(dimtzin & 4 != 0),
+                    &["Yes", "No"],
+                    tolerance_enabled,
                 ),
-                ro(
+                choice(
                     t!("Tolerance suppress trailing zeros").as_ref(),
                     "dim_tolerance_suppress_trailing_zeros",
-                    yn(s.dimtzin & 8 != 0),
+                    yes(dimtzin & 8 != 0),
+                    &["Yes", "No"],
+                    tolerance_enabled,
+                ),
+                choice(
+                    t!("Tolerance suppress zero feet").as_ref(),
+                    "dim_tolerance_suppress_zero_feet",
+                    yes(suppresses_zero_feet(dimtzin)),
+                    &["Yes", "No"],
+                    tolerance_enabled,
+                ),
+                choice(
+                    t!("Tolerance suppress zero inches").as_ref(),
+                    "dim_tolerance_suppress_zero_inches",
+                    yes(suppresses_zero_inches(dimtzin)),
+                    &["Yes", "No"],
+                    tolerance_enabled,
+                ),
+                property(
+                    t!("Alt tolerance precision").as_ref(),
+                    "dim_alt_tolerance_precision",
+                    if alternate_tolerance_enabled {
+                        PropValue::Choice {
+                            selected: int(ov::DIMALTTD, s.dimalttd).to_string(),
+                            options: precision_options,
+                        }
+                    } else {
+                        PropValue::ReadOnly(int(ov::DIMALTTD, s.dimalttd).to_string())
+                    },
+                ),
+                choice(
+                    t!("Alt tolerance suppress leading zeros").as_ref(),
+                    "dim_alt_tolerance_suppress_leading_zeros",
+                    yes(dimalttz & 4 != 0),
+                    &["Yes", "No"],
+                    alternate_tolerance_enabled,
+                ),
+                choice(
+                    t!("Alt tolerance suppress trailing zeros").as_ref(),
+                    "dim_alt_tolerance_suppress_trailing_zeros",
+                    yes(dimalttz & 8 != 0),
+                    &["Yes", "No"],
+                    alternate_tolerance_enabled,
+                ),
+                choice(
+                    t!("Alt tolerance suppress zero feet").as_ref(),
+                    "dim_alt_tolerance_suppress_zero_feet",
+                    yes(suppresses_zero_feet(dimalttz)),
+                    &["Yes", "No"],
+                    alternate_tolerance_enabled,
+                ),
+                choice(
+                    t!("Alt tolerance suppress zero inches").as_ref(),
+                    "dim_alt_tolerance_suppress_zero_inches",
+                    yes(suppresses_zero_inches(dimalttz)),
+                    &["Yes", "No"],
+                    alternate_tolerance_enabled,
                 ),
             ],
         },
     ]
 }
+
+fn property(label: &str, field: &'static str, value: PropValue) -> Property {
+    Property {
+        label: label.to_string(),
+        field,
+        value,
+    }
+}
+
+fn split_measurement_template(value: &str) -> (String, String) {
+    value
+        .split_once("<>")
+        .map(|(prefix, suffix)| (prefix.to_string(), suffix.to_string()))
+        .unwrap_or_else(|| (String::new(), value.to_string()))
+}
+
+fn fraction_type_label(value: i16) -> &'static str {
+    match value {
+        1 => "Diagonal",
+        2 => "Not stacked",
+        _ => "Horizontal",
+    }
+}
+
+fn suppresses_zero_feet(value: i16) -> bool {
+    matches!(value & 3, 0 | 3)
+}
+
+fn suppresses_zero_inches(value: i16) -> bool {
+    matches!(value & 3, 0 | 2)
+}
+
+fn text_horizontal_label(value: i16) -> &'static str {
+    match value {
+        1 => "At extension line 1",
+        2 => "At extension line 2",
+        3 => "Over extension line 1",
+        4 => "Over extension line 2",
+        _ => "Centered",
+    }
+}
+
+fn text_vertical_label(value: i16) -> &'static str {
+    match value {
+        1 => "Above",
+        2 => "Outside",
+        3 => "JIS",
+        4 => "Below",
+        _ => "Centered",
+    }
+}
+
+fn fit_label(value: i16) -> &'static str {
+    match value {
+        1 => "Arrows",
+        2 => "Text",
+        3 => "Best fit",
+        _ => "Both text and arrows",
+    }
+}
+
+fn text_movement_label(value: i16) -> &'static str {
+    match value {
+        1 => "Move text, add leader",
+        2 => "Move text, no leader",
+        _ => "Keep dim line with text",
+    }
+}
+
+fn alternate_unit_label(value: i16) -> &'static str {
+    match value {
+        1 => "Scientific",
+        3 => "Engineering",
+        4 => "Architectural stacked",
+        5 => "Fractional stacked",
+        6 => "Architectural",
+        7 => "Fractional",
+        8 => "Desktop",
+        _ => "Decimal",
+    }
+}
+
+fn tolerance_vertical_label(value: i16) -> &'static str {
+    match value {
+        0 => "Bottom",
+        2 => "Top",
+        _ => "Middle",
+    }
+}
+
+fn tolerance_alignment_label(value: i16) -> &'static str {
+    if value == 0 {
+        "Align decimal separators"
+    } else {
+        "Align operational symbols"
+    }
+}
+
+fn choice_value(
+    selected: &str,
+    options: &[&str],
+) -> crate::scene::model::object::PropValue {
+    crate::scene::model::object::PropValue::Choice {
+        selected: selected.to_string(),
+        options: options.iter().map(|value| (*value).to_string()).collect(),
+    }
+}
+
+fn block_name(document: &CadDocument, handle: acadrust::Handle, fallback: &str) -> String {
+    if handle.is_null() {
+        return "Closed filled".to_string();
+    }
+    document
+        .block_records
+        .iter()
+        .find(|record| record.handle == handle)
+        .map(|record| record.name.clone())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn linetype_name(document: &CadDocument, handle: acadrust::Handle) -> String {
+    document
+        .line_types
+        .iter()
+        .find(|line_type| line_type.handle == handle)
+        .map(|line_type| line_type.name.clone())
+        .unwrap_or_else(|| "ByBlock".to_string())
+}
+
+fn linear_unit_label(value: i16) -> &'static str {
+    match value {
+        1 => "Scientific",
+        3 => "Engineering",
+        4 => "Architectural",
+        5 => "Fractional",
+        6 => "Desktop",
+        _ => "Decimal",
+    }
+}
+
 use acadrust::{CadDocument, EntityType, Handle};
 
 use crate::scene::convert::tess_util::aci_to_rgba;
@@ -1736,6 +2645,8 @@ fn tessellate_dimension_inner(
         real!(dimtfac, DIMTFAC);
         real!(dimgap, DIMGAP);
         real!(dimaltrnd, DIMALTRND);
+        real!(dimaltmzf, DIMALTMZF);
+        real!(dimmzf, DIMMZF);
         flag!(dimtol, DIMTOL);
         flag!(dimlim, DIMLIM);
         flag!(dimtih, DIMTIH);
@@ -1753,6 +2664,7 @@ fn tessellate_dimension_inner(
         flag!(dimfxlon, DIMFXLON);
         flag!(dimtxtdirection, DIMTXTDIRECTION);
         int!(dimzin, DIMZIN);
+        int!(dimtad, DIMTAD);
         int!(dimazin, DIMAZIN);
         int!(dimarcsym, DIMARCSYM);
         int!(dimclrd, DIMCLRD);
@@ -1791,6 +2703,12 @@ fn tessellate_dimension_inner(
         }
         if let Some(value) = ov::string(data, ov::DIMAPOST) {
             style.dimapost = value;
+        }
+        if let Some(value) = ov::string(data, ov::DIMALTMZS) {
+            style.dimaltmzs = value;
+        }
+        if let Some(value) = ov::string(data, ov::DIMMZS) {
+            style.dimmzs = value;
         }
         if let Some(value) = ov::handle(data, ov::DIMTXSTY) {
             style.dimtxsty_handle = value;
@@ -1912,12 +2830,15 @@ fn tessellate_dimension_inner(
     // Text box (local space) so the dim line can be broken where the text
     // crosses it — lets a DIMTFILL background sit over the line. The renderer
     // draws 2D fills under all wires, so the line is gapped rather than masked.
-    let dimgap_local = style.map(|s| (s.dimgap * dim_scale) as f32).unwrap_or(0.09);
+    let dimgap_local = style
+        .map(|s| (s.dimgap.abs() * dim_scale) as f32)
+        .unwrap_or(0.09);
+    let text_width = dimension_text_value(dim, style)
+        .map(|text| text.chars().count() as f32 * dim_txt as f32 * 0.6 + dimgap_local * 2.0)
+        .unwrap_or(0.0);
     let text_break = {
         let tp = vec3_local(dimension_text_pos_f64(dim, style, dim_txt, dim_scale));
-        let tw = dimension_text_value(dim, style)
-            .map(|t| t.chars().count() as f32 * dim_txt as f32 * 0.6)
-            .unwrap_or(0.0);
+        let tw = (text_width - dimgap_local * 2.0).max(0.0);
         if tw > 0.0 {
             // Vertical threshold is the bare text half-height (no DIMGAP): the
             // line only breaks when it actually passes under the glyphs. Text
@@ -1947,6 +2868,9 @@ fn tessellate_dimension_inner(
             dimcen,
             ticks: dimtsz_raw > 1e-9,
             arrow_len: dimasz,
+            text_width,
+            dimatfit: style.map(|s| s.dimatfit).unwrap_or(3),
+            dimtofl: style.map(|s| s.dimtofl).unwrap_or(false),
             text_break,
         },
         SuppressFlags {
@@ -1969,18 +2893,9 @@ fn tessellate_dimension_inner(
                 }
             }
         }
-        // Fit: text that doesn't fit between the extension lines is slid outside
-        // in the text-placement pass (unless DIMTIX), and arrowheads that don't
-        // fit are flipped outside in append_linear_dimension. DIMTOFL (force the
-        // dim line inside) is already satisfied for linear/aligned, whose dim
-        // line is always drawn between the extension points. DIMATFIT's exact
-        // mode ordering (arrows-first vs text-first) and DIMUPT (reposition on
-        // create) aren't differentiated yet — read here for round-trip.
-        let _ = (s.dimtofl, s.dimatfit, s.dimupt);
-        // DIMTXTDIRECTION (RTL) needs per-instance text mirroring on the Text
-        // entity, which the current text struct can't carry. Tracked: read
-        // and ignore so the file round-trips on save.
-        let _ = s.dimtxtdirection;
+        // DIMUPT governs interactive creation-time text placement; saved
+        // geometry already carries the resulting position.
+        let _ = s.dimupt;
         // DIMARCSYM only applies to arc-length dims; DIMJOGANG only to
         // jogged-radius dims. We don't ship those Dimension variants yet,
         // so the values are read for round-trip but not drawn.
@@ -2265,6 +3180,50 @@ fn tessellate_dimension_inner(
         }
     }
 
+    // A negative DIMGAP denotes the Basic tolerance display: frame the
+    // dimension text while keeping the absolute gap as the frame margin.
+    if style.is_some_and(|s| s.dimgap < 0.0) {
+        if let Some(rect) = text_fill_rect(dim, style, dim_txt, dim_scale) {
+            let p1 = rect[0];
+            let p2 = rect[1];
+            let p3 = rect[2];
+            let p4 = rect[5];
+            wires.push(WireModel {
+                point_marker: None,
+                taper_widths: Vec::new(),
+                pattern_stations: Vec::new(),
+                world_width: 0.0,
+                depth_override: None,
+                display_visible: true,
+                plot_visible: true,
+                fill_is_3d: false,
+                fill_is_2d_solid: false,
+                render_instance: None,
+                pick_tris: Vec::new(),
+                pick_tris_low: Vec::new(),
+                dash_from_start: false,
+                dash_align_end: None,
+                text_verts: Vec::new(),
+                name: name.clone(),
+                points: vec![p1, p2, p2, p3, p3, p4, p4, p1],
+                points_low: Vec::new(),
+                color: if selected { WireModel::SELECTED } else { text_color },
+                selected,
+                aci: 0,
+                pattern_length: 0.0,
+                pattern: [0.0; 8],
+                line_weight_px: 1.0,
+                snap_pts: vec![],
+                tangent_geoms: vec![],
+                key_vertices: vec![],
+                aabb: WireModel::UNBOUNDED_AABB,
+                plinegen: true,
+                fill_tris: vec![],
+                fill_tris_low: Vec::new(),
+            });
+        }
+    }
+
     if let Some(synth_text_entity) = dimension_text_entity(dim, dim_txt, style, document, dim_scale)
     {
         // Tolerance Text rendered separately so DIMTFAC scales its height
@@ -2430,7 +3389,7 @@ fn text_fill_rect(
         return None;
     }
     let pos = dimension_text_pos_f64(dim, style, text_height, dim_scale);
-    let dimgap = style.map(|s| s.dimgap).unwrap_or(0.0).max(0.0) * dim_scale;
+    let dimgap = style.map(|s| s.dimgap.abs()).unwrap_or(0.0) * dim_scale;
     // ~0.6 × text_height per character; matches average glyph aspect for
     // the bundled stick fonts. Inflate by 1 DIMGAP on each side.
     let approx_w = value.chars().count() as f64 * text_height * 0.6 + dimgap * 2.0;
@@ -2476,6 +3435,9 @@ struct DimLineParams {
     ticks: bool,
     /// Arrowhead length (DIMASZ, scaled) — used to decide arrow-outside fit.
     arrow_len: f32,
+    text_width: f32,
+    dimatfit: i16,
+    dimtofl: bool,
     /// Text box (local centre, half-width, half-height) used to break the
     /// dimension line where the text sits on it, so a DIMTFILL background reads
     /// over the line. None when the text doesn't overlap the line.
@@ -2783,12 +3745,22 @@ fn append_linear_dimension(
     let d1_out = d1 - dir_d1_to_d2 * dle;
     let d2_out = d2 + dir_d1_to_d2 * dle;
 
-    // DIMATFIT fit: when the arrowheads don't fit between the extension lines
-    // they're flipped to the outside (point still on the ext line, body
-    // outside) with a short stub for them to sit on. DIMSOXD suppresses those
-    // outer stubs. Ticks always fit, so this only affects arrowheads.
+    // When text plus arrows do not fit, DIMATFIT decides which component moves
+    // first: 0=both, 1=arrows, 2=text, 3=best fit.
     let gap = (d2 - d1).length();
-    let arrows_outside = !params.ticks && params.arrow_len > 1e-6 && gap < 2.0 * params.arrow_len;
+    let arrows_outside = if params.ticks || params.arrow_len <= 1e-6 {
+        false
+    } else if gap < 2.0 * params.arrow_len {
+        true
+    } else if gap < params.text_width + 2.0 * params.arrow_len {
+        match params.dimatfit {
+            0 | 1 => true,
+            2 => false,
+            _ => params.text_width <= gap,
+        }
+    } else {
+        false
+    };
 
     // The two suppression flags address the portions at the first and second
     // measured points independently. The text gap is also the natural split;
@@ -2814,14 +3786,15 @@ fn append_linear_dimension(
             }
         }
     }
-    if !suppress.dim1 && left_end > 1e-6 {
+    let draw_inside_line = !arrows_outside || params.dimtofl;
+    if draw_inside_line && !suppress.dim1 && left_end > 1e-6 {
         add_segment(
             &mut g.dim_lines,
             d1_out,
             d1_out + line_dir * left_end,
         );
     }
-    if !suppress.dim2 && line_len - right_start > 1e-6 {
+    if draw_inside_line && !suppress.dim2 && line_len - right_start > 1e-6 {
         add_segment(
             &mut g.dim_lines,
             d1_out + line_dir * right_start,
@@ -3132,7 +4105,9 @@ fn dimension_text_entity(
     document: &CadDocument,
     dim_scale: f64,
 ) -> Option<EntityType> {
-    let value = dimension_text_value(dim, style)?;
+    // Tolerances are emitted by `dimension_tolerance_entity` at their own
+    // height and alignment; keep the primary entity free of duplicate text.
+    let (value, _) = dimension_text_parts(dim, style)?;
     // Use f64 position directly to avoid f32 round-trip precision loss at large
     // coordinates (e.g. Turkish UTM ~4,000,000 m). tessellate() will apply
     // world_offset when rendering this synthetic entity.
@@ -3194,6 +4169,11 @@ fn dimension_text_entity(
         return Some(EntityType::MText(mtext));
     }
 
+    let value = if style.is_some_and(|style| style.dimtxtdirection) {
+        value.chars().rev().collect()
+    } else {
+        value
+    };
     let mut text = Text::with_value(value, pos_f64)
         .with_height(text_height)
         .with_rotation(rotation);
@@ -3247,11 +4227,12 @@ fn dimension_text_rotation(dim: &Dimension, style: Option<&DimStyle>) -> f64 {
     let dimtih = style.map(|s| s.dimtih).unwrap_or(false);
     let dimtoh = style.map(|s| s.dimtoh).unwrap_or(false);
     let dimjust = style.map(|s| s.dimjust).unwrap_or(0);
+    let outside = dimension_text_is_outside(dim, style);
     if base.text_rotation.abs() > 1e-9 {
         base.text_rotation
     } else if base.horizontal_direction.abs() > 1e-9 {
         base.horizontal_direction
-    } else if dimtih || dimtoh {
+    } else if (outside && dimtoh) || (!outside && dimtih) {
         0.0
     } else {
         let mut r = dimension_text_natural_rotation(dim);
@@ -3260,6 +4241,52 @@ fn dimension_text_rotation(dim: &Dimension, style: Option<&DimStyle>) -> f64 {
         }
         r
     }
+}
+
+fn dimension_text_is_outside(dim: &Dimension, style: Option<&DimStyle>) -> bool {
+    let Some(style) = style else {
+        return false;
+    };
+    let (first, second, axis) = match dim {
+        Dimension::Linear(d) => (
+            d.first_point,
+            d.second_point,
+            Vector3::new(d.rotation.cos(), d.rotation.sin(), 0.0),
+        ),
+        Dimension::Aligned(d) => {
+            let delta = d.second_point - d.first_point;
+            let length = (delta.x * delta.x + delta.y * delta.y).sqrt().max(1e-12);
+            (d.first_point, d.second_point, delta / length)
+        }
+        _ => return false,
+    };
+    let first_axis = first.x * axis.x + first.y * axis.y;
+    let second_axis = second.x * axis.x + second.y * axis.y;
+    let lo = first_axis.min(second_axis);
+    let hi = first_axis.max(second_axis);
+    if dim.base().text_user_positioned {
+        let point = dim.base().text_middle_point;
+        let position = point.x * axis.x + point.y * axis.y;
+        return position < lo || position > hi;
+    }
+    if style.dimtix {
+        return false;
+    }
+    let scale = if style.dimscale > 1e-9 { style.dimscale } else { 1.0 };
+    let height = style.dimtxt * scale;
+    let gap = style.dimgap.abs() * scale;
+    let text_width = dimension_text_value(dim, Some(style))
+        .map(|value| value.chars().count() as f64 * height * 0.6 + gap * 2.0)
+        .unwrap_or(0.0);
+    let arrow = style.dimasz * scale;
+    let span = hi - lo;
+    let insufficient = text_width + arrow * 2.0 > span;
+    insufficient
+        && match style.dimatfit {
+            0 | 2 => true,
+            1 | 3 => text_width > span,
+            _ => text_width > span,
+        }
 }
 
 fn dimension_text_natural_rotation(dim: &Dimension) -> f64 {
@@ -3319,7 +4346,7 @@ fn dimension_text_parts(
 
     // Build tolerance / limits suffix separately so the caller can render
     // it as its own Text entity at DIMTFAC × DIMTXT height.
-    let tolerance_suffix = build_tolerance_suffix(dim.measurement(), style, is_angular);
+    let tolerance_suffix = build_tolerance_suffix(dim, style, is_angular);
     let primary = apply_dimpost(&primary_raw, style);
 
     // Alternate units appended in brackets when DIMALT is on (linear only).
@@ -3347,21 +4374,22 @@ fn dimension_text_parts(
 }
 
 fn build_tolerance_suffix(
-    measurement: f64,
+    dim: &Dimension,
     style: Option<&DimStyle>,
     is_angular: bool,
 ) -> Option<String> {
     let s = style?;
+    let measurement = dim.measurement();
     let dimtdec = s.dimtdec.max(0) as usize;
     let dimtzin = s.dimtzin;
     let fmt = |v: f64| -> String {
         let raw = format!("{:.*}", dimtdec, v);
-        apply_linear_zero_suppression(&raw, dimtzin)
+        swap_decimal_sep(&apply_linear_zero_suppression(&raw, dimtzin), s.dimdsep)
     };
     if s.dimlim {
         let high = measurement + s.dimtp;
         let low = measurement - s.dimtm;
-        return Some(format!("{}/{}", fmt(high), fmt(low)));
+        return Some(format!("\\S{}^{};", fmt(high), fmt(low)));
     }
     if s.dimtol {
         let unit = if is_angular { "°" } else { "" };
@@ -3369,16 +4397,42 @@ fn build_tolerance_suffix(
             return Some(format!("±{}{}", fmt(s.dimtp), unit));
         }
         if s.dimtp.abs() > 1e-12 || s.dimtm.abs() > 1e-12 {
+            let mut upper = fmt(s.dimtp);
+            let mut lower = fmt(s.dimtm);
+            let alignment = crate::entities::dim_override::int(
+                &dim.base().common.extended_data,
+                crate::entities::dim_override::DIMTALN,
+            )
+            .unwrap_or(0);
+            if alignment == 0 {
+                align_tolerance_decimals(&mut upper, &mut lower, s.dimdsep);
+            }
             return Some(format!(
-                "+{}{} / -{}{}",
-                fmt(s.dimtp),
-                unit,
-                fmt(s.dimtm),
-                unit
+                "\\S+{}{}^-{}{};",
+                upper, unit, lower, unit
             ));
         }
     }
     None
+}
+
+fn align_tolerance_decimals(upper: &mut String, lower: &mut String, separator: i16) {
+    let separator = separator as u8 as char;
+    let integer_width = |value: &str| {
+        value
+            .find(separator)
+            .or_else(|| value.find('.'))
+            .unwrap_or(value.len())
+    };
+    let upper_width = integer_width(upper);
+    let lower_width = integer_width(lower);
+    let target = upper_width.max(lower_width);
+    if upper_width < target {
+        upper.insert_str(0, &" ".repeat(target - upper_width));
+    }
+    if lower_width < target {
+        lower.insert_str(0, &" ".repeat(target - lower_width));
+    }
 }
 
 /// Build the bracketed alternate-units suffix when DIMALT is enabled.
@@ -3393,10 +4447,19 @@ fn alternate_units_text(measurement: f64, style: Option<&DimStyle>) -> Option<St
     if s.dimaltrnd > 1e-12 {
         v = (v / s.dimaltrnd).round() * s.dimaltrnd;
     }
+    let use_sub_units = s.dimaltz & 4 != 0
+        && v.abs() < 1.0
+        && s.dimaltmzf.abs() > 1e-12;
+    if use_sub_units {
+        v *= s.dimaltmzf;
+    }
     let dec = s.dimaltd.max(0) as usize;
-    let raw = format_with_unit(v, s.dimaltu, dec, s.dimfrac, s.dimaltz);
+    let raw = format_with_unit(v, s.dimaltu, dec, s.dimfrac, s.dimaltz, true);
     let suppressed = apply_linear_zero_suppression(&raw, s.dimaltz);
-    let sep_swapped = swap_decimal_sep(&suppressed, s.dimdsep);
+    let mut sep_swapped = swap_decimal_sep(&suppressed, s.dimdsep);
+    if use_sub_units {
+        sep_swapped.push_str(&s.dimaltmzs);
+    }
     // Alt-unit tolerance suffix using DIMALTTD / DIMALTTZ.
     let alt_value = if s.dimtol {
         let alttdec = s.dimalttd.max(0) as usize;
@@ -3450,7 +4513,7 @@ fn dimension_tolerance_entity(
 ) -> Option<EntityType> {
     let s = style?;
     let is_angular = matches!(dim, Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_));
-    let tol = build_tolerance_suffix(dim.measurement(), style, is_angular)?;
+    let tol = build_tolerance_suffix(dim, style, is_angular)?;
     let dimtfac = if s.dimtfac.abs() < 1e-12 {
         1.0
     } else {
@@ -3482,7 +4545,12 @@ fn dimension_tolerance_entity(
 
     // Approximate widths from glyph counts (~0.6 × cell size per char).
     let primary_w = primary_value_len as f64 * primary_height * 0.6;
-    let tol_w = tol.chars().count() as f64 * tol_height * 0.6;
+    let tol_visible_chars = tol
+        .strip_prefix("\\S")
+        .and_then(|value| value.strip_suffix(';'))
+        .map(|value| value.split('^').map(str::len).max().unwrap_or(0))
+        .unwrap_or_else(|| tol.chars().count());
+    let tol_w = tol_visible_chars as f64 * tol_height * 0.6;
     let gap = primary_height * 0.2;
     let dx_local = primary_w * 0.5 + tol_w * 0.5 + gap;
     let dy_local = match s.dimtolj {
@@ -3497,6 +4565,16 @@ fn dimension_tolerance_entity(
         primary_insertion.y + dx_local * sr + dy_local * cr,
         primary_insertion.z,
     );
+    if value_has_mtext_codes(&tol) {
+        let mut mtext = MText::with_value(tol, pos);
+        mtext.height = tol_height;
+        mtext.rotation = rot;
+        mtext.style = primary_style;
+        mtext.attachment_point = acadrust::entities::AttachmentPoint::MiddleCenter;
+        mtext.common = primary_common;
+        return Some(EntityType::MText(mtext));
+    }
+
     let mut t = Text::with_value(tol, pos)
         .with_height(tol_height)
         .with_rotation(rot);
@@ -3523,23 +4601,39 @@ fn apply_dimpost(value: &str, style: Option<&DimStyle>) -> String {
 
 /// Format a linear measurement honouring DIMLFAC, DIMRND, DIMDEC, DIMZIN, DIMDSEP, DIMLUNIT.
 fn format_linear_value(measurement: f64, style: Option<&DimStyle>) -> String {
-    let (dec, zin, lfac, rnd, dsep, lunit, frac) = style
+    let (dec, zin, lfac, rnd, dsep, lunit, frac, sub_factor, sub_suffix) = style
         .map(|s| {
             (
-                s.dimdec, s.dimzin, s.dimlfac, s.dimrnd, s.dimdsep, s.dimlunit, s.dimfrac,
+                s.dimdec,
+                s.dimzin,
+                s.dimlfac,
+                s.dimrnd,
+                s.dimdsep,
+                s.dimlunit,
+                s.dimfrac,
+                s.dimmzf,
+                s.dimmzs.as_str(),
             )
         })
-        .unwrap_or((4, 8, 1.0, 0.0, 46, 2, 0));
+        .unwrap_or((4, 8, 1.0, 0.0, 46, 2, 0, 1.0, ""));
 
     let lfac = if lfac.abs() < 1e-12 { 1.0 } else { lfac };
     let mut v = measurement * lfac;
     if rnd > 1e-12 {
         v = (v / rnd).round() * rnd;
     }
+    let use_sub_units = zin & 4 != 0 && v.abs() < 1.0 && sub_factor.abs() > 1e-12;
+    if use_sub_units {
+        v *= sub_factor;
+    }
     let dec = dec.max(0) as usize;
-    let raw = format_with_unit(v, lunit, dec, frac, zin);
+    let raw = format_with_unit(v, lunit, dec, frac, zin, false);
     let suppressed = apply_linear_zero_suppression(&raw, zin);
-    swap_decimal_sep(&suppressed, dsep)
+    let mut formatted = swap_decimal_sep(&suppressed, dsep);
+    if use_sub_units {
+        formatted.push_str(sub_suffix);
+    }
+    formatted
 }
 
 /// Dispatch on DIMLUNIT / DIMALTU.
@@ -3548,15 +4642,23 @@ fn format_linear_value(measurement: f64, style: Option<&DimStyle>) -> String {
 ///   3 = Engineering   (feet + decimal inches; 1 unit = 1 inch)
 ///   4 = Architectural (feet + fractional inches)
 ///   5 = Fractional    (integer + fractional inches)
-///   6 = Windows desktop → falls back to Decimal
-/// `dimfrac` controls denominator power for arch/fractional output (0/1/2);
-/// rendered inline as "n/d" (stacked glyphs require MText support).
-fn format_with_unit(value: f64, unit: i16, dec: usize, dimfrac: i16, zin: i16) -> String {
+/// For alternate units, 4/5 are stacked and 6/7 are unstacked architectural
+/// and fractional forms. For primary units DIMFRAC selects the stack form.
+fn format_with_unit(
+    value: f64,
+    unit: i16,
+    dec: usize,
+    dimfrac: i16,
+    zin: i16,
+    alternate: bool,
+) -> String {
     match unit {
         1 => format!("{:.*e}", dec, value),
         3 => format_engineering(value, dec),
-        4 => format_architectural(value, dimfrac, zin),
-        5 => format_fractional(value, dimfrac),
+        4 => format_architectural(value, dec, if alternate { 0 } else { dimfrac }, zin),
+        5 => format_fractional(value, dec, if alternate { 0 } else { dimfrac }),
+        6 if alternate => format_architectural(value, dec, 2, zin),
+        7 if alternate => format_fractional(value, dec, 2),
         _ => format!("{:.*}", dec, value),
     }
 }
@@ -3569,8 +4671,8 @@ fn format_engineering(inches: f64, dec: usize) -> String {
     format!("{}{:.0}'-{:.*}\"", sign, feet, dec, rem_in)
 }
 
-fn format_architectural(inches: f64, dimfrac: i16, zin: i16) -> String {
-    let denom = arch_denom(dimfrac);
+fn format_architectural(inches: f64, precision: usize, dimfrac: i16, zin: i16) -> String {
+    let denom = fractional_denominator(precision);
     // Round to the nearest 1/denom inch *first*, in integer ticks, so a fraction
     // that rounds up to a whole inch carries into the inches — and on into the
     // feet — instead of printing an un-reduced "11 1/1". A 3ft object that
@@ -3581,7 +4683,7 @@ fn format_architectural(inches: f64, dimfrac: i16, zin: i16) -> String {
     let feet = ticks / per_foot;
     let rem = ticks % per_foot;
     let whole = rem / denom;
-    let frac_str = reduce_fraction(rem % denom, denom);
+    let frac_str = format_fraction_component(&reduce_fraction(rem % denom, denom), dimfrac);
 
     // DIMZIN feet/inch suppression:
     //   0 suppress zero feet & zero inches, 1 include both,
@@ -3617,13 +4719,13 @@ fn format_architectural(inches: f64, dimfrac: i16, zin: i16) -> String {
     format!("{}{}", sign, body)
 }
 
-fn format_fractional(value: f64, dimfrac: i16) -> String {
-    let denom = arch_denom(dimfrac);
+fn format_fractional(value: f64, precision: usize, dimfrac: i16) -> String {
+    let denom = fractional_denominator(precision);
     // Round on the fraction grid first (same carry reasoning as architectural).
     let ticks = (value.abs() * denom as f64).round() as u64;
     let sign = if value < 0.0 && ticks != 0 { "-" } else { "" };
     let whole = ticks / denom;
-    let frac_str = reduce_fraction(ticks % denom, denom);
+    let frac_str = format_fraction_component(&reduce_fraction(ticks % denom, denom), dimfrac);
     if frac_str.is_empty() {
         format!("{}{}", sign, whole)
     } else if whole == 0 {
@@ -3633,12 +4735,18 @@ fn format_fractional(value: f64, dimfrac: i16) -> String {
     }
 }
 
-/// Power-of-two denominator for architectural / fractional output. DIMFRAC is
-/// the exponent-like fraction-format knob; clamp it to a readable
-/// range (16ths … 1024ths).
-fn arch_denom(dimfrac: i16) -> u64 {
-    let exp = (dimfrac.clamp(0, 8) as u32).max(2) + 2; // 4..=10 → 16..=1024
-    1u64 << exp
+/// Fraction precision maps 0..8 to whole units through 1/256. DIMFRAC controls
+/// only the visual stack form; it must not change the numeric denominator.
+fn fractional_denominator(precision: usize) -> u64 {
+    1u64 << precision.min(8)
+}
+
+fn format_fraction_component(value: &str, dimfrac: i16) -> String {
+    if value.is_empty() || dimfrac == 2 {
+        return value.to_string();
+    }
+    let separator = if dimfrac == 1 { '#' } else { '/' };
+    format!("\\S{};", value.replacen('/', &separator.to_string(), 1))
 }
 
 /// Reduce a power-of-two fraction numer/denom to display form. Empty for a zero
@@ -3810,6 +4918,7 @@ fn text_on_dim_line(
     text_w: f64,
     arrow: f64,
     dimtix: bool,
+    dimatfit: i16,
     tad: i16,
 ) -> Vector3 {
     // The perpendicular "up" side: the perpendicular of the dimension line
@@ -3849,13 +4958,20 @@ fn text_on_dim_line(
         2 | 4 => t2,
         _ => (t1 + t2) * 0.5,
     };
-    // DIMATFIT / DIMTIX fit: when centred text can't fit between the extension
-    // lines, slide it just past the far one (text-outside placement) unless
-    // DIMTIX forces it to stay inside.
+    // DIMATFIT / DIMTIX fit: move text according to the selected priority when
+    // the combined text-and-arrow envelope cannot fit.
     if dimjust == 0 && !dimtix && text_w > 0.0 {
         let lo = t1.min(t2);
         let hi = t1.max(t2);
-        if text_w > (hi - lo) - 2.0 * arrow {
+        let span = hi - lo;
+        let insufficient = text_w + 2.0 * arrow > span;
+        let text_outside = insufficient
+            && match dimatfit {
+                0 | 2 => true,
+                1 | 3 => text_w > span,
+                _ => text_w > span,
+            };
+        if text_outside {
             along = hi + arrow + text_w * 0.5;
         }
     }
@@ -3882,10 +4998,11 @@ fn dimension_text_pos_f64(
     let dimtad = style.map(|s| s.dimtad).unwrap_or(1);
     // DIMGAP scales with DIMSCALE just like DIMTXT, so the text-to-line gap
     // stays consistent when DIMSCALE != 1.
-    let dimgap = style.map(|s| s.dimgap).unwrap_or(0.0) * dim_scale;
+    let dimgap = style.map(|s| s.dimgap.abs()).unwrap_or(0.0) * dim_scale;
     let dimjust = style.map(|s| s.dimjust).unwrap_or(0);
     // DIMTIX forces the text to stay between the extension lines.
     let dimtix = style.map(|s| s.dimtix).unwrap_or(false);
+    let dimatfit = style.map(|s| s.dimatfit).unwrap_or(3);
     // DIMTVP vertical-position multiplier (units of dimtxt). Only honoured when
     // DIMTAD == 0; offsets text perpendicular to the dim line.
     let dimtvp = style.map(|s| s.dimtvp).unwrap_or(0.0);
@@ -3925,6 +5042,7 @@ fn dimension_text_pos_f64(
                 text_w,
                 arrow,
                 dimtix,
+                dimatfit,
                 dimtad,
             )
         }
@@ -3943,6 +5061,7 @@ fn dimension_text_pos_f64(
                 text_w,
                 arrow,
                 dimtix,
+                dimatfit,
                 dimtad,
             )
         }
@@ -4058,11 +5177,11 @@ mod dimtad_tests {
     fn above_is_up_regardless_of_direction() {
         let (first, second, defpt) = (v(0.0, 10.0), v(20.0, 10.0), v(0.0, 0.0));
         let perp = 5.0;
-        let fwd = text_on_dim_line(first, second, defpt, 1.0, 0.0, 0, perp, 0.0, 1.0, false, 1);
-        let rev = text_on_dim_line(first, second, defpt, -1.0, 0.0, 0, perp, 0.0, 1.0, false, 1);
+        let fwd = text_on_dim_line(first, second, defpt, 1.0, 0.0, 0, perp, 0.0, 1.0, false, 3, 1);
+        let rev = text_on_dim_line(first, second, defpt, -1.0, 0.0, 0, perp, 0.0, 1.0, false, 3, 1);
         assert!(fwd.y > 0.0, "above must be +Y, got {}", fwd.y);
         assert!(rev.y > 0.0, "above must be +Y even reversed, got {}", rev.y);
-        let below = text_on_dim_line(first, second, defpt, 1.0, 0.0, 0, perp, 0.0, 1.0, false, 4);
+        let below = text_on_dim_line(first, second, defpt, 1.0, 0.0, 0, perp, 0.0, 1.0, false, 3, 4);
         assert!(below.y < 0.0, "below must be -Y, got {}", below.y);
     }
 
@@ -4083,6 +5202,7 @@ mod dimtad_tests {
             0.0,
             1.0,
             false,
+            3,
             2,
         );
         assert!(
@@ -4102,6 +5222,7 @@ mod dimtad_tests {
             0.0,
             1.0,
             false,
+            3,
             2,
         );
         assert!(
@@ -4121,31 +5242,30 @@ mod arch_format_tests {
     // for the fraction that reduced to 1/1 and leaked out as a bare "1".)
     #[test]
     fn arch_carries_fraction_up_to_feet() {
-        assert_eq!(format_architectural(35.99, 0, 1), "3'-0\"");
-        assert_eq!(format_architectural(36.0, 0, 1), "3'-0\"");
+        assert_eq!(format_architectural(35.99, 4, 2, 1), "3'-0\"");
+        assert_eq!(format_architectural(36.0, 4, 2, 1), "3'-0\"");
         // An exact 15/16 must still render as a fraction, no spurious carry.
-        assert_eq!(format_architectural(35.9375, 0, 1), "2'-11 15/16\"");
+        assert_eq!(format_architectural(35.9375, 4, 2, 1), "2'-11 15/16\"");
     }
 
     // Carry that stops at inches (11.999" → 12" → 1'-0", not "0'-11 1"").
     #[test]
     fn arch_carries_fraction_up_to_inches() {
-        assert_eq!(format_architectural(11.999, 0, 1), "1'-0\"");
+        assert_eq!(format_architectural(11.999, 4, 2, 1), "1'-0\"");
     }
 
     #[test]
     fn arch_normal_values_unchanged() {
-        assert_eq!(format_architectural(30.5, 0, 1), "2'-6 1/2\"");
-        assert_eq!(format_architectural(0.0, 0, 1), "0'-0\"");
-        assert_eq!(format_architectural(-30.25, 0, 1), "-2'-6 1/4\"");
+        assert_eq!(format_architectural(30.5, 4, 2, 1), "2'-6 1/2\"");
+        assert_eq!(format_architectural(0.0, 4, 2, 1), "0'-0\"");
+        assert_eq!(format_architectural(-30.25, 4, 2, 1), "-2'-6 1/4\"");
     }
 
     // Same carry bug lived in the plain fractional formatter.
     #[test]
     fn fractional_carries_up() {
-        assert_eq!(format_fractional(35.9999, 0), "36");
-        assert_eq!(format_fractional(11.999, 0), "12");
-        assert_eq!(format_fractional(6.5, 0), "6 1/2");
+        assert_eq!(format_fractional(35.9999, 4, 2), "36");
+        assert_eq!(format_fractional(11.999, 4, 2), "12");
+        assert_eq!(format_fractional(6.5, 4, 2), "6 1/2");
     }
 }
-

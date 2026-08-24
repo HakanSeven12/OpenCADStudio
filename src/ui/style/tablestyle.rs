@@ -317,7 +317,11 @@ fn cell_editor<'a>(v: &TableStyleView<'a>, row_index: u8) -> Element<'a, Message
         let selector = crate::ui::color_select::color_selector(
             current,
             v.color_open == Some((row_index, field)),
-            crate::ui::color_select::ColorExtras { by_layer: true, by_block: true },
+            crate::ui::color_select::ColorExtras {
+                by_layer: true,
+                by_block: true,
+                ..Default::default()
+            },
             move |color| Message::TableStyleCellEdit {
                 row: row_index,
                 field,

@@ -22,6 +22,7 @@ pub mod view;
 mod boundary;
 mod camera_ops;
 pub(crate) mod centerline;
+pub(crate) mod dimension_assoc;
 pub(crate) mod centermark;
 mod entity;
 mod group_layer;
@@ -2396,6 +2397,11 @@ impl Scene {
             }
         }
         for change in self.refresh_associative_center_marks(&changes) {
+            if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                changes.push(change);
+            }
+        }
+        for change in self.refresh_associative_dimensions(&changes) {
             if !changes.iter().any(|(handle, _)| *handle == change.0) {
                 changes.push(change);
             }

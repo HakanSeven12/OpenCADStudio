@@ -834,6 +834,7 @@ impl PropertiesPanel {
                 crate::ui::color_select::ColorExtras {
                     by_layer: true,
                     by_block: true,
+                    ..Default::default()
                 },
                 Message::PropBgColorChanged,
                 Message::PropBgColorPickerToggle,
@@ -851,18 +852,35 @@ impl PropertiesPanel {
         // entity's main colour. Used by hatch gradient colours and the dim-line
         // colour override (Leader / Dimension). Dim colours legitimately take
         // ByLayer / ByBlock; gradient colours do not.
-        if field == "gradient_color_1" || field == "gradient_color_2" || field == "dim_line_color" {
+        if matches!(
+            field,
+            "gradient_color_1"
+                | "gradient_color_2"
+                | "dim_line_color"
+                | "dim_ext_line_color"
+                | "dim_text_color"
+                | "dim_text_fill_color"
+        ) {
             let open = self.open_color_field.as_deref() == Some(field);
             let fsel = field.to_string();
-            let extras = if field == "dim_line_color" {
+            let full_palette_field = field.to_string();
+            let extras = if field == "dim_text_fill_color" {
+                crate::ui::color_select::ColorExtras {
+                    none: true,
+                    background: true,
+                    ..Default::default()
+                }
+            } else if field.starts_with("dim_") {
                 crate::ui::color_select::ColorExtras {
                     by_layer: true,
                     by_block: true,
+                    ..Default::default()
                 }
             } else {
                 crate::ui::color_select::ColorExtras {
                     by_layer: false,
                     by_block: false,
+                    ..Default::default()
                 }
             };
             let selector = crate::ui::color_select::color_selector(
@@ -874,7 +892,10 @@ impl PropertiesPanel {
                     color: c,
                 },
                 Message::PropColorFieldToggle(field.to_string()),
-                Message::PropColorFieldToggle(field.to_string()),
+                Message::OpenColorWindow(
+                    crate::app::ColorPickTarget::PropertiesField(full_palette_field),
+                    color,
+                ),
             );
             return prop_row_widget(label, selector);
         }
@@ -884,6 +905,7 @@ impl PropertiesPanel {
             crate::ui::color_select::ColorExtras {
                 by_layer: true,
                 by_block: true,
+                ..Default::default()
             },
             Message::PropColorChanged,
             Message::PropColorPickerToggle,

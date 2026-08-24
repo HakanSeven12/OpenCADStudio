@@ -1146,6 +1146,9 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                     Some(crate::app::ColorPickTarget::PropertiesBg) => {
                         Some(Message::PropBgColorChanged(color))
                     }
+                    Some(crate::app::ColorPickTarget::PropertiesField(field)) => {
+                        Some(Message::PropColorFieldChanged { field, color })
+                    }
                     Some(crate::app::ColorPickTarget::MText) => {
                         Some(Message::MTextColorChanged(color))
                     }

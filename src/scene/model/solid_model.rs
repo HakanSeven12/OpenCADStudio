@@ -441,8 +441,8 @@ mod tests {
     use super::*;
 
     fn tri_count(body: &Body) -> usize {
-        mesh_from_solid(body, [0.7, 0.7, 0.7, 1.0])
-            .map(|m| m.lods[0].indices.len() / 3)
+        display_from_solid(body, [0.7, 0.7, 0.7, 1.0])
+            .map(|(m, _, _)| m.lods[0].indices.len() / 3)
             .unwrap_or(0)
     }
 

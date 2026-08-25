@@ -879,6 +879,7 @@ impl OpenCADStudio {
                     | "CURSORTYPE"
                     | "SNAPANG"
                     | "TEXTFILL"
+                    | "CLIPROMPTLINES"
                     | "ATTREQ"
                     | "ATTDIA"
                     | "DIMASSOC"
@@ -967,7 +968,7 @@ impl OpenCADStudio {
                 let value = it.next().map(|s| s.trim().to_string());
                 if name.is_empty() || name == "?" {
                     self.command_line.push_info(
-                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG ATTREQ ATTDIA DIMASSOC ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE | CLAYER CELTYPE TEXTSTYLE (read-only)",
+                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES ATTREQ ATTDIA DIMASSOC ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE | CLAYER CELTYPE TEXTSTYLE (read-only)",
                     );
                 } else {
                     let frame_kind = crate::scene::frame::kind_for_name(&name);
@@ -1310,6 +1311,20 @@ impl OpenCADStudio {
                                         "TEXTFILL = {}",
                                         crate::scene::text::sdf_atlas::textfill() as i32
                                     ),
+                                    false,
+                                )),
+                            },
+                            "CLIPROMPTLINES" => match &value {
+                                Some(v) => match v.parse::<i32>() {
+                                    Ok(n) if (0..=50).contains(&n) => {
+                                        self.cliprompt_lines = n;
+                                        self.command_line.set_cliprompt_lines(n as u8);
+                                        Ok((format!("CLIPROMPTLINES = {n}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 to 50 required.".into()),
+                                },
+                                None => Ok((
+                                    format!("CLIPROMPTLINES = {}", self.cliprompt_lines),
                                     false,
                                 )),
                             },
@@ -1889,6 +1904,7 @@ impl OpenCADStudio {
                                         | "PICKBOX"
                                         | "CURSORTYPE"
                                         | "SNAPANG"
+                                        | "CLIPROMPTLINES"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {

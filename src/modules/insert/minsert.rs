@@ -60,7 +60,7 @@ impl ParamIdx {
 }
 
 pub struct MinsertCommand {
-    available: Vec<String>,
+    picker: crate::modules::insert::picker::BlockPicker,
     step: Step,
     /// Collected array parameters (defaults applied as the user Enters through).
     rows: u16,
@@ -71,9 +71,15 @@ pub struct MinsertCommand {
 }
 
 impl MinsertCommand {
-    pub fn new(available: Vec<String>) -> Self {
+    pub fn new_with_usage(
+        available: Vec<String>,
+        usage_rank: rustc_hash::FxHashMap<String, (u32, usize)>,
+        cliprompt_lines: u8,
+    ) -> Self {
+        let limit = (cliprompt_lines as usize).clamp(0, crate::modules::insert::picker::MAX_SUGGESTIONS);
+        let picker = crate::modules::insert::picker::BlockPicker::new(available, usage_rank, limit);
         Self {
-            available,
+            picker,
             step: Step::Name,
             rows: 1,
             columns: 1,
@@ -122,12 +128,25 @@ impl CadCommand for MinsertCommand {
     fn prompt(&self) -> String {
         match &self.step {
             Step::Name => {
-                let hint = if self.available.is_empty() {
-                    String::new()
+                if self.picker.is_empty() {
+                    return t!("MINSERT  Enter block name:").into_owned();
+                }
+                let needle = self.picker.needle();
+                let filtered = self.picker.filtered();
+                if !needle.is_empty() && filtered.is_empty() {
+                    return t!("MINSERT  No matching blocks for \"%{needle}\"", needle = needle).into_owned();
+                }
+                if needle.is_empty() {
+                    let total = self.picker.total();
+                    let shown = filtered.len();
+                    if total <= shown {
+                        t!("MINSERT  Enter block name:").into_owned()
+                    } else {
+                        t!("MINSERT  Enter block name:  [%{shown} of %{total} — type to search]", shown = shown, total = total).into_owned()
+                    }
                 } else {
-                    format!("  [{}]", self.available.join(", "))
-                };
-                t!("MINSERT  Enter block name:%{hint}", hint = hint).into_owned()
+                    t!("MINSERT  Enter block name:  \"%{needle}\"  [%{shown} matches]", needle = needle, shown = filtered.len()).into_owned()
+                }
             }
             Step::Point { name } => {
                 t!(
@@ -193,6 +212,25 @@ impl CadCommand for MinsertCommand {
         }
     }
 
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        match &self.step {
+            Step::Name => self.picker.filtered().iter().map(|n| crate::command::CmdOption::new(n, n)).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn on_live_input(&mut self, input: &str) -> bool {
+        if !matches!(self.step, Step::Name) {
+            return false;
+        }
+        let needle = input.trim();
+        if needle == self.picker.needle() {
+            return false;
+        }
+        self.picker.set_needle(needle.to_string());
+        true
+    }
+
     fn wants_text_input(&self) -> bool {
         matches!(self.step, Step::Name | Step::Params { .. })
     }
@@ -201,13 +239,15 @@ impl CadCommand for MinsertCommand {
         match &self.step {
             Step::Name => {
                 let typed = text.trim();
-                let matched = self
-                    .available
-                    .iter()
-                    .find(|c| c.eq_ignore_ascii_case(typed))?;
-                self.step = Step::Point {
-                    name: matched.clone(),
-                };
+                if typed.is_empty() {
+                    self.picker.set_needle(String::new());
+                    return Some(CmdResult::NeedPoint);
+                }
+                if let Some(matched) = self.picker.contains_name(typed) {
+                    self.step = Step::Point { name: matched };
+                    return Some(CmdResult::NeedPoint);
+                }
+                self.picker.set_needle(typed.to_string());
                 Some(CmdResult::NeedPoint)
             }
             Step::Point { .. } => None,

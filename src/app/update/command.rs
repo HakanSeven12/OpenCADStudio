@@ -202,6 +202,16 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         // Command-line entry is shown uppercase.
                         self.command_line.input.push_str(&s.to_uppercase());
                         self.command_line.cancel_history_navigation();
+                        // Live incremental search for INSERT/MINSERT (see CommandInput)
+                        let live = self.command_line.input.clone();
+                        let i = self.active_tab;
+                        let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                            if cmd.on_live_input(&live) { (true, cmd.options(), cmd.prompt()) } else { (false, Vec::new(), String::new()) }
+                        } else { (false, Vec::new(), String::new()) };
+                        if should_update {
+                            self.command_line.set_step_options(opts);
+                            if let Some(last) = self.command_line.history.last_mut() { if last.pinned { last.text = prompt; } }
+                        }
                     }
                 }
                 self.command_line.autocomplete_cursor = None;
@@ -231,6 +241,18 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 self.command_line.input.pop();
                 self.command_line.autocomplete_cursor = None;
                 self.command_line.cancel_history_navigation();
+                // Live incremental search for INSERT/MINSERT
+                {
+                    let live = self.command_line.input.clone();
+                    let i = self.active_tab;
+                    let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                        if cmd.on_live_input(&live) { (true, cmd.options(), cmd.prompt()) } else { (false, Vec::new(), String::new()) }
+                    } else { (false, Vec::new(), String::new()) };
+                    if should_update {
+                        self.command_line.set_step_options(opts);
+                        if let Some(last) = self.command_line.history.last_mut() { if last.pinned { last.text = prompt; } }
+                    }
+                }
                 self.focus_cmd_input()
     }
 

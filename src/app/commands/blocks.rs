@@ -330,8 +330,16 @@ impl OpenCADStudio {
                         .push_error(crate::t!("No user-defined blocks found in this drawing.").as_ref());
                 } else {
                     use crate::modules::insert::insert_block::InsertBlockCommand;
-                    let cmd = InsertBlockCommand::new(blocks);
+                    let ranked = self.ranked_block_names(&blocks);
+                    let snapshot = self.block_usage_snapshot();
+                    let cmd = InsertBlockCommand::new_with_usage(
+                        ranked,
+                        snapshot,
+                        self.cliprompt_lines.clamp(0, 50) as u8,
+                    );
                     self.command_line.push_info(&cmd.prompt());
+                    let opts = cmd.options();
+                    self.command_line.set_step_options(opts.clone());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }
             }
@@ -343,8 +351,16 @@ impl OpenCADStudio {
                         .push_error(crate::t!("No user-defined blocks found in this drawing.").as_ref());
                 } else {
                     use crate::modules::insert::minsert::MinsertCommand;
-                    let cmd = MinsertCommand::new(blocks);
+                    let ranked = self.ranked_block_names(&blocks);
+                    let snapshot = self.block_usage_snapshot();
+                    let cmd = MinsertCommand::new_with_usage(
+                        ranked,
+                        snapshot,
+                        self.cliprompt_lines.clamp(0, 50) as u8,
+                    );
                     self.command_line.push_info(&cmd.prompt());
+                    let opts = cmd.options();
+                    self.command_line.set_step_options(opts.clone());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }
             }

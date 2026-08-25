@@ -745,6 +745,7 @@ impl OpenCADStudio {
         // so CLAYER / CECOLOR / … are left unchanged (#239). No-op otherwise.
         if was_active && self.tabs[i].active_cmd.is_none() {
             self.tabs[i].scene.set_hover_highlight(None);
+            self.command_line.set_step_options(Vec::new());
             self.restore_add_selected_defaults();
         }
         task
@@ -763,6 +764,7 @@ impl OpenCADStudio {
                     .and_then(|c| c.attedit_pending_handle());
                 if let Some(ins_handle) = attedit_handle {
                     self.tabs[i].active_cmd = None;
+                    self.command_line.set_step_options(Vec::new());
                     self.open_attribute_editor(ins_handle);
                     return Task::none();
                 }
@@ -770,6 +772,12 @@ impl OpenCADStudio {
                 if let Some(p) = prompt {
                     self.command_line.push_info(&p);
                 }
+                let opts = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.options())
+                    .unwrap_or_default();
+                self.command_line.set_step_options(opts);
                 if !self.tabs[i]
                     .active_cmd
                     .as_ref()
@@ -1234,6 +1242,10 @@ impl OpenCADStudio {
                     // and ribbon dropdowns now, not on the next reopen (#407).
                     self.refresh_layer_panel();
                 }
+                let insert_block_name = match &entity {
+                    acadrust::EntityType::Insert(ins) => Some(ins.block_name.clone()),
+                    _ => None,
+                };
                 // Record where this draw ended so ARC_CONT can continue from it
                 // (before `entity` is moved into commit_entity).
                 self.update_cont_anchor(&entity);
@@ -1265,6 +1277,9 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.restore_pre_cmd_tangent();
+                if let Some(name) = insert_block_name {
+                    self.record_block_insert(&name);
+                }
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
                 }
@@ -1926,6 +1941,10 @@ impl OpenCADStudio {
                         .as_mut()
                         .and_then(|c| c.attreq_take_insert());
                     if let Some(entity) = entity {
+                        let insert_name = match &entity {
+                            acadrust::EntityType::Insert(ins) => Some(ins.block_name.clone()),
+                            _ => None,
+                        };
                         let label = self.history_label_from_active_cmd(i, "INSERT");
                         let delta_safe = self.delta_add_safe(i, &entity);
                         let pending = self.begin_undo(i, label, 1, delta_safe);
@@ -1934,6 +1953,9 @@ impl OpenCADStudio {
                         self.tabs[i].scene.clear_preview_wire();
                         self.tabs[i].active_cmd = None;
                         self.tabs[i].snap_result = None;
+                        if let Some(n) = insert_name {
+                            self.record_block_insert(&n);
+                        }
                         self.restore_pre_cmd_tangent();
                         if let Some(pd) = pending {
                             self.commit_undo_delta(i, pd);

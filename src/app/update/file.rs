@@ -349,6 +349,9 @@ impl OpenCADStudio {
             bg_color: self.default_bg_color.map(f4_to_u3),
             paper_bg_color: self.default_paper_bg_color.map(f4_to_u3),
             language: self.language,
+            cliprompt_lines: crate::app::settings::clamp_clipromptlines(self.cliprompt_lines),
+            block_mru: self.block_mru.clone(),
+            block_freq: self.block_freq.clone(),
         }
     }
 
@@ -407,6 +410,17 @@ impl OpenCADStudio {
         if crate::i18n::set_language(s.language).is_ok() {
             self.language = s.language;
         }
+        self.cliprompt_lines = crate::app::settings::clamp_clipromptlines(s.cliprompt_lines);
+        self.command_line
+            .set_cliprompt_lines(self.cliprompt_lines.clamp(0, 50) as u8);
+        // Block usage: clone but cap to sane sizes (MRU 20, freq map 200)
+        self.block_mru = s.block_mru.iter().take(20).cloned().collect();
+        self.block_freq = s
+            .block_freq
+            .iter()
+            .take(200)
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
         // Push the restored background onto every drawing tab that exists now
         // (the start tab and any initial drawing). Tabs created later pick it
         // up via `apply_bg_default` at their construction site.
@@ -414,6 +428,79 @@ impl OpenCADStudio {
             self.apply_bg_default(idx);
         }
         self.rebuild_ribbon_modules();
+    }
+
+    pub(crate) fn record_block_insert(&mut self, name: &str) {
+        let key = name.to_ascii_uppercase();
+        *self.block_freq.entry(key).or_insert(0) += 1;
+        self.block_mru.retain(|n| !n.eq_ignore_ascii_case(name));
+        self.block_mru.insert(0, name.to_string());
+        if self.block_mru.len() > 20 {
+            self.block_mru.truncate(20);
+        }
+        // Cap freq map to 200 most frequent to bound persistence size.
+        if self.block_freq.len() > 200 {
+            let mut items: Vec<(String, u32)> = self
+                .block_freq
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect();
+            items.sort_by(|a, b| b.1.cmp(&a.1));
+            items.truncate(200);
+            self.block_freq = items.into_iter().collect();
+        }
+        // Debounce disk writes: at most once per second (2.4) to avoid thrash
+        // during rapid scripting/batch inserts. Immediate first write ensures
+        // crash recovery. Wasm has no `std::time::Instant` guarantee, so persist
+        // immediately there.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let now = std::time::Instant::now();
+            let should_persist = match self.block_usage_last_persist {
+                None => true,
+                Some(t) => now.duration_since(t).as_secs_f32() >= 1.0,
+            };
+            if should_persist {
+                self.block_usage_last_persist = Some(now);
+                self.persist_settings_if_changed();
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.persist_settings_if_changed();
+        }
+    }
+
+    pub(crate) fn block_usage_snapshot(&self) -> rustc_hash::FxHashMap<String, (u32, usize)> {
+        let mut out = rustc_hash::FxHashMap::default();
+        for (idx, name) in self.block_mru.iter().enumerate() {
+            let up = name.to_ascii_uppercase();
+            let freq = self.block_freq.get(&up).copied().unwrap_or(0);
+            out.insert(up, (freq, idx));
+        }
+        // Ensure every freq entry has at least an entry (for blocks not in MRU)
+        for (up, freq) in &self.block_freq {
+            out.entry(up.clone()).or_insert((*freq, usize::MAX));
+        }
+        out
+    }
+
+    pub(crate) fn ranked_block_names(&self, names: &[String]) -> Vec<String> {
+        let mut scored: Vec<(&String, u32, usize)> = names
+            .iter()
+            .map(|n| {
+                let up = n.to_ascii_uppercase();
+                let f = self.block_freq.get(&up).copied().unwrap_or(0);
+                let m = self
+                    .block_mru
+                    .iter()
+                    .position(|x| x.eq_ignore_ascii_case(n))
+                    .unwrap_or(usize::MAX);
+                (n, f, m)
+            })
+            .collect();
+        scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.2.cmp(&b.2)).then_with(|| a.0.cmp(b.0)));
+        scored.into_iter().map(|(n, _, _)| n.clone()).collect()
     }
 
     /// Adopt the per-drawing sysvars stored in tab `i`'s document header —

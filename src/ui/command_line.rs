@@ -59,7 +59,7 @@ fn strip_option_listing(s: &str) -> String {
 
 const MAX_HISTORY: usize = 64;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct CommandLine {
     pub input: String,
     /// Persistent literal-space mode (the `>` toggle button): while on, every
@@ -103,6 +103,31 @@ pub struct CommandLine {
     /// render as buttons above the input row. Empty when no command is
     /// active or the current step offers no options. (#304)
     step_options: Vec<CmdOption>,
+    /// CLIPROMPTLINES: how many temporary prompt lines for a single command
+    /// are displayed above the command window (0–50, default 3).
+    cliprompt_lines: u8,
+}
+
+impl Default for CommandLine {
+    fn default() -> Self {
+        Self {
+            input: String::new(),
+            literal_spaces: false,
+            history: Vec::new(),
+            cmd_recall: Vec::new(),
+            recent_commands: Vec::new(),
+            recall_cursor: None,
+            recall_draft: String::new(),
+            history_open: false,
+            history_height: 0.0,
+            autocomplete_cursor: None,
+            dynamic_commands: Vec::new(),
+            command_aliases: rustc_hash::FxHashMap::default(),
+            step_prompt: None,
+            step_options: Vec::new(),
+            cliprompt_lines: 3,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -347,11 +372,32 @@ impl CommandLine {
         self.step_options = opts;
     }
 
+    pub fn set_cliprompt_lines(&mut self, n: u8) {
+        self.cliprompt_lines = n.min(50);
+    }
+
+    /// Visible overlay count respecting CLIPROMPTLINES (0–50). Used in tests.
+    #[cfg(test)]
+    pub fn visible_history_count(&self) -> usize {
+        if self.cliprompt_lines == 0 {
+            return 0;
+        }
+        let visible: Vec<&HistoryEntry> = self
+            .history
+            .iter()
+            .filter(|e| e.pinned || e.created_at.elapsed().as_secs_f32() < HISTORY_VISIBLE_SECS)
+            .collect();
+        visible.len().min(self.cliprompt_lines as usize)
+    }
+
     /// `true` while at least one history entry is still within the
     /// visible window — the host app uses this to drive a low-frequency
     /// tick subscription so the overlay re-renders and fades the entry
     /// once it expires.
     pub fn has_visible_history(&self) -> bool {
+        if self.cliprompt_lines == 0 {
+            return false;
+        }
         self.history
             .iter()
             .any(|e| e.pinned || e.created_at.elapsed().as_secs_f32() < HISTORY_VISIBLE_SECS)
@@ -464,7 +510,12 @@ impl CommandLine {
             let pinned = visible.remove(index);
             visible.push(pinned);
         }
-        let start = visible.len().saturating_sub(4);
+        let clip = self.cliprompt_lines as usize;
+        // CLIPROMPTLINES == 0 means no temporary prompt lines above command window.
+        if clip == 0 {
+            visible.clear();
+        }
+        let start = visible.len().saturating_sub(clip);
         let has_recent_history = start < visible.len();
         let history_rows = visible[start..]
             .iter()

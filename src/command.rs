@@ -1753,6 +1753,16 @@ pub trait CadCommand: Send {
         Vec::new()
     }
 
+    /// Live search: called on each keystroke in the command line while the
+    /// command is active. Return true if the input updated internal filter
+    /// and the UI should refresh (prompt/options). Used for INSERT/MINSERT
+    /// incremental block name search without requiring Enter. Performance
+    /// critical — implementations must use precomputed caches and partial
+    /// sorting.
+    fn on_live_input(&mut self, _input: &str) -> bool {
+        false
+    }
+
     /// Push the active coordinate frame in full precision. Geometry commands
     /// use it for plane-local construction; inquiry and modify commands use it
     /// for local deltas, angles and transformation axes.

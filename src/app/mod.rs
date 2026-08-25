@@ -477,6 +477,18 @@ pub(super) struct OpenCADStudio {
     /// The `a` channel is always 1.0.
     default_bg_color: Option<[f32; 4]>,
     default_paper_bg_color: Option<[f32; 4]>,
+    /// CLIPROMPTLINES: how many temporary prompt lines for a single command
+    /// are displayed above the command window (0–50, Registry, default 3).
+    cliprompt_lines: i32,
+    /// MRU list of block names inserted via INSERT, most recent first, capped to 20.
+    block_mru: Vec<String>,
+    /// Insertion frequency per block name (uppercase key → count), capped.
+    block_freq: std::collections::HashMap<String, u32>,
+    /// Last time block-usage was flushed to disk (debounce per 2.4).
+    #[cfg(not(target_arch = "wasm32"))]
+    block_usage_last_persist: Option<std::time::Instant>,
+    #[cfg(target_arch = "wasm32")]
+    block_usage_last_persist: Option<()>,
     /// `true` after a bare `VPORTS` in model space — the next command-line
     /// entry is treated as the tiled-config option (SIngle/2H/2V/4).
     awaiting_vports: bool,
@@ -3156,6 +3168,10 @@ impl OpenCADStudio {
             savetime_min: 10,
             default_bg_color: None,
             default_paper_bg_color: None,
+            cliprompt_lines: 3,
+            block_mru: Vec::new(),
+            block_freq: std::collections::HashMap::new(),
+            block_usage_last_persist: None,
             awaiting_vports: false,
             pending_setvar: None,
             ucs_icon_hover: false,

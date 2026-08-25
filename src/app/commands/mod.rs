@@ -533,6 +533,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "SKETCHINC",
         "SKPOLY",
         "SKTOLERANCE",
+        "CLIPROMPTLINES",
         // Reset selected entities' overrides to follow their layer.
         "SETBYLAYER",
         // Remove duplicate objects; set drawing base point; audit integrity;

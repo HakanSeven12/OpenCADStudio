@@ -38,7 +38,7 @@ enum AwaitKind {
 }
 
 pub struct InsertBlockCommand {
-    available: Vec<String>,
+    picker: crate::modules::insert::picker::BlockPicker,
     step: Step,
     /// Uniform X/Y scale applied to the placed block (default 1).
     x_scale: f64,
@@ -57,9 +57,17 @@ pub struct InsertBlockCommand {
 }
 
 impl InsertBlockCommand {
-    pub fn new(available: Vec<String>) -> Self {
+    /// Construct with explicit usage ranking. `usage` maps uppercase block name → (frequency, MRU position).
+    /// `cliprompt_lines` directly controls suggestion count (relation per spec).
+    pub fn new_with_usage(
+        available: Vec<String>,
+        usage_rank: rustc_hash::FxHashMap<String, (u32, usize)>,
+        cliprompt_lines: u8,
+    ) -> Self {
+        let limit = (cliprompt_lines as usize).clamp(0, crate::modules::insert::picker::MAX_SUGGESTIONS);
+        let picker = crate::modules::insert::picker::BlockPicker::new(available, usage_rank, limit);
         Self {
-            available,
+            picker,
             step: Step::Name,
             x_scale: 1.0,
             y_scale: 1.0,
@@ -76,8 +84,14 @@ impl InsertBlockCommand {
     /// from `base`) rubber-band under the cursor. Used by paste-as-block, which
     /// has just defined the block and only needs the drop point.
     pub fn new_for_block(name: String, preview_wires: Vec<WireModel>, base: Vec3) -> Self {
+        // Minimal picker for the locked-name path; not used for Name step.
+        let picker = crate::modules::insert::picker::BlockPicker::new(
+            vec![name.clone()],
+            rustc_hash::FxHashMap::default(),
+            0,
+        );
         Self {
-            available: vec![name.clone()],
+            picker,
             step: Step::Point { name },
             x_scale: 1.0,
             y_scale: 1.0,
@@ -88,6 +102,7 @@ impl InsertBlockCommand {
             plane: WorkingPlane::default(),
         }
     }
+
 }
 
 impl CadCommand for InsertBlockCommand {
@@ -102,12 +117,39 @@ impl CadCommand for InsertBlockCommand {
     fn prompt(&self) -> String {
         match &self.step {
             Step::Name => {
-                let hint = if self.available.is_empty() {
-                    String::new()
+                if self.picker.is_empty() {
+                    return t!("INSERT  Enter block name:").into_owned();
+                }
+                let needle = self.picker.needle();
+                let filtered = self.picker.filtered();
+                if !needle.is_empty() && filtered.is_empty() {
+                    return t!(
+                        "INSERT  No matching blocks for \"%{needle}\"",
+                        needle = needle
+                    )
+                    .into_owned();
+                }
+                if needle.is_empty() {
+                    let total = self.picker.total();
+                    let shown = filtered.len();
+                    if total <= shown {
+                        t!("INSERT  Enter block name:").into_owned()
+                    } else {
+                        t!(
+                            "INSERT  Enter block name:  [%{shown} of %{total} — type to search]",
+                            shown = shown,
+                            total = total
+                        )
+                        .into_owned()
+                    }
                 } else {
-                    format!("  [{}]", self.available.join(", "))
-                };
-                t!("INSERT  Enter block name:%{hint}", hint = hint).into_owned()
+                    t!(
+                        "INSERT  Enter block name:  \"%{needle}\"  [%{shown} matches]",
+                        needle = needle,
+                        shown = filtered.len()
+                    )
+                    .into_owned()
+                }
             }
             Step::Point { name } => match self.awaiting {
                 Some(AwaitKind::Scale) => t!("INSERT  Specify scale factor <1>:").into_owned(),
@@ -165,6 +207,32 @@ impl CadCommand for InsertBlockCommand {
         }
     }
 
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        match &self.step {
+            Step::Name => self
+                .picker
+                .filtered()
+                .iter()
+                .map(|n| crate::command::CmdOption::new(n, n))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn on_live_input(&mut self, input: &str) -> bool {
+        if !matches!(self.step, Step::Name) {
+            return false;
+        }
+        // Performance: only recompute if needle actually changed; picker
+        // uses upper/lower caches and partial sort so per-keystroke is <0.2ms.
+        let needle = input.trim();
+        if needle == self.picker.needle() {
+            return false;
+        }
+        self.picker.set_needle(needle.to_string());
+        true
+    }
+
     fn on_enter(&mut self) -> CmdResult {
         match &self.step {
             // A bare Enter while a scale/rotation value is awaited keeps the
@@ -204,12 +272,25 @@ impl CadCommand for InsertBlockCommand {
         match &self.step {
             Step::Name => {
                 let name = text.trim();
-                if !self.available.iter().any(|c| c.eq_ignore_ascii_case(name)) {
-                    return None;
+                // Empty input: reset needle to show default ranked list (2.1).
+                // Consumed so prompt+buttons refresh, not stale filter.
+                if name.is_empty() {
+                    self.picker.set_needle(String::new());
+                    return Some(CmdResult::NeedPoint);
                 }
-                self.step = Step::Point {
-                    name: name.to_string(),
-                };
+                // Exact block name (case-insensitive) → accept and go to point step.
+                // This path is used both for typed exact names and for CmdOption
+                // button clicks (Message::CommandOptionPick feeds the keyword through
+                // on_text_input). Returning NeedPoint keeps the prompt updated.
+                if let Some(canonical) = self.picker.contains_name(name) {
+                    self.step = Step::Point { name: canonical };
+                    return Some(CmdResult::NeedPoint);
+                }
+                // Not an exact match → treat as incremental search needle.
+                // Update filter and re-render prompt + option buttons. Must return
+                // Some(NeedPoint) (consumed) not None, otherwise the driver would
+                // offer the same text to the command a second time.
+                self.picker.set_needle(name.to_string());
                 Some(CmdResult::NeedPoint)
             }
             Step::FillAttr { .. } => Some(self.accept_attr_value(text)),

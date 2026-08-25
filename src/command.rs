@@ -169,6 +169,34 @@ pub struct SelectionEntity {
     pub surface_area: Option<f64>,
 }
 
+/// One source point used by an associative dimension. A missing marker asks
+/// the scene to infer the closest stable sub-entity; an explicit marker keeps
+/// segment-level references intact.
+#[derive(Clone, Copy, Debug)]
+pub struct DimensionAssociationSource {
+    pub handle: Handle,
+    pub marker: Option<i32>,
+    pub parameter: f64,
+}
+
+impl DimensionAssociationSource {
+    pub const fn inferred(handle: Handle) -> Self {
+        Self {
+            handle,
+            marker: None,
+            parameter: 0.0,
+        }
+    }
+
+    pub const fn explicit(handle: Handle, marker: i32, parameter: f64) -> Self {
+        Self {
+            handle,
+            marker: Some(marker),
+            parameter,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum AreaPreviewSource {
     Handles(Vec<Handle>),
@@ -1217,6 +1245,12 @@ pub enum CmdResult {
         entity: EntityType,
         sources: Vec<Handle>,
     },
+    /// Commit a dimension whose definition points carry explicit sub-entity
+    /// references. `None` leaves that definition point independent.
+    CommitAssociativeDimensionDetailed {
+        entity: EntityType,
+        sources: Vec<Option<DimensionAssociationSource>>,
+    },
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded
     /// rendering). Ends the command.
@@ -1393,6 +1427,13 @@ pub enum CmdResult {
     OpenMTextEditor {
         pos: DVec3,
         handle: Option<Handle>,
+        initial: String,
+        height: f64,
+    },
+    /// Temporarily suspend the active command and collect formatted text in the
+    /// rich editor without creating a standalone MText entity.
+    SuspendForMTextInput {
+        pos: DVec3,
         initial: String,
         height: f64,
     },
@@ -1777,6 +1818,12 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// Allow typed coordinates while object picking is active. Commands whose
+    /// first prompt accepts either an object or a point opt in explicitly.
+    fn entity_pick_accepts_points(&self) -> bool {
+        false
+    }
+
     /// Include filled hatch / DXF SOLID regions in the entity hit-test.
     ///
     /// Most entity-pick commands operate on curve geometry and intentionally
@@ -1804,6 +1851,10 @@ pub trait CadCommand: Send {
     fn on_editor_closed(&mut self, _committed: bool) -> CmdResult {
         CmdResult::Cancel
     }
+
+    /// Supplies formatted text collected by `SuspendForMTextInput` before the
+    /// command is resumed through `on_editor_closed`.
+    fn on_editor_text(&mut self, _value: String) {}
 
     /// Called when the user clicks and `needs_entity_pick()` is true.
     /// `handle` is the nearest wire's entity handle (Handle::NULL if nothing found).

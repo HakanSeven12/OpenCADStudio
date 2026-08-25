@@ -581,6 +581,36 @@ impl OpenCADStudio {
                 let _ = self.apply_cmd_result(r);
                 return;
             }
+            let accepts_points = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.entity_pick_accepts_points());
+            if accepts_points {
+                if let Some((coord, kind)) = super::helpers::parse_coord(token) {
+                    let ucs = self.tabs[i].active_ucs.clone();
+                    let wcs = match (
+                        matches!(kind, super::helpers::CoordKind::Relative),
+                        self.last_point,
+                    ) {
+                        (true, Some(base)) => {
+                            base + match &ucs {
+                                Some(value) => super::helpers::ucs_rotate_vec(coord, value),
+                                None => coord,
+                            }
+                        }
+                        _ => match &ucs {
+                            Some(value) => super::helpers::ucs_to_wcs(coord, value),
+                            None => coord,
+                        },
+                    };
+                    if self.command_point_allowed(i, wcs) {
+                        self.last_point = Some(wcs);
+                        self.push_ucs_to_cmd(i);
+                        let _ = self.feed_command(StepInput::Point(wcs));
+                    }
+                    return;
+                }
+            }
             if let Ok(v) = u64::from_str_radix(token.trim_start_matches("0x"), 16) {
                 let handle = Handle::new(v);
                 let pt = self.tabs[i]
@@ -1246,6 +1276,30 @@ impl OpenCADStudio {
                             .copied()
                             .map(|source| (source, crate::scene::ChangeKind::Modified)),
                     );
+                    self.tabs[i].scene.bump_entities(&changed);
+                }
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                if let Some(pending) = pending {
+                    self.commit_undo_delta(i, pending);
+                }
+            }
+            CmdResult::CommitAssociativeDimensionDetailed { entity, sources } => {
+                let label = self.history_label_from_active_cmd(i, "DIMENSION");
+                let pending = self.begin_undo(i, label, 1, false);
+                if let Some(handle) = self.commit_entity_handle(entity) {
+                    self.tabs[i]
+                        .scene
+                        .attach_dimension_association_sources(handle, sources.clone());
+                    let mut changed = vec![(handle, crate::scene::ChangeKind::Modified)];
+                    changed.extend(sources.iter().flatten().map(|source| {
+                        (source.handle, crate::scene::ChangeKind::Modified)
+                    }));
+                    changed.sort_by_key(|(handle, _)| handle.value());
+                    changed.dedup_by_key(|(handle, _)| handle.value());
                     self.tabs[i].scene.bump_entities(&changed);
                 }
                 self.tabs[i].dirty = true;
@@ -3571,6 +3625,19 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.open_mtext_editor(pos, handle, &initial, height);
+            }
+            CmdResult::SuspendForMTextInput {
+                pos,
+                initial,
+                height,
+            } => {
+                self.tabs[i].suspended_cmd = self.tabs[i].active_cmd.take();
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                self.command_mtext_input = true;
+                self.pending_command_editor_text = None;
+                self.open_mtext_editor(pos, None, &initial, height);
             }
             CmdResult::OpenTextEditor {
                 pos,

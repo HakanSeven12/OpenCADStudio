@@ -6,6 +6,8 @@ use acadrust::objects::{
 use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 
+use crate::command::DimensionAssociationSource;
+
 use super::{ChangeKind, Scene};
 
 fn point_distance_squared(first: Vector3, second: Vector3) -> f64 {
@@ -21,6 +23,62 @@ fn ocs_point(x: f64, y: f64, elevation: f64, normal: Vector3) -> Vector3 {
         (normal.x, normal.y, normal.z),
     );
     Vector3::new(point.0, point.1, point.2)
+}
+
+fn bulge_center_world(
+    first: [f64; 2],
+    second: [f64; 2],
+    bulge: f64,
+    elevation: f64,
+    normal: Vector3,
+) -> Option<Vector3> {
+    if bulge.abs() <= 1.0e-12 {
+        return None;
+    }
+    let dx = second[0] - first[0];
+    let dy = second[1] - first[1];
+    let chord = dx.hypot(dy);
+    if chord <= 1.0e-12 {
+        return None;
+    }
+    let midpoint = [(first[0] + second[0]) * 0.5, (first[1] + second[1]) * 0.5];
+    let offset = chord * (1.0 - bulge * bulge) / (4.0 * bulge);
+    Some(ocs_point(
+        midpoint[0] - dy / chord * offset,
+        midpoint[1] + dx / chord * offset,
+        elevation,
+        normal,
+    ))
+}
+
+fn polyline_arc_center(entity: &EntityType, segment: usize) -> Option<Vector3> {
+    match entity {
+        EntityType::LwPolyline(polyline) => {
+            let count = polyline.vertices.len();
+            let first = *polyline.vertices.get(segment)?;
+            let second = *polyline.vertices.get((segment + 1) % count)?;
+            bulge_center_world(
+                [first.location.x, first.location.y],
+                [second.location.x, second.location.y],
+                first.bulge,
+                polyline.elevation,
+                polyline.normal,
+            )
+        }
+        EntityType::Polyline2D(polyline) => {
+            let count = polyline.vertices.len();
+            let first = polyline.vertices.get(segment)?;
+            let second = polyline.vertices.get((segment + 1) % count)?;
+            bulge_center_world(
+                [first.location.x, first.location.y],
+                [second.location.x, second.location.y],
+                first.bulge,
+                polyline.elevation,
+                polyline.normal,
+            )
+        }
+        _ => None,
+    }
 }
 
 fn source_points(entity: &EntityType) -> Vec<Vector3> {
@@ -101,6 +159,10 @@ fn source_marker(entity: &EntityType, point: Vector3) -> Option<i32> {
 fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Option<Vector3> {
     let source = *reference.xrefs.first()?;
     let entity = scene.document.get_entity(source)?;
+    if reference.main_gs_marker == -4 {
+        let segment = reference.osnap_distance.round().max(0.0) as usize;
+        return polyline_arc_center(entity, segment);
+    }
     if reference.main_gs_marker == -3 {
         return match entity {
             EntityType::Circle(circle) => Some(circle.center_wcs()),
@@ -168,6 +230,20 @@ impl Scene {
         dimension: Handle,
         sources: Vec<Option<Handle>>,
     ) {
+        self.attach_dimension_association_sources(
+            dimension,
+            sources
+                .into_iter()
+                .map(|source| source.map(DimensionAssociationSource::inferred))
+                .collect(),
+        );
+    }
+
+    pub(crate) fn attach_dimension_association_sources(
+        &mut self,
+        dimension: Handle,
+        sources: Vec<Option<DimensionAssociationSource>>,
+    ) {
         let Some(EntityType::Dimension(dimension_entity)) =
             self.document.get_entity(dimension)
         else {
@@ -182,9 +258,14 @@ impl Scene {
             .enumerate()
             .map(|(index, point)| {
             let source = sources.get(index).copied().flatten()?;
-            let entity = self.document.get_entity(source)?;
-            source_reference(entity, *point)
-                .map(|(marker, parameter)| (source, marker, parameter))
+            let (marker, parameter) = match source.marker {
+                Some(marker) => (marker, source.parameter),
+                None => {
+                    let entity = self.document.get_entity(source.handle)?;
+                    source_reference(entity, *point)?
+                }
+            };
+            Some((source.handle, marker, parameter))
         })
             .collect();
         if resolved.iter().all(Option::is_none) {
@@ -229,7 +310,7 @@ impl Scene {
             .insert(association_handle, ObjectType::Associative(object));
 
         let mut reactor_targets = vec![dimension];
-        reactor_targets.extend(sources.into_iter().flatten());
+        reactor_targets.extend(sources.into_iter().flatten().map(|source| source.handle));
         reactor_targets.sort_by_key(|handle| handle.value());
         reactor_targets.dedup();
         for handle in reactor_targets {

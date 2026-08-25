@@ -18,9 +18,127 @@
 //! style added without a handle (dropped on DWG save, issue #67).
 
 use super::OpenCADStudio;
-use acadrust::objects::{MLineStyle, MultiLeaderStyle, ObjectType, TableStyle};
+use acadrust::objects::{
+    Dictionary, MLineStyle, MultiLeaderStyle, ObjectType, TableStyle,
+};
 use acadrust::tables::{DimStyle, TextStyle};
 use acadrust::types::Handle;
+
+const MLEADERSTYLE_DICT_NAME: &str = "ACAD_MLEADERSTYLE";
+
+fn mleaderstyle_dict_handle(doc: &acadrust::CadDocument) -> Option<Handle> {
+    let root_h = doc.header.named_objects_dict_handle;
+
+    let root = match doc.objects.get(&root_h) {
+        Some(ObjectType::Dictionary(root)) => root,
+        _ => return None,
+    };
+
+    root.entries
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(MLEADERSTYLE_DICT_NAME))
+        .map(|(_, handle)| *handle)
+        .filter(|handle| {
+            matches!(
+                doc.objects.get(handle),
+                Some(ObjectType::Dictionary(_))
+            )
+        })
+}
+
+fn import_mleaderstyle_names_from_dictionary(doc: &mut acadrust::CadDocument) {
+    let Some(dict_h) = mleaderstyle_dict_handle(doc) else {
+        return;
+    };
+
+    let entries = match doc.objects.get(&dict_h) {
+        Some(ObjectType::Dictionary(dict)) => dict.entries.clone(),
+        _ => return,
+    };
+
+    for (name, handle) in entries {
+        if let Some(ObjectType::MultiLeaderStyle(style)) =
+            doc.objects.get_mut(&handle)
+        {
+            style.name = name;
+            style.owner_handle = dict_h;
+        }
+    }
+}
+
+fn sync_mleaderstyle_dictionary(doc: &mut acadrust::CadDocument) {
+    let root_h = crate::scene::annotative::root_named_dict_handle(doc);
+
+    let existing = match doc.objects.get(&root_h) {
+        Some(ObjectType::Dictionary(root)) => root
+            .entries
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(MLEADERSTYLE_DICT_NAME))
+            .map(|(_, handle)| *handle),
+        _ => None,
+    };
+
+    let dict_h = match existing.filter(|handle| {
+        matches!(
+            doc.objects.get(handle),
+            Some(ObjectType::Dictionary(_))
+        )
+    }) {
+        Some(handle) => handle,
+        None => {
+            let handle = doc.allocate_handle();
+
+            let mut dict = Dictionary::new();
+            dict.handle = handle;
+            dict.owner = root_h;
+
+            doc.objects
+                .insert(handle, ObjectType::Dictionary(dict));
+
+            handle
+        }
+    };
+
+    if let Some(ObjectType::Dictionary(root)) = doc.objects.get_mut(&root_h) {
+        root.entries
+            .retain(|(name, _)| !name.eq_ignore_ascii_case(MLEADERSTYLE_DICT_NAME));
+
+        root.add_entry(MLEADERSTYLE_DICT_NAME, dict_h);
+    }
+
+    let mut entries: Vec<(String, Handle)> = doc
+        .objects
+        .iter()
+        .filter_map(|(&handle, object)| match object {
+            ObjectType::MultiLeaderStyle(style) => {
+                Some((style.name.clone(), handle))
+            }
+            _ => None,
+        })
+        .collect();
+
+    entries.sort_by(|a, b| {
+        a.0.to_lowercase().cmp(&b.0.to_lowercase())
+    });
+
+    for (_, handle) in &entries {
+        if let Some(ObjectType::MultiLeaderStyle(style)) =
+            doc.objects.get_mut(handle)
+        {
+            style.owner_handle = dict_h;
+        }
+    }
+
+    if let Some(ObjectType::Dictionary(dict)) = doc.objects.get_mut(&dict_h) {
+        dict.owner = root_h;
+        dict.entries = entries;
+
+        // AutoCAD stores MLEADERSTYLE entries as soft-owner references (350),
+        // not hard-owner references (360).
+        dict.hard_owner = false;
+        dict.hard_owner_entries.clear();
+    }
+}
 
 /// Guarantee the built-in "Standard" style of every kind exists in `doc` —
 /// a foreign or damaged file saved without them leaves the style dropdowns
@@ -28,6 +146,7 @@ use acadrust::types::Handle;
 /// reference (#366). Missing entries are re-seeded with the app defaults.
 /// Called on every file open; a no-op for healthy documents.
 pub(crate) fn ensure_standard_styles(doc: &mut acadrust::CadDocument) {
+    import_mleaderstyle_names_from_dictionary(doc);
     if !doc
         .text_styles
         .iter()
@@ -68,6 +187,8 @@ pub(crate) fn ensure_standard_styles(doc: &mut acadrust::CadDocument) {
         s.handle = doc.allocate_handle();
         doc.objects.insert(s.handle, ObjectType::MultiLeaderStyle(s));
     }
+    sync_mleaderstyle_dictionary(doc);
+
     if !has(doc, |o| match o {
         ObjectType::MLineStyle(s) => Some(&s.name),
         _ => None,
@@ -741,6 +862,7 @@ impl OpenCADStudio {
         for (h, o) in &snap.style_objects {
             doc.objects.insert(*h, o.clone());
         }
+        sync_mleaderstyle_dictionary(doc);
         doc.header.current_text_style_name = snap.current_text.clone();
         doc.header.current_dimstyle_name = snap.current_dim.clone();
         doc.header.multiline_style = snap.multiline_style.clone();
@@ -772,11 +894,77 @@ impl OpenCADStudio {
             self.sync_ribbon_styles();
             return;
         };
+        sync_mleaderstyle_dictionary(
+            &mut self.tabs[i].scene.document,
+        );
+
         let edited = self.capture_style_state();
         let changed = edited != stage.baseline;
         if changed {
             self.tabs[i].dirty = true;
             let (text_names, dim_names, object_handles) = edited.changed_keys(&stage.baseline);
+            let changed_mleader_styles:
+                Vec<acadrust::objects::MultiLeaderStyle> =
+                object_handles
+                    .iter()
+                    .filter_map(|handle| {
+                        match self.tabs[i]
+                            .scene
+                            .document
+                            .objects
+                            .get(handle)
+                        {
+                            Some(
+                                acadrust::objects::ObjectType::
+                                    MultiLeaderStyle(style),
+                            ) => Some(style.clone()),
+                            _ => None,
+                        }
+                    })
+                    .collect();
+
+            let mut changed_mleaders = Vec::new();
+
+            for style in changed_mleader_styles {
+                let entity_handles: Vec<acadrust::Handle> = {
+                    let doc = &self.tabs[i].scene.document;
+
+                    doc.entities()
+                        .filter_map(|entity| {
+                            match entity {
+                                acadrust::EntityType::MultiLeader(ml)
+                                    if ml.style_handle
+                                        == Some(style.handle) =>
+                                {
+                                    Some(ml.common.handle)
+                                }
+                                _ => None,
+                            }
+                        })
+                        .collect()
+                };
+
+                for handle in entity_handles {
+                    if crate::scene::annotative::
+                        apply_mleader_style_to_object(
+                            &mut self.tabs[i].scene.document,
+                            handle,
+                            &style,
+                        )
+                    {
+                        changed_mleaders.push((
+                            handle,
+                            crate::scene::ChangeKind::Modified,
+                        ));
+                    }
+                }
+            }
+
+            if !changed_mleaders.is_empty() {
+                self.tabs[i]
+                    .scene
+                    .bump_entities(&changed_mleaders);
+            }
             self.tabs[i].scene.invalidate_text_style_dependencies_many(&text_names);
             self.tabs[i]
                 .scene

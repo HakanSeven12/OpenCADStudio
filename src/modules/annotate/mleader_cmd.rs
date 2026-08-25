@@ -74,17 +74,34 @@ impl CadCommand for MLeaderCommand {
         if self.verts.is_empty() {
             t!("MLEADER  Specify arrowhead point:").into_owned()
         } else {
-            t!(
-                "MLEADER  Specify next point [%{count} pts — Enter to place text]:",
-                count = self.verts.len()
-            )
-            .into_owned()
+            t!("MLEADER  Specify landing point:").into_owned()
         }
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         self.verts.push(pt);
-        CmdResult::NeedPoint
+
+        if self.verts.len() < 2 {
+            return CmdResult::NeedPoint;
+        }
+
+        let local: Vec<DVec3> = self
+            .verts
+            .iter()
+            .map(|point| self.plane.to_local(*point))
+            .collect();
+
+        let ml = build_mleader(
+            "",
+            &local,
+            Mat4::IDENTITY,
+            self.style.as_ref(),
+            self.display_scale,
+        );
+
+        CmdResult::CommitAndEditText(
+            self.plane.place_entity(EntityType::MultiLeader(ml)),
+        )
     }
 
     fn on_enter(&mut self) -> CmdResult {
@@ -163,13 +180,23 @@ fn build_mleader(
     display_scale: f64,
 ) -> MultiLeader {
     // Last vertex = content/text location; remaining = leader line points
-    let (leader_pts, content_pt) = verts.split_at(verts.len() - 1);
-    let content_pt = content_pt[0];
+    // Standard MLEADER creation:
+    //   verts[0] = arrowhead point
+    //   verts[1] = elbow / leader-root connection point
+    let arrow_pt = verts[0];
+    let elbow_pt = verts[1];
 
-    let leader_v3: Vec<Vector3> = leader_pts.iter().map(|p| v3(*p)).collect();
-    let content_v3 = v3(content_pt);
+    let arrow_v3 = v3(arrow_pt);
+    let elbow_v3 = v3(elbow_pt);
 
-    let mut ml = MultiLeader::with_text(text, content_v3, leader_v3);
+    // Start with one native leader line.
+    // The text/content position is corrected below once the dogleg
+    // direction and landing distance are known.
+    let mut ml = MultiLeader::with_text(
+        text,
+        elbow_v3,
+        vec![arrow_v3],
+    );
     if let Some(style) = style {
         crate::scene::annotative::apply_mleader_style(&mut ml, style);
     } else {
@@ -190,10 +217,21 @@ fn build_mleader(
     // world), so the annotation reads square to the user's coordinate system.
     let ux = ucs.transform_vector3(Vec3::X).normalize_or(Vec3::X);
     // Which side of the leader the text sits on, measured along the UCS X axis.
-    let last_leader = leader_pts.last().copied().unwrap_or(content_pt);
-    let to_right = (content_pt - last_leader).dot(ux.as_dvec3()) >= 0.0;
+    let to_right = (elbow_pt - arrow_pt).dot(ux.as_dvec3()) >= 0.0;
     let sign = if to_right { 1.0 } else { -1.0 };
     let landing = ux * (sign as f32);
+    // text_location es el punto de unión del contenido con la directriz.
+    //
+    // Si el texto está a la derecha, el punto de inserción corresponde
+    // al borde IZQUIERDO del texto.
+    //
+    // Si está a la izquierda, corresponde al borde DERECHO.
+    ml.context.text_attachment_point =
+        if to_right {
+            acadrust::entities::multileader::TextAttachmentPointType::Left
+        } else {
+            acadrust::entities::multileader::TextAttachmentPointType::Right
+        };
 
     // Text + landing read along the UCS X axis. text_direction is what the
     // renderer consults first, so set both.
@@ -201,18 +239,29 @@ fn build_mleader(
     ml.context.text_direction = Vector3::new(ux.x as f64, ux.y as f64, 0.0);
 
     if let Some(root) = ml.context.leader_roots.first_mut() {
-        // Leader ends at the clicked point; the landing runs from there toward
-        // the text along the UCS X axis.
-        root.direction = Vector3::new(landing.x as f64, landing.y as f64, 0.0);
-        root.connection_point = content_v3;
+        root.direction =
+            Vector3::new(landing.x as f64, landing.y as f64, 0.0);
+
+        // The second click is the elbow/root connection.
+        root.connection_point = elbow_v3;
+
+        // Dogleg length from the active MLeaderStyle.
         root.landing_distance = landing_distance;
     }
 
     // Seed the text one landing-length past the leader end, on the side the
     // user dragged toward, offset along the UCS X axis.
-    let off = landing * (landing_distance + landing_gap) as f32;
-    ml.context.text_location =
-        Vector3::new(content_v3.x + off.x as f64, content_v3.y + off.y as f64, content_v3.z);
+    let off =
+    landing * (landing_distance + landing_gap) as f32;
+
+    let text_location = Vector3::new(
+        elbow_v3.x + off.x as f64,
+        elbow_v3.y + off.y as f64,
+        elbow_v3.z,
+    );
+
+    ml.context.text_location = text_location;
+    ml.context.content_base_point = text_location;
 
     ml
 }

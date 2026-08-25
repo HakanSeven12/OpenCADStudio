@@ -1248,6 +1248,17 @@ impl super::OpenCADStudio {
                 }
                 _ => {}
             }
+            // En una MLEADER anotativa, el texto forma parte del
+            // propio contexto por escala. Copiar la edición también
+            // a la representación que está actualmente en pantalla.
+            if matches!(
+                self.tabs[i].scene.document.get_entity(h),
+                Some(EntityType::MultiLeader(_))
+            ) {
+                self.tabs[i]
+                    .scene
+                    .sync_displayed_annotation_context(h);
+            }
             self.tabs[i]
                 .scene
                 .bump_entities(&[(h, crate::scene::ChangeKind::Modified)]);
@@ -1335,6 +1346,14 @@ impl super::OpenCADStudio {
                     }
                 }
                 _ => {}
+            }
+            if matches!(
+                self.tabs[i].scene.document.get_entity(h),
+                Some(EntityType::MultiLeader(_))
+            ) {
+                self.tabs[i]
+                    .scene
+                    .sync_displayed_annotation_context(h);
             }
             self.tabs[i]
                 .scene

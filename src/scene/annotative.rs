@@ -697,25 +697,16 @@ pub fn effective_annotation_scale_for(
     // already-scaled text height and overall scale factor. Keep the text
     // height as stored; make `ml.scale_factor * anno_scale` resolve to the
     // active context's scale factor for arrows, doglegs, and fallback text.
-    if let EntityType::MultiLeader(mleader) = entity {
-        let Some(active) =
-            active_object_context_for_scale(doc, entity.common().handle, scale_handle)
-        else {
-            return fallback;
-        };
-        let ObjectContextKind::MLeader(context) = &active.kind else {
-            return fallback;
-        };
-        let base = mleader.scale_factor;
-        if base.abs() <= 1.0e-12 {
-            return fallback;
-        }
-        let relative = context.scale_factor / base;
-        return if relative.is_finite() && relative > 0.0 {
-            relative as f32
-        } else {
-            fallback
-        };
+    // MLEADER needs the absolute current annotation multiplier here.
+    //
+    // Its stored context may belong to another annotation scale. The MLEADER
+    // tessellator compares this current multiplier with the context's stored
+    // scale_factor and applies only the required correction.
+    //
+    // When the active context already belongs to this scale the correction is 1,
+    // preserving AutoCAD per-scale context geometry unchanged.
+    if matches!(entity, EntityType::MultiLeader(_)) {
+        return fallback;
     }
 
     let Some(coll_h) = annotation_scales_dict(doc, entity.common().handle) else {
@@ -1586,47 +1577,162 @@ pub fn apply_mleader_style(
         }
     }
 }
+fn apply_mleader_style_at_display_scale(
+    entity: &mut acadrust::entities::MultiLeader,
+    style: &acadrust::objects::MultiLeaderStyle,
+    display_scale: f64,
+) {
+    apply_mleader_style(entity, style);
+
+    let scale = if display_scale.is_finite()
+        && display_scale > 1.0e-12
+    {
+        display_scale
+    } else {
+        1.0
+    };
+
+    // Estos valores del estilo son tamaños de papel.
+    // El contexto MLEADER guarda la representación ya
+    // escalada para la escala anotativa/modelo activa.
+    entity.context.scale_factor = scale;
+
+    entity.context.text_height =
+        style.text_height * scale;
+
+    entity.context.arrowhead_size =
+        style.arrowhead_size * scale;
+
+    entity.context.landing_gap =
+        style.landing_gap * scale;
+
+    for root in &mut entity.context.leader_roots {
+        root.landing_distance =
+            style.landing_distance * scale;
+
+        root.text_attachment_direction =
+            entity.text_attachment_direction;
+    }
+}
 
 pub fn apply_mleader_style_to_object(
     doc: &mut CadDocument,
     handle: Handle,
     style: &acadrust::objects::MultiLeaderStyle,
 ) -> bool {
-    let Some(EntityType::MultiLeader(original)) = doc.get_entity(handle).cloned() else {
+    let Some(EntityType::MultiLeader(original)) =
+        doc.get_entity(handle).cloned()
+    else {
         return false;
     };
+
+    // Escala visual de la representación base.
+    //
+    // En una MLEADER anotativa context.scale_factor
+    // contiene la escala real de esa representación
+    // (por ejemplo 50 para 1:50).
+    //
+    // En una no anotativa manda el scale_factor del estilo.
+    let base_display_scale = if style.is_annotative {
+        let scale = original.context.scale_factor;
+
+        if scale.is_finite() && scale > 1.0e-12 {
+            scale
+        } else {
+            1.0
+        }
+    } else {
+        let scale = style.scale_factor;
+
+        if scale.is_finite() && scale > 1.0e-12 {
+            scale
+        } else {
+            1.0
+        }
+    };
+
     let mut styled = original.clone();
-    apply_mleader_style(&mut styled, style);
-    if let Some(EntityType::MultiLeader(entity)) = doc.get_entity_mut(handle) {
+
+    apply_mleader_style_at_display_scale(
+        &mut styled,
+        style,
+        base_display_scale,
+    );
+
+    if let Some(EntityType::MultiLeader(entity)) =
+        doc.get_entity_mut(handle)
+    {
         *entity = styled;
     }
 
-    let leaf_handles: Vec<_> = annotation_scales_dict(doc, handle)
-        .and_then(|collection| as_dict(doc, collection))
-        .map(|collection| collection.entries.iter().map(|(_, leaf)| *leaf).collect())
-        .unwrap_or_default();
+    // Actualizar también TODAS las representaciones
+    // anotativas almacenadas de la misma MLEADER.
+    let leaf_handles: Vec<_> =
+        annotation_scales_dict(doc, handle)
+            .and_then(|collection| as_dict(doc, collection))
+            .map(|collection| {
+                collection
+                    .entries
+                    .iter()
+                    .map(|(_, leaf)| *leaf)
+                    .collect()
+            })
+            .unwrap_or_default();
+
     for leaf_handle in leaf_handles {
-        let Some(ObjectType::ObjectContextData(leaf)) = doc.objects.get_mut(&leaf_handle) else {
-            continue;
-        };
-        let ObjectContextKind::MLeader(context) = &mut leaf.kind else {
-            continue;
-        };
-        let context_scale = context.scale_factor;
-        let text_height_ratio = if original.text_height.abs() > 1.0e-12 {
-            context.text_height / original.text_height
-        } else {
-            1.0
-        };
+        // Primero clonamos los datos necesarios para
+        // evitar mantener un borrow mutable sobre doc.
+        let context_before =
+            match doc.objects.get(&leaf_handle) {
+                Some(
+                    ObjectType::ObjectContextData(leaf)
+                ) => {
+                    let ObjectContextKind::MLeader(context) =
+                        &leaf.kind
+                    else {
+                        continue;
+                    };
+
+                    context.clone()
+                }
+
+                _ => continue,
+            };
+
+        let context_scale =
+            if context_before.scale_factor.is_finite()
+                && context_before.scale_factor > 1.0e-12
+            {
+                context_before.scale_factor
+            } else {
+                base_display_scale
+            };
+
         let mut per_scale = original.clone();
-        per_scale.context.clone_from(context);
-        apply_mleader_style(&mut per_scale, style);
-        per_scale.context.scale_factor = context_scale;
-        if style.text_height > 0.0 && text_height_ratio.is_finite() {
-            per_scale.context.text_height = style.text_height * text_height_ratio;
+
+        per_scale.context =
+            context_before;
+
+        apply_mleader_style_at_display_scale(
+            &mut per_scale,
+            style,
+            context_scale,
+        );
+
+        if let Some(
+            ObjectType::ObjectContextData(leaf)
+        ) = doc.objects.get_mut(&leaf_handle)
+        {
+            if let ObjectContextKind::MLeader(context) =
+                &mut leaf.kind
+            {
+                context.clone_from(
+                    &per_scale.context,
+                );
+            }
         }
-        context.clone_from(&per_scale.context);
     }
+
     true
 }
 

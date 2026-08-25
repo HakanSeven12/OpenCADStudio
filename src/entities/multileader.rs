@@ -182,8 +182,18 @@ fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<Rende
                 style: &resolved,
                 // Side-anchored on the leader-facing edge so the text reads
                 // outward; flips live with the leader/text side.
-                attach_h_anchor: if text_sign >= 0.0 { 0.0 } else { 1.0 },
-                v_anchor: mleader_v_anchor(ctx.text_left_attachment),
+                attach_h_anchor: match ctx.text_attachment_point {
+                    acadrust::entities::multileader::TextAttachmentPointType::Left => 0.0,
+                    acadrust::entities::multileader::TextAttachmentPointType::Center => 0.5,
+                    acadrust::entities::multileader::TextAttachmentPointType::Right => 1.0,
+                },
+                v_anchor: mleader_v_anchor(
+                    if text_sign >= 0.0 {
+                        ctx.text_left_attachment
+                    } else {
+                        ctx.text_right_attachment
+                    },
+                ),
                 line_spacing_factor: ctx.line_spacing_factor as f32,
                 vertical_text: false,
                 want_glyph_boxes: false,
@@ -200,11 +210,21 @@ fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<Rende
     } else {
         0.0
     };
-    // text_location is the leader-facing (near) edge; the landing runs one
-    // dogleg from there back toward the leader.
-    let landing_pt = [
-        text_loc.x - text_sign * dogleg * tdx,
-        text_loc.y - text_sign * dogleg * tdy,
+
+    let landing_gap = ml.context.landing_gap.max(0.0);
+
+    // Codo visual: desde aquí arranca la horizontal.
+    let elbow_pt = [
+        text_loc.x - text_sign * (dogleg + landing_gap) * tdx,
+        text_loc.y - text_sign * (dogleg + landing_gap) * tdy,
+        text_loc.z,
+    ];
+
+    // Extremo de la línea horizontal, justo antes del texto.
+    // Esto evita que la justificación quede solapada con la línea.
+    let text_edge_pt = [
+        text_loc.x - text_sign * landing_gap * tdx,
+        text_loc.y - text_sign * landing_gap * tdy,
         text_loc.z,
     ];
 
@@ -225,13 +245,17 @@ fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<Rende
                 first = false;
 
                 // Build the full control-point list: line.points + landing point
-                let mut ctrl: Vec<[f64; 3]> = line.points.iter().map(|p| p3(p)).collect();
-                let last_f = *ctrl.last().unwrap_or(&landing_pt);
-                let dist = ((last_f[0] - landing_pt[0]).powi(2)
-                    + (last_f[1] - landing_pt[1]).powi(2))
+                let mut ctrl: Vec<[f64; 3]> =
+                    line.points.iter().map(|p| p3(p)).collect();
+
+                let last_f = *ctrl.last().unwrap_or(&elbow_pt);
+
+                let dist = ((last_f[0] - elbow_pt[0]).powi(2)
+                    + (last_f[1] - elbow_pt[1]).powi(2))
                 .sqrt();
+
                 if dist > 1e-9 {
-                    ctrl.push(landing_pt);
+                    ctrl.push(elbow_pt);
                 }
                 for &c in &ctrl {
                     key_verts.push(c);
@@ -295,8 +319,8 @@ fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<Rende
         // Horizontal landing from the leader end to the text's near edge.
         if dogleg > 0.0 {
             points.push(nan);
-            points.push(landing_pt);
-            points.push([text_loc.x, text_loc.y, text_loc.z]);
+            points.push(elbow_pt);
+            points.push(text_edge_pt);
         }
     }
 
@@ -428,27 +452,134 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
         ],
     )
 }
+fn mleader_landing_geom(
+    ml: &MultiLeader,
+) -> Option<(DVec3, DVec3, f64, f64, f64)> {
+    if ml.content_type != LeaderContentType::MText
+        || !ml.enable_landing
+        || !ml.enable_dogleg
+    {
+        return None;
+    }
 
+    let text = DVec3::new(
+        ml.context.text_location.x,
+        ml.context.text_location.y,
+        ml.context.text_location.z,
+    );
+
+    let td = ml.context.text_direction;
+
+    let axis = {
+        let d = DVec3::new(td.x, td.y, td.z);
+
+        if d.length_squared() > 1.0e-18 {
+            d.normalize()
+        } else {
+            let a = ml.context.text_rotation;
+
+            DVec3::new(a.cos(), a.sin(), 0.0)
+        }
+    };
+
+    let leader_ref = ml
+        .context
+        .leader_roots
+        .first()
+        .and_then(|root| root.lines.first())
+        .and_then(|line| line.points.last())
+        .map(|p| DVec3::new(p.x, p.y, p.z))
+        .or_else(|| {
+            ml.context.leader_roots.first().map(|root| {
+                DVec3::new(
+                    root.connection_point.x,
+                    root.connection_point.y,
+                    root.connection_point.z,
+                )
+            })
+        })
+        .unwrap_or(text);
+
+    let sign = if (text - leader_ref).dot(axis) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+
+    let dogleg = ml
+        .context
+        .leader_roots
+        .first()
+        .map(|root| root.landing_distance.max(0.0))
+        .unwrap_or_else(|| ml.dogleg_length.max(0.0));
+
+    let gap = ml.context.landing_gap.max(0.0);
+
+    if dogleg <= 1.0e-9 {
+        return None;
+    }
+
+    // El codo visual queda ANTES del tramo horizontal y del gap al texto.
+    let elbow =
+        text - axis * (sign * (dogleg + gap));
+
+    Some((elbow, axis, sign, dogleg, gap))
+}
 fn grips(ml: &MultiLeader) -> Vec<GripDef> {
-    let mut result: Vec<GripDef> = Vec::new();
+    let mut result = Vec::new();
     let mut id = 0usize;
 
+    // Grips reales de las líneas:
+    // flecha + cualquier vértice intermedio.
     for root in &ml.context.leader_roots {
         for line in &root.lines {
             for p in &line.points {
-                result.push(square_grip(id, glam::DVec3::new(p.x, p.y, p.z)));
+                result.push(square_grip(
+                    id,
+                    DVec3::new(p.x, p.y, p.z),
+                ));
+
                 id += 1;
             }
         }
     }
 
     if ml.content_type == LeaderContentType::MText {
+        // Grip virtual del codo.
+        if let Some((elbow, _, _, _, _)) = mleader_landing_geom(ml)
+        {
+            result.push(square_grip(
+                id,
+                elbow,
+            ));
+
+            id += 1;
+        }
+
+        // Extremo del landing.
+        //
+        // Coincide geométricamente con el punto donde
+        // comienza el contenido.
         let tl = &ml.context.text_location;
-        // Text-location grip, then the wrap-width grip at the box's far edge.
-        result.push(center_grip(id, glam::DVec3::new(tl.x, tl.y, tl.z)));
+
+        result.push(center_grip(
+            id,
+            DVec3::new(tl.x, tl.y, tl.z),
+        ));
+
         id += 1;
+
+        // Grip triangular del ancho del MTEXT.
         let (_, far) = text_box_geom(ml);
-        result.push(triangle_grip(id, glam::DVec3::new(far[0], far[1], far[2])));
+
+        result.push(triangle_grip(
+            id,
+            DVec3::new(
+                far[0],
+                far[1],
+                far[2],
+            ),
+        ));
     }
 
     result
@@ -458,16 +589,30 @@ fn grips(ml: &MultiLeader) -> Vec<GripDef> {
 /// text grip's "Move with Leader" action so the leader follows the text.
 pub(crate) const MOVE_ALL_GRIP: usize = usize::MAX;
 
-fn apply_grip(ml: &mut MultiLeader, grip_id: usize, apply: GripApply) {
+fn apply_grip(
+    ml: &mut MultiLeader,
+    grip_id: usize,
+    apply: GripApply,
+) {
+    // Movimiento completo de la MLEADER.
     if grip_id == MOVE_ALL_GRIP {
         let (dx, dy, dz) = match apply {
-            GripApply::Translate(d) => (d.x as f64, d.y as f64, d.z as f64),
+            GripApply::Translate(d) => (
+                d.x as f64,
+                d.y as f64,
+                d.z as f64,
+            ),
+
             GripApply::Absolute(a) => (
-                a.x as f64 - ml.context.text_location.x,
-                a.y as f64 - ml.context.text_location.y,
-                a.z as f64 - ml.context.text_location.z,
+                a.x as f64
+                    - ml.context.text_location.x,
+                a.y as f64
+                    - ml.context.text_location.y,
+                a.z as f64
+                    - ml.context.text_location.z,
             ),
         };
+
         for root in &mut ml.context.leader_roots {
             for line in &mut root.lines {
                 for p in &mut line.points {
@@ -476,18 +621,24 @@ fn apply_grip(ml: &mut MultiLeader, grip_id: usize, apply: GripApply) {
                     p.z += dz;
                 }
             }
+
             root.connection_point.x += dx;
             root.connection_point.y += dy;
             root.connection_point.z += dz;
         }
+
         ml.context.text_location.x += dx;
         ml.context.text_location.y += dy;
         ml.context.text_location.z += dz;
+
         return;
     }
 
     let mut idx = 0usize;
 
+    // ─────────────────────────────────────────────
+    // GRIPS DE LA LÍNEA
+    // ─────────────────────────────────────────────
     for root in &mut ml.context.leader_roots {
         for line in &mut root.lines {
             for p in &mut line.points {
@@ -498,55 +649,270 @@ fn apply_grip(ml: &mut MultiLeader, grip_id: usize, apply: GripApply) {
                             p.y = a.y as f64;
                             p.z = a.z as f64;
                         }
+
                         GripApply::Translate(d) => {
                             p.x += d.x as f64;
                             p.y += d.y as f64;
                             p.z += d.z as f64;
                         }
                     }
+
                     return;
                 }
+
                 idx += 1;
             }
         }
     }
 
-    // Text-location grip (idx == n_vertices), then the wrap-width grip.
-    if ml.content_type == LeaderContentType::MText {
-        if idx == grip_id {
-            let tl = &mut ml.context.text_location;
-            match apply {
-                GripApply::Absolute(a) => {
-                    tl.x = a.x as f64;
-                    tl.y = a.y as f64;
-                    tl.z = a.z as f64;
-                }
-                GripApply::Translate(d) => {
-                    tl.x += d.x as f64;
-                    tl.y += d.y as f64;
-                    tl.z += d.z as f64;
-                }
+    if ml.content_type != LeaderContentType::MText {
+        return;
+    }
+
+    // Calculamos la geometría antes de modificar nada.
+    let landing =
+        mleader_landing_geom(ml);
+
+    // ─────────────────────────────────────────────
+    // GRIP DEL CODO
+    // ─────────────────────────────────────────────
+    if let Some((old_elbow, axis, old_sign, dogleg, gap)) = landing {
+    if grip_id == idx {
+        let target = match apply {
+            GripApply::Absolute(a) => {
+                DVec3::new(
+                    a.x as f64,
+                    a.y as f64,
+                    a.z as f64,
+                )
             }
+
+            GripApply::Translate(d) => {
+                old_elbow
+                    + DVec3::new(
+                        d.x as f64,
+                        d.y as f64,
+                        d.z as f64,
+                    )
+            }
+        };
+
+        // Punto de flecha de la directriz.
+        //
+        // Usamos el primer punto de la primera LeaderLine,
+        // que corresponde a la punta de flecha.
+        let arrow = ml
+            .context
+            .leader_roots
+            .first()
+            .and_then(|root| root.lines.first())
+            .and_then(|line| line.points.first())
+            .map(|p| {
+                DVec3::new(
+                    p.x,
+                    p.y,
+                    p.z,
+                )
+            })
+            .unwrap_or(old_elbow);
+
+        // Posición del codo respecto de la flecha,
+        // proyectada sobre la dirección horizontal
+        // propia de la MLEADER.
+        //
+        // Esto funciona también con UCS girado.
+        let side_distance =
+            (target - arrow).dot(axis);
+
+        // Histeresis: no espejar apenas cruza 1 px.
+        // Tiene que pasarse un 10% del largo del dogleg.
+        let flip_tol =
+            (dogleg * 0.10).max(1.0e-6);
+
+        let new_sign =
+            if side_distance > flip_tol {
+                1.0
+            } else if side_distance < -flip_tol {
+                -1.0
+            } else {
+                old_sign
+            };
+        // Cambiar el borde de attachment, NO la justificación interna
+        // del texto.
+        //
+        // Texto a la derecha  -> se conecta por su borde izquierdo.
+        // Texto a la izquierda -> se conecta por su borde derecho.
+        ml.context.text_attachment_point =
+            if new_sign >= 0.0 {
+                acadrust::entities::multileader::TextAttachmentPointType::Left
+            } else {
+                acadrust::entities::multileader::TextAttachmentPointType::Right
+            };
+        // El texto se coloca a una distancia:
+        // dogleg + landing_gap
+        //
+        // Así el codo sigue coincidiendo con el grip,
+        // y además queda un espacio limpio antes del texto.
+        let new_text =
+            target
+                + axis
+                    * (new_sign * (dogleg + gap));
+
+        ml.context.text_location.x =
+            new_text.x;
+
+        ml.context.text_location.y =
+            new_text.y;
+
+        ml.context.text_location.z =
+            new_text.z;
+
+        // Mantener coherente la información de conexión
+        // almacenada por el MLEADER.
+        if let Some(root) =
+            ml.context.leader_roots.first_mut()
+        {
+            root.connection_point.x =
+                target.x;
+
+            root.connection_point.y =
+                target.y;
+
+            root.connection_point.z =
+                target.z;
+
+            root.direction.x =
+                axis.x * new_sign;
+
+            root.direction.y =
+                axis.y * new_sign;
+
+            root.direction.z =
+                axis.z * new_sign;
+        }
+
+        return;
+    }
+
+        idx += 1;
+
+        // ─────────────────────────────────────────
+        // GRIP DEL EXTREMO HORIZONTAL
+        // ─────────────────────────────────────────
+        if grip_id == idx {
+            let Some((
+                elbow,
+                axis,
+                sign,
+                _old_length,
+                gap,
+            )) = mleader_landing_geom(ml)
+            else {
+                return;
+            };
+
+            let old_end = DVec3::new(
+                ml.context.text_location.x,
+                ml.context.text_location.y,
+                ml.context.text_location.z,
+            );
+
+            let target = match apply {
+                GripApply::Absolute(a) => {
+                    DVec3::new(
+                        a.x as f64,
+                        a.y as f64,
+                        a.z as f64,
+                    )
+                }
+
+                GripApply::Translate(d) => {
+                    old_end
+                        + DVec3::new(
+                            d.x as f64,
+                            d.y as f64,
+                            d.z as f64,
+                        )
+                }
+            };
+
+            // Proyección exclusivamente sobre la
+            // horizontal propia de la MLEADER.
+            // El grip está en text_location, no en el final de la línea.
+            // Por eso restamos el gap para obtener el largo real del dogleg.
+            let requested_total =
+                (target - elbow).dot(axis) * sign;
+
+            let new_length =
+                (requested_total - gap).max(1.0e-6);
+
+            let new_text =
+                elbow
+                    + axis
+                        * (sign * (new_length + gap));
+
+            ml.context.text_location.x =
+                new_text.x;
+
+            ml.context.text_location.y =
+                new_text.y;
+
+            ml.context.text_location.z =
+                new_text.z;
+
+            // landing_distance es justamente la longitud
+            // del dogleg de la MLEADER.
+            ml.dogleg_length =
+                new_length;
+
+            for root in &mut ml.context.leader_roots {
+                root.landing_distance =
+                    new_length;
+            }
+
             return;
         }
+
         idx += 1;
-        if idx == grip_id {
-            // Dragging the box edge sets the MText wrap limit, projected on
-            // the box's flow axis (rotated baseline, or down the column for
-            // vertical flow).
-            let (dir, far) = text_box_geom(ml);
-            let (nx, ny) = match apply {
-                GripApply::Absolute(a) => (a.x as f64, a.y as f64),
-                GripApply::Translate(d) => (far[0] + d.x as f64, far[1] + d.y as f64),
-            };
-            let tl = &ml.context.text_location;
-            // `dir` carries the attachment-side factor (may be ±half), so
-            // normalise by its squared length: width = proj(flow)/k.
-            let d2 = (dir[0] * dir[0] + dir[1] * dir[1]).max(1e-12);
-            let proj = ((nx - tl.x) * dir[0] + (ny - tl.y) * dir[1]) / d2;
-            let min_w = ml.text_height.max(1.0) * 0.5;
-            ml.context.text_width = proj.max(min_w);
-        }
+    }
+
+    // ─────────────────────────────────────────────
+    // GRIP DEL ANCHO DEL TEXTO
+    // ─────────────────────────────────────────────
+    if grip_id == idx {
+        let (dir, far) =
+            text_box_geom(ml);
+
+        let (nx, ny) = match apply {
+            GripApply::Absolute(a) => (
+                a.x as f64,
+                a.y as f64,
+            ),
+
+            GripApply::Translate(d) => (
+                far[0] + d.x as f64,
+                far[1] + d.y as f64,
+            ),
+        };
+
+        let tl =
+            &ml.context.text_location;
+
+        let d2 =
+            (dir[0] * dir[0]
+                + dir[1] * dir[1])
+                .max(1.0e-12);
+
+        let proj =
+            ((nx - tl.x) * dir[0]
+                + (ny - tl.y) * dir[1])
+                / d2;
+
+        let min_w =
+            ml.text_height.max(1.0) * 0.5;
+
+        ml.context.text_width =
+            proj.max(min_w);
     }
 }
 
@@ -1133,53 +1499,87 @@ impl crate::entities::traits::Grippable for MultiLeader {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(
+        &self,
+        grip_id: usize,
+    ) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{
+            GripMenuAction,
+            GripMenuItem,
+        };
+
         let n_vertices: usize = self
             .context
             .leader_roots
             .iter()
-            .flat_map(|r| r.lines.iter())
-            .map(|l| l.points.len())
+            .flat_map(|root| root.lines.iter())
+            .map(|line| line.points.len())
             .sum();
-        if self.content_type == LeaderContentType::MText && grip_id >= n_vertices {
-            if grip_id == n_vertices {
-                // Text-location grip.
-                vec![
+
+        if self.content_type
+            == LeaderContentType::MText
+        {
+            let has_elbow =
+                mleader_landing_geom(self).is_some();
+
+            let elbow_id =
+                n_vertices;
+
+            let landing_id =
+                n_vertices
+                    + usize::from(has_elbow);
+
+            let width_id =
+                landing_id + 1;
+
+            // Codo.
+            if has_elbow
+                && grip_id == elbow_id
+            {
+                return vec![
                     GripMenuItem {
                         label: "Stretch",
-                        action: GripMenuAction::Stretch,
+                        action:
+                            GripMenuAction::Stretch,
                     },
-                    GripMenuItem {
-                        label: "Move with Leader",
-                        action: GripMenuAction::MoveWithLeader,
-                    },
-                    GripMenuItem {
-                        label: "Move Independent",
-                        action: GripMenuAction::MoveIndependent,
-                    },
-                ]
-            } else {
-                // Wrap-width grip: drag only.
-                Vec::new()
+                ];
             }
-        } else {
-            // Leader-line vertex.
-            vec![
-                GripMenuItem {
-                    label: "Stretch",
-                    action: GripMenuAction::Stretch,
-                },
-                GripMenuItem {
-                    label: "Add Leader",
-                    action: GripMenuAction::AddLeader,
-                },
-                GripMenuItem {
-                    label: "Remove Leader",
-                    action: GripMenuAction::RemoveLeader,
-                },
-            ]
+
+            // Extremo horizontal.
+            if grip_id == landing_id {
+                return vec![
+                    GripMenuItem {
+                        label: "Stretch",
+                        action:
+                            GripMenuAction::Stretch,
+                    },
+                ];
+            }
+
+            // Ancho del texto.
+            if grip_id == width_id {
+                return Vec::new();
+            }
         }
+
+        // Flecha / vértices de la línea.
+        vec![
+            GripMenuItem {
+                label: "Stretch",
+                action:
+                    GripMenuAction::Stretch,
+            },
+            GripMenuItem {
+                label: "Add Leader",
+                action:
+                    GripMenuAction::AddLeader,
+            },
+            GripMenuItem {
+                label: "Remove Leader",
+                action:
+                    GripMenuAction::RemoveLeader,
+            },
+        ]
     }
     fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
         use crate::scene::model::object::GripMenuAction as A;
@@ -1323,16 +1723,53 @@ impl MultiLeaderTess for MultiLeader {
 
         // ── Scaling ──────────────────────────────────────────────────────────────
         // Used only when a context omits an already-resolved content size.
-        let fallback_content_scale = (ml.scale_factor as f32)
-            * if crate::scene::annotative::mleader_is_annotative(document, ml) {
-                anno_scale
+        // ── Scaling ──────────────────────────────────────────────────────────────
+
+        let annotative =
+            crate::scene::annotative::mleader_is_annotative(document, ml);
+
+        // MLEADER context data stores sizes already resolved for the annotation
+        // scale at which that context was created.
+        //
+        // If the current CANNOSCALE is different, apply only the ratio between
+        // the requested scale and the context's stored scale.
+        //
+        // Example:
+        //   context created at 1:200 -> context.scale_factor = 200
+        //   current scale 1:100      -> correction = 100 / 200 = 0.5
+        //
+        // If an AutoCAD file already supplies a real 1:100 context, its
+        // scale_factor is already 100 and the correction naturally becomes 1.
+        let base_scale = if ml.scale_factor.abs() > 1.0e-12 {
+            ml.scale_factor as f32
+        } else {
+            1.0
+        };
+
+        let stored_context_scale = ml.context.scale_factor as f32;
+
+        let context_scale_correction =
+            if annotative && stored_context_scale.abs() > 1.0e-12 {
+                let correction =
+                    (base_scale * anno_scale) / stored_context_scale;
+
+                if correction.is_finite() && correction > 0.0 {
+                    correction
+                } else {
+                    1.0
+                }
             } else {
                 1.0
             };
 
+        let fallback_content_scale =
+            base_scale * if annotative { anno_scale } else { 1.0 };
+
         // The active context stores the resolved world-space arrow size.
         // Reapplying the entity scale here makes context-sized arrows grow twice.
-        let arrow_size = ml.context.arrowhead_size as f32;
+        let arrow_size =
+            ml.context.arrowhead_size as f32
+                * context_scale_correction;
         let draw_arrow = arrow_size > 0.0;
         let invisible = ml.path_type == MultiLeaderPathType::Invisible;
         // arrowhead_handle resolves through the block records to a named arrow
@@ -1357,7 +1794,27 @@ impl MultiLeaderTess for MultiLeader {
 
         // Which side the text grip sits on, recomputed every frame so the text
         // alignment and the landing mirror live when the arrow or text moves.
-        let text_loc_w = ml.context.text_location;
+        let mut text_loc_w = ml.context.text_location;
+
+        // Keep the leader elbow fixed in model space and scale only the
+        // annotation-side offset. This makes text + landing follow CANNOSCALE
+        // without moving the arrowhead or the user-defined leader geometry.
+        if annotative
+            && (context_scale_correction - 1.0).abs() > 1.0e-6
+        {
+            if let Some(root) = ml.context.leader_roots.first() {
+                let anchor = root.connection_point;
+                let k = context_scale_correction as f64;
+
+                text_loc_w = acadrust::types::Vector3::new(
+                    anchor.x
+                        + (text_loc_w.x - anchor.x) * k,
+                    anchor.y
+                        + (text_loc_w.y - anchor.y) * k,
+                    text_loc_w.z,
+                );
+            }
+        }
         let leader_ref_w = ml
             .context
             .leader_roots
@@ -1471,7 +1928,9 @@ impl MultiLeaderTess for MultiLeader {
                 // stray line up the side of the text.
                 // Landing distance belongs to the selected leader-root context
                 // and is already resolved in world units.
-                let d = root.landing_distance;
+                let d =
+                    root.landing_distance
+                        * context_scale_correction as f64;
                 // The dogleg runs along the leader root's stored direction —
                 // for a rotated leader that is the angled baseline, not world
                 // X. Roots without a usable direction keep the legacy
@@ -1633,11 +2092,13 @@ impl MultiLeaderTess for MultiLeader {
             // scale_factor + annotation scale applied.
             let height = if ctx.text_height > 0.0 {
                 ctx.text_height as f32
+                    * context_scale_correction
             } else {
-                ml.text_height as f32 * fallback_content_scale
+                ml.text_height as f32
+                    * fallback_content_scale
             };
 
-            let ins = &ctx.text_location;
+            let ins = &text_loc_w;
             // Subtract world_offset in f64 before casting to f32: drawings often
             // sit at large absolute coordinates and casting first then subtracting
             // throws away the precision needed for the rotated sub-glyph offsets.
@@ -1730,7 +2191,9 @@ impl MultiLeaderTess for MultiLeader {
                 value: &ctx.text_string,
                 insertion: [local_ins_x as f64, local_ins_y as f64, z as f64],
                 height,
-                rect_w: ctx.text_width as f32,
+                rect_w:
+                    ctx.text_width as f32
+                        * context_scale_correction,
                 rotation: rot,
                 style: &style,
                 attach_h_anchor: h_anchor,

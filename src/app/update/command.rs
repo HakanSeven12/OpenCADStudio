@@ -1672,9 +1672,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         }
                     }
                     StyleKey::MLeaderStyle => {
-                        self.ribbon.active_mleader_style = name.clone();
                         let i = self.active_tab;
-                        self.tabs[i].active_mleader_style = name;
+
+                        self.ribbon.active_mleader_style = name.clone();
+                        self.tabs[i].active_mleader_style = name.clone();
+
+                        // Esta es la fuente que consulta el comando MLEADER
+                        // al crear una entidad nueva.
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .header
+                            .current_mleader_style_name = name;
+
+                        self.tabs[i].dirty = true;
                     }
                     StyleKey::TableStyle => {
                         self.ribbon.active_table_style = name;

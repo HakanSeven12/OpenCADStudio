@@ -143,15 +143,22 @@ impl OpenCADStudio {
                 }
             })
             .collect();
-        let active_mleader = self.tabs[i].active_mleader_style.clone();
-        let active_mleader = if mleader_names.contains(&active_mleader) {
-            active_mleader
-        } else {
+        let current_mleader =
+            doc.header.current_mleader_style_name.clone();
+
+        let active_mleader =
             mleader_names
-                .first()
+                .iter()
+                .find(|name| {
+                    name.eq_ignore_ascii_case(
+                        &current_mleader
+                    )
+                })
                 .cloned()
-                .unwrap_or_default()
-        };
+                .or_else(|| {
+                    mleader_names.first().cloned()
+                })
+                .unwrap_or_default();
 
         let table_names: Vec<String> = doc
             .objects

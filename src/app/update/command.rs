@@ -1144,6 +1144,31 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         | GripMenuAction::MoveWithLeader
                         | GripMenuAction::MoveIndependent
                 ) {
+                    let is_dimension = matches!(
+                        self.tabs[i].scene.document.get_entity(popup.handle),
+                        Some(acadrust::EntityType::Dimension(_))
+                    );
+                    if is_dimension {
+                        let movement = match item.action {
+                            GripMenuAction::MoveWithDimLine => Some("Keep dim line with text"),
+                            GripMenuAction::MoveWithLeader => Some("Move text, add leader"),
+                            GripMenuAction::MoveIndependent => Some("Move text, no leader"),
+                            _ => None,
+                        };
+                        if let Some(movement) = movement {
+                            crate::entities::dim_override::set_property(
+                                &mut self.tabs[i].scene.document,
+                                popup.handle,
+                                "dim_text_movement",
+                                movement,
+                            );
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].scene.bump_entities(&[(
+                                popup.handle,
+                                crate::scene::ChangeKind::Modified,
+                            )]);
+                        }
+                    }
                     // Stretch / Move = grab this grip. Engage it so the next
                     // click places it (click-move-click) — same as picking the
                     // grip directly in the viewport. Without this the menu just
@@ -1157,10 +1182,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         // "Move with Leader" drags the whole multileader; the
                         // others move just the picked grip.
                         let (grip_id, is_translate) =
-                            if matches!(item.action, GripMenuAction::MoveWithLeader) {
+                            if matches!(item.action, GripMenuAction::MoveWithLeader)
+                                && !is_dimension
+                            {
                                 (crate::entities::multileader::MOVE_ALL_GRIP, true)
                             } else {
-                                (popup.grip_id, g.is_midpoint)
+                                (popup.grip_id, if is_dimension { false } else { g.is_midpoint })
                             };
                         self.tabs[i].active_grip = Some(GripEdit::single(
                             popup.handle,

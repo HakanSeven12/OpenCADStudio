@@ -32,7 +32,7 @@ fn dimension_definition_point(dim: &Dimension) -> acadrust::types::Vector3 {
         Dimension::Linear(d) => d.definition_point,
         Dimension::Radius(d) => d.definition_point,
         Dimension::Diameter(d) => d.definition_point,
-        Dimension::Angular2Ln(d) => d.definition_point,
+        Dimension::Angular2Ln(d) => d.dimension_arc,
         Dimension::Angular3Pt(d) => d.definition_point,
         Dimension::Ordinate(d) => d.definition_point,
         Dimension::Arc(d) => d.definition_point,
@@ -105,6 +105,18 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
                     d.ext_line_rotation.to_degrees(),
                 ),
             ],
+        }];
+    }
+    if matches!(dim, Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_)) {
+        return vec![PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![crate::scene::model::object::Property {
+                label: t!("Dimension style").into_owned(),
+                field: "style_name",
+                value: crate::scene::model::object::PropValue::PlainText(
+                    dim.base().style_name.clone(),
+                ),
+            }],
         }];
     }
     let mut props = base_props(dim.base());
@@ -1024,6 +1036,12 @@ fn restore_dim_text_relative_position(
 }
 
 fn dimension_line_grip_position(dim: &Dimension) -> Option<DVec3> {
+    match dim {
+        Dimension::Angular2Ln(d) => return Some(dv3(&d.dimension_arc)),
+        Dimension::Angular3Pt(d) => return Some(dv3(&d.definition_point)),
+        Dimension::Arc(d) => return Some(dv3(&d.definition_point)),
+        _ => {}
+    }
     let (first, second, defpt, ax, ay) = match dim {
         Dimension::Linear(d) => (
             d.first_point,
@@ -1139,11 +1157,12 @@ impl Grippable for Dimension {
                 center_grip(2, text),
             ],
             Dimension::Angular2Ln(d) => vec![
-                square_grip(0, dv3(&d.angle_vertex)),
-                center_grip(1, dv3(&d.first_point)),
-                center_grip(2, dv3(&d.second_point)),
+                square_grip(0, dv3(&d.first_point)),
+                center_grip(1, dv3(&d.second_point)),
+                center_grip(2, dv3(&d.angle_vertex)),
                 center_grip(3, dv3(&d.definition_point)),
-                center_grip(4, text),
+                center_grip(4, dv3(&d.dimension_arc)),
+                center_grip(5, text),
             ],
             Dimension::Angular3Pt(d) => vec![
                 square_grip(0, dv3(&d.angle_vertex)),
@@ -1191,7 +1210,8 @@ impl Grippable for Dimension {
         let text_grip = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => 3,
             Dimension::Radius(_) | Dimension::Diameter(_) => 2,
-            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => 4,
+            Dimension::Angular2Ln(_) => 5,
+            Dimension::Angular3Pt(_) => 4,
             Dimension::Ordinate(_) => 3,
             Dimension::Arc(d) => if d.has_leader { 6 } else { 4 },
             Dimension::LargeRadial(_) => 4,
@@ -1234,10 +1254,11 @@ impl Grippable for Dimension {
                 _ => {}
             },
             Dimension::Angular2Ln(d) => match grip_id {
-                0 => apply_to_v3(&mut d.angle_vertex, &apply),
-                1 => apply_to_v3(&mut d.first_point, &apply),
-                2 => apply_to_v3(&mut d.second_point, &apply),
+                0 => apply_to_v3(&mut d.first_point, &apply),
+                1 => apply_to_v3(&mut d.second_point, &apply),
+                2 => apply_to_v3(&mut d.angle_vertex, &apply),
                 3 => apply_to_v3(&mut d.definition_point, &apply),
+                4 => apply_to_v3(&mut d.dimension_arc, &apply),
                 _ => {}
             },
             Dimension::Angular3Pt(d) => match grip_id {
@@ -1285,7 +1306,8 @@ impl Grippable for Dimension {
         let (dim_line_grip, text_grip) = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => (2, 3),
             Dimension::Radius(_) | Dimension::Diameter(_) => (1, 2),
-            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => (3, 4),
+            Dimension::Angular2Ln(_) => (4, 5),
+            Dimension::Angular3Pt(_) => (3, 4),
             Dimension::Ordinate(_) => (0, 3),
             Dimension::Arc(d) => (3, if d.has_leader { 6 } else { 4 }),
             Dimension::LargeRadial(_) => (3, 4),
@@ -1353,7 +1375,8 @@ impl Grippable for Dimension {
         let (_dim_line_grip, text_grip) = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => (2, 3),
             Dimension::Radius(_) | Dimension::Diameter(_) => (1, 2),
-            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => (3, 4),
+            Dimension::Angular2Ln(_) => (4, 5),
+            Dimension::Angular3Pt(_) => (3, 4),
             Dimension::Ordinate(_) => (0, 3),
             Dimension::Arc(d) => (3, if d.has_leader { 6 } else { 4 }),
             Dimension::LargeRadial(_) => (3, 4),
@@ -1400,7 +1423,8 @@ impl Grippable for Dimension {
         let text_grip = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => 3,
             Dimension::Radius(_) | Dimension::Diameter(_) => 2,
-            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => 4,
+            Dimension::Angular2Ln(_) => 5,
+            Dimension::Angular3Pt(_) => 4,
             Dimension::Ordinate(_) => 3,
             Dimension::Arc(d) => if d.has_leader { 6 } else { 4 },
             Dimension::LargeRadial(_) => 4,
@@ -1641,7 +1665,7 @@ pub fn style_sections(
         _ => choice_value("None", &["None", "Background", "Color"]),
     };
 
-    vec![
+    let mut sections = vec![
         PropSection {
             title: t!("Lines & Arrows").into_owned(),
             props: vec![
@@ -1968,19 +1992,19 @@ pub fn style_sections(
                 text(
                     t!("Decimal separator").as_ref(),
                     "dim_decimal_separator",
-                    decimal_separator,
+                    decimal_separator.clone(),
                     true,
                 ),
                 text(
                     t!("Dim prefix").as_ref(),
                     "dim_prefix",
-                    dim_prefix,
+                    dim_prefix.clone(),
                     true,
                 ),
                 text(
                     t!("Dim suffix").as_ref(),
                     "dim_suffix",
-                    dim_suffix,
+                    dim_suffix.clone(),
                     true,
                 ),
                 text(
@@ -2271,7 +2295,81 @@ pub fn style_sections(
                 ),
             ],
         },
-    ]
+    ];
+
+    if matches!(dimension, Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_)) {
+        if let Some(text_section) = sections
+            .iter_mut()
+            .find(|section| section.title == t!("Text").as_ref())
+        {
+            text_section
+                .props
+                .retain(|property| property.field != "dim_fractional_type");
+        }
+
+        let angle_zero_suppression = int(ov::DIMAZIN, s.dimazin);
+        let angle_unit = int(ov::DIMAUNIT, s.dimaunit);
+        if let Some(primary_units) = sections
+            .iter_mut()
+            .find(|section| section.title == t!("Primary Units").as_ref())
+        {
+            primary_units.props = vec![
+                text(
+                    t!("Decimal separator").as_ref(),
+                    "dim_decimal_separator",
+                    decimal_separator,
+                    true,
+                ),
+                text(t!("Dim prefix").as_ref(), "dim_prefix", dim_prefix, true),
+                text(t!("Dim suffix").as_ref(), "dim_suffix", dim_suffix, true),
+                choice(
+                    t!("Angle format").as_ref(),
+                    "dim_angle_units",
+                    angular_unit_label(angle_unit),
+                    &[
+                        "Decimal degrees",
+                        "Degrees/minutes/seconds",
+                        "Gradians",
+                        "Radians",
+                    ],
+                    true,
+                ),
+                choice(
+                    t!("Suppress leading zeros").as_ref(),
+                    "dim_angle_suppress_leading_zeros",
+                    yes(angle_zero_suppression & 1 != 0),
+                    &["Yes", "No"],
+                    true,
+                ),
+                choice(
+                    t!("Suppress trailing zeros").as_ref(),
+                    "dim_angle_suppress_trailing_zeros",
+                    yes(angle_zero_suppression & 2 != 0),
+                    &["Yes", "No"],
+                    true,
+                ),
+                property(
+                    t!("Precision").as_ref(),
+                    "dim_angle_precision",
+                    PropValue::Choice {
+                        selected: int(ov::DIMADEC, s.dimadec).to_string(),
+                        options: (0..=8).map(|value| value.to_string()).collect(),
+                    },
+                ),
+            ];
+        }
+        sections.retain(|section| section.title != t!("Alternate Units").as_ref());
+        if let Some(tolerances) = sections
+            .iter_mut()
+            .find(|section| section.title == t!("Tolerances").as_ref())
+        {
+            tolerances
+                .props
+                .retain(|property| !property.field.starts_with("dim_alt_tolerance_"));
+        }
+    }
+
+    sections
 }
 
 fn property(label: &str, field: &'static str, value: PropValue) -> Property {
@@ -2352,6 +2450,15 @@ fn alternate_unit_label(value: i16) -> &'static str {
         7 => "Fractional",
         8 => "Desktop",
         _ => "Decimal",
+    }
+}
+
+fn angular_unit_label(value: i16) -> &'static str {
+    match value {
+        1 => "Degrees/minutes/seconds",
+        2 => "Gradians",
+        3 => "Radians",
+        _ => "Decimal degrees",
     }
 }
 
@@ -3369,6 +3476,8 @@ fn dimtmove_leader_endpoints(dim: &Dimension) -> Option<(Vec3, Vec3)> {
         }
         Dimension::Radius(d) => lv(d.definition_point),
         Dimension::Diameter(d) => (lv(d.angle_vertex) + lv(d.definition_point)) * 0.5,
+        Dimension::Angular2Ln(d) => lv(d.dimension_arc),
+        Dimension::Angular3Pt(d) => lv(d.definition_point),
         _ => return None,
     };
     Some((anchor, lv(txt)))
@@ -3566,7 +3675,12 @@ fn dimension_geometry(
             // ten degrees came out as two hundred and seventy.
             let (p1, p2) = (lv(d.first_point), lv(d.second_point));
             let (p3, p4) = (lv(d.angle_vertex), lv(d.definition_point));
-            let arc_point = lv(d.dimension_arc);
+            let stored_arc = if d.dimension_arc.length_squared() > 1.0e-18 {
+                d.dimension_arc
+            } else {
+                d.base.definition_point
+            };
+            let arc_point = lv(stored_arc);
             match two_line_angle_frame(p1, p2, p3, p4, arc_point) {
                 Some((vertex, start, end)) => append_angular_dimension(
                     &mut g,
@@ -3577,6 +3691,8 @@ fn dimension_geometry(
                     arrow1,
                     arrow2,
                     Some((start, end)),
+                    params,
+                    suppress,
                 ),
                 // Parallel lines have no vertex and so no angle to draw; the
                 // extension lines alone say where the dimension was.
@@ -3587,15 +3703,29 @@ fn dimension_geometry(
             }
         }
         Dimension::Angular3Pt(d) => {
+            let vertex = lv(d.angle_vertex);
+            let first = lv(d.first_point);
+            let second = lv(d.second_point);
+            let arc_point = lv(d.definition_point);
+            let explicit_sweep = two_line_angle_frame(
+                vertex,
+                first,
+                vertex,
+                second,
+                arc_point,
+            )
+            .map(|(_, start, end)| (start, end));
             append_angular_dimension(
                 &mut g,
-                lv(d.angle_vertex),
-                lv(d.first_point),
-                lv(d.second_point),
-                lv(d.definition_point),
+                vertex,
+                first,
+                second,
+                arc_point,
                 arrow1,
                 arrow2,
-                None,
+                explicit_sweep,
+                params,
+                suppress,
             );
         }
         Dimension::Ordinate(d) => {
@@ -3623,6 +3753,8 @@ fn dimension_geometry(
                     d.arc_start_parameter as f32,
                     d.arc_end_parameter as f32,
                 )),
+                params,
+                suppress,
             );
             if d.has_leader {
                 add_segment(
@@ -3933,6 +4065,8 @@ fn append_angular_dimension(
     arrow1: &ArrowKind,
     arrow2: &ArrowKind,
     explicit_sweep: Option<(f32, f32)>,
+    params: DimLineParams,
+    suppress: SuppressFlags,
 ) {
     let radius = vertex.distance(arc_point);
     if radius <= 1e-6 {
@@ -3947,8 +4081,30 @@ fn append_angular_dimension(
     let (start, mut end) = explicit_sweep.unwrap_or((measured_start, measured_end));
     let dir1 = Vec3::new(start.cos(), start.sin(), 0.0);
     let dir2 = Vec3::new(end.cos(), end.sin(), 0.0);
-    add_segment(&mut g.ext_lines, first, vertex + dir1 * radius);
-    add_segment(&mut g.ext_lines, second, vertex + dir2 * radius);
+    let arc_start = vertex + dir1 * radius;
+    let arc_end = vertex + dir2 * radius;
+    let extension = |origin: Vec3, endpoint: Vec3, direction: Vec3| {
+        if params.dimfxlon {
+            (
+                endpoint - direction * params.dimfxl.max(0.0),
+                endpoint + direction * params.dimexe,
+            )
+        } else {
+            let toward_arc = normalized_or(endpoint - origin, direction);
+            (
+                origin + toward_arc * params.dimexo,
+                endpoint + toward_arc * params.dimexe,
+            )
+        }
+    };
+    let (ext1_start, ext1_end) = extension(first, arc_start, dir1);
+    let (ext2_start, ext2_end) = extension(second, arc_end, dir2);
+    if !suppress.ext1 {
+        add_segment(&mut g.ext_lines, ext1_start, ext1_end);
+    }
+    if !suppress.ext2 {
+        add_segment(&mut g.ext_lines, ext2_start, ext2_end);
+    }
 
     let mut delta = end - start;
     // Wrap a negative sweep forwards, but leave a zero one alone: two rays that
@@ -3965,14 +4121,28 @@ fn append_angular_dimension(
         delta = end - start;
     }
 
-    let steps = 32;
+    let arc_extension = if params.ticks && radius > 1.0e-6 {
+        params.dimdle / radius
+    } else {
+        0.0
+    };
+    let direction = delta.signum();
+    let draw_start = start - direction * arc_extension;
+    let draw_delta = delta + direction * arc_extension * 2.0;
+    let steps = angular_arc_steps(draw_delta);
     let mut arc_pts = Vec::with_capacity((steps + 1) as usize);
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
-        let a = start + delta * t;
+        let a = draw_start + draw_delta * t;
         arc_pts.push(vertex + Vec3::new(a.cos() * radius, a.sin() * radius, 0.0));
     }
-    add_polyline(&mut g.dim_lines, &arc_pts);
+    let midpoint = arc_pts.len() / 2;
+    if !suppress.dim1 && midpoint > 0 {
+        add_polyline(&mut g.dim_lines, &arc_pts[..=midpoint]);
+    }
+    if !suppress.dim2 && midpoint + 1 < arc_pts.len() {
+        add_polyline(&mut g.dim_lines, &arc_pts[midpoint..]);
+    }
 
     if arc_pts.len() >= 2 {
         append_arrow(
@@ -3989,6 +4159,10 @@ fn append_angular_dimension(
             arrow2,
         );
     }
+}
+
+fn angular_arc_steps(sweep: f32) -> u32 {
+    ((sweep.abs() / std::f32::consts::PI * 90.0).ceil() as u32).clamp(8, 720)
 }
 
 fn dimension_snap_pts(dim: &Dimension) -> Vec<(glam::DVec3, SnapHint)> {
@@ -4008,10 +4182,11 @@ fn dimension_snap_pts(dim: &Dimension) -> Vec<(glam::DVec3, SnapHint)> {
         Dimension::Radius(d) => vec![node(d.angle_vertex), node(d.definition_point)],
         Dimension::Diameter(d) => vec![node(d.angle_vertex), node(d.definition_point)],
         Dimension::Angular2Ln(d) => vec![
-            node(d.angle_vertex),
             node(d.first_point),
             node(d.second_point),
+            node(d.angle_vertex),
             node(d.definition_point),
+            node(d.dimension_arc),
         ],
         Dimension::Angular3Pt(d) => vec![
             node(d.angle_vertex),
@@ -4771,35 +4946,44 @@ fn reduce_fraction(mut n: u64, mut d: u64) -> String {
 /// Format an angular measurement (input in degrees as Dimension::measurement
 /// returns for angular variants) honouring DIMAUNIT, DIMADEC, DIMAZIN.
 fn format_angular_value(measurement_deg: f64, style: Option<&DimStyle>) -> String {
-    let (aunit, adec, azin) = style
-        .map(|s| (s.dimaunit, s.dimadec, s.dimazin))
-        .unwrap_or((0, 2, 0));
+    let (aunit, adec, azin, decimal_separator) = style
+        .map(|s| (s.dimaunit, s.dimadec, s.dimazin, s.dimdsep))
+        .unwrap_or((0, 2, 0, b'.' as i16));
     let adec = adec.max(0) as usize;
 
     match aunit {
         // 1 = Degrees / Minutes / Seconds
-        1 => format_dms(measurement_deg, adec, azin),
+        1 => format_dms(measurement_deg, adec, azin, decimal_separator),
         // 2 = Gradians
         2 => {
             let g = measurement_deg / 0.9;
             let raw = format!("{:.*}", adec, g);
-            format!("{}g", apply_angular_zero_suppression(&raw, azin))
+            format!(
+                "{}g",
+                swap_decimal_sep(&apply_angular_zero_suppression(&raw, azin), decimal_separator)
+            )
         }
         // 3 = Radians
         3 => {
             let r = measurement_deg.to_radians();
             let raw = format!("{:.*}", adec, r);
-            format!("{}r", apply_angular_zero_suppression(&raw, azin))
+            format!(
+                "{}r",
+                swap_decimal_sep(&apply_angular_zero_suppression(&raw, azin), decimal_separator)
+            )
         }
         // 0 or unknown = Decimal Degrees
         _ => {
             let raw = format!("{:.*}", adec, measurement_deg);
-            format!("{}°", apply_angular_zero_suppression(&raw, azin))
+            format!(
+                "{}°",
+                swap_decimal_sep(&apply_angular_zero_suppression(&raw, azin), decimal_separator)
+            )
         }
     }
 }
 
-fn format_dms(deg: f64, sec_dec: usize, azin: i16) -> String {
+fn format_dms(deg: f64, sec_dec: usize, azin: i16, decimal_separator: i16) -> String {
     let sign = if deg < 0.0 { "-" } else { "" };
     let abs = deg.abs();
     let d = abs.floor();
@@ -4807,15 +4991,11 @@ fn format_dms(deg: f64, sec_dec: usize, azin: i16) -> String {
     let m = m_full.floor();
     let s = (m_full - m) * 60.0;
     let s_str = format!("{:.*}", sec_dec, s);
-    let mut out = format!("{}{:.0}°{:.0}'{}\"", sign, d, m, s_str);
-    if azin & 4 != 0 {
-        // suppress 0° / 0' parts
-        if d == 0.0 {
-            out = out.trim_start_matches('0').to_string();
-            out = out.replacen("°", "", 1);
-        }
-    }
-    out
+    let s_str = swap_decimal_sep(
+        &apply_angular_zero_suppression(&s_str, azin),
+        decimal_separator,
+    );
+    format!("{}{:.0}°{:.0}'{}\"", sign, d, m, s_str)
 }
 
 /// Apply DIMZIN bit flags to a formatted linear value.

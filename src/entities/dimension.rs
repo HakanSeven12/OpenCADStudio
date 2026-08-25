@@ -4484,15 +4484,19 @@ fn alternate_units_text(measurement: f64, style: Option<&DimStyle>) -> Option<St
     if !s.dimalt {
         return None;
     }
-    let mut v = measurement * s.dimaltf;
+    let scaled = measurement * s.dimaltf;
+    let use_sub_units = s.dimaltz & 4 != 0
+        && scaled.abs() < 1.0
+        && s.dimaltmzf.abs() > 1e-12;
+    // DIMALTMZF replaces the ordinary alternate-unit factor for sub-unit
+    // values; it is not an additional multiplier.
+    let mut v = if use_sub_units {
+        measurement * s.dimaltmzf
+    } else {
+        scaled
+    };
     if s.dimaltrnd > 1e-12 {
         v = (v / s.dimaltrnd).round() * s.dimaltrnd;
-    }
-    let use_sub_units = s.dimaltz & 4 != 0
-        && v.abs() < 1.0
-        && s.dimaltmzf.abs() > 1e-12;
-    if use_sub_units {
-        v *= s.dimaltmzf;
     }
     let dec = s.dimaltd.max(0) as usize;
     let raw = format_with_unit(v, s.dimaltu, dec, s.dimfrac, s.dimaltz, true);
@@ -4659,13 +4663,17 @@ fn format_linear_value(measurement: f64, style: Option<&DimStyle>) -> String {
         .unwrap_or((4, 8, 1.0, 0.0, 46, 2, 0, 1.0, ""));
 
     let lfac = if lfac.abs() < 1e-12 { 1.0 } else { lfac };
-    let mut v = measurement * lfac;
+    let scaled = measurement * lfac;
+    let use_sub_units = zin & 4 != 0 && scaled.abs() < 1.0 && sub_factor.abs() > 1e-12;
+    // For values below one unit, DIMMZF replaces DIMLFAC; applying it after
+    // DIMLFAC multiplies both factors and reports the wrong sub-unit value.
+    let mut v = if use_sub_units {
+        measurement * sub_factor
+    } else {
+        scaled
+    };
     if rnd > 1e-12 {
         v = (v / rnd).round() * rnd;
-    }
-    let use_sub_units = zin & 4 != 0 && v.abs() < 1.0 && sub_factor.abs() > 1e-12;
-    if use_sub_units {
-        v *= sub_factor;
     }
     let dec = dec.max(0) as usize;
     let raw = format_with_unit(v, lunit, dec, frac, zin, false);

@@ -1843,8 +1843,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Määritä ominaisuuden sijainti:
     .dimordinate-specify-leader-endpoint = DIMORDINATE Määritä johtajan päätepiste:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Enter mittateksti (tyhjä = mitattu arvo):
-    .dimradius-specify-center-point = DIMRADIUS Määritä keskipiste:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS Määritä mittaviivan sijainti [teksti/kulma]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Valitse kaari, ympyrä tai murtoviivan kaari:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS Määritä mittaviivan sijainti [Mteksti/teksti/kulma]:
     .dimradius-specify-radius-point = DIMRADIUS Määritä sädepiste:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Määritä tekstin kulma (asteita):
     .dimspace-enter-value-0-auto = DIMSPACE Enter-arvo (0 = automaattinen):

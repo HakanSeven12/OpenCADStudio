@@ -1856,8 +1856,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE  حدد موقع المعلم:
     .dimordinate-specify-leader-endpoint = DIMORDINATE  حدد نقطة نهاية الخط القائد:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  أدخل نص البُعد (فارغ = القيمة المقاسة):
-    .dimradius-specify-center-point = DIMRADIUS  حدد نقطة المركز:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS  حدد موقع خط البُعد [نص/زاوية]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  حدد قوسًا أو دائرة أو قوسًا متعدد الخطوط:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS  حدد موقع خط البُعد [نص متعدد الأسطر/نص/زاوية]:
     .dimradius-specify-radius-point = DIMRADIUS  حدد نقطة نصف القطر:
     .dimradius-specify-text-angle-degrees = DIMRADIUS  حدد زاوية النص (بالدرجات):
     .dimspace-enter-value-0-auto = DIMSPACE  أدخل القيمة (0 = تلقائي):

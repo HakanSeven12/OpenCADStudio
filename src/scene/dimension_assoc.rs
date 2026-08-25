@@ -6,13 +6,169 @@ use acadrust::objects::{
 use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 use cadkernel::geom2d::{
-    closest_point, BulgeArc, Circle as KernelCircle, Curve as KernelCurve,
+    angle_within_arc, arc as tessellate_arc, arc_span, closest_point, Arc as KernelArc,
+    BulgeArc, Circle as KernelCircle, Curve as KernelCurve, DEFAULT_SEGMENTS_PER_RADIAN,
 };
+use cadkernel::space::Plane;
 use std::f64::consts::TAU;
 
 use crate::command::DimensionAssociationSource;
 
 use super::{ChangeKind, Scene};
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RadialSourceGeometry {
+    pub plane: Plane,
+    pub center: [f64; 2],
+    pub radius: f64,
+    pub start_angle: f64,
+    pub end_angle: f64,
+    pub limited: bool,
+    pub marker: i32,
+}
+
+impl RadialSourceGeometry {
+    pub(crate) fn center_world(self) -> Vector3 {
+        vector3(self.plane.point_at(self.center))
+    }
+
+    pub(crate) fn point_at_angle(self, angle: f64) -> Vector3 {
+        vector3(self.plane.point_at([
+            self.center[0] + self.radius * angle.cos(),
+            self.center[1] + self.radius * angle.sin(),
+        ]))
+    }
+
+    pub(crate) fn angle_at(self, point: DPoint) -> f64 {
+        let projected = self.plane.project(point).unwrap_or(self.center);
+        (projected[1] - self.center[1]).atan2(projected[0] - self.center[0])
+    }
+
+    pub(crate) fn chord_at(self, point: DPoint) -> Vector3 {
+        self.point_at_angle(self.angle_at(point))
+    }
+
+    fn contains_angle(self, angle: f64) -> bool {
+        !self.limited || angle_within_arc(angle, self.start_angle, self.end_angle)
+    }
+
+    fn curve(self) -> KernelCurve {
+        if self.limited {
+            KernelCurve::Arc(KernelArc {
+                centre: self.center,
+                radius: self.radius,
+                start_angle: self.start_angle,
+                end_angle: self.end_angle,
+            })
+        } else {
+            KernelCurve::Circle(KernelCircle {
+                centre: self.center,
+                radius: self.radius,
+            })
+        }
+    }
+
+    fn distance_squared_to(self, point: DPoint) -> f64 {
+        let Some(projected) = self.plane.project(point) else {
+            return f64::INFINITY;
+        };
+        let planar = closest_point(&self.curve(), projected).distance;
+        let world = self.plane.point_at(projected);
+        let dx = world[0] - point[0];
+        let dy = world[1] - point[1];
+        let dz = world[2] - point[2];
+        planar * planar + dx * dx + dy * dy + dz * dz
+    }
+}
+
+type DPoint = [f64; 3];
+
+fn vector3(point: DPoint) -> Vector3 {
+    Vector3::new(point[0], point[1], point[2])
+}
+
+fn dpoint(point: Vector3) -> DPoint {
+    [point.x, point.y, point.z]
+}
+
+fn radial_candidates(entity: &EntityType) -> Vec<RadialSourceGeometry> {
+    let Some(planar) = crate::entities::curve::entity_curve(entity) else {
+        return Vec::new();
+    };
+    match planar.curve {
+        KernelCurve::Circle(circle) => vec![RadialSourceGeometry {
+            plane: planar.plane,
+            center: circle.centre,
+            radius: circle.radius,
+            start_angle: 0.0,
+            end_angle: 0.0,
+            limited: false,
+            marker: 0,
+        }],
+        KernelCurve::Arc(arc) => vec![RadialSourceGeometry {
+            plane: planar.plane,
+            center: arc.centre,
+            radius: arc.radius,
+            start_angle: arc.start_angle,
+            end_angle: arc.end_angle,
+            limited: true,
+            marker: 0,
+        }],
+        KernelCurve::Polyline(polyline) => (0..polyline.vertices.len())
+            .filter_map(|index| {
+                let arc = polyline.segment_arc(index)?;
+                let (start_angle, end_angle) = if arc.sweep >= 0.0 {
+                    (arc.start_angle, arc.end_angle)
+                } else {
+                    (arc.end_angle, arc.start_angle)
+                };
+                Some(RadialSourceGeometry {
+                    plane: planar.plane,
+                    center: arc.center,
+                    radius: arc.radius,
+                    start_angle,
+                    end_angle,
+                    limited: true,
+                    marker: index as i32,
+                })
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+pub(crate) fn radial_source_at(
+    entity: &EntityType,
+    point: Vector3,
+) -> Option<RadialSourceGeometry> {
+    radial_candidates(entity).into_iter().min_by(|first, second| {
+        first
+            .distance_squared_to(dpoint(point))
+            .total_cmp(&second.distance_squared_to(dpoint(point)))
+    })
+}
+
+fn radial_source_for_marker(entity: &EntityType, marker: i32) -> Option<RadialSourceGeometry> {
+    radial_candidates(entity)
+        .into_iter()
+        .find(|candidate| candidate.marker == marker)
+}
+
+fn radial_source_matching(
+    entity: &EntityType,
+    center: Vector3,
+    radius: f64,
+    chord: Vector3,
+) -> Option<RadialSourceGeometry> {
+    radial_candidates(entity).into_iter().min_by(|first, second| {
+        let score = |candidate: &RadialSourceGeometry| {
+            point_distance_squared(candidate.center_world(), center)
+                + (candidate.radius - radius).powi(2)
+                + candidate.distance_squared_to(dpoint(chord)) * 1e-6
+        };
+        score(first).total_cmp(&score(second))
+    })
+}
 
 fn point_distance_squared(first: Vector3, second: Vector3) -> f64 {
     let dx = first.x - second.x;
@@ -286,6 +442,75 @@ pub(crate) fn dimension_is_associative(
     })
 }
 
+pub(crate) fn radial_extension_points(
+    document: &acadrust::CadDocument,
+    dimension: Handle,
+    gap: f64,
+    extension: f64,
+) -> Option<Vec<Vector3>> {
+    let EntityType::Dimension(Dimension::Radius(radius_dimension)) =
+        document.get_entity(dimension)?
+    else {
+        return None;
+    };
+    let association = document.objects.values().find_map(|object| {
+        let ObjectType::Associative(object) = object else {
+            return None;
+        };
+        let AssociativeData::DimensionAssociation(association) = &object.data else {
+            return None;
+        };
+        (association.dimension == dimension).then_some(association)
+    })?;
+    let reference = association.references[0].first()?;
+    let source = document.get_entity(*reference.xrefs.first()?)?;
+    let radial = radial_source_for_marker(source, reference.main_gs_marker)?;
+    if !radial.limited || radial.radius <= 1e-12 {
+        return None;
+    }
+    let target = radial.angle_at(dpoint(radius_dimension.definition_point));
+    if radial.contains_angle(target) {
+        return None;
+    }
+
+    let from_start = arc_span(target, radial.start_angle);
+    let from_end = arc_span(radial.end_angle, target);
+    let gap_angle = gap.max(0.0) / radial.radius;
+    let extension_angle = extension.max(0.0) / radial.radius;
+    let span = from_start.min(from_end);
+    if span <= gap_angle + 1e-10 {
+        return None;
+    }
+    let (start, end, reverse) = if from_start <= from_end {
+        (
+            target - extension_angle,
+            radial.start_angle - gap_angle,
+            true,
+        )
+    } else {
+        (
+            radial.end_angle + gap_angle,
+            target + extension_angle,
+            false,
+        )
+    };
+    let mut points: Vec<_> = tessellate_arc(
+        radial.center,
+        radial.radius,
+        start,
+        end,
+        0.0,
+        DEFAULT_SEGMENTS_PER_RADIAN,
+    )
+    .into_iter()
+    .map(|point| vector3(radial.plane.point_at([point[0], point[1]])))
+    .collect();
+    if reverse {
+        points.reverse();
+    }
+    Some(points)
+}
+
 impl Scene {
     pub(crate) fn attach_dimension_association(
         &mut self,
@@ -311,6 +536,51 @@ impl Scene {
         else {
             return;
         };
+        if let Dimension::Radius(radius_dimension) = dimension_entity {
+            let Some(source) = sources.iter().flatten().next().copied() else {
+                return;
+            };
+            let Some(source_entity) = self.document.get_entity(source.handle) else {
+                return;
+            };
+            let measured_radius = radius_dimension.measurement();
+            let radial = source
+                .marker
+                .and_then(|marker| radial_source_for_marker(source_entity, marker))
+                .or_else(|| {
+                    radial_source_matching(
+                        source_entity,
+                        radius_dimension.angle_vertex,
+                        measured_radius,
+                        radius_dimension.definition_point,
+                    )
+                });
+            let Some(radial) = radial else {
+                return;
+            };
+            let angle = if source.marker.is_some() && source.parameter.is_finite() {
+                source.parameter
+            } else {
+                radial.angle_at(dpoint(radius_dimension.definition_point))
+            };
+            let reference = AssocDimensionReference {
+                class_name: "AcDbOsnapPointRef".to_string(),
+                osnap_type: 10,
+                xrefs: vec![source.handle],
+                main_subent_type: 1,
+                main_gs_marker: radial.marker,
+                osnap_distance: angle,
+                osnap_point: radius_dimension.definition_point,
+                ..AssocDimensionReference::default()
+            };
+            self.store_dimension_association(
+                dimension,
+                [vec![reference], Vec::new(), Vec::new(), Vec::new()],
+                1,
+                sources,
+            );
+            return;
+        }
         let source_data = dimension_reference_points(dimension_entity);
         if source_data.is_empty() {
             return;
@@ -371,6 +641,16 @@ impl Scene {
             }
         }
 
+        self.store_dimension_association(dimension, references, associativity, sources);
+    }
+
+    fn store_dimension_association(
+        &mut self,
+        dimension: Handle,
+        references: [Vec<AssocDimensionReference>; 4],
+        associativity: i32,
+        sources: Vec<Option<DimensionAssociationSource>>,
+    ) {
         let association_handle = self.document.allocate_handle();
         let mut object = AssociativeObject::new("DIMASSOC", "AcDbDimAssoc");
         object.handle = association_handle;
@@ -406,6 +686,34 @@ impl Scene {
         else {
             return [None, None];
         };
+        if let Dimension::Radius(radius) = entity {
+            let measurement = radius.measurement();
+            let source = self
+                .document
+                .entities()
+                .filter(|candidate| candidate.common().handle != dimension)
+                .filter_map(|candidate| {
+                    let radial = radial_source_matching(
+                        candidate,
+                        radius.angle_vertex,
+                        measurement,
+                        radius.definition_point,
+                    )?;
+                    let center_error = point_distance_squared(
+                        radial.center_world(),
+                        radius.angle_vertex,
+                    );
+                    let radius_error = (radial.radius - measurement).powi(2);
+                    let tolerance = measurement.abs().max(1.0) * 1e-9;
+                    (center_error + radius_error <= tolerance * tolerance).then_some((
+                        center_error + radius_error,
+                        candidate.common().handle,
+                    ))
+                })
+                .min_by(|first, second| first.0.total_cmp(&second.0))
+                .map(|(_, handle)| handle);
+            return [source, None];
+        }
         let Some(points) = dimension_inference_points(entity) else {
             return [None, None];
         };
@@ -459,7 +767,13 @@ impl Scene {
                     .first()
                     .and_then(|reference| resolve_reference(self, reference))
             });
-            if resolved.iter().all(Option::is_none) {
+            let radial_source = association.references[0].first().and_then(|reference| {
+                let source = *reference.xrefs.first()?;
+                let entity = self.document.get_entity(source)?;
+                let radial = radial_source_for_marker(entity, reference.main_gs_marker)?;
+                Some((radial, reference.osnap_distance))
+            });
+            if radial_source.is_none() && resolved.iter().all(Option::is_none) {
                 continue;
             }
             let Some(EntityType::Dimension(dimension)) =
@@ -512,6 +826,27 @@ impl Scene {
                         angular.definition_point = point;
                     }
                     angular.base.definition_point = angular.definition_point;
+                }
+                Dimension::Radius(radius) => {
+                    let Some((radial, angle)) = radial_source else {
+                        continue;
+                    };
+                    let old_chord = radius.definition_point;
+                    let new_center = radial.center_world();
+                    let new_chord = radial.point_at_angle(angle);
+                    let delta = Vector3::new(
+                        new_chord.x - old_chord.x,
+                        new_chord.y - old_chord.y,
+                        new_chord.z - old_chord.z,
+                    );
+                    radius.angle_vertex = new_center;
+                    radius.definition_point = new_chord;
+                    radius.base.definition_point = new_chord;
+                    if radius.base.text_user_positioned {
+                        radius.base.text_middle_point = radius.base.text_middle_point + delta;
+                        radius.base.insertion_point = radius.base.insertion_point + delta;
+                    }
+                    radius.base.actual_measurement = radius.measurement();
                 }
                 _ => continue,
             }

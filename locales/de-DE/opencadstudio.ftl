@@ -1844,8 +1844,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Bezugspunkt angeben:
     .dimordinate-specify-leader-endpoint = DIMORDINATE Endpunkt der Führungslinie angeben:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Bemaßungstext eingeben (leer = Messwert):
-    .dimradius-specify-center-point = DIMRADIUS Mittelpunkt angeben:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS Lage der Dimensionslinie angeben [Text/Winkel]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Bogen, Kreis oder Polylinienbogen auswählen:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS Lage der Dimensionslinie angeben [MText/Text/Winkel]:
     .dimradius-specify-radius-point = DIMRADIUS Radiuspunkt angeben:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Textwinkel angeben (Grad):
     .dimspace-enter-value-0-auto = DIMSPACE Abstand eingeben (0 = automatisch):

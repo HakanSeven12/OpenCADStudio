@@ -1843,8 +1843,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Zadejte umístění funkce:
     .dimordinate-specify-leader-endpoint = DIMORDINATE Zadejte koncový bod odkazu:
     .dimradius-enter-dimension-text-blank-measured = Text rozměru DIMRADIUS Enter (prázdná naměřená hodnota =):
-    .dimradius-specify-center-point = DIMRADIUS Zadejte středový bod:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS Určete umístění kótovací čáry [Text/Úhel]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Vyberte oblouk, kružnici nebo obloukový segment křivky:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS Určete umístění kótovací čáry [MText/Text/Úhel]:
     .dimradius-specify-radius-point = DIMRADIUS Zadejte bod poloměru:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Zadejte úhel textu (stupně):
     .dimspace-enter-value-0-auto = Hodnota DIMSPACE Enter (0 = auto):

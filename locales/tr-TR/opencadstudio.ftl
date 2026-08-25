@@ -1854,8 +1854,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE  Unsur konumunu belirtin:
     .dimordinate-specify-leader-endpoint = DIMORDINATE  Kılavuzun uç noktasını belirtin:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Ölçü metnini girin (boş = ölçülen değer):
-    .dimradius-specify-center-point = DIMRADIUS  Merkez noktasını belirtin:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS  Ölçü çizgisinin konumunu belirtin [Metin/Açı]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Yay, daire veya çoklu çizgi yayı seçin:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS  Ölçü çizgisinin konumunu belirtin [Çok satırlı metin/Metin/Açı]:
     .dimradius-specify-radius-point = DIMRADIUS  Yarıçap noktasını belirtin:
     .dimradius-specify-text-angle-degrees = DIMRADIUS  Metin açısını belirtin (derece):
     .dimspace-enter-value-0-auto = DIMSPACE  Değeri girin (0 = otomatik):

@@ -1847,8 +1847,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Укажите местоположение:
     .dimordinate-specify-leader-endpoint = DIMORDINATE Укажите конечную точку выноски:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Введите текст размера (пусто = измеренное значение):
-    .dimradius-specify-center-point = DIMRADIUS Укажите центральную точку:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS Укажите положение размерной линии [Текст/Угол]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Выберите дугу, окружность или дуговой сегмент полилинии:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS Укажите положение размерной линии [Мтекст/Текст/Угол]:
     .dimradius-specify-radius-point = DIMRADIUS Укажите точку радиуса:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Укажите угол текста (градусы):
     .dimspace-enter-value-0-auto = DIMSPACE Введите значение (0 = авто):

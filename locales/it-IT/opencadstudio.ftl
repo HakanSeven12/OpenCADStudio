@@ -1843,8 +1843,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Specificare la posizione dell'elemento:
     .dimordinate-specify-leader-endpoint = DIMORDINATE Specificare il punto finale della guida:
     .dimradius-enter-dimension-text-blank-measured = Testo della dimensione DIMRADIUS Enter (valore misurato = vuoto):
-    .dimradius-specify-center-point = DIMRADIUS Specificare il punto centrale:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS Specificare la posizione della linea di quota [Testo/Angolo]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Selezionare un arco, un cerchio o un arco di polilinea:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS Specificare la posizione della linea di quota [Mtesto/Testo/Angolo]:
     .dimradius-specify-radius-point = DIMRADIUS Specificare il punto del raggio:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Specificare l'angolo del testo (gradi):
     .dimspace-enter-value-0-auto = Valore DIMSPACE Enter (0 = automatico):

@@ -1843,8 +1843,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE 기능 위치 지정:
     .dimordinate-specify-leader-endpoint = DIMORDINATE 리더 끝점 지정:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Enter 치수 문자(빈 = 측정 값):
-    .dimradius-specify-center-point = DIMRADIUS 중심점 지정:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS 치수선 위치 지정 [문자/각도]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS 호, 원 또는 폴리선 호 선택:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS 치수선 위치 지정 [여러 줄 문자/문자/각도]:
     .dimradius-specify-radius-point = DIMRADIUS 반경 점 지정:
     .dimradius-specify-text-angle-degrees = DIMRADIUS 텍스트 각도(도) 지정:
     .dimspace-enter-value-0-auto = DIMSPACE Enter 값(0 = 자동):

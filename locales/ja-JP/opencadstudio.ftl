@@ -1834,8 +1834,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE  フィーチャ位置を指定:
     .dimordinate-specify-leader-endpoint = DIMORDINATE  引出線の終点を指定:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  寸法値を入力（空白 = 計測値）:
-    .dimradius-specify-center-point = DIMRADIUS  中心点を指定:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS  寸法線の位置を指定 [文字/角度]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  円弧、円、またはポリライン円弧を選択:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS  寸法線の位置を指定 [マルチテキスト/文字/角度]:
     .dimradius-specify-radius-point = DIMRADIUS  半径点を指定:
     .dimradius-specify-text-angle-degrees = DIMRADIUS  文字角度を指定（度）:
     .dimspace-enter-value-0-auto = DIMSPACE  値を入力（0 = 自動）:

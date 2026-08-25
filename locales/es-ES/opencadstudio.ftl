@@ -1844,8 +1844,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE  Especifique la ubicación del elemento:
     .dimordinate-specify-leader-endpoint = DIMORDINATE  Especifique el punto final de la directriz:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Introduzca el texto de cota (vacío = valor medido):
-    .dimradius-specify-center-point = DIMRADIUS  Especifique el centro:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS  Especifique la ubicación de la línea de cota [Texto/Ángulo]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Seleccione un arco, círculo o arco de polilínea:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS  Especifique la ubicación de la línea de cota [Mtexto/Texto/Ángulo]:
     .dimradius-specify-radius-point = DIMRADIUS  Especifique el punto del radio:
     .dimradius-specify-text-angle-degrees = DIMRADIUS  Especifique el ángulo del texto (grados):
     .dimspace-enter-value-0-auto = DIMSPACE  Introduzca el valor (0 = automático):

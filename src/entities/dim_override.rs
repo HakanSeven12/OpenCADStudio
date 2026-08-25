@@ -357,6 +357,7 @@ fn inherited_real(doc: &CadDocument, handle: Handle, code: i16) -> f64 {
     };
     match code {
         DIMGAP => style.dimgap,
+        DIMCEN => style.dimcen,
         DIMTP => style.dimtp,
         DIMTM => style.dimtm,
         _ => 0.0,
@@ -395,6 +396,30 @@ pub fn set_property(
     value: &str,
 ) -> bool {
     let trimmed = value.trim();
+    if field == "dim_center_type" {
+        let current = inherited_real(doc, handle, DIMCEN);
+        let size = current.abs().max(0.01);
+        let value = match trimmed.to_ascii_lowercase().as_str() {
+            "none" => 0.0,
+            "center marks" => size,
+            "centerlines" => -size,
+            _ => return false,
+        };
+        set(doc, handle, DIMCEN, Some(XDataValue::Real(value)));
+        return true;
+    }
+    if field == "dim_center_size" {
+        let Ok(size) = trimmed.parse::<f64>() else {
+            return false;
+        };
+        if !size.is_finite() || size < 0.0 {
+            return false;
+        }
+        let current = inherited_real(doc, handle, DIMCEN);
+        let value = if current < 0.0 { -size } else { size };
+        set(doc, handle, DIMCEN, Some(XDataValue::Real(value)));
+        return true;
+    }
     let handle_field = match field {
         "dim_arrowhead_1" => Some(DIMBLK1),
         "dim_arrowhead_2" => Some(DIMBLK2),

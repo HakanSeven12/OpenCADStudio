@@ -1843,8 +1843,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Jellemző helyének megadása:
     .dimordinate-specify-leader-endpoint = DIMORDINATE Vezető végpont megadása:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Enter méretszöveg (üres = mért érték):
-    .dimradius-specify-center-point = DIMRADIUS Középpont megadása:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS A méretvonal helyének megadása [szöveg/szög]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Válasszon ívet, kört vagy vonalláncívet:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS A méretvonal helyének megadása [Mszöveg/szöveg/szög]:
     .dimradius-specify-radius-point = DIMRADIUS Adja meg a sugárpontot:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Adja meg a szöveg szögét (fokban):
     .dimspace-enter-value-0-auto = DIMSPACE Enter érték (0 = automatikus):

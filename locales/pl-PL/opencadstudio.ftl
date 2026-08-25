@@ -1843,8 +1843,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Określ lokalizację elementu:
     .dimordinate-specify-leader-endpoint = DIMORDINATE Określ punkt końcowy linii odniesienia:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Enter tekst wymiarowy (pusta wartość zmierzona =):
-    .dimradius-specify-center-point = DIMRADIUS Określ punkt środkowy:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS Określ położenie linii wymiarowej [Tekst/Kąt]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Wybierz łuk, okrąg lub łuk polilinii:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS Określ położenie linii wymiarowej [Mtekst/Tekst/Kąt]:
     .dimradius-specify-radius-point = DIMRADIUS Określ punkt promienia:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Określ kąt tekstu (w stopniach):
     .dimspace-enter-value-0-auto = Wartość DIMSPACE Enter (0 = auto):

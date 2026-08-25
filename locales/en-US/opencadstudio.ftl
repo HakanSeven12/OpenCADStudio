@@ -1874,8 +1874,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE  Specify feature location:
     .dimordinate-specify-leader-endpoint = DIMORDINATE  Specify leader endpoint:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Enter dimension text (blank = measured value):
-    .dimradius-specify-center-point = DIMRADIUS  Specify center point:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS  Specify dimension line location  [Text/Angle]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Select arc, circle, or polyline arc:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS  Specify dimension line location  [Mtext/Text/Angle]:
     .dimradius-specify-radius-point = DIMRADIUS  Specify radius point:
     .dimradius-specify-text-angle-degrees = DIMRADIUS  Specify text angle (degrees):
     .dimspace-enter-value-0-auto = DIMSPACE  Enter value (0 = auto):

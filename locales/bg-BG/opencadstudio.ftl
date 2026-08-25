@@ -1843,8 +1843,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE  Посочи местоположение на елемента:
     .dimordinate-specify-leader-endpoint = DIMORDINATE  Посочи крайна точка на водача:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Въведи текст на оразмеряване (празно = измерена стойност):
-    .dimradius-specify-center-point = DIMRADIUS  Посочи централна точка:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS  Посочи местоположение на линията за оразмеряване  [Текст/Ъгъл]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Избери дъга, окръжност или дъгов сегмент на полилиния:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS  Посочи местоположение на линията за оразмеряване  [Мтекст/Текст/Ъгъл]:
     .dimradius-specify-radius-point = DIMRADIUS  Посочи точка на радиус:
     .dimradius-specify-text-angle-degrees = DIMRADIUS  Посочи ъгъл на текста (градуси):
     .dimspace-enter-value-0-auto = DIMSPACE  Въведи стойност (0 = авто):

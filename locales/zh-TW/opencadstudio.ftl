@@ -1843,8 +1843,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE  指定特徵位置：
     .dimordinate-specify-leader-endpoint = DIMORDINATE  指定引線端點：
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  輸入標註文字（空白 = 測量值）：
-    .dimradius-specify-center-point = DIMRADIUS  指定中心點：
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS  指定尺寸線位置  [文字/角度]：
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  選擇圓弧、圓或聚合線圓弧：
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS  指定尺寸線位置  [多行文字/文字/角度]：
     .dimradius-specify-radius-point = DIMRADIUS  指定半徑點：
     .dimradius-specify-text-angle-degrees = DIMRADIUS  指定文字角度（度）：
     .dimspace-enter-value-0-auto = DIMSPACE  輸入值（0 = 自動）：

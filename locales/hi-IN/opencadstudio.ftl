@@ -1832,8 +1832,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE सुविधा स्थान निर्दिष्ट करें:
     .dimordinate-specify-leader-endpoint = DIMORDINATE लीडर समापन बिंदु निर्दिष्ट करें:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS आयाम टेक्स्ट दर्ज करें (blank = मापा मान):
-    .dimradius-specify-center-point = DIMRADIUS केंद्र बिंदु निर्दिष्ट करें:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS आयाम लाइन स्थान निर्दिष्ट करें [टेक्स्ट / एंगल]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS आर्क, सर्कल या पॉलीलाइन आर्क चुनें:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS आयाम लाइन स्थान निर्दिष्ट करें [एमटेक्स्ट/टेक्स्ट/एंगल]:
     .dimradius-specify-radius-point = DIMRADIUS त्रिज्या बिंदु निर्दिष्ट करें:
     .dimradius-specify-text-angle-degrees = DIMRADIUS पाठ कोण निर्दिष्ट करें (डिग्री):
     .dimspace-enter-value-0-auto = DIMSPACE मान दर्ज करें (0 = ऑटो):

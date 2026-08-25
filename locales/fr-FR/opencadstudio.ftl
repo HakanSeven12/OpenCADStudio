@@ -1844,8 +1844,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Spécifiez le point à coter :
     .dimordinate-specify-leader-endpoint = DIMORDINATE Spécifiez l’extrémité du repère :
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Entrer le texte dimensionnel (blanc = valeur mesurée):
-    .dimradius-specify-center-point = DIMRADIUS Spécifier le point central:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS Spécifiez la position de la ligne de cote [Texte / Angle] :
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Sélectionnez un arc, un cercle ou un arc de polyligne :
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS Spécifiez la position de la ligne de cote [Mtexte/Texte/Angle] :
     .dimradius-specify-radius-point = DIMRADIUS Spécifier le point de rayon:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Spécifiez l'angle de texte (degrés):
     .dimspace-enter-value-0-auto = DIMSPACE Entrer la valeur (0 = automatique) :

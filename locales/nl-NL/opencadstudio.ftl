@@ -1844,8 +1844,8 @@ annotate =
     .dimordinate-specify-feature-location = DIMORDINATE Geef functielocatie op:
     .dimordinate-specify-leader-endpoint = DIMORDINATE Geef het eindpunt van de verwijslijn op:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Voer maattekst in (leeg = gemeten waarde):
-    .dimradius-specify-center-point = DIMRADIUS Centrumpunt opgeven:
-    .dimradius-specify-dimension-line-location-text = DIMRADIUS Geef de positie van de maatlijn op [Tekst/Hoek]:
+    .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Selecteer boog, cirkel of polylijnboog:
+    .dimradius-specify-dimension-line-location-text = DIMRADIUS Geef de positie van de maatlijn op [M-tekst/Tekst/Hoek]:
     .dimradius-specify-radius-point = DIMRADIUS radiuspunt specificeren:
     .dimradius-specify-text-angle-degrees = DIMRADIUS Teksthoek (graden) specificeren:
     .dimspace-enter-value-0-auto = DIMSPACE Waarde invoeren (0 = auto):

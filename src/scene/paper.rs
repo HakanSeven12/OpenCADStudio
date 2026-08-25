@@ -168,7 +168,6 @@ impl Scene {
             if !vp.status.is_on
                 || vp.common.invisible
                 || self.entity_temporarily_hidden(handle)
-                || self.layer_hidden(&vp.common.layer)
             {
                 continue;
             }

@@ -115,10 +115,11 @@ fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Opti
         .copied()
 }
 
-fn dimension_points(dimension: &Dimension) -> Option<[Vector3; 2]> {
+fn dimension_points(dimension: &Dimension) -> Option<[Option<Vector3>; 2]> {
     match dimension {
-        Dimension::Linear(linear) => Some([linear.first_point, linear.second_point]),
-        Dimension::Aligned(aligned) => Some([aligned.first_point, aligned.second_point]),
+        Dimension::Linear(linear) => Some([Some(linear.first_point), Some(linear.second_point)]),
+        Dimension::Aligned(aligned) => Some([Some(aligned.first_point), Some(aligned.second_point)]),
+        Dimension::Ordinate(ordinate) => Some([Some(ordinate.feature_location), None]),
         _ => None,
     }
 }
@@ -186,13 +187,14 @@ impl Scene {
             return;
         };
         let resolved: [Option<(Handle, i32, f64, u8)>; 2] = std::array::from_fn(|index| {
+            let point = source_data[index]?;
             let source = sources[index]?;
             let entity = self.document.get_entity(source)?;
-            source_marker(entity, source_data[index]).map(|marker| {
+            source_marker(entity, point).map(|marker| {
                 (
                     source,
                     marker,
-                    source_parameter(entity, source_data[index]),
+                    source_parameter(entity, point),
                     if matches!(entity, EntityType::Circle(_)) {
                         10
                     } else {
@@ -230,7 +232,7 @@ impl Scene {
                     marker,
                     parameter,
                     osnap_type,
-                    source_data[index],
+                    source_data[index].expect("resolved dimension point"),
                 ));
             }
         }
@@ -274,7 +276,7 @@ impl Scene {
             return [None, None];
         };
         points.map(|point| {
-            self.document
+            point.and_then(|point| self.document
                 .entities()
                 .filter(|entity| entity.common().handle != dimension)
                 .filter_map(|entity| {
@@ -283,7 +285,7 @@ impl Scene {
                 })
                 .filter(|(distance, _)| *distance <= 1e-16)
                 .min_by(|first, second| first.0.total_cmp(&second.0))
-                .map(|(_, handle)| handle)
+                .map(|(_, handle)| handle))
         })
     }
 
@@ -352,6 +354,12 @@ impl Scene {
                     }
                     aligned.base.actual_measurement = aligned.measurement();
                     aligned.base.definition_point = aligned.definition_point;
+                }
+                Dimension::Ordinate(ordinate) => {
+                    if let Some(feature) = first {
+                        ordinate.feature_location = feature;
+                    }
+                    ordinate.refresh_measurement();
                 }
                 _ => continue,
             }

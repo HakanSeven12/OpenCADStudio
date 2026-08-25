@@ -1246,6 +1246,12 @@ impl OpenCADStudio {
                     .document
                     .header
                     .dimension_associativity;
+                let single_source_dimension = matches!(
+                    &entity,
+                    acadrust::EntityType::Dimension(
+                        acadrust::entities::Dimension::Ordinate(_)
+                    )
+                );
                 let pending = if association_mode == 0 {
                     let layer = self.tabs[i].active_layer.clone();
                     if layer != "0" || entity.as_entity().layer().is_empty() {
@@ -1295,7 +1301,13 @@ impl OpenCADStudio {
                         if association_mode == 2 {
                             let sources = source.map_or_else(
                                 || self.tabs[i].scene.infer_dimension_sources(handle),
-                                |source| [Some(source), Some(source)],
+                                |source| {
+                                    if single_source_dimension {
+                                        [Some(source), None]
+                                    } else {
+                                        [Some(source), Some(source)]
+                                    }
+                                },
                             );
                             self.tabs[i]
                                 .scene
@@ -3066,7 +3078,6 @@ impl OpenCADStudio {
                                     stretched |= mv(&mut d.definition_point);
                                 }
                                 Dimension::Ordinate(d) => {
-                                    stretched |= mv(&mut d.definition_point);
                                     stretched |= mv(&mut d.feature_location);
                                     stretched |= mv(&mut d.leader_endpoint);
                                 }

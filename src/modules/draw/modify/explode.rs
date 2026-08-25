@@ -851,7 +851,20 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
     // Per-element commons so a baked block keeps the style's colours/lineweights:
     // extension lines (DIMCLRE/DIMLWE), dimension line + arrows + centre mark
     // (DIMCLRD/DIMLWD), text (DIMCLRT).
-    let ext_c = dim_common(&base.common, met.dimclre, met.dimlwe);
+    let mut ext_c = dim_common(&base.common, met.dimclre, met.dimlwe);
+    let override_data = &base.common.extended_data;
+    if let Some(color) = crate::entities::dim_override::color(
+        override_data,
+        crate::entities::dim_override::DIMCLRE,
+    ) {
+        ext_c.color = color;
+    }
+    if let Some(lineweight) = crate::entities::dim_override::int(
+        override_data,
+        crate::entities::dim_override::DIMLWE,
+    ) {
+        ext_c.line_weight = acadrust::types::LineWeight::from_value(lineweight);
+    }
     let dim_c = dim_common(&base.common, met.dimclrd, met.dimlwd);
     let mut result: Vec<EntityType> = Vec::new();
 
@@ -1041,8 +1054,33 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
             ));
         }
         Dimension::Ordinate(d) => {
-            result.push(make_seg(&d.feature_location, &d.definition_point, &dim_c));
-            result.push(make_seg(&d.definition_point, &d.leader_endpoint, &dim_c));
+            if !met.dimse1 {
+                use crate::entities::dim_override as ov;
+                let scale = ov::real(override_data, ov::DIMSCALE)
+                    .filter(|value| *value > 1e-6)
+                    .unwrap_or(1.0);
+                let dogleg = ov::real(override_data, ov::DIMASZ)
+                    .unwrap_or(met.dimasz / scale)
+                    * scale
+                    * 2.0;
+                let offset = ov::real(override_data, ov::DIMEXO)
+                    .unwrap_or(met.dimexo / scale)
+                    * scale;
+                let fixed_on = ov::int(override_data, ov::DIMFXLON)
+                    .map(|value| value != 0)
+                    .unwrap_or(met.dimfxlon);
+                let fixed_length = fixed_on.then(|| {
+                    ov::real(override_data, ov::DIMFXL)
+                        .unwrap_or(met.dimfxl / scale)
+                        * scale
+                });
+                let points = d.leader_polyline(dogleg, offset, fixed_length);
+                for pair in points.windows(2) {
+                    if (pair[1] - pair[0]).length() > 1e-12 {
+                        result.push(make_seg(&pair[0], &pair[1], &ext_c));
+                    }
+                }
+            }
         }
         Dimension::Arc(d) => {
             result.extend(angular_block_segs(

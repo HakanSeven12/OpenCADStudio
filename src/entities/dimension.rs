@@ -124,6 +124,23 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
             ],
         }];
     }
+    if let Dimension::Ordinate(d) = dim {
+        return vec![PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Dimension style").into_owned(),
+                    field: "style_name",
+                    value: PropValue::PlainText(d.base.style_name.clone()),
+                },
+                edit_angle(
+                    t!("Rotation").as_ref(),
+                    "ordinate_rotation",
+                    -d.base.horizontal_direction.to_degrees(),
+                ),
+            ],
+        }];
+    }
     let mut props = base_props(dim.base());
     match dim {
         Dimension::Aligned(d) => {
@@ -351,6 +368,40 @@ fn assign_deg(value: &str, target: &mut f64) -> bool {
 }
 
 fn apply_geom_prop(dim: &mut Dimension, field: &str, value: &str) {
+    let ordinate_auto_text = match dim {
+        Dimension::Ordinate(ordinate) if !ordinate.base.text_user_positioned => {
+            Some(dimension_text_pos_f64(dim, None, 2.5, 1.0))
+        }
+        _ => None,
+    };
+    if let Dimension::Ordinate(ordinate) = dim {
+        match field {
+            "ordinate_rotation" => {
+                if let Some(angle) = parse_f64(value) {
+                    ordinate.base.horizontal_direction = -angle.to_radians();
+                    ordinate.refresh_measurement();
+                }
+                return;
+            }
+            "text_x" | "text_y" => {
+                let old_text = ordinate_auto_text.unwrap_or(ordinate.base.text_middle_point);
+                let mut new_text = old_text;
+                let changed = if field == "text_x" {
+                    assign_f64(value, &mut new_text.x)
+                } else {
+                    assign_f64(value, &mut new_text.y)
+                };
+                if changed {
+                    let delta = new_text - old_text;
+                    ordinate.leader_endpoint = ordinate.leader_endpoint + delta;
+                    ordinate.base.text_middle_point = new_text;
+                    ordinate.base.text_user_positioned = true;
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
     if apply_base_prop(dim.base_mut(), field, value) {
         return;
     }
@@ -709,6 +760,42 @@ fn apply_large_radial_fields(d: &mut DimensionLargeRadial, field: &str, value: &
 }
 
 fn apply_transform(dim: &mut Dimension, t: &EntityTransform) {
+    if matches!(dim, Dimension::Ordinate(_)) {
+        match t {
+            EntityTransform::Translate(delta) => dim.translate(Vector3::new(
+                delta.x, delta.y, delta.z,
+            )),
+            EntityTransform::Rotate {
+                center,
+                axis,
+                angle_rad,
+            } => crate::scene::view::transform::apply_standard_transform(
+                dim,
+                *center,
+                *axis,
+                *angle_rad,
+            ),
+            EntityTransform::Scale { center, factor } => {
+                crate::scene::view::transform::apply_standard_scale(dim, *center, *factor)
+            }
+            EntityTransform::Mirror {
+                p1,
+                p2,
+                working_normal,
+            } => acadrust::Entity::apply_transform(
+                dim,
+                &crate::scene::view::transform::reflection_about_working_line(
+                    *p1,
+                    *p2,
+                    *working_normal,
+                ),
+            ),
+            EntityTransform::Affine(transform) => {
+                acadrust::Entity::apply_transform(dim, transform)
+            }
+        }
+        return;
+    }
     match t {
         EntityTransform::Translate(d) => dim.translate(acadrust::types::Vector3::new(
             d.x as f64, d.y as f64, d.z as f64,
@@ -1193,10 +1280,9 @@ impl Grippable for Dimension {
                 center_grip(4, text),
             ],
             Dimension::Ordinate(d) => vec![
-                square_grip(0, dv3(&d.definition_point)),
-                center_grip(1, dv3(&d.feature_location)),
-                center_grip(2, dv3(&d.leader_endpoint)),
-                center_grip(3, text),
+                square_grip(0, dv3(&d.feature_location)),
+                center_grip(1, dv3(&d.leader_endpoint)),
+                center_grip(2, text),
             ],
             Dimension::Arc(d) => {
                 let mut grips = vec![
@@ -1227,12 +1313,25 @@ impl Grippable for Dimension {
 
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
+        if matches!(self, Dimension::Ordinate(_)) && grip_id == 2 {
+            let old_text = dimension_text_pos_f64(self, None, 2.5, 1.0);
+            let mut new_text = old_text;
+            apply_to_v3(&mut new_text, &apply);
+            let delta = new_text - old_text;
+            if let Dimension::Ordinate(d) = self {
+                d.leader_endpoint = d.leader_endpoint + delta;
+                d.base.text_middle_point = new_text;
+                d.base.text_user_positioned = true;
+                d.refresh_measurement();
+            }
+            return;
+        }
         // Last grip always moves the text.
         let text_grip = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => 3,
             Dimension::Radius(_) | Dimension::Diameter(_) => 2,
             Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => 4,
-            Dimension::Ordinate(_) => 3,
+            Dimension::Ordinate(_) => 2,
             Dimension::Arc(d) => if d.has_leader { 6 } else { 4 },
             Dimension::LargeRadial(_) => 4,
         };
@@ -1288,9 +1387,15 @@ impl Grippable for Dimension {
                 _ => {}
             },
             Dimension::Ordinate(d) => match grip_id {
-                0 => apply_to_v3(&mut d.definition_point, &apply),
-                1 => apply_to_v3(&mut d.feature_location, &apply),
-                2 => apply_to_v3(&mut d.leader_endpoint, &apply),
+                0 => apply_to_v3(&mut d.feature_location, &apply),
+                1 => {
+                    let old = d.leader_endpoint;
+                    apply_to_v3(&mut d.leader_endpoint, &apply);
+                    if d.base.text_user_positioned {
+                        d.base.text_middle_point =
+                            d.base.text_middle_point + (d.leader_endpoint - old);
+                    }
+                }
                 _ => {}
             },
             Dimension::Arc(d) => match grip_id {
@@ -1326,7 +1431,7 @@ impl Grippable for Dimension {
             Dimension::Linear(_) | Dimension::Aligned(_) => (2, 3),
             Dimension::Radius(_) | Dimension::Diameter(_) => (1, 2),
             Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => (3, 4),
-            Dimension::Ordinate(_) => (0, 3),
+            Dimension::Ordinate(_) => (1, 2),
             Dimension::Arc(d) => (3, if d.has_leader { 6 } else { 4 }),
             Dimension::LargeRadial(_) => (3, 4),
         };
@@ -1365,6 +1470,11 @@ impl Grippable for Dimension {
                     action: GripMenuAction::Center,
                 },
             ]
+        } else if matches!(self, Dimension::Ordinate(_)) {
+            vec![GripMenuItem {
+                label: "Stretch",
+                action: GripMenuAction::Stretch,
+            }]
         } else if grip_id == dim_line_grip {
             vec![
                 GripMenuItem {
@@ -1394,7 +1504,7 @@ impl Grippable for Dimension {
             Dimension::Linear(_) | Dimension::Aligned(_) => (2, 3),
             Dimension::Radius(_) | Dimension::Diameter(_) => (1, 2),
             Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => (3, 4),
-            Dimension::Ordinate(_) => (0, 3),
+            Dimension::Ordinate(_) => (1, 2),
             Dimension::Arc(d) => (3, if d.has_leader { 6 } else { 4 }),
             Dimension::LargeRadial(_) => (3, 4),
         };
@@ -1441,7 +1551,7 @@ impl Grippable for Dimension {
             Dimension::Linear(_) | Dimension::Aligned(_) => 3,
             Dimension::Radius(_) | Dimension::Diameter(_) => 2,
             Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => 4,
-            Dimension::Ordinate(_) => 3,
+            Dimension::Ordinate(_) => 2,
             Dimension::Arc(d) => if d.has_leader { 6 } else { 4 },
             Dimension::LargeRadial(_) => 4,
         };
@@ -1682,7 +1792,7 @@ pub fn style_sections(
         _ => choice_value("None", &["None", "Background", "Color"]),
     };
 
-    vec![
+    let mut sections = vec![
         PropSection {
             title: t!("Lines & Arrows").into_owned(),
             props: vec![
@@ -2312,7 +2422,52 @@ pub fn style_sections(
                 ),
             ],
         },
-    ]
+    ];
+    if matches!(dimension, Dimension::Ordinate(_)) {
+        for section in &mut sections {
+            section.props.retain(|property| match section.title.as_str() {
+                title if title == t!("Lines & Arrows").as_ref() => matches!(
+                    property.field,
+                    "dim_arrow_size"
+                        | "dim_ext_line_lineweight"
+                        | "dim_ext_line_fixed"
+                        | "dim_ext_line_fixed_length"
+                        | "dim_ext_line_color"
+                        | "dim_ext_line_offset"
+                ),
+                title if title == t!("Text").as_ref() => !matches!(
+                    property.field,
+                    "dim_text_outside_align" | "dim_text_pos_hor" | "dim_text_inside_align"
+                ),
+                title if title == t!("Fit").as_ref() => matches!(
+                    property.field,
+                    "dim_text_movement" | "dim_scale_overall"
+                ),
+                _ => true,
+            });
+        }
+        let dim_scale = if s.dimscale > 1e-6 { s.dimscale } else { 1.0 };
+        let text_position = dimension_text_pos_f64(
+            dimension,
+            Some(s),
+            real(ov::DIMTXT, s.dimtxt) * dim_scale,
+            dim_scale,
+        );
+        for section in &mut sections {
+            for property in &mut section.props {
+                match property.field {
+                    "text_x" => {
+                        property.value = PropValue::EditText(format!("{:.4}", text_position.x));
+                    }
+                    "text_y" => {
+                        property.value = PropValue::EditText(format!("{:.4}", text_position.y));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    sections
 }
 
 fn property(label: &str, field: &'static str, value: PropValue) -> Property {
@@ -3640,16 +3795,23 @@ fn dimension_geometry(
             );
         }
         Dimension::Ordinate(d) => {
-            add_segment(
-                &mut g.dim_lines,
-                lv(d.feature_location),
-                lv(d.definition_point),
-            );
-            add_segment(
-                &mut g.dim_lines,
-                lv(d.definition_point),
-                lv(d.leader_endpoint),
-            );
+            if !suppress.ext1 {
+                let fixed_length = params
+                    .dimfxlon
+                    .then_some(params.dimfxl.max(0.0) as f64);
+                let points = d.leader_polyline(
+                    (params.arrow_len * 2.0) as f64,
+                    params.dimexo as f64,
+                    fixed_length,
+                );
+                for pair in points.windows(2) {
+                    let start = lv(pair[0]);
+                    let end = lv(pair[1]);
+                    if (end - start).length_squared() > 1e-12 {
+                        add_segment(&mut g.ext_lines, start, end);
+                    }
+                }
+            }
         }
         Dimension::Arc(d) => {
             append_angular_dimension(
@@ -4061,7 +4223,6 @@ fn dimension_snap_pts(dim: &Dimension) -> Vec<(glam::DVec3, SnapHint)> {
             node(d.definition_point),
         ],
         Dimension::Ordinate(d) => vec![
-            node(d.definition_point),
             node(d.feature_location),
             node(d.leader_endpoint),
         ],
@@ -4271,6 +4432,8 @@ fn dimension_text_rotation(dim: &Dimension, style: Option<&DimStyle>) -> f64 {
     let outside = dimension_text_is_outside(dim, style);
     if base.text_rotation.abs() > 1e-9 {
         base.text_rotation
+    } else if matches!(dim, Dimension::Ordinate(_)) {
+        dimension_text_natural_rotation(dim)
     } else if base.horizontal_direction.abs() > 1e-9 {
         base.horizontal_direction
     } else if (outside && dimtoh) || (!outside && dimtih) {
@@ -4337,6 +4500,14 @@ fn dimension_text_natural_rotation(dim: &Dimension) -> f64 {
             let dx = d.second_point.x - d.first_point.x;
             let dy = d.second_point.y - d.first_point.y;
             dy.atan2(dx)
+        }
+        Dimension::Ordinate(d) => {
+            let axis_rotation = -d.base.horizontal_direction;
+            if d.is_ordinate_type_x {
+                axis_rotation + std::f64::consts::FRAC_PI_2
+            } else {
+                axis_rotation
+            }
         }
         _ => 0.0,
     };
@@ -5118,6 +5289,26 @@ fn dimension_text_pos_f64(
                 dimatfit,
                 dimtad,
             )
+        }
+        Dimension::Ordinate(d) => {
+            let (x_axis, y_axis) = d.local_axes();
+            let text_axis = if d.is_ordinate_type_x { y_axis } else { x_axis };
+            let perpendicular = if d.is_ordinate_type_x { x_axis } else { y_axis };
+            let delta = d.leader_endpoint - d.feature_location;
+            let direction_sign = if delta.dot(&text_axis) < 0.0 { -1.0 } else { 1.0 };
+            let perpendicular_sign = if delta.dot(&perpendicular) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            let vertical = match dimtad {
+                0 => dimtvp * text_height,
+                4 => -perp_off,
+                _ => perp_off,
+            };
+            d.leader_endpoint
+                + text_axis * (direction_sign * (text_w * 0.5 + dimgap))
+                + perpendicular * (perpendicular_sign * vertical)
         }
         _ => {
             // Non-linear (radius / diameter / angular / ordinate): lift the

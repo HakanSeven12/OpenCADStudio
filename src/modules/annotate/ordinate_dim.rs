@@ -32,9 +32,22 @@ enum Step {
     LeaderEndpoint { feature: DVec3 },
 }
 
+#[derive(Clone, Copy)]
+enum DatumMode {
+    Automatic,
+    X,
+    Y,
+}
+
 pub struct OrdinateDimCommand {
     step: Step,
     plane: WorkingPlane,
+    datum_mode: DatumMode,
+    text_override: Option<String>,
+    awaiting_text: bool,
+    mtext_override: bool,
+    text_angle: Option<f64>,
+    awaiting_angle: bool,
 }
 
 impl OrdinateDimCommand {
@@ -42,6 +55,12 @@ impl OrdinateDimCommand {
         Self {
             step: Step::FeaturePoint,
             plane: WorkingPlane::default(),
+            datum_mode: DatumMode::Automatic,
+            text_override: None,
+            awaiting_text: false,
+            mtext_override: false,
+            text_angle: None,
+            awaiting_angle: false,
         }
     }
 }
@@ -56,9 +75,23 @@ impl CadCommand for OrdinateDimCommand {
     }
 
     fn prompt(&self) -> String {
+        if self.awaiting_text {
+            return if self.mtext_override {
+                t!("DIMORDINATE  Enter formatted dimension text (blank = measured value):")
+                    .into_owned()
+            } else {
+                t!("DIMORDINATE  Enter dimension text (blank = measured value):").into_owned()
+            };
+        }
+        if self.awaiting_angle {
+            return t!("DIMORDINATE  Specify text angle (degrees):").into_owned();
+        }
         match self.step {
             Step::FeaturePoint => t!("DIMORDINATE  Specify feature location:").into_owned(),
-            Step::LeaderEndpoint { .. } => t!("DIMORDINATE  Specify leader endpoint:").into_owned(),
+            Step::LeaderEndpoint { .. } => t!(
+                "DIMORDINATE  Specify leader endpoint [Xdatum/Ydatum/Mtext/Text/Angle]:"
+            )
+            .into_owned(),
         }
     }
 
@@ -71,26 +104,105 @@ impl CadCommand for OrdinateDimCommand {
             Step::LeaderEndpoint { feature } => {
                 let feature = self.plane.to_local(feature);
                 let pt = self.plane.to_local(pt);
-                let is_x = is_x_type(feature, pt);
-                let elbow = ordinate_elbow(feature, pt, is_x);
+                let is_x = match self.datum_mode {
+                    DatumMode::Automatic => is_x_type(feature, pt),
+                    DatumMode::X => true,
+                    DatumMode::Y => false,
+                };
                 let mut dim = DimensionOrdinate::new(v3(feature), v3(pt), is_x);
-                // The leader is an orthogonal L from the feature to the
-                // endpoint; store its elbow as the definition point. Without it
-                // the renderer draws feature → (0,0,0) → endpoint, kinking the
-                // leader through the world origin. The old code also worked in
-                // the wrong (XZ) plane, dropping the Y coordinate. (#150)
-                dim.definition_point = v3(elbow);
-                dim.base.definition_point = v3(elbow);
-                CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Dimension(
-                    Dimension::Ordinate(dim),
-                )))
+                crate::entities::dimension::set_dimension_text_override(
+                    &mut dim.base,
+                    self.text_override.clone(),
+                );
+                if let Some(angle) = self.text_angle {
+                    dim.base.text_rotation = angle;
+                }
+                dim.refresh_measurement();
+                CmdResult::CommitDimension {
+                    entity: self.plane.place_entity(EntityType::Dimension(
+                        Dimension::Ordinate(dim),
+                    )),
+                    source: None,
+                }
             }
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.awaiting_text {
+            self.awaiting_text = false;
+            return CmdResult::NeedPoint;
+        }
+        if self.awaiting_angle {
+            self.awaiting_angle = false;
+            return CmdResult::NeedPoint;
+        }
         CmdResult::Cancel
     }
+
+    fn wants_text_input(&self) -> bool {
+        true
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        !self.awaiting_text && !self.awaiting_angle
+    }
+
+    fn wants_text_with_spaces(&self) -> bool {
+        self.awaiting_text
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.awaiting_text {
+            let value = text.trim();
+            self.text_override = if value.is_empty() || value == "<>" {
+                None
+            } else {
+                Some(value.to_string())
+            };
+            self.awaiting_text = false;
+            return Some(CmdResult::NeedPoint);
+        }
+        if self.awaiting_angle {
+            let value = text.trim();
+            self.text_angle = if value.is_empty() {
+                None
+            } else {
+                crate::entities::common::parse_typed_angle(value)
+            };
+            self.awaiting_angle = false;
+            return Some(CmdResult::NeedPoint);
+        }
+        if !matches!(self.step, Step::LeaderEndpoint { .. }) {
+            return None;
+        }
+        match text.trim().to_uppercase().as_str() {
+            "X" | "XDATUM" => {
+                self.datum_mode = DatumMode::X;
+                Some(CmdResult::NeedPoint)
+            }
+            "Y" | "YDATUM" => {
+                self.datum_mode = DatumMode::Y;
+                Some(CmdResult::NeedPoint)
+            }
+            "T" | "TEXT" => {
+                self.mtext_override = false;
+                self.awaiting_text = true;
+                Some(CmdResult::NeedPoint)
+            }
+            "M" | "MTEXT" => {
+                self.mtext_override = true;
+                self.awaiting_text = true;
+                Some(CmdResult::NeedPoint)
+            }
+            "A" | "ANGLE" => {
+                self.awaiting_angle = true;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
+        }
+    }
+
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         let feature = match self.step {
             Step::LeaderEndpoint { feature } => feature,
@@ -98,17 +210,24 @@ impl CadCommand for OrdinateDimCommand {
         };
         let feature = self.plane.to_local(feature);
         let pt = self.plane.to_local(pt);
-        let is_x = is_x_type(feature, pt);
-        let elbow = ordinate_elbow(feature, pt, is_x);
-        let feature = self.plane.to_world(feature);
-        let elbow = self.plane.to_world(elbow);
-        let pt = self.plane.to_world(pt);
+        let is_x = match self.datum_mode {
+            DatumMode::Automatic => is_x_type(feature, pt),
+            DatumMode::X => true,
+            DatumMode::Y => false,
+        };
+        let dim = DimensionOrdinate::new(v3(feature), v3(pt), is_x);
+        let points = dim.leader_polyline(0.44, 0.0, None);
         // Screen-only rubber band: downcast to f32 at the preview boundary.
-        Some(preview_wire(vec![
-            feature.as_vec3(),
-            elbow.as_vec3(),
-            pt.as_vec3(),
-        ]))
+        Some(preview_wire(
+            points
+                .into_iter()
+                .map(|point| {
+                    self.plane
+                        .to_world(DVec3::new(point.x, point.y, point.z))
+                        .as_vec3()
+                })
+                .collect(),
+        ))
     }
 }
 
@@ -122,17 +241,7 @@ fn v3(p: DVec3) -> Vector3 {
 fn is_x_type(feature: DVec3, leader: DVec3) -> bool {
     let dx = (leader.x - feature.x).abs();
     let dy = (leader.y - feature.y).abs();
-    dy >= dx
-}
-
-/// Orthogonal elbow of the ordinate leader: an X-datum runs along Y from the
-/// feature then jogs across in X; a Y-datum runs along X then jogs in Y.
-fn ordinate_elbow(feature: DVec3, leader: DVec3, is_x: bool) -> DVec3 {
-    if is_x {
-        DVec3::new(feature.x, leader.y, feature.z)
-    } else {
-        DVec3::new(leader.x, feature.y, feature.z)
-    }
+    dy > dx
 }
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {

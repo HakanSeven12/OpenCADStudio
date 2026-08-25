@@ -2364,9 +2364,15 @@ pub fn style_sections(
                 "dim_arrowhead_1",
                 "dim_arrow_size",
                 "dim_line_lineweight",
+                "dim_ext_line_lineweight",
                 "dim_line_1",
                 "dim_line_color",
                 "dim_linetype",
+                "dim_ext_linetype_1",
+                "dim_ext_line_1",
+                "dim_ext_line_color",
+                "dim_ext_line_ext",
+                "dim_ext_line_offset",
             ];
             lines
                 .props

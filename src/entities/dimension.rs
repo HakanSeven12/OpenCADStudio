@@ -1095,6 +1095,14 @@ fn dimension_line_grip_position(dim: &Dimension) -> Option<DVec3> {
 }
 
 fn above_dimension_text_position(dim: &Dimension) -> Option<DVec3> {
+    if let Some((vertex, start, end, radius)) = angular_dimension_frame(dim) {
+        let angle = (start + end) * 0.5;
+        let direction = DVec3::new(angle.cos() as f64, angle.sin() as f64, 0.0);
+        return Some(
+            DVec3::new(vertex.x as f64, vertex.y as f64, vertex.z as f64)
+                + direction * (radius as f64 + 1.0),
+        );
+    }
     let center = dimension_line_grip_position(dim)?;
     let (ax, ay) = match dim {
         Dimension::Linear(d) => (d.rotation.cos(), d.rotation.sin()),
@@ -2524,7 +2532,7 @@ use acadrust::{CadDocument, EntityType, Handle};
 
 use crate::scene::convert::tess_util::aci_to_rgba;
 use crate::scene::convert::tessellate::{
-    add_polyline, add_segment, append_arrow, arrow_from_block_with_deferred_hatch,
+    add_segment, append_arrow, arrow_from_block_with_deferred_hatch,
     normalized_or, ArrowKind, DimGeom,
 };
 use crate::scene::model::wire_model::{SnapHint, WireModel};
@@ -4056,6 +4064,43 @@ fn two_line_angle_frame(
     Some((vertex, start, end))
 }
 
+fn angular_dimension_frame(dim: &Dimension) -> Option<(Vec3, f32, f32, f32)> {
+    let (vertex, start, end, arc_point) = match dim {
+        Dimension::Angular2Ln(value) => {
+            let first_start = vec3_local(value.first_point);
+            let first_end = vec3_local(value.second_point);
+            let second_start = vec3_local(value.angle_vertex);
+            let second_end = vec3_local(value.definition_point);
+            let stored_arc = if value.dimension_arc.length_squared() > 1.0e-18 {
+                value.dimension_arc
+            } else {
+                value.base.definition_point
+            };
+            let arc_point = vec3_local(stored_arc);
+            let (vertex, start, end) = two_line_angle_frame(
+                first_start,
+                first_end,
+                second_start,
+                second_end,
+                arc_point,
+            )?;
+            (vertex, start, end, arc_point)
+        }
+        Dimension::Angular3Pt(value) => {
+            let vertex = vec3_local(value.angle_vertex);
+            let first = vec3_local(value.first_point);
+            let second = vec3_local(value.second_point);
+            let arc_point = vec3_local(value.definition_point);
+            let (vertex, start, end) =
+                two_line_angle_frame(vertex, first, vertex, second, arc_point)?;
+            (vertex, start, end, arc_point)
+        }
+        _ => return None,
+    };
+    let radius = vertex.distance(arc_point);
+    (radius > 1.0e-6).then_some((vertex, start, end, radius))
+}
+
 fn append_angular_dimension(
     g: &mut DimGeom,
     vertex: Vec3,
@@ -4121,11 +4166,22 @@ fn append_angular_dimension(
         delta = end - start;
     }
 
-    let arc_extension = if params.ticks && radius > 1.0e-6 {
-        params.dimdle / radius
+    let arc_length = radius * delta.abs();
+    let arrows_outside = if params.ticks || params.arrow_len <= 1.0e-6 {
+        false
+    } else if arc_length < params.arrow_len * 2.0 {
+        true
+    } else if arc_length < params.text_width + params.arrow_len * 2.0 {
+        match params.dimatfit {
+            0 | 1 => true,
+            2 => false,
+            _ => params.text_width <= arc_length,
+        }
     } else {
-        0.0
+        false
     };
+    let draw_inside_line = !arrows_outside || params.dimtofl;
+    let arc_extension = if params.ticks { params.dimdle / radius } else { 0.0 };
     let direction = delta.signum();
     let draw_start = start - direction * arc_extension;
     let draw_delta = delta + direction * arc_extension * 2.0;
@@ -4133,31 +4189,116 @@ fn append_angular_dimension(
     let mut arc_pts = Vec::with_capacity((steps + 1) as usize);
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
-        let a = draw_start + draw_delta * t;
-        arc_pts.push(vertex + Vec3::new(a.cos() * radius, a.sin() * radius, 0.0));
+        let angle = draw_start + draw_delta * t;
+        arc_pts.push(vertex + Vec3::new(angle.cos() * radius, angle.sin() * radius, 0.0));
     }
-    let midpoint = arc_pts.len() / 2;
-    if !suppress.dim1 && midpoint > 0 {
-        add_polyline(&mut g.dim_lines, &arc_pts[..=midpoint]);
-    }
-    if !suppress.dim2 && midpoint + 1 < arc_pts.len() {
-        add_polyline(&mut g.dim_lines, &arc_pts[midpoint..]);
+    if draw_inside_line {
+        for index in 0..steps as usize {
+            let t = (index as f32 + 0.5) / steps as f32;
+            if (t < 0.5 && suppress.dim1) || (t >= 0.5 && suppress.dim2) {
+                continue;
+            }
+            let a = arc_pts[index];
+            let b = arc_pts[index + 1];
+            let hidden_by_text = params.text_break.is_some_and(|(center, half_width, half_height)| {
+                let angle = draw_start + draw_delta * t;
+                let radial = Vec3::new(angle.cos(), angle.sin(), 0.0);
+                let tangent = Vec3::new(-angle.sin(), angle.cos(), 0.0);
+                let offset = center - (a + b) * 0.5;
+                offset.dot(tangent).abs() <= half_width
+                    && offset.dot(radial).abs() <= half_height
+            });
+            if !hidden_by_text {
+                add_segment(&mut g.dim_lines, a, b);
+            }
+        }
     }
 
-    if arc_pts.len() >= 2 {
+    if arrows_outside && !params.dimsoxd {
+        let stub_angle = (params.arrow_len * 2.0 / radius).min(std::f32::consts::FRAC_PI_2);
+        if !suppress.dim1 {
+            append_sampled_arc(
+                &mut g.dim_lines,
+                vertex,
+                radius,
+                start - direction * stub_angle,
+                start,
+            );
+        }
+        if !suppress.dim2 {
+            append_sampled_arc(
+                &mut g.dim_lines,
+                vertex,
+                radius,
+                end,
+                end + direction * stub_angle,
+            );
+        }
+    }
+
+    if let Some((text_center, half_width, _)) = params.text_break {
+        let text_angle = (text_center.y - vertex.y).atan2(text_center.x - vertex.x);
+        let into = (text_angle - start).rem_euclid(std::f32::consts::TAU);
+        if into > delta.abs() + 1.0e-6 {
+            let back_to_start = (start - text_angle).rem_euclid(std::f32::consts::TAU);
+            let forward_from_end = (text_angle - end).rem_euclid(std::f32::consts::TAU);
+            let text_gap = (half_width / radius).min(std::f32::consts::FRAC_PI_2);
+            if back_to_start <= forward_from_end && !suppress.dim1 {
+                append_sampled_arc(
+                    &mut g.dim_lines,
+                    vertex,
+                    radius,
+                    text_angle + text_gap,
+                    start,
+                );
+            } else if !suppress.dim2 {
+                append_sampled_arc(
+                    &mut g.dim_lines,
+                    vertex,
+                    radius,
+                    end,
+                    text_angle - text_gap,
+                );
+            }
+        }
+    }
+
+    let start_tangent = Vec3::new(-start.sin(), start.cos(), 0.0) * direction;
+    let end_tangent = Vec3::new(-end.sin(), end.cos(), 0.0) * direction;
+    let draw_arrows = !arrows_outside || !params.dimsoxd;
+    if draw_arrows && !suppress.dim1 {
         append_arrow(
             g,
-            arc_pts[0],
-            normalized_or(arc_pts[1] - arc_pts[0], Vec3::X),
+            arc_start,
+            if arrows_outside { -start_tangent } else { start_tangent },
             arrow1,
         );
-        let n = arc_pts.len();
+    }
+    if draw_arrows && !suppress.dim2 {
         append_arrow(
             g,
-            arc_pts[n - 1],
-            normalized_or(arc_pts[n - 2] - arc_pts[n - 1], Vec3::X),
+            arc_end,
+            if arrows_outside { end_tangent } else { -end_tangent },
             arrow2,
         );
+    }
+}
+
+fn append_sampled_arc(
+    lines: &mut Vec<[f32; 3]>,
+    vertex: Vec3,
+    radius: f32,
+    start: f32,
+    end: f32,
+) {
+    let steps = angular_arc_steps(end - start);
+    let mut previous = vertex + Vec3::new(start.cos() * radius, start.sin() * radius, 0.0);
+    for index in 1..=steps {
+        let t = index as f32 / steps as f32;
+        let angle = start + (end - start) * t;
+        let next = vertex + Vec3::new(angle.cos() * radius, angle.sin() * radius, 0.0);
+        add_segment(lines, previous, next);
+        previous = next;
     }
 }
 
@@ -4422,6 +4563,32 @@ fn dimension_text_is_outside(dim: &Dimension, style: Option<&DimStyle>) -> bool 
     let Some(style) = style else {
         return false;
     };
+    if let Some((vertex, start, end, radius)) = angular_dimension_frame(dim) {
+        if dim.base().text_user_positioned {
+            let text = vec3_local(dim.base().text_middle_point);
+            let angle = (text.y - vertex.y).atan2(text.x - vertex.x);
+            return (angle - start).rem_euclid(std::f32::consts::TAU)
+                > end - start + 1.0e-6;
+        }
+        if style.dimtix {
+            return false;
+        }
+        let scale = if style.dimscale > 1e-9 { style.dimscale } else { 1.0 };
+        let height = style.dimtxt * scale;
+        let gap = style.dimgap.abs() * scale;
+        let text_width = dimension_text_value(dim, Some(style))
+            .map(|value| value.chars().count() as f64 * height * 0.6 + gap * 2.0)
+            .unwrap_or(0.0);
+        let arrow = style.dimasz * scale;
+        let span = radius as f64 * (end - start).abs() as f64;
+        let insufficient = text_width + arrow * 2.0 > span;
+        return insufficient
+            && match style.dimatfit {
+                0 | 2 => true,
+                1 | 3 => text_width > span,
+                _ => text_width > span,
+            };
+    }
     let (first, second, axis) = match dim {
         Dimension::Linear(d) => (
             d.first_point,
@@ -4472,6 +4639,11 @@ fn dimension_text_natural_rotation(dim: &Dimension) -> f64 {
             let dy = d.second_point.y - d.first_point.y;
             dy.atan2(dx)
         }
+        Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => angular_dimension_frame(dim)
+            .map(|(_, start, end, _)| {
+                ((start + end) * 0.5 + std::f32::consts::FRAC_PI_2) as f64
+            })
+            .unwrap_or(0.0),
         _ => 0.0,
     };
     // Clamp to (-π/2, π/2] so text never appears upside-down.
@@ -5243,6 +5415,32 @@ fn dimension_text_pos_f64(
                 dimtix,
                 dimatfit,
                 dimtad,
+            )
+        }
+        Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => {
+            let Some((vertex, start, end, radius)) = angular_dimension_frame(dim) else {
+                return base.text_middle_point;
+            };
+            let span = radius as f64 * (end - start).abs() as f64;
+            let insufficient = text_w + arrow * 2.0 > span;
+            let move_outside = !dimtix
+                && insufficient
+                && match dimatfit {
+                    0 | 2 => true,
+                    1 | 3 => text_w > span,
+                    _ => text_w > span,
+                };
+            let angle = if move_outside {
+                end as f64 + (text_w * 0.5 + dimgap + arrow) / (radius as f64).max(1.0e-12)
+            } else {
+                ((start + end) * 0.5) as f64
+            };
+            let radial_offset = if dimtad == 4 { -perp_off } else { perp_off };
+            let text_radius = (radius as f64 + radial_offset).max(0.0);
+            Vector3::new(
+                vertex.x as f64 + angle.cos() * text_radius,
+                vertex.y as f64 + angle.sin() * text_radius,
+                vertex.z as f64,
             )
         }
         _ => {

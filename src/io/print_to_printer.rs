@@ -13,6 +13,22 @@ use crate::io::plot_style::PlotStyleTable;
 use crate::scene::model::hatch_model::HatchModel;
 use crate::io::pdf_export::PlotWire;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn temp_pdf_path(kind: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!(
+        "open_cad_studio_{kind}_{}_{stamp}_{id}.pdf",
+        std::process::id()
+    ))
+}
+
 /// Extra options for a print job. On CUPS (Linux/macOS) these map to `lp`
 /// flags / `-o` options. On Windows the generated PDF already carries render
 /// options. Windows queues repeated jobs when more than one copy is requested;
@@ -166,7 +182,7 @@ pub async fn print_wires_with(
     plot_style: Option<PlotStyleTable>,
     opts: PrintOptions,
 ) -> Result<String, String> {
-    let tmp_path = std::env::temp_dir().join("open_cad_studio_print.pdf");
+    let tmp_path = temp_pdf_path("print");
     pdf_export::export_pdf(
         &wires,
         &hatches,
@@ -228,10 +244,15 @@ fn dispatch_to_printer_opts(
 ) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
-        // Target a named printer via the "printto" verb; fall back to the
-        // default-printer "print" verb.
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{GetLastError, ERROR_NO_ASSOCIATION};
+        use windows_sys::Win32::UI::Shell::{
+            ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC,
+            SE_ERR_NOASSOC,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
         let wide = |s: &str| -> Vec<u16> { OsStr::new(s).encode_wide().chain(Some(0)).collect() };
         let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
         let (verb, params, label) = match opts.printer.as_deref() {
@@ -240,18 +261,28 @@ fn dispatch_to_printer_opts(
         };
         let params_ptr = params.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
         for _ in 0..opts.copies.max(1) {
-            let result = unsafe {
-                windows_sys::Win32::UI::Shell::ShellExecuteW(
-                    std::ptr::null_mut(),
-                    verb.as_ptr(),
-                    path_wide.as_ptr(),
-                    params_ptr,
-                    std::ptr::null(),
-                    windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE,
-                ) as usize
+            let mut info = SHELLEXECUTEINFOW {
+                cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+                fMask: SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC,
+                lpVerb: verb.as_ptr(),
+                lpFile: path_wide.as_ptr(),
+                lpParameters: params_ptr,
+                nShow: SW_HIDE,
+                ..Default::default()
             };
-            if result <= 32 {
-                return Err(format!("ShellExecute failed (code {result})"));
+            if unsafe { ShellExecuteExW(&mut info) } == 0 {
+                let shell_code = info.hInstApp as usize;
+                let code = if (1..=32).contains(&shell_code) {
+                    shell_code as u32
+                } else {
+                    unsafe { GetLastError() }
+                };
+                if code == SE_ERR_NOASSOC || code == ERROR_NO_ASSOCIATION {
+                    return Err(
+                        "Windows has no PDF application registered with Print support.".into(),
+                    );
+                }
+                return Err(format!("Windows print dispatch failed (code {code})"));
             }
         }
         Ok(label)

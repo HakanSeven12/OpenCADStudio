@@ -2963,13 +2963,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             };
             let plot_style = self.dialog_plot_style(&dialog);
             let options = self.plot_print_options(&dialog, Default::default());
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0);
-            let temp_path = std::env::temp_dir().join(format!(
-                "open_cad_studio_print_all_{stamp}.pdf"
-            ));
+            let temp_path = crate::io::print_to_printer::temp_pdf_path("print_all");
             self.save_config();
             self.close_active_modal();
             self.command_line.push_info(
@@ -2987,7 +2981,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 .map(|printer| format!("Sent {} layouts to printer: {printer}", pages.len()))
                 .map_err(|error| format!("Print failed: {error}"))
             };
-            self.run_print_all_work(dialog.background, work)
+            self.run_print_all_work(true, work)
         }
     }
 
@@ -4150,7 +4144,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             // Preview renders to a temp PDF and opens it — never a save dialog,
             // whatever the output target is.
             if preview {
-                let tmp = std::env::temp_dir().join("open_cad_studio_preview.pdf");
+                let tmp = crate::io::print_to_printer::temp_pdf_path("preview");
                 let render_options = Self::pdf_plot_options(&d, wgroup_splits);
                 let work = move || {
                     crate::io::pdf_export::export_pdf(
@@ -4166,7 +4160,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 // Tested clipped export (opens a save dialog).
                 return Task::done(Message::PlotWindowExport);
             }
-            let tmp = std::env::temp_dir().join("open_cad_studio_print.pdf");
+            let tmp = crate::io::print_to_printer::temp_pdf_path("print");
             let render_options = Self::pdf_plot_options(&d, wgroup_splits);
             let opts = self.plot_print_options(&d, wgroup_splits);
             let work = move || {
@@ -4178,14 +4172,14 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     .map(|printer| format!("Sent to printer: {printer}"))
                     .map_err(|e| format!("Print failed: {e}"))
             };
-            return self.run_plot_work(d.background, false, work);
+            return self.run_plot_work(true, false, work);
         }
 
         let (wires, hatches, wipeouts, group_splits, page_w, page_h, ox, oy, rotation, scale, clip) =
             self.layout_plot_params();
 
         if preview {
-            let tmp = std::env::temp_dir().join("open_cad_studio_preview.pdf");
+            let tmp = crate::io::print_to_printer::temp_pdf_path("preview");
             let render_options = Self::pdf_plot_options(&d, group_splits);
             let work = move || {
                 crate::io::pdf_export::export_pdf(
@@ -4224,7 +4218,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 .map(|printer| format!("Sent to printer: {printer}"))
                 .map_err(|error| format!("Print failed: {error}"))
         };
-        self.run_plot_work(d.background, false, work)
+        self.run_plot_work(true, false, work)
     }
 
     /// Build a [`PrintOptions`](crate::io::print_to_printer::PrintOptions) from

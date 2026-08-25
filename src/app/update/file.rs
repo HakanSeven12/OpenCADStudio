@@ -1187,34 +1187,12 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 self.tabs[i].scene.material_base_dir =
                     path.parent().map(std::path::Path::to_path_buf);
                 self.tabs[i].scene.document = doc;
-                // DWG stores CLAYER as a layer handle. Resolve that handle back to
-                // the layer name after opening so the per-tab creation state and
-                // header name stay in sync. DXF already provides current_layer_name,
-                // so keep it as a fallback.
-                let current_layer = {
-                    let doc = &self.tabs[i].scene.document;
-
-                    doc.layers
-                        .iter()
-                        .find(|layer| layer.handle == doc.header.current_layer_handle)
-                        .map(|layer| (layer.name.clone(), layer.handle))
-                        .or_else(|| {
-                            doc.layers
-                                .get(&doc.header.current_layer_name)
-                                .map(|layer| (layer.name.clone(), layer.handle))
-                        })
-                        .or_else(|| {
-                            doc.layers
-                                .get("0")
-                                .map(|layer| (layer.name.clone(), layer.handle))
-                        })
-                };
-
-                if let Some((name, handle)) = current_layer {
-                    self.tabs[i].scene.document.header.current_layer_name = name.clone();
-                    self.tabs[i].scene.document.header.current_layer_handle = handle;
-                    self.tabs[i].active_layer = name;
-                }
+                self.tabs[i].active_layer = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .current_layer_name
+                    .clone();
                 // A file saved without the built-in Standard styles (foreign
                 // or damaged) gets them re-seeded so nothing dangles (#366).
                 crate::app::style_ops::ensure_standard_styles(

@@ -1657,14 +1657,9 @@ pub struct Scene {
     pub bg_color: [f32; 4],
     /// Custom paper-space background fill color for Wipeout entities.
     pub paper_bg_color: [f32; 4],
-    /// Largest local-space coordinate expected from real geometry, derived from
-    /// EXTMIN/EXTMAX (10× safety margin). Used by fit_all() to ignore garbage
-    /// entity coordinates (origin-stuck entities, bad Ray/XLine direction vectors).
+    /// Dense model-space cluster half-span used for viewport recovery.
     pub local_extent_max: f32,
-    /// Robust centre (median of entity centroids) of the dense model-space
-    /// cluster. Used together with `local_extent_max` to frame a viewport whose
-    /// saved view is missing — aiming at the raw extents centre would land in
-    /// the empty gap when a drawing has a second, far cluster.
+    /// Dense model-space cluster median used for viewport recovery.
     pub local_center: [f64; 2],
     /// Current annotation scale (CANNOSCALE equivalent).
     /// Multiplier applied to Text/MText/Dimension sizes during tessellation.

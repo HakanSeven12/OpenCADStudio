@@ -1806,10 +1806,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Ursprung der ersten Maßhilfslinie angeben oder Enter drücken, um ein Objekt auszuwählen:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Ursprung der zweiten Maßhilfslinie angeben:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Textwinkel angeben (Grad):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Bemaßungstext eingeben (leer = Messwert):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Formatierten Bemaßungstext eingeben (leer = Messwert):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Bogen, Kreis oder Linie wählen oder Winkelspitze angeben:
+    .dimangular-select-second-line = DIMANGULAR Zweite Linie wählen:
     .dimangular-specify-angle-vertex = DIMANGULAR Winkelspitze angeben:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Bemaßungsbogenlage angeben [Mtext/Text/Winkel/Quadrant]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Bemaßungsbogenlage angeben:
     .dimangular-specify-first-extension-line-point = DIMANGULAR Geben Sie den ersten Verlängerungslinienpunkt an:
+    .dimangular-specify-quadrant = DIMANGULAR Quadrant angeben:
     .dimangular-specify-second-extension-line-point = DIMANGULAR Zweiter Verlängerungslinienpunkt angeben:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Zweiten Punkt für Textwinkel angeben:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Textwinkel oder ersten Punkt angeben:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Keine Basisdimension gefunden.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Ursprung der zweiten Maßhilfslinie angeben (Eingabe zum Beenden):
     .dimbreak-select-dimension-to-break = DIMBREAK Bemaßung auswählen, um zu brechen:

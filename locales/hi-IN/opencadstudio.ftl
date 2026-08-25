@@ -1794,10 +1794,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED पहली एक्सटेंशन रेखा का मूल निर्दिष्ट करें या ऑब्जेक्ट चुनने के लिए Enter दबाएँ:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED दूसरी एक्सटेंशन रेखा का मूल निर्दिष्ट करें:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED पाठ कोण निर्दिष्ट करें (डिग्री):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR आयाम टेक्स्ट दर्ज करें (खाली = मापा मान):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR स्वरूपित आयाम टेक्स्ट दर्ज करें (खाली = मापा मान):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR चाप, वृत्त या रेखा चुनें, या कोण का शीर्ष निर्दिष्ट करें:
+    .dimangular-select-second-line = DIMANGULAR दूसरी रेखा चुनें:
     .dimangular-specify-angle-vertex = DIMANGULAR कोण वर्टेक्स निर्दिष्ट करें:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR आयाम आर्क स्थान निर्दिष्ट करें [Mtext/टेक्स्ट/कोण/चतुर्थांश]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR आयाम आर्क स्थान निर्दिष्ट करें:
     .dimangular-specify-first-extension-line-point = DIMANGULAR पहली एक्सटेंशन लाइन बिंदु निर्दिष्ट करें:
+    .dimangular-specify-quadrant = DIMANGULAR चतुर्थांश निर्दिष्ट करें:
     .dimangular-specify-second-extension-line-point = DIMANGULAR दूसरी एक्सटेंशन लाइन बिंदु निर्दिष्ट करें:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR टेक्स्ट कोण के लिए दूसरा बिंदु निर्दिष्ट करें:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR टेक्स्ट कोण या पहला बिंदु निर्दिष्ट करें:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE कोई आधार आयाम नहीं मिला। पहले आयाम दें।
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE एक दूसरी विस्तार लाइन मूल निर्दिष्ट करें (बाहर निकलने के लिए बेहतर):
     .dimbreak-select-dimension-to-break = DIMBREAK तोड़ने के लिए आयाम का चयन करें:

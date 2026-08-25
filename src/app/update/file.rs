@@ -492,6 +492,13 @@ impl OpenCADStudio {
         self.reset_modal_geometry();
         let i = self.active_tab;
         if let Some(mut cmd) = self.tabs[i].suspended_cmd.take() {
+            if committed {
+                if let Some(value) = self.pending_command_editor_text.take() {
+                    cmd.on_editor_text(value);
+                }
+            } else {
+                self.pending_command_editor_text = None;
+            }
             let res = cmd.on_editor_closed(committed);
             self.tabs[i].active_cmd = Some(cmd);
             self.apply_cmd_result(res)

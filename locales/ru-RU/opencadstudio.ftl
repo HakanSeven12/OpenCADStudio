@@ -1809,10 +1809,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Укажите начало первой выносной линии или нажмите Enter для выбора объекта:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Укажите начало второй выносной линии:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Укажите угол текста (градусы):
-    .dimangular-specify-angle-vertex = DIMANGULAR Укажите угол вершины:
-    .dimangular-specify-dimension-arc-location = DIMANGULAR Укажите местоположение дуги размерности:
-    .dimangular-specify-first-extension-line-point = DIMANGULAR Укажите первую точку расширения:
-    .dimangular-specify-second-extension-line-point = DIMANGULAR Укажите вторую точку расширения:
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Введите текст размера (пусто = измеренное значение):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Введите форматированный текст размера (пусто = измеренное значение):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Выберите дугу, окружность, линию или укажите вершину угла:
+    .dimangular-select-second-line = DIMANGULAR Выберите вторую линию:
+    .dimangular-specify-angle-vertex = DIMANGULAR Укажите вершину угла:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Укажите положение размерной дуги [Mtext/Текст/Угол/Квадрант]:
+    .dimangular-specify-dimension-arc-location = DIMANGULAR Укажите положение размерной дуги:
+    .dimangular-specify-first-extension-line-point = DIMANGULAR Укажите первую точку выносной линии:
+    .dimangular-specify-quadrant = DIMANGULAR Укажите квадрант:
+    .dimangular-specify-second-extension-line-point = DIMANGULAR Укажите вторую точку выносной линии:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Укажите вторую точку угла текста:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Укажите угол текста или первую точку:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Базовый размер не найден. Сначала создайте размер.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Укажите происхождение второй линии расширения (Введите для выхода):
     .dimbreak-select-dimension-to-break = DIMBREAK Выберите размер для разбиения:

@@ -1806,10 +1806,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Especifique el origen de la primera línea de referencia o pulse Enter para seleccionar un objeto:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Especifique el origen de la segunda línea de referencia:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Especifique el ángulo del texto (grados):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Introduzca el texto de cota (vacío = valor medido):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR  Introduzca el texto de cota con formato (vacío = valor medido):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR  Seleccione arco, círculo, línea o especifique un vértice de ángulo:
+    .dimangular-select-second-line = DIMANGULAR  Seleccione la segunda línea:
     .dimangular-specify-angle-vertex = DIMANGULAR  Especifique el vértice del ángulo:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR  Especifique la ubicación del arco de cota [Mtext/Texto/Ángulo/Cuadrante]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Especifique la ubicación del arco de cota:
     .dimangular-specify-first-extension-line-point = DIMANGULAR  Especifique un punto de la primera línea de referencia:
+    .dimangular-specify-quadrant = DIMANGULAR  Especifique el cuadrante:
     .dimangular-specify-second-extension-line-point = DIMANGULAR  Especifique un punto de la segunda línea de referencia:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR  Especifique el segundo punto para el ángulo del texto:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR  Especifique el ángulo del texto o el primer punto:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE  No se encontró ninguna cota base. Coloque primero una cota.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE  Especifique el origen de una segunda línea de referencia (Enter para salir):
     .dimbreak-select-dimension-to-break = DIMBREAK  Seleccione la cota que desea partir:

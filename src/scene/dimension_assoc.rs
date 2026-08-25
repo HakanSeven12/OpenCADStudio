@@ -6,9 +6,11 @@ use acadrust::objects::{
 use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 use cadkernel::geom2d::{
-    closest_point, Circle as KernelCircle, Curve as KernelCurve,
+    closest_point, BulgeArc, Circle as KernelCircle, Curve as KernelCurve,
 };
 use std::f64::consts::TAU;
+
+use crate::command::DimensionAssociationSource;
 
 use super::{ChangeKind, Scene};
 
@@ -34,10 +36,66 @@ fn circle_curve(circle: &acadrust::entities::Circle) -> KernelCurve {
     })
 }
 
+fn bulge_center_world(
+    first: [f64; 2],
+    second: [f64; 2],
+    bulge: f64,
+    elevation: f64,
+    normal: Vector3,
+) -> Option<Vector3> {
+    let center = BulgeArc::from_bulge(first, second, bulge)?.center;
+    Some(ocs_point(center[0], center[1], elevation, normal))
+}
+
+fn next_segment_index(count: usize, closed: bool, segment: usize) -> Option<usize> {
+    if segment + 1 < count {
+        Some(segment + 1)
+    } else if closed && segment < count {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+fn polyline_arc_center(entity: &EntityType, segment: usize) -> Option<Vector3> {
+    match entity {
+        EntityType::LwPolyline(polyline) => {
+            let count = polyline.vertices.len();
+            let first = *polyline.vertices.get(segment)?;
+            let second = *polyline
+                .vertices
+                .get(next_segment_index(count, polyline.is_closed, segment)?)?;
+            bulge_center_world(
+                [first.location.x, first.location.y],
+                [second.location.x, second.location.y],
+                first.bulge,
+                polyline.elevation,
+                polyline.normal,
+            )
+        }
+        EntityType::Polyline2D(polyline) => {
+            let count = polyline.vertices.len();
+            let first = polyline.vertices.get(segment)?;
+            let second = polyline
+                .vertices
+                .get(next_segment_index(count, polyline.is_closed(), segment)?)?;
+            bulge_center_world(
+                [first.location.x, first.location.y],
+                [second.location.x, second.location.y],
+                first.bulge,
+                polyline.elevation,
+                polyline.normal,
+            )
+        }
+        _ => None,
+    }
+}
+
 fn source_points(entity: &EntityType) -> Vec<Vector3> {
     match entity {
         EntityType::Line(line) => vec![line.start, line.end],
         EntityType::Arc(arc) => vec![arc.start_point_wcs(), arc.end_point_wcs()],
+        EntityType::Circle(_) => Vec::new(),
         EntityType::LwPolyline(polyline) => polyline
             .vertices
             .iter()
@@ -66,10 +124,38 @@ fn source_points(entity: &EntityType) -> Vec<Vector3> {
     }
 }
 
-fn source_marker(entity: &EntityType, point: Vector3) -> Option<i32> {
-    if matches!(entity, EntityType::Circle(_)) {
-        return Some(0);
+fn source_reference(entity: &EntityType, point: Vector3) -> Option<(i32, f64)> {
+    let curve_parameter = match entity {
+        EntityType::Circle(circle) => {
+            let center = circle.center_wcs();
+            if point_distance_squared(center, point) <= 1e-16 {
+                return Some((-3, 0.0));
+            }
+            let (axis_x, axis_y) = circle.axes_wcs();
+            let offset = point - center;
+            Some(offset.dot(&axis_y).atan2(offset.dot(&axis_x)))
+        }
+        EntityType::Arc(arc) => {
+            let local = crate::scene::view::transform::wcs_point_to_ocs(
+                (point.x, point.y, point.z),
+                (arc.normal.x, arc.normal.y, arc.normal.z),
+            );
+            let dx = local.0 - arc.center.x;
+            let dy = local.1 - arc.center.y;
+            if dx * dx + dy * dy <= 1e-16 {
+                return Some((-3, 0.0));
+            }
+            Some(dy.atan2(dx))
+        }
+        _ => None,
+    };
+    if let Some(parameter) = curve_parameter {
+        return Some((-2, parameter));
     }
+    source_marker(entity, point).map(|marker| (marker, 0.0))
+}
+
+fn source_marker(entity: &EntityType, point: Vector3) -> Option<i32> {
     source_points(entity)
         .into_iter()
         .enumerate()
@@ -83,6 +169,26 @@ fn source_marker(entity: &EntityType, point: Vector3) -> Option<i32> {
 fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Option<Vector3> {
     let source = *reference.xrefs.first()?;
     let entity = scene.document.get_entity(source)?;
+    if reference.main_gs_marker == -4 {
+        let segment = reference.osnap_distance.round().max(0.0) as usize;
+        return polyline_arc_center(entity, segment);
+    }
+    if reference.main_gs_marker == -3 {
+        return match entity {
+            EntityType::Circle(circle) => Some(circle.center_wcs()),
+            EntityType::Arc(arc) => Some(arc.center_wcs()),
+            _ => None,
+        };
+    }
+    if reference.main_gs_marker == -2 {
+        return match entity {
+            EntityType::Circle(circle) => {
+                Some(circle.point_at_angle_wcs(reference.osnap_distance))
+            }
+            EntityType::Arc(arc) => Some(arc.point_at_angle_wcs(reference.osnap_distance)),
+            _ => None,
+        };
+    }
     if let EntityType::Circle(circle) = entity {
         let stored = crate::scene::view::transform::wcs_point_to_ocs(
             (
@@ -115,7 +221,7 @@ fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Opti
         .copied()
 }
 
-fn dimension_points(dimension: &Dimension) -> Option<[Vector3; 2]> {
+fn dimension_inference_points(dimension: &Dimension) -> Option<[Vector3; 2]> {
     match dimension {
         Dimension::Linear(linear) => Some([linear.first_point, linear.second_point]),
         Dimension::Aligned(aligned) => Some([aligned.first_point, aligned.second_point]),
@@ -139,15 +245,23 @@ fn source_distance_squared(entity: &EntityType, point: Vector3) -> Option<f64> {
         .min_by(f64::total_cmp)
 }
 
-fn source_parameter(entity: &EntityType, point: Vector3) -> f64 {
-    let EntityType::Circle(circle) = entity else {
-        return 0.0;
-    };
-    let point = crate::scene::view::transform::wcs_point_to_ocs(
-        (point.x, point.y, point.z),
-        (circle.normal.x, circle.normal.y, circle.normal.z),
-    );
-    circle_curve(circle).parameter_at([point.0, point.1]) * TAU
+fn dimension_reference_points(dimension: &Dimension) -> Vec<Vector3> {
+    match dimension {
+        Dimension::Linear(linear) => vec![linear.first_point, linear.second_point],
+        Dimension::Aligned(aligned) => vec![aligned.first_point, aligned.second_point],
+        Dimension::Angular3Pt(angular) => vec![
+            angular.angle_vertex,
+            angular.first_point,
+            angular.second_point,
+        ],
+        Dimension::Angular2Ln(angular) => vec![
+            angular.first_point,
+            angular.second_point,
+            angular.angle_vertex,
+            angular.definition_point,
+        ],
+        _ => Vec::new(),
+    }
 }
 
 pub(crate) fn dimension_is_associative(
@@ -176,31 +290,50 @@ impl Scene {
     pub(crate) fn attach_dimension_association(
         &mut self,
         dimension: Handle,
-        sources: [Option<Handle>; 2],
+        sources: Vec<Option<Handle>>,
     ) {
-        let Some(EntityType::Dimension(entity)) = self.document.get_entity(dimension)
+        self.attach_dimension_association_sources(
+            dimension,
+            sources
+                .into_iter()
+                .map(|source| source.map(DimensionAssociationSource::inferred))
+                .collect(),
+        );
+    }
+
+    pub(crate) fn attach_dimension_association_sources(
+        &mut self,
+        dimension: Handle,
+        sources: Vec<Option<DimensionAssociationSource>>,
+    ) {
+        let Some(EntityType::Dimension(dimension_entity)) =
+            self.document.get_entity(dimension)
         else {
             return;
         };
-        let Some(source_data) = dimension_points(entity) else {
+        let source_data = dimension_reference_points(dimension_entity);
+        if source_data.is_empty() {
             return;
-        };
-        let resolved: [Option<(Handle, i32, f64, u8)>; 2] = std::array::from_fn(|index| {
-            let source = sources[index]?;
-            let entity = self.document.get_entity(source)?;
-            source_marker(entity, source_data[index]).map(|marker| {
-                (
-                    source,
-                    marker,
-                    source_parameter(entity, source_data[index]),
-                    if matches!(entity, EntityType::Circle(_)) {
-                        10
-                    } else {
-                        1
-                    },
-                )
+        }
+        let resolved: Vec<Option<(Handle, i32, f64, u8)>> = source_data
+            .iter()
+            .take(4)
+            .enumerate()
+            .map(|(index, point)| {
+                let source = sources.get(index).copied().flatten()?;
+                let entity = self.document.get_entity(source.handle)?;
+                let (marker, parameter) = match source.marker {
+                    Some(marker) => (marker, source.parameter),
+                    None => source_reference(entity, *point)?,
+                };
+                let osnap_type = if matches!(entity, EntityType::Circle(_)) {
+                    10
+                } else {
+                    1
+                };
+                Some((source.handle, marker, parameter, osnap_type))
             })
-        });
+            .collect();
         if resolved.iter().all(Option::is_none) {
             return;
         }
@@ -223,6 +356,9 @@ impl Scene {
             std::array::from_fn(|_| Vec::new());
         let mut associativity = 0;
         for (index, resolved) in resolved.into_iter().enumerate() {
+            if index >= references.len() {
+                break;
+            }
             if let Some((source, marker, parameter, osnap_type)) = resolved {
                 associativity |= 1 << index;
                 references[index].push(reference(
@@ -250,7 +386,7 @@ impl Scene {
             .insert(association_handle, ObjectType::Associative(object));
 
         let mut reactor_targets = vec![dimension];
-        reactor_targets.extend(sources.into_iter().flatten());
+        reactor_targets.extend(sources.into_iter().flatten().map(|source| source.handle));
         reactor_targets.sort_by_key(|handle| handle.value());
         reactor_targets.dedup();
         for handle in reactor_targets {
@@ -270,7 +406,7 @@ impl Scene {
         else {
             return [None, None];
         };
-        let Some(points) = dimension_points(entity) else {
+        let Some(points) = dimension_inference_points(entity) else {
             return [None, None];
         };
         points.map(|point| {
@@ -318,13 +454,12 @@ impl Scene {
 
         let mut refreshed = Vec::new();
         for association in associations {
-            let first = association.references[0]
-                .first()
-                .and_then(|reference| resolve_reference(self, reference));
-            let second = association.references[1]
-                .first()
-                .and_then(|reference| resolve_reference(self, reference));
-            if first.is_none() && second.is_none() {
+            let resolved: [Option<Vector3>; 4] = std::array::from_fn(|index| {
+                association.references[index]
+                    .first()
+                    .and_then(|reference| resolve_reference(self, reference))
+            });
+            if resolved.iter().all(Option::is_none) {
                 continue;
             }
             let Some(EntityType::Dimension(dimension)) =
@@ -334,27 +469,53 @@ impl Scene {
             };
             match dimension {
                 Dimension::Linear(linear) => {
-                    if let Some(first) = first {
-                        linear.first_point = first;
+                    if let Some(point) = resolved[0] {
+                        linear.first_point = point;
                     }
-                    if let Some(second) = second {
-                        linear.second_point = second;
+                    if let Some(point) = resolved[1] {
+                        linear.second_point = point;
                     }
-                    linear.base.actual_measurement = linear.measurement();
                     linear.base.definition_point = linear.definition_point;
                 }
                 Dimension::Aligned(aligned) => {
-                    if let Some(first) = first {
-                        aligned.first_point = first;
+                    if let Some(point) = resolved[0] {
+                        aligned.first_point = point;
                     }
-                    if let Some(second) = second {
-                        aligned.second_point = second;
+                    if let Some(point) = resolved[1] {
+                        aligned.second_point = point;
                     }
-                    aligned.base.actual_measurement = aligned.measurement();
                     aligned.base.definition_point = aligned.definition_point;
+                }
+                Dimension::Angular3Pt(angular) => {
+                    if let Some(point) = resolved[0] {
+                        angular.angle_vertex = point;
+                    }
+                    if let Some(point) = resolved[1] {
+                        angular.first_point = point;
+                    }
+                    if let Some(point) = resolved[2] {
+                        angular.second_point = point;
+                    }
+                    angular.base.definition_point = angular.definition_point;
+                }
+                Dimension::Angular2Ln(angular) => {
+                    if let Some(point) = resolved[0] {
+                        angular.first_point = point;
+                    }
+                    if let Some(point) = resolved[1] {
+                        angular.second_point = point;
+                    }
+                    if let Some(point) = resolved[2] {
+                        angular.angle_vertex = point;
+                    }
+                    if let Some(point) = resolved[3] {
+                        angular.definition_point = point;
+                    }
+                    angular.base.definition_point = angular.definition_point;
                 }
                 _ => continue,
             }
+            dimension.base_mut().actual_measurement = dimension.measurement();
             refreshed.push((association.dimension, ChangeKind::Modified));
         }
         refreshed

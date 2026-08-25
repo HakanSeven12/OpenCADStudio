@@ -1805,10 +1805,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Adja meg az első segédvonal kezdőpontját, vagy nyomja meg az Entert egy objektum kiválasztásához:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Adja meg a második segédvonal kezdőpontját:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Adja meg a szöveg szögét (fokban):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Adja meg a méretszöveget (üres = mért érték):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Adja meg a formázott méretszöveget (üres = mért érték):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Válasszon ívet, kört vagy vonalat, vagy adjon meg egy szögcsúcsot:
+    .dimangular-select-second-line = DIMANGULAR Válassza ki a második vonalat:
     .dimangular-specify-angle-vertex = DIMANGULAR Szögcsúcs megadása:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Adja meg a méretív helyét [Mtext/Szöveg/Szög/Kvadráns]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR A méretív helyének megadása:
     .dimangular-specify-first-extension-line-point = DIMANGULAR Adja meg az első hosszabbító vonalpontot:
+    .dimangular-specify-quadrant = DIMANGULAR Adja meg a kvadránst:
     .dimangular-specify-second-extension-line-point = DIMANGULAR Adja meg a második kiterjesztési vonalpontot:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Adja meg a szövegszög második pontját:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Adja meg a szövegszöget vagy az első pontot:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Nem található alapméret. Először helyezzen el egy méretet.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Adjon meg egy második mellékvonal kezdőpontját (Enter a kilépéshez):
     .dimbreak-select-dimension-to-break = DIMBREAK Válassza ki a törni kívánt méretet:

@@ -1836,10 +1836,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Specify first extension line origin or press Enter to select object:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Specify second extension line origin:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Specify text angle (degrees):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Enter dimension text (blank = measured value):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR  Enter formatted dimension text (blank = measured value):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR  Select arc, circle, line, or specify an angle vertex:
+    .dimangular-select-second-line = DIMANGULAR  Select second line:
     .dimangular-specify-angle-vertex = DIMANGULAR  Specify angle vertex:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR  Specify dimension arc location [Mtext/Text/Angle/Quadrant]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Specify dimension arc location:
     .dimangular-specify-first-extension-line-point = DIMANGULAR  Specify first extension line point:
+    .dimangular-specify-quadrant = DIMANGULAR  Specify quadrant:
     .dimangular-specify-second-extension-line-point = DIMANGULAR  Specify second extension line point:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR  Specify second point for text angle:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR  Specify text angle or first point:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE  No base dimension found. Place a dimension first.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE  Specify a second extension line origin (Enter to exit):
     .dimbreak-select-dimension-to-break = DIMBREAK  Select dimension to break:

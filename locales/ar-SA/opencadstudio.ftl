@@ -1818,10 +1818,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED  حدد أصل خط الامتداد الأول أو اضغط Enter لتحديد كائن:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  حدد أصل خط الامتداد الثاني:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  حدد زاوية النص (بالدرجات):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  أدخل نص البُعد (فارغ = القيمة المقاسة):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR  أدخل نص البُعد المنسق (فارغ = القيمة المقاسة):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR  حدد قوسًا أو دائرة أو خطًا، أو حدد رأس زاوية:
+    .dimangular-select-second-line = DIMANGULAR  حدد الخط الثاني:
     .dimangular-specify-angle-vertex = DIMANGULAR  حدد رأس الزاوية:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR  حدد موقع قوس البُعد [Mtext/نص/زاوية/ربع]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  حدد موقع قوس البُعد:
     .dimangular-specify-first-extension-line-point = DIMANGULAR  حدد نقطة خط الامتداد الأول:
+    .dimangular-specify-quadrant = DIMANGULAR  حدد الربع:
     .dimangular-specify-second-extension-line-point = DIMANGULAR  حدد نقطة خط الامتداد الثاني:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR  حدد النقطة الثانية لزاوية النص:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR  حدد زاوية النص أو النقطة الأولى:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE  لم يُعثر على بُعد أساسي. ضع بُعدًا أولًا.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE  حدد أصل خط امتداد ثانٍ (Enter للخروج):
     .dimbreak-select-dimension-to-break = DIMBREAK  حدد البُعد المراد قطعه:

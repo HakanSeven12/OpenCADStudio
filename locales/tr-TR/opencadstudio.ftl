@@ -1816,10 +1816,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Birinci uzatma çizgisinin başlangıcını belirtin veya nesne seçmek için Enter'a basın:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  İkinci uzatma çizgisinin başlangıcını belirtin:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Metin açısını belirtin (derece):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Ölçü metnini girin (boş = ölçülen değer):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR  Biçimlendirilmiş ölçü metnini girin (boş = ölçülen değer):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR  Yay, çember veya çizgi seçin ya da açı köşesi belirtin:
+    .dimangular-select-second-line = DIMANGULAR  İkinci çizgiyi seçin:
     .dimangular-specify-angle-vertex = DIMANGULAR  Açı köşesini belirtin:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR  Ölçü yayının konumunu belirtin [Mtext/Metin/Açı/Kadran]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Ölçü yayının konumunu belirtin:
     .dimangular-specify-first-extension-line-point = DIMANGULAR  Birinci uzatma çizgisi noktasını belirtin:
+    .dimangular-specify-quadrant = DIMANGULAR  Kadranı belirtin:
     .dimangular-specify-second-extension-line-point = DIMANGULAR  İkinci uzatma çizgisi noktasını belirtin:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR  Metin açısının ikinci noktasını belirtin:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR  Metin açısını veya ilk noktayı belirtin:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE  Temel ölçü bulunamadı. Önce bir ölçü yerleştirin.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE  İkinci uzatma çizgisinin başlangıcını belirtin (çıkmak için Enter):
     .dimbreak-select-dimension-to-break = DIMBREAK  Kesilecek ölçüyü seçin:

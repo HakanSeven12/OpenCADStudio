@@ -169,6 +169,38 @@ pub struct SelectionEntity {
     pub surface_area: Option<f64>,
 }
 
+/// Association source with an optional sub-entity marker.
+#[derive(Clone, Copy, Debug)]
+pub struct DimensionAssociationSource {
+    pub handle: Handle,
+    pub marker: Option<i32>,
+    pub parameter: f64,
+}
+
+impl DimensionAssociationSource {
+    pub const fn inferred(handle: Handle) -> Self {
+        Self {
+            handle,
+            marker: None,
+            parameter: 0.0,
+        }
+    }
+
+    pub const fn explicit(handle: Handle, marker: i32, parameter: f64) -> Self {
+        Self {
+            handle,
+            marker: Some(marker),
+            parameter,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum DimensionAssociationInput {
+    Infer(Option<Handle>),
+    Explicit(Vec<Option<DimensionAssociationSource>>),
+}
+
 #[derive(Clone)]
 pub enum AreaPreviewSource {
     Handles(Vec<Handle>),
@@ -1212,11 +1244,10 @@ pub enum CmdResult {
     CommitEntitiesAndExit(Vec<EntityType>),
     /// Commit an acadrust entity to the document and end the command.
     CommitAndExit(EntityType),
-    /// Commit a linear/aligned dimension using the drawing's association mode.
-    /// Object-selection workflows may retain their source.
+    /// Commit a dimension using the drawing's association mode.
     CommitDimension {
         entity: EntityType,
-        source: Option<Handle>,
+        association: DimensionAssociationInput,
     },
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded
@@ -1394,6 +1425,12 @@ pub enum CmdResult {
     OpenMTextEditor {
         pos: DVec3,
         handle: Option<Handle>,
+        initial: String,
+        height: f64,
+    },
+    /// Collect rich text without creating an MText entity.
+    SuspendForMTextInput {
+        pos: DVec3,
         initial: String,
         height: f64,
     },
@@ -1778,6 +1815,11 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// Accept typed coordinates while object picking.
+    fn entity_pick_accepts_points(&self) -> bool {
+        false
+    }
+
     /// Include filled hatch / DXF SOLID regions in the entity hit-test.
     ///
     /// Most entity-pick commands operate on curve geometry and intentionally
@@ -1805,6 +1847,9 @@ pub trait CadCommand: Send {
     fn on_editor_closed(&mut self, _committed: bool) -> CmdResult {
         CmdResult::Cancel
     }
+
+    /// Resume the command with collected rich text.
+    fn on_editor_text(&mut self, _value: String) {}
 
     /// Called when the user clicks and `needs_entity_pick()` is true.
     /// `handle` is the nearest wire's entity handle (Handle::NULL if nothing found).

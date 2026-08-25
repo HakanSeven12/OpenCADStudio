@@ -5,7 +5,7 @@ use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::command::{CadCommand, CmdResult, DimensionAssociationInput, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
@@ -134,7 +134,7 @@ impl CadCommand for AlignedDimensionCommand {
                 }
                 CmdResult::CommitDimension {
                     entity: self.plane.place_entity(EntityType::Dimension(Dimension::Aligned(dim))),
-                    source: self.source_handle,
+                    association: DimensionAssociationInput::Infer(self.source_handle),
                 }
             }
         }

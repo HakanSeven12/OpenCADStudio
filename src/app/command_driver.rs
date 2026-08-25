@@ -581,6 +581,36 @@ impl OpenCADStudio {
                 let _ = self.apply_cmd_result(r);
                 return;
             }
+            let accepts_points = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.entity_pick_accepts_points());
+            if accepts_points {
+                if let Some((coord, kind)) = super::helpers::parse_coord(token) {
+                    let ucs = self.tabs[i].active_ucs.clone();
+                    let wcs = match (
+                        matches!(kind, super::helpers::CoordKind::Relative),
+                        self.last_point,
+                    ) {
+                        (true, Some(base)) => {
+                            base + match &ucs {
+                                Some(value) => super::helpers::ucs_rotate_vec(coord, value),
+                                None => coord,
+                            }
+                        }
+                        _ => match &ucs {
+                            Some(value) => super::helpers::ucs_to_wcs(coord, value),
+                            None => coord,
+                        },
+                    };
+                    if self.command_point_allowed(i, wcs) {
+                        self.last_point = Some(wcs);
+                        self.push_ucs_to_cmd(i);
+                        let _ = self.feed_command(StepInput::Point(wcs));
+                    }
+                    return;
+                }
+            }
             if let Ok(v) = u64::from_str_radix(token.trim_start_matches("0x"), 16) {
                 let handle = Handle::new(v);
                 let pt = self.tabs[i]
@@ -818,7 +848,7 @@ impl OpenCADStudio {
                             .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_dimension_association(handle, sources);
+                            .attach_dimension_association(handle, sources.to_vec());
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1227,7 +1257,7 @@ impl OpenCADStudio {
                             .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_dimension_association(handle, sources);
+                            .attach_dimension_association(handle, sources.to_vec());
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1239,7 +1269,10 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
-            CmdResult::CommitDimension { mut entity, source } => {
+            CmdResult::CommitDimension {
+                mut entity,
+                association,
+            } => {
                 let label = self.history_label_from_active_cmd(i, "DIMENSION");
                 let association_mode = self.tabs[i]
                     .scene
@@ -1293,19 +1326,37 @@ impl OpenCADStudio {
                     let pending = self.begin_undo(i, label, 1, delta_safe);
                     if let Some(handle) = self.commit_entity_handle(entity) {
                         if association_mode == 2 {
-                            let sources = source.map_or_else(
-                                || self.tabs[i].scene.infer_dimension_sources(handle),
-                                |source| [Some(source), Some(source)],
-                            );
-                            self.tabs[i]
-                                .scene
-                                .attach_dimension_association(handle, sources);
                             let mut changes = vec![
                                 (handle, crate::scene::ChangeKind::Modified),
                             ];
-                            changes.extend(sources.into_iter().flatten().map(|source| {
-                                (source, crate::scene::ChangeKind::Modified)
-                            }));
+                            match association {
+                                crate::command::DimensionAssociationInput::Infer(source) => {
+                                    let sources: Vec<_> = source.map_or_else(
+                                        || {
+                                            self.tabs[i]
+                                                .scene
+                                                .infer_dimension_sources(handle)
+                                                .into_iter()
+                                                .collect()
+                                        },
+                                        |source| vec![Some(source), Some(source)],
+                                    );
+                                    self.tabs[i]
+                                        .scene
+                                        .attach_dimension_association(handle, sources.clone());
+                                    changes.extend(sources.into_iter().flatten().map(|source| {
+                                        (source, crate::scene::ChangeKind::Modified)
+                                    }));
+                                }
+                                crate::command::DimensionAssociationInput::Explicit(sources) => {
+                                    self.tabs[i]
+                                        .scene
+                                        .attach_dimension_association_sources(handle, sources.clone());
+                                    changes.extend(sources.into_iter().flatten().map(|source| {
+                                        (source.handle, crate::scene::ChangeKind::Modified)
+                                    }));
+                                }
+                            }
                             changes.sort_by_key(|(handle, _)| handle.value());
                             changes.dedup_by_key(|(handle, _)| handle.value());
                             self.tabs[i].scene.bump_entities(&changes);
@@ -3636,6 +3687,19 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.open_mtext_editor(pos, handle, &initial, height);
+            }
+            CmdResult::SuspendForMTextInput {
+                pos,
+                initial,
+                height,
+            } => {
+                self.tabs[i].suspended_cmd = self.tabs[i].active_cmd.take();
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                self.command_mtext_input = true;
+                self.pending_command_editor_text = None;
+                self.open_mtext_editor(pos, None, &initial, height);
             }
             CmdResult::OpenTextEditor {
                 pos,

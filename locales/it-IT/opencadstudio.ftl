@@ -1805,10 +1805,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Specificare l'origine della prima linea di estensione o premere Invio per selezionare un oggetto:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Specificare l'origine della seconda linea di estensione:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Specificare l'angolo del testo (gradi):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Immettere il testo di quota (vuoto = valore misurato):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Immettere il testo di quota formattato (vuoto = valore misurato):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Selezionare un arco, un cerchio o una linea oppure specificare un vertice dell'angolo:
+    .dimangular-select-second-line = DIMANGULAR Selezionare la seconda linea:
     .dimangular-specify-angle-vertex = DIMANGULAR Specificare il vertice dell'angolo:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Specificare la posizione dell'arco di quota [Mtext/Testo/Angolo/Quadrante]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Specificare la posizione dell'arco di quota:
     .dimangular-specify-first-extension-line-point = DIMANGULAR Specificare il primo punto della linea di estensione:
+    .dimangular-specify-quadrant = DIMANGULAR Specificare il quadrante:
     .dimangular-specify-second-extension-line-point = DIMANGULAR Specificare il secondo punto della linea di estensione:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Specificare il secondo punto per l'angolo del testo:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Specificare l'angolo del testo o il primo punto:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Nessuna dimensione base trovata. Posiziona prima una dimensione.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Specificare una seconda origine della linea di estensione (Enter per uscire):
     .dimbreak-select-dimension-to-break = DIMBREAK Selezionare la dimensione da interrompere:

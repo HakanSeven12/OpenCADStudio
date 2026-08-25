@@ -1805,10 +1805,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Zadejte počátek první vynášecí čáry nebo stiskněte Enter pro výběr objektu:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Zadejte počátek druhé vynášecí čáry:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Zadejte úhel textu (stupně):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Zadejte text kóty (prázdné = naměřená hodnota):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Zadejte formátovaný text kóty (prázdné = naměřená hodnota):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Vyberte oblouk, kružnici či čáru, nebo zadejte vrchol úhlu:
+    .dimangular-select-second-line = DIMANGULAR Vyberte druhou čáru:
     .dimangular-specify-angle-vertex = DIMANGULAR Zadejte vrchol úhlu:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Zadejte umístění oblouku kóty [Mtext/Text/Úhel/Kvadrant]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Zadejte umístění oblouku kóty:
     .dimangular-specify-first-extension-line-point = DIMANGULAR Zadejte první bod vynášecí čáry:
+    .dimangular-specify-quadrant = DIMANGULAR Zadejte kvadrant:
     .dimangular-specify-second-extension-line-point = DIMANGULAR Zadejte druhý bod vynášecí čáry:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Zadejte druhý bod úhlu textu:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Zadejte úhel textu nebo první bod:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Nebyl nalezen žádný rozměr základny. Nejprve umístěte kótu.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Zadejte počátek druhé prodlužovací čáry (Enter pro ukončení):
     .dimbreak-select-dimension-to-break = DIMBREAK Vyberte rozměr, který chcete přerušit:

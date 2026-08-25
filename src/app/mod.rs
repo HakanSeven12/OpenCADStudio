@@ -764,6 +764,9 @@ pub(super) struct OpenCADStudio {
     ctrl_down: bool,
     /// Open in-place MText editor (toolbar + text area + live preview), if any.
     mtext_editor: Option<mtext_editor::MTextEditorState>,
+    /// Return rich text to a suspended drawing command.
+    command_mtext_input: bool,
+    pending_command_editor_text: Option<String>,
     /// Open in-place single-line TEXT editor (plain text-entry box), if any.
     text_inline: Option<text_inline::TextInlineState>,
     /// Cursor-anchored one-shot snap override menu (Shift+RMB): the canvas
@@ -3252,6 +3255,8 @@ impl OpenCADStudio {
             ctrl_down: false,
             cont_anchor: None,
             mtext_editor: None,
+            command_mtext_input: false,
+            pending_command_editor_text: None,
             text_inline: None,
             snap_override_popup: None,
             axis_lock_dir: None,

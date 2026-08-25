@@ -1805,10 +1805,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Посочи начало на първата удължителна линия или натисни Enter за избор на обект:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Посочи начало на втората удължителна линия:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Посочи ъгъл на текста (градуси):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Въведи текст на оразмеряване (празно = измерена стойност):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR  Въведи форматиран текст на оразмеряване (празно = измерена стойност):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR  Избери дъга, окръжност, линия или посочи връх на ъгъла:
+    .dimangular-select-second-line = DIMANGULAR  Избери втората линия:
     .dimangular-specify-angle-vertex = DIMANGULAR  Посочи връх на ъгъла:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR  Посочи местоположение на дъгата за оразмеряване [Mtext/Текст/Ъгъл/Квадрант]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Посочи местоположение на дъгата за оразмеряване:
     .dimangular-specify-first-extension-line-point = DIMANGULAR  Посочи точка на първата удължителна линия:
+    .dimangular-specify-quadrant = DIMANGULAR  Посочи квадрант:
     .dimangular-specify-second-extension-line-point = DIMANGULAR  Посочи точка на втората удължителна линия:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR  Посочи втора точка за ъгъла на текста:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR  Посочи ъгъл на текста или първа точка:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE  Не е намерено базово оразмеряване. Първо постави оразмеряване.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE  Посочи начало на втора удължителна линия (Enter за изход):
     .dimbreak-select-dimension-to-break = DIMBREAK  Избери оразмеряване за прекъсване:

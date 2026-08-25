@@ -1806,10 +1806,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Geef het beginpunt van de eerste hulplijn op of druk op Enter om een object te selecteren:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Geef het beginpunt van de tweede hulplijn op:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Teksthoek (graden) specificeren:
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Voer maattekst in (leeg = gemeten waarde):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Voer opgemaakte maattekst in (leeg = gemeten waarde):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Selecteer een boog, cirkel of lijn, of geef een hoekpunt op:
+    .dimangular-select-second-line = DIMANGULAR Selecteer de tweede lijn:
     .dimangular-specify-angle-vertex = DIMANGULAR Specificeer hoekvertex:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Geef de positie van de maatboog op [Mtext/Tekst/Hoek/Kwadrant]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Geef de positie van de maatboog op:
     .dimangular-specify-first-extension-line-point = DIMANGULAR Geef eerste extensieregelpunt aan:
+    .dimangular-specify-quadrant = DIMANGULAR Geef het kwadrant op:
     .dimangular-specify-second-extension-line-point = DIMANGULAR Geef tweede extensieregelpunt:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Geef het tweede punt voor de teksthoek op:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Geef de teksthoek of het eerste punt op:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Geen basismaat gevonden. Plaats eerst een maat.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Vermeld een tweede extensielijn (tot afsluiten overgaan):
     .dimbreak-select-dimension-to-break = DIMBREAK Selecteer de te onderbreken maat:

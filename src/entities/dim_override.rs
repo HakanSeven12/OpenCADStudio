@@ -274,6 +274,8 @@ pub fn property_int_code(field: &str) -> Option<i16> {
         "dim_line_inside" => DIMSOXD,
         "dim_units" => DIMLUNIT,
         "dim_precision" => DIMDEC,
+        "dim_angle_units" => DIMAUNIT,
+        "dim_angle_precision" => DIMADEC,
         "dim_decimal_separator" => DIMDSEP,
         "dim_fractional_type" => DIMFRAC,
         "dim_text_view_direction" => DIMTXTDIRECTION,
@@ -330,6 +332,9 @@ fn inherited_int(doc: &CadDocument, handle: Handle, code: i16) -> i16 {
         DIMTOL => style.dimtol as i16,
         DIMLIM => style.dimlim as i16,
         DIMALT => style.dimalt as i16,
+        DIMAZIN => style.dimazin,
+        DIMAUNIT => style.dimaunit,
+        DIMADEC => style.dimadec,
         DIMTFILL => style.dimtfill,
         DIMTALN => 0,
         _ => 0,
@@ -451,6 +456,8 @@ pub fn set_property(
         "dim_tolerance_suppress_trailing_zeros" => Some((DIMTZIN, 8)),
         "dim_alt_tolerance_suppress_leading_zeros" => Some((DIMALTTZ, 4)),
         "dim_alt_tolerance_suppress_trailing_zeros" => Some((DIMALTTZ, 8)),
+        "dim_angle_suppress_leading_zeros" => Some((DIMAZIN, 1)),
+        "dim_angle_suppress_trailing_zeros" => Some((DIMAZIN, 2)),
         _ => None,
     };
     if let Some((code, bit)) = bit_field {
@@ -622,6 +629,13 @@ pub fn set_property(
                 "architectural" => Some(4),
                 "fractional" => Some(5),
                 "desktop" => Some(6),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_angle_units" => match trimmed.to_ascii_lowercase().as_str() {
+                "decimal degrees" => Some(0),
+                "degrees/minutes/seconds" => Some(1),
+                "gradians" => Some(2),
+                "radians" => Some(3),
                 _ => trimmed.parse().ok(),
             },
             "dim_fractional_type" => match trimmed.to_ascii_lowercase().as_str() {

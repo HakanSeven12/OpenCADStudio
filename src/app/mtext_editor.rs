@@ -1209,6 +1209,12 @@ impl super::OpenCADStudio {
     pub(super) fn mtext_commit(&mut self) -> bool {
         let i = self.active_tab;
         let Some(ed) = self.mtext_editor.take() else { return false };
+        if self.command_mtext_input {
+            self.pending_command_editor_text = Some(ed.build_mtext().value);
+            self.command_mtext_input = false;
+            self.refresh_properties();
+            return true;
+        }
         let body_empty = ed.content.text().trim().is_empty();
         let mut mt = ed.build_mtext();
         let annotative = ed.editing.is_none()
@@ -1302,6 +1308,10 @@ impl super::OpenCADStudio {
     /// then updated in place on later applies, so repeated Apply never leaves
     /// duplicate entities behind.
     pub(super) fn mtext_apply(&mut self) {
+        if self.command_mtext_input {
+            self.rebuild_mtext_preview();
+            return;
+        }
         let i = self.active_tab;
         let (mut mt, editing, body_empty) = match self.mtext_editor.as_ref() {
             Some(ed) => (
@@ -1398,6 +1408,8 @@ impl super::OpenCADStudio {
     /// Discard the editor without changing the drawing.
     pub(super) fn mtext_cancel(&mut self) {
         self.mtext_editor = None;
+        self.command_mtext_input = false;
+        self.pending_command_editor_text = None;
         self.reset_modal_geometry();
     }
 }

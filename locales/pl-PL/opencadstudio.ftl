@@ -1805,10 +1805,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Określ początek pierwszej linii pomocniczej lub naciśnij Enter, aby wybrać obiekt:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Określ początek drugiej linii pomocniczej:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Określ kąt tekstu (w stopniach):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Wprowadź tekst wymiaru (puste = zmierzona wartość):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Wprowadź sformatowany tekst wymiaru (puste = zmierzona wartość):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Wybierz łuk, okrąg lub linię albo określ wierzchołek kąta:
+    .dimangular-select-second-line = DIMANGULAR Wybierz drugą linię:
     .dimangular-specify-angle-vertex = DIMANGULAR Określ wierzchołek kąta:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Określ położenie łuku wymiarowego [Mtext/Tekst/Kąt/Ćwiartka]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Określ położenie łuku wymiarowego:
     .dimangular-specify-first-extension-line-point = DIMANGULAR Określ pierwszy punkt linii pomocniczej:
+    .dimangular-specify-quadrant = DIMANGULAR Określ ćwiartkę:
     .dimangular-specify-second-extension-line-point = DIMANGULAR Określ drugi punkt linii pomocniczej:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Określ drugi punkt kąta tekstu:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Określ kąt tekstu lub pierwszy punkt:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Nie znaleziono wymiaru podstawowego. Najpierw umieść wymiar.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Określ początek drugiej linii pomocniczej (Enter, aby wyjść):
     .dimbreak-select-dimension-to-break = DIMBREAK Wybierz wymiar do przerwania:

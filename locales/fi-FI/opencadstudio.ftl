@@ -1805,10 +1805,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Määritä ensimmäisen apuviivan alkupiste tai valitse objekti painamalla Enter:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Määritä toisen apuviivan alkupiste:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Määritä tekstin kulma (asteita):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Syötä mittateksti (tyhjä = mitattu arvo):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Syötä muotoiltu mittateksti (tyhjä = mitattu arvo):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Valitse kaari, ympyrä tai viiva tai määritä kulman kärkipiste:
+    .dimangular-select-second-line = DIMANGULAR Valitse toinen viiva:
     .dimangular-specify-angle-vertex = DIMANGULAR Määritä kulman kärkipiste:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Määritä mittakaaren sijainti [Mtext/Teksti/Kulma/Neljännes]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Määritä mittakaaren sijainti:
     .dimangular-specify-first-extension-line-point = DIMANGULAR Määritä ensimmäinen jatkolinjan piste:
+    .dimangular-specify-quadrant = DIMANGULAR Määritä neljännes:
     .dimangular-specify-second-extension-line-point = DIMANGULAR Määritä toinen jatkolinjan piste:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Määritä tekstikulman toinen piste:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Määritä tekstikulma tai ensimmäinen piste:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Perusmittaa ei löytynyt. Aseta ensin mitta.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Määritä toinen alalinjan lähtökohta (Enter poistuaksesi):
     .dimbreak-select-dimension-to-break = DIMBREAK Valitse katkaistava mitta:

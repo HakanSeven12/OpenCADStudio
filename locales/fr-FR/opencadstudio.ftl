@@ -1806,10 +1806,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Spécifiez l'origine de la première ligne d'attache ou appuyez sur Entrée pour sélectionner un objet :
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Spécifiez l'origine de la deuxième ligne d'attache :
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Spécifiez l'angle de texte (degrés):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Saisissez le texte de cote (vide = valeur mesurée) :
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR Saisissez le texte de cote formaté (vide = valeur mesurée) :
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR Sélectionnez un arc, un cercle ou une ligne, ou spécifiez un sommet d'angle :
+    .dimangular-select-second-line = DIMANGULAR Sélectionnez la deuxième ligne :
     .dimangular-specify-angle-vertex = DIMANGULAR Spécifiez le sommet d'angle:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR Spécifiez l'emplacement de l'arc de cote [Mtext/Texte/Angle/Quadrant] :
     .dimangular-specify-dimension-arc-location = DIMANGULAR Spécifier l'emplacement de l'arc dimensionnel:
     .dimangular-specify-first-extension-line-point = DIMANGULAR Spécifiez le premier point de ligne d'extension:
+    .dimangular-specify-quadrant = DIMANGULAR Spécifiez le quadrant :
     .dimangular-specify-second-extension-line-point = DIMANGULAR Spécifiez le deuxième point de la ligne d'extension:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR Spécifiez le deuxième point pour l'angle du texte :
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR Spécifiez l'angle du texte ou le premier point :
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE Aucune cote de base trouvée. Créez d’abord une cote.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE Spécifiez une deuxième ligne d'extension d'origine (Entrer pour sortir):
     .dimbreak-select-dimension-to-break = DIMBREAK Sélectionnez la dimension à casser:

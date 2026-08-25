@@ -1806,10 +1806,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Especifique a origem da primeira linha de extensão ou pressione Enter para selecionar um objeto:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Especifique a origem da segunda linha de extensão:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Especifique o ângulo do texto (graus):
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Insira o texto da cota (vazio = valor medido):
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR  Insira o texto formatado da cota (vazio = valor medido):
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR  Selecione arco, círculo, linha ou especifique um vértice de ângulo:
+    .dimangular-select-second-line = DIMANGULAR  Selecione a segunda linha:
     .dimangular-specify-angle-vertex = DIMANGULAR  Especifique o vértice do ângulo:
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR  Especifique a localização do arco de cota [Mtext/Texto/Ângulo/Quadrante]:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Especifique a localização do arco de cota:
     .dimangular-specify-first-extension-line-point = DIMANGULAR  Especifique o ponto da primeira linha de extensão:
+    .dimangular-specify-quadrant = DIMANGULAR  Especifique o quadrante:
     .dimangular-specify-second-extension-line-point = DIMANGULAR  Especifique o ponto da segunda linha de extensão:
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR  Especifique o segundo ponto para o ângulo do texto:
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR  Especifique o ângulo do texto ou o primeiro ponto:
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE  Nenhuma cota base encontrada. Coloque uma cota primeiro.
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE  Especifique a origem de uma segunda linha de extensão (Enter para sair):
     .dimbreak-select-dimension-to-break = DIMBREAK  Selecione a cota a quebrar:

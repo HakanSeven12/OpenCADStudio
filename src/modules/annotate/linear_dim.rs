@@ -5,7 +5,7 @@ use cadkernel::geom2d::{
     closest_point, Circle as KernelCircle, Curve, Line as KernelLine,
 };
 
-use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::command::{CadCommand, CmdResult, DimensionAssociationInput, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use glam::DVec3;
@@ -186,7 +186,7 @@ impl CadCommand for LinearDimensionCommand {
                 ));
                 CmdResult::CommitDimension {
                     entity,
-                    source: self.source_handle,
+                    association: DimensionAssociationInput::Infer(self.source_handle),
                 }
             }
         }

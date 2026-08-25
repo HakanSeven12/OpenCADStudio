@@ -1805,10 +1805,18 @@ annotate =
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED  指定第一條尺寸界線原點，或按 Enter 選取物件：
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  指定第二條尺寸界線原點：
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  指定文字角度（度）：
+    .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  輸入標註文字（空白 = 測量值）：
+    .dimangular-enter-formatted-dimension-text-blank-measured = DIMANGULAR  輸入帶格式的標註文字（空白 = 測量值）：
+    .dimangular-select-arc-circle-line-or-specify-angle-vertex = DIMANGULAR  選取圓弧、圓或直線，或指定角度頂點：
+    .dimangular-select-second-line = DIMANGULAR  選取第二條直線：
     .dimangular-specify-angle-vertex = DIMANGULAR  指定角度頂點：
+    .dimangular-specify-dimension-arc-location-options = DIMANGULAR  指定標註圓弧位置 [Mtext/文字/角度/象限]：
     .dimangular-specify-dimension-arc-location = DIMANGULAR  指定標註圓弧位置：
     .dimangular-specify-first-extension-line-point = DIMANGULAR  指定第一條尺寸界線點：
+    .dimangular-specify-quadrant = DIMANGULAR  指定象限：
     .dimangular-specify-second-extension-line-point = DIMANGULAR  指定第二條尺寸界線點：
+    .dimangular-specify-second-point-for-text-angle = DIMANGULAR  指定文字角度的第二點：
+    .dimangular-specify-text-angle-or-first-point = DIMANGULAR  指定文字角度或第一點：
     .dimbaseline-no-base-dimension-found-place-a-di = DIMBASELINE  未找到基準標註。請先放置標註。
     .dimbaseline-specify-a-second-extension-line-or = DIMBASELINE  指定第二條尺寸界線原點（按 Enter 退出）：
     .dimbreak-select-dimension-to-break = DIMBREAK  選擇要打斷的標註：

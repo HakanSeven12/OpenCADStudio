@@ -1835,8 +1835,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE  Temel ölçü bulunamadı. Önce bir ölçü yerleştirin.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE  İkinci uzatma çizgisinin başlangıcını belirtin (çıkmak için Enter):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER  Ölçü metnini girin (boş = ölçülen değer):
-    .dimdiameter-specify-center-point = DIMDIAMETER  Merkez noktasını belirtin:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER  Ölçü çizgisinin konumunu belirtin [Metin/Açı]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER  Yay, daire veya çoklu çizgi yayı seçin:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER  Ölçü çizgisinin konumunu belirtin [Çok satırlı metin/Metin/Açı]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER  Daire üzerindeki noktayı belirtin:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER  Metin açısını belirtin (derece):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT  Metin geçersiz kılmasını girin (boş = ölçülen değere sıfırla):

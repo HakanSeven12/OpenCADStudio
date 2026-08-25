@@ -1825,8 +1825,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Aucune cote de base trouvée. Créez d’abord une cote.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Spécifiez une deuxième ligne d'extension d'origine (Entrer pour sortir):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER Entrer le texte dimensionnel (blanc = valeur mesurée):
-    .dimdiameter-specify-center-point = DIMDIAMETER Spécifier le point central:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER Spécifiez la position de la ligne de cote [Texte / Angle] :
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Sélectionnez un arc, un cercle ou un arc de polyligne :
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER Spécifiez la position de la ligne de cote [Mtexte/Texte/Angle] :
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Spécifier le point sur le cercle:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Spécifiez l'angle de texte (degrés):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Saisissez la valeur de la valeur de remplacement (blank = reset to meased):

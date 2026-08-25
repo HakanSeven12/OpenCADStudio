@@ -1825,8 +1825,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Geen basismaat gevonden. Plaats eerst een maat.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Vermeld een tweede extensielijn (tot afsluiten overgaan):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER Voer maattekst in (leeg = gemeten waarde):
-    .dimdiameter-specify-center-point = DIMDIAMETER Centrumpunt opgeven:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER Geef de positie van de maatlijn op [Tekst/Hoek]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Selecteer boog, cirkel of polylijnboog:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER Geef de positie van de maatlijn op [M-tekst/Tekst/Hoek]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Punt op cirkel specificeren:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Teksthoek (graden) specificeren:
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Tekstoverride invoeren (blanc = reset op gemeten):

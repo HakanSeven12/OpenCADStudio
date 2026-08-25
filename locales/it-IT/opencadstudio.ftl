@@ -1824,8 +1824,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Nessuna dimensione base trovata. Posiziona prima una dimensione.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Specificare una seconda origine della linea di estensione (Enter per uscire):
     .dimdiameter-enter-dimension-text-blank-measure = Testo della dimensione DIMDIAMETER Enter (valore misurato = vuoto):
-    .dimdiameter-specify-center-point = DIMDIAMETER Specificare il punto centrale:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER Specificare la posizione della linea di quota [Testo/Angolo]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Selezionare un arco, un cerchio o un arco di polilinea:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER Specificare la posizione della linea di quota [Mtesto/Testo/Angolo]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Specificare il punto sul cerchio:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Specificare l'angolo del testo (gradi):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Enter sovrascrittura testo (= vuoto ripristinato su misurato):

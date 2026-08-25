@@ -1825,8 +1825,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Keine Basisdimension gefunden.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Ursprung der zweiten Maßhilfslinie angeben (Eingabe zum Beenden):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER Bemaßungstext eingeben (leer = Messwert):
-    .dimdiameter-specify-center-point = DIMDIAMETER Mittelpunkt angeben:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER Lage der Dimensionslinie angeben [Text/Winkel]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Bogen, Kreis oder Polylinienbogen auswählen:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER Lage der Dimensionslinie angeben [MText/Text/Winkel]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Punkt auf dem Kreis angeben:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Textwinkel angeben (Grad):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Textüberschreiben eingeben (leer = auf gemessen zurücksetzen):

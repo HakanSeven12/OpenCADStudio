@@ -1855,8 +1855,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE  No base dimension found. Place a dimension first.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE  Specify a second extension line origin (Enter to exit):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER  Enter dimension text (blank = measured value):
-    .dimdiameter-specify-center-point = DIMDIAMETER  Specify center point:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER  Specify dimension line location  [Text/Angle]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER  Select arc, circle, or polyline arc:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER  Specify dimension line location  [Mtext/Text/Angle]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER  Specify point on circle:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER  Specify text angle (degrees):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT  Enter text override (blank = reset to measured):

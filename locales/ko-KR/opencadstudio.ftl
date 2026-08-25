@@ -1824,8 +1824,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE 기본 치수를 찾을 수 없습니다. 먼저 치수를 배치합니다.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE 두 번째 연장선 원점을 지정합니다(종료하려면 Enter).
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER Enter 치수 문자(빈 = 측정 값):
-    .dimdiameter-specify-center-point = DIMDIAMETER 중심점 지정:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER 치수선 위치 지정 [문자/각도]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER 호, 원 또는 폴리선 호 선택:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER 치수선 위치 지정 [여러 줄 문자/문자/각도]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER 원의 점 지정:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER 텍스트 각도(도) 지정:
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Enter 텍스트 재정의(빈 =가 측정으로 재설정됨):

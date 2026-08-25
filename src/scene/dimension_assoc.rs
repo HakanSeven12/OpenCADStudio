@@ -48,6 +48,10 @@ impl RadialSourceGeometry {
         self.point_at_angle(self.angle_at(point))
     }
 
+    pub(crate) fn opposite_chord_at(self, point: DPoint) -> Vector3 {
+        self.point_at_angle(self.angle_at(point) + std::f64::consts::PI)
+    }
+
     fn contains_angle(self, angle: f64) -> bool {
         !self.limited || angle_within_arc(angle, self.start_angle, self.end_angle)
     }
@@ -448,10 +452,13 @@ pub(crate) fn radial_extension_points(
     gap: f64,
     extension: f64,
 ) -> Option<Vec<Vector3>> {
-    let EntityType::Dimension(Dimension::Radius(radius_dimension)) =
-        document.get_entity(dimension)?
-    else {
+    let EntityType::Dimension(dimension_entity) = document.get_entity(dimension)? else {
         return None;
+    };
+    let target_point = match dimension_entity {
+        Dimension::Radius(radius) => radius.definition_point,
+        Dimension::Diameter(diameter) => diameter.angle_vertex,
+        _ => return None,
     };
     let association = document.objects.values().find_map(|object| {
         let ObjectType::Associative(object) = object else {
@@ -468,7 +475,7 @@ pub(crate) fn radial_extension_points(
     if !radial.limited || radial.radius <= 1e-12 {
         return None;
     }
-    let target = radial.angle_at(dpoint(radius_dimension.definition_point));
+    let target = radial.angle_at(dpoint(target_point));
     if radial.contains_angle(target) {
         return None;
     }
@@ -536,32 +543,37 @@ impl Scene {
         else {
             return;
         };
-        if let Dimension::Radius(radius_dimension) = dimension_entity {
+        let radial_data = match dimension_entity {
+            Dimension::Radius(radius) => Some((
+                radius.angle_vertex,
+                radius.measurement(),
+                radius.definition_point,
+            )),
+            Dimension::Diameter(diameter) => Some((
+                diameter.center(),
+                diameter.measurement() * 0.5,
+                diameter.angle_vertex,
+            )),
+            _ => None,
+        };
+        if let Some((center, measured_radius, chord)) = radial_data {
             let Some(source) = sources.iter().flatten().next().copied() else {
                 return;
             };
             let Some(source_entity) = self.document.get_entity(source.handle) else {
                 return;
             };
-            let measured_radius = radius_dimension.measurement();
             let radial = source
                 .marker
                 .and_then(|marker| radial_source_for_marker(source_entity, marker))
-                .or_else(|| {
-                    radial_source_matching(
-                        source_entity,
-                        radius_dimension.angle_vertex,
-                        measured_radius,
-                        radius_dimension.definition_point,
-                    )
-                });
+                .or_else(|| radial_source_matching(source_entity, center, measured_radius, chord));
             let Some(radial) = radial else {
                 return;
             };
             let angle = if source.marker.is_some() && source.parameter.is_finite() {
                 source.parameter
             } else {
-                radial.angle_at(dpoint(radius_dimension.definition_point))
+                radial.angle_at(dpoint(chord))
             };
             let reference = AssocDimensionReference {
                 class_name: "AcDbOsnapPointRef".to_string(),
@@ -570,7 +582,7 @@ impl Scene {
                 main_subent_type: 1,
                 main_gs_marker: radial.marker,
                 osnap_distance: angle,
-                osnap_point: radius_dimension.definition_point,
+                osnap_point: chord,
                 ..AssocDimensionReference::default()
             };
             self.store_dimension_association(
@@ -686,8 +698,21 @@ impl Scene {
         else {
             return [None, None];
         };
-        if let Dimension::Radius(radius) = entity {
-            let measurement = radius.measurement();
+        let radial_data = match entity {
+            Dimension::Radius(radius) => Some((
+                radius.angle_vertex,
+                radius.measurement(),
+                radius.definition_point,
+            )),
+            Dimension::Diameter(diameter) => Some((
+                diameter.center(),
+                diameter.measurement() * 0.5,
+                diameter.angle_vertex,
+            )),
+            _ => None,
+        };
+        if let Some((center, radius, chord)) = radial_data {
+            let tolerance = radius.abs().max(1.0) * 1e-9;
             let source = self
                 .document
                 .entities()
@@ -695,16 +720,12 @@ impl Scene {
                 .filter_map(|candidate| {
                     let radial = radial_source_matching(
                         candidate,
-                        radius.angle_vertex,
-                        measurement,
-                        radius.definition_point,
+                        center,
+                        radius,
+                        chord,
                     )?;
-                    let center_error = point_distance_squared(
-                        radial.center_world(),
-                        radius.angle_vertex,
-                    );
-                    let radius_error = (radial.radius - measurement).powi(2);
-                    let tolerance = measurement.abs().max(1.0) * 1e-9;
+                    let center_error = point_distance_squared(radial.center_world(), center);
+                    let radius_error = (radial.radius - radius).powi(2);
                     (center_error + radius_error <= tolerance * tolerance).then_some((
                         center_error + radius_error,
                         candidate.common().handle,
@@ -847,6 +868,27 @@ impl Scene {
                         radius.base.insertion_point = radius.base.insertion_point + delta;
                     }
                     radius.base.actual_measurement = radius.measurement();
+                }
+                Dimension::Diameter(diameter) => {
+                    let Some((radial, angle)) = radial_source else {
+                        continue;
+                    };
+                    let old_chord = diameter.angle_vertex;
+                    let new_chord = radial.point_at_angle(angle);
+                    let new_far_chord = radial.point_at_angle(angle + std::f64::consts::PI);
+                    let delta = Vector3::new(
+                        new_chord.x - old_chord.x,
+                        new_chord.y - old_chord.y,
+                        new_chord.z - old_chord.z,
+                    );
+                    diameter.angle_vertex = new_chord;
+                    diameter.definition_point = new_far_chord;
+                    diameter.base.definition_point = new_far_chord;
+                    if diameter.base.text_user_positioned {
+                        diameter.base.text_middle_point = diameter.base.text_middle_point + delta;
+                        diameter.base.insertion_point = diameter.base.insertion_point + delta;
+                    }
+                    diameter.base.actual_measurement = diameter.measurement();
                 }
                 _ => continue,
             }

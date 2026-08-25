@@ -1828,8 +1828,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Базовый размер не найден. Сначала создайте размер.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Укажите происхождение второй линии расширения (Введите для выхода):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER Введите текст размера (пусто = измеренное значение):
-    .dimdiameter-specify-center-point = DIMDIAMETER Укажите центральную точку:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER Укажите положение размерной линии [Текст/Угол]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Выберите дугу, окружность или дуговой сегмент полилинии:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER Укажите положение размерной линии [Мтекст/Текст/Угол]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Укажите точку на окружности:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Укажите угол текста (градусы):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Введите текстовую оверрайд (blank = reset to measured):

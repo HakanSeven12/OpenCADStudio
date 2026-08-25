@@ -1824,8 +1824,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Nem található alapméret. Először helyezzen el egy méretet.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Adjon meg egy második mellékvonal kezdőpontját (Enter a kilépéshez):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER Enter méretszöveg (üres = mért érték):
-    .dimdiameter-specify-center-point = DIMDIAMETER Középpont megadása:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER A méretvonal helyének megadása [szöveg/szög]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Válasszon ívet, kört vagy vonalláncívet:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER A méretvonal helyének megadása [Mszöveg/szöveg/szög]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Pont megadása a körön:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Adja meg a szöveg szögét (fokban):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Enter szöveg felülírása (üres = visszaállítása mért értékre):

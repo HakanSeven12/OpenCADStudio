@@ -1824,8 +1824,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Perusmittaa ei löytynyt. Aseta ensin mitta.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Määritä toinen alalinjan lähtökohta (Enter poistuaksesi):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER Enter mittateksti (tyhjä = mitattu arvo):
-    .dimdiameter-specify-center-point = DIMDIAMETER Määritä keskipiste:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER Määritä mittaviivan sijainti [teksti/kulma]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Valitse kaari, ympyrä tai murtoviivan kaari:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER Määritä mittaviivan sijainti [Mteksti/teksti/kulma]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Määritä piste ympyrässä:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Määritä tekstin kulma (asteita):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Enter tekstin ohitus (tyhjä = nollattu mitattuun):

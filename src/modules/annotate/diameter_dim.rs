@@ -1,11 +1,11 @@
-// DIMDIAMETER command — diameter dimension for circles and arcs.
-
 use acadrust::entities::{Dimension, DimensionDiameter};
-use acadrust::types::Vector3;
+use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 use glam::{DVec3, Vec3};
 
-use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::command::{
+    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, WorkingPlane,
+};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
@@ -22,40 +22,43 @@ pub fn tool() -> ToolDef {
 }
 
 enum Step {
-    CenterPoint,
-    ArcPoint(DVec3),
-    TextPoint { center: DVec3, arc_pt: DVec3 },
+    SelectObject,
+    DimLine(crate::scene::dimension_assoc::RadialSourceGeometry),
 }
 
 pub struct DiameterDimensionCommand {
     step: Step,
-    plane: WorkingPlane,
-    /// Optional text that replaces the measured value (None = measurement).
     text_override: Option<String>,
-    /// True while the next typed line is captured as the text override.
     awaiting_text: bool,
-    /// Explicit text rotation in radians (None = follow the UCS/style).
     text_angle: Option<f64>,
-    /// True while the next typed value is captured as the text angle.
     awaiting_angle: bool,
+    picked_entity: Option<EntityType>,
+    source_handle: Option<Handle>,
 }
 
 impl DiameterDimensionCommand {
     pub fn new() -> Self {
         Self {
-            step: Step::CenterPoint,
-            plane: WorkingPlane::default(),
+            step: Step::SelectObject,
             text_override: None,
             awaiting_text: false,
             text_angle: None,
             awaiting_angle: false,
+            picked_entity: None,
+            source_handle: None,
+        }
+    }
+
+    fn editor_anchor(&self) -> DVec3 {
+        match self.step {
+            Step::SelectObject => DVec3::ZERO,
+            Step::DimLine(source) => dvec(source.point_at_angle(source.start_angle)),
         }
     }
 }
 
 impl CadCommand for DiameterDimensionCommand {
-    fn set_working_plane(&mut self, plane: WorkingPlane) {
-        self.plane = plane;
+    fn set_working_plane(&mut self, _plane: WorkingPlane) {
     }
 
     fn name(&self) -> &'static str {
@@ -64,54 +67,58 @@ impl CadCommand for DiameterDimensionCommand {
 
     fn prompt(&self) -> String {
         if self.awaiting_text {
-            return t!("DIMDIAMETER  Enter dimension text (blank = measured value):").into_owned();
+            return t!("DIMDIAMETER  Enter dimension text (blank = measured value):")
+                .into_owned();
         }
         if self.awaiting_angle {
             return t!("DIMDIAMETER  Specify text angle (degrees):").into_owned();
         }
         match self.step {
-            Step::CenterPoint => t!("DIMDIAMETER  Specify center point:").into_owned(),
-            Step::ArcPoint(_) => t!("DIMDIAMETER  Specify point on circle:").into_owned(),
-            Step::TextPoint { .. } => {
-                t!("DIMDIAMETER  Specify dimension line location  [Text/Angle]:").into_owned()
+            Step::SelectObject => {
+                t!("DIMDIAMETER  Select arc, circle, or polyline arc:").into_owned()
+            }
+            Step::DimLine(_) => {
+                t!("DIMDIAMETER  Specify dimension line location  [Mtext/Text/Angle]:")
+                    .into_owned()
             }
         }
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
-            Step::CenterPoint => {
-                self.step = Step::ArcPoint(pt);
-                CmdResult::NeedPoint
-            }
-            Step::ArcPoint(center) => {
-                self.step = Step::TextPoint { center, arc_pt: pt };
-                CmdResult::NeedPoint
-            }
-            Step::TextPoint { center, arc_pt } => {
-                let center = self.plane.to_local(center);
-                let arc_pt = self.plane.to_local(arc_pt);
-                let pt = self.plane.to_local(pt);
-                let mut dim = DimensionDiameter::new(v3(center), v3(arc_pt));
-                dim.base.definition_point = v3(arc_pt);
+            Step::SelectObject => CmdResult::NeedPoint,
+            Step::DimLine(source) => {
+                let source_plane = WorkingPlane::new(
+                    DVec3::from_array(source.plane.origin),
+                    DVec3::from_array(source.plane.x_axis),
+                    DVec3::from_array(source.plane.y_axis),
+                );
+                let chord = source_plane.to_local(dvec(source.chord_at(pt.to_array())));
+                let far_chord = source_plane.to_local(dvec(source.opposite_chord_at(pt.to_array())));
+                let pt = source_plane.to_local(pt);
+                let mut dim = DimensionDiameter::new(v3(chord), v3(far_chord));
                 dim.base.text_middle_point = v3(pt);
                 dim.base.insertion_point = v3(pt);
-                dim.leader_length = arc_pt.distance(pt);
+                dim.base.text_user_positioned = true;
+                dim.leader_length = chord.distance(pt);
                 dim.base.actual_measurement = dim.measurement();
-                dim.base.user_text = self.text_override.clone();
-                // An explicit text angle overrides the default rotation.
+                crate::entities::dimension::set_dimension_text_override(
+                    &mut dim.base,
+                    self.text_override.clone(),
+                );
                 if let Some(a) = self.text_angle {
                     dim.base.text_rotation = a;
                 }
-                CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Dimension(
-                    Dimension::Diameter(dim),
-                )))
+                CmdResult::CommitDimension {
+                    entity: source_plane
+                        .place_entity(EntityType::Dimension(Dimension::Diameter(dim))),
+                    association: DimensionAssociationInput::Infer(self.source_handle),
+                }
             }
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        // A bare Enter while entering override text accepts the measured value.
         if self.awaiting_text {
             self.awaiting_text = false;
             return CmdResult::NeedPoint;
@@ -123,24 +130,37 @@ impl CadCommand for DiameterDimensionCommand {
         CmdResult::Cancel
     }
 
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
     fn wants_text_input(&self) -> bool {
         true
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        // While entering the override text or angle it is a value, not a point step.
         !self.awaiting_text && !self.awaiting_angle
     }
 
     fn wants_text_with_spaces(&self) -> bool {
-        // The override text may contain spaces.
         self.awaiting_text
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        if matches!(self.step, Step::DimLine(_)) && !self.awaiting_text && !self.awaiting_angle {
+            vec![
+                CmdOption::new("MText", "MTEXT"),
+                CmdOption::new("Text", "TEXT"),
+                CmdOption::new("Angle", "ANGLE"),
+            ]
+        } else {
+            Vec::new()
+        }
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.awaiting_text {
             let t = text.trim();
-            // Blank (or the "<>" placeholder) keeps the measured value.
             self.text_override = if t.is_empty() || t == "<>" {
                 None
             } else {
@@ -151,7 +171,6 @@ impl CadCommand for DiameterDimensionCommand {
         }
         if self.awaiting_angle {
             let t = text.trim();
-            // Blank clears any explicit angle (follow the default again).
             self.text_angle = if t.is_empty() {
                 None
             } else {
@@ -160,11 +179,19 @@ impl CadCommand for DiameterDimensionCommand {
             self.awaiting_angle = false;
             return Some(CmdResult::NeedPoint);
         }
-        match text.trim().to_uppercase().as_str() {
-            "T" | "TEXT" | "M" | "MTEXT" => {
+        if !matches!(self.step, Step::DimLine(_)) {
+            return None;
+        }
+        match text.trim().to_ascii_uppercase().as_str() {
+            "T" | "TEXT" => {
                 self.awaiting_text = true;
                 Some(CmdResult::NeedPoint)
             }
+            "M" | "MTEXT" => Some(CmdResult::SuspendForMTextInput {
+                pos: self.editor_anchor(),
+                initial: self.text_override.clone().unwrap_or_default(),
+                height: 2.5,
+            }),
             "A" | "ANGLE" => {
                 self.awaiting_angle = true;
                 Some(CmdResult::NeedPoint)
@@ -173,14 +200,60 @@ impl CadCommand for DiameterDimensionCommand {
         }
     }
 
+    fn on_editor_text(&mut self, value: String) {
+        let value = value.trim();
+        self.text_override = if value.is_empty() || value == "<>" {
+            None
+        } else {
+            Some(value.to_string())
+        };
+    }
+
+    fn on_editor_closed(&mut self, _committed: bool) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        matches!(self.step, Step::SelectObject)
+    }
+
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+
+    fn inject_before_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.picked_entity = Some(entity);
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
+        let Some(entity) = self.picked_entity.take() else {
+            return CmdResult::NeedPoint;
+        };
+        let Some(source) = crate::scene::dimension_assoc::radial_source_at(
+            &entity,
+            Vector3::new(point.x, point.y, point.z),
+        ) else {
+            return CmdResult::NeedPoint;
+        };
+        if !source.radius.is_finite() || source.radius <= 1e-12 {
+            return CmdResult::NeedPoint;
+        }
+        self.source_handle = Some(handle);
+        self.step = Step::DimLine(source);
+        CmdResult::NeedPoint
+    }
+
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        let pt = pt.as_vec3();
         match self.step {
-            Step::CenterPoint => None,
-            Step::ArcPoint(center) => Some(preview_line(center.as_vec3(), pt)),
-            Step::TextPoint { center, arc_pt } => {
-                let far = center + (center - arc_pt); // opposite point on circle
-                Some(preview_line(far.as_vec3(), pt))
+            Step::SelectObject => None,
+            Step::DimLine(source) => {
+                let chord = dvec(source.chord_at(pt.to_array())).as_vec3();
+                let far_chord = dvec(source.opposite_chord_at(pt.to_array())).as_vec3();
+                Some(preview_line(far_chord, chord, pt.as_vec3()))
             }
         }
     }
@@ -190,7 +263,12 @@ fn v3(p: DVec3) -> Vector3 {
     Vector3::new(p.x, p.y, p.z)
 }
 
-fn preview_line(a: Vec3, b: Vec3) -> WireModel {
+fn dvec(point: Vector3) -> DVec3 {
+    DVec3::new(point.x, point.y, point.z)
+}
+
+fn preview_line(far_chord: Vec3, chord: Vec3, text: Vec3) -> WireModel {
+    let separator = [f32::NAN; 3];
     WireModel {
         point_marker: None,
         taper_widths: Vec::new(),
@@ -204,11 +282,17 @@ fn preview_line(a: Vec3, b: Vec3) -> WireModel {
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: "dimdia_preview".into(),
-        points: vec![[a.x, a.y, a.z], [b.x, b.y, b.z]],
+        points: vec![
+            far_chord.to_array(),
+            chord.to_array(),
+            separator,
+            chord.to_array(),
+            text.to_array(),
+        ],
         points_low: Vec::new(),
         color: WireModel::CYAN,
         selected: false,
@@ -226,6 +310,4 @@ fn preview_line(a: Vec3, b: Vec3) -> WireModel {
     }
 }
 
-
-// ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMDIAMETER"] });  // DiameterDimensionCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["DIMDIAMETER"] });

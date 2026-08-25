@@ -1824,8 +1824,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE  Не е намерено базово оразмеряване. Първо постави оразмеряване.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE  Посочи начало на втора удължителна линия (Enter за изход):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER  Въведи текст на оразмеряване (празно = измерена стойност):
-    .dimdiameter-specify-center-point = DIMDIAMETER  Посочи централна точка:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER  Посочи местоположение на линията за оразмеряване  [Текст/Ъгъл]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER  Избери дъга, окръжност или дъгов сегмент на полилиния:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER  Посочи местоположение на линията за оразмеряване  [Мтекст/Текст/Ъгъл]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER  Посочи точка на окръжност:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER  Посочи ъгъл на текста (градуси):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT  Въведи заместващ текст (празно = върни към измерена стойност):

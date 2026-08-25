@@ -1824,8 +1824,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Nie znaleziono wymiaru podstawowego. Najpierw umieść wymiar.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Określ początek drugiej linii pomocniczej (Enter, aby wyjść):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER Enter tekst wymiarowy (pusta wartość zmierzona =):
-    .dimdiameter-specify-center-point = DIMDIAMETER Określ punkt środkowy:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER Określ położenie linii wymiarowej [Tekst/Kąt]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Wybierz łuk, okrąg lub łuk polilinii:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER Określ położenie linii wymiarowej [Mtekst/Tekst/Kąt]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Określ punkt na okręgu:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Określ kąt tekstu (w stopniach):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT Enter zastąpienie tekstu (puste = resetowane do zmierzonego):

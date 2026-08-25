@@ -1815,8 +1815,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE  基準寸法がありません。先に寸法を配置してください。
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE  2 本目の寸法補助線の起点を指定（Enter で終了）:
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER  寸法値を入力（空白 = 計測値）:
-    .dimdiameter-specify-center-point = DIMDIAMETER  中心点を指定:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER  寸法線の位置を指定 [文字/角度]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER  円弧、円、またはポリライン円弧を選択:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER  寸法線の位置を指定 [マルチテキスト/文字/角度]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER  円上の点を指定:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER  文字角度を指定（度）:
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT  寸法値の上書きを入力（空白 = 計測値に戻す）:

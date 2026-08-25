@@ -1824,8 +1824,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE Nebyl nalezen žádný rozměr základny. Nejprve umístěte kótu.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE Zadejte počátek druhé prodlužovací čáry (Enter pro ukončení):
     .dimdiameter-enter-dimension-text-blank-measure = Text rozměru DIMDIAMETER Enter (prázdná naměřená hodnota =):
-    .dimdiameter-specify-center-point = DIMDIAMETER Zadejte středový bod:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER Určete umístění kótovací čáry [Text/Úhel]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER Vyberte oblouk, kružnici nebo obloukový segment křivky:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER Určete umístění kótovací čáry [MText/Text/Úhel]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER Určete bod na kružnici:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER Zadejte úhel textu (stupně):
     .dimedit-enter-text-override-blank-reset-to-mea = Přepsání textu DIMEDIT Enter (prázdné = resetováno na měření):

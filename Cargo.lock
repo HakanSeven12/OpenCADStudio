@@ -72,7 +72,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.4.1"
-source = "git+https://git@github.com/HakanSeven12/cadcodec.git?rev=711be3b#711be3b5151e25e7ed9931f37b0f7c4f16c0243d"
+source = "git+https://git@github.com/HakanSeven12/cadcodec.git?rev=0f746f7#0f746f78ca871fded0e910b758d787eb9d4e74f8"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",

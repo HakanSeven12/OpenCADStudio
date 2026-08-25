@@ -1813,8 +1813,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE कोई आधार आयाम नहीं मिला। पहले आयाम दें।
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE एक दूसरी विस्तार लाइन मूल निर्दिष्ट करें (बाहर निकलने के लिए बेहतर):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER आयाम टेक्स्ट दर्ज करें (blank = मापा मान):
-    .dimdiameter-specify-center-point = DIMDIAMETER केंद्र बिंदु निर्दिष्ट करें:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER आयाम लाइन स्थान निर्दिष्ट करें [टेक्स्ट / एंगल]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER आर्क, सर्कल या पॉलीलाइन आर्क चुनें:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER आयाम लाइन स्थान निर्दिष्ट करें [एमटेक्स्ट/टेक्स्ट/एंगल]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER सर्कल पर बिंदु निर्दिष्ट करें:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER पाठ कोण निर्दिष्ट करें (डिग्री):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT टेक्स्ट ओवरराइड (ब्लैंक = मापा गया करने के लिए रीसेट):

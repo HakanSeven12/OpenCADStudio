@@ -1837,8 +1837,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE  لم يُعثر على بُعد أساسي. ضع بُعدًا أولًا.
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE  حدد أصل خط امتداد ثانٍ (Enter للخروج):
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER  أدخل نص البُعد (فارغ = القيمة المقاسة):
-    .dimdiameter-specify-center-point = DIMDIAMETER  حدد نقطة المركز:
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER  حدد موقع خط البُعد [نص/زاوية]:
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER  حدد قوسًا أو دائرة أو قوسًا متعدد الخطوط:
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER  حدد موقع خط البُعد [نص متعدد الأسطر/نص/زاوية]:
     .dimdiameter-specify-point-on-circle = DIMDIAMETER  حدد نقطة على الدائرة:
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER  حدد زاوية النص (بالدرجات):
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT  أدخل نص التجاوز (فارغ = إعادة للقيمة المقاسة):

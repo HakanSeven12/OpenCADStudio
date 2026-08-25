@@ -1812,8 +1812,8 @@ annotate =
     .dimcontinue-no-base-dimension-found-place-a-di = DIMCONTINUE  未找到基准标注。请先放置标注。
     .dimcontinue-specify-a-second-extension-line-or = DIMCONTINUE  指定第二条尺寸界线原点（按 Enter 退出）：
     .dimdiameter-enter-dimension-text-blank-measure = DIMDIAMETER  输入标注文字（空白 = 测量值）：
-    .dimdiameter-specify-center-point = DIMDIAMETER  指定中心点：
-    .dimdiameter-specify-dimension-line-location-te = DIMDIAMETER  指定尺寸线位置  [文字/角度]：
+    .dimdiameter-select-arc-circle-or-polyline-arc = DIMDIAMETER  选择圆弧、圆或多段线圆弧：
+    .dimdiameter-specify-dimension-line-location-text = DIMDIAMETER  指定尺寸线位置  [多行文字/文字/角度]：
     .dimdiameter-specify-point-on-circle = DIMDIAMETER  指定圆上的点：
     .dimdiameter-specify-text-angle-degrees = DIMDIAMETER  指定文字角度（度）：
     .dimedit-enter-text-override-blank-reset-to-mea = DIMEDIT  输入文字替代（空白 = 重置为测量值）：

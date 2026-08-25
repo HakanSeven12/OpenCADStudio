@@ -1,19 +1,11 @@
-// DIMORDINATE command — ordinate (datum) dimension.
-//
-// Measures the X or Y distance from the UCS origin (datum) to a feature point.
-// The user picks:
-//   1. The feature location.
-//   2. The leader endpoint (where the annotation line ends).
-//
-// If the leader moves mainly in Y → X-type ordinate (shows X coordinate).
-// If the leader moves mainly in X → Y-type ordinate (shows Y coordinate).
-
 use acadrust::entities::{Dimension, DimensionOrdinate};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
 use glam::{DVec3, Vec3};
 
-use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::command::{
+    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, WorkingPlane,
+};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
@@ -32,9 +24,21 @@ enum Step {
     LeaderEndpoint { feature: DVec3 },
 }
 
+#[derive(Clone, Copy)]
+enum DatumMode {
+    Automatic,
+    X,
+    Y,
+}
+
 pub struct OrdinateDimCommand {
     step: Step,
     plane: WorkingPlane,
+    datum_mode: DatumMode,
+    text_override: Option<String>,
+    awaiting_text: bool,
+    text_angle: Option<f64>,
+    awaiting_angle: bool,
 }
 
 impl OrdinateDimCommand {
@@ -42,6 +46,18 @@ impl OrdinateDimCommand {
         Self {
             step: Step::FeaturePoint,
             plane: WorkingPlane::default(),
+            datum_mode: DatumMode::Automatic,
+            text_override: None,
+            awaiting_text: false,
+            text_angle: None,
+            awaiting_angle: false,
+        }
+    }
+
+    fn editor_anchor(&self) -> DVec3 {
+        match self.step {
+            Step::FeaturePoint => DVec3::ZERO,
+            Step::LeaderEndpoint { feature } => feature,
         }
     }
 }
@@ -56,9 +72,19 @@ impl CadCommand for OrdinateDimCommand {
     }
 
     fn prompt(&self) -> String {
+        if self.awaiting_text {
+            return t!("DIMORDINATE  Enter dimension text (blank = measured value):")
+                .into_owned();
+        }
+        if self.awaiting_angle {
+            return t!("DIMORDINATE  Specify text angle (degrees):").into_owned();
+        }
         match self.step {
             Step::FeaturePoint => t!("DIMORDINATE  Specify feature location:").into_owned(),
-            Step::LeaderEndpoint { .. } => t!("DIMORDINATE  Specify leader endpoint:").into_owned(),
+            Step::LeaderEndpoint { .. } => t!(
+                "DIMORDINATE  Specify leader endpoint [Xdatum/Ydatum/Mtext/Text/Angle]:"
+            )
+            .into_owned(),
         }
     }
 
@@ -71,26 +97,138 @@ impl CadCommand for OrdinateDimCommand {
             Step::LeaderEndpoint { feature } => {
                 let feature = self.plane.to_local(feature);
                 let pt = self.plane.to_local(pt);
-                let is_x = is_x_type(feature, pt);
-                let elbow = ordinate_elbow(feature, pt, is_x);
+                let is_x = match self.datum_mode {
+                    DatumMode::Automatic => is_x_type(feature, pt),
+                    DatumMode::X => true,
+                    DatumMode::Y => false,
+                };
                 let mut dim = DimensionOrdinate::new(v3(feature), v3(pt), is_x);
-                // The leader is an orthogonal L from the feature to the
-                // endpoint; store its elbow as the definition point. Without it
-                // the renderer draws feature → (0,0,0) → endpoint, kinking the
-                // leader through the world origin. The old code also worked in
-                // the wrong (XZ) plane, dropping the Y coordinate. (#150)
-                dim.definition_point = v3(elbow);
-                dim.base.definition_point = v3(elbow);
-                CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Dimension(
-                    Dimension::Ordinate(dim),
-                )))
+                crate::entities::dimension::set_dimension_text_override(
+                    &mut dim.base,
+                    self.text_override.clone(),
+                );
+                if let Some(angle) = self.text_angle {
+                    dim.base.text_rotation = angle;
+                }
+                dim.refresh_measurement();
+                CmdResult::CommitDimension {
+                    entity: self.plane.place_entity(EntityType::Dimension(
+                        Dimension::Ordinate(dim),
+                    )),
+                    association: DimensionAssociationInput::Infer(None),
+                }
             }
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.awaiting_text {
+            self.awaiting_text = false;
+            return CmdResult::NeedPoint;
+        }
+        if self.awaiting_angle {
+            self.awaiting_angle = false;
+            return CmdResult::NeedPoint;
+        }
         CmdResult::Cancel
     }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn wants_text_input(&self) -> bool {
+        true
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        !self.awaiting_text && !self.awaiting_angle
+    }
+
+    fn wants_text_with_spaces(&self) -> bool {
+        self.awaiting_text
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        if matches!(self.step, Step::LeaderEndpoint { .. })
+            && !self.awaiting_text
+            && !self.awaiting_angle
+        {
+            vec![
+                CmdOption::new("Xdatum", "XDATUM"),
+                CmdOption::new("Ydatum", "YDATUM"),
+                CmdOption::new("MText", "MTEXT"),
+                CmdOption::new("Text", "TEXT"),
+                CmdOption::new("Angle", "ANGLE"),
+            ]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.awaiting_text {
+            let value = text.trim();
+            self.text_override = if value.is_empty() || value == "<>" {
+                None
+            } else {
+                Some(value.to_string())
+            };
+            self.awaiting_text = false;
+            return Some(CmdResult::NeedPoint);
+        }
+        if self.awaiting_angle {
+            let value = text.trim();
+            self.text_angle = if value.is_empty() {
+                None
+            } else {
+                crate::entities::common::parse_typed_angle(value)
+            };
+            self.awaiting_angle = false;
+            return Some(CmdResult::NeedPoint);
+        }
+        if !matches!(self.step, Step::LeaderEndpoint { .. }) {
+            return None;
+        }
+        match text.trim().to_ascii_uppercase().as_str() {
+            "X" | "XDATUM" => {
+                self.datum_mode = DatumMode::X;
+                Some(CmdResult::NeedPoint)
+            }
+            "Y" | "YDATUM" => {
+                self.datum_mode = DatumMode::Y;
+                Some(CmdResult::NeedPoint)
+            }
+            "T" | "TEXT" => {
+                self.awaiting_text = true;
+                Some(CmdResult::NeedPoint)
+            }
+            "M" | "MTEXT" => Some(CmdResult::SuspendForMTextInput {
+                pos: self.editor_anchor(),
+                initial: self.text_override.clone().unwrap_or_default(),
+                height: 2.5,
+            }),
+            "A" | "ANGLE" => {
+                self.awaiting_angle = true;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
+        }
+    }
+
+    fn on_editor_text(&mut self, value: String) {
+        let value = value.trim();
+        self.text_override = if value.is_empty() || value == "<>" {
+            None
+        } else {
+            Some(value.to_string())
+        };
+    }
+
+    fn on_editor_closed(&mut self, _committed: bool) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         let feature = match self.step {
             Step::LeaderEndpoint { feature } => feature,
@@ -98,17 +236,23 @@ impl CadCommand for OrdinateDimCommand {
         };
         let feature = self.plane.to_local(feature);
         let pt = self.plane.to_local(pt);
-        let is_x = is_x_type(feature, pt);
-        let elbow = ordinate_elbow(feature, pt, is_x);
-        let feature = self.plane.to_world(feature);
-        let elbow = self.plane.to_world(elbow);
-        let pt = self.plane.to_world(pt);
-        // Screen-only rubber band: downcast to f32 at the preview boundary.
-        Some(preview_wire(vec![
-            feature.as_vec3(),
-            elbow.as_vec3(),
-            pt.as_vec3(),
-        ]))
+        let is_x = match self.datum_mode {
+            DatumMode::Automatic => is_x_type(feature, pt),
+            DatumMode::X => true,
+            DatumMode::Y => false,
+        };
+        let dim = DimensionOrdinate::new(v3(feature), v3(pt), is_x);
+        let points = dim.leader_polyline(0.44, 0.0, None);
+        Some(preview_wire(
+            points
+                .into_iter()
+                .map(|point| {
+                    self.plane
+                        .to_world(DVec3::new(point.x, point.y, point.z))
+                        .as_vec3()
+                })
+                .collect(),
+        ))
     }
 }
 
@@ -116,23 +260,10 @@ fn v3(p: DVec3) -> Vector3 {
     Vector3::new(p.x, p.y, p.z)
 }
 
-/// X-datum (labels the feature's X coordinate) when the leader runs more
-/// vertically than horizontally; Y-datum otherwise. Mirrors the placement
-/// decision so the preview and the committed entity agree.
 fn is_x_type(feature: DVec3, leader: DVec3) -> bool {
     let dx = (leader.x - feature.x).abs();
     let dy = (leader.y - feature.y).abs();
-    dy >= dx
-}
-
-/// Orthogonal elbow of the ordinate leader: an X-datum runs along Y from the
-/// feature then jogs across in X; a Y-datum runs along X then jogs in Y.
-fn ordinate_elbow(feature: DVec3, leader: DVec3, is_x: bool) -> DVec3 {
-    if is_x {
-        DVec3::new(feature.x, leader.y, feature.z)
-    } else {
-        DVec3::new(leader.x, feature.y, feature.z)
-    }
+    dy > dx
 }
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {
@@ -149,9 +280,9 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: "dimordinate_preview".into(),
         points: points.into_iter().map(|p| [p.x, p.y, p.z]).collect(),
         points_low: Vec::new(),

@@ -1852,7 +1852,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR  İkinci uzatma çizgisinin başlangıcını belirtin [Metin/Açı]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR  Metin açısını belirtin (derece):
     .dimordinate-specify-feature-location = DIMORDINATE  Unsur konumunu belirtin:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE  Kılavuzun uç noktasını belirtin:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE  Ölçü metnini girin (boş = ölçülen değer):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE  Kılavuzun uç noktasını belirtin [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE  Metin açısını belirtin (derece):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Ölçü metnini girin (boş = ölçülen değer):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Yay, daire veya çoklu çizgi yayı seçin:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS  Ölçü çizgisinin konumunu belirtin [Çok satırlı metin/Metin/Açı]:

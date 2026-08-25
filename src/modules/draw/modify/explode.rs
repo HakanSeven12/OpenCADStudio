@@ -1179,8 +1179,15 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
             ));
         }
         Dimension::Ordinate(d) => {
-            result.push(make_seg(&d.feature_location, &d.definition_point, &dim_c));
-            result.push(make_seg(&d.definition_point, &d.leader_endpoint, &dim_c));
+            if !met.dimse1 {
+                let fixed_length = met.dimfxlon.then_some(met.dimfxl);
+                let points = d.leader_polyline(met.dimasz * 2.0, met.dimexo, fixed_length);
+                for pair in points.windows(2) {
+                    if (pair[1] - pair[0]).length() > 1e-12 {
+                        result.push(make_seg(&pair[0], &pair[1], &ext_c));
+                    }
+                }
+            }
         }
         Dimension::Arc(d) => {
             result.extend(angular_block_segs(

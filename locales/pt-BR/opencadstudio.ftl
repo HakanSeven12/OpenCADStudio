@@ -1842,7 +1842,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR  Especifique a origem da segunda linha de extensão [Texto/Ângulo]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR  Especifique o ângulo do texto (graus):
     .dimordinate-specify-feature-location = DIMORDINATE  Especifique a localização da característica:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE  Especifique a extremidade da linha de chamada:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE  Insira o texto da cota (vazio = valor medido):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE  Especifique a extremidade da linha de chamada [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE  Especifique o ângulo do texto (graus):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Insira o texto da cota (vazio = valor medido):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Selecione um arco, círculo ou arco de polilinha:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS  Especifique a localização da linha de cota [Mtexto/Texto/Ângulo]:

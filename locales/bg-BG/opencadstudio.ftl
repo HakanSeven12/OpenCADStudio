@@ -1841,7 +1841,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR  Посочи начало на втората удължителна линия  [Текст/Ъгъл]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR  Посочи ъгъл на текста (градуси):
     .dimordinate-specify-feature-location = DIMORDINATE  Посочи местоположение на елемента:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE  Посочи крайна точка на водача:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE  Въведи текст на оразмеряване (празно = измерена стойност):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE  Посочи крайна точка на водача [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE  Посочи ъгъл на текста (градуси):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Въведи текст на оразмеряване (празно = измерена стойност):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Избери дъга, окръжност или дъгов сегмент на полилиния:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS  Посочи местоположение на линията за оразмеряване  [Мтекст/Текст/Ъгъл]:

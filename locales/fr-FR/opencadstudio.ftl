@@ -1842,7 +1842,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Spécifiez l'origine de la deuxième ligne d'extension [Texte/Angle]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Spécifiez l'angle de texte (degrés):
     .dimordinate-specify-feature-location = DIMORDINATE Spécifiez le point à coter :
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Spécifiez l’extrémité du repère :
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Entrez le texte de cote (vide = valeur mesurée) :
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Spécifiez l’extrémité du repère [Xdatum/Ydatum/Mtext/Text/Angle] :
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Spécifiez l'angle du texte (degrés) :
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Entrer le texte dimensionnel (blanc = valeur mesurée):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Sélectionnez un arc, un cercle ou un arc de polyligne :
     .dimradius-specify-dimension-line-location-text = DIMRADIUS Spécifiez la position de la ligne de cote [Mtexte/Texte/Angle] :

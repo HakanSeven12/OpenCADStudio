@@ -1845,7 +1845,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Укажите происхождение второй линии расширения [Текст/Угле]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Укажите угол текста (градусы):
     .dimordinate-specify-feature-location = DIMORDINATE Укажите местоположение:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Укажите конечную точку выноски:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Введите текст размера (пусто = измеренное значение):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Укажите конечную точку выноски [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Укажите угол текста (градусы):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Введите текст размера (пусто = измеренное значение):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Выберите дугу, окружность или дуговой сегмент полилинии:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS Укажите положение размерной линии [Мтекст/Текст/Угол]:

@@ -1872,7 +1872,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR  Specify second extension line origin  [Text/Angle]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR  Specify text angle (degrees):
     .dimordinate-specify-feature-location = DIMORDINATE  Specify feature location:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE  Specify leader endpoint:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE  Enter dimension text (blank = measured value):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE  Specify leader endpoint [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE  Specify text angle (degrees):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  Enter dimension text (blank = measured value):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Select arc, circle, or polyline arc:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS  Specify dimension line location  [Mtext/Text/Angle]:

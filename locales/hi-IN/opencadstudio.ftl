@@ -1830,7 +1830,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR दूसरी एक्सटेंशन लाइन उत्पत्ति निर्दिष्ट करें [टेक्स्ट / एंगल]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR पाठ कोण निर्दिष्ट करें (डिग्री):
     .dimordinate-specify-feature-location = DIMORDINATE सुविधा स्थान निर्दिष्ट करें:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE लीडर समापन बिंदु निर्दिष्ट करें:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE आयाम टेक्स्ट दर्ज करें (रिक्त = मापा मान):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE लीडर समापन बिंदु निर्दिष्ट करें [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE पाठ कोण निर्दिष्ट करें (डिग्री):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS आयाम टेक्स्ट दर्ज करें (blank = मापा मान):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS आर्क, सर्कल या पॉलीलाइन आर्क चुनें:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS आयाम लाइन स्थान निर्दिष्ट करें [एमटेक्स्ट/टेक्स्ट/एंगल]:

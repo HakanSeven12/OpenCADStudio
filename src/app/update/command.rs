@@ -1179,11 +1179,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         .zip(self.tabs[i].selected_grips.iter())
                         .find(|(owner, g)| **owner == popup.handle && g.id == popup.grip_id)
                     {
-                        // "Move with Leader" drags the whole multileader; the
-                        // others move just the picked grip.
+                        // Only multileaders use the whole-object grip.
+                        let is_multileader = matches!(
+                            self.tabs[i].scene.document.get_entity(popup.handle),
+                            Some(acadrust::EntityType::MultiLeader(_))
+                        );
                         let (grip_id, is_translate) =
                             if matches!(item.action, GripMenuAction::MoveWithLeader)
-                                && !is_dimension
+                                && is_multileader
                             {
                                 (crate::entities::multileader::MOVE_ALL_GRIP, true)
                             } else {

@@ -1841,7 +1841,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Specificare l'origine della seconda linea di estensione [Testo/Angolo]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Specificare l'angolo del testo (gradi):
     .dimordinate-specify-feature-location = DIMORDINATE Specificare la posizione dell'elemento:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Specificare il punto finale della guida:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Immettere il testo della quota (vuoto = valore misurato):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Specificare il punto finale della guida [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Specificare l'angolo del testo (gradi):
     .dimradius-enter-dimension-text-blank-measured = Testo della dimensione DIMRADIUS Enter (valore misurato = vuoto):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Selezionare un arco, un cerchio o un arco di polilinea:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS Specificare la posizione della linea di quota [Mtesto/Testo/Angolo]:

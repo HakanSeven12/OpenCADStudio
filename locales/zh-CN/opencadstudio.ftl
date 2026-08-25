@@ -1829,7 +1829,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR  指定第二条尺寸界线原点  [文字/角度]：
     .dimlinear-specify-text-angle-degrees = DIMLINEAR  指定文字角度（度）：
     .dimordinate-specify-feature-location = DIMORDINATE  指定特征位置：
-    .dimordinate-specify-leader-endpoint = DIMORDINATE  指定引线端点：
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE  输入标注文字（空白 = 测量值）：
+    .dimordinate-specify-leader-endpoint = DIMORDINATE  指定引线端点 [Xdatum/Ydatum/Mtext/Text/Angle]：
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE  指定文字角度（度）：
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  输入标注文字（空白 = 测量值）：
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  选择圆弧、圆或多段线圆弧：
     .dimradius-specify-dimension-line-location-text = DIMRADIUS  指定尺寸线位置  [多行文字/文字/角度]：

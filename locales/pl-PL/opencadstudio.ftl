@@ -1841,7 +1841,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Określ początek drugiej linii pomocniczej [Tekst/Kąt]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Określ kąt tekstu (w stopniach):
     .dimordinate-specify-feature-location = DIMORDINATE Określ lokalizację elementu:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Określ punkt końcowy linii odniesienia:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Wprowadź tekst wymiarowy (puste = wartość zmierzona):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Określ punkt końcowy linii odniesienia [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Określ kąt tekstu (w stopniach):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Enter tekst wymiarowy (pusta wartość zmierzona =):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Wybierz łuk, okrąg lub łuk polilinii:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS Określ położenie linii wymiarowej [Mtekst/Tekst/Kąt]:

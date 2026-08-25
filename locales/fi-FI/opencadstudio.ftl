@@ -1841,7 +1841,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Määritä toisen jatkolinjan alkuperä [teksti/kulma]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Määritä tekstin kulma (asteita):
     .dimordinate-specify-feature-location = DIMORDINATE Määritä ominaisuuden sijainti:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Määritä johtajan päätepiste:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Syötä mittateksti (tyhjä = mitattu arvo):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Määritä johtajan päätepiste [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Määritä tekstin kulma (asteita):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Enter mittateksti (tyhjä = mitattu arvo):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Valitse kaari, ympyrä tai murtoviivan kaari:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS Määritä mittaviivan sijainti [Mteksti/teksti/kulma]:

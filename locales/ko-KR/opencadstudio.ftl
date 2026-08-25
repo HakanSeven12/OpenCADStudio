@@ -1841,7 +1841,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR 두 번째 연장선 원점 지정 [문자/각도]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR 텍스트 각도(도) 지정:
     .dimordinate-specify-feature-location = DIMORDINATE 기능 위치 지정:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE 리더 끝점 지정:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE 치수 문자 입력(빈 값 = 측정 값):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE 리더 끝점 지정 [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE 텍스트 각도(도) 지정:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Enter 치수 문자(빈 = 측정 값):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS 호, 원 또는 폴리선 호 선택:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS 치수선 위치 지정 [여러 줄 문자/문자/각도]:

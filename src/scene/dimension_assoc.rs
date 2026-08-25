@@ -381,10 +381,11 @@ fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Opti
         .copied()
 }
 
-fn dimension_inference_points(dimension: &Dimension) -> Option<[Vector3; 2]> {
+fn dimension_inference_points(dimension: &Dimension) -> Option<[Option<Vector3>; 2]> {
     match dimension {
-        Dimension::Linear(linear) => Some([linear.first_point, linear.second_point]),
-        Dimension::Aligned(aligned) => Some([aligned.first_point, aligned.second_point]),
+        Dimension::Linear(linear) => Some([Some(linear.first_point), Some(linear.second_point)]),
+        Dimension::Aligned(aligned) => Some([Some(aligned.first_point), Some(aligned.second_point)]),
+        Dimension::Ordinate(ordinate) => Some([Some(ordinate.feature_location), None]),
         _ => None,
     }
 }
@@ -420,6 +421,7 @@ fn dimension_reference_points(dimension: &Dimension) -> Vec<Vector3> {
             angular.angle_vertex,
             angular.definition_point,
         ],
+        Dimension::Ordinate(ordinate) => vec![ordinate.feature_location],
         _ => Vec::new(),
     }
 }
@@ -739,7 +741,7 @@ impl Scene {
             return [None, None];
         };
         points.map(|point| {
-            self.document
+            point.and_then(|point| self.document
                 .entities()
                 .filter(|entity| entity.common().handle != dimension)
                 .filter_map(|entity| {
@@ -748,7 +750,7 @@ impl Scene {
                 })
                 .filter(|(distance, _)| *distance <= 1e-16)
                 .min_by(|first, second| first.0.total_cmp(&second.0))
-                .map(|(_, handle)| handle)
+                .map(|(_, handle)| handle))
         })
     }
 
@@ -889,6 +891,12 @@ impl Scene {
                         diameter.base.insertion_point = diameter.base.insertion_point + delta;
                     }
                     diameter.base.actual_measurement = diameter.measurement();
+                }
+                Dimension::Ordinate(ordinate) => {
+                    if let Some(feature) = resolved[0] {
+                        ordinate.feature_location = feature;
+                    }
+                    ordinate.refresh_measurement();
                 }
                 _ => continue,
             }

@@ -1841,7 +1841,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Zadejte počátek druhé vynášecí čáry [Text/Úhel]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Zadejte úhel textu (stupně):
     .dimordinate-specify-feature-location = DIMORDINATE Zadejte umístění funkce:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Zadejte koncový bod odkazu:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Zadejte text rozměru (prázdné = naměřená hodnota):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Zadejte koncový bod odkazu [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Zadejte úhel textu (stupně):
     .dimradius-enter-dimension-text-blank-measured = Text rozměru DIMRADIUS Enter (prázdná naměřená hodnota =):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Vyberte oblouk, kružnici nebo obloukový segment křivky:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS Určete umístění kótovací čáry [MText/Text/Úhel]:

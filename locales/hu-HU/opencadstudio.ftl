@@ -1841,7 +1841,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Adja meg a második mellékvonal eredetét [szöveg/szög]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Adja meg a szöveg szögét (fokban):
     .dimordinate-specify-feature-location = DIMORDINATE Jellemző helyének megadása:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Vezető végpont megadása:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Adja meg a méretszöveget (üres = mért érték):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Vezető végpont megadása [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Adja meg a szöveg szögét (fokban):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Enter méretszöveg (üres = mért érték):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Válasszon ívet, kört vagy vonalláncívet:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS A méretvonal helyének megadása [Mszöveg/szöveg/szög]:

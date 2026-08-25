@@ -1842,7 +1842,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Vermeld de oorsprong van de tweede extensieregel [Tekst/hoek]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Teksthoek (graden) specificeren:
     .dimordinate-specify-feature-location = DIMORDINATE Geef functielocatie op:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Geef het eindpunt van de verwijslijn op:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Voer maattekst in (leeg = gemeten waarde):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Geef het eindpunt van de verwijslijn op [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Teksthoek (graden) specificeren:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Voer maattekst in (leeg = gemeten waarde):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Selecteer boog, cirkel of polylijnboog:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS Geef de positie van de maatlijn op [M-tekst/Tekst/Hoek]:

@@ -1832,7 +1832,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR  2 本目の寸法補助線の起点を指定 [文字/角度]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR  文字角度を指定（度）:
     .dimordinate-specify-feature-location = DIMORDINATE  フィーチャ位置を指定:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE  引出線の終点を指定:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE  寸法値を入力（空白 = 計測値）:
+    .dimordinate-specify-leader-endpoint = DIMORDINATE  引出線の終点を指定 [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE  文字角度を指定（度）:
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  寸法値を入力（空白 = 計測値）:
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  円弧、円、またはポリライン円弧を選択:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS  寸法線の位置を指定 [マルチテキスト/文字/角度]:

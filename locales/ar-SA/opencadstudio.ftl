@@ -1854,7 +1854,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR  حدد أصل خط الامتداد الثاني [نص/زاوية]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR  حدد زاوية النص (بالدرجات):
     .dimordinate-specify-feature-location = DIMORDINATE  حدد موقع المعلم:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE  حدد نقطة نهاية الخط القائد:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE  أدخل نص البُعد (فارغ = القيمة المقاسة):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE  حدد نقطة نهاية الخط القائد [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE  حدد زاوية النص (بالدرجات):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS  أدخل نص البُعد (فارغ = القيمة المقاسة):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  حدد قوسًا أو دائرة أو قوسًا متعدد الخطوط:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS  حدد موقع خط البُعد [نص متعدد الأسطر/نص/زاوية]:

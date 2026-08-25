@@ -1842,7 +1842,9 @@ annotate =
     .dimlinear-specify-second-extension-line-origin = DIMLINEAR Geben Sie den Ursprung der zweiten Erweiterungslinie an [Text/Winkel]:
     .dimlinear-specify-text-angle-degrees = DIMLINEAR Textwinkel angeben (Grad):
     .dimordinate-specify-feature-location = DIMORDINATE Bezugspunkt angeben:
-    .dimordinate-specify-leader-endpoint = DIMORDINATE Endpunkt der Führungslinie angeben:
+    .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE Bemaßungstext eingeben (leer = Messwert):
+    .dimordinate-specify-leader-endpoint = DIMORDINATE Endpunkt der Führungslinie angeben [Xdatum/Ydatum/Mtext/Text/Angle]:
+    .dimordinate-specify-text-angle-degrees = DIMORDINATE Textwinkel angeben (Grad):
     .dimradius-enter-dimension-text-blank-measured = DIMRADIUS Bemaßungstext eingeben (leer = Messwert):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS Bogen, Kreis oder Polylinienbogen auswählen:
     .dimradius-specify-dimension-line-location-text = DIMRADIUS Lage der Dimensionslinie angeben [MText/Text/Winkel]:

@@ -3076,15 +3076,38 @@ impl Scene {
             let Some(entity) = self.document.get_entity(handle) else {
                 continue;
             };
-            if !crate::scene::annotative::is_annotative(&self.document, entity)
-                || !self.resident_entity_visible(
+            if !self.resident_entity_visible(
                     entity,
                     target_block,
                     Some(&frozen),
                     annotation_scale_handle,
                     true,
-                )
-            {
+                ) {
+                continue;
+            }
+
+            if matches!(entity, EntityType::Hatch(_)) {
+                if selected {
+                    if let Some(mut wire) = self.hatch_outline_wire(handle) {
+                        let (_, pattern_length, pattern, line_weight_px, aci) =
+                            render_style_for_viewport(
+                                &self.document,
+                                entity,
+                                content_viewport.then_some(inst.handle),
+                            );
+                        wire.color = WireModel::SELECTED;
+                        wire.selected = true;
+                        wire.pattern_length = pattern_length;
+                        wire.pattern = pattern;
+                        wire.line_weight_px = line_weight_px;
+                        wire.aci = aci;
+                        wires.push(wire);
+                    }
+                }
+                continue;
+            }
+
+            if !crate::scene::annotative::is_annotative(&self.document, entity) {
                 continue;
             }
 

@@ -146,13 +146,15 @@ fn check_family(
         -ddx_xz.x * sin_a + ddx_xz.y * cos_a,
         -ddy_xz.x * sin_a + ddy_xz.y * cos_a,
     )) * 0.5;
+    let width_px = select(1.0, max(fam.line_width, 1.0), u.lwdisplay_enable > 0.5);
+    let half_line = half_px * width_px;
 
     let wpx = length(vec2<f32>(ddx_xz.x, ddy_xz.x));
     let wpy = length(vec2<f32>(ddx_xz.y, ddy_xz.y));
 
-    if d > half_px * 2.0 { return false; }
+    if d > max(half_line, half_px * 2.0) { return false; }
 
-    if fam.n_dashes == 0u { return d <= half_px; }
+    if fam.n_dashes == 0u { return d <= half_line; }
 
     let along_step = fam.along_step * scale;
     let period     = fam.period * scale;
@@ -165,7 +167,7 @@ fn check_family(
         let idx = fam.dash_off + j;
         let sv  = texel(h.dash_off + idx / 4u)[idx % 4u] * scale;
         if sv > 0.0 {
-            if d <= half_px && t_mod >= pos && t_mod < pos + sv { return true; }
+            if d <= half_line && t_mod >= pos && t_mod < pos + sv { return true; }
             pos = pos + sv;
         } else if sv < 0.0 {
             pos = pos - sv;
@@ -173,7 +175,8 @@ fn check_family(
             let dtv = (t - pos) - round((t - pos) / period) * period;
             let owx = -dtv * cos_a + dperp * sin_a;
             let owy = -dtv * sin_a - dperp * cos_a;
-            if abs(owx / wpx) <= 0.5 && abs(owy / wpy) <= 0.5 { return true; }
+            let dot_half = width_px * 0.5;
+            if abs(owx / wpx) <= dot_half && abs(owy / wpy) <= dot_half { return true; }
         }
     }
     return false;

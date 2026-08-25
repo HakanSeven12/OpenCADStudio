@@ -351,10 +351,8 @@ impl Scene {
         (plain, texts)
     }
 
-    /// Boundary outline wire for a hatch, reconstructed from its cached
-    /// `HatchModel` (offsets from `world_origin`). Used only for edit previews —
-    /// the normal render shows the fill, not this outline.
-    fn hatch_outline_wire(&self, handle: Handle) -> Option<WireModel> {
+    /// Boundary wire for edit previews and selected hatches.
+    pub(super) fn hatch_outline_wire(&self, handle: Handle) -> Option<WireModel> {
         let m = self.hatches.get(&handle)?;
         Self::hatch_model_outline_wire(handle, m)
     }
@@ -375,12 +373,15 @@ impl Scene {
         if pts.len() < 2 {
             return None;
         }
-        Some(WireModel::solid_f64(
+        let mut wire = WireModel::solid_f64(
             handle.value().to_string(),
             pts,
             m.color,
             false,
-        ))
+        );
+        wire.aci = m.aci;
+        wire.line_weight_px = m.line_weight_px;
+        Some(wire)
     }
 
     /// Fill-only geometry has no resident wire for the normal rollover xray.

@@ -295,9 +295,7 @@ impl StorageHatchBatch {
                         // along-line phase.
                         let perp_step = fam.dy;
                         let along_step = fam.dx;
-                        // Screen-space derivative drives 1-px line width
-                        // in the shader; this stored field is unused.
-                        let line_width = 0.0_f32;
+                        let line_width = h.line_weight_px.max(1.0);
                         let period: f32 = fam.dashes.iter().map(|d| d.abs()).sum();
                         families.push(LineFamilyGpu {
                             cos_a: fam.angle_deg.to_radians().cos(),

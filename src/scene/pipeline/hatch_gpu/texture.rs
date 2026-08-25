@@ -286,7 +286,12 @@ impl TextureHatch {
                 texels.push([angle_r.cos(), angle_r.sin(), fam.x0, fam.y0]);
                 texels.push([fam.dx, fam.dy, fam.dy, fam.dx]);
                 // Counts as exact f32 (small integers → no denormal/bitcast risk).
-                texels.push([0.0, period, n_dashes as f32, dash_rel as f32]);
+                texels.push([
+                    model.line_weight_px.max(1.0),
+                    period,
+                    n_dashes as f32,
+                    dash_rel as f32,
+                ]);
                 n_families += 1;
             }
         }

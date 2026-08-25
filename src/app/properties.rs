@@ -203,11 +203,15 @@ impl OpenCADStudio {
                             })
                             .unwrap_or_else(|| "ByLayer".to_string())
                     };
-                    let plot_style = match header.current_plotstyle_type {
-                        1 => "ByBlock",
-                        2 => "ByColor",
-                        3 => "ByObject",
-                        _ => "ByLayer",
+                    let plot_style = if header.plotstyle_mode {
+                        "ByColor"
+                    } else {
+                        match header.current_plotstyle_type {
+                            1 => "ByBlock",
+                            2 => "Normal",
+                            3 => "ByObject",
+                            _ => "ByLayer",
+                        }
                     };
                     let layout_plot_table = doc.objects.values().find_map(|object| {
                         let acadrust::objects::ObjectType::Layout(layout) = object else {
@@ -316,7 +320,7 @@ impl OpenCADStudio {
                                 Property {
                                     label: t!("Plot style").into_owned(),
                                     field: "plot_style",
-                                    value: if header.plotstyle_mode {
+                                    value: if !header.plotstyle_mode {
                                         PropValue::Choice {
                                             selected: plot_style.to_string(),
                                             options: vec![
@@ -327,7 +331,7 @@ impl OpenCADStudio {
                                         }
                                     } else {
                                         PropValue::ReadOnlyWithTooltip {
-                                            value: plot_style.to_string(),
+                                            value: "ByColor".to_string(),
                                             tooltip: t!("Plot style is locked to color in Color-Dependent (CTB) mode").into_owned(),
                                         }
                                     },
@@ -344,9 +348,9 @@ impl OpenCADStudio {
                                 read_only(
                                     t!("Plot table type").as_ref(),
                                     if header.plotstyle_mode {
-                                        "Named plot styles".to_string()
-                                    } else {
                                         "Color-dependent plot styles".to_string()
+                                    } else {
+                                        "Named plot styles".to_string()
                                     },
                                 ),
                             ],
@@ -746,11 +750,10 @@ impl OpenCADStudio {
                         }
                     }
 
-                    // In named plot-style mode (PSTYLEMODE=1) the Plot style row
-                    // picks a named style from the drawing's plot style table. In
-                    // the color-dependent mode it stays read-only (the object's
-                    // color drives the plot style), so it is left untouched.
-                    if self.tabs[i].scene.document.header.plotstyle_mode {
+                    // Named plot-style mode exposes the drawing's styles. In
+                    // color-dependent mode the object's color determines the
+                    // style, so the row is locked to ByColor.
+                    if !self.tabs[i].scene.document.header.plotstyle_mode {
                         let doc = &self.tabs[i].scene.document;
                         let dict_h = doc.header.acad_plotstylename_dict_handle;
                         let common = entity.common();
@@ -797,15 +800,8 @@ impl OpenCADStudio {
                             if let Some(row) =
                                 section.props.iter_mut().find(|p| p.field == "plot_style")
                             {
-                                let common = entity.common();
-                                let plot_style_str = match common.plotstyle_flags {
-                                    0 => "ByLayer",
-                                    1 => "ByBlock",
-                                    2 => "Normal",
-                                    _ => "ByColor",
-                                };
                                 row.value = crate::scene::model::object::PropValue::ReadOnlyWithTooltip {
-                                    value: plot_style_str.to_string(),
+                                    value: "ByColor".to_string(),
                                     tooltip: t!("Plot style is locked to color in Color-Dependent (CTB) mode").into_owned(),
                                 };
                             }

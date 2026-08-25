@@ -1798,9 +1798,11 @@ annotate =
     .collect-leaders = 合併引線
     .ddedit-select-text-entity = DDEDIT  選擇文字實體：
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED  輸入標註文字（空白 = 測量值）：
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  指定尺寸線位置  [文字/角度]：
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  指定第一條尺寸界線原點：
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  指定第二條尺寸界線原點  [文字/角度]：
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  輸入帶格式的標註文字（空白 = 測量值）：
+    .dimaligned-select-object-to-dimension = DIMALIGNED  選取要標註的物件：
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  指定尺寸線位置 [Mtext/文字/角度]：
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  指定第一條尺寸界線原點，或按 Enter 選取物件：
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  指定第二條尺寸界線原點：
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  指定文字角度（度）：
     .dimangular-specify-angle-vertex = DIMANGULAR  指定角度頂點：
     .dimangular-specify-dimension-arc-location = DIMANGULAR  指定標註圓弧位置：

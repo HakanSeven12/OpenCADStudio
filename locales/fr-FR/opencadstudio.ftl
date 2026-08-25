@@ -1799,9 +1799,11 @@ annotate =
     .collect-leaders = Regrouper les repères
     .ddedit-select-text-entity = DDEDIT Sélectionnez l’objet texte :
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Entrer le texte dimensionnel (blanc = valeur mesurée):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Spécifiez la position de la ligne de cote [Texte / Angle] :
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Spécifiez l'origine de la première ligne d'extension:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Spécifiez l'origine de la deuxième ligne d'extension [Texte/Angle]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Saisissez le texte de cote formaté (vide = valeur mesurée) :
+    .dimaligned-select-object-to-dimension = DIMALIGNED Sélectionnez l'objet à coter :
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Spécifiez la position de la ligne de cote [Mtext/Texte/Angle] :
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Spécifiez l'origine de la première ligne d'attache ou appuyez sur Entrée pour sélectionner un objet :
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Spécifiez l'origine de la deuxième ligne d'attache :
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Spécifiez l'angle de texte (degrés):
     .dimangular-specify-angle-vertex = DIMANGULAR Spécifiez le sommet d'angle:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Spécifier l'emplacement de l'arc dimensionnel:

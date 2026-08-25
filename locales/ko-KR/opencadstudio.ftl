@@ -1798,9 +1798,11 @@ annotate =
     .collect-leaders = 리더 수집
     .ddedit-select-text-entity = DDEDIT 텍스트 엔터티 선택:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Enter 치수 문자(빈 = 측정 값):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED 치수선 위치 지정 [문자/각도]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED 첫 번째 연장선 원점 지정:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED 두 번째 연장선 원점 지정 [문자/각도]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED 서식 있는 치수 문자를 입력하십시오(비워 두면 측정값):
+    .dimaligned-select-object-to-dimension = DIMALIGNED 치수를 기입할 객체 선택:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED 치수선 위치 지정 [Mtext/문자/각도]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED 첫 번째 치수 보조선 원점을 지정하거나 Enter를 눌러 객체 선택:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED 두 번째 치수 보조선 원점 지정:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED 텍스트 각도(도) 지정:
     .dimangular-specify-angle-vertex = DIMANGULAR 각도 꼭지점 지정:
     .dimangular-specify-dimension-arc-location = DIMANGULAR 치수 호 위치를 지정합니다.

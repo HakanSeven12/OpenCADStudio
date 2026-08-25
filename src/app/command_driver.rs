@@ -801,19 +801,24 @@ impl OpenCADStudio {
                 // the structure snapshot fallback.
                 let delta_safe = self.delta_add_safe(i, &entity);
                 let pending = self.begin_undo(i, label, 1, delta_safe);
-                let is_linear_dimension = matches!(
+                let is_associative_dimension = matches!(
                     entity,
-                    acadrust::EntityType::Dimension(acadrust::entities::Dimension::Linear(_))
+                    acadrust::EntityType::Dimension(
+                        acadrust::entities::Dimension::Linear(_)
+                            | acadrust::entities::Dimension::Aligned(_)
+                    )
                 );
+                let association_enabled =
+                    self.tabs[i].scene.document.header.dimension_associativity == 2;
                 let committed = self.commit_entity_handle(entity);
-                if is_linear_dimension {
+                if is_associative_dimension && association_enabled {
                     if let Some(handle) = committed {
                         let sources = self.tabs[i]
                             .scene
-                            .infer_linear_dimension_sources(handle);
+                            .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_linear_dimension_association(handle, sources);
+                            .attach_dimension_association(handle, sources);
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1205,19 +1210,24 @@ impl OpenCADStudio {
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
                 let delta_safe = self.delta_add_safe(i, &entity);
                 let pending = self.begin_undo(i, label, 1, delta_safe);
-                let is_linear_dimension = matches!(
+                let is_associative_dimension = matches!(
                     entity,
-                    acadrust::EntityType::Dimension(acadrust::entities::Dimension::Linear(_))
+                    acadrust::EntityType::Dimension(
+                        acadrust::entities::Dimension::Linear(_)
+                            | acadrust::entities::Dimension::Aligned(_)
+                    )
                 );
+                let association_enabled =
+                    self.tabs[i].scene.document.header.dimension_associativity == 2;
                 let committed = self.commit_entity_handle(entity);
-                if is_linear_dimension {
+                if is_associative_dimension && association_enabled {
                     if let Some(handle) = committed {
                         let sources = self.tabs[i]
                             .scene
-                            .infer_linear_dimension_sources(handle);
+                            .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_linear_dimension_association(handle, sources);
+                            .attach_dimension_association(handle, sources);
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1229,25 +1239,87 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
-            CmdResult::CommitAssociativeDimension { entity, source } => {
-                let label = self.history_label_from_active_cmd(i, "DIMLINEAR");
-                let pending = self.begin_undo(i, label, 1, false);
-                if let Some(handle) = self.commit_entity_handle(entity) {
-                    self.tabs[i]
+            CmdResult::CommitDimension { mut entity, source } => {
+                let label = self.history_label_from_active_cmd(i, "DIMENSION");
+                let association_mode = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .dimension_associativity;
+                let pending = if association_mode == 0 {
+                    let layer = self.tabs[i].active_layer.clone();
+                    if layer != "0" || entity.as_entity().layer().is_empty() {
+                        entity.as_entity_mut().set_layer(layer);
+                    }
+                    crate::scene::view::dispatch::apply_color(
+                        &mut entity,
+                        self.ribbon.active_color,
+                    );
+                    crate::scene::view::dispatch::apply_common_prop(
+                        &mut entity,
+                        "linetype",
+                        &self.ribbon.active_linetype.clone(),
+                    );
+                    crate::scene::view::dispatch::apply_line_weight(
+                        &mut entity,
+                        self.ribbon.active_lineweight,
+                    );
+                    let celtscale = self.tabs[i]
                         .scene
-                        .attach_linear_dimension_association(handle, [Some(source), Some(source)]);
-                    self.tabs[i].scene.bump_entities(&[
-                        (handle, crate::scene::ChangeKind::Modified),
-                        (source, crate::scene::ChangeKind::Modified),
-                    ]);
-                }
+                        .document
+                        .header
+                        .current_entity_linetype_scale;
+                    if (celtscale - 1.0).abs() > 1e-9 && celtscale.abs() > 1e-9 {
+                        entity.common_mut().linetype_scale = celtscale;
+                    }
+                    crate::scene::creation_style::apply_current_creation_styles(
+                        &self.tabs[i].scene.document,
+                        &mut entity,
+                    );
+                    let pieces = crate::modules::draw::modify::explode::explode_entity(
+                        &entity,
+                        &self.tabs[i].scene.document,
+                    );
+                    let delta_safe = pieces
+                        .iter()
+                        .all(|piece| self.delta_add_safe(i, piece));
+                    let pending = self.begin_undo(i, label, pieces.len(), delta_safe);
+                    for piece in pieces {
+                        self.tabs[i].scene.add_entity(piece);
+                    }
+                    pending
+                } else {
+                    let delta_safe = self.delta_add_safe(i, &entity);
+                    let pending = self.begin_undo(i, label, 1, delta_safe);
+                    if let Some(handle) = self.commit_entity_handle(entity) {
+                        if association_mode == 2 {
+                            let sources = source.map_or_else(
+                                || self.tabs[i].scene.infer_dimension_sources(handle),
+                                |source| [Some(source), Some(source)],
+                            );
+                            self.tabs[i]
+                                .scene
+                                .attach_dimension_association(handle, sources);
+                            let mut changes = vec![
+                                (handle, crate::scene::ChangeKind::Modified),
+                            ];
+                            changes.extend(sources.into_iter().flatten().map(|source| {
+                                (source, crate::scene::ChangeKind::Modified)
+                            }));
+                            changes.sort_by_key(|(handle, _)| handle.value());
+                            changes.dedup_by_key(|(handle, _)| handle.value());
+                            self.tabs[i].scene.bump_entities(&changes);
+                        }
+                    }
+                    pending
+                };
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.restore_pre_cmd_tangent();
-                if let Some(pending) = pending {
-                    self.commit_undo_delta(i, pending);
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
                 }
             }
             CmdResult::CommitSolid {

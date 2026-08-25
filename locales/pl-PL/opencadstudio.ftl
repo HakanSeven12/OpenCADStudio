@@ -1798,9 +1798,11 @@ annotate =
     .collect-leaders = Zbieraj Liderów
     .ddedit-select-text-entity = DDEDIT Wybierz element tekstowy:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Enter tekst wymiarowy (pusta wartość zmierzona =):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Określ położenie linii wymiarowej [Tekst/Kąt]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Określ początek pierwszej linii pomocniczej:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Określ początek drugiej linii pomocniczej [Tekst/Kąt]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Wprowadź sformatowany tekst wymiaru (puste = zmierzona wartość):
+    .dimaligned-select-object-to-dimension = DIMALIGNED Wybierz obiekt do zwymiarowania:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Określ położenie linii wymiarowej [Mtext/Tekst/Kąt]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Określ początek pierwszej linii pomocniczej lub naciśnij Enter, aby wybrać obiekt:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Określ początek drugiej linii pomocniczej:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Określ kąt tekstu (w stopniach):
     .dimangular-specify-angle-vertex = DIMANGULAR Określ wierzchołek kąta:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Określ położenie łuku wymiarowego:

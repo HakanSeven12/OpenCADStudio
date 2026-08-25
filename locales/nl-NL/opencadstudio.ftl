@@ -1799,9 +1799,11 @@ annotate =
     .collect-leaders = Verwijslijnen verzamelen
     .ddedit-select-text-entity = DDEDIT Selecteer een tekstobject:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Voer maattekst in (leeg = gemeten waarde):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Geef de positie van de maatlijn op [Tekst/Hoek]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Vermeld de oorsprong van de eerste extensieregel:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Vermeld de oorsprong van de tweede extensieregel [Tekst/hoek]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Voer opgemaakte maattekst in (leeg = gemeten waarde):
+    .dimaligned-select-object-to-dimension = DIMALIGNED Selecteer het object om te bematen:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Geef de positie van de maatlijn op [Mtext/Tekst/Hoek]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Geef het beginpunt van de eerste hulplijn op of druk op Enter om een object te selecteren:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Geef het beginpunt van de tweede hulplijn op:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Teksthoek (graden) specificeren:
     .dimangular-specify-angle-vertex = DIMANGULAR Specificeer hoekvertex:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Geef de positie van de maatboog op:

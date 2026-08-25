@@ -1802,9 +1802,11 @@ annotate =
     .collect-leaders = Собрать выноски
     .ddedit-select-text-entity = DDEDIT Выберите текстовый объект:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Введите текст размера (пусто = измеренное значение):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Укажите положение размерной линии [Текст/Угол]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Укажите происхождение первой линии расширения:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Укажите происхождение второй линии расширения [Текст/Угле]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Введите форматированный текст размера (пусто = измеренное значение):
+    .dimaligned-select-object-to-dimension = DIMALIGNED Выберите объект для нанесения размера:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Укажите положение размерной линии [Mtext/Текст/Угол]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Укажите начало первой выносной линии или нажмите Enter для выбора объекта:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Укажите начало второй выносной линии:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Укажите угол текста (градусы):
     .dimangular-specify-angle-vertex = DIMANGULAR Укажите угол вершины:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Укажите местоположение дуги размерности:

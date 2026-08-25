@@ -1811,9 +1811,11 @@ annotate =
     .collect-leaders = تجميع الخطوط القائدة
     .ddedit-select-text-entity = DDEDIT  حدد كيان النص:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED  أدخل نص البُعد (فارغ = القيمة المقاسة):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  حدد موقع خط البُعد [نص/زاوية]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  حدد أصل خط الامتداد الأول:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  حدد أصل خط الامتداد الثاني [نص/زاوية]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  أدخل نص البُعد المنسق (فارغ = القيمة المقاسة):
+    .dimaligned-select-object-to-dimension = DIMALIGNED  حدد كائنًا لقياسه:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  حدد موقع خط البُعد [Mtext/نص/زاوية]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  حدد أصل خط الامتداد الأول أو اضغط Enter لتحديد كائن:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  حدد أصل خط الامتداد الثاني:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  حدد زاوية النص (بالدرجات):
     .dimangular-specify-angle-vertex = DIMANGULAR  حدد رأس الزاوية:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  حدد موقع قوس البُعد:

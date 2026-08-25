@@ -1798,9 +1798,11 @@ annotate =
     .collect-leaders = Kerää johtajia
     .ddedit-select-text-entity = DDEDIT Valitse tekstikokonaisuus:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Enter mittateksti (tyhjä = mitattu arvo):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Määritä mittaviivan sijainti [teksti/kulma]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Määritä ensimmäisen jatkolinjan alkuperä:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Määritä toisen jatkolinjan alkuperä [teksti/kulma]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Syötä muotoiltu mittateksti (tyhjä = mitattu arvo):
+    .dimaligned-select-object-to-dimension = DIMALIGNED Valitse mitoitettava objekti:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Määritä mittaviivan sijainti [Mtext/Teksti/Kulma]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Määritä ensimmäisen apuviivan alkupiste tai valitse objekti painamalla Enter:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Määritä toisen apuviivan alkupiste:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Määritä tekstin kulma (asteita):
     .dimangular-specify-angle-vertex = DIMANGULAR Määritä kulman kärkipiste:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Määritä mittakaaren sijainti:

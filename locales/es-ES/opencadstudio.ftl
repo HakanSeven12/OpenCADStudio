@@ -1799,9 +1799,11 @@ annotate =
     .collect-leaders = Recopilar directrices
     .ddedit-select-text-entity = DDEDIT  Seleccione una entidad de texto:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED  Introduzca el texto de cota (vacío = valor medido):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Especifique la ubicación de la línea de cota [Texto/Ángulo]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Especifique el origen de la primera línea de referencia:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Especifique el origen de la segunda línea de referencia [Texto/Ángulo]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Introduzca el texto de cota con formato (vacío = valor medido):
+    .dimaligned-select-object-to-dimension = DIMALIGNED  Seleccione el objeto que desea acotar:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Especifique la ubicación de la línea de cota [Mtext/Texto/Ángulo]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Especifique el origen de la primera línea de referencia o pulse Enter para seleccionar un objeto:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Especifique el origen de la segunda línea de referencia:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Especifique el ángulo del texto (grados):
     .dimangular-specify-angle-vertex = DIMANGULAR  Especifique el vértice del ángulo:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Especifique la ubicación del arco de cota:

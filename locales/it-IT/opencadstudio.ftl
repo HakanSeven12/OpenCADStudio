@@ -1798,9 +1798,11 @@ annotate =
     .collect-leaders = Colleziona leader
     .ddedit-select-text-entity = DDEDIT Seleziona entità testo:
     .dimaligned-enter-dimension-text-blank-measured = Testo della dimensione DIMALIGNED Enter (valore misurato = vuoto):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Specificare la posizione della linea di quota [Testo/Angolo]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Specificare l'origine della prima linea di estensione:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Specificare l'origine della seconda linea di estensione [Testo/Angolo]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Immettere il testo di quota formattato (vuoto = valore misurato):
+    .dimaligned-select-object-to-dimension = DIMALIGNED Selezionare l'oggetto da quotare:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Specificare la posizione della linea di quota [Mtext/Testo/Angolo]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Specificare l'origine della prima linea di estensione o premere Invio per selezionare un oggetto:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Specificare l'origine della seconda linea di estensione:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Specificare l'angolo del testo (gradi):
     .dimangular-specify-angle-vertex = DIMANGULAR Specificare il vertice dell'angolo:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Specificare la posizione dell'arco di quota:

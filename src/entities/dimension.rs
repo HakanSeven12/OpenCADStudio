@@ -86,8 +86,21 @@ fn base_props(base: &DimensionBase) -> Vec<crate::scene::model::object::Property
 }
 
 fn properties(dim: &Dimension) -> Vec<PropSection> {
-    if let Dimension::Linear(d) = dim {
-        let base = &d.base;
+    let compact_linear = match dim {
+        Dimension::Linear(d) => Some((
+            &d.base,
+            d.rotation,
+            d.ext_line_rotation,
+        )),
+        Dimension::Aligned(d) => Some((
+            &d.base,
+            (d.second_point.y - d.first_point.y)
+                .atan2(d.second_point.x - d.first_point.x),
+            d.ext_line_rotation,
+        )),
+        _ => None,
+    };
+    if let Some((base, rotation, ext_line_rotation)) = compact_linear {
         return vec![PropSection {
             title: t!("Misc").into_owned(),
             props: vec![
@@ -98,11 +111,15 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
                         base.style_name.clone(),
                     ),
                 },
-                edit_angle(t!("Dim line angle").as_ref(), "rotation", d.rotation.to_degrees()),
+                edit_angle(
+                    t!("Dim line angle").as_ref(),
+                    "rotation",
+                    rotation.to_degrees(),
+                ),
                 edit_angle(
                     t!("Extension line angle").as_ref(),
                     "ext_line_rotation",
-                    d.ext_line_rotation.to_degrees(),
+                    ext_line_rotation.to_degrees(),
                 ),
             ],
         }];
@@ -354,6 +371,29 @@ fn apply_geom_prop(dim: &mut Dimension, field: &str, value: &str) {
 }
 
 fn apply_linear_fields_aligned(d: &mut DimensionAligned, field: &str, value: &str) {
+    if field == "rotation" {
+        let Some(angle) = parse_f64(value).map(f64::to_radians) else {
+            return;
+        };
+        let old_angle = (d.second_point.y - d.first_point.y)
+            .atan2(d.second_point.x - d.first_point.x);
+        let delta = angle - old_angle;
+        let origin_x = d.first_point.x;
+        let origin_y = d.first_point.y;
+        let rotate = |point: &mut acadrust::types::Vector3| {
+            let x = point.x - origin_x;
+            let y = point.y - origin_y;
+            let (sin, cos) = delta.sin_cos();
+            point.x = origin_x + x * cos - y * sin;
+            point.y = origin_y + x * sin + y * cos;
+        };
+        rotate(&mut d.second_point);
+        rotate(&mut d.definition_point);
+        rotate(&mut d.base.definition_point);
+        rotate(&mut d.base.text_middle_point);
+        rotate(&mut d.base.insertion_point);
+        return;
+    }
     apply_linear_common(
         &mut d.first_point,
         &mut d.second_point,
@@ -1495,6 +1535,7 @@ pub fn style_sections(
 
     let s = style;
     let dimfxlon = int(ov::DIMFXLON, s.dimfxlon as i16) != 0;
+    let dimtix = int(ov::DIMTIX, s.dimtix as i16) != 0;
     let dimlunit = int(ov::DIMLUNIT, s.dimlunit);
     let dimfrac = int(ov::DIMFRAC, s.dimfrac);
     let dimalt = int(ov::DIMALT, s.dimalt as i16) != 0;
@@ -1859,7 +1900,7 @@ pub fn style_sections(
                     "dim_text_inside_align",
                     on(int(ov::DIMTIH, s.dimtih as i16) != 0),
                     &["On", "Off"],
-                    true,
+                    dimtix,
                 ),
                 property(
                     t!("Text position X").as_ref(),
@@ -1925,7 +1966,7 @@ pub fn style_sections(
                 choice(
                     t!("Text inside").as_ref(),
                     "dim_text_inside",
-                    on(int(ov::DIMTIX, s.dimtix as i16) != 0),
+                    on(dimtix),
                     &["On", "Off"],
                     true,
                 ),
@@ -2192,14 +2233,14 @@ pub fn style_sections(
                     "dim_tolerance_pos_vert",
                     tolerance_vertical_label(int(ov::DIMTOLJ, s.dimtolj)),
                     &["Bottom", "Middle", "Top"],
-                    tolerance_enabled,
+                    true,
                 ),
                 choice(
                     t!("Tolerance alignment").as_ref(),
                     "dim_tolerance_alignment",
                     tolerance_alignment_label(int(ov::DIMTALN, 0)),
                     &["Align decimal separators", "Align operational symbols"],
-                    tolerance_display == "Deviation",
+                    true,
                 ),
                 choice(
                     t!("Tolerance suppress leading zeros").as_ref(),
@@ -4443,15 +4484,19 @@ fn alternate_units_text(measurement: f64, style: Option<&DimStyle>) -> Option<St
     if !s.dimalt {
         return None;
     }
-    let mut v = measurement * s.dimaltf;
+    let scaled = measurement * s.dimaltf;
+    let use_sub_units = s.dimaltz & 4 != 0
+        && scaled.abs() < 1.0
+        && s.dimaltmzf.abs() > 1e-12;
+    // DIMALTMZF replaces the ordinary alternate-unit factor for sub-unit
+    // values; it is not an additional multiplier.
+    let mut v = if use_sub_units {
+        measurement * s.dimaltmzf
+    } else {
+        scaled
+    };
     if s.dimaltrnd > 1e-12 {
         v = (v / s.dimaltrnd).round() * s.dimaltrnd;
-    }
-    let use_sub_units = s.dimaltz & 4 != 0
-        && v.abs() < 1.0
-        && s.dimaltmzf.abs() > 1e-12;
-    if use_sub_units {
-        v *= s.dimaltmzf;
     }
     let dec = s.dimaltd.max(0) as usize;
     let raw = format_with_unit(v, s.dimaltu, dec, s.dimfrac, s.dimaltz, true);
@@ -4460,12 +4505,17 @@ fn alternate_units_text(measurement: f64, style: Option<&DimStyle>) -> Option<St
     if use_sub_units {
         sep_swapped.push_str(&s.dimaltmzs);
     }
+    let tolerance_factor = if use_sub_units {
+        s.dimaltmzf
+    } else {
+        s.dimaltf
+    };
     // Alt-unit tolerance suffix using DIMALTTD / DIMALTTZ.
     let alt_value = if s.dimtol {
         let alttdec = s.dimalttd.max(0) as usize;
         let alttzin = s.dimalttz;
         let fmt = |x: f64| -> String {
-            let raw = format!("{:.*}", alttdec, x * s.dimaltf);
+            let raw = format!("{:.*}", alttdec, x * tolerance_factor);
             swap_decimal_sep(&apply_linear_zero_suppression(&raw, alttzin), s.dimdsep)
         };
         if (s.dimtp - s.dimtm).abs() < 1e-12 && s.dimtp.abs() > 1e-12 {
@@ -4479,7 +4529,7 @@ fn alternate_units_text(measurement: f64, style: Option<&DimStyle>) -> Option<St
         let alttdec = s.dimalttd.max(0) as usize;
         let alttzin = s.dimalttz;
         let fmt = |x: f64| -> String {
-            let raw = format!("{:.*}", alttdec, x * s.dimaltf);
+            let raw = format!("{:.*}", alttdec, x * tolerance_factor);
             swap_decimal_sep(&apply_linear_zero_suppression(&raw, alttzin), s.dimdsep)
         };
         format!(
@@ -4618,13 +4668,17 @@ fn format_linear_value(measurement: f64, style: Option<&DimStyle>) -> String {
         .unwrap_or((4, 8, 1.0, 0.0, 46, 2, 0, 1.0, ""));
 
     let lfac = if lfac.abs() < 1e-12 { 1.0 } else { lfac };
-    let mut v = measurement * lfac;
+    let scaled = measurement * lfac;
+    let use_sub_units = zin & 4 != 0 && scaled.abs() < 1.0 && sub_factor.abs() > 1e-12;
+    // For values below one unit, DIMMZF replaces DIMLFAC; applying it after
+    // DIMLFAC multiplies both factors and reports the wrong sub-unit value.
+    let mut v = if use_sub_units {
+        measurement * sub_factor
+    } else {
+        scaled
+    };
     if rnd > 1e-12 {
         v = (v / rnd).round() * rnd;
-    }
-    let use_sub_units = zin & 4 != 0 && v.abs() < 1.0 && sub_factor.abs() > 1e-12;
-    if use_sub_units {
-        v *= sub_factor;
     }
     let dec = dec.max(0) as usize;
     let raw = format_with_unit(v, lunit, dec, frac, zin, false);

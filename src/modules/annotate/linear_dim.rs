@@ -1,7 +1,9 @@
 use acadrust::entities::{Dimension, DimensionLinear};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
-use cadkernel::geom2d::{closest_point, Curve, Line as KernelLine};
+use cadkernel::geom2d::{
+    closest_point, Circle as KernelCircle, Curve, Line as KernelLine,
+};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -9,18 +11,7 @@ use crate::scene::model::wire_model::WireModel;
 use glam::DVec3;
 use crate::t;
 
-/// Which axis a linear dimension measures along.
-///
-/// Not the segment's own direction. A linear dimension reports the run or the
-/// rise, and which of the two is wanted is said by where the dimension line is
-/// put: pulled clear of the points above or below, the horizontal distance is
-/// what is left to show; pulled out to the side, the vertical one. Taking the
-/// answer from the two origins alone made every shallow tilt horizontal
-/// forever, whatever the cursor did. (#669)
-///
-/// "Clear of the points" is measured against their extent rather than their
-/// midpoint: a dimension line dragged straight up from near one end of a long
-/// pair is still above them, though it is a long way from the middle.
+/// Select the measured axis from where the dimension line clears the points.
 fn measure_axis(first: DVec3, second: DVec3, def: DVec3) -> DVec3 {
     let outside = |value: f64, a: f64, b: f64| {
         let (low, high) = if a <= b { (a, b) } else { (b, a) };
@@ -193,10 +184,9 @@ impl CadCommand for LinearDimensionCommand {
                 let entity = self.plane.place_entity(EntityType::Dimension(
                     Dimension::Linear(dim),
                 ));
-                if let Some(source) = self.source_handle {
-                    CmdResult::CommitAssociativeDimension { entity, source }
-                } else {
-                    CmdResult::CommitAndExit(entity)
+                CmdResult::CommitDimension {
+                    entity,
+                    source: self.source_handle,
                 }
             }
         }
@@ -366,11 +356,31 @@ fn dimension_line_offset(second: DVec3, point: DVec3, axis: DVec3) -> f64 {
     (point - second).dot(perpendicular)
 }
 
-fn dimension_source_points(entity: &EntityType, click: DVec3) -> Option<(DVec3, DVec3)> {
+pub(crate) fn dimension_source_points(
+    entity: &EntityType,
+    click: DVec3,
+) -> Option<(DVec3, DVec3)> {
     let point = |p: Vector3| DVec3::new(p.x, p.y, p.z);
     match entity {
         EntityType::Line(line) => Some((point(line.start), point(line.end))),
         EntityType::Arc(arc) => Some((point(arc.start_point_wcs()), point(arc.end_point_wcs()))),
+        EntityType::Circle(circle) => {
+            let click = crate::scene::view::transform::wcs_point_to_ocs(
+                (click.x, click.y, click.z),
+                (circle.normal.x, circle.normal.y, circle.normal.z),
+            );
+            let curve = Curve::Circle(KernelCircle {
+                centre: [circle.center.x, circle.center.y],
+                radius: circle.radius,
+            });
+            let first = closest_point(&curve, [click.0, click.1]).point;
+            let parameter = curve.parameter_at(first);
+            let second = curve.point_at((parameter + 0.5).rem_euclid(1.0));
+            Some((
+                ocs_point(first, circle.center.z, circle.normal),
+                ocs_point(second, circle.center.z, circle.normal),
+            ))
+        }
         EntityType::LwPolyline(polyline) => nearest_planar_source(
             polyline
                 .vertices

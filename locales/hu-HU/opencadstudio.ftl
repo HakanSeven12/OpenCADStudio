@@ -1798,9 +1798,11 @@ annotate =
     .collect-leaders = Gyűjtsd össze a vezetőket
     .ddedit-select-text-entity = DDEDIT Szöveg entitás kiválasztása:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Enter méretszöveg (üres = mért érték):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED A méretvonal helyének megadása [szöveg/szög]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Adja meg az első mellékvonal eredetét:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Adja meg a második mellékvonal eredetét [szöveg/szög]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Adja meg a formázott méretszöveget (üres = mért érték):
+    .dimaligned-select-object-to-dimension = DIMALIGNED Válassza ki a méretezendő objektumot:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Adja meg a méretvonal helyét [Mtext/Szöveg/Szög]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Adja meg az első segédvonal kezdőpontját, vagy nyomja meg az Entert egy objektum kiválasztásához:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Adja meg a második segédvonal kezdőpontját:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Adja meg a szöveg szögét (fokban):
     .dimangular-specify-angle-vertex = DIMANGULAR Szögcsúcs megadása:
     .dimangular-specify-dimension-arc-location = DIMANGULAR A méretív helyének megadása:

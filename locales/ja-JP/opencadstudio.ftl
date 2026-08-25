@@ -1789,9 +1789,11 @@ annotate =
     .collect-leaders = 引出線を収集
     .ddedit-select-text-entity = DDEDIT  文字図形を選択:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED  寸法値を入力（空白 = 計測値）:
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  寸法線の位置を指定 [文字/角度]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  1 本目の寸法補助線の起点を指定:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  2 本目の寸法補助線の起点を指定 [文字/角度]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  書式付き寸法文字を入力（空白 = 計測値）:
+    .dimaligned-select-object-to-dimension = DIMALIGNED  寸法を記入するオブジェクトを選択:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  寸法線の位置を指定 [Mtext/文字/角度]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  1 本目の寸法補助線の起点を指定、または Enter でオブジェクトを選択:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  2 本目の寸法補助線の起点を指定:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  文字角度を指定（度）:
     .dimangular-specify-angle-vertex = DIMANGULAR  角度の頂点を指定:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  寸法円弧の位置を指定:

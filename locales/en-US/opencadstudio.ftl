@@ -1829,9 +1829,11 @@ annotate =
     .collect-leaders = Collect Leaders
     .ddedit-select-text-entity = DDEDIT  Select text entity:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED  Enter dimension text (blank = measured value):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Specify dimension line location  [Text/Angle]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Specify first extension line origin:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Specify second extension line origin  [Text/Angle]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Enter formatted dimension text (blank = measured value):
+    .dimaligned-select-object-to-dimension = DIMALIGNED  Select object to dimension:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Specify dimension line location  [Mtext/Text/Angle]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Specify first extension line origin or press Enter to select object:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Specify second extension line origin:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Specify text angle (degrees):
     .dimangular-specify-angle-vertex = DIMANGULAR  Specify angle vertex:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Specify dimension arc location:

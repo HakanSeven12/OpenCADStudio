@@ -1809,9 +1809,11 @@ annotate =
     .collect-leaders = Kılavuzları Topla
     .ddedit-select-text-entity = DDEDIT  Metin nesnesini seçin:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED  Ölçü metnini girin (boş = ölçülen değer):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Ölçü çizgisinin konumunu belirtin [Metin/Açı]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Birinci uzatma çizgisinin başlangıcını belirtin:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  İkinci uzatma çizgisinin başlangıcını belirtin [Metin/Açı]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Biçimlendirilmiş ölçü metnini girin (boş = ölçülen değer):
+    .dimaligned-select-object-to-dimension = DIMALIGNED  Ölçülendirilecek nesneyi seçin:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Ölçü çizgisinin konumunu belirtin [Mtext/Metin/Açı]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Birinci uzatma çizgisinin başlangıcını belirtin veya nesne seçmek için Enter'a basın:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  İkinci uzatma çizgisinin başlangıcını belirtin:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Metin açısını belirtin (derece):
     .dimangular-specify-angle-vertex = DIMANGULAR  Açı köşesini belirtin:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Ölçü yayının konumunu belirtin:

@@ -1799,9 +1799,11 @@ annotate =
     .collect-leaders = Führungslinien sammeln
     .ddedit-select-text-entity = DDEDIT Textobjekt auswählen:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Bemaßungstext eingeben (leer = Messwert):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Lage der Dimensionslinie angeben [Text/Winkel]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Geben Sie den Ursprung der ersten Erweiterungslinie an:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Geben Sie den Ursprung der zweiten Erweiterungslinie an [Text/Winkel]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Formatierten Bemaßungstext eingeben (leer = Messwert):
+    .dimaligned-select-object-to-dimension = DIMALIGNED Zu bemaßendes Objekt auswählen:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Lage der Bemaßungslinie angeben [Mtext/Text/Winkel]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Ursprung der ersten Maßhilfslinie angeben oder Enter drücken, um ein Objekt auszuwählen:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Ursprung der zweiten Maßhilfslinie angeben:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Textwinkel angeben (Grad):
     .dimangular-specify-angle-vertex = DIMANGULAR Winkelspitze angeben:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Bemaßungsbogenlage angeben:

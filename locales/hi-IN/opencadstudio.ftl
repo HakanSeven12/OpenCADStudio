@@ -1787,9 +1787,11 @@ annotate =
     .collect-leaders = लीडर एकत्र करें
     .ddedit-select-text-entity = DDEDIT टेक्स्ट ऑब्जेक्ट चुनें:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED आयाम टेक्स्ट दर्ज करें (blank = मापा मान):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED आयाम लाइन स्थान निर्दिष्ट करें [टेक्स्ट / एंगल]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED पहली एक्सटेंशन लाइन उत्पत्ति निर्दिष्ट करें:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED दूसरी एक्सटेंशन लाइन उत्पत्ति निर्दिष्ट करें [टेक्स्ट / एंगल]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED स्वरूपित आयाम टेक्स्ट दर्ज करें (खाली = मापा मान):
+    .dimaligned-select-object-to-dimension = DIMALIGNED आयाम देने के लिए ऑब्जेक्ट चुनें:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED आयाम रेखा का स्थान निर्दिष्ट करें [Mtext/टेक्स्ट/कोण]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED पहली एक्सटेंशन रेखा का मूल निर्दिष्ट करें या ऑब्जेक्ट चुनने के लिए Enter दबाएँ:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED दूसरी एक्सटेंशन रेखा का मूल निर्दिष्ट करें:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED पाठ कोण निर्दिष्ट करें (डिग्री):
     .dimangular-specify-angle-vertex = DIMANGULAR कोण वर्टेक्स निर्दिष्ट करें:
     .dimangular-specify-dimension-arc-location = DIMANGULAR आयाम आर्क स्थान निर्दिष्ट करें:

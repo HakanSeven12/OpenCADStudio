@@ -1798,9 +1798,11 @@ annotate =
     .collect-leaders = Sbírejte vůdce
     .ddedit-select-text-entity = DDEDIT Vyberte textovou entitu:
     .dimaligned-enter-dimension-text-blank-measured = Text rozměru DIMALIGNED Enter (prázdná naměřená hodnota =):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Určete umístění kótovací čáry [Text/Úhel]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Zadejte počátek prvního vynášecího řádku:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Zadejte počátek druhé vynášecí čáry [Text/Úhel]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Zadejte formátovaný text kóty (prázdné = naměřená hodnota):
+    .dimaligned-select-object-to-dimension = DIMALIGNED Vyberte objekt ke kótování:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Určete umístění kótovací čáry [Mtext/Text/Úhel]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Zadejte počátek první vynášecí čáry nebo stiskněte Enter pro výběr objektu:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED Zadejte počátek druhé vynášecí čáry:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Zadejte úhel textu (stupně):
     .dimangular-specify-angle-vertex = DIMANGULAR Zadejte vrchol úhlu:
     .dimangular-specify-dimension-arc-location = DIMANGULAR Zadejte umístění oblouku kóty:

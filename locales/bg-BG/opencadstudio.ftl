@@ -1798,9 +1798,11 @@ annotate =
     .collect-leaders = Събери водачи
     .ddedit-select-text-entity = DDEDIT  Избери текстов обект:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED  Въведи текст на оразмеряване (празно = измерена стойност):
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Посочи местоположение на линията за оразмеряване  [Текст/Ъгъл]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Посочи начало на първата удължителна линия:
-    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Посочи начало на втората удължителна линия  [Текст/Ъгъл]:
+    .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Въведи форматиран текст на оразмеряване (празно = измерена стойност):
+    .dimaligned-select-object-to-dimension = DIMALIGNED  Избери обект за оразмеряване:
+    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Посочи местоположение на линията за оразмеряване [Mtext/Текст/Ъгъл]:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Посочи начало на първата удължителна линия или натисни Enter за избор на обект:
+    .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Посочи начало на втората удължителна линия:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Посочи ъгъл на текста (градуси):
     .dimangular-specify-angle-vertex = DIMANGULAR  Посочи връх на ъгъла:
     .dimangular-specify-dimension-arc-location = DIMANGULAR  Посочи местоположение на дъгата за оразмеряване:

@@ -612,10 +612,66 @@ struct DimMetrics {
 /// suppression), DIMCLRD/E/T (colours) and DIMLWD/E (lineweights).
 fn dim_metrics(dim: &Dimension, doc: &CadDocument) -> DimMetrics {
     let name = dim.base().style_name.as_str();
-    let style = doc.dim_styles.iter().find(|s| {
+    let mut effective_style = doc.dim_styles.iter().find(|s| {
         s.name.eq_ignore_ascii_case(name)
             || (name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
-    });
+    }).cloned();
+    if let Some(style) = &mut effective_style {
+        use crate::entities::dim_override as ov;
+        let data = &dim.base().common.extended_data;
+        macro_rules! real {
+            ($field:ident, $code:ident) => {
+                if let Some(value) = ov::real(data, ov::$code) {
+                    style.$field = value;
+                }
+            };
+        }
+        macro_rules! int {
+            ($field:ident, $code:ident) => {
+                if let Some(value) = ov::int(data, ov::$code) {
+                    style.$field = value;
+                }
+            };
+        }
+        macro_rules! flag {
+            ($field:ident, $code:ident) => {
+                if let Some(value) = ov::int(data, ov::$code) {
+                    style.$field = value != 0;
+                }
+            };
+        }
+        macro_rules! handle {
+            ($field:ident, $code:ident) => {
+                if let Some(value) = ov::handle(data, ov::$code) {
+                    style.$field = value;
+                }
+            };
+        }
+        real!(dimscale, DIMSCALE);
+        real!(dimasz, DIMASZ);
+        real!(dimcen, DIMCEN);
+        real!(dimexo, DIMEXO);
+        real!(dimexe, DIMEXE);
+        real!(dimtsz, DIMTSZ);
+        real!(dimdle, DIMDLE);
+        real!(dimfxl, DIMFXL);
+        flag!(dimfxlon, DIMFXLON);
+        flag!(dimse1, DIMSE1);
+        flag!(dimse2, DIMSE2);
+        flag!(dimsd1, DIMSD1);
+        flag!(dimsd2, DIMSD2);
+        flag!(dimsoxd, DIMSOXD);
+        flag!(dimsah, DIMSAH);
+        int!(dimclrd, DIMCLRD);
+        int!(dimclre, DIMCLRE);
+        int!(dimclrt, DIMCLRT);
+        int!(dimlwd, DIMLWD);
+        int!(dimlwe, DIMLWE);
+        handle!(dimblk, DIMBLK);
+        handle!(dimblk1, DIMBLK1);
+        handle!(dimblk2, DIMBLK2);
+    }
+    let style = effective_style.as_ref();
     let scale = style
         .map(|s| if s.dimscale > 1e-6 { s.dimscale } else { 1.0 })
         .unwrap_or(1.0);
@@ -630,7 +686,15 @@ fn dim_metrics(dim: &Dimension, doc: &CadDocument) -> DimMetrics {
         let t = ArrowKind::Tick { size: dimtsz as f32 };
         (t.clone(), t)
     } else if let Some(s) = style {
-        if s.dimsah {
+        if matches!(dim, Dimension::Diameter(_)) {
+            use crate::entities::dim_override as ov;
+            let data = &dim.base().common.extended_data;
+            let first = ov::handle(data, ov::DIMBLK1)
+                .unwrap_or(if s.dimsah { s.dimblk1 } else { s.dimblk });
+            let second = ov::handle(data, ov::DIMBLK2)
+                .unwrap_or(if s.dimsah { s.dimblk2 } else { s.dimblk });
+            (arrow_from_block(doc, first, asz), arrow_from_block(doc, second, asz))
+        } else if s.dimsah {
             (arrow_from_block(doc, s.dimblk1, asz), arrow_from_block(doc, s.dimblk2, asz))
         } else {
             let a = arrow_from_block(doc, s.dimblk, asz);
@@ -993,26 +1057,102 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
             result.extend(dim_center_mark(center, met.dimcen, len, &dim_c));
         }
         Dimension::Diameter(d) => {
-            // Full diameter through the centre (far edge -> near edge), inward
-            // terminators at both edges, plus the centre mark.
-            let (center, edge) = (d.angle_vertex, d.definition_point);
-            let far = v3(2.0 * center.x - edge.x, 2.0 * center.y - edge.y, edge.z);
-            result.push(make_seg(&far, &edge, &dim_c));
+            // The stored points are the two opposite chord points. Their
+            // midpoint is the measured circle centre.
+            let (edge, far) = (d.angle_vertex, d.definition_point);
+            let center = v3(
+                (edge.x + far.x) * 0.5,
+                (edge.y + far.y) * 0.5,
+                (edge.z + far.z) * 0.5,
+            );
             let len = ((edge.x - far.x).powi(2) + (edge.y - far.y).powi(2))
                 .sqrt()
                 .max(1e-12);
             let (ux, uy) = ((edge.x - far.x) / len, (edge.y - far.y) / len);
-            result.extend(dim_terminator(edge, -ux, -uy, &met.arrow1, &dim_c));
-            result.extend(dim_terminator(far, ux, uy, &met.arrow2, &dim_c));
-            // Optional leader past the near edge toward the text. DIM-DIA-LEADER.
-            if d.leader_length.abs() > 1e-9 {
-                let anchor = dim_text_anchor(base, center, edge);
-                let ld = norm2(anchor.x - edge.x, anchor.y - edge.y, ux, uy);
+            let ticks = met.dimtsz > 1e-9;
+            let extension = if ticks { met.dimdle } else { 0.0 };
+            let edge_outer = v3(
+                edge.x + ux * extension,
+                edge.y + uy * extension,
+                edge.z,
+            );
+            let far_outer = v3(
+                far.x - ux * extension,
+                far.y - uy * extension,
+                far.z,
+            );
+            if !met.dimsd1 {
+                result.push(make_seg(&edge_outer, &center, &dim_c));
+            }
+            if !met.dimsd2 {
+                result.push(make_seg(&center, &far_outer, &dim_c));
+            }
+            let outside = !ticks && met.dimasz > 1e-6 && len < 2.0 * met.dimasz;
+            if outside {
+                result.extend(dim_terminator(edge, ux, uy, &met.arrow1, &dim_c));
+                result.extend(dim_terminator(far, -ux, -uy, &met.arrow2, &dim_c));
+                if !met.dimsoxd {
+                    let stub = 2.0 * met.dimasz;
+                    if !met.dimsd1 {
+                        result.push(make_seg(
+                            &edge,
+                            &v3(edge.x + ux * stub, edge.y + uy * stub, edge.z),
+                            &dim_c,
+                        ));
+                    }
+                    if !met.dimsd2 {
+                        result.push(make_seg(
+                            &far,
+                            &v3(far.x - ux * stub, far.y - uy * stub, far.z),
+                            &dim_c,
+                        ));
+                    }
+                }
+            } else {
+                result.extend(dim_terminator(edge, -ux, -uy, &met.arrow1, &dim_c));
+                result.extend(dim_terminator(far, ux, uy, &met.arrow2, &dim_c));
+            }
+            let anchor = dim_text_anchor(base, center, edge);
+            let distance_squared = |first: Vector3, second: Vector3| {
+                (first.x - second.x).powi(2)
+                    + (first.y - second.y).powi(2)
+                    + (first.z - second.z).powi(2)
+            };
+            let (leader_tip, suppressed, fallback) = if distance_squared(anchor, edge)
+                <= distance_squared(anchor, far)
+            {
+                (edge, met.dimsd1, (ux, uy))
+            } else {
+                (far, met.dimsd2, (-ux, -uy))
+            };
+            if !suppressed && d.leader_length.abs() > 1e-9 {
+                let ld = norm2(
+                    anchor.x - leader_tip.x,
+                    anchor.y - leader_tip.y,
+                    fallback.0,
+                    fallback.1,
+                );
                 result.push(make_seg(
-                    &edge,
-                    &v3(edge.x + ld.0 * d.leader_length, edge.y + ld.1 * d.leader_length, edge.z),
+                    &leader_tip,
+                    &v3(
+                        leader_tip.x + ld.0 * d.leader_length.abs(),
+                        leader_tip.y + ld.1 * d.leader_length.abs(),
+                        leader_tip.z,
+                    ),
                     &dim_c,
                 ));
+            }
+            if !met.dimse1 {
+                if let Some(points) = crate::scene::dimension_assoc::radial_extension_points(
+                    doc,
+                    base.common.handle,
+                    met.dimexo,
+                    met.dimexe,
+                ) {
+                    for pair in points.windows(2) {
+                        result.push(make_seg(&pair[0], &pair[1], &ext_c));
+                    }
+                }
             }
             result.extend(dim_center_mark(center, met.dimcen, len * 0.5, &dim_c));
         }
@@ -1567,15 +1707,16 @@ mod tests {
     }
 
     // A diameter dimension bakes a line edge-to-edge THROUGH the centre, not a
-    // radius-length line. The two extreme endpoints must be equidistant from the
-    // centre (angle_vertex) and the centre must lie between them.
+    // radius-length line. The two stored extreme endpoints must be equidistant
+    // from their midpoint and that midpoint must be the circle centre.
     #[test]
     fn diameter_dim_bakes_through_center() {
         use acadrust::entities::DimensionDiameter;
         let mut doc = CadDocument::new();
         let center = Vector3::new(3.0, 4.0, 0.0);
         let edge = Vector3::new(8.0, 4.0, 0.0); // radius 5 along +x
-        let mut d = DimensionDiameter::new(center, edge);
+        let far = Vector3::new(-2.0, 4.0, 0.0);
+        let mut d = DimensionDiameter::new(edge, far);
         d.base.text_middle_point = Vector3::new(3.0, 9.0, 0.0);
         let handle = doc
             .add_entity(EntityType::Dimension(Dimension::Diameter(d)))

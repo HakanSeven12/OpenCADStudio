@@ -1,5 +1,5 @@
 use acadrust::entities::{Dimension, DimensionRadius};
-use acadrust::types::Vector3;
+use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
@@ -20,14 +20,12 @@ pub fn tool() -> ToolDef {
 }
 
 enum Step {
-    CenterPoint,
-    RadiusPoint(DVec3),
-    TextPoint { center: DVec3, point: DVec3 },
+    SelectObject,
+    DimLine(crate::scene::dimension_assoc::RadialSourceGeometry),
 }
 
 pub struct RadiusDimensionCommand {
     step: Step,
-    plane: WorkingPlane,
     /// Optional text that replaces the measured value (None = measurement).
     text_override: Option<String>,
     /// True while the next typed line is captured as the text override.
@@ -36,24 +34,28 @@ pub struct RadiusDimensionCommand {
     text_angle: Option<f64>,
     /// True while the next typed value is captured as the text angle.
     awaiting_angle: bool,
+    picked_entity: Option<EntityType>,
+    source_handle: Option<Handle>,
+    mtext_override: bool,
 }
 
 impl RadiusDimensionCommand {
     pub fn new() -> Self {
         Self {
-            step: Step::CenterPoint,
-            plane: WorkingPlane::default(),
+            step: Step::SelectObject,
             text_override: None,
             awaiting_text: false,
             text_angle: None,
             awaiting_angle: false,
+            picked_entity: None,
+            source_handle: None,
+            mtext_override: false,
         }
     }
 }
 
 impl CadCommand for RadiusDimensionCommand {
-    fn set_working_plane(&mut self, plane: WorkingPlane) {
-        self.plane = plane;
+    fn set_working_plane(&mut self, _plane: WorkingPlane) {
     }
 
     fn name(&self) -> &'static str {
@@ -62,48 +64,57 @@ impl CadCommand for RadiusDimensionCommand {
 
     fn prompt(&self) -> String {
         if self.awaiting_text {
-            return t!("DIMRADIUS  Enter dimension text (blank = measured value):").into_owned();
+            return if self.mtext_override {
+                t!("DIMRADIUS  Enter formatted dimension text (blank = measured value):")
+                    .into_owned()
+            } else {
+                t!("DIMRADIUS  Enter dimension text (blank = measured value):").into_owned()
+            };
         }
         if self.awaiting_angle {
             return t!("DIMRADIUS  Specify text angle (degrees):").into_owned();
         }
         match self.step {
-            Step::CenterPoint => t!("DIMRADIUS  Specify center point:").into_owned(),
-            Step::RadiusPoint(_) => t!("DIMRADIUS  Specify radius point:").into_owned(),
-            Step::TextPoint { .. } => {
-                t!("DIMRADIUS  Specify dimension line location  [Text/Angle]:").into_owned()
+            Step::SelectObject => t!("DIMRADIUS  Select arc, circle, or polyline arc:").into_owned(),
+            Step::DimLine(_) => {
+                t!("DIMRADIUS  Specify dimension line location  [Mtext/Text/Angle]:").into_owned()
             }
         }
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
-            Step::CenterPoint => {
-                self.step = Step::RadiusPoint(pt);
-                CmdResult::NeedPoint
-            }
-            Step::RadiusPoint(center) => {
-                self.step = Step::TextPoint { center, point: pt };
-                CmdResult::NeedPoint
-            }
-            Step::TextPoint { center, point } => {
-                let center = self.plane.to_local(center);
-                let point = self.plane.to_local(point);
-                let pt = self.plane.to_local(pt);
+            Step::SelectObject => CmdResult::NeedPoint,
+            Step::DimLine(source) => {
+                let source_plane = WorkingPlane::new(
+                    DVec3::from_array(source.plane.origin),
+                    DVec3::from_array(source.plane.x_axis),
+                    DVec3::from_array(source.plane.y_axis),
+                );
+                let center_world = dvec(source.center_world());
+                let point_world = dvec(source.chord_at(pt.to_array()));
+                let center = source_plane.to_local(center_world);
+                let point = source_plane.to_local(point_world);
+                let pt = source_plane.to_local(pt);
                 let mut dim = DimensionRadius::new(v3(center), v3(point));
                 dim.base.definition_point = v3(point);
                 dim.base.text_middle_point = v3(pt);
                 dim.base.insertion_point = v3(pt);
+                dim.base.text_user_positioned = true;
                 dim.leader_length = point.distance(pt);
                 dim.base.actual_measurement = dim.measurement();
-                dim.base.user_text = self.text_override.clone();
+                crate::entities::dimension::set_dimension_text_override(
+                    &mut dim.base,
+                    self.text_override.clone(),
+                );
                 // An explicit text angle overrides the default rotation.
                 if let Some(a) = self.text_angle {
                     dim.base.text_rotation = a;
                 }
-                CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Dimension(
-                    Dimension::Radius(dim),
-                )))
+                CmdResult::CommitDimension {
+                    entity: source_plane.place_entity(EntityType::Dimension(Dimension::Radius(dim))),
+                    source: self.source_handle,
+                }
             }
         }
     }
@@ -162,8 +173,17 @@ impl CadCommand for RadiusDimensionCommand {
             self.awaiting_angle = false;
             return Some(CmdResult::NeedPoint);
         }
+        if !matches!(self.step, Step::DimLine(_)) {
+            return None;
+        }
         match text.trim().to_uppercase().as_str() {
-            "T" | "TEXT" | "M" | "MTEXT" => {
+            "T" | "TEXT" => {
+                self.mtext_override = false;
+                self.awaiting_text = true;
+                Some(CmdResult::NeedPoint)
+            }
+            "M" | "MTEXT" => {
+                self.mtext_override = true;
                 self.awaiting_text = true;
                 Some(CmdResult::NeedPoint)
             }
@@ -175,24 +195,64 @@ impl CadCommand for RadiusDimensionCommand {
         }
     }
 
+    fn needs_entity_pick(&self) -> bool {
+        matches!(self.step, Step::SelectObject)
+    }
+
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+
+    fn inject_before_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.picked_entity = Some(entity);
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
+        let Some(entity) = self.picked_entity.take() else {
+            return CmdResult::NeedPoint;
+        };
+        let Some(source) = crate::scene::dimension_assoc::radial_source_at(
+            &entity,
+            Vector3::new(point.x, point.y, point.z),
+        ) else {
+            return CmdResult::NeedPoint;
+        };
+        if !source.radius.is_finite() || source.radius <= 1e-12 {
+            return CmdResult::NeedPoint;
+        }
+        self.source_handle = Some(handle);
+        self.step = Step::DimLine(source);
+        CmdResult::NeedPoint
+    }
+
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        let pt = pt.as_vec3();
         match self.step {
-            Step::CenterPoint => None,
-            Step::RadiusPoint(center) => Some(preview_wire(vec![center.as_vec3(), pt])),
-            Step::TextPoint { center, point } => Some(preview_wire(vec![
-                center.as_vec3(),
-                point.as_vec3(),
+            Step::SelectObject => None,
+            Step::DimLine(source) => {
+                let center = dvec(source.center_world()).as_vec3();
+                let point = dvec(source.chord_at(pt.to_array())).as_vec3();
+                Some(preview_wire(vec![
+                center,
+                point,
                 Vec3::new(f32::NAN, f32::NAN, f32::NAN),
-                point.as_vec3(),
-                pt,
-            ])),
+                point,
+                pt.as_vec3(),
+            ]))
+            }
         }
     }
 }
 
 fn v3(pt: DVec3) -> Vector3 {
     Vector3::new(pt.x, pt.y, pt.z)
+}
+
+fn dvec(point: Vector3) -> DVec3 {
+    DVec3::new(point.x, point.y, point.z)
 }
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {

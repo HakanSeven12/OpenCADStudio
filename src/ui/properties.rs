@@ -30,6 +30,7 @@ const PATTERN_CARD_W: f32 = 158.0;
 const PATTERN_PREVIEW_H: f32 = 58.0;
 const PATTERN_PICKER_W: f32 = 348.0;
 const PATTERN_PICKER_H: f32 = 720.0;
+const LINETYPE_MENU_W: f32 = 220.0;
 
 use crate::app::Message;
 use crate::scene::model::object::{PropSection, PropValue};
@@ -1049,7 +1050,10 @@ impl PropertiesPanel {
         .on_open(Message::PropColorPickerClose)
         .width(Length::Fill);
 
-        prop_row_widget(label, combo.into())
+        prop_row_widget(
+            label,
+            crate::ui::wide_menu::wide_menu(combo, LINETYPE_MENU_W),
+        )
     }
 
     fn render_choice_row<'a>(

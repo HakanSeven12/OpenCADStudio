@@ -46,6 +46,7 @@ const ICON_SZ: f32 = ROW_H * 0.62; // ≈16 px at ROW_H=26
 const FONT_SZ: f32 = ROW_H * 0.42; // ≈11 px at ROW_H=26
 /// Vertical padding for combo_box / text_input so their total height = ROW_H.
 const COMBO_PAD_V: f32 = (ROW_H - FONT_SZ * 1.3 - 2.0) / 2.0;
+const LINETYPE_MENU_W: f32 = 220.0;
 /// Widget id for the layer-table scrollable, so a freshly created layer can be
 /// scrolled into view after it is added (#271).
 pub const LAYER_TABLE_SCROLL_ID: &str = "layer-manager-table-scroll";
@@ -831,22 +832,24 @@ fn layer_row<'a>(
         art: String::new(), // art comes from combo state items; just match by name
     };
     let lt_cell: Element<'_, Message> = if let Some(state) = lt_combo {
-        combo_box(
-            state,
-            t!("linetype").as_ref(),
-            Some(&cur_lt_item),
-            |item: LinetypeItem| Message::LayerLinetypeSet(item.name),
+        crate::ui::wide_menu::wide_menu(
+            combo_box(
+                state,
+                t!("linetype").as_ref(),
+                Some(&cur_lt_item),
+                |item: LinetypeItem| Message::LayerLinetypeSet(item.name),
+            )
+            .size(FONT_SZ)
+            .padding(Padding {
+                top: COMBO_PAD_V,
+                bottom: COMBO_PAD_V,
+                left: 4.0,
+                right: 4.0,
+            })
+            .width(Length::Fixed(COL_LT))
+            .input_style(combo_input_style),
+            LINETYPE_MENU_W,
         )
-        .size(FONT_SZ)
-        .padding(Padding {
-            top: COMBO_PAD_V,
-            bottom: COMBO_PAD_V,
-            left: 4.0,
-            right: 4.0,
-        })
-        .width(Length::Fixed(COL_LT))
-        .input_style(combo_input_style)
-        .into()
     } else {
         text(layer.linetype.as_str())
             .size(FONT_SZ)

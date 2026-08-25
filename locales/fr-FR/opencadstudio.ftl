@@ -1866,6 +1866,7 @@ annotate =
         Données
     .lower = Moins
     .mleader-specify-arrowhead-point = MLEADER Spécifiez le point de la tête de flèche:
+    .mleader-specify-landing-point = MLEADER Spécifiez le point de palier:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Spécifiez le point suivant [__ocs_arg_count__ points — Entrée pour placer le texte] :
     .mleaderadd-select-a-multileader = MLEADERADD Sélectionnez une ligne de repère multiple :
     .mleaderadd-specify-arrowhead-location = MLEADERADD Spécifiez l'emplacement de la tête de flèche:

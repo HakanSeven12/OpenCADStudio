@@ -1270,10 +1270,29 @@ impl OpenCADStudio {
                 self.restore_pre_cmd_tangent();
             }
             CmdResult::CommitAndEditText(entity) => {
+                let annotative_mleader = matches!(
+                    &entity,
+                    acadrust::EntityType::MultiLeader(ml) if ml.enable_annotation_scale
+                );
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
-                let delta_safe = self.delta_add_safe(i, &entity);
+                let delta_safe = self.delta_add_safe(i, &entity) && !annotative_mleader;
                 let pending = self.begin_undo(i, label, 1, delta_safe);
                 let handle = self.commit_entity_handle(entity);
+
+                if annotative_mleader {
+                    let scale_handle = self.tabs[i].scene.creation_annotation_scale_handle();
+                    if let (Some(handle), Some(scale_handle)) = (handle, scale_handle) {
+                        crate::scene::annotative::create_annotation_context(
+                            &mut self.tabs[i].scene.document,
+                            handle,
+                            scale_handle,
+                        );
+                        self.tabs[i]
+                            .scene
+                            .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                    }
+                }
+
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;

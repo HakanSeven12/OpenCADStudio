@@ -1896,6 +1896,7 @@ annotate =
         Data
     .lower = Lower
     .mleader-specify-arrowhead-point = MLEADER  Specify arrowhead point:
+    .mleader-specify-landing-point = MLEADER  Specify landing point:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER  Specify next point [__ocs_arg_count__ pts — Enter to place text]:
     .mleaderadd-select-a-multileader = MLEADERADD  Select a multileader:
     .mleaderadd-specify-arrowhead-location = MLEADERADD  Specify arrowhead location:

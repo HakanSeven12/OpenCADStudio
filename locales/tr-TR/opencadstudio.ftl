@@ -1872,6 +1872,7 @@ annotate =
     .link-data = Verileri Bağla
     .lower = Alt
     .mleader-specify-arrowhead-point = MLEADER  Ok ucu noktasını belirtin:
+    .mleader-specify-landing-point = MLEADER  Yatay bağlantı noktasını belirtin:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER  Sonraki noktayı belirtin [__ocs_arg_count__ nokta — metni yerleştirmek için Enter]:
     .mleaderadd-select-a-multileader = MLEADERADD  Bir çoklu kılavuz seçin:
     .mleaderadd-specify-arrowhead-location = MLEADERADD  Ok ucu konumunu belirtin:

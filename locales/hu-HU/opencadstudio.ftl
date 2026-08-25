@@ -1865,6 +1865,7 @@ annotate =
         Adatok
     .lower = Lejjebb
     .mleader-specify-arrowhead-point = MLEADER Nyílhegy pont megadása:
+    .mleader-specify-landing-point = MLEADER Bekötési pont megadása:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Adja meg a következő pontot [__ocs_arg_count__ pts — Enter a szöveg elhelyezéséhez]:
     .mleaderadd-select-a-multileader = MLEADERADD Válasszon többvezetőt:
     .mleaderadd-specify-arrowhead-location =MLEADERADD Adja meg a nyílhegy helyét:

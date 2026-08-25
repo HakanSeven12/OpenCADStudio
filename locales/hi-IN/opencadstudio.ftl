@@ -1854,6 +1854,7 @@ annotate =
         डेटा
     .lower = कम
     .mleader-specify-arrowhead-point = MLEADER निर्दिष्ट तीरहेड बिंदु:
+    .mleader-specify-landing-point = MLEADER लैंडिंग बिंदु निर्दिष्ट करें:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER अगला बिंदु निर्दिष्ट करें [__ocs_arg_count__ बिंदु — टेक्स्ट रखने के लिए Enter दबाएँ]:
     .mleaderadd-select-a-multileader = MLEADERADD मल्टीलीडर चुनें:
     .mleaderadd-specify-arrowhead-location = MLEADERADD एरोहेड का स्थान निर्दिष्ट करें:

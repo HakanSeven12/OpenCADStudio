@@ -1866,6 +1866,7 @@ annotate =
         Daten
     .lower = niedriger
     .mleader-specify-arrowhead-point = MLEADER Pfeilspitze angeben:
+    .mleader-specify-landing-point = MLEADER Absetzpunkt angeben:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Nächsten Punkt angeben [__ocs_arg_count__ Punkte — Eingabe zum Platzieren des Texts]:
     .mleaderadd-select-a-multileader = MLEADERADD Multiführungslinie auswählen:
     .mleaderadd-specify-arrowhead-location = MLEADERADD Pfeilkopfposition angeben:

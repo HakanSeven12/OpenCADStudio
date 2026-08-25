@@ -1878,6 +1878,7 @@ annotate =
         البيانات
     .lower = خفض
     .mleader-specify-arrowhead-point = MLEADER  حدد نقطة رأس السهم:
+    .mleader-specify-landing-point = MLEADER  حدد نقطة خط الإسناد:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER  حدد النقطة التالية [__ocs_arg_count__ نقاط — Enter لوضع النص]:
     .mleaderadd-select-a-multileader = MLEADERADD  حدد خطًا قائدًا متعددًا:
     .mleaderadd-specify-arrowhead-location = MLEADERADD  حدد موقع رأس السهم:

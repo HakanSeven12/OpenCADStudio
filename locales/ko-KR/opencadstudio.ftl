@@ -1865,6 +1865,7 @@ annotate =
         데이터
     .lower = 낮은
     .mleader-specify-arrowhead-point = MLEADER 화살촉 점 지정:
+    .mleader-specify-landing-point = MLEADER 연결점 지정:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER 다음 점 지정 [__ocs_arg_count__ 포인트 - 텍스트를 배치할 Enter]:
     .mleaderadd-select-a-multileader = MLEADERADD 다중 지시선 선택:
     .mleaderadd-specify-arrowhead-location =MLEADERADD 화살촉 위치 지정:

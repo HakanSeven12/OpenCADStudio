@@ -1866,6 +1866,7 @@ annotate =
         datos
     .lower = Inferior
     .mleader-specify-arrowhead-point = MLEADER  Especifique el punto de la punta de flecha:
+    .mleader-specify-landing-point = MLEADER  Especifique el punto de conexión:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER  Especifique el punto siguiente [__ocs_arg_count__ puntos; Enter para colocar texto]:
     .mleaderadd-select-a-multileader = MLEADERADD  Seleccione una directriz múltiple:
     .mleaderadd-specify-arrowhead-location = MLEADERADD  Especifique la ubicación de la punta de flecha:

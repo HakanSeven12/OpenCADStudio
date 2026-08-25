@@ -1866,6 +1866,7 @@ annotate =
         dados
     .lower = Inferior
     .mleader-specify-arrowhead-point = MLEADER  Especifique o ponto da ponta de seta:
+    .mleader-specify-landing-point = MLEADER  Especifique o ponto de conexão:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER  Especifique o próximo ponto [__ocs_arg_count__ pontos — Enter para inserir texto]:
     .mleaderadd-select-a-multileader = MLEADERADD  Selecione uma linha de chamada múltipla:
     .mleaderadd-specify-arrowhead-location = MLEADERADD  Especifique a localização da ponta de seta:

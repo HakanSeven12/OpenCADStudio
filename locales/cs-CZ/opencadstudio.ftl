@@ -1865,6 +1865,7 @@ annotate =
         Data
     .lower = Nižší
     .mleader-specify-arrowhead-point = MLEADER Zadejte bod šipky:
+    .mleader-specify-landing-point = MLEADER Zadejte bod odskoku:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Zadejte další bod [__ocs_arg_count__ bodů — Enter pro umístění textu]:
     .mleaderadd-select-a-multileader = MLEADERADD Vyberte multiodkaz:
     .mleaderadd-specify-arrowhead-location =MLEADERADD Zadejte umístění šipky:

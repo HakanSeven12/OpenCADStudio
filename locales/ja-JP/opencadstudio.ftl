@@ -1856,6 +1856,7 @@ annotate =
         リンク
     .lower = 下げる
     .mleader-specify-arrowhead-point = MLEADER  矢印位置を指定:
+    .mleader-specify-landing-point = MLEADER  ランディング点を指定:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER  次の点を指定 [__ocs_arg_count__ 点 — Enter で文字を配置]:
     .mleaderadd-select-a-multileader = MLEADERADD  マルチ引出線を選択:
     .mleaderadd-specify-arrowhead-location = MLEADERADD  矢印位置を指定:

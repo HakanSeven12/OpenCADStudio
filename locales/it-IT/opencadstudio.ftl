@@ -1865,6 +1865,7 @@ annotate =
         Dati
     .lower = Più in basso
     .mleader-specify-arrowhead-point = MLEADER Specificare il punto della freccia:
+    .mleader-specify-landing-point = MLEADER Specificare il punto di collegamento:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Specificare il punto successivo [__ocs_arg_count__ punti — Enter per posizionare il testo]:
     .mleaderadd-select-a-multileader = MLEADERADD Seleziona una multidirettrice:
     .mleaderadd-specify-arrowhead-location =MLEADERADD Specificare la posizione della punta della freccia:

@@ -1865,6 +1865,7 @@ annotate =
         Data
     .lower = Alempi
     .mleader-specify-arrowhead-point = MLEADER Määritä nuolenpää:
+    .mleader-specify-landing-point = MLEADER Määritä vaakaviivan piste:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Määritä seuraava piste [__ocs_arg_count__ pts — Enter tekstin sijoittamiseksi]:
     .mleaderadd-select-a-multileader = MLEADERADD Valitse monijohtaja:
     .mleaderadd-specify-arrowhead-location =MLEADERADD Määritä nuolenpään sijainti:

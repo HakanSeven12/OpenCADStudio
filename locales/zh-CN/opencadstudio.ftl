@@ -1853,6 +1853,7 @@ annotate =
         数据
     .lower = 下调
     .mleader-specify-arrowhead-point = MLEADER  指定箭头点：
+    .mleader-specify-landing-point = MLEADER  指定水平基线点：
     .mleader-specify-next-point-count-pts-enter-to = MLEADER  指定下一点 [__ocs_arg_count__ 个点 — 按 Enter 放置文字]：
     .mleaderadd-select-a-multileader = MLEADERADD  选择多重引线：
     .mleaderadd-specify-arrowhead-location = MLEADERADD  指定箭头位置：

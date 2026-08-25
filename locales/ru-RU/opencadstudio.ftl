@@ -1869,6 +1869,7 @@ annotate =
         Данные
     .lower = ниже
     .mleader-specify-arrowhead-point = MLEADER Укажите точку наконечника стрелки:
+    .mleader-specify-landing-point = MLEADER Укажите точку полки:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Укажите следующую точку [точек: __ocs_arg_count__ — Enter для размещения текста]:
     .mleaderadd-select-a-multileader = MLEADERADD Выберите мультивыноску:
     .mleaderadd-specify-arrowhead-location = MLEADERADD Укажите местоположение наконечника стрелки:

@@ -1865,6 +1865,7 @@ annotate =
         данни
     .lower = Малки букви
     .mleader-specify-arrowhead-point = MLEADER  Посочи точка на върха на стрелката:
+    .mleader-specify-landing-point = MLEADER  Посочи точката на хоризонталния участък:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER  Посочи следваща точка [__ocs_arg_count__ т. — Enter за поставяне на текст]:
     .mleaderadd-select-a-multileader = MLEADERADD  Избери многоводач:
     .mleaderadd-specify-arrowhead-location = MLEADERADD  Посочи местоположение на върха на стрелката:

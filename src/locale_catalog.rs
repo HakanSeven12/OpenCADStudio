@@ -1530,6 +1530,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MIRROR  Specify first mirror-line point  [%{count} objects]:" => Some(("modify", "mirror-specify-first-mirror-line-point-count-o")),
         "MIRROR  Specify second point  [p1=%{px},%{py}]:" => Some(("modify", "mirror-specify-second-point-p1-px-py")),
         "MLEADER  Specify arrowhead point:" => Some(("annotate", "mleader-specify-arrowhead-point")),
+        "MLEADER  Specify landing point:" => Some(("annotate", "mleader-specify-landing-point")),
         "MLEADER  Specify next point [%{count} pts — Enter to place text]:" => Some(("annotate", "mleader-specify-next-point-count-pts-enter-to")),
         "MLEADERADD  Select a multileader:" => Some(("annotate", "mleaderadd-select-a-multileader")),
         "MLEADERADD  Specify arrowhead location:" => Some(("annotate", "mleaderadd-specify-arrowhead-location")),

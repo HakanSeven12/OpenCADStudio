@@ -1866,6 +1866,7 @@ annotate =
         Gegevens
     .lower = Lager
     .mleader-specify-arrowhead-point = MLEADER pijlpunt specificeren:
+    .mleader-specify-landing-point = MLEADER Landingspunt opgeven:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Geef het volgende punt op [__ocs_arg_count__ punten — Enter om tekst te plaatsen]:
     .mleaderadd-select-a-multileader = MLEADERADD Selecteer een multileader:
     .mleaderadd-specify-arrowhead-location = MLEADERADD Plaats pijlpunt opgeven:

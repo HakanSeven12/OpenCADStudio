@@ -1865,6 +1865,7 @@ annotate =
         Dane
     .lower = Niższy
     .mleader-specify-arrowhead-point = MLEADER Określ punkt grotu strzałki:
+    .mleader-specify-landing-point = MLEADER Określ punkt odsadzenia:
     .mleader-specify-next-point-count-pts-enter-to = MLEADER Określ następny punkt [__ocs_arg_count__ pkt — Enter, aby umieścić tekst]:
     .mleaderadd-select-a-multileader = MLEADERADD Wybierz wielolinię odniesienia:
     .mleaderadd-specify-arrowhead-location =MLEADERADD Określ położenie grotu strzałki:

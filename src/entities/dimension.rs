@@ -2391,6 +2391,17 @@ pub fn style_sections(
                 center_type != "None",
             ));
         }
+        if let Some(primary_units) = sections
+            .iter_mut()
+            .find(|section| section.title == t!("Primary Units").as_ref())
+        {
+            primary_units.props.retain(|property| {
+                !matches!(
+                    property.field,
+                    "dim_sub_units_suffix" | "dim_sub_units_scale"
+                )
+            });
+        }
     }
 
     sections

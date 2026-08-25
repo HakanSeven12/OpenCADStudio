@@ -1212,7 +1212,7 @@ pub enum CmdResult {
     CommitEntitiesAndExit(Vec<EntityType>),
     /// Commit an acadrust entity to the document and end the command.
     CommitAndExit(EntityType),
-    /// Commit a linear/aligned dimension using the drawing's association mode.
+    /// Commit a dimension using the drawing's association mode.
     /// Object-selection workflows may retain their source.
     CommitDimension {
         entity: EntityType,

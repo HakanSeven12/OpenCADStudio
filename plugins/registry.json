@@ -18,5 +18,10 @@
     "repo": "KevinGriffin-new/opencad-landsurvey-plugin",
     "name": "Land Survey",
     "description": "Survey points, PNEZD & LandXML import, TIN surfaces, earthwork volumes, COGO, and coordinate transforms (RTS / Helmert / resection)."
+  },
+  {
+    "repo": "piyton/ocs-mcp-bridge",
+    "name": "MCP Bridge",
+    "description": "Read/write bridge for external tools: serves the live selection and accepts draw/remove requests over a local socket (MCP servers, scripts)."
   }
 ]

@@ -1,7 +1,7 @@
 // DIMALIGNED command — aligned dimension (measures true distance between two points).
 
 use acadrust::entities::{Dimension, DimensionAligned};
-use acadrust::types::Vector3;
+use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 use glam::DVec3;
 
@@ -38,6 +38,14 @@ pub struct AlignedDimensionCommand {
     text_angle: Option<f64>,
     /// True while the next typed value is captured as the text angle.
     awaiting_angle: bool,
+    /// True while Enter-at-the-first-prompt is waiting for an entity pick.
+    selecting_object: bool,
+    /// Entity data injected by the host before `on_entity_pick`.
+    picked_entity: Option<EntityType>,
+    /// Source retained when both extension origins came from one entity.
+    source_handle: Option<Handle>,
+    /// Distinguishes the formatted-text option from the plain-text option.
+    mtext_override: bool,
 }
 
 impl AlignedDimensionCommand {
@@ -49,6 +57,10 @@ impl AlignedDimensionCommand {
             awaiting_text: false,
             text_angle: None,
             awaiting_angle: false,
+            selecting_object: false,
+            picked_entity: None,
+            source_handle: None,
+            mtext_override: false,
         }
     }
 }
@@ -64,18 +76,29 @@ impl CadCommand for AlignedDimensionCommand {
 
     fn prompt(&self) -> String {
         if self.awaiting_text {
-            return t!("DIMALIGNED  Enter dimension text (blank = measured value):").into_owned();
+            return if self.mtext_override {
+                t!("DIMALIGNED  Enter formatted dimension text (blank = measured value):")
+                    .into_owned()
+            } else {
+                t!("DIMALIGNED  Enter dimension text (blank = measured value):").into_owned()
+            };
         }
         if self.awaiting_angle {
             return t!("DIMALIGNED  Specify text angle (degrees):").into_owned();
         }
+        if self.selecting_object {
+            return t!("DIMALIGNED  Select object to dimension:").into_owned();
+        }
         match self.step {
-            Step::First => t!("DIMALIGNED  Specify first extension line origin:").into_owned(),
+            Step::First => t!(
+                "DIMALIGNED  Specify first extension line origin or press Enter to select object:"
+            )
+            .into_owned(),
             Step::Second(_) => {
-                t!("DIMALIGNED  Specify second extension line origin  [Text/Angle]:").into_owned()
+                t!("DIMALIGNED  Specify second extension line origin:").into_owned()
             }
             Step::DimLine { .. } => {
-                t!("DIMALIGNED  Specify dimension line location  [Text/Angle]:").into_owned()
+                t!("DIMALIGNED  Specify dimension line location  [Mtext/Text/Angle]:").into_owned()
             }
         }
     }
@@ -87,6 +110,9 @@ impl CadCommand for AlignedDimensionCommand {
                 CmdResult::NeedPoint
             }
             Step::Second(p1) => {
+                if pt.distance_squared(p1) <= 1e-24 {
+                    return CmdResult::NeedPoint;
+                }
                 self.step = Step::DimLine { p1, p2: pt };
                 CmdResult::NeedPoint
             }
@@ -110,14 +136,18 @@ impl CadCommand for AlignedDimensionCommand {
                 dim.base.text_middle_point = v3((d1 + d2) * 0.5);
                 dim.base.insertion_point = dim.base.text_middle_point;
                 dim.base.actual_measurement = dim.measurement();
-                dim.base.user_text = self.text_override.clone();
+                crate::entities::dimension::set_dimension_text_override(
+                    &mut dim.base,
+                    self.text_override.clone(),
+                );
                 // An explicit text angle overrides the default rotation.
                 if let Some(a) = self.text_angle {
                     dim.base.text_rotation = a;
                 }
-                CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Dimension(
-                    Dimension::Aligned(dim),
-                )))
+                CmdResult::CommitDimension {
+                    entity: self.plane.place_entity(EntityType::Dimension(Dimension::Aligned(dim))),
+                    source: self.source_handle,
+                }
             }
         }
     }
@@ -130,6 +160,10 @@ impl CadCommand for AlignedDimensionCommand {
         }
         if self.awaiting_angle {
             self.awaiting_angle = false;
+            return CmdResult::NeedPoint;
+        }
+        if matches!(self.step, Step::First) {
+            self.selecting_object = true;
             return CmdResult::NeedPoint;
         }
         CmdResult::Cancel
@@ -173,8 +207,17 @@ impl CadCommand for AlignedDimensionCommand {
             self.awaiting_angle = false;
             return Some(CmdResult::NeedPoint);
         }
+        if !matches!(self.step, Step::DimLine { .. }) {
+            return None;
+        }
         match text.trim().to_uppercase().as_str() {
-            "T" | "TEXT" | "M" | "MTEXT" => {
+            "T" | "TEXT" => {
+                self.mtext_override = false;
+                self.awaiting_text = true;
+                Some(CmdResult::NeedPoint)
+            }
+            "M" | "MTEXT" => {
+                self.mtext_override = true;
                 self.awaiting_text = true;
                 Some(CmdResult::NeedPoint)
             }
@@ -184,6 +227,38 @@ impl CadCommand for AlignedDimensionCommand {
             }
             _ => None,
         }
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        self.selecting_object
+    }
+
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+
+    fn inject_before_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.picked_entity = Some(entity);
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
+        let Some(entity) = self.picked_entity.take() else {
+            return CmdResult::NeedPoint;
+        };
+        let Some((p1, p2)) = super::linear_dim::dimension_source_points(&entity, point) else {
+            return CmdResult::NeedPoint;
+        };
+        if p1.distance_squared(p2) <= 1e-24 {
+            return CmdResult::NeedPoint;
+        }
+        self.source_handle = Some(handle);
+        self.selecting_object = false;
+        self.step = Step::DimLine { p1, p2 };
+        CmdResult::NeedPoint
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
@@ -272,13 +347,15 @@ fn dim_line_endpoints(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> (DVec3, DVec3) {
 }
 
 fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
-    // Show ext lines + dim line.
     let (d1, d2) = dim_line_endpoints(p1, p2, dim_pt);
-    // Preview WireModel points are screen/GPU-side: downcast to f32.
-    let p1 = p1.as_vec3();
-    let p2 = p2.as_vec3();
-    let d1 = d1.as_vec3();
-    let d2 = d2.as_vec3();
+    let axis = (d2 - d1).normalize_or_zero();
+    let perp = DVec3::new(-axis.y, axis.x, 0.0);
+    let nan = [f32::NAN, 0.0, 0.0];
+    let arrow = 0.22;
+    let text = (d1 + d2) * 0.5 + perp * 0.15;
+    let half_width = ((p2 - p1).length().log10().max(0.0) + 1.0) * 0.18;
+    let half_height = 0.16;
+    let to_point = |point: DVec3| point.as_vec3().to_array();
     WireModel {
         point_marker: None,
         taper_widths: Vec::new(),
@@ -292,19 +369,33 @@ fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: "dimaligned_preview".into(),
         points: vec![
-            [p1.x, p1.y, p1.z],
-            [d1.x, d1.y, d1.z],
-            [f32::NAN, 0.0, 0.0],
-            [p2.x, p2.y, p2.z],
-            [d2.x, d2.y, d2.z],
-            [f32::NAN, 0.0, 0.0],
-            [d1.x, d1.y, d1.z],
-            [d2.x, d2.y, d2.z],
+            to_point(p1),
+            to_point(d1),
+            nan,
+            to_point(p2),
+            to_point(d2),
+            nan,
+            to_point(d1),
+            to_point(d2),
+            nan,
+            to_point(d1 + axis * arrow + perp * arrow * 0.45),
+            to_point(d1),
+            to_point(d1 + axis * arrow - perp * arrow * 0.45),
+            nan,
+            to_point(d2 - axis * arrow + perp * arrow * 0.45),
+            to_point(d2),
+            to_point(d2 - axis * arrow - perp * arrow * 0.45),
+            nan,
+            to_point(text - axis * half_width - perp * half_height),
+            to_point(text + axis * half_width - perp * half_height),
+            to_point(text + axis * half_width + perp * half_height),
+            to_point(text - axis * half_width + perp * half_height),
+            to_point(text - axis * half_width - perp * half_height),
         ],
         points_low: Vec::new(),
         color: WireModel::CYAN,

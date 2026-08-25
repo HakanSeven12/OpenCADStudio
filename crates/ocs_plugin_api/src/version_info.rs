@@ -1,4 +1,16 @@
 //! Embedded version metadata generated at build time.
+//!
+//! At compile time `build.rs` writes a small JSON blob to
+//! `OUT_DIR/version_info.json` containing host version, `ocs_plugin_api`
+//! version, `acadrust` version and source, API version bounds, and a build
+//! timestamp. The blob is embedded via `include_str!` and is available without
+//! enabling the `host` feature.
+//!
+//! The acadrust source string is used to detect binary-incompatible plugin
+//! builds. For API v4 and later the host compares the plugin's resolved
+//! `acadrust` source with its own via [`acadrust_sources_compatible`]. Two
+//! sources are considered compatible only when they resolve to the same 40
+//! character git commit hash.
 
 use std::sync::OnceLock;
 

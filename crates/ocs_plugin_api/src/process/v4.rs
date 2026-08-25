@@ -517,7 +517,7 @@ mod tests {
 
     use std::sync::Mutex as StdMutex;
 
-    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
+    use crate::test_lock::ENV_LOCK;
 
     fn set_test_env() {
         std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", "2");
@@ -532,6 +532,13 @@ mod tests {
     #[test]
     fn execute_code_timeout_floor_is_at_least_60s_and_env_override() {
         let _guard = ENV_LOCK.lock().unwrap();
+        let prev_call_timeout = std::env::var("OCS_PLUGIN_CALL_TIMEOUT_SECS").ok();
+        let prev_test_floor = std::env::var("OCS_PLUGIN_TEST_FLOOR_SECS").ok();
+        let prev_execute_timeout = std::env::var("OCS_PLUGIN_EXECUTE_TIMEOUT_SECS").ok();
+        // Remove the test floor bypass and the call-timeout override so the
+        // ExecuteCode-specific floor (60 s) is actually exercised.
+        std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS");
+        std::env::remove_var("OCS_PLUGIN_TEST_FLOOR_SECS");
         std::env::remove_var("OCS_PLUGIN_EXECUTE_TIMEOUT_SECS");
         assert!(
             request_timeout("ExecuteCode") >= Duration::from_secs(60),
@@ -544,7 +551,19 @@ mod tests {
             Duration::from_secs(120),
             "env override should be respected"
         );
-        std::env::remove_var("OCS_PLUGIN_EXECUTE_TIMEOUT_SECS");
+
+        match prev_call_timeout {
+            Some(v) => std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", v),
+            None => std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS"),
+        }
+        match prev_test_floor {
+            Some(v) => std::env::set_var("OCS_PLUGIN_TEST_FLOOR_SECS", v),
+            None => std::env::remove_var("OCS_PLUGIN_TEST_FLOOR_SECS"),
+        }
+        match prev_execute_timeout {
+            Some(v) => std::env::set_var("OCS_PLUGIN_EXECUTE_TIMEOUT_SECS", v),
+            None => std::env::remove_var("OCS_PLUGIN_EXECUTE_TIMEOUT_SECS"),
+        }
     }
 
     #[test]

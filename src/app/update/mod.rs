@@ -231,6 +231,31 @@ impl OpenCADStudio {
         }
     }
 
+    /// Emit `SelectionChangedV4` to V4 plugins when the active tab's selection
+    /// set actually changed since the last broadcast.
+    ///
+    /// Checked at the message boundary rather than at the mutation sites so
+    /// every path is covered: picking, window select, QSELECT, SELECTALL,
+    /// grip edits that drop the selection, and the automation `select` op.
+    /// The signature comparison keeps hover and repeated no-op selects from
+    /// producing spurious notifications.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn notify_plugins_selection_changed(&mut self) {
+        if self.active_tab >= self.tabs.len() {
+            return;
+        }
+        let i = self.active_tab;
+        let tab_id = self.tabs[i].id;
+        let sig = self.tabs[i].scene.selection_sig();
+        let key = (tab_id, sig);
+        if self.last_plugin_selection == Some(key) {
+            return;
+        }
+        self.last_plugin_selection = Some(key);
+        let handles = self.tabs[i].scene.selected_handles_in_order();
+        crate::plugin::v4_support::publish_selection_changed_v4(tab_id, handles);
+    }
+
     pub fn update(&mut self, msg: Message) -> Task<Message> {
         let perf_started = crate::perf::enabled().then(Instant::now);
         let perf_label = perf_message_label(&msg);
@@ -275,6 +300,11 @@ impl OpenCADStudio {
         // The block panel watches the drawing's block list and rebuilds its
         // thumbnails whenever the names change (BLOCK define, file open, …).
         self.refresh_block_palette_if_stale();
+        // Let V4 plugins observe selection changes that happened while handling
+        // this message (picking, window select, QSELECT, SELECTALL, grip edits,
+        // and plugin request draining).
+        #[cfg(not(target_arch = "wasm32"))]
+        self.notify_plugins_selection_changed();
         // OTRACK acquires tracking points only while a command or grip drag is
         // running; drop them once neither is active so the temporary tracking
         // points / vectors disappear when the command ends (issue #64).

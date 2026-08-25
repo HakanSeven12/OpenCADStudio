@@ -8,6 +8,21 @@
 //! This module is generic over the payload type so that the V3 simplified view
 //! and the V4 bincode-per-entity view can share the same double-buffered
 //! control-page logic.
+//!
+//! Key types:
+//!
+//! - [`DocumentSnapshotStore<T>`] — host-side, file-backed double buffer. Call
+//!   [`DocumentSnapshotStore::publish`] to atomically swap the active segment and
+//!   increment the version.
+//! - [`SharedDocumentReader<T>`] — plugin-side read-only mapping.
+//! - [`DocumentViewInfo`] — path + version returned to the plugin so it can
+//!   open the mapping.
+//! - [`DocumentViewData`] / [`DocumentViewDataV4`] — concrete snapshot payloads
+//!   for V3 and V4.
+//!
+//! The control page at the start of the mapping stores magic, version, active
+//! segment, and length. The two snapshot segments follow it. Publishing writes
+//! to the inactive segment, then flips the active segment atomically.
 
 use std::fs::OpenOptions;
 use std::io;

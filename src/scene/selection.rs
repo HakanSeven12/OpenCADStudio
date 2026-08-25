@@ -1,6 +1,9 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
 use super::*;
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 impl Scene {
     // ── Selection ─────────────────────────────────────────────────────────
     /// Treat a classic LEADER and its attached annotation as one logical object.
@@ -55,6 +58,21 @@ impl Scene {
         self.selected.clear();
         self.selected_order.clear();
         self.bump_selection();
+    }
+
+    /// Order-independent signature of the current selection set.
+    ///
+    /// `selection_generation` cannot be used for change detection because it
+    /// also bumps on hover. This signature combines a per-handle hash with XOR
+    /// so it is allocation-free, O(n), and insensitive to selection order.
+    pub(crate) fn selection_sig(&self) -> u64 {
+        let mut combined = 0u64;
+        for handle in &self.selected {
+            let mut hasher = DefaultHasher::new();
+            handle.hash(&mut hasher);
+            combined ^= hasher.finish();
+        }
+        combined
     }
 
     pub(crate) fn selected_handles_in_order(&self) -> Vec<Handle> {
@@ -836,5 +854,33 @@ impl Scene {
             self.bump_entities(&changes);
         }
         restored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selection_sig_is_order_independent() {
+        let mut scene_a = Scene::default();
+        let mut scene_b = Scene::default();
+        let h1 = Handle::new(1);
+        let h2 = Handle::new(2);
+        scene_a.select_entity(h1, false);
+        scene_a.select_entity(h2, false);
+        scene_b.select_entity(h2, false);
+        scene_b.select_entity(h1, false);
+        assert_eq!(scene_a.selection_sig(), scene_b.selection_sig());
+    }
+
+    #[test]
+    fn selection_sig_changes_when_selection_changes() {
+        let mut scene = Scene::default();
+        let empty_sig = scene.selection_sig();
+        scene.select_entity(Handle::new(1), false);
+        assert_ne!(scene.selection_sig(), empty_sig);
+        scene.deselect_all();
+        assert_eq!(scene.selection_sig(), empty_sig);
     }
 }

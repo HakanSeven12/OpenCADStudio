@@ -193,6 +193,17 @@ fn entity_json(e: &acadrust::EntityType) -> Value {
 impl OpenCADStudio {
     /// Handle one JSON request line and return the JSON response.
     pub(crate) fn automation_op(&mut self, line: &str) -> Value {
+        let res = self.automation_op_inner(line);
+        // Most automation ops mutate `Scene::selected` directly rather than
+        // going through `update()` (`select` calls `deselect_all` /
+        // `select_entity`, and `run` can erase the selected entities), so the
+        // selection check has to run on this path too.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.notify_plugins_selection_changed();
+        res
+    }
+
+    fn automation_op_inner(&mut self, line: &str) -> Value {
         let req: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => return err(format!("invalid JSON: {e}")),
@@ -201,6 +212,7 @@ impl OpenCADStudio {
             "new" => {
                 let i = self.active_tab;
                 self.tabs[i].scene.document = acadrust::CadDocument::new();
+                self.tabs[i].scene.deselect_all();
                 self.tabs[i].current_path = None;
                 // The headless session starts on the welcome (Start) tab, which
                 // blocks drawing commands; turn it into a real drawing.
@@ -224,6 +236,7 @@ impl OpenCADStudio {
                     Ok(doc) => {
                         let i = self.active_tab;
                         self.tabs[i].scene.document = doc;
+                        self.tabs[i].scene.deselect_all();
                         crate::app::style_ops::ensure_standard_styles(
                             &mut self.tabs[i].scene.document,
                         );

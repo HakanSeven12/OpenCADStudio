@@ -86,8 +86,21 @@ fn base_props(base: &DimensionBase) -> Vec<crate::scene::model::object::Property
 }
 
 fn properties(dim: &Dimension) -> Vec<PropSection> {
-    if let Dimension::Linear(d) = dim {
-        let base = &d.base;
+    let compact_linear = match dim {
+        Dimension::Linear(d) => Some((
+            &d.base,
+            d.rotation,
+            d.ext_line_rotation,
+        )),
+        Dimension::Aligned(d) => Some((
+            &d.base,
+            (d.second_point.y - d.first_point.y)
+                .atan2(d.second_point.x - d.first_point.x),
+            d.ext_line_rotation,
+        )),
+        _ => None,
+    };
+    if let Some((base, rotation, ext_line_rotation)) = compact_linear {
         return vec![PropSection {
             title: t!("Misc").into_owned(),
             props: vec![
@@ -98,11 +111,15 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
                         base.style_name.clone(),
                     ),
                 },
-                edit_angle(t!("Dim line angle").as_ref(), "rotation", d.rotation.to_degrees()),
+                edit_angle(
+                    t!("Dim line angle").as_ref(),
+                    "rotation",
+                    rotation.to_degrees(),
+                ),
                 edit_angle(
                     t!("Extension line angle").as_ref(),
                     "ext_line_rotation",
-                    d.ext_line_rotation.to_degrees(),
+                    ext_line_rotation.to_degrees(),
                 ),
             ],
         }];
@@ -354,6 +371,29 @@ fn apply_geom_prop(dim: &mut Dimension, field: &str, value: &str) {
 }
 
 fn apply_linear_fields_aligned(d: &mut DimensionAligned, field: &str, value: &str) {
+    if field == "rotation" {
+        let Some(angle) = parse_f64(value).map(f64::to_radians) else {
+            return;
+        };
+        let old_angle = (d.second_point.y - d.first_point.y)
+            .atan2(d.second_point.x - d.first_point.x);
+        let delta = angle - old_angle;
+        let origin_x = d.first_point.x;
+        let origin_y = d.first_point.y;
+        let rotate = |point: &mut acadrust::types::Vector3| {
+            let x = point.x - origin_x;
+            let y = point.y - origin_y;
+            let (sin, cos) = delta.sin_cos();
+            point.x = origin_x + x * cos - y * sin;
+            point.y = origin_y + x * sin + y * cos;
+        };
+        rotate(&mut d.second_point);
+        rotate(&mut d.definition_point);
+        rotate(&mut d.base.definition_point);
+        rotate(&mut d.base.text_middle_point);
+        rotate(&mut d.base.insertion_point);
+        return;
+    }
     apply_linear_common(
         &mut d.first_point,
         &mut d.second_point,
@@ -1495,6 +1535,7 @@ pub fn style_sections(
 
     let s = style;
     let dimfxlon = int(ov::DIMFXLON, s.dimfxlon as i16) != 0;
+    let dimtix = int(ov::DIMTIX, s.dimtix as i16) != 0;
     let dimlunit = int(ov::DIMLUNIT, s.dimlunit);
     let dimfrac = int(ov::DIMFRAC, s.dimfrac);
     let dimalt = int(ov::DIMALT, s.dimalt as i16) != 0;
@@ -1859,7 +1900,7 @@ pub fn style_sections(
                     "dim_text_inside_align",
                     on(int(ov::DIMTIH, s.dimtih as i16) != 0),
                     &["On", "Off"],
-                    true,
+                    dimtix,
                 ),
                 property(
                     t!("Text position X").as_ref(),
@@ -1925,7 +1966,7 @@ pub fn style_sections(
                 choice(
                     t!("Text inside").as_ref(),
                     "dim_text_inside",
-                    on(int(ov::DIMTIX, s.dimtix as i16) != 0),
+                    on(dimtix),
                     &["On", "Off"],
                     true,
                 ),

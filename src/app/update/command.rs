@@ -2169,6 +2169,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             }
                         }
                     } else if field == "plot_style" {
+                        if self.tabs[i].scene.document.header.plotstyle_mode {
+                            self.refresh_properties();
+                            return Task::none();
+                        }
                         // Named plot-style pick: ByLayer / ByBlock clear the
                         // handle; a named style resolves through the drawing's
                         // ACAD_PLOTSTYLENAME dictionary to its placeholder handle.
@@ -2349,11 +2353,15 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             self.refresh_properties();
                         }
                         "plot_style" => {
+                            if self.tabs[i].scene.document.header.plotstyle_mode {
+                                self.refresh_properties();
+                                return Task::none();
+                            }
                             match value.as_str() {
                                 "ByBlock" => {
                                     self.tabs[i].scene.document.header.current_plotstyle_type = 1
                                 }
-                                "Normal" | "ByColor" => {
+                                "Normal" => {
                                     self.tabs[i].scene.document.header.current_plotstyle_type = 2
                                 }
                                 _ => self.tabs[i].scene.document.header.current_plotstyle_type = 0,

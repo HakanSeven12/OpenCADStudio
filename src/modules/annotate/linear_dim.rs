@@ -193,10 +193,9 @@ impl CadCommand for LinearDimensionCommand {
                 let entity = self.plane.place_entity(EntityType::Dimension(
                     Dimension::Linear(dim),
                 ));
-                if let Some(source) = self.source_handle {
-                    CmdResult::CommitAssociativeDimension { entity, source }
-                } else {
-                    CmdResult::CommitAndExit(entity)
+                CmdResult::CommitDimension {
+                    entity,
+                    source: self.source_handle,
                 }
             }
         }
@@ -366,11 +365,42 @@ fn dimension_line_offset(second: DVec3, point: DVec3, axis: DVec3) -> f64 {
     (point - second).dot(perpendicular)
 }
 
-fn dimension_source_points(entity: &EntityType, click: DVec3) -> Option<(DVec3, DVec3)> {
+pub(crate) fn dimension_source_points(
+    entity: &EntityType,
+    click: DVec3,
+) -> Option<(DVec3, DVec3)> {
     let point = |p: Vector3| DVec3::new(p.x, p.y, p.z);
     match entity {
         EntityType::Line(line) => Some((point(line.start), point(line.end))),
         EntityType::Arc(arc) => Some((point(arc.start_point_wcs()), point(arc.end_point_wcs()))),
+        EntityType::Circle(circle) => {
+            let click = crate::scene::view::transform::wcs_point_to_ocs(
+                (click.x, click.y, click.z),
+                (circle.normal.x, circle.normal.y, circle.normal.z),
+            );
+            let delta = DVec3::new(
+                click.0 - circle.center.x,
+                click.1 - circle.center.y,
+                0.0,
+            );
+            let direction = if delta.length_squared() > 1e-24 {
+                delta.normalize()
+            } else {
+                DVec3::X
+            };
+            let first = [
+                circle.center.x + direction.x * circle.radius,
+                circle.center.y + direction.y * circle.radius,
+            ];
+            let second = [
+                circle.center.x - direction.x * circle.radius,
+                circle.center.y - direction.y * circle.radius,
+            ];
+            Some((
+                ocs_point(first, circle.center.z, circle.normal),
+                ocs_point(second, circle.center.z, circle.normal),
+            ))
+        }
         EntityType::LwPolyline(polyline) => nearest_planar_source(
             polyline
                 .vertices

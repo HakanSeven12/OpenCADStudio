@@ -56,6 +56,9 @@ fn source_points(entity: &EntityType) -> Vec<Vector3> {
 }
 
 fn source_marker(entity: &EntityType, point: Vector3) -> Option<i32> {
+    if matches!(entity, EntityType::Circle(_)) {
+        return Some(0);
+    }
     source_points(entity)
         .into_iter()
         .enumerate()
@@ -69,9 +72,80 @@ fn source_marker(entity: &EntityType, point: Vector3) -> Option<i32> {
 fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Option<Vector3> {
     let source = *reference.xrefs.first()?;
     let entity = scene.document.get_entity(source)?;
+    if let EntityType::Circle(circle) = entity {
+        let stored = crate::scene::view::transform::wcs_point_to_ocs(
+            (
+                reference.osnap_point.x,
+                reference.osnap_point.y,
+                reference.osnap_point.z,
+            ),
+            (circle.normal.x, circle.normal.y, circle.normal.z),
+        );
+        let dx = stored.0 - circle.center.x;
+        let dy = stored.1 - circle.center.y;
+        let length = dx.hypot(dy);
+        let stored_angle = dy.atan2(dx);
+        let angle = if reference.osnap_distance.abs() > 1e-12
+            || stored_angle.abs() <= 1e-12
+        {
+            reference.osnap_distance
+        } else {
+            stored_angle
+        };
+        let (sin, cos) = angle.sin_cos();
+        let (ux, uy) = if angle.is_finite() {
+            (cos, sin)
+        } else if length > 1e-12 {
+            (dx / length, dy / length)
+        } else {
+            (1.0, 0.0)
+        };
+        return Some(ocs_point(
+            circle.center.x + ux * circle.radius,
+            circle.center.y + uy * circle.radius,
+            circle.center.z,
+            circle.normal,
+        ));
+    }
     source_points(entity)
         .get(reference.main_gs_marker.max(0) as usize)
         .copied()
+}
+
+fn dimension_points(dimension: &Dimension) -> Option<[Vector3; 2]> {
+    match dimension {
+        Dimension::Linear(linear) => Some([linear.first_point, linear.second_point]),
+        Dimension::Aligned(aligned) => Some([aligned.first_point, aligned.second_point]),
+        _ => None,
+    }
+}
+
+fn source_distance_squared(entity: &EntityType, point: Vector3) -> Option<f64> {
+    if let EntityType::Circle(circle) = entity {
+        let point = crate::scene::view::transform::wcs_point_to_ocs(
+            (point.x, point.y, point.z),
+            (circle.normal.x, circle.normal.y, circle.normal.z),
+        );
+        let radial_error =
+            (point.0 - circle.center.x).hypot(point.1 - circle.center.y) - circle.radius;
+        let plane_error = point.2 - circle.center.z;
+        return Some(radial_error * radial_error + plane_error * plane_error);
+    }
+    source_points(entity)
+        .into_iter()
+        .map(|candidate| point_distance_squared(candidate, point))
+        .min_by(f64::total_cmp)
+}
+
+fn source_parameter(entity: &EntityType, point: Vector3) -> f64 {
+    let EntityType::Circle(circle) = entity else {
+        return 0.0;
+    };
+    let point = crate::scene::view::transform::wcs_point_to_ocs(
+        (point.x, point.y, point.z),
+        (circle.normal.x, circle.normal.y, circle.normal.z),
+    );
+    (point.1 - circle.center.y).atan2(point.0 - circle.center.x)
 }
 
 pub(crate) fn dimension_is_associative(
@@ -97,34 +171,43 @@ pub(crate) fn dimension_is_associative(
 }
 
 impl Scene {
-    pub(crate) fn attach_linear_dimension_association(
+    pub(crate) fn attach_dimension_association(
         &mut self,
         dimension: Handle,
         sources: [Option<Handle>; 2],
     ) {
-        let Some(EntityType::Dimension(Dimension::Linear(linear))) =
-            self.document.get_entity(dimension)
+        let Some(EntityType::Dimension(entity)) = self.document.get_entity(dimension)
         else {
             return;
         };
-        let first_point = linear.first_point;
-        let second_point = linear.second_point;
-        let source_data = [first_point, second_point].map(|point| point);
-        let resolved: [Option<(Handle, i32)>; 2] = std::array::from_fn(|index| {
+        let Some(source_data) = dimension_points(entity) else {
+            return;
+        };
+        let resolved: [Option<(Handle, i32, f64)>; 2] = std::array::from_fn(|index| {
             let source = sources[index]?;
             let entity = self.document.get_entity(source)?;
-            source_marker(entity, source_data[index]).map(|marker| (source, marker))
+            source_marker(entity, source_data[index]).map(|marker| {
+                (
+                    source,
+                    marker,
+                    source_parameter(entity, source_data[index]),
+                )
+            })
         });
         if resolved.iter().all(Option::is_none) {
             return;
         }
 
-        let reference = |source: Handle, marker: i32, point: Vector3| AssocDimensionReference {
+        let reference = |source: Handle,
+                         marker: i32,
+                         parameter: f64,
+                         point: Vector3| AssocDimensionReference {
             class_name: "AcDbOsnapPointRef".to_string(),
             osnap_type: 1,
             xrefs: vec![source],
             main_subent_type: 1,
             main_gs_marker: marker,
+            osnap_distance: parameter,
             osnap_point: point,
             ..AssocDimensionReference::default()
         };
@@ -132,9 +215,14 @@ impl Scene {
             std::array::from_fn(|_| Vec::new());
         let mut associativity = 0;
         for (index, resolved) in resolved.into_iter().enumerate() {
-            if let Some((source, marker)) = resolved {
+            if let Some((source, marker, parameter)) = resolved {
                 associativity |= 1 << index;
-                references[index].push(reference(source, marker, source_data[index]));
+                references[index].push(reference(
+                    source,
+                    marker,
+                    parameter,
+                    source_data[index],
+                ));
             }
         }
 
@@ -165,24 +253,23 @@ impl Scene {
         }
     }
 
-    pub(crate) fn infer_linear_dimension_sources(
+    pub(crate) fn infer_dimension_sources(
         &self,
         dimension: Handle,
     ) -> [Option<Handle>; 2] {
-        let Some(EntityType::Dimension(Dimension::Linear(linear))) =
-            self.document.get_entity(dimension)
+        let Some(EntityType::Dimension(entity)) = self.document.get_entity(dimension)
         else {
             return [None, None];
         };
-        [linear.first_point, linear.second_point].map(|point| {
+        let Some(points) = dimension_points(entity) else {
+            return [None, None];
+        };
+        points.map(|point| {
             self.document
                 .entities()
                 .filter(|entity| entity.common().handle != dimension)
                 .filter_map(|entity| {
-                    source_points(entity)
-                        .into_iter()
-                        .map(|candidate| point_distance_squared(candidate, point))
-                        .min_by(f64::total_cmp)
+                    source_distance_squared(entity, point)
                         .map(|distance| (distance, entity.common().handle))
                 })
                 .filter(|(distance, _)| *distance <= 1e-16)
@@ -231,19 +318,35 @@ impl Scene {
             if first.is_none() && second.is_none() {
                 continue;
             }
-            if let Some(EntityType::Dimension(Dimension::Linear(linear))) =
+            let Some(EntityType::Dimension(dimension)) =
                 self.document.get_entity_mut(association.dimension)
-            {
-                if let Some(first) = first {
-                    linear.first_point = first;
+            else {
+                continue;
+            };
+            match dimension {
+                Dimension::Linear(linear) => {
+                    if let Some(first) = first {
+                        linear.first_point = first;
+                    }
+                    if let Some(second) = second {
+                        linear.second_point = second;
+                    }
+                    linear.base.actual_measurement = linear.measurement();
+                    linear.base.definition_point = linear.definition_point;
                 }
-                if let Some(second) = second {
-                    linear.second_point = second;
+                Dimension::Aligned(aligned) => {
+                    if let Some(first) = first {
+                        aligned.first_point = first;
+                    }
+                    if let Some(second) = second {
+                        aligned.second_point = second;
+                    }
+                    aligned.base.actual_measurement = aligned.measurement();
+                    aligned.base.definition_point = aligned.definition_point;
                 }
-                linear.base.actual_measurement = linear.measurement();
-                linear.base.definition_point = linear.definition_point;
-                refreshed.push((association.dimension, ChangeKind::Modified));
+                _ => continue,
             }
+            refreshed.push((association.dimension, ChangeKind::Modified));
         }
         refreshed
     }

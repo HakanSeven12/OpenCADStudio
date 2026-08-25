@@ -219,9 +219,29 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
             let manifest_text = download_string(&manifest_asset.url)?;
             let manifest = external::parse_plugin_toml(&manifest_text)
                 .ok_or_else(|| format!("release {} plugin.toml is missing an id", release.tag))?;
+            let acadrust_source = manifest.acadrust_source.clone();
+            let acadrust_declared = manifest.acadrust_declared;
+            let acadrust_compatible = if !ocs_plugin_api::version_info::uses_acadrust_gate(
+                manifest.api_version,
+            ) {
+                true
+            } else if !acadrust_declared {
+                true
+            } else {
+                match acadrust_source.as_deref() {
+                    None | Some("") => false,
+                    Some(source) => ocs_plugin_api::version_info::acadrust_sources_compatible(
+                        source,
+                        ocs_plugin_api::version_info::host_acadrust_source(),
+                    ),
+                }
+            };
             Ok::<_, String>(ReleaseInfo {
                 tag: release.tag,
                 api_version: manifest.api_version,
+                acadrust_source,
+                acadrust_declared,
+                acadrust_compatible,
             })
         })();
         match result {
@@ -229,6 +249,19 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
             Err(error) => last_error = Some(error),
         }
     }
+
+    // Once a repo declares a fingerprint, require it on later API versions.
+    let any_declared = info.iter().any(|r| r.acadrust_declared);
+    if any_declared {
+        for r in &mut info {
+            if !r.acadrust_declared
+                && ocs_plugin_api::version_info::uses_acadrust_gate(r.api_version)
+            {
+                r.acadrust_compatible = false;
+            }
+        }
+    }
+
     if info.is_empty() {
         Err(last_error.unwrap_or_else(|| "no installable releases found".to_string()))
     } else {
@@ -283,8 +316,8 @@ fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Download and install a release's package into the plugins folder. Verifies
-/// the API version from the package's `plugin.toml` first. Returns the plugin
-/// id on success.
+/// the API version and, when present, the `acadrust` fingerprint from the
+/// package's `plugin.toml` first. Returns the plugin id on success.
 pub fn install(release: &Release, repository: &str) -> Result<String, String> {
     let lib = release.lib_asset().ok_or("no library for this platform")?;
     let toml = release.toml_asset().ok_or("release has no plugin.toml")?;
@@ -298,6 +331,34 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
             ocs_plugin_api::manifest::API_VERSION_MIN_SUPPORTED,
             ocs_plugin_api::manifest::effective_max_api_version()
         ));
+    }
+
+    if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version)
+        && manifest.acadrust_declared
+    {
+        let Some(source) = manifest.acadrust_source.as_deref() else {
+            return Err(
+                "Release declares acadrust metadata but has no source; cannot verify ABI compatibility".to_string(),
+            );
+        };
+        if source.is_empty() {
+            return Err(
+                "Release declares acadrust metadata but has no source; cannot verify ABI compatibility".to_string(),
+            );
+        }
+        if !ocs_plugin_api::version_info::acadrust_sources_compatible(
+            source,
+            ocs_plugin_api::version_info::host_acadrust_source(),
+        ) {
+            let host_src = ocs_plugin_api::version_info::host_acadrust_source();
+            let plugin_hash = ocs_plugin_api::version_info::acadrust_source_hash(source)
+                .unwrap_or("unknown");
+            let host_hash = ocs_plugin_api::version_info::acadrust_source_hash(host_src)
+                .unwrap_or("unknown");
+            return Err(format!(
+                "Plugin built for acadrust @{plugin_hash}, but this host uses @{host_hash}"
+            ));
+        }
     }
 
     let dir = external::plugins_dir()

@@ -14,7 +14,7 @@ serde = { version = "1", features = ["derive"] }
 # Pulled in only by the `host` feature, which adds the `acadrust`-typed
 # `HostApi` runtime surface. The default crate stays dependency-free so engine
 # crates and external tooling can depend on the manifest/ribbon contract cheaply.
-acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "94df2c3", optional = true, features = ["serde"] }
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "5b2ae66", optional = true, features = ["serde"] }
 
 # Runtime IPC and serialization (host feature only).
 interprocess = { version = "2", optional = true }
@@ -37,7 +37,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 cargo-lock = "11"
 # acadrust is scanned at build time to generate the embedded type registry.
-acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "94df2c3", features = ["serde"] }
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "5b2ae66", features = ["serde"] }
 
 [dev-dependencies]
 serde_json = "1"

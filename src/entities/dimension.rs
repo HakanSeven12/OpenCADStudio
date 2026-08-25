@@ -2233,14 +2233,14 @@ pub fn style_sections(
                     "dim_tolerance_pos_vert",
                     tolerance_vertical_label(int(ov::DIMTOLJ, s.dimtolj)),
                     &["Bottom", "Middle", "Top"],
-                    tolerance_enabled,
+                    true,
                 ),
                 choice(
                     t!("Tolerance alignment").as_ref(),
                     "dim_tolerance_alignment",
                     tolerance_alignment_label(int(ov::DIMTALN, 0)),
                     &["Align decimal separators", "Align operational symbols"],
-                    tolerance_display == "Deviation",
+                    true,
                 ),
                 choice(
                     t!("Tolerance suppress leading zeros").as_ref(),

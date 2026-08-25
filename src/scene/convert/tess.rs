@@ -818,7 +818,10 @@ fn tessellate_entity_inner(
             graph.walk_insert(
                 &insert,
                 h,
-                |_, _| true,
+                |sub, context| {
+                    // Direct POINTs are dimension definition markers.
+                    context.insert_path.len() != 1 || !matches!(sub, EntityType::Point(_))
+                },
                 |sub, context| {
                     let has_book_color = view::render::has_resolved_book_color(document, sub);
                     let color_byblock =

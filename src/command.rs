@@ -1212,10 +1212,10 @@ pub enum CmdResult {
     CommitEntitiesAndExit(Vec<EntityType>),
     /// Commit an acadrust entity to the document and end the command.
     CommitAndExit(EntityType),
-    /// Commit an object-selected linear dimension and retain its source link.
+    /// Commit an object-selected dimension and retain its source links.
     CommitAssociativeDimension {
         entity: EntityType,
-        source: Handle,
+        sources: Vec<Handle>,
     },
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded

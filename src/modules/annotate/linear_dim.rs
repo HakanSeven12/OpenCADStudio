@@ -194,7 +194,10 @@ impl CadCommand for LinearDimensionCommand {
                     Dimension::Linear(dim),
                 ));
                 if let Some(source) = self.source_handle {
-                    CmdResult::CommitAssociativeDimension { entity, source }
+                    CmdResult::CommitAssociativeDimension {
+                        entity,
+                        sources: vec![source, source],
+                    }
                 } else {
                     CmdResult::CommitAndExit(entity)
                 }

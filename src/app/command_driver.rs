@@ -1229,17 +1229,24 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
-            CmdResult::CommitAssociativeDimension { entity, source } => {
-                let label = self.history_label_from_active_cmd(i, "DIMLINEAR");
+            CmdResult::CommitAssociativeDimension { entity, sources } => {
+                let label = self.history_label_from_active_cmd(i, "DIMENSION");
                 let pending = self.begin_undo(i, label, 1, false);
                 if let Some(handle) = self.commit_entity_handle(entity) {
                     self.tabs[i]
                         .scene
-                        .attach_linear_dimension_association(handle, [Some(source), Some(source)]);
-                    self.tabs[i].scene.bump_entities(&[
-                        (handle, crate::scene::ChangeKind::Modified),
-                        (source, crate::scene::ChangeKind::Modified),
-                    ]);
+                        .attach_dimension_association(
+                            handle,
+                            sources.iter().copied().map(Some).collect(),
+                        );
+                    let mut changed = vec![(handle, crate::scene::ChangeKind::Modified)];
+                    changed.extend(
+                        sources
+                            .iter()
+                            .copied()
+                            .map(|source| (source, crate::scene::ChangeKind::Modified)),
+                    );
+                    self.tabs[i].scene.bump_entities(&changed);
                 }
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();

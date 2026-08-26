@@ -1312,7 +1312,13 @@ impl OpenCADStudio {
                     &self.tabs[i].scene.document,
                 )
                 .height;
-                let new_cmd = MTextCommand::with_height(height);
+                let style = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .current_text_style_name
+                    .clone();
+                let new_cmd = MTextCommand::with_defaults(height, style);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

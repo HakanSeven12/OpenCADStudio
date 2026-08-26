@@ -3904,10 +3904,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextHeight(s) => {
-                if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.height = s;
-                }
-                self.rebuild_mtext_preview();
+                self.mtext_apply_span_number("height", s);
                 Task::none()
             }
             Message::MTextRectWidth(width) => {
@@ -3939,24 +3936,126 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextOblique(s) => {
-                if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.oblique = s;
-                }
-                self.rebuild_mtext_preview();
+                self.mtext_apply_span_number("oblique", s);
                 Task::none()
             }
             Message::MTextWidth(s) => {
+                self.mtext_apply_span_number("width", s);
+                Task::none()
+            }
+            Message::MTextCharSpace(s) => {
+                self.mtext_apply_span_number("tracking", s);
+                Task::none()
+            }
+            Message::MTextUndo => {
+                self.mtext_undo();
+                Task::none()
+            }
+            Message::MTextRedo => {
+                self.mtext_redo();
+                Task::none()
+            }
+            Message::MTextStack => {
+                self.mtext_stack_selection();
+                Task::none()
+            }
+            Message::MTextClearFormatting => {
+                self.mtext_clear_formatting();
+                Task::none()
+            }
+            Message::MTextInsert(value) => {
+                self.mtext_type(&value);
+                Task::none()
+            }
+            Message::MTextAnnotative(value) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.width = s;
+                    ed.annotative = value;
                 }
                 self.rebuild_mtext_preview();
                 Task::none()
             }
-            Message::MTextCharSpace(s) => {
+            Message::MTextColumnMode(mode) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.char_space = s;
+                    match mode.as_str() {
+                        "Static" => {
+                            ed.column_type = 1;
+                            ed.column_auto_height = false;
+                        }
+                        "Dynamic auto" => {
+                            ed.column_type = 2;
+                            ed.column_auto_height = true;
+                        }
+                        "Dynamic manual" => {
+                            ed.column_type = 2;
+                            ed.column_auto_height = false;
+                        }
+                        _ => ed.column_type = 0,
+                    }
                 }
                 self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnCount(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.column_count = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnWidth(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.column_width = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnGutter(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.column_gutter = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnHeight(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.rect_height = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnFlowReversed(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.column_flow_reversed = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextParagraphNumber(field, value) => {
+                self.mtext_apply_paragraph_number(field, value);
+                Task::none()
+            }
+            Message::MTextFindText(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.find_text = value;
+                }
+                Task::none()
+            }
+            Message::MTextReplaceText(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.replace_text = value;
+                }
+                Task::none()
+            }
+            Message::MTextFindNext => {
+                self.mtext_find_next();
+                Task::none()
+            }
+            Message::MTextReplaceNext => {
+                self.mtext_replace_next();
+                Task::none()
+            }
+            Message::MTextReplaceAll => {
+                self.mtext_replace_all();
                 Task::none()
             }
             Message::MTextJustify(ap) => {

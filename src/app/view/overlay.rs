@@ -6,7 +6,8 @@ use iced::advanced::renderer;
 use iced::advanced::widget;
 use iced::advanced::{Layout, Shell, Widget};
 use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, stack, text, text_input, Space,
+    button, checkbox, column, container, mouse_area, row, scrollable, stack, text, text_input,
+    Space,
 };
 use iced::{Background, Border, Color, Element, Event, Fill, Length, Rectangle, Size, Theme, Vector};
 use crate::t;
@@ -374,7 +375,7 @@ pub(super) fn mtext_editor_overlay<'a>(
         iced::widget::Space::new().width(Fill).height(Fill),
         t!("Text Editor"),
         content,
-        Message::MTextCancel,
+        Message::MTextOk,
         modal_offset,
         crate::ui::modal::ModalOptions::STANDARD,
     )
@@ -450,6 +451,9 @@ fn mtext_editor_content<'a>(
         .on_select(Message::MTextStyle)
         .text_size(11)
         .width(iced::Length::Fixed(96.0));
+    let annotative = checkbox(ed.annotative)
+        .on_toggle(Message::MTextAnnotative)
+        .size(14);
     let font_sel = if ed.font.trim().is_empty() {
         "[Style default]".to_string()
     } else {
@@ -487,6 +491,9 @@ fn mtext_editor_content<'a>(
 
     let row1 = row![
         style_pl,
+        row![annotative, text(t!("Annotative")).size(11)]
+            .spacing(3)
+            .align_y(iced::Alignment::Center),
         font_pl,
         small_input("2.5", &ed.height, Message::MTextHeight, 64.0),
         iced::widget::Space::new().width(6),
@@ -535,6 +542,14 @@ fn mtext_editor_content<'a>(
     .text_size(11)
     .width(iced::Length::Fixed(112.0));
     let row2 = row![
+        button(lbl("↶"))
+            .on_press(Message::MTextUndo)
+            .padding(3)
+            .style(btn_style),
+        button(lbl("↷"))
+            .on_press(Message::MTextRedo)
+            .padding(3)
+            .style(btn_style),
         lbl("O"),
         small_input("0", &ed.oblique, Message::MTextOblique, 48.0),
         lbl("W"),
@@ -571,6 +586,144 @@ fn mtext_editor_content<'a>(
             .style(btn_style),
         button(lbl("2"))
             .on_press(Message::MTextLineSpacing(2.0))
+            .padding(3)
+            .style(btn_style),
+        button(lbl("Stack"))
+            .on_press(Message::MTextStack)
+            .padding(3)
+            .style(btn_style),
+        button(lbl("Clear"))
+            .on_press(Message::MTextClearFormatting)
+            .padding(3)
+            .style(btn_style),
+        button(lbl("°"))
+            .on_press(Message::MTextInsert("°".to_string()))
+            .padding(3)
+            .style(btn_style),
+        button(lbl("±"))
+            .on_press(Message::MTextInsert("±".to_string()))
+            .padding(3)
+            .style(btn_style),
+        button(lbl("⌀"))
+            .on_press(Message::MTextInsert("⌀".to_string()))
+            .padding(3)
+            .style(btn_style),
+    ]
+    .spacing(4)
+    .align_y(iced::Alignment::Center)
+    .width(width);
+
+    let column_mode = match (ed.column_type, ed.column_auto_height) {
+        (1, _) => "Static",
+        (2, true) => "Dynamic auto",
+        (2, false) => "Dynamic manual",
+        _ => "No columns",
+    }
+    .to_string();
+    let column_picker = iced::widget::pick_list(
+        Some(column_mode),
+        ["No columns", "Static", "Dynamic auto", "Dynamic manual"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+        |value| value.to_string(),
+    )
+    .on_select(Message::MTextColumnMode)
+    .text_size(11)
+    .width(iced::Length::Fixed(120.0));
+    let reverse = checkbox(ed.column_flow_reversed)
+        .on_toggle(Message::MTextColumnFlowReversed)
+        .size(14);
+    let row3 = row![
+        lbl("Columns"),
+        column_picker,
+        lbl("Count"),
+        small_input("2", &ed.column_count, Message::MTextColumnCount, 42.0),
+        lbl("Height"),
+        text_input("0", &ed.rect_height)
+            .on_input(Message::MTextColumnHeight)
+            .width(iced::Length::Fixed(58.0))
+            .padding(3)
+            .size(12),
+        lbl("Width"),
+        small_input("0", &ed.column_width, Message::MTextColumnWidth, 58.0),
+        lbl("Gutter"),
+        small_input("0", &ed.column_gutter, Message::MTextColumnGutter, 58.0),
+        reverse,
+        lbl("Reverse"),
+        iced::widget::Space::new().width(8),
+        lbl("First"),
+        text_input("0", &ed.paragraph_first_indent)
+            .on_input(|value| Message::MTextParagraphNumber(
+                super::super::mtext_editor::ParaNumber::FirstIndent,
+                value,
+            ))
+            .width(iced::Length::Fixed(48.0))
+            .padding(3)
+            .size(12),
+        lbl("Left"),
+        text_input("0", &ed.paragraph_left_indent)
+            .on_input(|value| Message::MTextParagraphNumber(
+                super::super::mtext_editor::ParaNumber::LeftIndent,
+                value,
+            ))
+            .width(iced::Length::Fixed(48.0))
+            .padding(3)
+            .size(12),
+        lbl("Right"),
+        text_input("0", &ed.paragraph_right_indent)
+            .on_input(|value| Message::MTextParagraphNumber(
+                super::super::mtext_editor::ParaNumber::RightIndent,
+                value,
+            ))
+            .width(iced::Length::Fixed(48.0))
+            .padding(3)
+            .size(12),
+        lbl("Before"),
+        text_input("0", &ed.paragraph_space_before)
+            .on_input(|value| Message::MTextParagraphNumber(
+                super::super::mtext_editor::ParaNumber::SpaceBefore,
+                value,
+            ))
+            .width(iced::Length::Fixed(48.0))
+            .padding(3)
+            .size(12),
+        lbl("After"),
+        text_input("0", &ed.paragraph_space_after)
+            .on_input(|value| Message::MTextParagraphNumber(
+                super::super::mtext_editor::ParaNumber::SpaceAfter,
+                value,
+            ))
+            .width(iced::Length::Fixed(48.0))
+            .padding(3)
+            .size(12),
+    ]
+    .spacing(4)
+    .align_y(iced::Alignment::Center)
+    .width(width);
+    let row4 = row![
+        lbl("Find"),
+        text_input("Find", &ed.find_text)
+            .on_input(Message::MTextFindText)
+            .width(iced::Length::Fixed(140.0))
+            .padding(3)
+            .size(12),
+        button(lbl("Next"))
+            .on_press(Message::MTextFindNext)
+            .padding(3)
+            .style(btn_style),
+        lbl("Replace"),
+        text_input("Replace", &ed.replace_text)
+            .on_input(Message::MTextReplaceText)
+            .width(iced::Length::Fixed(140.0))
+            .padding(3)
+            .size(12),
+        button(lbl("Replace"))
+            .on_press(Message::MTextReplaceNext)
+            .padding(3)
+            .style(btn_style),
+        button(lbl("Replace All"))
+            .on_press(Message::MTextReplaceAll)
             .padding(3)
             .style(btn_style),
     ]
@@ -710,13 +863,13 @@ fn mtext_editor_content<'a>(
             .into()
     };
 
-    // ── Top action bar: Apply on the right, exactly like the style managers'
-    // toolbar strip. Closing (the modal ✕) without applying discards the
-    // buffer, so there is no separate Cancel.
+    // ── Top action bar: Apply keeps editing; Close saves and exits. Escape
+    // remains the explicit discard path.
     let action_bar = container(
         row![
             iced::widget::Space::new().width(width),
             crate::ui::style::style_manager::tb_button(t!("Apply"), Message::MTextApply, true),
+            crate::ui::style::style_manager::tb_button(t!("Close Text Editor"), Message::MTextOk, true),
         ]
         .align_y(iced::Alignment::Center),
     )
@@ -730,7 +883,7 @@ fn mtext_editor_content<'a>(
     .padding([5, 8]);
 
     container(
-        column![action_bar, row1, row2, width_slider, body]
+        column![action_bar, row1, row2, row3, row4, width_slider, body]
             .spacing(6)
             .width(width)
             .height(height),

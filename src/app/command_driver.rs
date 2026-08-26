@@ -3716,10 +3716,11 @@ impl OpenCADStudio {
                 handle,
                 initial,
                 height,
+                template,
             } => {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.open_mtext_editor(pos, handle, &initial, height);
+                self.open_mtext_editor(pos, handle, &initial, height, template.map(|m| *m));
             }
             CmdResult::SuspendForMTextInput {
                 pos,
@@ -3732,7 +3733,7 @@ impl OpenCADStudio {
                 self.restore_pre_cmd_tangent();
                 self.command_mtext_input = true;
                 self.pending_command_editor_text = None;
-                self.open_mtext_editor(pos, None, &initial, height);
+                self.open_mtext_editor(pos, None, &initial, height, None);
             }
             CmdResult::OpenTextEditor {
                 pos,

@@ -166,7 +166,7 @@ impl super::OpenCADStudio {
         };
 
         if field.is_rich() {
-            self.open_mtext_editor(pos, Some(target), &value, height);
+            self.open_mtext_editor(pos, Some(target), &value, height, None);
             self.unfocus_widgets()
         } else {
             self.open_text_inline(pos, Some(target), &value, height, field);

@@ -1427,6 +1427,11 @@ pub enum CmdResult {
         handle: Option<Handle>,
         initial: String,
         height: f64,
+        /// Optional entity defaults collected by the interactive MTEXT
+        /// command (boundary, rotation, attachment, spacing and columns).
+        /// Existing-entity edits leave this as `None` and load the document
+        /// entity instead.
+        template: Option<Box<acadrust::MText>>,
     },
     /// Collect rich text without creating an MText entity.
     SuspendForMTextInput {

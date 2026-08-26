@@ -1486,6 +1486,9 @@ pub struct Scene {
     /// pick only refreshes the GPU xray overlay (cheap) instead of bumping
     /// `geometry_epoch` and re-tessellating the whole model.
     pub selection_generation: u64,
+    /// Cached fingerprint of `selected`, recomputed lazily after mutations.
+    selection_fingerprint_cache: u64,
+    selection_fingerprint_dirty: bool,
     /// Cached tessellation of all visible entity wires for the current layout.
     /// Keyed by `(geometry_epoch, camera_generation)` so a camera change
     /// invalidates the cull-dependent wire list as well as a geometry change.
@@ -1861,6 +1864,8 @@ impl Scene {
             projection_bounds_epoch: std::cell::Cell::new(0),
             block_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             selection_generation: 0,
+            selection_fingerprint_cache: 0,
+            selection_fingerprint_dirty: false,
             wire_cache: RefCell::new(None),
             interaction_index_cache: RefCell::new(Vec::new()),
             interaction_index_pending_key: std::cell::Cell::new(None),
@@ -2608,6 +2613,11 @@ impl Scene {
     /// hover changes; use [`bump_geometry`] when the geometry itself changed.
     pub fn bump_selection(&mut self) {
         self.selection_generation = self.selection_generation.wrapping_add(1);
+    }
+
+    pub(crate) fn bump_selection_set(&mut self) {
+        self.selection_fingerprint_dirty = true;
+        self.bump_selection();
     }
 
     /// Milliseconds after the last camera change during which the view counts as
@@ -4398,6 +4408,7 @@ impl Scene {
             .extend(self.selected.iter().copied());
         self.selected.clear();
         self.selected_order.clear();
+        self.bump_selection_set();
         self.bump_entities(&changes);
     }
 

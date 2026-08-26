@@ -40,8 +40,11 @@ impl Scene {
     }
     pub fn select_entity(&mut self, handle: Handle, exclusive: bool) {
         let handles = self.handles_expanded_for_leader_annotations(&[handle]);
+        let mut changed = false;
 
         if exclusive {
+            changed = self.selected.len() != handles.len()
+                || handles.iter().any(|handle| !self.selected.contains(handle));
             self.selected.clear();
             self.selected_order.clear();
         }
@@ -49,30 +52,35 @@ impl Scene {
         for handle in handles {
             if self.selected.insert(handle) {
                 self.selected_order.push(handle);
+                changed = true;
             }
         }
-        self.bump_selection();
+        if changed {
+            self.bump_selection_set();
+        }
     }
 
     pub fn deselect_all(&mut self) {
+        if self.selected.is_empty() {
+            return;
+        }
         self.selected.clear();
         self.selected_order.clear();
-        self.bump_selection();
+        self.bump_selection_set();
     }
 
-    /// Order-independent signature of the current selection set.
-    ///
-    /// `selection_generation` cannot be used for change detection because it
-    /// also bumps on hover. This signature combines a per-handle hash with XOR
-    /// so it is allocation-free, O(n), and insensitive to selection order.
-    pub(crate) fn selection_sig(&self) -> u64 {
-        let mut combined = 0u64;
-        for handle in &self.selected {
-            let mut hasher = DefaultHasher::new();
-            handle.hash(&mut hasher);
-            combined ^= hasher.finish();
+    pub(crate) fn selection_fingerprint(&mut self) -> u64 {
+        if self.selection_fingerprint_dirty {
+            let mut fingerprint = self.selected.len() as u64;
+            for handle in &self.selected {
+                let mut hasher = DefaultHasher::new();
+                handle.hash(&mut hasher);
+                fingerprint ^= hasher.finish();
+            }
+            self.selection_fingerprint_cache = fingerprint;
+            self.selection_fingerprint_dirty = false;
         }
-        combined
+        self.selection_fingerprint_cache
     }
 
     pub(crate) fn selected_handles_in_order(&self) -> Vec<Handle> {
@@ -121,7 +129,7 @@ impl Scene {
             order.extend(added);
             self.selected = selected;
             self.selected_order = order;
-            self.bump_selection();
+            self.bump_selection_set();
         }
     }
 
@@ -136,7 +144,7 @@ impl Scene {
         }
 
         if changed {
-            self.bump_selection();
+            self.bump_selection_set();
         }
     }
 
@@ -217,7 +225,7 @@ impl Scene {
             }
         }
         if added > 0 {
-            self.bump_selection();
+            self.bump_selection_set();
         }
         added
     }
@@ -241,7 +249,9 @@ impl Scene {
                 self.selected_order.push(h);
             }
         }
-        self.bump_selection();
+        if self.selected != prev {
+            self.bump_selection_set();
+        }
         self.selected.len()
     }
 
@@ -727,7 +737,8 @@ impl Scene {
 
         let mut handle_set: HashSet<Handle> = HashSet::default();
         let mut erased: Vec<(Handle, ChangeKind)> = Vec::new();
-        let mut highlight_changed = false;
+        let mut selection_changed = false;
+        let mut hover_changed = false;
 
         for &h in &erase_handles {
             // Objects on a locked layer can't be erased.
@@ -742,11 +753,11 @@ impl Scene {
             self.delete_solid_history(h);
             self.remember_removed_cache_categories(h);
             self.document.remove_entity_arc(h);
-            highlight_changed |= self.selected.remove(&h);
+            selection_changed |= self.selected.remove(&h);
             self.selected_order.retain(|selected| *selected != h);
             if self.hover_highlight == Some(h) {
                 self.hover_highlight = None;
-                highlight_changed = true;
+                hover_changed = true;
             }
             self.hatches.remove(&h);
             self.images.remove(&h);
@@ -756,7 +767,9 @@ impl Scene {
             handle_set.insert(h);
             erased.push((h, ChangeKind::Removed));
         }
-        if highlight_changed {
+        if selection_changed {
+            self.bump_selection_set();
+        } else if hover_changed {
             self.bump_selection();
         }
         // Capture exactly the group objects that this erase will rewrite, plus
@@ -862,25 +875,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selection_sig_is_order_independent() {
-        let mut scene_a = Scene::default();
-        let mut scene_b = Scene::default();
-        let h1 = Handle::new(1);
-        let h2 = Handle::new(2);
-        scene_a.select_entity(h1, false);
-        scene_a.select_entity(h2, false);
-        scene_b.select_entity(h2, false);
-        scene_b.select_entity(h1, false);
-        assert_eq!(scene_a.selection_sig(), scene_b.selection_sig());
-    }
-
-    #[test]
-    fn selection_sig_changes_when_selection_changes() {
+    fn selection_fingerprint_tracks_final_set_only() {
         let mut scene = Scene::default();
-        let empty_sig = scene.selection_sig();
-        scene.select_entity(Handle::new(1), false);
-        assert_ne!(scene.selection_sig(), empty_sig);
+        let first = Handle::new(1);
+        let second = Handle::new(2);
+        scene.select_entity(first, false);
+        scene.select_entity(second, false);
+        let fingerprint = scene.selection_fingerprint();
+        assert!(!scene.selection_fingerprint_dirty);
+
         scene.deselect_all();
-        assert_eq!(scene.selection_sig(), empty_sig);
+        scene.select_entity(second, false);
+        scene.select_entity(first, false);
+        assert!(scene.selection_fingerprint_dirty);
+        assert_eq!(scene.selection_fingerprint(), fingerprint);
+
+        scene.set_hover_highlight(Some(Handle::new(3)));
+        assert!(!scene.selection_fingerprint_dirty);
+        assert_eq!(scene.selection_fingerprint(), fingerprint);
     }
 }

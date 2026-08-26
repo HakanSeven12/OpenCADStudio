@@ -233,12 +233,6 @@ impl OpenCADStudio {
 
     /// Emit `SelectionChangedV4` to V4 plugins when the active tab's selection
     /// set actually changed since the last broadcast.
-    ///
-    /// Checked at the message boundary rather than at the mutation sites so
-    /// every path is covered: picking, window select, QSELECT, SELECTALL,
-    /// grip edits that drop the selection, and the automation `select` op.
-    /// The signature comparison keeps hover and repeated no-op selects from
-    /// producing spurious notifications.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn notify_plugins_selection_changed(&mut self) {
         if self.active_tab >= self.tabs.len() {
@@ -246,8 +240,8 @@ impl OpenCADStudio {
         }
         let i = self.active_tab;
         let tab_id = self.tabs[i].id;
-        let sig = self.tabs[i].scene.selection_sig();
-        let key = (tab_id, sig);
+        let fingerprint = self.tabs[i].scene.selection_fingerprint();
+        let key = (tab_id, fingerprint);
         if self.last_plugin_selection == Some(key) {
             return;
         }

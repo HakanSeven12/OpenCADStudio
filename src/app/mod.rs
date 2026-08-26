@@ -679,7 +679,7 @@ pub(super) struct OpenCADStudio {
     /// keep their manifest listed but drop their ribbon tab and command
     /// dispatch. Persisted via [`settings::UserSettings::disabled_plugins`].
     disabled_plugins: rustc_hash::FxHashSet<String>,
-    /// `(tab id, selection signature)` last broadcast to V4 plugins, so
+    /// `(tab id, selection fingerprint)` last broadcast to V4 plugins, so
     /// `SelectionChangedV4` fires once per real change rather than per message.
     #[cfg(not(target_arch = "wasm32"))]
     last_plugin_selection: Option<(u64, u64)>,

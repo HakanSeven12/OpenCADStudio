@@ -1,4 +1,23 @@
 //! V4 wire frames and envelope types.
+//!
+//! V4 replaces the simple request/response pipe with a multiplexed frame layer.
+//! Every request and response carries a monotonically increasing correlation
+//! `id` so a plugin can send/receive out of order. Notifications carry an
+//! optional `command_id` so a plugin can associate a host notification with the
+//! long-running command that caused it.
+//!
+//! The two frame enums are:
+//!
+//! - [`HostToPluginV4`] — host → runner requests, responses to runner requests,
+//!   and host notifications.
+//! - [`PluginToHostV4`] — runner → host requests, responses to host requests,
+//!   and plugin notifications.
+//!
+//! Notifications are wrapped in [`NotificationEnvelope`] and are best-effort:
+//! a process that fails to accept a notification is logged and skipped, but the
+//! connection stays alive. Unknown host-notification discriminants deserialize
+//! to [`crate::host::HostNotification::Unknown`] so newer host notifications do
+//! not break older plugins.
 
 use serde::{Deserialize, Serialize};
 

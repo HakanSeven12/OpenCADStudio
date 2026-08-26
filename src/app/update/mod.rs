@@ -235,6 +235,25 @@ impl OpenCADStudio {
         }
     }
 
+    /// Emit `SelectionChangedV4` to V4 plugins when the active tab's selection
+    /// set actually changed since the last broadcast.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn notify_plugins_selection_changed(&mut self) {
+        if self.active_tab >= self.tabs.len() {
+            return;
+        }
+        let i = self.active_tab;
+        let tab_id = self.tabs[i].id;
+        let fingerprint = self.tabs[i].scene.selection_fingerprint();
+        let key = (tab_id, fingerprint);
+        if self.last_plugin_selection == Some(key) {
+            return;
+        }
+        self.last_plugin_selection = Some(key);
+        let handles = self.tabs[i].scene.selected_handles_in_order();
+        crate::plugin::v4_support::publish_selection_changed_v4(tab_id, handles);
+    }
+
     pub fn update(&mut self, msg: Message) -> Task<Message> {
         let perf_started = crate::perf::enabled().then(Instant::now);
         let perf_label = perf_message_label(&msg);
@@ -279,6 +298,11 @@ impl OpenCADStudio {
         // The block panel watches the drawing's block list and rebuilds its
         // thumbnails whenever the names change (BLOCK define, file open, …).
         self.refresh_block_palette_if_stale();
+        // Let V4 plugins observe selection changes that happened while handling
+        // this message (picking, window select, QSELECT, SELECTALL, grip edits,
+        // and plugin request draining).
+        #[cfg(not(target_arch = "wasm32"))]
+        self.notify_plugins_selection_changed();
         // OTRACK acquires tracking points only while a command or grip drag is
         // running; drop them once neither is active so the temporary tracking
         // points / vectors disappear when the command ends (issue #64).
@@ -3915,10 +3939,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextHeight(s) => {
-                if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.height = s;
-                }
-                self.rebuild_mtext_preview();
+                self.mtext_apply_span_number("height", s);
                 Task::none()
             }
             Message::MTextRectWidth(width) => {
@@ -3950,24 +3971,126 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextOblique(s) => {
-                if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.oblique = s;
-                }
-                self.rebuild_mtext_preview();
+                self.mtext_apply_span_number("oblique", s);
                 Task::none()
             }
             Message::MTextWidth(s) => {
+                self.mtext_apply_span_number("width", s);
+                Task::none()
+            }
+            Message::MTextCharSpace(s) => {
+                self.mtext_apply_span_number("tracking", s);
+                Task::none()
+            }
+            Message::MTextUndo => {
+                self.mtext_undo();
+                Task::none()
+            }
+            Message::MTextRedo => {
+                self.mtext_redo();
+                Task::none()
+            }
+            Message::MTextStack => {
+                self.mtext_stack_selection();
+                Task::none()
+            }
+            Message::MTextClearFormatting => {
+                self.mtext_clear_formatting();
+                Task::none()
+            }
+            Message::MTextInsert(value) => {
+                self.mtext_type(&value);
+                Task::none()
+            }
+            Message::MTextAnnotative(value) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.width = s;
+                    ed.annotative = value;
                 }
                 self.rebuild_mtext_preview();
                 Task::none()
             }
-            Message::MTextCharSpace(s) => {
+            Message::MTextColumnMode(mode) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
-                    ed.char_space = s;
+                    match mode.as_str() {
+                        "Static" => {
+                            ed.column_type = 1;
+                            ed.column_auto_height = false;
+                        }
+                        "Dynamic auto" => {
+                            ed.column_type = 2;
+                            ed.column_auto_height = true;
+                        }
+                        "Dynamic manual" => {
+                            ed.column_type = 2;
+                            ed.column_auto_height = false;
+                        }
+                        _ => ed.column_type = 0,
+                    }
                 }
                 self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnCount(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.column_count = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnWidth(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.column_width = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnGutter(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.column_gutter = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnHeight(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.rect_height = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextColumnFlowReversed(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.column_flow_reversed = value;
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
+            Message::MTextParagraphNumber(field, value) => {
+                self.mtext_apply_paragraph_number(field, value);
+                Task::none()
+            }
+            Message::MTextFindText(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.find_text = value;
+                }
+                Task::none()
+            }
+            Message::MTextReplaceText(value) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.replace_text = value;
+                }
+                Task::none()
+            }
+            Message::MTextFindNext => {
+                self.mtext_find_next();
+                Task::none()
+            }
+            Message::MTextReplaceNext => {
+                self.mtext_replace_next();
+                Task::none()
+            }
+            Message::MTextReplaceAll => {
+                self.mtext_replace_all();
                 Task::none()
             }
             Message::MTextJustify(ap) => {

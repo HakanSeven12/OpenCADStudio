@@ -5,7 +5,8 @@ use crate::entities::common::{
     edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, ro_prop as ro, square_grip, triangle_grip,
 };
 use crate::entities::text_support::{
-    layout_mtext, resolve_text_style, GlyphBox, MTextColumns, MTextRenderOpts, MTextVAnchor,
+    clamp_mtext_column_count, layout_mtext, resolve_text_style, GlyphBox, MTextColumns,
+    MTextRenderOpts, MTextVAnchor,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
@@ -24,10 +25,19 @@ fn columns_of(t: &MText) -> MTextColumns {
     if c.column_type == 0 {
         return MTextColumns::default();
     }
+    let count = clamp_mtext_column_count(c.column_count) as usize;
     MTextColumns {
-        count: c.column_count.max(0) as usize,
+        count,
         width: c.width as f32,
         gutter: c.gutter as f32,
+        flow_reversed: c.flow_reversed,
+        auto_height: c.auto_height,
+        heights: c
+            .heights
+            .iter()
+            .take(count)
+            .map(|height| *height as f32)
+            .collect(),
     }
 }
 
@@ -120,7 +130,14 @@ pub fn glyph_boxes(t: &MText, document: &acadrust::CadDocument) -> Vec<GlyphBox>
         attach_h_anchor,
         v_anchor,
         line_spacing_factor: t.line_spacing_factor as f32,
-        vertical_text: matches!(t.drawing_direction, DrawingDirection::TopToBottom),
+        exact_line_spacing: matches!(
+            t.line_spacing_style,
+            acadrust::entities::LineSpacingStyle::Exactly
+        ),
+        rectangle_height: t.rectangle_height.unwrap_or(0.0) as f32,
+        vertical_text: matches!(t.drawing_direction, DrawingDirection::TopToBottom)
+            || matches!(t.drawing_direction, DrawingDirection::ByStyle)
+                && resolved_style.is_vertical,
         want_glyph_boxes: true,
         columns: columns_of(t),
     });
@@ -169,7 +186,14 @@ fn to_render(t: &MText, document: &acadrust::CadDocument) -> RenderEntity {
         attach_h_anchor,
         v_anchor,
         line_spacing_factor: t.line_spacing_factor as f32,
-        vertical_text: matches!(t.drawing_direction, DrawingDirection::TopToBottom),
+        exact_line_spacing: matches!(
+            t.line_spacing_style,
+            acadrust::entities::LineSpacingStyle::Exactly
+        ),
+        rectangle_height: t.rectangle_height.unwrap_or(0.0) as f32,
+        vertical_text: matches!(t.drawing_direction, DrawingDirection::TopToBottom)
+            || matches!(t.drawing_direction, DrawingDirection::ByStyle)
+                && resolved_style.is_vertical,
         want_glyph_boxes: false,
         columns: columns_of(t),
     });
@@ -231,8 +255,43 @@ fn grips(t: &MText) -> Vec<GripDef> {
         t.insertion_point.z,
     );
     let (dir, k) = width_grip_axis(t);
-    let width_grip = p + dir * (k * t.rectangle_width.max(0.0));
-    vec![square_grip(0, p), triangle_grip(1, width_grip)]
+    let column_count = clamp_mtext_column_count(t.column_data.column_count);
+    let columns_active =
+        t.column_data.column_type != 0 && column_count > 1 && t.column_data.width > 0.0;
+    let block_width = if columns_active {
+        t.column_data.width * column_count as f64
+            + t.column_data.gutter * (column_count - 1) as f64
+    } else {
+        t.rectangle_width.max(0.0)
+    };
+    let width_grip = p + dir * (k * block_width);
+    let mut result = vec![square_grip(0, p), triangle_grip(1, width_grip)];
+
+    let height = t
+        .rectangle_height
+        .or_else(|| t.column_data.heights.first().copied())
+        .unwrap_or(0.0);
+    if height > 0.0 && !(columns_active && t.column_data.auto_height) {
+        let (sin, cos) = t.rotation.sin_cos();
+        let down = glam::DVec3::new(sin, -cos, 0.0);
+        let (_, vertical) = attach_anchors(t);
+        let factor = match vertical {
+            MTextVAnchor::Top
+            | MTextVAnchor::MiddleOfTopLine
+            | MTextVAnchor::BottomOfTopLine => 1.0,
+            MTextVAnchor::Middle => 0.5,
+            MTextVAnchor::Bottom | MTextVAnchor::MiddleOfBottomLine => -1.0,
+        };
+        result.push(triangle_grip(2, p + down * (factor * height)));
+    }
+    if columns_active {
+        result.push(triangle_grip(3, p + dir * (k * t.column_data.width)));
+        result.push(triangle_grip(
+            4,
+            p + dir * (k * (t.column_data.width + t.column_data.gutter)),
+        ));
+    }
+    result
 }
 
 fn columns_str(c: &acadrust::entities::MTextColumnData) -> &'static str {
@@ -248,10 +307,9 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
     // by the line-spacing factor.
     let line_space_distance = t.height * 1.666_666_666_666_667 * t.line_spacing_factor;
     let text_frame_on = (t.background_fill_flags & 0x10) != 0;
-    // Defined width is only live without columns; defined height is live for
-    // static columns or manual-height dynamic columns, grayed otherwise.
+    // Defined width is reported by Properties but is not edited there. Defined
+    // height remains live for static columns or manual-height dynamic columns.
     let col_type = t.column_data.column_type;
-    let width_editable = col_type == 0;
     let height_editable = col_type == 1 || (col_type == 2 && !t.column_data.auto_height);
     vec![
         PropSection {
@@ -353,7 +411,7 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                             .collect(),
                     },
                 },
-                num_row(t!("Defined width").as_ref(), "rect_w", t.rectangle_width, width_editable),
+                num_row(t!("Defined width").as_ref(), "rect_w", t.rectangle_width, false),
                 num_row(
                     t!("Defined height").as_ref(),
                     "rect_h",
@@ -371,20 +429,6 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                             .collect(),
                     },
                 },
-                // Count / width / gutter are live only when columns are on.
-                num_row(
-                    t!("Column count").as_ref(),
-                    "col_count",
-                    t.column_data.column_count as f64,
-                    col_type != 0,
-                ),
-                num_row(t!("Column width").as_ref(), "col_width", t.column_data.width, col_type != 0),
-                num_row(
-                    t!("Column gutter").as_ref(),
-                    "col_gutter",
-                    t.column_data.gutter,
-                    col_type != 0,
-                ),
                 Property {
                     label: t!("Text frame").into_owned(),
                     field: "text_frame",
@@ -502,21 +546,20 @@ fn apply_geom_prop(t: &mut MText, field: &str, value: &str) {
         "ins_y" => t.insertion_point.y = v,
         "ins_z" => t.insertion_point.z = v,
         "height" if v > 0.0 => t.height = v,
-        "rect_w" if v > 0.0 => t.rectangle_width = v,
-        "rect_h" if v > 0.0 => t.rectangle_height = Some(v),
+        "rect_h" if v >= 0.0 => t.rectangle_height = (v > 0.0).then_some(v),
         "rotation" => t.rotation = v.to_radians(),
-        "line_spacing" if v > 0.0 => t.line_spacing_factor = v,
+        "line_spacing" if (0.25..=4.0).contains(&v) => t.line_spacing_factor = v,
         // Editing the absolute distance back-solves the line-spacing factor so
         // the two stay consistent (distance = height × 5/3 × factor).
         "line_space_distance" if v > 0.0 => {
             let denom = t.height * 1.666_666_666_666_667;
             if denom > 0.0 {
-                t.line_spacing_factor = v / denom;
+                let factor = v / denom;
+                if (0.25..=4.0).contains(&factor) {
+                    t.line_spacing_factor = factor;
+                }
             }
         }
-        "col_count" if v >= 1.0 => t.column_data.column_count = v.round() as i32,
-        "col_width" if v > 0.0 => t.column_data.width = v,
-        "col_gutter" if v >= 0.0 => t.column_data.gutter = v,
         _ => {}
     }
 }
@@ -541,7 +584,60 @@ fn apply_grip(t: &mut MText, grip_id: usize, apply: GripApply) {
             let dx = p.x as f64 - t.insertion_point.x;
             let dy = p.y as f64 - t.insertion_point.y;
             let projected = dx * dir.x + dy * dir.y;
-            t.rectangle_width = (projected / k).max(0.01);
+            let width = (projected / k).max(0.0);
+            let column_count = clamp_mtext_column_count(t.column_data.column_count);
+            if t.column_data.column_type != 0 && column_count > 1 {
+                t.column_data.column_count = column_count;
+                let gaps = (column_count - 1) as f64;
+                t.column_data.width =
+                    ((width - t.column_data.gutter * gaps) / column_count as f64)
+                        .max(0.01);
+            } else {
+                t.rectangle_width = width;
+            }
+        }
+        (2, GripApply::Absolute(p)) => {
+            let (sin, cos) = t.rotation.sin_cos();
+            let down = glam::DVec3::new(sin, -cos, 0.0);
+            let delta = glam::DVec3::new(
+                p.x as f64 - t.insertion_point.x,
+                p.y as f64 - t.insertion_point.y,
+                p.z as f64 - t.insertion_point.z,
+            );
+            let (_, vertical) = attach_anchors(t);
+            let factor = match vertical {
+                MTextVAnchor::Top
+                | MTextVAnchor::MiddleOfTopLine
+                | MTextVAnchor::BottomOfTopLine => 1.0,
+                MTextVAnchor::Middle => 0.5,
+                MTextVAnchor::Bottom | MTextVAnchor::MiddleOfBottomLine => -1.0,
+            };
+            let height = (delta.dot(down) / factor).max(0.01);
+            t.rectangle_height = Some(height);
+            if t.column_data.column_type != 0 && !t.column_data.auto_height {
+                let column_count = clamp_mtext_column_count(t.column_data.column_count);
+                t.column_data.column_count = column_count;
+                t.column_data.heights = vec![height; column_count as usize];
+            }
+        }
+        (3, GripApply::Absolute(p)) => {
+            let (dir, k) = width_grip_axis(t);
+            let delta = glam::DVec3::new(
+                p.x as f64 - t.insertion_point.x,
+                p.y as f64 - t.insertion_point.y,
+                0.0,
+            );
+            t.column_data.width = (delta.dot(dir) / k).max(0.01);
+        }
+        (4, GripApply::Absolute(p)) => {
+            let (dir, k) = width_grip_axis(t);
+            let delta = glam::DVec3::new(
+                p.x as f64 - t.insertion_point.x,
+                p.y as f64 - t.insertion_point.y,
+                0.0,
+            );
+            t.column_data.gutter =
+                (delta.dot(dir) / k - t.column_data.width).max(0.0);
         }
         _ => {}
     }

@@ -3,7 +3,9 @@ use acadrust::entities::Tolerance;
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
-use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
+use crate::scene::convert::acad_to_render::{
+    GlyphRun, RenderEntity, RenderObject, TextPlane, TextStroke,
+};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 use crate::scene::text::lff;
@@ -131,7 +133,7 @@ fn parse_cell(s: &str) -> Cell {
 /// (`\Fgdt.shx|b0|i0|c134|p6;j`), so match the name and skip to the `;` rather
 /// than demanding the bare `\Fgdt;` form — the parameterised spelling is legal
 /// and would otherwise drop the symbol silently.
-fn symbol_font_switch(inner: &str) -> Option<char> {
+pub(crate) fn symbol_font_switch(inner: &str) -> Option<char> {
     let rest = inner
         .strip_prefix("\\F")
         .or_else(|| inner.strip_prefix("\\f"))?;
@@ -247,15 +249,13 @@ fn content_width(
 /// One text run of a feature-control frame, ready to become a `TextStroke`
 /// with a `GlyphRun` so the run can render as SDF glyph quads (or, when
 /// SDF is off, from `strokes`). `origin` is relative to the tolerance insertion
-/// point (already rotated); `strokes` are the glyph polylines rotated about the
-/// origin (no origin translation — the wire-builder adds the origin).
+/// point; `strokes` remain in the frame's local plane.
 struct TolCell {
     text: String,
     font: String,
     origin: [f32; 2],
     strokes: Vec<Vec<[f32; 2]>>,
     height: f32,
-    rotation: f32,
     width_factor: f32,
     oblique: f32,
 }
@@ -263,8 +263,8 @@ struct TolCell {
 /// Tessellate a Tolerance entity's feature-control frame.
 ///
 /// Returns (`box_strokes`, `cells`):
-///   - `box_strokes` — the outer border, row separators and column dividers as
-///     2-D polylines (rotated; run-less, so they always render as strokes)
+///   - `box_strokes` — the outer border, row separators and column dividers in
+///     frame-local coordinates
 ///   - `cells` — one [`TolCell`] per non-empty cell, carrying its text + a
 ///     `GlyphRun` so the cell renders as SDF text (frame stays geometry).
 fn tessellate_tolerance(
@@ -341,13 +341,6 @@ fn tessellate_tolerance(
         .map(|row| row.iter().map(|c| cell_width(c)).collect())
         .collect();
 
-    // ── Transform helpers (local space — translation applied in tessellate.rs) ──
-    let angle = (tol.direction.y as f32).atan2(tol.direction.x as f32);
-    let (sa, ca) = angle.sin_cos();
-
-    // Rotate only; origin is kept as f64 and applied later with full precision.
-    let rot = |x: f32, y: f32| -> [f32; 2] { [x * ca - y * sa, x * sa + y * ca] };
-
     let mut box_out: Vec<Vec<[f32; 2]>> = Vec::new();
     let mut cells: Vec<TolCell> = Vec::new();
 
@@ -370,11 +363,11 @@ fn tessellate_tolerance(
         let y0 = row_bottom(ri);
         let y1 = y0 + cell_h;
         box_out.push(vec![
-            rot(0.0, y0),
-            rot(rw, y0),
-            rot(rw, y1),
-            rot(0.0, y1),
-            rot(0.0, y0),
+            [0.0, y0],
+            [rw, y0],
+            [rw, y1],
+            [0.0, y1],
+            [0.0, y0],
         ]);
     }
 
@@ -385,15 +378,13 @@ fn tessellate_tolerance(
         let mut x_cursor = 0.0_f32;
         for w in widths.iter().take(widths.len().saturating_sub(1)) {
             x_cursor += w;
-            box_out.push(vec![rot(x_cursor, y0), rot(x_cursor, y1)]);
+            box_out.push(vec![[x_cursor, y0], [x_cursor, y1]]);
         }
     }
 
     // ── Text content per cell ─────────────────────────────────────────────
-    // Each cell becomes a TolCell: its origin is the (rotated) cell position
-    // relative to the insertion point; its `strokes` are the glyph polylines
-    // rotated about that origin (used only when SDF is off). The GlyphRun the
-    // caller attaches lets the cell render as SDF text.
+    // Each cell stays in frame-local coordinates; the renderer maps the frame
+    // into its world-space plane.
     for (ri, row) in rows.iter().enumerate() {
         // The compartment is 2h tall and the character h, so an h/2 margin
         // centres the text on the row's centreline.
@@ -427,21 +418,17 @@ fn tessellate_tolerance(
                             &font,
                             &text,
                         );
-                    // Glyph polylines rotated about the run's origin (no origin
-                    // translation — the wire-builder adds `origin`).
                     let strokes: Vec<Vec<[f32; 2]>> = local_strokes
                         .into_iter()
-                        .map(|pl| pl.into_iter().map(|[px, py]| rot(px, py)).collect())
                         .filter(|pl: &Vec<[f32; 2]>| !pl.is_empty())
                         .collect();
                     let advance = run_advance(&text, &font, h, width_factor, oblique);
                     cells.push(TolCell {
                         text,
                         font,
-                        origin: rot(run_x, row_y),
+                        origin: [run_x, row_y],
                         strokes,
                         height: h,
-                        rotation: angle,
                         width_factor,
                         oblique,
                     });
@@ -453,6 +440,24 @@ fn tessellate_tolerance(
     }
 
     (box_out, cells)
+}
+
+pub(crate) fn preview_strokes(
+    tol: &Tolerance,
+    doc: &acadrust::CadDocument,
+) -> Vec<Vec<[f32; 2]>> {
+    tessellate_tolerance(tol, doc).0
+}
+
+fn frame_basis(tol: &Tolerance) -> (glam::DVec3, glam::DVec3) {
+    let normal = glam::DVec3::new(tol.normal.x, tol.normal.y, tol.normal.z)
+        .normalize_or(glam::DVec3::Z);
+    let direction = glam::DVec3::new(tol.direction.x, tol.direction.y, tol.direction.z);
+    let fallback = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z)).0;
+    let fallback = glam::DVec3::new(fallback.0, fallback.1, fallback.2);
+    let x_axis = (direction - normal * direction.dot(normal)).normalize_or(fallback);
+    let y_axis = normal.cross(x_axis).normalize_or(glam::DVec3::Y);
+    (x_axis, y_axis)
 }
 
 // ── RenderConvertible ──────────────────────────────────────────────────────────
@@ -471,7 +476,18 @@ impl RenderConvertible for Tolerance {
 
         // Build the feature-control frame in local space; origin stored as f64.
         let (box_strokes, cells) = tessellate_tolerance(self, document);
-        let ins = [self.insertion_point.x, self.insertion_point.y];
+        let ins = glam::DVec3::new(
+            self.insertion_point.x,
+            self.insertion_point.y,
+            self.insertion_point.z,
+        );
+        let (x_axis, y_axis) = frame_basis(self);
+        let plane = |origin: glam::DVec3| TextPlane {
+            origin: origin.to_array(),
+            scale_origin: ins.to_array(),
+            x_axis: x_axis.to_array(),
+            y_axis: y_axis.to_array(),
+        };
         let style = resolve_dim_style(self, document);
         let xd = &self.common.extended_data;
         let explicit_color = |index: Option<i16>| {
@@ -520,9 +536,10 @@ impl RenderConvertible for Tolerance {
         if !box_strokes.is_empty() {
             groups.push(TextStroke {
                 strokes: box_strokes,
-                origin: ins,
+                origin: [ins.x, ins.y],
                 color: frame_color,
                 fill_tris: vec![],
+                plane: Some(plane(ins)),
                 run: None,
             });
         }
@@ -530,16 +547,21 @@ impl RenderConvertible for Tolerance {
             groups.push(TextStroke {
                 strokes: cell.strokes,
                 origin: [
-                    ins[0] + cell.origin[0] as f64,
-                    ins[1] + cell.origin[1] as f64,
+                    ins.x + x_axis.x * cell.origin[0] as f64
+                        + y_axis.x * cell.origin[1] as f64,
+                    ins.y + x_axis.y * cell.origin[0] as f64
+                        + y_axis.y * cell.origin[1] as f64,
                 ],
                 color: text_color,
                 fill_tris: vec![],
+                plane: Some(plane(
+                    ins + x_axis * cell.origin[0] as f64 + y_axis * cell.origin[1] as f64,
+                )),
                 run: Some(GlyphRun {
                     text: cell.text,
                     font: cell.font,
                     height: cell.height,
-                    rotation: cell.rotation,
+                    rotation: 0.0,
                     width_factor: cell.width_factor,
                     oblique: cell.oblique,
                     // `tracking` scales the font's own letter spacing, so 0

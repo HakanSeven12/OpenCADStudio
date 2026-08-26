@@ -78,6 +78,81 @@ fn oriented_text_corners(
     ]
 }
 
+fn oriented_mtext_corner_groups(
+    verts: &[crate::scene::pipeline::text_gpu::TextVertex],
+    text: &acadrust::MText,
+    rotation: f64,
+    pad: f64,
+    annotation_scale: f64,
+) -> Vec<[[f64; 2]; 4]> {
+    let columns = &text.column_data;
+    let count = crate::entities::text_support::clamp_mtext_column_count(columns.column_count)
+        as usize;
+    if columns.column_type == 0 || count <= 1 || columns.width <= 0.0 {
+        return vec![oriented_text_corners(
+            verts,
+            [text.insertion_point.x, text.insertion_point.y],
+            rotation,
+            pad,
+        )];
+    }
+
+    let width = columns.width * annotation_scale;
+    let gutter = columns.gutter.max(0.0) * annotation_scale;
+    let total_width = width * count as f64 + gutter * count.saturating_sub(1) as f64;
+    let anchor = match text.attachment_point {
+        acadrust::entities::mtext::AttachmentPoint::TopCenter
+        | acadrust::entities::mtext::AttachmentPoint::MiddleCenter
+        | acadrust::entities::mtext::AttachmentPoint::BottomCenter => 0.5,
+        acadrust::entities::mtext::AttachmentPoint::TopRight
+        | acadrust::entities::mtext::AttachmentPoint::MiddleRight
+        | acadrust::entities::mtext::AttachmentPoint::BottomRight => 1.0,
+        _ => 0.0,
+    };
+    let block_left = -anchor * total_width;
+    let origin = [text.insertion_point.x, text.insertion_point.y];
+    let (sin_r, cos_r) = rotation.sin_cos();
+    let mut bounds = vec![[f64::MAX, f64::MAX, f64::MIN, f64::MIN]; count];
+    for vertex in verts {
+        let x = vertex.pos[0] as f64 + vertex.pos_low[0] as f64 - origin[0];
+        let y = vertex.pos[1] as f64 + vertex.pos_low[1] as f64 - origin[1];
+        let local_x = x * cos_r + y * sin_r;
+        let local_y = -x * sin_r + y * cos_r;
+        let stride = width + gutter;
+        let physical = ((local_x - block_left) / stride)
+            .floor()
+            .clamp(0.0, count.saturating_sub(1) as f64) as usize;
+        bounds[physical][0] = bounds[physical][0].min(local_x);
+        bounds[physical][1] = bounds[physical][1].min(local_y);
+        bounds[physical][2] = bounds[physical][2].max(local_x);
+        bounds[physical][3] = bounds[physical][3].max(local_y);
+    }
+    let to_world = |x: f64, y: f64| {
+        [
+            origin[0] + x * cos_r - y * sin_r,
+            origin[1] + x * sin_r + y * cos_r,
+        ]
+    };
+    bounds
+        .into_iter()
+        .filter(|bounds| bounds[0] <= bounds[2] && bounds[1] <= bounds[3])
+        .map(|bounds| {
+            let [left, bottom, right, top] = [
+                bounds[0] - pad,
+                bounds[1] - pad,
+                bounds[2] + pad,
+                bounds[3] + pad,
+            ];
+            [
+                to_world(left, bottom),
+                to_world(right, bottom),
+                to_world(right, top),
+                to_world(left, top),
+            ]
+        })
+        .collect()
+}
+
 pub(crate) fn explicit_mtext_background(entity: &EntityType) -> Option<[f32; 4]> {
     let EntityType::MText(text) = entity else {
         return None;
@@ -633,7 +708,14 @@ pub fn tessellate(
     // stay a roughly constant on-screen size; otherwise the header-driven path.
     let te = crate::entities::point::relative_render(entity, document, world_per_pixel)
         .or_else(|| crate::entities::light::relative_render(entity, document, world_per_pixel))
-        .or_else(|| convert(entity, document));
+        .or_else(|| match entity {
+            EntityType::Text(text) => Some(crate::entities::text::to_render_at_scale(
+                text,
+                document,
+                anno_scale,
+            )),
+            _ => convert(entity, document),
+        });
     if let Some(te) = te {
         match te.object {
             // ── Text / MText: pre-tessellated glyph strokes ───────────────
@@ -733,9 +815,32 @@ pub fn tessellate(
                         }
                         bin_first[bi] = false;
                         for &[x, y] in stroke {
-                            let xv = x as f64 * anno + slx_v;
-                            let yv = y as f64 * anno + sly_v;
-                            let (h, l) = split_ds_xyz(xv, yv, elev_v);
+                            let world = if let Some(plane) = group.plane {
+                                let scaled_origin = [
+                                    plane.scale_origin[0]
+                                        + (plane.origin[0] - plane.scale_origin[0]) * anno,
+                                    plane.scale_origin[1]
+                                        + (plane.origin[1] - plane.scale_origin[1]) * anno,
+                                    plane.scale_origin[2]
+                                        + (plane.origin[2] - plane.scale_origin[2]) * anno,
+                                ];
+                                let x = x as f64 * anno;
+                                let y = y as f64 * anno;
+                                [
+                                    scaled_origin[0]
+                                        + plane.x_axis[0] * x
+                                        + plane.y_axis[0] * y,
+                                    scaled_origin[1]
+                                        + plane.x_axis[1] * x
+                                        + plane.y_axis[1] * y,
+                                    scaled_origin[2]
+                                        + plane.x_axis[2] * x
+                                        + plane.y_axis[2] * y,
+                                ]
+                            } else {
+                                [x as f64 * anno + slx_v, y as f64 * anno + sly_v, elev_v]
+                            };
+                            let (h, l) = split_ds_xyz(world[0], world[1], world[2]);
                             bins[bi].pts.push(h);
                             bins[bi].pts_low.push(l);
                         }
@@ -743,9 +848,32 @@ pub fn tessellate(
 
                     // 2. Process fill triangles
                     for &[x, y] in &group.fill_tris {
-                        let xv = x as f64 * anno + slx_v;
-                        let yv = y as f64 * anno + sly_v;
-                        let (h, l) = split_ds_xyz(xv, yv, elev_v);
+                        let world = if let Some(plane) = group.plane {
+                            let scaled_origin = [
+                                plane.scale_origin[0]
+                                    + (plane.origin[0] - plane.scale_origin[0]) * anno,
+                                plane.scale_origin[1]
+                                    + (plane.origin[1] - plane.scale_origin[1]) * anno,
+                                plane.scale_origin[2]
+                                    + (plane.origin[2] - plane.scale_origin[2]) * anno,
+                            ];
+                            let x = x as f64 * anno;
+                            let y = y as f64 * anno;
+                            [
+                                scaled_origin[0]
+                                    + plane.x_axis[0] * x
+                                    + plane.y_axis[0] * y,
+                                scaled_origin[1]
+                                    + plane.x_axis[1] * x
+                                    + plane.y_axis[1] * y,
+                                scaled_origin[2]
+                                    + plane.x_axis[2] * x
+                                    + plane.y_axis[2] * y,
+                            ]
+                        } else {
+                            [x as f64 * anno + slx_v, y as f64 * anno + sly_v, elev_v]
+                        };
+                        let (h, l) = split_ds_xyz(world[0], world[1], world[2]);
                         bins[bi].fill_tris.push(h);
                         bins[bi].fill_tris_low.push(l);
                     }
@@ -793,14 +921,35 @@ pub fn tessellate(
                                 run.bold,
                                 &run.text,
                             );
-                            crate::scene::pipeline::text_gpu::push_glyph_vertices(
-                                &mut sdf_verts,
-                                &quads,
-                                [slx_v, sly_v, elev_v],
-                                anno,
-                                gcolor,
-                                0.0,
-                            );
+                            if let Some(plane) = group.plane {
+                                let scaled_origin = [
+                                    plane.scale_origin[0]
+                                        + (plane.origin[0] - plane.scale_origin[0]) * anno,
+                                    plane.scale_origin[1]
+                                        + (plane.origin[1] - plane.scale_origin[1]) * anno,
+                                    plane.scale_origin[2]
+                                        + (plane.origin[2] - plane.scale_origin[2]) * anno,
+                                ];
+                                crate::scene::pipeline::text_gpu::push_glyph_vertices_on_plane(
+                                    &mut sdf_verts,
+                                    &quads,
+                                    scaled_origin,
+                                    plane.x_axis,
+                                    plane.y_axis,
+                                    anno,
+                                    gcolor,
+                                    0.0,
+                                );
+                            } else {
+                                crate::scene::pipeline::text_gpu::push_glyph_vertices(
+                                    &mut sdf_verts,
+                                    &quads,
+                                    [slx_v, sly_v, elev_v],
+                                    anno,
+                                    gcolor,
+                                    0.0,
+                                );
+                            }
                         }
                     }
                 }
@@ -849,11 +998,12 @@ pub fn tessellate(
                                     .unwrap_or(m.rotation);
                                 let text_height = m.height * anno;
                                 let pad = (m.background_scale - 1.0).max(0.0) * text_height;
-                                let corners = oriented_text_corners(
+                                let corner_groups = oriented_mtext_corner_groups(
                                     &sdf_verts,
-                                    [m.insertion_point.x, m.insertion_point.y],
+                                    m,
                                     text_rotation,
                                     pad,
+                                    anno,
                                 );
                                 // Fill / mask — two triangles behind the glyphs.
                                 if has_fill {
@@ -862,13 +1012,18 @@ pub fn tessellate(
                                     } else {
                                         color_or_inherit(&m.background_color, bg_color)
                                     };
-                                    let mut ft = Vec::with_capacity(6);
-                                    let mut ftl = Vec::with_capacity(6);
-                                    for &k in &[0usize, 1, 2, 0, 2, 3] {
-                                        let (h, lo) =
-                                            split_ds_xyz(corners[k][0], corners[k][1], elev_v);
-                                        ft.push(h);
-                                        ftl.push(lo);
+                                    let mut ft = Vec::with_capacity(6 * corner_groups.len());
+                                    let mut ftl = Vec::with_capacity(6 * corner_groups.len());
+                                    for corners in &corner_groups {
+                                        for &k in &[0usize, 1, 2, 0, 2, 3] {
+                                            let (h, lo) = split_ds_xyz(
+                                                corners[k][0],
+                                                corners[k][1],
+                                                elev_v,
+                                            );
+                                            ft.push(h);
+                                            ftl.push(lo);
+                                        }
                                     }
                                     wires.push(WireModel {
                                         point_marker: None,
@@ -907,19 +1062,24 @@ pub fn tessellate(
                                 // Text frame — a closed rectangle in the text
                                 // colour around the same box.
                                 if has_frame {
-                                    let loop_xy = [
-                                        corners[0],
-                                        corners[1],
-                                        corners[2],
-                                        corners[3],
-                                        corners[0],
-                                    ];
-                                    let mut fp = Vec::with_capacity(5);
-                                    let mut fpl = Vec::with_capacity(5);
-                                    for &[x, y] in &loop_xy {
-                                        let (h, lo) = split_ds_xyz(x, y, elev_v);
-                                        fp.push(h);
-                                        fpl.push(lo);
+                                    let mut fp = Vec::with_capacity(6 * corner_groups.len());
+                                    let mut fpl = Vec::with_capacity(6 * corner_groups.len());
+                                    for (group_index, corners) in corner_groups.iter().enumerate() {
+                                        if group_index > 0 {
+                                            fp.push([f32::NAN; 3]);
+                                            fpl.push([0.0; 3]);
+                                        }
+                                        for &[x, y] in &[
+                                            corners[0],
+                                            corners[1],
+                                            corners[2],
+                                            corners[3],
+                                            corners[0],
+                                        ] {
+                                            let (h, lo) = split_ds_xyz(x, y, elev_v);
+                                            fp.push(h);
+                                            fpl.push(lo);
+                                        }
                                     }
                                     wires.push(WireModel {
                                         point_marker: None,
@@ -1718,24 +1878,9 @@ pub fn tessellate(
     // f64 for the WireModel's double-single-era snap buffer.
     let snap_pts: Vec<(glam::DVec3, SnapHint)> =
         snap_pts.into_iter().map(|(p, h)| (p.as_dvec3(), h)).collect();
-    // A paper-space viewport is a window, not a wireframe: give it an interior
-    // pick surface so a click anywhere inside the frame selects it. Ranked
-    // below edge and fill hits, so content drawn inside still wins the click.
-    // The sheet ("overall") viewport is the layout's own invisible camera
-    // frame covering the whole page — never pickable, or it would swallow
-    // every click over the real viewports beneath it. It is identified by the
-    // Layout object's viewport link (authoritative — DWG files carry id = 0
-    // and this file class centres the sheet viewport off-origin, so neither
-    // the id nor the geometry heuristic alone is reliable), with
-    // `is_content_viewport` as the fallback classifier.
-    let is_sheet_vp = |vp: &acadrust::entities::Viewport| {
-        let h = vp.common.handle;
-        document.objects.values().any(|obj| {
-            matches!(obj, acadrust::objects::ObjectType::Layout(l) if l.viewport == h)
-        }) || !crate::scene::Scene::is_content_viewport(vp)
-    };
+    // Paper viewports are pickable inside their frames; the sheet viewport is not.
     let (pick_tris, pick_tris_low) = match entity {
-        EntityType::Viewport(vp) if !is_sheet_vp(vp) => {
+        EntityType::Viewport(vp) if !crate::scene::Scene::is_sheet_viewport(document, vp) => {
             if let Some(polygon) = clipped_viewport_polygon.as_ref() {
                 points_to_ds(crate::entities::mesh::triangulate_planar(polygon))
             } else {

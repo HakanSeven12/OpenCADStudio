@@ -151,6 +151,51 @@ pub fn push_glyph_vertices(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn push_glyph_vertices_on_plane(
+    out: &mut Vec<TextVertex>,
+    quads: &[GlyphQuad],
+    origin: [f64; 3],
+    x_axis: [f64; 3],
+    y_axis: [f64; 3],
+    anno: f64,
+    color: [f32; 4],
+    draw_depth: f32,
+) {
+    for q in quads {
+        let mk = |ci: usize, uv: [f32; 2]| -> TextVertex {
+            let c = q.corners[ci];
+            let x = c[0] as f64 * anno;
+            let y = c[1] as f64 * anno;
+            let world = [
+                origin[0] + x_axis[0] * x + y_axis[0] * y,
+                origin[1] + x_axis[1] * x + y_axis[1] * y,
+                origin[2] + x_axis[2] * x + y_axis[2] * y,
+            ];
+            let (xh, xl) = split_ds(world[0]);
+            let (yh, yl) = split_ds(world[1]);
+            let (zh, zl) = split_ds(world[2]);
+            TextVertex {
+                pos: [xh, yh, zh],
+                pos_low: [xl, yl, zl],
+                uv,
+                color,
+                draw_depth,
+            }
+        };
+        let bl = [q.uv_min[0], q.uv_max[1]];
+        let br = [q.uv_max[0], q.uv_max[1]];
+        let tr = [q.uv_max[0], q.uv_min[1]];
+        let tl = [q.uv_min[0], q.uv_min[1]];
+        out.push(mk(0, bl));
+        out.push(mk(1, br));
+        out.push(mk(2, tr));
+        out.push(mk(0, bl));
+        out.push(mk(2, tr));
+        out.push(mk(3, tl));
+    }
+}
+
 /// Slide every glyph vertex by a world-space delta, re-splitting the
 /// double-single position. Lets a grip drag move already-shaped text by
 /// translating the drag-start glyphs each frame instead of re-tessellating

@@ -69,6 +69,8 @@ pub enum HostNotification {
     DocumentChangedV4 { tab_id: u64, version: u64 },
     /// V4 tab closed notification. Discriminant 6.
     DocumentTabClosed { tab_id: u64 },
+    /// V4 selection changed for a specific tab. Discriminant 7.
+    SelectionChangedV4 { tab_id: u64, handles: Vec<Handle> },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -112,6 +114,13 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, tab_id)
                     .map_err(serde::ser::Error::custom)?;
             }
+            HostNotification::SelectionChangedV4 { tab_id, handles } => {
+                bytes.push(7);
+                bincode::serialize_into(&mut bytes, tab_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, handles)
+                    .map_err(serde::ser::Error::custom)?;
+            }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
         bytes.serialize(serializer)
@@ -145,6 +154,9 @@ impl<'de> Deserialize<'de> for HostNotification {
                 .map_err(serde::de::Error::custom),
             6 => bincode::deserialize(rest)
                 .map(|tab_id| HostNotification::DocumentTabClosed { tab_id })
+                .map_err(serde::de::Error::custom),
+            7 => bincode::deserialize(rest)
+                .map(|(tab_id, handles)| HostNotification::SelectionChangedV4 { tab_id, handles })
                 .map_err(serde::de::Error::custom),
             _ => Ok(HostNotification::Unknown(bytes)),
         }

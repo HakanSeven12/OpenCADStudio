@@ -38,6 +38,11 @@ pub struct State {
     pub projected_height: String,
     pub projected_zone: bool,
     pub datum_identifier: String,
+    plain_frame: bool,
+    symbol_tail: String,
+    extra_rows: Vec<String>,
+    original_text: Option<String>,
+    dirty: bool,
 }
 
 impl Default for State {
@@ -50,6 +55,11 @@ impl Default for State {
             projected_height: String::new(),
             projected_zone: false,
             datum_identifier: String::new(),
+            plain_frame: false,
+            symbol_tail: String::new(),
+            extra_rows: Vec::new(),
+            original_text: None,
+            dirty: false,
         }
     }
 }
@@ -130,16 +140,32 @@ fn escape(code: &str) -> String {
     }
 }
 
-fn strip_escape(input: &str, code: &str) -> Option<String> {
-    let marker = escape(code);
-    input
-        .strip_suffix(&marker)
-        .map(std::string::ToString::to_string)
+fn remove_escape(input: &str, code: &str) -> Option<String> {
+    let target = code.chars().next()?;
+    for (start, ch) in input.char_indices() {
+        if ch != '{' {
+            continue;
+        }
+        let tail = &input[start + 1..];
+        let Some(relative_end) = tail.find('}') else {
+            break;
+        };
+        let end = start + 1 + relative_end;
+        if crate::entities::tolerance::symbol_font_switch(&input[start + 1..end])
+            == Some(target)
+        {
+            let mut remaining = String::with_capacity(input.len() - (end + 1 - start));
+            remaining.push_str(&input[..start]);
+            remaining.push_str(&input[end + 1..]);
+            return Some(remaining);
+        }
+    }
+    None
 }
 
 fn parse_material(input: &str) -> (String, String) {
     for code in ["m", "l", "s"] {
-        if let Some(value) = strip_escape(input, code) {
+        if let Some(value) = remove_escape(input, code) {
             return (value, code.to_string());
         }
     }
@@ -157,125 +183,186 @@ impl State {
             .replace("\\P", "\n")
             .replace("\r\n", "\n")
             .replace('\r', "\n");
-        let mut lines = normalized.lines();
+        let lines: Vec<&str> = normalized.split('\n').collect();
+        state.original_text = (!raw.is_empty()).then(|| raw.to_string());
 
-        if let Some(frame) = lines.next() {
+        if let Some(frame) = lines.first().copied() {
             let cells: Vec<&str> = frame.split("%%v").collect();
             if let Some(cell) = cells.first() {
-                state.symbol = SYMBOLS
-                    .iter()
-                    .find_map(|(code, _)| {
-                        (!code.is_empty() && cell.contains(&escape(code))).then(|| code.to_string())
-                    })
-                    .unwrap_or_default();
-            }
-            for index in 0..2 {
-                if let Some(cell) = cells.get(index + 1) {
-                    let (cell, diameter) = if let Some(rest) = cell.strip_prefix(&escape("n")) {
-                        (rest, true)
-                    } else {
-                        (*cell, false)
-                    };
-                    let (value, material) = parse_material(cell);
-                    state.tolerances[index] = ToleranceEntry {
-                        diameter,
-                        value,
-                        material,
-                    };
+                let mut remaining = (*cell).to_string();
+                for (code, _) in SYMBOLS.iter().filter(|(code, _)| !code.is_empty()) {
+                    if let Some(value) = remove_escape(&remaining, code) {
+                        state.symbol = (*code).to_string();
+                        remaining = value;
+                        break;
+                    }
                 }
+                state.symbol_tail = remaining;
             }
-            for index in 0..3 {
-                if let Some(cell) = cells.get(index + 3) {
-                    let (value, material) = parse_material(cell);
-                    state.datums[index] = DatumEntry { value, material };
+            state.plain_frame = !raw.is_empty() && cells.len() == 1 && state.symbol.is_empty();
+            if state.plain_frame {
+                state.tolerances[0].value = frame.to_string();
+                state.symbol_tail.clear();
+            } else {
+                for index in 0..2 {
+                    if let Some(cell) = cells.get(index + 1) {
+                        let (cell, diameter) = remove_escape(cell, "n")
+                            .map_or_else(|| ((*cell).to_string(), false), |value| (value, true));
+                        let (value, material) = parse_material(&cell);
+                        state.tolerances[index] = ToleranceEntry {
+                            diameter,
+                            value,
+                            material,
+                        };
+                    }
                 }
-            }
-            if cells.len() == 1
-                && state.symbol.is_empty()
-                && !frame.trim().is_empty()
-            {
-                state.tolerances[0].value = frame.trim().to_string();
+                for index in 0..3 {
+                    if let Some(cell) = cells.get(index + 3) {
+                        let (value, material) = parse_material(cell);
+                        state.datums[index] = DatumEntry { value, material };
+                    }
+                }
             }
         }
 
-        if let Some(projected) = lines.next() {
-            if let Some(value) = strip_escape(projected, "p") {
+        let mut next = 1;
+        if let Some(projected) = lines.get(next).copied() {
+            if let Some(value) = remove_escape(projected, "p") {
                 state.projected_height = value;
                 state.projected_zone = true;
-            } else {
+                next += 1;
+            } else if lines.get(next + 1).is_some()
+                && !projected.contains("%%v")
+                && !lines[next + 1].contains("%%v")
+            {
                 state.projected_height = projected.to_string();
+                next += 1;
             }
         }
-        if let Some(identifier) = lines.next() {
-            state.datum_identifier = identifier.to_string();
+        if next > 1 {
+            if let Some(identifier) = lines.get(next).copied() {
+                if !identifier.contains("%%v") {
+                    state.datum_identifier = identifier.to_string();
+                    next += 1;
+                }
+            }
         }
+        state.extra_rows = lines[next..].iter().map(|row| (*row).to_string()).collect();
         state
     }
 
     pub fn apply_field(&mut self, field: Field) {
-        match field {
-            Field::Symbol(value) => self.symbol = value,
+        let changed = match field {
+            Field::Symbol(value) => {
+                let changed = self.symbol != value;
+                self.symbol = value;
+                changed
+            }
             Field::ToleranceValue(index, value) if index < 2 => {
-                self.tolerances[index].value = value
+                let changed = self.tolerances[index].value != value;
+                self.tolerances[index].value = value;
+                changed
             }
             Field::ToleranceMaterial(index, value) if index < 2 => {
-                self.tolerances[index].material = value
+                let changed = self.tolerances[index].material != value;
+                self.tolerances[index].material = value;
+                changed
             }
-            Field::DatumValue(index, value) if index < 3 => self.datums[index].value = value,
+            Field::DatumValue(index, value) if index < 3 => {
+                let changed = self.datums[index].value != value;
+                self.datums[index].value = value;
+                changed
+            }
             Field::DatumMaterial(index, value) if index < 3 => {
-                self.datums[index].material = value
+                let changed = self.datums[index].material != value;
+                self.datums[index].material = value;
+                changed
             }
-            Field::ProjectedHeight(value) => self.projected_height = value,
-            Field::DatumIdentifier(value) => self.datum_identifier = value,
-            _ => {}
-        }
+            Field::ProjectedHeight(value) => {
+                let changed = self.projected_height != value;
+                self.projected_height = value;
+                changed
+            }
+            Field::DatumIdentifier(value) => {
+                let changed = self.datum_identifier != value;
+                self.datum_identifier = value;
+                changed
+            }
+            _ => false,
+        };
+        self.dirty |= changed;
     }
 
     pub fn apply_toggle(&mut self, toggle: Toggle) {
-        match toggle {
+        let changed = match toggle {
             Toggle::Diameter(index, value) if index < 2 => {
-                self.tolerances[index].diameter = value
+                let changed = self.tolerances[index].diameter != value;
+                self.tolerances[index].diameter = value;
+                changed
             }
-            Toggle::ProjectedZone(value) => self.projected_zone = value,
-            _ => {}
-        }
+            Toggle::ProjectedZone(value) => {
+                let changed = self.projected_zone != value;
+                self.projected_zone = value;
+                changed
+            }
+            _ => false,
+        };
+        self.dirty |= changed;
     }
 
     pub fn is_valid(&self) -> bool {
         !self.symbol.is_empty()
+            || !self.symbol_tail.is_empty()
             || self.tolerances.iter().any(|entry| !entry.value.trim().is_empty())
             || self.datums.iter().any(|entry| !entry.value.trim().is_empty())
             || !self.projected_height.trim().is_empty()
             || !self.datum_identifier.trim().is_empty()
+            || self.extra_rows.iter().any(|row| !row.trim().is_empty())
     }
 
     pub fn to_text(&self) -> String {
-        let mut cells = Vec::with_capacity(6);
-        cells.push(escape(&self.symbol));
-        for entry in &self.tolerances {
-            let mut value = String::new();
-            if entry.diameter && !entry.value.trim().is_empty() {
-                value.push_str(&escape("n"));
+        if !self.dirty {
+            if let Some(original) = &self.original_text {
+                return original.clone();
             }
-            value.push_str(entry.value.trim());
-            if !entry.value.trim().is_empty() {
-                value.push_str(&escape(&entry.material));
+        }
+
+        let only_plain_value = self.plain_frame
+            && self.symbol.is_empty()
+            && self.symbol_tail.is_empty()
+            && self.tolerances[1] == ToleranceEntry::default()
+            && self.datums.iter().all(|entry| *entry == DatumEntry::default());
+        let frame = if only_plain_value {
+            self.tolerances[0].value.clone()
+        } else {
+            let mut cells = Vec::with_capacity(6);
+            cells.push(format!("{}{}", escape(&self.symbol), self.symbol_tail));
+            for entry in &self.tolerances {
+                let mut value = String::new();
+                if entry.diameter && !entry.value.trim().is_empty() {
+                    value.push_str(&escape("n"));
+                }
+                value.push_str(&entry.value);
+                if !entry.value.trim().is_empty() {
+                    value.push_str(&escape(&entry.material));
+                }
+                cells.push(value);
             }
-            cells.push(value);
-        }
-        for entry in &self.datums {
-            let mut value = entry.value.trim().to_string();
-            if !value.is_empty() {
-                value.push_str(&escape(&entry.material));
+            for entry in &self.datums {
+                let mut value = entry.value.clone();
+                if !value.trim().is_empty() {
+                    value.push_str(&escape(&entry.material));
+                }
+                cells.push(value);
             }
-            cells.push(value);
-        }
-        while cells.last().is_some_and(String::is_empty) {
-            cells.pop();
-        }
-        let mut rows = vec![cells.join("%%v")];
+            while cells.last().is_some_and(String::is_empty) {
+                cells.pop();
+            }
+            cells.join("%%v")
+        };
+        let mut rows = vec![frame];
         if !self.projected_height.trim().is_empty() || self.projected_zone {
-            let mut projected = self.projected_height.trim().to_string();
+            let mut projected = self.projected_height.clone();
             if self.projected_zone {
                 projected.push_str(&escape("p"));
             }
@@ -285,8 +372,9 @@ impl State {
             if rows.len() == 1 {
                 rows.push(String::new());
             }
-            rows.push(self.datum_identifier.trim().to_string());
+            rows.push(self.datum_identifier.clone());
         }
+        rows.extend(self.extra_rows.iter().cloned());
         rows.join("\n")
     }
 }

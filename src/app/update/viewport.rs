@@ -4620,7 +4620,10 @@ impl OpenCADStudio {
                     if let Some(AcadEntityType::Viewport(vp)) =
                         self.tabs[i].scene.document.get_entity(h)
                     {
-                        if Scene::is_content_viewport(vp) {
+                        if !Scene::is_sheet_viewport(
+                            &self.tabs[i].scene.document,
+                            vp,
+                        ) {
                             Some(h)
                         } else {
                             None

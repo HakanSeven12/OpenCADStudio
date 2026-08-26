@@ -71,8 +71,28 @@ impl super::OpenCADStudio {
             return false;
         }
         let i = self.active_tab;
-        let mut command =
-            crate::modules::annotate::tolerance_cmd::ToleranceCommand::with_text(state.to_text());
+        let text = state.to_text();
+        let mut preview_entity = EntityType::Tolerance(
+            acadrust::entities::Tolerance::with_text(
+                acadrust::types::Vector3::ZERO,
+                text.clone(),
+            ),
+        );
+        crate::scene::creation_style::apply_current_creation_styles(
+            &self.tabs[i].scene.document,
+            &mut preview_entity,
+        );
+        let preview_strokes = match &preview_entity {
+            EntityType::Tolerance(tolerance) => crate::entities::tolerance::preview_strokes(
+                tolerance,
+                &self.tabs[i].scene.document,
+            ),
+            _ => Vec::new(),
+        };
+        let mut command = crate::modules::annotate::tolerance_cmd::ToleranceCommand::with_text(
+            text,
+            preview_strokes,
+        );
         use crate::command::CadCommand;
         let plane = if self.tabs[i].editing_model_space() {
             self.tabs[i].ucs_xform().working_plane()

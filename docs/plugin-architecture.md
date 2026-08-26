@@ -127,6 +127,7 @@ concrete types:
 | Command line | `push_info`, `push_output`, `push_error` |
 | Undo / dirty | `push_undo`, `set_dirty` |
 | Tab | `tab_index()` |
+| Notifications (V4) | `on_notification` receives `HostNotification::SelectionChangedV4 { tab_id, handles }` when the active tab's selection changes, plus `DocumentChangedV4` / `DocumentTabClosed`. |
 
 ### `export_plugin!` — the C-ABI export
 
@@ -309,7 +310,7 @@ Two timeouts protect the host from a stuck runner:
 
 | Timeout | Env var | Default | Floor |
 |---|---|---|---|
-| Spawn (connection) | `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` | 10 s | — |
+| Spawn (connection) | `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` | 30 s | — |
 | Per-call | `OCS_PLUGIN_CALL_TIMEOUT_SECS` | 30 s | `GetManifest`/`GetRibbon` ≥ 5 s, `Dispatch` ≥ 10 s, interactive events/prompt/pick ≥ 2 s |
 
 A call timeout covers the full round-trip, including any nested plugin→host
@@ -402,6 +403,7 @@ Next:
 | Piece | Location |
 |-------|----------|
 | Contract crate + runtime | [`crates/ocs_plugin_api`](../crates/ocs_plugin_api) |
+| Internal API architecture | [`crates/ocs_plugin_api/ARCHITECTURE.md`](../crates/ocs_plugin_api/ARCHITECTURE.md) |
 | Plugin runner implementation | [`crates/ocs_plugin_api/src/runner.rs`](../crates/ocs_plugin_api/src/runner.rs) |
 | Host spawn logic | [`crates/ocs_plugin_api/src/process.rs`](../crates/ocs_plugin_api/src/process.rs) |
 | Host plugin integration | `src/plugin/`, `src/app/plugin_host.rs` |

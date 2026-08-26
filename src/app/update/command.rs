@@ -1162,6 +1162,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 if matches!(
                     item.action,
                     GripMenuAction::Stretch
+                        | GripMenuAction::MoveWithText
                         | GripMenuAction::MoveWithDimLine
                         | GripMenuAction::MoveWithLeader
                         | GripMenuAction::MoveIndependent
@@ -1212,7 +1213,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             {
                                 (crate::entities::multileader::MOVE_ALL_GRIP, true)
                             } else {
-                                (popup.grip_id, if is_dimension { false } else { g.is_midpoint })
+                                (
+                                    popup.grip_id,
+                                    matches!(item.action, GripMenuAction::MoveWithText)
+                                        || (!is_dimension && g.is_midpoint),
+                                )
                             };
                         self.tabs[i].active_grip = Some(GripEdit::single(
                             popup.handle,

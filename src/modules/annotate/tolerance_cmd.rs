@@ -25,13 +25,15 @@ pub fn tool() -> ToolDef {
 
 pub struct ToleranceCommand {
     text: String,
+    preview_strokes: Vec<Vec<[f32; 2]>>,
     plane: WorkingPlane,
 }
 
 impl ToleranceCommand {
-    pub fn with_text(text: String) -> Self {
+    pub fn with_text(text: String, preview_strokes: Vec<Vec<[f32; 2]>>) -> Self {
         Self {
             text,
+            preview_strokes,
             plane: WorkingPlane::default(),
         }
     }
@@ -66,48 +68,17 @@ impl CadCommand for ToleranceCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        let normalized = self
-            .text
-            .replace("^J", "\n")
-            .replace("\\P", "\n")
-            .replace("\r\n", "\n")
-            .replace('\r', "\n");
-        let rows: Vec<Vec<&str>> = normalized
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                let mut cells: Vec<&str> = line.split("%%v").collect();
-                while cells.last().is_some_and(|cell| cell.trim().is_empty()) {
-                    cells.pop();
-                }
-                cells
-            })
-            .filter(|cells| !cells.is_empty())
-            .collect();
-        let row_height = 0.35;
-        let cell_width = 0.5;
         let mut points = Vec::new();
-        let mut segment = |a: DVec3, b: DVec3| {
+        for stroke in &self.preview_strokes {
+            if stroke.len() < 2 {
+                continue;
+            }
             if !points.is_empty() {
                 points.push(DVec3::splat(f64::NAN));
             }
-            points.push(a);
-            points.push(b);
-        };
-        for (row_index, cells) in rows.iter().enumerate() {
-            let count = cells.len().max(1);
-            let y0 = -row_height * (row_index as f64 + 0.5);
-            let y1 = y0 + row_height;
-            let x1 = cell_width * count as f64;
-            let p = |x: f64, y: f64| pt + self.plane.x * x + self.plane.y * y;
-            segment(p(0.0, y0), p(x1, y0));
-            segment(p(x1, y0), p(x1, y1));
-            segment(p(x1, y1), p(0.0, y1));
-            segment(p(0.0, y1), p(0.0, y0));
-            for index in 1..count {
-                let x = cell_width * index as f64;
-                segment(p(x, y0), p(x, y1));
-            }
+            points.extend(stroke.iter().map(|[x, y]| {
+                pt + self.plane.x * *x as f64 + self.plane.y * *y as f64
+            }));
         }
         Some(WireModel {
             point_marker: None,

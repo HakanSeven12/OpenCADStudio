@@ -29,7 +29,7 @@ impl Scene {
                 && if sheet.is_valid() {
                     handle != sheet
                 } else {
-                    Self::is_content_viewport(vp)
+                    !Self::is_sheet_viewport(&self.document, vp)
                 }
         };
         let content = if let Some(block) = self

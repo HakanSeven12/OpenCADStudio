@@ -1884,6 +1884,69 @@ impl OpenCADStudio {
                         }
                     }
 
+                    // Single-line text height rows depend on both the
+                    // justification and the active annotation scale. Aligned
+                    // text derives its paper height from the two endpoints,
+                    // while annotative text exposes that paper height and a
+                    // separate calculated model height.
+                    if let acadrust::EntityType::Text(text) = entity {
+                        let aligned = matches!(
+                            text.horizontal_alignment,
+                            acadrust::entities::TextHorizontalAlignment::Aligned
+                        );
+                        let annotative = crate::scene::annotative::is_annotative(doc, entity);
+                        let model_factor = if annotative {
+                            annotation_scale_handle
+                                .and_then(|handle| match doc.objects.get(&handle) {
+                                    Some(acadrust::objects::ObjectType::Scale(scale)) => Some(
+                                        scale.inverse_factor()
+                                            / self.tabs[i].scene.annotation_scale_unit_factor(),
+                                    ),
+                                    _ => None,
+                                })
+                                .unwrap_or(self.tabs[i].scene.annotation_scale as f64)
+                        } else {
+                            1.0
+                        };
+                        let paper_height = if aligned {
+                            crate::entities::text::text_run_placement_at_scale(
+                                text,
+                                doc,
+                                model_factor as f32,
+                            )
+                            .height as f64
+                        } else {
+                            text.height
+                        };
+                        for section in sections.iter_mut() {
+                            if let Some(row) =
+                                section.props.iter_mut().find(|row| row.field == "height")
+                            {
+                                if annotative {
+                                    row.label = t!("Paper text height").into_owned();
+                                }
+                                if aligned {
+                                    row.value = crate::scene::model::object::PropValue::ReadOnly(
+                                        crate::entities::common::format_length(paper_height),
+                                    );
+                                }
+                            }
+                        }
+                        if annotative {
+                            insert_row_after(
+                                &mut sections,
+                                "height",
+                                crate::entities::common::ro_prop(
+                                    t!("Model text height").as_ref(),
+                                    "model_text_height",
+                                    crate::entities::common::format_length(
+                                        paper_height * model_factor,
+                                    ),
+                                ),
+                            );
+                        }
+                    }
+
                     if !group_names.is_empty() {
                         let label = group_names.join(", ");
                         if let Some(general) = sections.first_mut() {

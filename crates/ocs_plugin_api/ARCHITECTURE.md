@@ -61,20 +61,23 @@ The runtime enforces two gates:
 
 ```mermaid
 sequenceDiagram
-    participant H as Host process
-    participant PM as PluginManager
-    participant PP as PluginProcess
+    participant PM as PluginManager (host)
+    participant PP as PluginProcess (host)
     participant R as Runner child
     participant L as Plugin cdylib
 
     PM->>PP: spawn(cdylib_path, host)
-    PP->>H: spawn --ocs-plugin-runner <socket> <cdylib>
-    H->>R: exec
-    R->>R: create local socket listener
+    PP->>PP: create local socket listener
+    PP->>R: spawn --ocs-plugin-runner <socket> <cdylib>
     R->>L: unsafe { load(cdylib_path) }
     L-->>R: Box<dyn BuiltinPlugin>
-    R->>PP: connect + RunnerHandshake::Token
-    PP->>PP: verify OCS_PLUGIN_TOKEN
+    alt API v4
+        R->>PP: connect + RunnerHandshake::TokenV4
+        PP->>PP: verify token + V4 protocol/API gate
+    else API v2/v3
+        R->>PP: connect + RunnerHandshake::Token
+        PP->>PP: verify token
+    end
     PP->>R: HostToPlugin::Request(GetManifest)
     R->>L: manifest()
     L-->>R: PluginManifest { api_version }

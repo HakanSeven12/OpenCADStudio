@@ -5,7 +5,8 @@ use crate::entities::common::{
     edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, ro_prop as ro, square_grip, triangle_grip,
 };
 use crate::entities::text_support::{
-    layout_mtext, resolve_text_style, GlyphBox, MTextColumns, MTextRenderOpts, MTextVAnchor,
+    clamp_mtext_column_count, layout_mtext, resolve_text_style, GlyphBox, MTextColumns,
+    MTextRenderOpts, MTextVAnchor,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
@@ -24,13 +25,19 @@ fn columns_of(t: &MText) -> MTextColumns {
     if c.column_type == 0 {
         return MTextColumns::default();
     }
+    let count = clamp_mtext_column_count(c.column_count) as usize;
     MTextColumns {
-        count: c.column_count.max(0) as usize,
+        count,
         width: c.width as f32,
         gutter: c.gutter as f32,
         flow_reversed: c.flow_reversed,
         auto_height: c.auto_height,
-        heights: c.heights.iter().map(|height| *height as f32).collect(),
+        heights: c
+            .heights
+            .iter()
+            .take(count)
+            .map(|height| *height as f32)
+            .collect(),
     }
 }
 
@@ -248,12 +255,12 @@ fn grips(t: &MText) -> Vec<GripDef> {
         t.insertion_point.z,
     );
     let (dir, k) = width_grip_axis(t);
-    let columns_active = t.column_data.column_type != 0
-        && t.column_data.column_count > 1
-        && t.column_data.width > 0.0;
+    let column_count = clamp_mtext_column_count(t.column_data.column_count);
+    let columns_active =
+        t.column_data.column_type != 0 && column_count > 1 && t.column_data.width > 0.0;
     let block_width = if columns_active {
-        t.column_data.width * t.column_data.column_count as f64
-            + t.column_data.gutter * (t.column_data.column_count - 1) as f64
+        t.column_data.width * column_count as f64
+            + t.column_data.gutter * (column_count - 1) as f64
     } else {
         t.rectangle_width.max(0.0)
     };
@@ -578,10 +585,12 @@ fn apply_grip(t: &mut MText, grip_id: usize, apply: GripApply) {
             let dy = p.y as f64 - t.insertion_point.y;
             let projected = dx * dir.x + dy * dir.y;
             let width = (projected / k).max(0.0);
-            if t.column_data.column_type != 0 && t.column_data.column_count > 1 {
-                let gaps = (t.column_data.column_count - 1) as f64;
+            let column_count = clamp_mtext_column_count(t.column_data.column_count);
+            if t.column_data.column_type != 0 && column_count > 1 {
+                t.column_data.column_count = column_count;
+                let gaps = (column_count - 1) as f64;
                 t.column_data.width =
-                    ((width - t.column_data.gutter * gaps) / t.column_data.column_count as f64)
+                    ((width - t.column_data.gutter * gaps) / column_count as f64)
                         .max(0.01);
             } else {
                 t.rectangle_width = width;
@@ -606,8 +615,9 @@ fn apply_grip(t: &mut MText, grip_id: usize, apply: GripApply) {
             let height = (delta.dot(down) / factor).max(0.01);
             t.rectangle_height = Some(height);
             if t.column_data.column_type != 0 && !t.column_data.auto_height {
-                t.column_data.heights =
-                    vec![height; t.column_data.column_count.max(1) as usize];
+                let column_count = clamp_mtext_column_count(t.column_data.column_count);
+                t.column_data.column_count = column_count;
+                t.column_data.heights = vec![height; column_count as usize];
             }
         }
         (3, GripApply::Absolute(p)) => {

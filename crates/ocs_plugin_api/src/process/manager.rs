@@ -1,4 +1,19 @@
 //! Process manager for out-of-process plugins.
+//!
+//! `PluginManager` is the host's owner of every loaded plugin process. It is
+//! responsible for:
+//!
+//! - Spawning plugins via [`PluginProcess::spawn`] and building their ribbon
+//!   modules.
+//! - Routing commands to plugins through [`PluginManager::dispatch`].
+//! - Broadcasting host notifications to every alive V4 plugin via
+//!   [`PluginManager::broadcast_notification`].
+//! - Surfacing dead plugins and per-plugin errors in [`DispatchResult`].
+//!
+//! Notifications are V4-only: `broadcast_notification` skips non-V4 processes.
+//! The plugin-to-host notification handler (set via
+//! [`PluginManager::set_notification_handler`]) runs on the V4 reader thread
+//! and must not block. For heavy work, forward the notification to a channel.
 
 use std::path::Path;
 use std::sync::Arc;

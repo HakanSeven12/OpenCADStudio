@@ -527,7 +527,7 @@ fn tessellate_entity_inner(
     if let EntityType::Viewport(vp) = e {
         // The sheet viewport (overall/id=1) is never shown — it represents the
         // paper boundary, not a user-defined content window.
-        if !Scene::is_content_viewport(vp) {
+        if Scene::is_sheet_viewport(document, vp) {
             return vec![];
         }
         let is_active = active_viewport == Some(h);

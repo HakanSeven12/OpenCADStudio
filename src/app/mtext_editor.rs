@@ -325,13 +325,14 @@ impl MTextEditorState {
             mt.column_data.column_count = 0;
             mt.column_data.heights.clear();
         } else {
-            mt.column_data.column_count = self
-                .column_count
-                .trim()
-                .parse::<i32>()
-                .ok()
-                .filter(|count| *count > 0)
-                .unwrap_or(1);
+            mt.column_data.column_count = crate::entities::text_support::clamp_mtext_column_count(
+                self.column_count
+                    .trim()
+                    .parse::<i32>()
+                    .ok()
+                    .filter(|count| *count > 0)
+                    .unwrap_or(1),
+            );
             mt.column_data.auto_height = self.column_auto_height;
             mt.column_data.flow_reversed = self.column_flow_reversed;
             if let Ok(width) = self.column_width.trim().parse::<f64>() {
@@ -347,7 +348,7 @@ impl MTextEditorState {
             if !self.column_auto_height && rectangle_height > 0.0 {
                 mt.column_data.heights = vec![
                     rectangle_height;
-                    mt.column_data.column_count.max(1) as usize
+                    mt.column_data.column_count as usize
                 ];
             }
         }
@@ -690,7 +691,10 @@ fn seed_mtext_state(state: &mut MTextEditorState, m: &MText) {
     state.rect_height = m.rectangle_height.unwrap_or(0.0).max(0.0).to_string();
     state.annotative = m.is_annotative;
     state.column_type = m.column_data.column_type;
-    state.column_count = m.column_data.column_count.max(1).to_string();
+    state.column_count = crate::entities::text_support::clamp_mtext_column_count(
+        m.column_data.column_count,
+    )
+    .to_string();
     state.column_auto_height = m.column_data.auto_height;
     state.column_flow_reversed = m.column_data.flow_reversed;
     state.column_width = m.column_data.width.max(0.0).to_string();
@@ -1073,9 +1077,13 @@ impl super::OpenCADStudio {
                     Cell::Stack { .. } => None,
                 })
                 .collect();
+            if needle.len() > chars.len() {
+                return;
+            }
             let start = ed.caret.min(chars.len());
-            let found = (start..=chars.len().saturating_sub(needle.len()))
-                .chain(0..start.min(chars.len().saturating_sub(needle.len()) + 1))
+            let last_start = chars.len() - needle.len();
+            let found = (start..=last_start)
+                .chain(0..start.min(last_start + 1))
                 .find(|index| {
                     chars[*index..*index + needle.len()]
                         .iter()

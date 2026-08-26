@@ -86,7 +86,8 @@ fn oriented_mtext_corner_groups(
     annotation_scale: f64,
 ) -> Vec<[[f64; 2]; 4]> {
     let columns = &text.column_data;
-    let count = columns.column_count.max(0) as usize;
+    let count = crate::entities::text_support::clamp_mtext_column_count(columns.column_count)
+        as usize;
     if columns.column_type == 0 || count <= 1 || columns.width <= 0.0 {
         return vec![oriented_text_corners(
             verts,
@@ -707,7 +708,14 @@ pub fn tessellate(
     // stay a roughly constant on-screen size; otherwise the header-driven path.
     let te = crate::entities::point::relative_render(entity, document, world_per_pixel)
         .or_else(|| crate::entities::light::relative_render(entity, document, world_per_pixel))
-        .or_else(|| convert(entity, document));
+        .or_else(|| match entity {
+            EntityType::Text(text) => Some(crate::entities::text::to_render_at_scale(
+                text,
+                document,
+                anno_scale,
+            )),
+            _ => convert(entity, document),
+        });
     if let Some(te) = te {
         match te.object {
             // ── Text / MText: pre-tessellated glyph strokes ───────────────
@@ -1803,24 +1811,9 @@ pub fn tessellate(
     // f64 for the WireModel's double-single-era snap buffer.
     let snap_pts: Vec<(glam::DVec3, SnapHint)> =
         snap_pts.into_iter().map(|(p, h)| (p.as_dvec3(), h)).collect();
-    // A paper-space viewport is a window, not a wireframe: give it an interior
-    // pick surface so a click anywhere inside the frame selects it. Ranked
-    // below edge and fill hits, so content drawn inside still wins the click.
-    // The sheet ("overall") viewport is the layout's own invisible camera
-    // frame covering the whole page — never pickable, or it would swallow
-    // every click over the real viewports beneath it. It is identified by the
-    // Layout object's viewport link (authoritative — DWG files carry id = 0
-    // and this file class centres the sheet viewport off-origin, so neither
-    // the id nor the geometry heuristic alone is reliable), with
-    // `is_content_viewport` as the fallback classifier.
-    let is_sheet_vp = |vp: &acadrust::entities::Viewport| {
-        let h = vp.common.handle;
-        document.objects.values().any(|obj| {
-            matches!(obj, acadrust::objects::ObjectType::Layout(l) if l.viewport == h)
-        }) || !crate::scene::Scene::is_content_viewport(vp)
-    };
+    // Paper viewports are pickable inside their frames; the sheet viewport is not.
     let (pick_tris, pick_tris_low) = match entity {
-        EntityType::Viewport(vp) if !is_sheet_vp(vp) => {
+        EntityType::Viewport(vp) if !crate::scene::Scene::is_sheet_viewport(document, vp) => {
             if let Some(polygon) = clipped_viewport_polygon.as_ref() {
                 points_to_ds(crate::entities::mesh::triangulate_planar(polygon))
             } else {

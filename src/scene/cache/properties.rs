@@ -94,7 +94,8 @@ pub fn general_section(entity: &EntityType) -> PropSection {
         ],
     };
 
-    if matches!(entity, EntityType::LwPolyline(polyline) if crate::entities::lwpolyline::is_rectangle(polyline))
+    if matches!(entity, EntityType::Text(_))
+        || matches!(entity, EntityType::LwPolyline(polyline) if crate::entities::lwpolyline::is_rectangle(polyline))
         || matches!(entity, EntityType::MText(_))
     {
         section.props.retain(|prop| prop.field != "handle");

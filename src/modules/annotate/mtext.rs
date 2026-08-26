@@ -104,21 +104,64 @@ impl MTextCommand {
         true
     }
 
-    fn boundary_size(&self, opposite: DVec3) -> (f64, f64) {
+    fn boundary_geometry(&self, opposite: DVec3) -> (DVec3, f64, f64) {
         let first = self.first.unwrap_or(opposite);
         let local = self.plane.vector_to_local(opposite - first);
         let (sin, cos) = self.rotation.sin_cos();
-        let horizontal = local.x * cos + local.y * sin;
+        let picked_horizontal = local.x * cos + local.y * sin;
         let vertical = -local.x * sin + local.y * cos;
-        (self.width.unwrap_or(horizontal.abs()), vertical.abs())
+        let width = self.width.unwrap_or(picked_horizontal.abs());
+        let horizontal = if self.width.is_some() {
+            width.copysign(if picked_horizontal.abs() > 1e-12 {
+                picked_horizontal
+            } else {
+                1.0
+            })
+        } else {
+            picked_horizontal
+        };
+        let (xmin, xmax) = (horizontal.min(0.0), horizontal.max(0.0));
+        let (ymin, ymax) = (vertical.min(0.0), vertical.max(0.0));
+        let horizontal_anchor = match self.attachment {
+            AttachmentPoint::TopLeft
+            | AttachmentPoint::MiddleLeft
+            | AttachmentPoint::BottomLeft => 0.0,
+            AttachmentPoint::TopCenter
+            | AttachmentPoint::MiddleCenter
+            | AttachmentPoint::BottomCenter => 0.5,
+            AttachmentPoint::TopRight
+            | AttachmentPoint::MiddleRight
+            | AttachmentPoint::BottomRight => 1.0,
+        };
+        let vertical_anchor = match self.attachment {
+            AttachmentPoint::TopLeft
+            | AttachmentPoint::TopCenter
+            | AttachmentPoint::TopRight => 1.0,
+            AttachmentPoint::MiddleLeft
+            | AttachmentPoint::MiddleCenter
+            | AttachmentPoint::MiddleRight => 0.5,
+            AttachmentPoint::BottomLeft
+            | AttachmentPoint::BottomCenter
+            | AttachmentPoint::BottomRight => 0.0,
+        };
+        let anchor_x = xmin + (xmax - xmin) * horizontal_anchor;
+        let anchor_y = ymin + (ymax - ymin) * vertical_anchor;
+        let offset = DVec3::new(
+            anchor_x * cos - anchor_y * sin,
+            anchor_x * sin + anchor_y * cos,
+            0.0,
+        );
+        (
+            first + self.plane.vector_to_world(offset),
+            width,
+            vertical.abs(),
+        )
     }
 
     fn open_editor(&self, opposite: DVec3) -> CmdResult {
-        let first = self.first.unwrap_or(opposite);
-        let (width, boundary_height) = self.boundary_size(opposite);
+        let (insertion, width, boundary_height) = self.boundary_geometry(opposite);
         let mut template = MText::default();
-        template.insertion_point = Vector3::new(first.x, first.y, first.z);
-        template.normal = Vector3::new(self.plane.z.x, self.plane.z.y, self.plane.z.z);
+        template.insertion_point = Vector3::new(insertion.x, insertion.y, insertion.z);
         template.height = self.height;
         template.rectangle_width = width.max(0.0);
         template.rectangle_height = (boundary_height > 1e-9).then_some(boundary_height);
@@ -128,7 +171,8 @@ impl MTextCommand {
         template.line_spacing_factor = self.line_spacing;
         template.column_data.column_type = self.column_type;
         if self.column_type != 0 {
-            template.column_data.column_count = self.column_count.max(1);
+            template.column_data.column_count =
+                crate::entities::text_support::clamp_mtext_column_count(self.column_count);
             template.column_data.auto_height = self.column_type == 2;
             template.column_data.width = if self.column_width > 0.0 {
                 self.column_width
@@ -144,7 +188,7 @@ impl MTextCommand {
             };
         }
         CmdResult::OpenMTextEditor {
-            pos: first,
+            pos: insertion,
             handle: None,
             initial: String::new(),
             height: self.height,
@@ -295,7 +339,7 @@ impl CadCommand for MTextCommand {
             }
             Step::ColumnCount => {
                 let value = trimmed.parse::<i32>().ok()?;
-                if value < 1 {
+                if !(1..=crate::entities::text_support::MAX_MTEXT_COLUMNS).contains(&value) {
                     return None;
                 }
                 self.column_count = value;

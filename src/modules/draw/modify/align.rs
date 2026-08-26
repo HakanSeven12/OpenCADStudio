@@ -14,6 +14,7 @@ use glam::DVec3;
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform};
+use crate::scene::model::wire_model::WireModel;
 
 pub struct AlignCommand {
     state: AlignState,
@@ -35,10 +36,16 @@ enum AlignState {
 }
 
 impl AlignCommand {
-    pub fn new() -> Self {
+    pub fn with_selection(handles: Vec<Handle>) -> Self {
+        let state = if handles.is_empty() {
+            AlignState::Gathering
+        } else {
+            AlignState::Src1
+        };
+
         Self {
-            state: AlignState::Gathering,
-            handles: vec![],
+            state,
+            handles,
             src1: None,
             dst1: None,
             src2: None,
@@ -66,8 +73,23 @@ impl CadCommand for AlignCommand {
             }
             AlignState::Dst2 => t!("ALIGN  Specify 2nd destination point:").into_owned(),
             AlignState::AskScale => {
-                t!("ALIGN  Scale objects based on alignment points? [Y/N]:").into_owned()
+                t!(
+                    "ALIGN  Scale objects based on alignment points? [Yes / No]:"
+                )
+                .into_owned()
             }
+        }
+    }
+
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+
+        match self.state {
+            AlignState::AskScale => vec![
+                CmdOption::new(t!("Yes").as_ref(), "Y"),
+                CmdOption::new(t!("No").as_ref(), "N"),
+            ],
+            _ => vec![],
         }
     }
 
@@ -113,14 +135,17 @@ impl CadCommand for AlignCommand {
                 if self.handles.is_empty() {
                     return CmdResult::Cancel;
                 }
+
                 self.state = AlignState::Src1;
                 CmdResult::NeedPoint
             }
+
             AlignState::Src2 => {
-                // Only 1 pair — pure translation
+                // One alignment pair only: translation.
                 match (self.src1, self.dst1) {
                     (Some(s), Some(d)) => {
                         let delta = d - s;
+
                         CmdResult::TransformSelected(
                             self.handles.clone(),
                             EntityTransform::Translate(delta),
@@ -129,10 +154,10 @@ impl CadCommand for AlignCommand {
                     _ => CmdResult::Cancel,
                 }
             }
-            AlignState::AskScale => {
-                // No scale (default N)
-                self.compute_align(false)
-            }
+
+            // Default option shown as <No>.
+            AlignState::AskScale => self.compute_align(false),
+
             _ => CmdResult::Cancel,
         }
     }
@@ -145,8 +170,76 @@ impl CadCommand for AlignCommand {
         if self.state != AlignState::AskScale {
             return None;
         }
-        let scale = text.trim().to_uppercase().starts_with('Y');
-        Some(self.compute_align(scale))
+
+        match text.trim().to_ascii_lowercase().as_str() {
+            "y" | "yes" | "scale" => {
+                Some(self.compute_align(true))
+            }
+
+            "n" | "no" | "don't scale" | "dont scale" | "noscale" => {
+                Some(self.compute_align(false))
+            }
+
+            _ => Some(CmdResult::NeedPoint),
+        }
+    }
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+    fn line(a: DVec3, b: DVec3, name: &str) -> WireModel {
+        WireModel::solid(
+            name.into(),
+            vec![
+                [a.x as f32, a.y as f32, a.z as f32],
+                [b.x as f32, b.y as f32, b.z as f32],
+            ],
+            WireModel::CYAN,
+            false,
+        )
+    }
+
+    let mut out = Vec::new();
+
+    // Keep the first completed alignment pair visible while defining
+    // the second pair and while choosing the scale option.
+    if let (Some(src1), Some(dst1)) = (self.src1, self.dst1) {
+        match self.state {
+            AlignState::Src2
+            | AlignState::Dst2
+            | AlignState::AskScale => {
+                out.push(line(src1, dst1, "align_pair_1"));
+            }
+            _ => {}
+        }
+    }
+
+        match self.state {
+            // First source has been picked: stretch its reference line
+            // to the cursor until the first destination is chosen.
+            AlignState::Dst1 => {
+                if let Some(src1) = self.src1 {
+                    out.push(line(src1, pt, "align_pair_1_preview"));
+                }
+            }
+
+            // Second source has been picked: stretch the second reference
+            // line to the cursor until its destination is chosen.
+            AlignState::Dst2 => {
+                if let Some(src2) = self.src2 {
+                    out.push(line(src2, pt, "align_pair_2_preview"));
+                }
+            }
+
+            // Once both pairs are complete, keep both visible while
+            // waiting for the Scale / No Scale decision.
+            AlignState::AskScale => {
+                if let (Some(src2), Some(dst2)) = (self.src2, self.dst2) {
+                    out.push(line(src2, dst2, "align_pair_2"));
+                }
+            }
+
+            _ => {}
+        }
+
+        out
     }
 }
 

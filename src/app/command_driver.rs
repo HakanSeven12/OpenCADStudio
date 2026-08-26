@@ -3749,6 +3749,22 @@ impl OpenCADStudio {
                     &initial,
                     height,
                     super::text_inline::TextEntityField::Text,
+                    None,
+                );
+            }
+            CmdResult::SuspendForTextInput { pos, entity } => {
+                self.tabs[i].suspended_cmd = self.tabs[i].active_cmd.take();
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                let height = entity.height;
+                self.open_text_inline(
+                    pos,
+                    None,
+                    "",
+                    height,
+                    super::text_inline::TextEntityField::Text,
+                    Some(entity),
                 );
             }
             CmdResult::EditTextEntity { handle } => {

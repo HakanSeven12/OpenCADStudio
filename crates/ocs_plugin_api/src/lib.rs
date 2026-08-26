@@ -20,6 +20,17 @@
 //! For binary compatibility, the host and every plugin must resolve the same
 //! `acadrust` source. The host does this via a `[patch.crates-io]` entry in
 //! `Cargo.toml`; out-of-tree plugins should copy that exact patch.
+//!
+//! For internal architecture (process model, wire protocols, versioning policy,
+//! failure modes), see `ARCHITECTURE.md` in the crate root. The modules enabled
+//! by the `host` feature are:
+//!
+//! - `host` — plugin/runtime traits and notification types.
+//! - `host_v4` — per-tab shared-memory snapshot manager.
+//! - `ipc` — transport, V2/V3 protocol, and V4 multiplexed protocol.
+//! - `process` — `PluginProcess` and `PluginManager`.
+//! - `runner` — child-process runner entry point.
+//! - `shm` — shared-memory document views.
 
 pub mod manifest;
 pub mod ribbon;
@@ -63,6 +74,16 @@ pub use type_registry::{
     TypeId, TypeInfo, TypeKind, TypeRegistry,
 };
 pub use version_info::get_embedded_version_info_json;
+
+#[cfg(test)]
+pub(crate) mod test_lock {
+    //! Shared lock for tests that mutate process environment variables.
+    //!
+    //! Environment variables are global mutable state. Any test that sets or
+    //! removes an env var must hold this lock for the duration of the mutation
+    //! so tests in other modules do not observe half-written state.
+    pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
 
 #[cfg(feature = "host")]
 pub use process::{DispatchResult, PluginError, PluginManager, PluginProcess};

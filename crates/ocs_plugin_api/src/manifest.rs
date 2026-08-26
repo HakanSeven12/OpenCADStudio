@@ -1,4 +1,16 @@
-//! Plugin identity and capability declaration.
+//! Plugin identity, API version constants, and compatibility rules.
+//!
+//! This module defines the host ABI major version (`API_VERSION`), the oldest
+//! major the host still loads (`API_VERSION_MIN_SUPPORTED`), and the runtime
+//! `OCS_PLUGIN_MAX_API_VERSION` gate that lets operators disable newer API
+//! majors without rebuilding.
+//!
+//! Compatibility rule: a plugin compiled against major `N` runs on any host
+//! whose major is `>= N`, because new vtable entries and enum variants are
+//! appended at the end. `host_accepts_plugin_version` enforces the supported
+//! range after applying the runtime cap.
+//!
+//! See `ARCHITECTURE.md` in the crate root for the full versioning policy.
 
 /// Host plugin API version. Bump when the host runtime surface breaks
 /// compatibility. v2 added `HostApi::start_interactive`. v3 changes
@@ -56,11 +68,9 @@ pub fn host_accepts_plugin_version(plugin_major: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use crate::test_lock::ENV_LOCK;
 
     use super::*;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn current_matches_const() {

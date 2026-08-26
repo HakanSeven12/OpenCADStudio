@@ -1034,6 +1034,12 @@ pub struct MTextRenderOpts<'a> {
 ///
 /// Content moves to the next column at an explicit `\N` break or when the
 /// configured manual/automatic column height is exhausted.
+pub(crate) const MAX_MTEXT_COLUMNS: i32 = 256;
+
+pub(crate) fn clamp_mtext_column_count(count: i32) -> i32 {
+    count.clamp(1, MAX_MTEXT_COLUMNS)
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct MTextColumns {
     /// Column count. 0 or 1 both mean "no column layout".
@@ -1064,6 +1070,11 @@ impl MTextColumns {
             i
         };
         physical as f32 * (self.width + self.gutter)
+    }
+
+    fn total_width(&self) -> f32 {
+        self.width * self.count as f32
+            + self.gutter.max(0.0) * self.count.saturating_sub(1) as f32
     }
 }
 
@@ -1135,6 +1146,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         indent_right: f32,
         tab_stops: Vec<TabStop>,
         is_first_in_paragraph: bool,
+        starts_column: bool,
         /// Which column this line lives in; always 0 without a column layout.
         column: usize,
         /// Extra gap above (paragraph's first wrapped line only) / below (last
@@ -1272,6 +1284,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 indent_right: para.indent_right,
                 tab_stops: para.tab_stops.clone(),
                 is_first_in_paragraph: idx == 0,
+                starts_column: idx == 0 && para.starts_column,
                 column,
                 // The gap above rides the first wrapped line; the gap below the
                 // last, so an interior wrap keeps normal single spacing.
@@ -1294,6 +1307,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             indent_right: 0.0,
             tab_stops: Vec::new(),
             is_first_in_paragraph: true,
+            starts_column: false,
             column: 0,
             space_before: 0.0,
             space_after: 0.0,
@@ -1401,14 +1415,32 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     // auto-height balances the content; static/manual columns use their stored
     // height (falling back to the entity rectangle height).
     if cols.active() {
-        let total_advance: f32 = per_line_h.iter().sum();
+        let mut pending_after = 0.0_f32;
+        let total_advance: f32 = sub_lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                if line.starts_column {
+                    pending_after = 0.0;
+                }
+                let spacing = if line.is_first_in_paragraph {
+                    line.space_before + pending_after
+                } else {
+                    0.0
+                };
+                pending_after = line.space_after;
+                per_line_h.get(index).copied().unwrap_or(entity_h) + spacing
+            })
+            .sum();
         let balanced = (total_advance / cols.count.max(1) as f32).max(entity_h);
         let mut current_column = 0usize;
         let mut used = 0.0_f32;
+        let mut pending_after = 0.0_f32;
         for (index, line) in sub_lines.iter_mut().enumerate() {
-            if line.column > current_column {
-                current_column = line.column.min(cols.count - 1);
+            if line.starts_column {
+                current_column = (current_column + 1).min(cols.count - 1);
                 used = 0.0;
+                pending_after = 0.0;
             }
             let limit = if cols.auto_height {
                 balanced
@@ -1419,7 +1451,13 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     .filter(|height| *height > 0.0)
                     .unwrap_or(opts.rectangle_height)
             };
-            let advance = per_line_h.get(index).copied().unwrap_or(entity_h);
+            let line_advance = per_line_h.get(index).copied().unwrap_or(entity_h);
+            let spacing = if line.is_first_in_paragraph {
+                line.space_before + pending_after
+            } else {
+                0.0
+            };
+            let mut advance = line_advance + spacing;
             if limit > 0.0
                 && used > 0.0
                 && used + advance > limit
@@ -1427,9 +1465,16 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             {
                 current_column += 1;
                 used = 0.0;
+                advance = line_advance
+                    + if line.is_first_in_paragraph {
+                        line.space_before
+                    } else {
+                        0.0
+                    };
             }
             line.column = current_column;
             used += advance;
+            pending_after = line.space_after;
         }
     }
     // Per-line text height — the tallest Word on the line, an empty line
@@ -1499,7 +1544,12 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         MTextVAnchor::BottomOfTopLine => 0.0,
     };
     let attach_h_anchor = opts.attach_h_anchor;
-    let box_left = -attach_h_anchor * rect_w;
+    let block_width = if cols.active() {
+        cols.total_width()
+    } else {
+        rect_w
+    };
+    let box_left = -attach_h_anchor * block_width;
     let rot = opts.rotation;
     let (cos_r, sin_r) = (rot.cos(), rot.sin());
     let ins_x = opts.insertion[0];
@@ -2010,6 +2060,49 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     emit(denominator, valign_dy);
                     emit(numerator, valign_dy + run_h * STACK_RAISE);
 
+                    if opts.want_glyph_boxes {
+                        let slots = numerator.chars().count()
+                            + denominator.chars().count()
+                            + usize::from(!denominator.is_empty());
+                        if slots > 0 {
+                            let top = valign_dy + run_h * (STACK_RAISE + STACK_HALF_SCALE);
+                            for index in 0..slots {
+                                let x0 = cursor_x + slot_w * index as f32 / slots as f32;
+                                let x1 = cursor_x + slot_w * (index + 1) as f32 / slots as f32;
+                                let corners = [
+                                    to_world(line_base_x, line_base_y, x0, valign_dy),
+                                    to_world(line_base_x, line_base_y, x1, valign_dy),
+                                    to_world(line_base_x, line_base_y, x0, top),
+                                    to_world(line_base_x, line_base_y, x1, top),
+                                ];
+                                let xmin = corners
+                                    .iter()
+                                    .map(|p| p.0)
+                                    .fold(f32::INFINITY, f32::min);
+                                let xmax = corners
+                                    .iter()
+                                    .map(|p| p.0)
+                                    .fold(f32::NEG_INFINITY, f32::max);
+                                let ymin = corners
+                                    .iter()
+                                    .map(|p| p.1)
+                                    .fold(f32::INFINITY, f32::min);
+                                let ymax = corners
+                                    .iter()
+                                    .map(|p| p.1)
+                                    .fold(f32::NEG_INFINITY, f32::max);
+                                glyph_boxes.push(GlyphBox {
+                                    vis,
+                                    xmin,
+                                    xmax,
+                                    ymin,
+                                    ymax,
+                                });
+                                vis += 1;
+                            }
+                        }
+                    }
+
                     if *bar && slot_w > 0.0 {
                         // The rule is plain geometry, not a glyph, so it rides a
                         // run-less group — those keep their strokes, while a
@@ -2032,6 +2125,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             run: None,
                         });
                     }
+                    local_bounds[0] = local_bounds[0].min(cursor_x);
+                    local_bounds[1] = local_bounds[1].min(line_ly + valign_dy);
+                    local_bounds[2] = local_bounds[2].max(cursor_x + slot_w);
+                    local_bounds[3] = local_bounds[3]
+                        .max(line_ly + valign_dy + run_h * (STACK_RAISE + STACK_HALF_SCALE));
                     cursor_x += slot_w;
                 }
                 AtomKind::Space => {

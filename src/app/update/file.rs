@@ -204,7 +204,14 @@ fn plot_scene_content(
                 || !crate::scene::Scene::handle_from_wire_name(&wire.name)
                     .and_then(|handle| scene.document.get_entity(handle))
                     .is_some_and(|entity| {
-                        matches!(entity, acadrust::EntityType::Viewport(viewport) if crate::scene::Scene::is_content_viewport(viewport))
+                        matches!(
+                            entity,
+                            acadrust::EntityType::Viewport(viewport)
+                                if !crate::scene::Scene::is_sheet_viewport(
+                                    &scene.document,
+                                    viewport,
+                                )
+                        )
                     }))
     });
     model_wires.retain(|wire| wire.plot_visible);

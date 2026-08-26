@@ -1443,6 +1443,14 @@ pub enum CmdResult {
         initial: String,
         height: f64,
     },
+    /// Suspend the active TEXT command while the in-place editor collects one
+    /// independent line. The prepared entity carries the chosen style,
+    /// justification, rotation and two-point geometry. When the editor closes,
+    /// the command resumes so another line can be placed directly below it.
+    SuspendForTextInput {
+        pos: DVec3,
+        entity: acadrust::entities::Text,
+    },
     /// Apply new pattern/scale/angle to an existing hatch entity.
     HatcheditApply {
         handle: Handle,
@@ -1860,6 +1868,8 @@ pub trait CadCommand: Send {
 
     /// Resume the command with collected rich text.
     fn on_editor_text(&mut self, _value: String) {}
+
+    fn on_editor_display_height(&mut self, _height: f64) {}
 
     /// Called when the user clicks and `needs_entity_pick()` is true.
     /// `handle` is the nearest wire's entity handle (Handle::NULL if nothing found).

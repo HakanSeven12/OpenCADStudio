@@ -943,7 +943,12 @@ impl OpenCADStudio {
 
             "ALIGN" => {
                 use crate::modules::draw::modify::align::AlignCommand;
-                let cmd = AlignCommand::new();
+
+                let selected: Vec<acadrust::Handle> =
+                    self.tabs[i].scene.selected.iter().copied().collect();
+
+                let cmd = AlignCommand::with_selection(selected);
+
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

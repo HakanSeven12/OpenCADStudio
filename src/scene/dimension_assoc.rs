@@ -460,6 +460,7 @@ pub(crate) fn radial_extension_points(
     let target_point = match dimension_entity {
         Dimension::Radius(radius) => radius.definition_point,
         Dimension::Diameter(diameter) => diameter.angle_vertex,
+        Dimension::LargeRadial(radial) => radial.chord_point,
         _ => return None,
     };
     let association = document.objects.values().find_map(|object| {
@@ -555,6 +556,11 @@ impl Scene {
                 diameter.center(),
                 diameter.measurement() * 0.5,
                 diameter.angle_vertex,
+            )),
+            Dimension::LargeRadial(radial) => Some((
+                radial.definition_point,
+                radial.measurement(),
+                radial.chord_point,
             )),
             _ => None,
         };
@@ -710,6 +716,11 @@ impl Scene {
                 diameter.center(),
                 diameter.measurement() * 0.5,
                 diameter.angle_vertex,
+            )),
+            Dimension::LargeRadial(radial) => Some((
+                radial.definition_point,
+                radial.measurement(),
+                radial.chord_point,
             )),
             _ => None,
         };
@@ -891,6 +902,33 @@ impl Scene {
                         diameter.base.insertion_point = diameter.base.insertion_point + delta;
                     }
                     diameter.base.actual_measurement = diameter.measurement();
+                }
+                Dimension::LargeRadial(radial) => {
+                    let Some((source, angle)) = radial_source else {
+                        continue;
+                    };
+                    let old_center = radial.definition_point;
+                    let new_center = source.center_world();
+                    let new_chord = source.point_at_angle(angle);
+                    let center_delta = Vector3::new(
+                        new_center.x - old_center.x,
+                        new_center.y - old_center.y,
+                        new_center.z - old_center.z,
+                    );
+                    radial.definition_point = new_center;
+                    radial.base.definition_point = new_center;
+                    radial.chord_point = new_chord;
+                    if point_distance_squared(center_delta, Vector3::default()) > 1e-18 {
+                        radial.override_center = radial.override_center + center_delta;
+                        radial.jog_point = radial.jog_point + center_delta;
+                        if radial.base.text_user_positioned {
+                            radial.base.text_middle_point =
+                                radial.base.text_middle_point + center_delta;
+                            radial.base.insertion_point =
+                                radial.base.insertion_point + center_delta;
+                        }
+                    }
+                    radial.base.actual_measurement = radial.measurement();
                 }
                 Dimension::Ordinate(ordinate) => {
                     if let Some(feature) = resolved[0] {

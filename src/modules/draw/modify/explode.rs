@@ -1218,9 +1218,11 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 d.override_center,
                 d.jog_angle,
             );
-            result.push(make_seg(&d.chord_point, &near, &dim_c));
-            result.push(make_seg(&near, &far, &dim_c));
-            result.push(make_seg(&far, &d.override_center, &dim_c));
+            if !met.dimsd1 {
+                result.push(make_seg(&d.chord_point, &near, &dim_c));
+                result.push(make_seg(&near, &far, &dim_c));
+                result.push(make_seg(&far, &d.override_center, &dim_c));
+            }
             let len = ((near.x - d.chord_point.x).powi(2)
                 + (near.y - d.chord_point.y).powi(2))
             .sqrt()
@@ -1230,6 +1232,15 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 (near.x - d.chord_point.x) / len,
                 (near.y - d.chord_point.y) / len,
                 &met.arrow1,
+                &dim_c,
+            ));
+            let radius = ((d.definition_point.x - d.chord_point.x).powi(2)
+                + (d.definition_point.y - d.chord_point.y).powi(2))
+            .sqrt();
+            result.extend(dim_center_mark(
+                d.definition_point,
+                met.dimcen,
+                radius,
                 &dim_c,
             ));
         }

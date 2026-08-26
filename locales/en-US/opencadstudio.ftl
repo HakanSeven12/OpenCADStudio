@@ -1864,6 +1864,12 @@ annotate =
     .dimjogged-created-a-jogged-radius-dimension = DIMJOGGED: created a jogged radius dimension.
     .dimjogged-invalid-radius = DIMJOGGED: invalid radius.
     .dimjogged-select-an-arc-or-circle-first = DIMJOGGED: select an arc or circle first.
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Enter dimension text (blank = measured value):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Select arc, circle, or polyline arc:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Specify center location override:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Specify dimension line location  [Mtext/Text/Angle]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Specify jog location:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Specify text angle (degrees):
     .dimjogline-select-linear-or-aligned-dimension = DIMJOGLINE  Select linear or aligned dimension:
     .dimjogline-specify-jog-location = DIMJOGLINE  Specify jog location:
     .dimlinear-enter-dimension-text-blank-measured = DIMLINEAR  Enter dimension text (blank = measured value):
@@ -2667,6 +2673,7 @@ properties =
     .island-detection-style = Island detection style
     .italic = Italic
     .jog-angle = Jog Angle
+    .jogged-radius = Jogged Radius
     .jog-x = Jog X
     .jog-y = Jog Y
     .jog-z = Jog Z

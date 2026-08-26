@@ -15,6 +15,7 @@ pub mod dimspace;
 pub mod dimtedit;
 pub mod leader_cmd;
 pub mod linear_dim;
+pub mod jogged_radius_dim;
 pub mod mleader_cmd;
 pub mod mleader_edit;
 pub mod mtext;
@@ -102,6 +103,11 @@ impl CadModule for AnnotateModule {
                                     radius_dim::tool().id,
                                     radius_dim::tool().label,
                                     radius_dim::tool().icon,
+                                ),
+                                (
+                                    jogged_radius_dim::tool().id,
+                                    jogged_radius_dim::tool().label,
+                                    jogged_radius_dim::tool().icon,
                                 ),
                                 (
                                     diameter_dim::tool().id,

@@ -1443,6 +1443,14 @@ pub enum CmdResult {
         initial: String,
         height: f64,
     },
+    /// Suspend the active TEXT command while the in-place editor collects one
+    /// independent line. The prepared entity carries the chosen style,
+    /// justification, rotation and two-point geometry. When the editor closes,
+    /// the command resumes so another line can be placed directly below it.
+    SuspendForTextInput {
+        pos: DVec3,
+        entity: acadrust::entities::Text,
+    },
     /// Apply new pattern/scale/angle to an existing hatch entity.
     HatcheditApply {
         handle: Handle,

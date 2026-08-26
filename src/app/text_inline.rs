@@ -95,6 +95,9 @@ pub struct TextInlineState {
     pub editing: Option<Handle>,
     /// Which entity slot this session writes to on commit.
     pub field: TextEntityField,
+    /// Fully prepared entity supplied by the interactive TEXT command. Editing
+    /// existing text and legacy direct-open paths leave this empty.
+    pub creation: Option<Text>,
     /// Canvas-space anchor where the field is drawn (the insertion-point click).
     pub screen_anchor: iced::Point,
 }
@@ -169,7 +172,7 @@ impl super::OpenCADStudio {
             self.open_mtext_editor(pos, Some(target), &value, height);
             self.unfocus_widgets()
         } else {
-            self.open_text_inline(pos, Some(target), &value, height, field);
+            self.open_text_inline(pos, Some(target), &value, height, field, None);
             iced::widget::operation::focus(iced::widget::Id::new(super::view::TEXT_INLINE_ID))
         }
     }
@@ -183,6 +186,7 @@ impl super::OpenCADStudio {
         initial: &str,
         height: f64,
         field: TextEntityField,
+        creation: Option<Text>,
     ) {
         if handle.is_some_and(|h| self.tabs[self.active_tab].scene.is_layer_locked(h)) {
             return;
@@ -193,6 +197,7 @@ impl super::OpenCADStudio {
             height: if height > 0.0 { height } else { 0.25 },
             editing: handle,
             field,
+            creation,
             screen_anchor: iced::Point::new(60.0, 90.0),
         };
         if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().last_move_pos {
@@ -229,12 +234,17 @@ impl super::OpenCADStudio {
             } else {
                 crate::command::WorkingPlane::default()
             };
-            let position = plane.to_local(ed.pos);
-            let mut t = Text::with_value(
-                &ed.value,
-                Vector3::new(position.x, position.y, position.z),
-            )
-            .with_height(ed.height);
+            let mut t = if let Some(mut prepared) = ed.creation {
+                prepared.value = ed.value.clone();
+                prepared
+            } else {
+                let position = plane.to_local(ed.pos);
+                Text::with_value(
+                    &ed.value,
+                    Vector3::new(position.x, position.y, position.z),
+                )
+                .with_height(ed.height)
+            };
             // New text inherits the document's current text style (STYLE), not
             // the entity default. See #92.
             let cur_style = self.tabs[i]
@@ -244,13 +254,31 @@ impl super::OpenCADStudio {
                 .current_text_style_name
                 .clone();
             if !cur_style.is_empty() {
-                t.style = cur_style;
+                if t.style.trim().is_empty() {
+                    t.style = cur_style;
+                }
             }
             let annotative = crate::scene::annotative::text_style_is_annotative(
                 &self.tabs[i].scene.document,
                 &t.style,
             );
             self.push_undo_snapshot(i, "TEXT");
+            self.tabs[i].scene.document.header.current_text_style_name = t.style.clone();
+            let variable_height = self.tabs[i]
+                .scene
+                .document
+                .text_styles
+                .iter()
+                .find(|style| style.name.eq_ignore_ascii_case(&t.style))
+                .is_none_or(|style| style.height <= 1.0e-9);
+            if variable_height
+                && !matches!(
+                    t.horizontal_alignment,
+                    acadrust::entities::TextHorizontalAlignment::Aligned
+                )
+            {
+                self.tabs[i].scene.document.header.text_height = t.height;
+            }
             let handle = self.commit_entity_handle(plane.place_entity(EntityType::Text(t)));
             if annotative {
                 let scale = self.tabs[i].scene.current_annotation_scale_handle();

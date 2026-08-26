@@ -175,6 +175,16 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
             ],
         }];
     }
+    if let Dimension::Arc(d) = dim {
+        return vec![PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![Property {
+                label: t!("Dimension style").into_owned(),
+                field: "style_name",
+                value: PropValue::PlainText(d.base.style_name.clone()),
+            }],
+        }];
+    }
     let mut props = base_props(dim.base());
     match dim {
         Dimension::Aligned(d) => {
@@ -2598,6 +2608,33 @@ pub fn style_sections(
         }
     }
 
+    if matches!(dimension, Dimension::Arc(_)) {
+        if let Some(lines) = sections
+            .iter_mut()
+            .find(|section| section.title == t!("Lines & Arrows").as_ref())
+        {
+            let symbol = match int(ov::DIMARCSYM, s.dimarcsym) {
+                1 => "Above dimension text",
+                2 => "None",
+                _ => "Preceding dimension text",
+            };
+            lines.props.insert(
+                3,
+                choice(
+                    t!("Arc length symbol").as_ref(),
+                    "dim_arc_symbol",
+                    symbol,
+                    &[
+                        "Preceding dimension text",
+                        "Above dimension text",
+                        "None",
+                    ],
+                    true,
+                ),
+            );
+        }
+    }
+
     if matches!(dimension, Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_)) {
         if let Some(text_section) = sections
             .iter_mut()
@@ -3405,10 +3442,8 @@ fn tessellate_dimension_inner(
         // DIMUPT governs interactive creation-time text placement; saved
         // geometry already carries the resulting position.
         let _ = s.dimupt;
-        // DIMARCSYM only applies to arc-length dims; DIMJOGANG only to
-        // jogged-radius dims. We don't ship those Dimension variants yet,
-        // so the values are read for round-trip but not drawn.
-        let _ = (s.dimarcsym, s.dimjogang);
+        // DIMJOGANG is consumed by the jogged-radius path.
+        let _ = s.dimjogang;
         // DIMUNIT is the obsolete pre-R2000 linear unit format; DIMLUNIT
         // supersedes it. Read but not honoured.
         let _ = s.dimunit;
@@ -3633,6 +3668,46 @@ fn tessellate_dimension_inner(
         // match emit_wire's paired fill path.
         fill_tris_low: Vec::new(),
     });
+
+    if let Some(symbol) = style.and_then(|style| {
+        arc_length_symbol_points(dim, Some(style), dim_txt, dim_scale, style.dimarcsym)
+    }) {
+        let mut points = Vec::new();
+        add_polyline(&mut points, &symbol);
+        wires.push(WireModel {
+            point_marker: None,
+            taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
+            world_width: 0.0,
+            depth_override: None,
+            display_visible: true,
+            plot_visible: true,
+            fill_is_3d: false,
+            fill_is_2d_solid: false,
+            render_instance: None,
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+            dash_from_start: false,
+            dash_align_end: None,
+            text_verts: Vec::new(),
+            name: name.clone(),
+            points,
+            points_low: Vec::new(),
+            color: if selected { WireModel::SELECTED } else { text_color },
+            selected,
+            aci: 0,
+            pattern_length: 0.0,
+            pattern: [0.0; 8],
+            line_weight_px: 1.0,
+            snap_pts: vec![],
+            tangent_geoms: vec![],
+            key_vertices: vec![],
+            aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            fill_tris: vec![],
+            fill_tris_low: Vec::new(),
+        });
+    }
 
     // DIMTFILL: 0=none, 1=drawing background (mask), 2=DIMTFILLCLR.
     if let Some(s) = style {
@@ -3935,6 +4010,57 @@ fn text_fill_rect(
     let p4 = corner(-hx, hy);
     Some(vec![p1, p2, p3, p1, p3, p4])
 }
+
+fn arc_length_symbol_points(
+    dim: &Dimension,
+    style: Option<&DimStyle>,
+    text_height: f64,
+    dim_scale: f64,
+    symbol_position: i16,
+) -> Option<Vec<Vec3>> {
+    if !matches!(dim, Dimension::Arc(_)) || symbol_position == 2 {
+        return None;
+    }
+    let value = dimension_text_value(dim, style)?;
+    if value.is_empty() || text_height <= 1.0e-12 {
+        return None;
+    }
+
+    let position = dimension_text_pos_f64(dim, style, text_height, dim_scale);
+    let rotation = dimension_text_rotation(dim, style);
+    let (sin_rotation, cos_rotation) = rotation.sin_cos();
+    let text_width = value.chars().count() as f64 * text_height * 0.6;
+    let symbol_width = text_height * 0.62;
+    let symbol_height = text_height * 0.20;
+    let (center_x, center_y) = if symbol_position == 1 {
+        (0.0, text_height * 0.72)
+    } else {
+        (-(text_width * 0.5 + symbol_width * 0.70), text_height * 0.02)
+    };
+    let transform = |x: f64, y: f64| {
+        let local_x = center_x + x;
+        let local_y = center_y + y;
+        Vec3::new(
+            (position.x + local_x * cos_rotation - local_y * sin_rotation) as f32,
+            (position.y + local_x * sin_rotation + local_y * cos_rotation) as f32,
+            position.z as f32,
+        )
+    };
+
+    let steps = 8usize;
+    Some(
+        (0..=steps)
+            .map(|index| {
+                let t = index as f64 / steps as f64;
+                let x = (t - 0.5) * symbol_width;
+                let normalized = x / (symbol_width * 0.5);
+                let y = symbol_height * (1.0 - normalized * normalized);
+                transform(x, y)
+            })
+            .collect(),
+    )
+}
+
 struct SuppressFlags {
     ext1: bool,
     ext2: bool,
@@ -4170,6 +4296,7 @@ fn dimension_geometry(
             }
         }
         Dimension::Arc(d) => {
+            let explicit_sweep = arc_dimension_angles(d);
             append_angular_dimension(
                 &mut g,
                 lv(d.center_point),
@@ -4178,10 +4305,7 @@ fn dimension_geometry(
                 lv(d.definition_point),
                 arrow1,
                 arrow2,
-                d.is_partial.then_some((
-                    d.arc_start_parameter as f32,
-                    d.arc_end_parameter as f32,
-                )),
+                explicit_sweep,
                 params,
                 suppress,
             );
@@ -4585,6 +4709,25 @@ fn two_line_angle_frame(
     Some((vertex, start, end))
 }
 
+pub(crate) fn arc_dimension_angles(dimension: &DimensionArc) -> Option<(f32, f32)> {
+    let raw = dimension.arc_end_parameter - dimension.arc_start_parameter;
+    let mut sweep = raw.rem_euclid(std::f64::consts::TAU);
+    if sweep <= 1.0e-12 && raw.abs() > 1.0e-12 {
+        sweep = std::f64::consts::TAU;
+    }
+    if sweep > 1.0e-12 {
+        let start = dimension.arc_start_parameter as f32;
+        return Some((start, start + sweep as f32));
+    }
+
+    let start = (dimension.first_extension_point.y - dimension.center_point.y)
+        .atan2(dimension.first_extension_point.x - dimension.center_point.x);
+    let end = (dimension.second_extension_point.y - dimension.center_point.y)
+        .atan2(dimension.second_extension_point.x - dimension.center_point.x);
+    let sweep = (end - start).rem_euclid(std::f64::consts::TAU);
+    (sweep > 1.0e-12).then_some((start as f32, (start + sweep) as f32))
+}
+
 fn angular_dimension_frame(dim: &Dimension) -> Option<(Vec3, f32, f32, f32)> {
     let (vertex, start, end, arc_point) = match dim {
         Dimension::Angular2Ln(value) => {
@@ -4609,6 +4752,12 @@ fn angular_dimension_frame(dim: &Dimension) -> Option<(Vec3, f32, f32, f32)> {
             let arc_point = vec3_local(value.definition_point);
             let (vertex, start, end) =
                 two_line_angle_frame(vertex, first, vertex, second, arc_point)?;
+            (vertex, start, end, arc_point)
+        }
+        Dimension::Arc(value) => {
+            let vertex = vec3_local(value.center_point);
+            let arc_point = vec3_local(value.definition_point);
+            let (start, end) = arc_dimension_angles(value)?;
             (vertex, start, end, arc_point)
         }
         _ => return None,
@@ -5201,7 +5350,7 @@ fn dimension_text_natural_rotation(dim: &Dimension) -> f64 {
             let dy = d.second_point.y - d.first_point.y;
             dy.atan2(dx)
         }
-        Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => angular_dimension_frame(dim)
+        Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) | Dimension::Arc(_) => angular_dimension_frame(dim)
             .map(|(_, start, end, _)| {
                 ((start + end) * 0.5 + std::f32::consts::FRAC_PI_2) as f64
             })
@@ -6133,6 +6282,45 @@ pub(crate) fn baked_dimension_text_entity(
         t.alignment_point = Some(t.insertion_point);
     }
     Some(ent)
+}
+
+pub(crate) fn baked_arc_length_symbol_points(
+    dim: &Dimension,
+    document: &CadDocument,
+    anno_scale: f64,
+) -> Vec<Vector3> {
+    if !matches!(dim, Dimension::Arc(_)) {
+        return Vec::new();
+    }
+    let style_name = dim.base().style_name.as_str();
+    let style = document.dim_styles.iter().find(|style| {
+        style.name.eq_ignore_ascii_case(style_name)
+            || (style_name.trim().is_empty() && style.name.eq_ignore_ascii_case("Standard"))
+    });
+    let dim_scale = style
+        .map(|style| {
+            if style.dimscale > 1.0e-6 {
+                style.dimscale
+            } else {
+                anno_scale
+            }
+        })
+        .unwrap_or(1.0);
+    let text_height = style
+        .map(|style| style.dimtxt * dim_scale)
+        .unwrap_or(2.5 * dim_scale);
+    let symbol_position = crate::entities::dim_override::int(
+        &dim.base().common.extended_data,
+        crate::entities::dim_override::DIMARCSYM,
+    )
+    .or_else(|| style.map(|style| style.dimarcsym))
+    .unwrap_or(0);
+
+    arc_length_symbol_points(dim, style, text_height, dim_scale, symbol_position)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|point| Vector3::new(point.x as f64, point.y as f64, point.z as f64))
+        .collect()
 }
 
 pub(crate) fn dimension_text_grip_position(

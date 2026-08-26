@@ -1,6 +1,7 @@
 // Annotate module — dimension, text, leader, table, and markup tools.
 
 pub mod aligned_dim;
+pub mod arc_length_dim;
 pub mod angular_dim;
 pub mod data_extract;
 pub mod data_link;
@@ -97,6 +98,11 @@ impl CadModule for AnnotateModule {
                                     angular_dim::tool().id,
                                     angular_dim::tool().label,
                                     angular_dim::tool().icon,
+                                ),
+                                (
+                                    arc_length_dim::tool().id,
+                                    arc_length_dim::tool().label,
+                                    arc_length_dim::tool().icon,
                                 ),
                                 (
                                     radius_dim::tool().id,

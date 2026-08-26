@@ -1725,7 +1725,16 @@ impl OpenCADStudio {
                             _ => None,
                         };
                         if let Some((anno_field, insert_after)) = anno {
-                            let is_anno = crate::scene::annotative::is_annotative(doc, entity);
+                            let is_anno = crate::scene::annotative::is_annotative(doc, entity)
+                                || match entity {
+                                    acadrust::EntityType::Dimension(dimension) => {
+                                        crate::scene::annotative::dim_style_is_annotative(
+                                            doc,
+                                            &dimension.base().style_name,
+                                        )
+                                    }
+                                    _ => false,
+                                };
                             // Dimensions/tables carry no Annotative row yet — add one
                             // right after their style row.
                             if let Some(anchor) = insert_after {
@@ -1753,6 +1762,13 @@ impl OpenCADStudio {
                                             field: "is_annotative",
                                             value: t.is_annotative,
                                         },
+                                    ),
+                                    acadrust::EntityType::Dimension(
+                                        acadrust::entities::Dimension::Arc(_),
+                                    ) => set_row(
+                                        &mut sections,
+                                        "annotative",
+                                        if is_anno { "Yes" } else { "No" }.to_string(),
                                     ),
                                     acadrust::EntityType::Text(_)
                                     | acadrust::EntityType::Insert(_)

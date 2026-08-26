@@ -1190,6 +1190,8 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
             }
         }
         Dimension::Arc(d) => {
+            let explicit_sweep = crate::entities::dimension::arc_dimension_angles(d)
+                .map(|(start, end)| (start as f64, end as f64));
             result.extend(angular_block_segs(
                 d.center_point,
                 d.first_extension_point,
@@ -1198,10 +1200,7 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 &met,
                 &ext_c,
                 &dim_c,
-                d.is_partial.then_some((
-                    d.arc_start_parameter,
-                    d.arc_end_parameter,
-                )),
+                explicit_sweep,
             ));
             if d.has_leader {
                 result.push(make_seg(
@@ -1232,6 +1231,15 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 &met.arrow1,
                 &dim_c,
             ));
+        }
+    }
+
+    let symbol_points =
+        crate::entities::dimension::baked_arc_length_symbol_points(dim, doc, 1.0);
+    if symbol_points.len() > 1 {
+        let text_c = dim_common(&base.common, met.dimclrt, -2);
+        for pair in symbol_points.windows(2) {
+            result.push(make_seg(&pair[0], &pair[1], &text_c));
         }
     }
 

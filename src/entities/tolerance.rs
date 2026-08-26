@@ -629,20 +629,15 @@ impl PropertyEditable for Tolerance {
             },
             PropSection {
                 title: t!("Misc").into_owned(),
-                props: vec![
-                    ro(
-                        t!("Dimension style").as_ref(),
-                        "tol_dim_style",
-                        if self.dimension_style_name.is_empty() {
-                            "(default)".to_string()
-                        } else {
-                            self.dimension_style_name.clone()
-                        },
-                    ),
-                    edit(t!("Direction X").as_ref(), "tol_dir_x", self.direction.x),
-                    edit(t!("Direction Y").as_ref(), "tol_dir_y", self.direction.y),
-                    edit(t!("Direction Z").as_ref(), "tol_dir_z", self.direction.z),
-                ],
+                props: vec![ro(
+                    t!("Dim style").as_ref(),
+                    "tol_dim_style",
+                    if self.dimension_style_name.is_empty() {
+                        "(default)".to_string()
+                    } else {
+                        self.dimension_style_name.clone()
+                    },
+                )],
             },
         ]
     }
@@ -656,29 +651,6 @@ impl PropertyEditable for Tolerance {
             "tol_iy" => self.insertion_point.y = v,
             "tol_iz" => self.insertion_point.z = v,
             "tol_text_height" if v > 0.0 => self.text_height = v,
-            "tol_dir_x" | "tol_dir_y" | "tol_dir_z" => {
-                let mut candidate = self.direction;
-                match field {
-                    "tol_dir_x" => candidate.x = v,
-                    "tol_dir_y" => candidate.y = v,
-                    _ => candidate.z = v,
-                }
-                let direction_len =
-                    (candidate.x * candidate.x + candidate.y * candidate.y + candidate.z * candidate.z)
-                        .sqrt();
-                let normal_len =
-                    (self.normal.x * self.normal.x + self.normal.y * self.normal.y + self.normal.z * self.normal.z)
-                        .sqrt();
-                let dot = candidate.x * self.normal.x
-                    + candidate.y * self.normal.y
-                    + candidate.z * self.normal.z;
-                if direction_len > 1.0e-9
-                    && (normal_len <= 1.0e-9
-                        || dot.abs() <= direction_len * normal_len * 1.0e-8)
-                {
-                    self.direction = candidate;
-                }
-            }
             _ => {}
         }
     }

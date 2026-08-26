@@ -827,30 +827,8 @@ impl OpenCADStudio {
             }
         }
 
-        // A viewport frames the model, so its framing is measured in model
-        // units and has to follow them. Left alone, every layout would suddenly
-        // look at a region a thousand times too large. The paper side of the
-        // ratio is untouched — the sheet is still the same sheet — so the ratio
-        // itself moves the other way.
-        //
-        // `transform_viewport` covers the rectangle and the target but not the
-        // framing, so the framing is done here for every viewport, and the
-        // target only for the ones the scale above did not already reach.
-        // Not every viewport frames the model, though. Each layout's sheet
-        // viewport frames the sheet — its view is the paper, measured in paper
-        // units — so scaling it by the model's factor would leave the drawing
-        // frame the same size as before while the view of it changed by a
-        // thousand, which is the boundary appearing to break.
-        let sheets: std::collections::HashSet<acadrust::Handle> = self.tabs[i]
-            .scene
-            .document
-            .objects
-            .values()
-            .filter_map(|object| match object {
-                acadrust::objects::ObjectType::Layout(layout) => Some(layout.viewport),
-                _ => None,
-            })
-            .collect();
+        // Model framing follows model units; sheet framing stays in paper units.
+        let sheets = self.tabs[i].scene.sheet_viewport_handles();
         let scaled: std::collections::HashSet<acadrust::Handle> = handles.iter().copied().collect();
         let mut reframed = 0usize;
         for entity in self.tabs[i].scene.document.entities_mut() {
@@ -858,14 +836,7 @@ impl OpenCADStudio {
             let acadrust::entities::EntityType::Viewport(vp) = entity else {
                 continue;
             };
-            // Only a paper-space viewport can be a sheet — the scale above
-            // reached everything in model space, and what it reached frames the
-            // model by definition. Among the rest, the layout names its sheet
-            // outright, and a file that arrives without that link still gives
-            // itself away by sitting at the paper origin, where only the sheet
-            // sits.
-            let is_sheet = !scaled.contains(&handle)
-                && (sheets.contains(&handle) || !crate::scene::Scene::is_content_viewport(vp));
+            let is_sheet = !scaled.contains(&handle) && sheets.contains(&handle);
             if is_sheet {
                 continue;
             }

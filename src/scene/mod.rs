@@ -2998,32 +2998,96 @@ impl Scene {
         crate::io::set_saved_active_layout(&mut self.document, &self.current_layout);
     }
 
-    /// Returns true if this viewport should display model-space content
-    /// (i.e. it is a user viewport, not the sheet/overall viewport).
-    ///
-    /// Rules:
-    /// - id=1  → always the sheet viewport → false
-    /// - id≥2  → always a user viewport    → true
-    /// - id=0 or id<0 (DWG reader omits the id; some DXF exporters write -1):
-    ///   use geometry: the sheet viewport is centred at the paper origin (0,0)
-    ///   with scale≈1.0 (view_height ≈ paper-space height).
-    pub fn is_content_viewport(vp: &acadrust::entities::Viewport) -> bool {
-        if vp.id == 1 {
-            return false;
+    pub(crate) fn layout_sheet_viewport_handle(
+        document: &acadrust::CadDocument,
+        layout: &acadrust::objects::Layout,
+    ) -> Handle {
+        let owned_viewport = |handle| match document.get_entity(handle) {
+            Some(EntityType::Viewport(vp)) if vp.common.owner_handle == layout.block_record => {
+                Some(vp)
+            }
+            _ => None,
+        };
+
+        let listed = layout
+            .viewports
+            .iter()
+            .copied()
+            .filter_map(|handle| owned_viewport(handle).map(|vp| (handle, vp)));
+        if let Some((handle, _)) = listed.clone().find(|(_, vp)| vp.id == 1) {
+            return handle;
         }
-        if vp.id > 1 {
+        if let Some((handle, _)) = listed.into_iter().next() {
+            return handle;
+        }
+
+        let block_handles = document
+            .block_records
+            .iter()
+            .find(|block| block.handle == layout.block_record)
+            .map(|block| block.entity_handles.as_slice())
+            .unwrap_or_default();
+        let block_viewports = block_handles
+            .iter()
+            .copied()
+            .filter_map(|handle| owned_viewport(handle).map(|vp| (handle, vp)));
+        if let Some((handle, _)) = block_viewports.clone().find(|(_, vp)| vp.id == 1) {
+            return handle;
+        }
+        if let Some((handle, _)) = block_viewports.into_iter().next() {
+            return handle;
+        }
+
+        document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::Viewport(vp) if vp.common.owner_handle == layout.block_record => {
+                    Some((
+                        vp.common.handle,
+                        vp.id == 1,
+                        vp.width.abs() * vp.height.abs(),
+                    ))
+                }
+                _ => None,
+            })
+            .max_by(|a, b| a.1.cmp(&b.1).then_with(|| a.2.total_cmp(&b.2)))
+            .map(|(handle, _, _)| handle)
+            .unwrap_or(Handle::NULL)
+    }
+
+    pub(crate) fn is_sheet_viewport(
+        document: &acadrust::CadDocument,
+        vp: &acadrust::entities::Viewport,
+    ) -> bool {
+        if vp.id == 1 {
             return true;
         }
-        // id ≤ 0: DWG files never write group-code 69 (viewport id), so all
-        // viewports arrive with id=0.
-        //
-        // In DWG format the sheet ("overall") viewport always has its center at
-        // the paper-space origin (0, 0). Content viewports are placed at their
-        // actual position on the paper and therefore have a non-zero center.
-        // Using center position is more reliable than a scale heuristic because
-        // the sheet viewport's scale is not always exactly 1:1 (observed: 0.8965
-        // in real-world files, which the old 0.02 tolerance missed entirely).
-        vp.center.x.abs() >= 0.5 || vp.center.y.abs() >= 0.5
+        if vp.id > 1 {
+            return false;
+        }
+        document.objects.values().any(|object| {
+            matches!(
+                object,
+                ObjectType::Layout(layout)
+                    if layout.block_record == vp.common.owner_handle
+                        && Self::layout_sheet_viewport_handle(document, layout)
+                            == vp.common.handle
+            )
+        })
+    }
+
+    pub(crate) fn sheet_viewport_handles(&self) -> std::collections::HashSet<Handle> {
+        self.document
+            .objects
+            .values()
+            .filter_map(|object| match object {
+                ObjectType::Layout(layout) => {
+                    let handle = Self::layout_sheet_viewport_handle(&self.document, layout);
+                    handle.is_valid().then_some(handle)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     fn current_layout_sheet_viewport_handle(&self) -> Handle {
@@ -3035,7 +3099,7 @@ impl Scene {
                     return None;
                 };
                 if layout.name == self.current_layout {
-                    Some(layout.viewport)
+                    Some(Self::layout_sheet_viewport_handle(&self.document, layout))
                 } else {
                     None
                 }
@@ -3043,69 +3107,39 @@ impl Scene {
             .unwrap_or(Handle::NULL)
     }
 
-    /// Guarantee that a paper layout has its full-screen overall (`id == 1`)
-    /// sheet viewport. `add_layout` creates it; this is a safety net for layouts
-    /// that arrive without it. The sheet
-    /// viewport is the authoritative paper-space view and the canvas every
-    /// floating viewport overlays.
+    /// Ensure a paper layout has its overall (`id == 1`) viewport.
     pub fn ensure_sheet_viewport(&mut self, layout_name: &str) {
         if layout_name == "Model" {
             return;
         }
-        // Locate the layout: its object handle, block-record handle, current
-        // sheet-viewport link, and paper limits.
+        // Locate the layout and its paper limits.
         let info = self.document.objects.iter().find_map(|(h, obj)| {
             if let ObjectType::Layout(l) = obj {
                 if l.name == layout_name {
-                    return Some((*h, l.block_record, l.viewport, l.min_limits, l.max_limits));
+                    return Some((
+                        *h,
+                        l.block_record,
+                        Self::layout_sheet_viewport_handle(&self.document, l),
+                        l.min_limits,
+                        l.max_limits,
+                    ));
                 }
             }
             None
         });
-        let Some((layout_handle, block_record, cur_vp, min_lim, max_lim)) = info else {
+        let Some((layout_handle, block_record, sheet, min_lim, max_lim)) = info else {
             return;
         };
         if block_record.is_null() {
             return;
         }
 
-        // Normal files carry a valid direct Layout→Viewport link. This O(1)
-        // path is hit on every ordinary layout-tab switch.
-        if cur_vp.is_valid()
+        if sheet.is_valid()
             && matches!(
-                self.document.get_entity(cur_vp),
+                self.document.get_entity(sheet),
                 Some(EntityType::Viewport(vp)) if vp.common.owner_handle == block_record
             )
         {
-            return;
-        }
-
-        // Already present? Accept either the linked viewport handle or any
-        // `id == 1` viewport owned by the layout block.
-        let has_sheet = self.document.entities().any(|e| {
-            matches!(e, EntityType::Viewport(vp)
-                if vp.common.owner_handle == block_record
-                    && (vp.id == 1 || vp.common.handle == cur_vp))
-        });
-        if has_sheet {
-            // Keep the layout's link in sync if it was missing.
-            if !cur_vp.is_valid() {
-                let h = self.document.entities().find_map(|e| match e {
-                    EntityType::Viewport(vp)
-                        if vp.common.owner_handle == block_record && vp.id == 1 =>
-                    {
-                        Some(vp.common.handle)
-                    }
-                    _ => None,
-                });
-                if let Some(h) = h {
-                    if let Some(ObjectType::Layout(l)) =
-                        self.document.objects.get_mut(&layout_handle)
-                    {
-                        l.viewport = h;
-                    }
-                }
-            }
             return;
         }
 
@@ -3115,10 +3149,7 @@ impl Scene {
         let mut vp = acadrust::entities::Viewport::new();
         vp.id = 1;
         vp.status = acadrust::entities::ViewportStatusFlags::default_on();
-        // Paper-space center is a 2D (x, y) point with z = 0. Putting the
-        // paper-height midpoint in z
-        // (with y = 0) left the sheet view centered at y = 0, shifting the whole
-        // layout half a page down. See issue #156.
+        // Paper-space center is an (x, y) point with z = 0.
         vp.center = acadrust::types::Vector3::new(
             (min_lim.0 + max_lim.0) / 2.0,
             (min_lim.1 + max_lim.1) / 2.0,
@@ -3126,12 +3157,7 @@ impl Scene {
         );
         vp.width = pw;
         vp.height = ph;
-        // Frame the new layout on the whole sheet: look straight down at the
-        // paper centre with the visible height a touch taller than the page.
-        // Without this the viewport keeps `Viewport::new`'s default view
-        // (target 0,0 / height 210), so the first time a fresh drawing's
-        // layout is opened the camera sits on the paper's bottom-left corner
-        // instead of centring the sheet.
+        // Frame the full sheet with a small margin.
         vp.view_target = acadrust::types::Vector3::new(
             (min_lim.0 + max_lim.0) / 2.0,
             (min_lim.1 + max_lim.1) / 2.0,
@@ -3144,7 +3170,8 @@ impl Scene {
             .add_entity_to_layout(EntityType::Viewport(vp), layout_name)
         {
             if let Some(ObjectType::Layout(l)) = self.document.objects.get_mut(&layout_handle) {
-                l.viewport = handle;
+                l.viewports.retain(|candidate| *candidate != handle);
+                l.viewports.insert(0, handle);
             }
         }
     }
@@ -3161,7 +3188,7 @@ impl Scene {
         if sheet_handle.is_valid() {
             vp.common.handle != sheet_handle
         } else {
-            Self::is_content_viewport(vp)
+            !Self::is_sheet_viewport(&self.document, vp)
         }
     }
 

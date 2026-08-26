@@ -1772,7 +1772,7 @@ impl OpenCADStudio {
                     {
                         // Which entities show an Annotative row, the field it uses,
                         // and — for those that don't already carry the row
-                        // (dimension / table) — the existing field to insert it
+                        // (dimension / table / tolerance) — the existing field to insert it
                         // after. MLeader uses its editable toggle field.
                         let anno: Option<(&str, Option<&str>)> = match entity {
                             acadrust::EntityType::Text(_)
@@ -1786,14 +1786,21 @@ impl OpenCADStudio {
                             acadrust::EntityType::Dimension(_) => {
                                 Some(("annotative", Some("style_name")))
                             }
+                            acadrust::EntityType::Tolerance(_) => {
+                                Some(("annotative", Some("tol_dim_style")))
+                            }
                             acadrust::EntityType::Table(_) => {
                                 Some(("annotative", Some("tbl_style_handle")))
                             }
                             _ => None,
                         };
                         if let Some((anno_field, insert_after)) = anno {
-                            let is_anno = crate::scene::annotative::is_annotative(doc, entity);
-                            // Dimensions/tables carry no Annotative row yet — add one
+                            let is_anno = crate::scene::annotative::is_annotative(doc, entity)
+                                || (matches!(entity, acadrust::EntityType::Tolerance(_))
+                                    && crate::scene::annotative::annotation_style_is_annotative(
+                                        doc, entity,
+                                    ));
+                            // Dimensions/tables/tolerances carry no Annotative row yet — add one
                             // right after their style row.
                             if let Some(anchor) = insert_after {
                                 insert_row_after(

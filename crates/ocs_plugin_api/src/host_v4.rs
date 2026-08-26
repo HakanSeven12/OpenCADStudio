@@ -3,6 +3,12 @@
 //! Maintains a per-tab shared-memory document view keyed by the stable
 //! `DocumentTab.id`. The manager is used by `src/plugin/v4_support.rs` to
 //! open, publish, and close V4 snapshots independently of the V3 reader path.
+//!
+//! [`manager`] returns a global `Mutex`-guarded [`HostV4SnapshotManager`].
+//! [`HostV4SnapshotManager::open`] lazily creates a [`DocumentSnapshotStore`] for
+//! a tab; [`HostV4SnapshotManager::publish`] updates an existing store;
+//! [`HostV4SnapshotManager::close`] drops it. Segment size defaults to 16 MiB
+//! and can be overridden with `OCS_V4_SNAPSHOT_SEGMENT_SIZE`.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

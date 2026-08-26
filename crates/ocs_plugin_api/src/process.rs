@@ -1,4 +1,22 @@
 //! Process management for out-of-process plugins.
+//!
+//! This module defines the lifecycle of a single plugin process:
+//!
+//! 1. `PluginProcess::spawn` creates a local socket, spawns the host binary in
+//!    runner mode (`--ocs-plugin-runner <socket> <cdylib>`), and waits for the
+//!    runner to connect back.
+//! 2. The runner presents a pre-shared token via [`crate::ipc::protocol::PLUGIN_TOKEN_ENV`];
+//!    the host rejects the connection on mismatch.
+//! 3. The host requests the manifest, checks `api_version` and (for v4+) the
+//!    acadrust source gate, then keeps the process alive.
+//! 4. Host → plugin calls (`dispatch`, `execute_code`, interactive events) are
+//!    sent over the socket with a configurable per-call timeout.
+//! 5. Stdout/stderr of the child are drained into `PluginIoLine` records for
+//!    logging and UI display.
+//!
+//! `NullHost` is a dummy `HostApi` implementation used for V4 paths that do not
+//! supply a real host surface (e.g., interactive events). Timeouts and message
+//! size limits are centralized here.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -1119,6 +1137,7 @@ mod timeout_tests {
     };
     use crate::ipc::transport::{recv, send};
     use crate::ribbon::owned::OwnedPluginManifest;
+    use crate::test_lock::ENV_LOCK;
     use acadrust::xdata::ExtendedDataRecord;
     use acadrust::{CadDocument, EntityType, Handle};
     use interprocess::local_socket::{
@@ -1129,8 +1148,6 @@ mod timeout_tests {
     use std::sync::Mutex as StdMutex;
     use std::thread;
     use std::time::Instant;
-
-    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
 
     struct EmptyReader;
 

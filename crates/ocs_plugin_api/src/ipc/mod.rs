@@ -2,6 +2,21 @@
 //!
 //! Built only with the `host` feature because it needs `acadrust`-typed
 //! messages and the plugin runner binary.
+//!
+//! Submodules:
+//!
+//! - [`protocol`](crate::ipc::protocol) — V2/V3 request/response enums and the
+//!   initial runner handshake.
+//! - [`transport`](crate::ipc::transport) — length-framed bincode over a local
+//!   socket; enforces `MAX_MESSAGE_SIZE`.
+//! - [`client`](crate::ipc::client) — plugin-side V2/V3 client and `HostApi`
+//!   proxy.
+//! - [`server`](crate::ipc::server) — host-side handler that applies a
+//!   `PluginRequest` to a `HostApi` implementation.
+//! - [`v4`](crate::ipc::v4) — multiplexed V4 frames, notifications, and
+//!   correlation ids.
+//! - [`proxy`](crate::ipc::proxy) — optional TCP proxy so plugin child
+//!   processes can forward requests to the host.
 
 #[cfg(feature = "host")]
 pub mod client;

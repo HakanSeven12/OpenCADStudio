@@ -3,7 +3,15 @@
 //! The JSON embedded here is produced by tracing a curated allow-list of
 //! `acadrust` types with `serde-reflection` and mapping the result into a
 //! stable, language-binding-friendly schema defined in
-//! [`crate::type_registry_types`].
+//! [`crate::type_registry_types`]. The registry is embedded via
+//! `include_str!(concat!(env!("OUT_DIR"), "/type_registry.json"))` so the
+//! `host` feature is not required to read it.
+//!
+//! The allow-list is intentionally narrow: it excludes generic containers and
+//! internal enums such as `EntityType` in favor of concrete serializable structs
+//! like `Point`, `Line`, `Circle`, and `MText`. Language bindings and tooling
+//! can depend on this schema without pulling the full `acadrust` dependency
+//! tree.
 
 pub use crate::type_registry_types::*;
 

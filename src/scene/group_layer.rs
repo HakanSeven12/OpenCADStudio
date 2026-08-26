@@ -203,8 +203,11 @@ impl Scene {
 
     /// If any handle belongs to a selectable group, also select every member.
     pub fn expand_selection_for_groups(&mut self, handles: &[Handle]) {
+        let previous_len = self.selected.len();
         self.selected
             .extend(self.handles_expanded_for_selectable_groups(handles));
-        self.bump_selection();
+        if self.selected.len() != previous_len {
+            self.bump_selection_set();
+        }
     }
 }

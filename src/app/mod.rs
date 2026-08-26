@@ -691,6 +691,10 @@ pub(super) struct OpenCADStudio {
     /// keep their manifest listed but drop their ribbon tab and command
     /// dispatch. Persisted via [`settings::UserSettings::disabled_plugins`].
     disabled_plugins: rustc_hash::FxHashSet<String>,
+    /// `(tab id, selection fingerprint)` last broadcast to V4 plugins, so
+    /// `SelectionChangedV4` fires once per real change rather than per message.
+    #[cfg(not(target_arch = "wasm32"))]
+    last_plugin_selection: Option<(u64, u64)>,
     /// External add-on packages found in the plugins folder, refreshed when the
     /// Plugin Manager opens.
     external_plugins: Vec<crate::plugin::external::ExternalPlugin>,
@@ -3246,6 +3250,8 @@ impl OpenCADStudio {
             attr_editor_tab: crate::ui::window::attribute_editor::AttrTab::Attribute,
             attr_editor_selected: 0,
             disabled_plugins: rustc_hash::FxHashSet::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            last_plugin_selection: None,
             external_plugins: Vec::new(),
             loaded_plugin_ids: rustc_hash::FxHashSet::default(),
             plugin_load_errors: rustc_hash::FxHashMap::default(),

@@ -78,6 +78,80 @@ fn oriented_text_corners(
     ]
 }
 
+fn oriented_mtext_corner_groups(
+    verts: &[crate::scene::pipeline::text_gpu::TextVertex],
+    text: &acadrust::MText,
+    rotation: f64,
+    pad: f64,
+    annotation_scale: f64,
+) -> Vec<[[f64; 2]; 4]> {
+    let columns = &text.column_data;
+    let count = columns.column_count.max(0) as usize;
+    if columns.column_type == 0 || count <= 1 || columns.width <= 0.0 {
+        return vec![oriented_text_corners(
+            verts,
+            [text.insertion_point.x, text.insertion_point.y],
+            rotation,
+            pad,
+        )];
+    }
+
+    let width = columns.width * annotation_scale;
+    let gutter = columns.gutter.max(0.0) * annotation_scale;
+    let total_width = width * count as f64 + gutter * count.saturating_sub(1) as f64;
+    let anchor = match text.attachment_point {
+        acadrust::entities::mtext::AttachmentPoint::TopCenter
+        | acadrust::entities::mtext::AttachmentPoint::MiddleCenter
+        | acadrust::entities::mtext::AttachmentPoint::BottomCenter => 0.5,
+        acadrust::entities::mtext::AttachmentPoint::TopRight
+        | acadrust::entities::mtext::AttachmentPoint::MiddleRight
+        | acadrust::entities::mtext::AttachmentPoint::BottomRight => 1.0,
+        _ => 0.0,
+    };
+    let block_left = -anchor * total_width;
+    let origin = [text.insertion_point.x, text.insertion_point.y];
+    let (sin_r, cos_r) = rotation.sin_cos();
+    let mut bounds = vec![[f64::MAX, f64::MAX, f64::MIN, f64::MIN]; count];
+    for vertex in verts {
+        let x = vertex.pos[0] as f64 + vertex.pos_low[0] as f64 - origin[0];
+        let y = vertex.pos[1] as f64 + vertex.pos_low[1] as f64 - origin[1];
+        let local_x = x * cos_r + y * sin_r;
+        let local_y = -x * sin_r + y * cos_r;
+        let stride = width + gutter;
+        let physical = ((local_x - block_left) / stride)
+            .floor()
+            .clamp(0.0, count.saturating_sub(1) as f64) as usize;
+        bounds[physical][0] = bounds[physical][0].min(local_x);
+        bounds[physical][1] = bounds[physical][1].min(local_y);
+        bounds[physical][2] = bounds[physical][2].max(local_x);
+        bounds[physical][3] = bounds[physical][3].max(local_y);
+    }
+    let to_world = |x: f64, y: f64| {
+        [
+            origin[0] + x * cos_r - y * sin_r,
+            origin[1] + x * sin_r + y * cos_r,
+        ]
+    };
+    bounds
+        .into_iter()
+        .filter(|bounds| bounds[0] <= bounds[2] && bounds[1] <= bounds[3])
+        .map(|bounds| {
+            let [left, bottom, right, top] = [
+                bounds[0] - pad,
+                bounds[1] - pad,
+                bounds[2] + pad,
+                bounds[3] + pad,
+            ];
+            [
+                to_world(left, bottom),
+                to_world(right, bottom),
+                to_world(right, top),
+                to_world(left, top),
+            ]
+        })
+        .collect()
+}
+
 pub(crate) fn explicit_mtext_background(entity: &EntityType) -> Option<[f32; 4]> {
     let EntityType::MText(text) = entity else {
         return None;
@@ -849,11 +923,12 @@ pub fn tessellate(
                                     .unwrap_or(m.rotation);
                                 let text_height = m.height * anno;
                                 let pad = (m.background_scale - 1.0).max(0.0) * text_height;
-                                let corners = oriented_text_corners(
+                                let corner_groups = oriented_mtext_corner_groups(
                                     &sdf_verts,
-                                    [m.insertion_point.x, m.insertion_point.y],
+                                    m,
                                     text_rotation,
                                     pad,
+                                    anno,
                                 );
                                 // Fill / mask — two triangles behind the glyphs.
                                 if has_fill {
@@ -862,13 +937,18 @@ pub fn tessellate(
                                     } else {
                                         color_or_inherit(&m.background_color, bg_color)
                                     };
-                                    let mut ft = Vec::with_capacity(6);
-                                    let mut ftl = Vec::with_capacity(6);
-                                    for &k in &[0usize, 1, 2, 0, 2, 3] {
-                                        let (h, lo) =
-                                            split_ds_xyz(corners[k][0], corners[k][1], elev_v);
-                                        ft.push(h);
-                                        ftl.push(lo);
+                                    let mut ft = Vec::with_capacity(6 * corner_groups.len());
+                                    let mut ftl = Vec::with_capacity(6 * corner_groups.len());
+                                    for corners in &corner_groups {
+                                        for &k in &[0usize, 1, 2, 0, 2, 3] {
+                                            let (h, lo) = split_ds_xyz(
+                                                corners[k][0],
+                                                corners[k][1],
+                                                elev_v,
+                                            );
+                                            ft.push(h);
+                                            ftl.push(lo);
+                                        }
                                     }
                                     wires.push(WireModel {
                                         point_marker: None,
@@ -907,19 +987,24 @@ pub fn tessellate(
                                 // Text frame — a closed rectangle in the text
                                 // colour around the same box.
                                 if has_frame {
-                                    let loop_xy = [
-                                        corners[0],
-                                        corners[1],
-                                        corners[2],
-                                        corners[3],
-                                        corners[0],
-                                    ];
-                                    let mut fp = Vec::with_capacity(5);
-                                    let mut fpl = Vec::with_capacity(5);
-                                    for &[x, y] in &loop_xy {
-                                        let (h, lo) = split_ds_xyz(x, y, elev_v);
-                                        fp.push(h);
-                                        fpl.push(lo);
+                                    let mut fp = Vec::with_capacity(6 * corner_groups.len());
+                                    let mut fpl = Vec::with_capacity(6 * corner_groups.len());
+                                    for (group_index, corners) in corner_groups.iter().enumerate() {
+                                        if group_index > 0 {
+                                            fp.push([f32::NAN; 3]);
+                                            fpl.push([0.0; 3]);
+                                        }
+                                        for &[x, y] in &[
+                                            corners[0],
+                                            corners[1],
+                                            corners[2],
+                                            corners[3],
+                                            corners[0],
+                                        ] {
+                                            let (h, lo) = split_ds_xyz(x, y, elev_v);
+                                            fp.push(h);
+                                            fpl.push(lo);
+                                        }
                                     }
                                     wires.push(WireModel {
                                         point_marker: None,

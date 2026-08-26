@@ -43,12 +43,44 @@ pub(crate) fn sync_text_alignment_point(t: &mut Text) {
         (HA::Left, VA::Baseline)
     );
     if needs_alignment_point {
-        if t.alignment_point.is_none() {
+        if matches!(t.horizontal_alignment, HA::Aligned | HA::Fit) {
+            let point = t.alignment_point.unwrap_or(t.insertion_point);
+            let dx = point.x - t.insertion_point.x;
+            let dy = point.y - t.insertion_point.y;
+            if dx.hypot(dy) <= 1.0e-9 {
+                let span = t.height.max(1.0e-6)
+                    * t.width_factor.abs().max(0.01)
+                    * t.value.chars().count().max(1) as f64
+                    * 0.6;
+                t.alignment_point = Some(acadrust::types::Vector3::new(
+                    t.insertion_point.x + t.rotation.cos() * span,
+                    t.insertion_point.y + t.rotation.sin() * span,
+                    t.insertion_point.z,
+                ));
+            } else {
+                t.alignment_point = Some(point);
+            }
+        } else if t.alignment_point.is_none() {
             t.alignment_point = Some(t.insertion_point);
         }
     } else {
         t.alignment_point = None;
     }
+}
+
+fn two_point_span(t: &Text) -> Option<(f64, f64)> {
+    if !matches!(t.horizontal_alignment, HA::Aligned | HA::Fit) {
+        return None;
+    }
+    let point = t.alignment_point?;
+    let dx = point.x - t.insertion_point.x;
+    let dy = point.y - t.insertion_point.y;
+    let distance = dx.hypot(dy);
+    (distance > 1.0e-9).then(|| (distance, dy.atan2(dx)))
+}
+
+fn displayed_rotation(t: &Text) -> f64 {
+    two_point_span(t).map_or(t.rotation, |(_, angle)| angle)
 }
 
 /// Resolved placement of a TEXT run: the baseline-anchored run origin (WCS xy)
@@ -152,10 +184,9 @@ pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPla
     );
     let resolved_style = resolve_text_style(&t.style, document);
     let font_name = resolved_style.font_name;
-    // AutoCAD text geometry rule: the entity stores the FINAL width factor /
-    // oblique angle, copied from the style at creation and persisting through
-    // style edits. Use it as-is. Only fall back to the style when the entity
-    // value is missing (the parser reports 0.0 for default-omitted fields).
+    // The entity stores the final width factor and oblique angle copied from
+    // its style at creation. Only fall back to the style when an omitted field
+    // was read as zero.
     let base_wf = if t.width_factor.abs() > 1e-9 {
         (t.width_factor as f32).clamp(0.01, 100.0)
     } else {
@@ -168,16 +199,42 @@ pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPla
     // mirror, and XOR keeps a double mirror an involution.
     let eff_backward = resolved_style.is_backward ^ (t.generation_flags & 0x2 != 0);
     let eff_upside = resolved_style.is_upside_down ^ (t.generation_flags & 0x4 != 0);
-    let width_factor = if eff_backward { -base_wf } else { base_wf };
-    let rotation = if eff_upside {
-        t.rotation as f32 + std::f32::consts::PI
-    } else {
-        t.rotation as f32
-    };
+    let mut width_factor = if eff_backward { -base_wf } else { base_wf };
     let oblique_angle = if t.oblique_angle.abs() > 1e-9 {
         t.oblique_angle as f32
     } else {
         resolved_style.oblique_angle
+    };
+    let value_for_bounds = resolve_dxf_special_chars(&t.value);
+    let mut height = t.height.max(1.0e-9) as f32;
+    let mut base_rotation = t.rotation as f32;
+
+    // Aligned and Fit are true two-point modes. Both derive their baseline
+    // direction from the endpoints. Aligned scales height uniformly; Fit keeps
+    // the height and changes only the horizontal factor.
+    if let Some((span, angle)) = two_point_span(t) {
+        base_rotation = angle as f32;
+        if let Some(base_bounds) = text_local_bounds(
+            &font_name,
+            &value_for_bounds,
+            height,
+            width_factor,
+            oblique_angle,
+        ) {
+            if base_bounds.advance > 1.0e-6 {
+                let scale = (span as f32 / base_bounds.advance).max(1.0e-6);
+                if matches!(t.horizontal_alignment, HA::Aligned) {
+                    height *= scale;
+                } else {
+                    width_factor *= scale;
+                }
+            }
+        }
+    }
+    let rotation = if eff_upside {
+        base_rotation + std::f32::consts::PI
+    } else {
+        base_rotation
     };
     // Anchor stays f64: large coordinates (UTM etc.) lose ~0.5 units of
     // precision when cast to f32, which snaps text baselines onto a coarse
@@ -188,17 +245,16 @@ pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPla
         &t.vertical_alignment,
         &t.alignment_point,
     ) {
-        (HA::Aligned | HA::Middle | HA::Fit, _, Some(a)) => [a.x, a.y],
+        (HA::Aligned | HA::Fit, _, _) => [t.insertion_point.x, t.insertion_point.y],
+        (HA::Middle, _, Some(a)) => [a.x, a.y],
         (HA::Center | HA::Right, _, Some(a)) => [a.x, a.y],
         (_, VA::Bottom | VA::Middle | VA::Top, Some(a)) => [a.x, a.y],
         _ => [t.insertion_point.x, t.insertion_point.y],
     };
-    // Strip %%u/%%o for bounds (they add no width); resolve %%d/%%c/%%p for correct advance.
-    let value_for_bounds = resolve_dxf_special_chars(&t.value);
     let bounds = text_local_bounds(
         &font_name,
         &value_for_bounds,
-        t.height as f32,
+        height,
         width_factor,
         oblique_angle,
     );
@@ -213,7 +269,8 @@ pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPla
         let ax = match t.horizontal_alignment {
             HA::Left => 0.0,
             HA::Center | HA::Middle => b.advance * 0.5 * sign,
-            HA::Right | HA::Aligned | HA::Fit => b.advance * sign,
+            HA::Right => b.advance * sign,
+            HA::Aligned | HA::Fit => 0.0,
         };
         // Vertical anchor uses the inked extent (cap / baseline geometry).
         let ay = match t.vertical_alignment {
@@ -236,7 +293,7 @@ pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPla
     ];
     TextPlacement {
         origin,
-        height: t.height as f32,
+        height,
         rotation,
         width_factor,
         oblique_angle,
@@ -247,12 +304,19 @@ pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPla
 }
 
 fn grips(t: &Text) -> Vec<GripDef> {
-    let p = glam::DVec3::new(
+    let insertion = glam::DVec3::new(
         t.insertion_point.x,
         t.insertion_point.y,
         t.insertion_point.z,
     );
-    vec![square_grip(0, p)]
+    let mut grips = vec![square_grip(0, insertion)];
+    if let Some(point) = t.alignment_point {
+        grips.push(square_grip(
+            1,
+            glam::DVec3::new(point.x, point.y, point.z),
+        ));
+    }
+    grips
 }
 
 fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
@@ -263,6 +327,8 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
     // both points are live.
     let is_plain_left = matches!(t.horizontal_alignment, HA::Left)
         && matches!(t.vertical_alignment, VA::Baseline);
+    let is_aligned = matches!(t.horizontal_alignment, HA::Aligned);
+    let is_two_point = matches!(t.horizontal_alignment, HA::Aligned | HA::Fit);
     let pos_editable = is_plain_left || matches!(t.horizontal_alignment, HA::Aligned | HA::Fit);
     let align_editable = !is_plain_left;
     // The alignment point is meaningless (reset to the origin) for plain-Left text.
@@ -331,9 +397,18 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
                     t!("Height").as_ref(),
                     "height",
                     t.height,
-                    crate::entities::common::style_fixed_height(&t.style).is_none(),
+                    !is_aligned
+                        && crate::entities::common::style_fixed_height(&t.style).is_none(),
                 ),
-                edit_angle(t!("Rotation").as_ref(), "rotation", t.rotation.to_degrees()),
+                if is_two_point {
+                    ro(
+                        t!("Rotation").as_ref(),
+                        "rotation",
+                        crate::entities::common::format_angle(displayed_rotation(t)),
+                    )
+                } else {
+                    edit_angle(t!("Rotation").as_ref(), "rotation", t.rotation.to_degrees())
+                },
                 edit(t!("Width factor").as_ref(), "width_factor", t.width_factor),
                 edit_angle(t!("Obliquing").as_ref(), "oblique_angle", t.oblique_angle.to_degrees()),
                 num_row(t!("Text alignment X").as_ref(), "align_x", ax, align_editable),
@@ -451,25 +526,44 @@ fn apply_geom_prop(t: &mut Text, field: &str, value: &str) {
                 _ => ap.z = v,
             }
         }
-        "height" if v > 0.0 => t.height = v,
-        "rotation" => t.rotation = v.to_radians(),
+        "height"
+            if v > 0.0 && !matches!(t.horizontal_alignment, HA::Aligned) =>
+        {
+            t.height = v
+        }
+        "rotation" if !matches!(t.horizontal_alignment, HA::Aligned | HA::Fit) => {
+            t.rotation = v.to_radians()
+        }
         "width_factor" if v > 0.0 => t.width_factor = v,
-        "oblique_angle" => t.oblique_angle = v.to_radians(),
+        "oblique_angle" if (-85.0..=85.0).contains(&v) => {
+            t.oblique_angle = v.to_radians()
+        }
         _ => {}
     }
 }
 
-fn apply_grip(t: &mut Text, _grip_id: usize, apply: GripApply) {
+fn apply_grip(t: &mut Text, grip_id: usize, apply: GripApply) {
     match apply {
         GripApply::Absolute(p) => {
-            t.insertion_point.x = p.x as f64;
-            t.insertion_point.y = p.y as f64;
-            t.insertion_point.z = p.z as f64;
+            let target = if grip_id == 1 {
+                let insertion = t.insertion_point;
+                t.alignment_point.get_or_insert(insertion)
+            } else {
+                &mut t.insertion_point
+            };
+            target.x = p.x;
+            target.y = p.y;
+            target.z = p.z;
         }
         GripApply::Translate(d) => {
-            t.insertion_point.x += d.x as f64;
-            t.insertion_point.y += d.y as f64;
-            t.insertion_point.z += d.z as f64;
+            t.insertion_point.x += d.x;
+            t.insertion_point.y += d.y;
+            t.insertion_point.z += d.z;
+            if let Some(point) = t.alignment_point.as_mut() {
+                point.x += d.x;
+                point.y += d.y;
+                point.z += d.z;
+            }
         }
     }
 }
@@ -551,7 +645,9 @@ impl Grippable for Text {
         value: f64,
     ) {
         use crate::scene::model::object::GripMenuAction as A;
-        if matches!(action, A::RotateText) {
+        if matches!(action, A::RotateText)
+            && !matches!(self.horizontal_alignment, HA::Aligned | HA::Fit)
+        {
             self.rotation = value.to_radians();
         }
     }

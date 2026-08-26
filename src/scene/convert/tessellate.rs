@@ -633,7 +633,14 @@ pub fn tessellate(
     // stay a roughly constant on-screen size; otherwise the header-driven path.
     let te = crate::entities::point::relative_render(entity, document, world_per_pixel)
         .or_else(|| crate::entities::light::relative_render(entity, document, world_per_pixel))
-        .or_else(|| convert(entity, document));
+        .or_else(|| match entity {
+            EntityType::Text(text) => Some(crate::entities::text::to_render_at_scale(
+                text,
+                document,
+                anno_scale,
+            )),
+            _ => convert(entity, document),
+        });
     if let Some(te) = te {
         match te.object {
             // ── Text / MText: pre-tessellated glyph strokes ───────────────

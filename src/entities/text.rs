@@ -130,8 +130,12 @@ pub(crate) fn acad_text_encode(value: &str) -> String {
     out
 }
 
-fn to_render(t: &Text, document: &acadrust::CadDocument) -> RenderEntity {
-    let p = text_run_placement(t, document);
+pub(crate) fn to_render_at_scale(
+    t: &Text,
+    document: &acadrust::CadDocument,
+    annotation_scale: f32,
+) -> RenderEntity {
+    let p = text_run_placement_at_scale(t, document, annotation_scale);
     let snap_pt = glam::DVec3::new(p.wcs_insertion[0], p.wcs_insertion[1], p.wcs_insertion[2]);
     // Parse `%%` codes via acadrust, re-encoded for the stroke tessellator.
     let value = acad_text_encode(&p.value);
@@ -172,7 +176,16 @@ fn to_render(t: &Text, document: &acadrust::CadDocument) -> RenderEntity {
 
 /// Compute a TEXT entity's run placement (origin + layout params). Extracted
 /// from `to_render` verbatim so the stroke and SDF-quad paths agree exactly.
-pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPlacement {
+pub fn text_run_placement_at_scale(
+    t: &Text,
+    document: &acadrust::CadDocument,
+    annotation_scale: f32,
+) -> TextPlacement {
+    let annotation_scale = if annotation_scale.is_finite() && annotation_scale > 1.0e-9 {
+        annotation_scale
+    } else {
+        1.0
+    };
     let normal = (t.normal.x, t.normal.y, t.normal.z);
     let (wsx, wsy, wsz) = crate::scene::view::transform::ocs_point_to_wcs(
         (
@@ -222,7 +235,8 @@ pub fn text_run_placement(t: &Text, document: &acadrust::CadDocument) -> TextPla
             oblique_angle,
         ) {
             if base_bounds.advance > 1.0e-6 {
-                let scale = (span as f32 / base_bounds.advance).max(1.0e-6);
+                let scale =
+                    (span as f32 / annotation_scale / base_bounds.advance).max(1.0e-6);
                 if matches!(t.horizontal_alignment, HA::Aligned) {
                     height *= scale;
                 } else {
@@ -605,7 +619,7 @@ fn apply_transform(t: &mut Text, tr: &EntityTransform) {
 
 impl RenderConvertible for Text {
     fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
-        Some(to_render(self, document))
+        Some(to_render_at_scale(self, document, 1.0))
     }
 }
 

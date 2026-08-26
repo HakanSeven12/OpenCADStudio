@@ -47,12 +47,17 @@ pub struct TextCommand {
     oblique_angle: f64,
     fixed_height: bool,
     annotative: bool,
-    generation_flags: i16,
+    annotation_multiplier: f64,
+    last_display_height: Option<f64>,
     last_entity: Option<Text>,
 }
 
 impl TextCommand {
-    pub fn with_defaults(defaults: TextCreationDefaults, styles: Vec<TextStyle>) -> Self {
+    pub fn with_defaults(
+        defaults: TextCreationDefaults,
+        styles: Vec<TextStyle>,
+        annotation_multiplier: f64,
+    ) -> Self {
         let current_height = defaults.height;
         let mut command = Self {
             step: Step::Start,
@@ -69,7 +74,8 @@ impl TextCommand {
             oblique_angle: defaults.oblique_angle,
             fixed_height: false,
             annotative: false,
-            generation_flags: 0,
+            annotation_multiplier: annotation_multiplier.max(1.0e-9),
+            last_display_height: None,
             last_entity: None,
         };
         let style = command.style_name.clone();
@@ -102,8 +108,6 @@ impl TextCommand {
             85.0_f64.to_radians(),
         );
         self.annotative = style.annotative;
-        self.generation_flags = (if style.flags.backward { 2 } else { 0 })
-            | (if style.flags.upside_down { 4 } else { 0 });
         true
     }
 
@@ -166,7 +170,6 @@ impl TextCommand {
         text.rotation = self.rotation;
         text.horizontal_alignment = self.horizontal;
         text.vertical_alignment = self.vertical;
-        text.generation_flags = self.generation_flags;
         text.alignment_point = if self.is_two_point() {
             let second = self.plane.to_local(self.second_point?);
             Some(Vector3::new(second.x, second.y, second.z))
@@ -183,6 +186,7 @@ impl TextCommand {
             return CmdResult::NeedPoint;
         };
         let pos = self.first_point.unwrap_or(DVec3::ZERO);
+        self.last_display_height = None;
         self.last_entity = Some(entity.clone());
         CmdResult::SuspendForTextInput { pos, entity }
     }
@@ -199,7 +203,18 @@ impl TextCommand {
         } else {
             entity.rotation
         };
-        let spacing = entity.height.max(1.0e-9) * 1.666_666_666_7;
+        let fallback_height = entity.height.max(1.0e-9)
+            * if self.annotative {
+                self.annotation_multiplier
+            } else {
+                1.0
+            };
+        let spacing = self
+            .last_display_height
+            .take()
+            .unwrap_or(fallback_height)
+            .max(1.0e-9)
+            * 1.666_666_666_7;
         let delta = Vector3::new(angle.sin() * spacing, -angle.cos() * spacing, 0.0);
         entity.insertion_point = entity.insertion_point + delta;
         if let Some(point) = entity.alignment_point.as_mut() {
@@ -419,6 +434,12 @@ impl CadCommand for TextCommand {
             self.open_next_line()
         } else {
             CmdResult::Cancel
+        }
+    }
+
+    fn on_editor_display_height(&mut self, height: f64) {
+        if height.is_finite() && height > 1.0e-9 {
+            self.last_display_height = Some(height);
         }
     }
 

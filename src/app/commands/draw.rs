@@ -1268,10 +1268,16 @@ impl OpenCADStudio {
             // ── Annotate commands ──────────────────────────────────────────
             "TEXT" => {
                 use crate::modules::annotate::text::TextCommand;
-                let document = &self.tabs[i].scene.document;
-                let defaults = crate::scene::creation_style::current_text_defaults(document);
-                let styles = document.text_styles.iter().cloned().collect();
-                let new_cmd = TextCommand::with_defaults(defaults, styles);
+                let (defaults, styles, annotation_multiplier) = {
+                    let scene = &self.tabs[i].scene;
+                    let annotation_multiplier = scene.creation_annotation_multiplier();
+                    let defaults =
+                        crate::scene::creation_style::current_text_defaults(&scene.document);
+                    let styles = scene.document.text_styles.iter().cloned().collect();
+                    (defaults, styles, annotation_multiplier)
+                };
+                let new_cmd =
+                    TextCommand::with_defaults(defaults, styles, annotation_multiplier);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

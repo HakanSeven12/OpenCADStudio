@@ -1809,12 +1809,30 @@ impl OpenCADStudio {
                             text.horizontal_alignment,
                             acadrust::entities::TextHorizontalAlignment::Aligned
                         );
+                        let annotative = crate::scene::annotative::is_annotative(doc, entity);
+                        let model_factor = if annotative {
+                            annotation_scale_handle
+                                .and_then(|handle| match doc.objects.get(&handle) {
+                                    Some(acadrust::objects::ObjectType::Scale(scale)) => Some(
+                                        scale.inverse_factor()
+                                            / self.tabs[i].scene.annotation_scale_unit_factor(),
+                                    ),
+                                    _ => None,
+                                })
+                                .unwrap_or(self.tabs[i].scene.annotation_scale as f64)
+                        } else {
+                            1.0
+                        };
                         let paper_height = if aligned {
-                            crate::entities::text::text_run_placement(text, doc).height as f64
+                            crate::entities::text::text_run_placement_at_scale(
+                                text,
+                                doc,
+                                model_factor as f32,
+                            )
+                            .height as f64
                         } else {
                             text.height
                         };
-                        let annotative = crate::scene::annotative::is_annotative(doc, entity);
                         for section in sections.iter_mut() {
                             if let Some(row) =
                                 section.props.iter_mut().find(|row| row.field == "height")
@@ -1830,15 +1848,6 @@ impl OpenCADStudio {
                             }
                         }
                         if annotative {
-                            let model_factor = annotation_scale_handle
-                                .and_then(|handle| match doc.objects.get(&handle) {
-                                    Some(acadrust::objects::ObjectType::Scale(scale)) => Some(
-                                        scale.inverse_factor()
-                                            / self.tabs[i].scene.annotation_scale_unit_factor(),
-                                    ),
-                                    _ => None,
-                                })
-                                .unwrap_or(self.tabs[i].scene.annotation_scale as f64);
                             insert_row_after(
                                 &mut sections,
                                 "height",

@@ -300,10 +300,9 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
     // by the line-spacing factor.
     let line_space_distance = t.height * 1.666_666_666_666_667 * t.line_spacing_factor;
     let text_frame_on = (t.background_fill_flags & 0x10) != 0;
-    // Defined width is only live without columns; defined height is live for
-    // static columns or manual-height dynamic columns, grayed otherwise.
+    // Defined width is reported by Properties but is not edited there. Defined
+    // height remains live for static columns or manual-height dynamic columns.
     let col_type = t.column_data.column_type;
-    let width_editable = col_type == 0;
     let height_editable = col_type == 1 || (col_type == 2 && !t.column_data.auto_height);
     vec![
         PropSection {
@@ -405,7 +404,7 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                             .collect(),
                     },
                 },
-                num_row(t!("Defined width").as_ref(), "rect_w", t.rectangle_width, width_editable),
+                num_row(t!("Defined width").as_ref(), "rect_w", t.rectangle_width, false),
                 num_row(
                     t!("Defined height").as_ref(),
                     "rect_h",
@@ -540,7 +539,6 @@ fn apply_geom_prop(t: &mut MText, field: &str, value: &str) {
         "ins_y" => t.insertion_point.y = v,
         "ins_z" => t.insertion_point.z = v,
         "height" if v > 0.0 => t.height = v,
-        "rect_w" if v >= 0.0 => t.rectangle_width = v,
         "rect_h" if v >= 0.0 => t.rectangle_height = (v > 0.0).then_some(v),
         "rotation" => t.rotation = v.to_radians(),
         "line_spacing" if (0.25..=4.0).contains(&v) => t.line_spacing_factor = v,

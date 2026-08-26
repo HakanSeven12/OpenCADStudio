@@ -4,7 +4,7 @@ use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 use crate::scene::text::lff;
 use crate::scene::view::transform;
@@ -144,51 +144,6 @@ fn symbol_font_switch(inner: &str) -> Option<char> {
     tail.chars().next()
 }
 
-/// Per-entity overrides of individual dimension-style variables, carried as
-/// extended data under the `DSTYLE` application.
-///
-/// An entity may keep its style yet override single variables on itself, as
-/// `(variable group code, value)` pairs. Reading the style but ignoring these
-/// draws the frame at the style's size rather than its own — which is how this
-/// one, overriding its text height to a fraction of the style's, came out far
-/// too large.
-///
-/// Only the character height is read — it is the frame's single geometric
-/// input (see `tessellate_tolerance`); every other variable is left to the style.
-fn dstyle_overrides(tol: &Tolerance) -> Option<f64> {
-    // The only variable the frame is built from.
-    const DIMTXT: i16 = 140;
-
-    use acadrust::xdata::XDataValue as V;
-
-    // The record belongs to the shared "ACAD" application and names itself in
-    // its FIRST STRING VALUE. There is no record called "DSTYLE" — asking for
-    // one finds nothing and leaves every override silently unread.
-    let rec = tol.common.extended_data.get_record("ACAD")?;
-    let mut vals = rec.values.iter();
-    match vals.next() {
-        Some(V::String(s)) if s == "DSTYLE" => {}
-        _ => return None,
-    }
-
-    let mut txt = None;
-    let mut pending: Option<i16> = None;
-    for v in vals {
-        match v {
-            V::Integer16(code) => pending = Some(*code),
-            V::Real(value) | V::Distance(value) => {
-                if pending.take() == Some(DIMTXT) {
-                    txt = Some(*value);
-                }
-            }
-            // Braces and anything else just delimit; a non-numeric value also
-            // ends the pair we were waiting on.
-            _ => pending = None,
-        }
-    }
-    txt
-}
-
 /// The tolerance's dimension style — by handle first, then by name.
 ///
 /// The order matters and is not interchangeable: a DWG records the style's
@@ -196,7 +151,7 @@ fn dstyle_overrides(tol: &Tolerance) -> Option<f64> {
 /// leaves the handle empty. Matching on the name alone — the shape used
 /// elsewhere for entities that only ever carry one — would silently resolve
 /// every DWG-read tolerance to "Standard" and pick the wrong metrics.
-fn resolve_dim_style<'a>(
+pub(crate) fn resolve_dim_style<'a>(
     tol: &Tolerance,
     doc: &'a acadrust::CadDocument,
 ) -> Option<&'a acadrust::tables::DimStyle> {
@@ -222,8 +177,20 @@ fn resolve_dim_style<'a>(
 ///
 /// This is where the pen LANDS, so it carries the font's letter spacing past
 /// the final glyph — which is what puts the gap between one run and the next.
-fn run_advance(text: &str, font: &str, height: f32) -> f32 {
-    crate::entities::text_support::text_local_bounds(font, text, height, 1.0, 0.0)
+fn run_advance(
+    text: &str,
+    font: &str,
+    height: f32,
+    width_factor: f32,
+    oblique: f32,
+) -> f32 {
+    crate::entities::text_support::text_local_bounds(
+        font,
+        text,
+        height,
+        width_factor,
+        oblique,
+    )
         .map(|b| b.advance)
         .unwrap_or(0.0)
 }
@@ -232,8 +199,11 @@ fn run_advance(text: &str, font: &str, height: f32) -> f32 {
 ///
 /// Glyph geometry is authored against a 9-unit cap height, so a font's spacing
 /// scales with the character height like everything else.
-fn letter_spacing(font: &str, height: f32) -> f32 {
-    crate::scene::text::font_face::Face::resolve(font).letter_spacing() * height / 9.0
+fn letter_spacing(font: &str, height: f32, width_factor: f32) -> f32 {
+    crate::scene::text::font_face::Face::resolve(font).letter_spacing()
+        * height
+        / 9.0
+        * width_factor
 }
 
 /// How wide a compartment's content actually draws.
@@ -243,15 +213,35 @@ fn letter_spacing(font: &str, height: f32) -> f32 {
 /// over-measures by exactly one spacing — the gaps between runs are real, the
 /// one hanging off the end is not — and every compartment came out that much
 /// too wide.
-fn content_width(cell: &Cell, height: f32) -> f32 {
+fn content_width(
+    cell: &Cell,
+    height: f32,
+    text_style: &crate::entities::text_support::ResolvedTextStyle,
+) -> f32 {
     let Some(last) = cell.last() else {
         return 0.0;
     };
     let pen: f32 = cell
         .iter()
-        .map(|r| run_advance(&r.text, r.font, height))
+        .map(|run| {
+            let (font, width, oblique) = if run.font == SYMBOL_FONT {
+                (SYMBOL_FONT, 1.0, 0.0)
+            } else {
+                (
+                    text_style.font_name.as_str(),
+                    text_style.width_factor,
+                    text_style.oblique_angle,
+                )
+            };
+            run_advance(&run.text, font, height, width, oblique)
+        })
         .sum();
-    (pen - letter_spacing(last.font, height)).max(0.0)
+    let (last_font, last_width) = if last.font == SYMBOL_FONT {
+        (SYMBOL_FONT, 1.0)
+    } else {
+        (text_style.font_name.as_str(), text_style.width_factor)
+    };
+    (pen - letter_spacing(last_font, height, last_width)).max(0.0)
 }
 
 /// One text run of a feature-control frame, ready to become a `TextStroke`
@@ -261,11 +251,13 @@ fn content_width(cell: &Cell, height: f32) -> f32 {
 /// origin (no origin translation — the wire-builder adds the origin).
 struct TolCell {
     text: String,
-    font: &'static str,
+    font: String,
     origin: [f32; 2],
     strokes: Vec<Vec<[f32; 2]>>,
     height: f32,
     rotation: f32,
+    width_factor: f32,
+    oblique: f32,
 }
 
 /// Tessellate a Tolerance entity's feature-control frame.
@@ -296,16 +288,28 @@ fn tessellate_tolerance(
     // and the frame draws about ten times too small. Falling back to them only
     // when no style resolves keeps DXF-read entities working.
     let style = resolve_dim_style(tol, doc);
-    let scale = style
-        .map(|s| if s.dimscale > 1e-6 { s.dimscale } else { 1.0 })
+    let xd = &tol.common.extended_data;
+    let scale = crate::entities::dim_override::real(xd, crate::entities::dim_override::DIMSCALE)
+        .or_else(|| style.map(|s| s.dimscale))
+        .map(|value| if value > 1e-6 { value } else { 1.0 })
         .unwrap_or(1.0);
     // The entity's own overrides win over its style; the style wins over the
     // entity's constructed defaults.
-    let h = dstyle_overrides(tol)
+    let h = crate::entities::dim_override::real(xd, crate::entities::dim_override::DIMTXT)
         .or(style.map(|s| s.dimtxt))
         .map(|v| v * scale)
         .unwrap_or(tol.text_height) as f32;
     let h = if h > 1e-6 { h } else { 2.5_f32 };
+
+    let text_style_name = crate::entities::dim_override::handle(
+        xd,
+        crate::entities::dim_override::DIMTXSTY,
+    )
+    .and_then(|handle| doc.text_styles.iter().find(|entry| entry.handle == handle))
+    .map(|entry| entry.name.as_str())
+    .or_else(|| style.map(|style| style.dimtxsty.as_str()))
+    .unwrap_or("Standard");
+    let text_style = crate::entities::text_support::resolve_text_style(text_style_name, doc);
 
     // A compartment is a PROPORTION of the character height: it spans -h..+h
     // about the row's centreline, so it is exactly 2h tall and the h/2 margin
@@ -329,7 +333,9 @@ fn tessellate_tolerance(
     // (`len()`) would make each one two or three cells wide.
     // A compartment's runs come from different fonts, so each is measured in its
     // own before they are summed.
-    let cell_width = |cell: &Cell| -> f32 { (content_width(cell, h) + 2.0 * pad).max(min_cell_w) };
+    let cell_width = |cell: &Cell| -> f32 {
+        (content_width(cell, h, &text_style) + 2.0 * pad).max(min_cell_w)
+    };
     let row_widths: Vec<Vec<f32>> = rows
         .iter()
         .map(|row| row.iter().map(|c| cell_width(c)).collect())
@@ -399,11 +405,28 @@ fn tessellate_tolerance(
                 // Centre the compartment's whole content, then lay its runs out
                 // left to right — each in its own font, each advancing the pen
                 // by what that font actually measures.
-                let mut run_x = cell_x + (cw - content_width(cell, h)) * 0.5;
+                let mut run_x = cell_x + (cw - content_width(cell, h, &text_style)) * 0.5;
                 for run in cell {
-                    let (text, font) = (run.text.clone(), run.font);
+                    let text = run.text.clone();
+                    let (font, width_factor, oblique) = if run.font == SYMBOL_FONT {
+                        (SYMBOL_FONT.to_string(), 1.0, 0.0)
+                    } else {
+                        (
+                            text_style.font_name.clone(),
+                            text_style.width_factor,
+                            text_style.oblique_angle,
+                        )
+                    };
                     let (local_strokes, _) =
-                        lff::tessellate_text_ex([0.0, 0.0], h, 0.0, 1.0, 0.0, font, &text);
+                        lff::tessellate_text_ex(
+                            [0.0, 0.0],
+                            h,
+                            0.0,
+                            width_factor,
+                            oblique,
+                            &font,
+                            &text,
+                        );
                     // Glyph polylines rotated about the run's origin (no origin
                     // translation — the wire-builder adds `origin`).
                     let strokes: Vec<Vec<[f32; 2]>> = local_strokes
@@ -411,7 +434,7 @@ fn tessellate_tolerance(
                         .map(|pl| pl.into_iter().map(|[px, py]| rot(px, py)).collect())
                         .filter(|pl: &Vec<[f32; 2]>| !pl.is_empty())
                         .collect();
-                    let advance = run_advance(&text, font, h);
+                    let advance = run_advance(&text, &font, h, width_factor, oblique);
                     cells.push(TolCell {
                         text,
                         font,
@@ -419,6 +442,8 @@ fn tessellate_tolerance(
                         strokes,
                         height: h,
                         rotation: angle,
+                        width_factor,
+                        oblique,
                     });
                     run_x += advance;
                 }
@@ -447,6 +472,45 @@ impl RenderConvertible for Tolerance {
         // Build the feature-control frame in local space; origin stored as f64.
         let (box_strokes, cells) = tessellate_tolerance(self, document);
         let ins = [self.insertion_point.x, self.insertion_point.y];
+        let style = resolve_dim_style(self, document);
+        let xd = &self.common.extended_data;
+        let explicit_color = |index: Option<i16>| {
+            index.filter(|value| !matches!(value, 0 | 256)).map(|value| {
+                let [red, green, blue, _] = crate::scene::convert::tess_util::aci_to_rgba(
+                    &acadrust::types::Color::from_index(value),
+                );
+                [red, green, blue]
+            })
+        };
+        let color_value = |color: &acadrust::types::Color| {
+            let [red, green, blue, _] =
+                crate::scene::convert::tess_util::aci_to_rgba(color);
+            [red, green, blue]
+        };
+        let frame_color = if let Some(index) = crate::entities::dim_override::int(
+            xd,
+            crate::entities::dim_override::DIMCLRD,
+        ) {
+            explicit_color(Some(index))
+        } else if let Some(color) =
+            style.and_then(|entry| entry.dimclrd_true_color.as_ref())
+        {
+            Some(color_value(color))
+        } else {
+            explicit_color(style.map(|entry| entry.dimclrd))
+        };
+        let text_color = if let Some(index) = crate::entities::dim_override::int(
+            xd,
+            crate::entities::dim_override::DIMCLRT,
+        ) {
+            explicit_color(Some(index))
+        } else if let Some(color) =
+            style.and_then(|entry| entry.dimclrt_true_color.as_ref())
+        {
+            Some(color_value(color))
+        } else {
+            explicit_color(style.map(|entry| entry.dimclrt))
+        };
 
         // Frame geometry first (run-less → always strokes; also the anchor
         // group so its origin = the insertion point), then one run-group per
@@ -457,7 +521,7 @@ impl RenderConvertible for Tolerance {
             groups.push(TextStroke {
                 strokes: box_strokes,
                 origin: ins,
-                color: None,
+                color: frame_color,
                 fill_tris: vec![],
                 run: None,
             });
@@ -469,15 +533,15 @@ impl RenderConvertible for Tolerance {
                     ins[0] + cell.origin[0] as f64,
                     ins[1] + cell.origin[1] as f64,
                 ],
-                color: None,
+                color: text_color,
                 fill_tris: vec![],
                 run: Some(GlyphRun {
                     text: cell.text,
-                    font: cell.font.to_string(),
+                    font: cell.font,
                     height: cell.height,
                     rotation: cell.rotation,
-                    width_factor: 1.0,
-                    oblique: 0.0,
+                    width_factor: cell.width_factor,
+                    oblique: cell.oblique,
                     // `tracking` scales the font's own letter spacing, so 0
                     // collapses the gap between glyphs and the characters run
                     // together. Every other text-bearing entity passes 1.0, and
@@ -539,12 +603,19 @@ impl Grippable for Tolerance {
 // ── PropertyEditable ──────────────────────────────────────────────────────────
 
 impl PropertyEditable for Tolerance {
-    fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
+    fn geometry_properties(&self, text_style_names: &[String]) -> Vec<PropSection> {
         vec![
             PropSection {
                 title: t!("Text").into_owned(),
                 props: vec![
-                    ro(t!("Text style").as_ref(), "tol_text_style", String::new()),
+                    Property {
+                        label: t!("Text style").into_owned(),
+                        field: "tol_text_style",
+                        value: PropValue::Choice {
+                            selected: String::new(),
+                            options: text_style_names.to_vec(),
+                        },
+                    },
                     edit(t!("Text height").as_ref(), "tol_text_height", self.text_height),
                 ],
             },
@@ -585,9 +656,29 @@ impl PropertyEditable for Tolerance {
             "tol_iy" => self.insertion_point.y = v,
             "tol_iz" => self.insertion_point.z = v,
             "tol_text_height" if v > 0.0 => self.text_height = v,
-            "tol_dir_x" => self.direction.x = v,
-            "tol_dir_y" => self.direction.y = v,
-            "tol_dir_z" => self.direction.z = v,
+            "tol_dir_x" | "tol_dir_y" | "tol_dir_z" => {
+                let mut candidate = self.direction;
+                match field {
+                    "tol_dir_x" => candidate.x = v,
+                    "tol_dir_y" => candidate.y = v,
+                    _ => candidate.z = v,
+                }
+                let direction_len =
+                    (candidate.x * candidate.x + candidate.y * candidate.y + candidate.z * candidate.z)
+                        .sqrt();
+                let normal_len =
+                    (self.normal.x * self.normal.x + self.normal.y * self.normal.y + self.normal.z * self.normal.z)
+                        .sqrt();
+                let dot = candidate.x * self.normal.x
+                    + candidate.y * self.normal.y
+                    + candidate.z * self.normal.z;
+                if direction_len > 1.0e-9
+                    && (normal_len <= 1.0e-9
+                        || dot.abs() <= direction_len * normal_len * 1.0e-8)
+                {
+                    self.direction = candidate;
+                }
+            }
             _ => {}
         }
     }
@@ -923,9 +1014,26 @@ mod tests {
     fn compartments_are_measured_by_their_ink_not_the_trailing_pen_gap() {
         // Cap height, so glyph units and world units line up.
         let h = 9.0_f32;
+        let document = acadrust::CadDocument::new();
+        let text_style = crate::entities::text_support::resolve_text_style("Standard", &document);
         for src in ["{\\Fgdt;r}", "{\\Fgdt;n}tol{\\Fgdt;m}", "1{\\Fgdt;m}", "A"] {
             let cell = parse_cell(src);
-            let pen: f32 = cell.iter().map(|r| run_advance(&r.text, r.font, h)).sum();
+            let pen: f32 = cell
+                .iter()
+                .map(|run| {
+                    if run.font == SYMBOL_FONT {
+                        run_advance(&run.text, SYMBOL_FONT, h, 1.0, 0.0)
+                    } else {
+                        run_advance(
+                            &run.text,
+                            &text_style.font_name,
+                            h,
+                            text_style.width_factor,
+                            text_style.oblique_angle,
+                        )
+                    }
+                })
+                .sum();
             let ink: f32 = cell
                 .iter()
                 .map(|r| {
@@ -934,11 +1042,17 @@ mod tests {
                         .unwrap_or(0.0)
                 })
                 .sum();
-            let got = content_width(&cell, h);
+            let got = content_width(&cell, h, &text_style);
 
             // Exactly one trailing gap comes off — the gaps BETWEEN runs are
             // real spacing and must stay.
-            let spacing = letter_spacing(cell.last().unwrap().font, h);
+            let last = cell.last().unwrap();
+            let (font, width) = if last.font == SYMBOL_FONT {
+                (SYMBOL_FONT, 1.0)
+            } else {
+                (text_style.font_name.as_str(), text_style.width_factor)
+            };
+            let spacing = letter_spacing(font, h, width);
             assert!(
                 (got - (pen - spacing)).abs() < 1e-3,
                 "{src:?}: content {got} should be pen {pen} less one {spacing} gap"

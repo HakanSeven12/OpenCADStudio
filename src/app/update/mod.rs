@@ -195,6 +195,7 @@ impl OpenCADStudio {
                 self.attr_editor_selected = 0;
                 self.attr_editor_tab = crate::ui::window::attribute_editor::AttrTab::Attribute;
             }
+            Some(GeometricTolerance) => self.geometric_tolerance = None,
             // Closing (✕) discards edits made since the last Apply — matching the
             // style editors. Committing happens only through the Apply button.
             Some(Aliases) => self.alias_editor_rows.clear(),
@@ -3704,6 +3705,40 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
                 self.refresh_properties();
+                Task::none()
+            }
+            Message::ToleranceDialogField(field) => {
+                if let Some(state) = self.geometric_tolerance.as_mut() {
+                    state.apply_field(field);
+                }
+                Task::none()
+            }
+            Message::ToleranceDialogToggle(toggle) => {
+                if let Some(state) = self.geometric_tolerance.as_mut() {
+                    state.apply_toggle(toggle);
+                }
+                Task::none()
+            }
+            Message::ToleranceDialogApply => {
+                self.apply_tolerance_dialog_edit();
+                Task::none()
+            }
+            Message::ToleranceDialogOk => {
+                let editing = self
+                    .geometric_tolerance
+                    .as_ref()
+                    .and_then(|state| state.editing)
+                    .is_some();
+                if editing {
+                    if self.apply_tolerance_dialog_edit() {
+                        self.geometric_tolerance = None;
+                        self.active_modal = None;
+                        self.reset_modal_geometry();
+                    }
+                } else {
+                    self.begin_tolerance_placement();
+                    self.reset_modal_geometry();
+                }
                 Task::none()
             }
             Message::SetLinearFormat(code) => {

@@ -416,6 +416,7 @@ fn tessellate_entity_inner(
             | EntityType::MText(_)
             | EntityType::Dimension(_)
             | EntityType::MultiLeader(_)
+            | EntityType::Tolerance(_)
     ) {
         crate::scene::annotative::effective_annotation_scale_for(
             document,

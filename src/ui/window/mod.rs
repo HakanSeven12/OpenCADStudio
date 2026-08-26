@@ -3,6 +3,7 @@ pub mod block_palette;
 pub mod layout_manager;
 pub mod layer_state_manager;
 pub mod drawing_units;
+pub mod geometric_tolerance;
 pub mod drafting_settings;
 pub mod layer_translator;
 pub mod plot;

@@ -22,6 +22,7 @@ pub(crate) mod settings;
 mod shortcuts;
 mod style_ops;
 mod text_inline;
+mod tolerance_dialog;
 mod update;
 mod view;
 mod visibility;
@@ -399,6 +400,8 @@ pub(super) struct OpenCADStudio {
     layer_translator: Option<crate::ui::window::layer_translator::State>,
     /// Working copy of the Drawing Units dialog; `None` while it is closed.
     drawing_units: Option<crate::ui::window::drawing_units::State>,
+    /// Working copy of the structured feature-control-frame editor.
+    geometric_tolerance: Option<crate::ui::window::geometric_tolerance::State>,
     /// PICKDRAG (#226): false (default) = press-drag lassoes; true =
     /// press-drag draws a rectangle marquee.
     pick_drag_rect: bool,
@@ -1588,6 +1591,7 @@ pub enum ModalKind {
     LayerStateManager,
     LayerTranslator,
     DrawingUnits,
+    GeometricTolerance,
     DraftingSettings,
     LayerStateEditor,
     Plot,
@@ -2318,6 +2322,14 @@ pub enum Message {
     DrawingUnitsField(crate::ui::window::drawing_units::Field),
     /// Drawing Units OK — write the working copy into the drawing.
     DrawingUnitsApply,
+    /// One structured feature-control-frame field changed.
+    ToleranceDialogField(crate::ui::window::geometric_tolerance::Field),
+    /// One structured feature-control-frame option changed.
+    ToleranceDialogToggle(crate::ui::window::geometric_tolerance::Toggle),
+    /// Apply edits without closing the structured editor.
+    ToleranceDialogApply,
+    /// Commit edits or continue to insertion-point placement.
+    ToleranceDialogOk,
     /// Toggle the Isolate pill's action menu open/closed.
     ToggleIsolatePopup,
     /// Close the Isolate action menu.
@@ -3145,6 +3157,7 @@ impl OpenCADStudio {
             last_layer_translation: None,
             layer_translator: None,
             drawing_units: None,
+            geometric_tolerance: None,
             pick_drag_rect: false,
             perf_hud: false,
             cycle_candidates: None,

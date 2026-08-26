@@ -200,6 +200,7 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
             oblique_angle,
             is_backward: width_factor < 0.0,
             is_upside_down: false,
+            is_vertical: false,
         };
         let layout = layout_mtext(&MTextRenderOpts {
             // Not an MTEXT: text in a fixed box, never columnar.
@@ -213,6 +214,8 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
             attach_h_anchor,
             v_anchor,
             line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
         });

@@ -11,6 +11,7 @@ pub struct ResolvedTextStyle {
     pub oblique_angle: f32,
     pub is_backward: bool,
     pub is_upside_down: bool,
+    pub is_vertical: bool,
 }
 
 pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedTextStyle {
@@ -76,6 +77,7 @@ pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedT
         oblique_angle: style.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
         is_backward: style.map(|s| s.is_backward()).unwrap_or(false),
         is_upside_down: style.map(|s| s.is_upside_down()).unwrap_or(false),
+        is_vertical: style.map(|s| s.is_vertical).unwrap_or(false),
     }
 }
 
@@ -1012,6 +1014,11 @@ pub struct MTextRenderOpts<'a> {
     pub v_anchor: MTextVAnchor,
     /// DXF code 44 — multiplier on the default 5/3-em baseline gap.
     pub line_spacing_factor: f32,
+    /// `true` fixes every baseline advance to the entity spacing. `false`
+    /// treats it as a minimum and expands for taller inline runs.
+    pub exact_line_spacing: bool,
+    /// User-defined text-box/column height. Zero means content-driven.
+    pub rectangle_height: f32,
     /// `true` when the entity is laid out top-to-bottom (DXF code 71 = 2).
     pub vertical_text: bool,
     /// When true, `layout_mtext` also fills `MTextLayout::glyph_boxes` with
@@ -1025,10 +1032,9 @@ pub struct MTextRenderOpts<'a> {
 
 /// An MTEXT's column layout, flattened from its `column_data`.
 ///
-/// Content moves to the next column at a `\N` break. Filling a column and
-/// spilling into the next on its own is not modelled: `heights` / `auto_height`
-/// are not read, so a column runs as long as its content does.
-#[derive(Clone, Copy, Debug, Default)]
+/// Content moves to the next column at an explicit `\N` break or when the
+/// configured manual/automatic column height is exhausted.
+#[derive(Clone, Debug, Default)]
 pub struct MTextColumns {
     /// Column count. 0 or 1 both mean "no column layout".
     pub count: usize,
@@ -1036,6 +1042,12 @@ pub struct MTextColumns {
     pub width: f32,
     /// Gap between two adjacent columns, world units.
     pub gutter: f32,
+    /// Whether logical column flow starts at the opposite side.
+    pub flow_reversed: bool,
+    /// Dynamic-column height is balanced from content when true.
+    pub auto_height: bool,
+    /// Optional manual height for each logical column.
+    pub heights: Vec<f32>,
 }
 
 impl MTextColumns {
@@ -1046,7 +1058,12 @@ impl MTextColumns {
 
     /// Left edge of column `i`, relative to the text block's own left edge.
     pub fn offset_of(&self, i: usize) -> f32 {
-        i as f32 * (self.width + self.gutter)
+        let physical = if self.flow_reversed {
+            self.count.saturating_sub(1).saturating_sub(i)
+        } else {
+            i
+        };
+        physical as f32 * (self.width + self.gutter)
     }
 }
 
@@ -1128,7 +1145,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         line_spacing: Option<ParaLineSpacing>,
     }
 
-    let cols = opts.columns;
+    let cols = opts.columns.clone();
     // A `\N` past the last column has nowhere to go — keep those lines in the
     // last one rather than laying them out beyond the block.
     let last_col = cols.count.saturating_sub(1);
@@ -1366,15 +1383,55 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             };
             // A paragraph's own `\psm#`/`\pse#` overrides the entity factor for
             // its lines; `Exact` fixes the baseline gap outright.
+            let entity_gap = entity_h * ls_factor * (5.0 / 3.0) * base_font.line_spacing();
             match s.line_spacing {
                 Some(ParaLineSpacing::Exact(e)) if e > 0.0 => e,
                 Some(ParaLineSpacing::Multiple(m)) if m > 0.0 => {
                     mh * m * (5.0 / 3.0) * base_font.line_spacing()
                 }
-                _ => mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing(),
+                _ if opts.exact_line_spacing => entity_gap,
+                _ => (mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing())
+                    .max(entity_gap),
             }
         })
         .collect();
+
+    // Flow lines into the next column when the active column's configured
+    // height is exhausted. Explicit `\N` breaks remain authoritative. Dynamic
+    // auto-height balances the content; static/manual columns use their stored
+    // height (falling back to the entity rectangle height).
+    if cols.active() {
+        let total_advance: f32 = per_line_h.iter().sum();
+        let balanced = (total_advance / cols.count.max(1) as f32).max(entity_h);
+        let mut current_column = 0usize;
+        let mut used = 0.0_f32;
+        for (index, line) in sub_lines.iter_mut().enumerate() {
+            if line.column > current_column {
+                current_column = line.column.min(cols.count - 1);
+                used = 0.0;
+            }
+            let limit = if cols.auto_height {
+                balanced
+            } else {
+                cols.heights
+                    .get(current_column)
+                    .copied()
+                    .filter(|height| *height > 0.0)
+                    .unwrap_or(opts.rectangle_height)
+            };
+            let advance = per_line_h.get(index).copied().unwrap_or(entity_h);
+            if limit > 0.0
+                && used > 0.0
+                && used + advance > limit
+                && current_column + 1 < cols.count
+            {
+                current_column += 1;
+                used = 0.0;
+            }
+            line.column = current_column;
+            used += advance;
+        }
+    }
     // Per-line text height — the tallest Word on the line, an empty line
     // inheriting the previous line's height (same rule as `per_line_h`). Unlike
     // `line_max_h` it has no `entity_h` floor, so it reflects the ACTUAL text
@@ -2169,6 +2226,7 @@ mod tests {
             oblique_angle: 0.0,
             is_backward: false,
             is_upside_down: false,
+            is_vertical: false,
         }
     }
 
@@ -2199,6 +2257,8 @@ mod tests {
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
             line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
         });
@@ -2222,6 +2282,8 @@ mod tests {
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
             line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
         });
@@ -2378,6 +2440,7 @@ mod v_anchor_tests {
             oblique_angle: 0.0,
             is_backward: false,
             is_upside_down: false,
+            is_vertical: false,
         };
         layout_mtext(&MTextRenderOpts {
             columns: Default::default(),
@@ -2390,6 +2453,8 @@ mod v_anchor_tests {
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
             line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: true,
         })

@@ -195,6 +195,11 @@ fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<Rende
                     },
                 ),
                 line_spacing_factor: ctx.line_spacing_factor as f32,
+                exact_line_spacing: matches!(
+                    ctx.line_spacing_style,
+                    acadrust::entities::LineSpacingStyle::Exactly
+                ),
+                rectangle_height: 0.0,
                 vertical_text: false,
                 want_glyph_boxes: false,
             }))
@@ -412,6 +417,7 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
             oblique_angle: 0.0,
             is_backward: false,
             is_upside_down: false,
+            is_vertical: false,
         };
         let layout = layout_mtext(&MTextRenderOpts {
             columns: Default::default(),
@@ -424,6 +430,11 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
             line_spacing_factor: ctx.line_spacing_factor as f32,
+            exact_line_spacing: matches!(
+                ctx.line_spacing_style,
+                acadrust::entities::LineSpacingStyle::Exactly
+            ),
+            rectangle_height: 0.0,
             vertical_text: vertical,
             want_glyph_boxes: false,
         });
@@ -2039,6 +2050,11 @@ impl MultiLeaderTess for MultiLeader {
                 attach_h_anchor: h_anchor,
                 v_anchor,
                 line_spacing_factor: ctx.line_spacing_factor as f32,
+                exact_line_spacing: matches!(
+                    ctx.line_spacing_style,
+                    acadrust::entities::LineSpacingStyle::Exactly
+                ),
+                rectangle_height: 0.0,
                 // Vertical flow (top-to-bottom) is stored per-context.
                 vertical_text: matches!(
                     ctx.text_flow_direction,

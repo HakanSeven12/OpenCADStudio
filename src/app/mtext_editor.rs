@@ -8,7 +8,7 @@
 use acadrust::entities::mtext::AttachmentPoint;
 use acadrust::entities::mtext_format::{
     parse_mtext, MTextColor, MTextDocument, MTextFont, MTextParagraph, MTextParagraphAlignment,
-    MTextSpan, ParagraphProperties, SpanProperties, StackingData, StackingType,
+    MTextScalar, MTextSpan, ParagraphProperties, SpanProperties, StackingData, StackingType,
 };
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle, MText};
@@ -36,6 +36,15 @@ pub enum ParaAlign {
     Center,
     Right,
     Justify,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParaNumber {
+    FirstIndent,
+    LeftIndent,
+    RightIndent,
+    SpaceBefore,
+    SpaceAfter,
 }
 
 /// `pick_list`-friendly wrapper for the 9 attachment points.
@@ -107,6 +116,23 @@ pub struct MTextEditorState {
     /// it is NOT derived from the typed content, so adding characters wraps
     /// to the next line instead of stretching the box into one long line.
     pub rect_width: f64,
+    pub rect_height: String,
+    pub annotative: bool,
+    pub column_type: i16,
+    pub column_count: String,
+    pub column_auto_height: bool,
+    pub column_flow_reversed: bool,
+    pub column_width: String,
+    pub column_gutter: String,
+    pub paragraph_first_indent: String,
+    pub paragraph_left_indent: String,
+    pub paragraph_right_indent: String,
+    pub paragraph_space_before: String,
+    pub paragraph_space_after: String,
+    pub find_text: String,
+    pub replace_text: String,
+    undo: Vec<String>,
+    redo: Vec<String>,
     /// `Some` when editing an existing entity; `None` for a fresh MText.
     pub editing: Option<Handle>,
     /// When true the panel shows the rendered preview; when false the raw
@@ -167,6 +193,23 @@ impl MTextEditorState {
             // Default box ~20 characters wide; overwritten with the entity's
             // own width when editing an existing MText.
             rect_width: (height * 20.0).max(1.0),
+            rect_height: "0".to_string(),
+            annotative: false,
+            column_type: 0,
+            column_count: "2".to_string(),
+            column_auto_height: false,
+            column_flow_reversed: false,
+            column_width: (height * 10.0).to_string(),
+            column_gutter: (height * 5.0).to_string(),
+            paragraph_first_indent: "0".to_string(),
+            paragraph_left_indent: "0".to_string(),
+            paragraph_right_indent: "0".to_string(),
+            paragraph_space_before: "0".to_string(),
+            paragraph_space_after: "0".to_string(),
+            find_text: String::new(),
+            replace_text: String::new(),
+            undo: Vec::new(),
+            redo: Vec::new(),
             editing,
             screen_anchor: iced::Point::new(60.0, 90.0),
             original: None,
@@ -274,7 +317,52 @@ impl MTextEditorState {
         mt.attachment_point = self.attachment;
         mt.line_spacing_factor = self.line_spacing as f64;
         mt.style = self.style.clone();
+        mt.is_annotative = self.annotative;
+        let rectangle_height = self.rect_height.trim().parse::<f64>().unwrap_or(0.0);
+        mt.rectangle_height = (rectangle_height > 0.0).then_some(rectangle_height);
+        mt.column_data.column_type = self.column_type;
+        if self.column_type == 0 {
+            mt.column_data.column_count = 0;
+            mt.column_data.heights.clear();
+        } else {
+            mt.column_data.column_count = self
+                .column_count
+                .trim()
+                .parse::<i32>()
+                .ok()
+                .filter(|count| *count > 0)
+                .unwrap_or(1);
+            mt.column_data.auto_height = self.column_auto_height;
+            mt.column_data.flow_reversed = self.column_flow_reversed;
+            if let Ok(width) = self.column_width.trim().parse::<f64>() {
+                if width > 0.0 {
+                    mt.column_data.width = width;
+                }
+            }
+            if let Ok(gutter) = self.column_gutter.trim().parse::<f64>() {
+                if gutter >= 0.0 {
+                    mt.column_data.gutter = gutter;
+                }
+            }
+            if !self.column_auto_height && rectangle_height > 0.0 {
+                mt.column_data.heights = vec![
+                    rectangle_height;
+                    mt.column_data.column_count.max(1) as usize
+                ];
+            }
+        }
         mt
+    }
+
+    fn record_undo(&mut self) {
+        let value = self.content.text();
+        if self.undo.last().is_none_or(|last| last != &value) {
+            self.undo.push(value);
+            if self.undo.len() > 100 {
+                self.undo.remove(0);
+            }
+        }
+        self.redo.clear();
     }
 }
 
@@ -595,6 +683,24 @@ fn vertical_caret_target(
     best.1
 }
 
+fn seed_mtext_state(state: &mut MTextEditorState, m: &MText) {
+    state.attachment = m.attachment_point;
+    state.line_spacing = m.line_spacing_factor as f32;
+    state.rect_width = m.rectangle_width.max(0.0);
+    state.rect_height = m.rectangle_height.unwrap_or(0.0).max(0.0).to_string();
+    state.annotative = m.is_annotative;
+    state.column_type = m.column_data.column_type;
+    state.column_count = m.column_data.column_count.max(1).to_string();
+    state.column_auto_height = m.column_data.auto_height;
+    state.column_flow_reversed = m.column_data.flow_reversed;
+    state.column_width = m.column_data.width.max(0.0).to_string();
+    state.column_gutter = m.column_data.gutter.max(0.0).to_string();
+    if !m.style.trim().is_empty() {
+        state.style = m.style.clone();
+    }
+    state.original = Some(m.clone());
+}
+
 impl super::OpenCADStudio {
     /// Open the in-place editor for a new (`handle = None`) or existing MText.
     /// Open the rich MText editor for a new or existing MText / MultiLeader.
@@ -605,6 +711,7 @@ impl super::OpenCADStudio {
         handle: Option<Handle>,
         initial: &str,
         height: f64,
+        template: Option<MText>,
     ) {
         if handle.is_some_and(|h| self.tabs[self.active_tab].scene.is_layer_locked(h)) {
             return;
@@ -614,20 +721,11 @@ impl super::OpenCADStudio {
             state.screen_anchor = p;
         }
         // Seed attachment / line-spacing / box width from the entity being edited.
+        let has_template = template.is_some();
         if let Some(h) = handle {
             match self.tabs[self.active_tab].scene.document.get_entity(h) {
                 Some(EntityType::MText(m)) => {
-                    state.attachment = m.attachment_point;
-                    state.line_spacing = m.line_spacing_factor as f32;
-                    if !m.style.trim().is_empty() {
-                        state.style = m.style.clone();
-                    }
-                    if m.rectangle_width > 0.0 {
-                        state.rect_width = m.rectangle_width;
-                    }
-                    // Keep the whole entity so `build_mtext` preserves the fields
-                    // the toolbar can't edit (columns, rotation, background…).
-                    state.original = Some(m.clone());
+                    seed_mtext_state(&mut state, m);
                 }
                 Some(EntityType::MultiLeader(ml)) => {
                     state.line_spacing = ml.context.line_spacing_factor as f32;
@@ -637,6 +735,8 @@ impl super::OpenCADStudio {
                 }
                 _ => {}
             }
+        } else if let Some(m) = template {
+            seed_mtext_state(&mut state, &m);
         } else {
             // New MText inherits the document's current text style (STYLE),
             // not the "Standard" default. See #92.
@@ -659,7 +759,7 @@ impl super::OpenCADStudio {
         // The preview uses a fixed on-screen text size. Therefore the initial
         // wrap width is the drawing-unit span that exactly reaches the right
         // edge of the editor, placing both ruler and slider at their maximum.
-        if handle.is_none() {
+        if handle.is_none() && !has_template {
             let initial_width = self.mtext_editor.as_ref().map(|ed| {
                 super::view::overlay::MTEXT_EDITOR_WRITING_WIDTH / ed.preview_scale()
             });
@@ -746,6 +846,318 @@ impl super::OpenCADStudio {
     /// Splice text around the preview selection (visible-char range) in the
     /// raw value. `case` optionally transforms the selected slice. Returns
     /// true when a preview selection was present and applied.
+    pub(super) fn mtext_undo(&mut self) {
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            if let Some(previous) = ed.undo.pop() {
+                ed.redo.push(ed.content.text());
+                ed.content = text_editor::Content::with_text(&previous);
+                ed.caret = previous.chars().count();
+                ed.sel = Some((ed.caret, ed.caret));
+                ed.sel_anchor = ed.caret;
+            }
+        }
+        self.rebuild_mtext_preview();
+    }
+
+    pub(super) fn mtext_redo(&mut self) {
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            if let Some(next) = ed.redo.pop() {
+                ed.undo.push(ed.content.text());
+                ed.content = text_editor::Content::with_text(&next);
+                ed.caret = next.chars().count();
+                ed.sel = Some((ed.caret, ed.caret));
+                ed.sel_anchor = ed.caret;
+            }
+        }
+        self.rebuild_mtext_preview();
+    }
+
+    pub(super) fn mtext_apply_span_number(&mut self, field: &'static str, value: String) {
+        let Some(number) = value.trim().replace(',', ".").parse::<f64>().ok() else {
+            return;
+        };
+        let valid = match field {
+            "height" => number > 0.0,
+            "oblique" => (-85.0..=85.0).contains(&number),
+            "width" => number > 0.0,
+            "tracking" => number.is_finite(),
+            _ => false,
+        };
+        if !valid {
+            return;
+        }
+        let has_selection = self
+            .mtext_editor
+            .as_ref()
+            .and_then(|editor| editor.sel)
+            .is_some_and(|(start, end)| start < end);
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            if has_selection {
+                let (start, end) = ed.sel.unwrap();
+                ed.record_undo();
+                let para0 = doc_para0(&ed.doc);
+                let mut cells = doc_to_cells(&ed.doc);
+                let end = end.min(cells.len());
+                for cell in &mut cells[start.min(end)..end] {
+                    if let Cell::Char(_, props) | Cell::Stack { props, .. } = cell {
+                        match field {
+                            "height" => props.height = Some(MTextScalar::Absolute(number)),
+                            "oblique" => props.oblique_angle = (number != 0.0).then_some(number),
+                            "width" => props.width_factor = (number != 1.0).then_some(number),
+                            "tracking" => props.tracking = (number != 0.0).then_some(number),
+                            _ => {}
+                        }
+                    }
+                }
+                ed.content = text_editor::Content::with_text(
+                    &cells_to_doc(&para0, &cells).to_mtext_string(),
+                );
+                ed.sel = Some((start, end));
+                ed.caret = end;
+            } else {
+                match field {
+                    "height" => ed.height = value,
+                    "oblique" => ed.oblique = value,
+                    "width" => ed.width = value,
+                    "tracking" => ed.char_space = value,
+                    _ => {}
+                }
+            }
+        }
+        self.rebuild_mtext_preview();
+    }
+
+    pub(super) fn mtext_apply_paragraph_number(&mut self, field: ParaNumber, value: String) {
+        let Some(number) = value.trim().replace(',', ".").parse::<f64>().ok() else {
+            return;
+        };
+        if !number.is_finite() {
+            return;
+        }
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.record_undo();
+            match field {
+                ParaNumber::FirstIndent => ed.paragraph_first_indent = value,
+                ParaNumber::LeftIndent => ed.paragraph_left_indent = value,
+                ParaNumber::RightIndent => ed.paragraph_right_indent = value,
+                ParaNumber::SpaceBefore => ed.paragraph_space_before = value,
+                ParaNumber::SpaceAfter => ed.paragraph_space_after = value,
+            }
+            let para0 = doc_para0(&ed.doc);
+            let cells = doc_to_cells(&ed.doc);
+            let (start, end) = ed
+                .sel
+                .filter(|(start, end)| start < end)
+                .unwrap_or((ed.caret, ed.caret));
+            let paragraph_of = |index: usize| {
+                cells
+                    .iter()
+                    .take(index.min(cells.len()))
+                    .filter(|cell| matches!(cell, Cell::Break(..)))
+                    .count()
+            };
+            let first = paragraph_of(start);
+            let last = paragraph_of(end.saturating_sub((end > start) as usize));
+            let mut doc = cells_to_doc(&para0, &cells);
+            for paragraph in doc
+                .paragraphs
+                .iter_mut()
+                .skip(first)
+                .take(last.saturating_sub(first) + 1)
+            {
+                let optional = (number != 0.0).then_some(number);
+                match field {
+                    ParaNumber::FirstIndent => paragraph.properties.first_line_indent = optional,
+                    ParaNumber::LeftIndent => paragraph.properties.left_margin = optional,
+                    ParaNumber::RightIndent => paragraph.properties.right_margin = optional,
+                    ParaNumber::SpaceBefore => paragraph.properties.spacing_before = optional,
+                    ParaNumber::SpaceAfter => paragraph.properties.spacing_after = optional,
+                }
+            }
+            ed.content = text_editor::Content::with_text(&doc.to_mtext_string());
+        }
+        self.rebuild_mtext_preview();
+    }
+
+    pub(super) fn mtext_stack_selection(&mut self) {
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            let Some((start, end)) = ed.sel.filter(|(start, end)| start < end) else {
+                return;
+            };
+            let para0 = doc_para0(&ed.doc);
+            let mut cells = doc_to_cells(&ed.doc);
+            let end = end.min(cells.len());
+            let plain = cells_to_doc(&ParagraphProperties::default(), &cells[start..end])
+                .to_plain_text();
+            let Some((split, separator)) = plain
+                .char_indices()
+                .find(|(_, ch)| matches!(ch, '/' | '#' | '^'))
+            else {
+                return;
+            };
+            let separator_len = separator.len_utf8();
+            let data = StackingData {
+                numerator: plain[..split].to_string(),
+                denominator: plain[split + separator_len..].to_string(),
+                stacking_type: StackingType::from_char(separator),
+            };
+            if data.numerator.is_empty() || data.denominator.is_empty() {
+                return;
+            }
+            let props = cells[start..end]
+                .iter()
+                .find_map(|cell| match cell {
+                    Cell::Char(_, props) | Cell::Stack { props, .. } => Some(props.clone()),
+                    Cell::Break(..) => None,
+                })
+                .unwrap_or_default();
+            ed.record_undo();
+            let replacement = flatten_stack(&data)
+                .chars()
+                .enumerate()
+                .map(|(index, _)| Cell::Stack {
+                    data: data.clone(),
+                    props: props.clone(),
+                    head: index == 0,
+                })
+                .collect::<Vec<_>>();
+            let replacement_len = replacement.len();
+            cells.splice(start..end, replacement);
+            let new_end = start + replacement_len;
+            ed.content = text_editor::Content::with_text(
+                &cells_to_doc(&para0, &cells).to_mtext_string(),
+            );
+            ed.sel = Some((start, new_end));
+            ed.caret = new_end;
+            ed.sel_anchor = start;
+        }
+        self.rebuild_mtext_preview();
+    }
+
+    pub(super) fn mtext_clear_formatting(&mut self) {
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            let para0 = doc_para0(&ed.doc);
+            let mut cells = doc_to_cells(&ed.doc);
+            let (start, end) = ed
+                .sel
+                .filter(|(start, end)| start < end)
+                .unwrap_or((0, cells.len()));
+            let end = end.min(cells.len());
+            ed.record_undo();
+            for cell in &mut cells[start.min(end)..end] {
+                if let Cell::Char(_, props) | Cell::Stack { props, .. } = cell {
+                    *props = SpanProperties::default();
+                }
+            }
+            ed.content = text_editor::Content::with_text(
+                &cells_to_doc(&para0, &cells).to_mtext_string(),
+            );
+            ed.sel = Some((start, end));
+            ed.caret = end;
+        }
+        self.rebuild_mtext_preview();
+    }
+
+    pub(super) fn mtext_find_next(&mut self) {
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            let needle: Vec<char> = ed.find_text.chars().collect();
+            if needle.is_empty() {
+                return;
+            }
+            let cells = doc_to_cells(&ed.doc);
+            let chars: Vec<Option<char>> = cells
+                .iter()
+                .map(|cell| match cell {
+                    Cell::Char(ch, _) => Some(*ch),
+                    Cell::Break(..) => Some('\n'),
+                    Cell::Stack { .. } => None,
+                })
+                .collect();
+            let start = ed.caret.min(chars.len());
+            let found = (start..=chars.len().saturating_sub(needle.len()))
+                .chain(0..start.min(chars.len().saturating_sub(needle.len()) + 1))
+                .find(|index| {
+                    chars[*index..*index + needle.len()]
+                        .iter()
+                        .zip(&needle)
+                        .all(|(actual, expected)| actual == &Some(*expected))
+                });
+            if let Some(found) = found {
+                ed.sel_anchor = found;
+                ed.sel = Some((found, found + needle.len()));
+                ed.caret = found + needle.len();
+                ed.caret_blink_on = true;
+            }
+        }
+    }
+
+    pub(super) fn mtext_replace_next(&mut self) {
+        let replacement = self
+            .mtext_editor
+            .as_ref()
+            .map(|editor| editor.replace_text.clone())
+            .unwrap_or_default();
+        let matches = self.mtext_editor.as_ref().is_some_and(|editor| {
+            let Some((start, end)) = editor.sel.filter(|(start, end)| start < end) else {
+                return false;
+            };
+            let cells = doc_to_cells(&editor.doc);
+            cells_to_doc(
+                &ParagraphProperties::default(),
+                &cells[start.min(cells.len())..end.min(cells.len())],
+            )
+            .to_plain_text()
+                == editor.find_text
+        });
+        if matches {
+            self.mtext_type(&replacement);
+        }
+        self.mtext_find_next();
+    }
+
+    pub(super) fn mtext_replace_all(&mut self) {
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            let needle: Vec<char> = ed.find_text.chars().collect();
+            if needle.is_empty() {
+                return;
+            }
+            let para0 = doc_para0(&ed.doc);
+            let mut cells = doc_to_cells(&ed.doc);
+            let replacement = ed.replace_text.clone();
+            let mut matches = Vec::new();
+            let mut index = 0usize;
+            while index + needle.len() <= cells.len() {
+                let found = cells[index..index + needle.len()]
+                    .iter()
+                    .zip(&needle)
+                    .all(|(cell, expected)| matches!(cell, Cell::Char(actual, _) if actual == expected));
+                if found {
+                    matches.push(index);
+                    index += needle.len();
+                } else {
+                    index += 1;
+                }
+            }
+            if matches.is_empty() {
+                return;
+            }
+            ed.record_undo();
+            for start in matches.into_iter().rev() {
+                let props = insert_props(&cells, start);
+                let paragraph = para_props_at(&para0, &cells, start);
+                let replacement_cells = str_to_cells(&replacement, &props, &paragraph);
+                cells.splice(start..start + needle.len(), replacement_cells);
+            }
+            ed.content = text_editor::Content::with_text(
+                &cells_to_doc(&para0, &cells).to_mtext_string(),
+            );
+            ed.caret = cells.len();
+            ed.sel = Some((ed.caret, ed.caret));
+            ed.sel_anchor = ed.caret;
+        }
+        self.rebuild_mtext_preview();
+    }
+
     /// Toggle a character format over the preview selection, on the structured
     /// span properties. The stroke-font renderer has no true bold, so Bold
     /// switches the run to the heavier "Gothic" face; Italic applies a 15°
@@ -798,6 +1210,7 @@ impl super::OpenCADStudio {
             if a >= b {
                 return;
             }
+            ed.record_undo();
             match kind {
                 MTextFmt::Underline => {
                     let on = !all_have(&cells[a..b], |p| p.underline());
@@ -882,6 +1295,7 @@ impl super::OpenCADStudio {
     /// Set the alignment of every paragraph the selection (or caret) touches.
     pub(super) fn mtext_apply_align(&mut self, align: ParaAlign) {
         if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.record_undo();
             let para0 = doc_para0(&ed.doc);
             let cells = doc_to_cells(&ed.doc);
             let (a, b) = ed
@@ -933,6 +1347,7 @@ impl super::OpenCADStudio {
             s
         };
         if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.record_undo();
             // Edit the structured document as a flat cell list, then serialize
             // it back into the raw content the preview/commit still read.
             let para0 = doc_para0(&ed.doc);
@@ -962,6 +1377,7 @@ impl super::OpenCADStudio {
     /// Delete the selection, or the visible character before the caret.
     pub(super) fn mtext_backspace(&mut self) {
         if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.record_undo();
             let para0 = doc_para0(&ed.doc);
             let mut cells = doc_to_cells(&ed.doc);
             let count = cells.len();
@@ -985,6 +1401,7 @@ impl super::OpenCADStudio {
     /// Delete the selection, or the visible character at the caret.
     pub(super) fn mtext_delete(&mut self) {
         if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.record_undo();
             let para0 = doc_para0(&ed.doc);
             let mut cells = doc_to_cells(&ed.doc);
             let count = cells.len();
@@ -1104,6 +1521,7 @@ impl super::OpenCADStudio {
                 let mut cells = doc_to_cells(&ed.doc);
                 let b = b.min(cells.len());
                 if a < b {
+                    ed.record_undo();
                     for c in &mut cells[a..b] {
                         if let Cell::Char(_, p) | Cell::Stack { props: p, .. } = c {
                             let (bold, italic) = p
@@ -1155,6 +1573,7 @@ impl super::OpenCADStudio {
                 let mut cells = doc_to_cells(&ed.doc);
                 let b = b.min(cells.len());
                 if a < b {
+                    ed.record_undo();
                     for c in &mut cells[a..b] {
                         if let Cell::Char(_, p) | Cell::Stack { props: p, .. } = c {
                             p.color = mcolor.clone();
@@ -1217,7 +1636,8 @@ impl super::OpenCADStudio {
         }
         let body_empty = ed.content.text().trim().is_empty();
         let mut mt = ed.build_mtext();
-        let annotative = ed.editing.is_none()
+        let annotative = mt.is_annotative
+            || ed.editing.is_none()
             && crate::scene::annotative::text_style_is_annotative(
                 &self.tabs[i].scene.document,
                 &mt.style,
@@ -1240,9 +1660,12 @@ impl super::OpenCADStudio {
                 Some(EntityType::MText(t)) => {
                     t.value = mt.value;
                     t.height = mt.height;
+                    t.style = mt.style;
                     t.attachment_point = mt.attachment_point;
                     t.line_spacing_factor = mt.line_spacing_factor;
                     t.rectangle_width = mt.rectangle_width;
+                    t.rectangle_height = mt.rectangle_height;
+                    t.column_data = mt.column_data;
                 }
                 Some(EntityType::MultiLeader(ml)) => {
                     ml.context.text_string = mt.value;
@@ -1255,9 +1678,25 @@ impl super::OpenCADStudio {
                 _ => {}
             }
             // Keep the displayed annotation context in sync.
+            if matches!(self.tabs[i].scene.document.get_entity(h), Some(EntityType::MText(_))) {
+                crate::scene::annotative::set_entity_annotative(
+                    &mut self.tabs[i].scene.document,
+                    h,
+                    annotative,
+                );
+                if annotative {
+                    if let Some(scale) = self.tabs[i].scene.current_annotation_scale_handle() {
+                        crate::scene::annotative::create_annotation_context(
+                            &mut self.tabs[i].scene.document,
+                            h,
+                            scale,
+                        );
+                    }
+                }
+            }
             if matches!(
                 self.tabs[i].scene.document.get_entity(h),
-                Some(EntityType::MultiLeader(_))
+                Some(EntityType::MText(_) | EntityType::MultiLeader(_))
             ) {
                 self.tabs[i]
                     .scene
@@ -1283,7 +1722,6 @@ impl super::OpenCADStudio {
                 position.y,
                 position.z,
             );
-            mt.rotation = 0.0;
             self.push_undo_snapshot(i, "MTEXT");
             let handle = self.commit_entity_handle(plane.place_entity(EntityType::MText(mt)));
             if annotative {
@@ -1321,7 +1759,8 @@ impl super::OpenCADStudio {
             ),
             None => return,
         };
-        let annotative = editing.is_none()
+        let annotative = mt.is_annotative
+            || editing.is_none()
             && crate::scene::annotative::text_style_is_annotative(
                 &self.tabs[i].scene.document,
                 &mt.style,
@@ -1341,9 +1780,12 @@ impl super::OpenCADStudio {
                 Some(EntityType::MText(t)) => {
                     t.value = mt.value;
                     t.height = mt.height;
+                    t.style = mt.style;
                     t.attachment_point = mt.attachment_point;
                     t.line_spacing_factor = mt.line_spacing_factor;
                     t.rectangle_width = mt.rectangle_width;
+                    t.rectangle_height = mt.rectangle_height;
+                    t.column_data = mt.column_data;
                 }
                 Some(EntityType::MultiLeader(ml)) => {
                     ml.context.text_string = mt.value;
@@ -1355,9 +1797,25 @@ impl super::OpenCADStudio {
                 }
                 _ => {}
             }
+            if matches!(self.tabs[i].scene.document.get_entity(h), Some(EntityType::MText(_))) {
+                crate::scene::annotative::set_entity_annotative(
+                    &mut self.tabs[i].scene.document,
+                    h,
+                    annotative,
+                );
+                if annotative {
+                    if let Some(scale) = self.tabs[i].scene.current_annotation_scale_handle() {
+                        crate::scene::annotative::create_annotation_context(
+                            &mut self.tabs[i].scene.document,
+                            h,
+                            scale,
+                        );
+                    }
+                }
+            }
             if matches!(
                 self.tabs[i].scene.document.get_entity(h),
-                Some(EntityType::MultiLeader(_))
+                Some(EntityType::MText(_) | EntityType::MultiLeader(_))
             ) {
                 self.tabs[i]
                     .scene
@@ -1383,7 +1841,6 @@ impl super::OpenCADStudio {
                 position.y,
                 position.z,
             );
-            mt.rotation = 0.0;
             self.push_undo_snapshot(i, "MTEXT");
             let handle = self.commit_entity_handle(plane.place_entity(EntityType::MText(mt)));
             self.tabs[i].dirty = true;
@@ -1400,6 +1857,11 @@ impl super::OpenCADStudio {
             // Bind the editor to the fresh entity so the next Apply updates it.
             if let (Some(h), Some(ed)) = (handle, self.mtext_editor.as_mut()) {
                 ed.editing = Some(h);
+                if let Some(EntityType::MText(mtext)) =
+                    self.tabs[i].scene.document.get_entity(h)
+                {
+                    ed.original = Some(mtext.clone());
+                }
             }
         }
         self.refresh_properties();

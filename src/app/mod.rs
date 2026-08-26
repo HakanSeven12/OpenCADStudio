@@ -2655,6 +2655,31 @@ pub enum Message {
     MTextWidth(String),
     /// Toolbar character-spacing field changed.
     MTextCharSpace(String),
+    /// Undo / redo editor text and inline-format operations.
+    MTextUndo,
+    MTextRedo,
+    /// Convert the selected numerator/separator/denominator to a stacked run.
+    MTextStack,
+    /// Remove inline character formatting from the selection (or all text).
+    MTextClearFormatting,
+    /// Insert a predefined symbol or field token at the caret.
+    MTextInsert(String),
+    /// Per-object annotation flag edited from the text toolbar.
+    MTextAnnotative(bool),
+    /// Column layout controls.
+    MTextColumnMode(String),
+    MTextColumnCount(String),
+    MTextColumnWidth(String),
+    MTextColumnGutter(String),
+    MTextColumnHeight(String),
+    MTextColumnFlowReversed(bool),
+    /// Paragraph indent/spacing controls.
+    MTextParagraphNumber(mtext_editor::ParaNumber, String),
+    MTextFindText(String),
+    MTextReplaceText(String),
+    MTextFindNext,
+    MTextReplaceNext,
+    MTextReplaceAll,
     /// Toolbar colour picker (same widget as Properties) — applies to the
     /// selection, or the whole text when nothing is selected.
     MTextColorChanged(AcadColor),

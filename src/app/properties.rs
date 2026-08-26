@@ -1355,6 +1355,13 @@ impl OpenCADStudio {
                             .map(|entry| entry.name.clone())
                             .or_else(|| style.map(|entry| entry.dimtxsty.clone()))
                             .unwrap_or_else(|| "Standard".to_string());
+                            let text_height_editable = doc
+                                .text_styles
+                                .iter()
+                                .find(|entry| {
+                                    entry.name.eq_ignore_ascii_case(&text_style_name)
+                                })
+                                .is_none_or(|entry| !entry.has_fixed_height());
                             let mut names = text_style_names.clone();
                             if !names
                                 .iter()
@@ -1380,7 +1387,11 @@ impl OpenCADStudio {
                             set_row_value(
                                 &mut sections,
                                 "tol_text_height",
-                                PropValue::EditText(format!("{height:.4}")),
+                                if text_height_editable {
+                                    PropValue::EditText(format!("{height:.4}"))
+                                } else {
+                                    PropValue::ReadOnly(format!("{height:.4}"))
+                                },
                             );
                         }
                         // MultiLeader: max points + segment-angle constraints

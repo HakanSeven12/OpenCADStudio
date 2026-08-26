@@ -810,16 +810,21 @@ pub(super) struct OpenCADStudio {
     /// Snapshot of the dialog's settings taken when it opened, restored by the
     /// `<previous>` list entry.
     plot_prev: Option<crate::ui::window::plot::PlotDialogState>,
+    /// Full source settings behind the fields currently shown in Plot.
+    plot_setup_template: Option<acadrust::objects::PlotSettings>,
     /// Paper layouts shown by Print All, in tab order with their selection.
     print_all_layouts: Vec<(String, bool)>,
     /// True while the Plot dialog is editing settings for Print All.
     print_all_options: bool,
+    /// True when Print All should override each layout's page setup.
+    print_all_settings_override: bool,
     /// Settings restored when the Print All options dialog is cancelled.
     print_all_options_prev: Option<crate::ui::window::plot::PlotDialogState>,
     /// Plot style restored together with cancelled Print All options.
     print_all_plot_style_prev: Option<Option<crate::io::plot_style::PlotStyleTable>>,
     /// Plot window restored together with cancelled Print All options.
     print_all_plot_window_prev: Option<Option<(f64, f64, f64, f64)>>,
+    print_all_plot_setup_prev: Option<Option<acadrust::objects::PlotSettings>>,
 
     // ── Plot Style Table ──────────────────────────────────────────────────
     /// Currently loaded CTB/STB table (None = no override).
@@ -3287,11 +3292,14 @@ impl OpenCADStudio {
             plot_orientation: crate::io::paper_sizes::Orientation::Landscape,
             plot_dialog: crate::ui::window::plot::PlotDialogState::default(),
             plot_prev: None,
+            plot_setup_template: None,
             print_all_layouts: Vec::new(),
             print_all_options: false,
+            print_all_settings_override: false,
             print_all_options_prev: None,
             print_all_plot_style_prev: None,
             print_all_plot_window_prev: None,
+            print_all_plot_setup_prev: None,
             opening: None,
             open_job_serial: 0,
             recovery_report: None,

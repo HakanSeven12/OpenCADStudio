@@ -30,6 +30,7 @@ impl OpenCADStudio {
                                 .document
                                 .header
                                 .paper_space_insertion_base = pt;
+                            self.tabs[i].scene.persist_current_layout_state();
                         } else {
                             self.tabs[i]
                                 .scene

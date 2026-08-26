@@ -5293,8 +5293,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.set_current_layout(name.clone());
         self.tabs[i].scene.deselect_all();
         let switch_ms = perf_phase.elapsed().as_secs_f64() * 1000.0;
-        // UCS follows the pane: model header UCS in the Model tab, none
-        // in plain paper space (a viewport's UCS is adopted on entry).
+        // UCS follows the active model, layout, or floating viewport pane.
         let perf_phase = Instant::now();
         self.tabs[i].refresh_active_ucs();
         self.tabs[i].scene.restore_saved_camera();
@@ -5358,10 +5357,28 @@ impl OpenCADStudio {
         self.push_undo_snapshot(i, "LAYOUT");
         match self.tabs[i].scene.document.add_layout(&new_name) {
             Ok(_) => {
-                // Override the acadrust default limits (12×9 imperial) with A4 landscape.
+                let layout_flags = i16::from(
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .paper_space_linetype_scaling,
+                ) | (i16::from(
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .paper_space_limit_check,
+                ) << 1);
+                let plot_style = self
+                    .active_plot_style
+                    .as_ref()
+                    .map(|style| style.name.clone())
+                    .unwrap_or_default();
                 for obj in self.tabs[i].scene.document.objects.values_mut() {
                     if let acadrust::objects::ObjectType::Layout(l) = obj {
                         if l.name == new_name {
+                            l.flags = layout_flags;
                             l.min_limits = (0.0, 0.0);
                             l.max_limits = (297.0, 210.0);
                             l.min_extents = (0.0, 0.0, 0.0);
@@ -5371,6 +5388,14 @@ impl OpenCADStudio {
                             l.plot_paper_units = 1;
                             l.plot_scale_numerator = 1.0;
                             l.plot_scale_denominator = 1.0;
+                            l.plot_scale_type = 16;
+                            l.plot_scale_factor = 1.0;
+                            l.plot_type = 5;
+                            l.plot_flags.use_standard_scale = true;
+                            l.plot_flags.print_lineweights = true;
+                            l.plot_flags.plot_plot_styles = !plot_style.is_empty();
+                            l.plot_flags.show_plot_styles = !plot_style.is_empty();
+                            l.plot_style_sheet = plot_style;
                             l.paper_size = "ISO_A4_(297.00_x_210.00_MM)".into();
                             break;
                         }

@@ -1614,6 +1614,15 @@ pub struct Scene {
     /// movement scanned the whole document for wipeouts and recreated the same
     /// Arcs, making Paper frame construction CPU-bound on large drawings.
     paper_sheet_render_cache: RefCell<HashMap<String, PaperSheetRenderCache>>,
+    display_plot_style_cache:
+        RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
+    styled_wire_cache: RefCell<
+        HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>,
+    >,
+    styled_hatch_cache:
+        RefCell<HashMap<(u64, usize, usize, String, u32), Arc<Vec<HatchModel>>>>,
+    styled_wire_fill_cache:
+        RefCell<HashMap<(u64, String, u32), Arc<Vec<HatchModel>>>>,
     /// Per-viewport projected wire cache for paper-space content viewports.
     /// Stores projected + clipped wires in paper-space coordinates.
     /// Maps vp_handle → (geometry_epoch, Vec<WireModel>).
@@ -1880,6 +1889,10 @@ impl Scene {
             paper_sheet_cache: RefCell::new(HashMap::default()),
             paper_viewport_cache: RefCell::new(HashMap::default()),
             paper_sheet_render_cache: RefCell::new(HashMap::default()),
+            display_plot_style_cache: RefCell::new(HashMap::default()),
+            styled_wire_cache: RefCell::new(HashMap::default()),
+            styled_hatch_cache: RefCell::new(HashMap::default()),
+            styled_wire_fill_cache: RefCell::new(HashMap::default()),
             paper_projected_cache: RefCell::new(HashMap::default()),
             current_layout: "Model".to_string(),
             block_edit_block: None,
@@ -2878,13 +2891,100 @@ impl Scene {
     /// active layout or its background are dropped.
     pub fn set_current_layout(&mut self, name: String) {
         if self.current_layout != name {
+            self.persist_current_layout_state();
             self.current_layout = name;
+            self.load_current_layout_state();
             self.sync_active_space_to_document();
             self.recolor_meshes();
             *self.wire_cache.borrow_mut() = None;
             *self.interaction_mesh_cache.borrow_mut() = None;
             *self.mesh_pick_lookup_cache.borrow_mut() = None;
             *self.insert_hatch_cache.borrow_mut() = None;
+        }
+    }
+
+    pub fn load_current_layout_state(&mut self) {
+        self.display_plot_style_cache
+            .borrow_mut()
+            .retain(|(layout, _), _| layout != &self.current_layout);
+        self.styled_wire_cache.borrow_mut().clear();
+        self.styled_hatch_cache.borrow_mut().clear();
+        self.styled_wire_fill_cache.borrow_mut().clear();
+        if self.current_layout == "Model" {
+            return;
+        }
+        if let Some((flags, insertion_base, min_extents, max_extents, min_limits, max_limits)) =
+            self.document.objects.values().find_map(|object| {
+            let ObjectType::Layout(layout) = object else {
+                return None;
+            };
+            (layout.name == self.current_layout).then_some((
+                layout.flags,
+                layout.insertion_base,
+                layout.min_extents,
+                layout.max_extents,
+                layout.min_limits,
+                layout.max_limits,
+            ))
+        }) {
+            self.document.header.paper_space_linetype_scaling = flags & 1 != 0;
+            self.document.header.paper_space_limit_check = flags & 2 != 0;
+            self.document.header.paper_space_insertion_base = acadrust::types::Vector3::new(
+                insertion_base.0,
+                insertion_base.1,
+                insertion_base.2,
+            );
+            self.document.header.paper_space_extents_min = acadrust::types::Vector3::new(
+                min_extents.0,
+                min_extents.1,
+                min_extents.2,
+            );
+            self.document.header.paper_space_extents_max = acadrust::types::Vector3::new(
+                max_extents.0,
+                max_extents.1,
+                max_extents.2,
+            );
+            self.document.header.paper_space_limits_min =
+                acadrust::types::Vector2::new(min_limits.0, min_limits.1);
+            self.document.header.paper_space_limits_max =
+                acadrust::types::Vector2::new(max_limits.0, max_limits.1);
+        }
+    }
+
+    pub fn persist_current_layout_state(&mut self) {
+        if self.current_layout == "Model" {
+            return;
+        }
+        let header = &self.document.header;
+        let psltscale = header.paper_space_linetype_scaling;
+        let plimcheck = header.paper_space_limit_check;
+        let insertion_base = header.paper_space_insertion_base;
+        let min_extents = header.paper_space_extents_min;
+        let max_extents = header.paper_space_extents_max;
+        let min_limits = header.paper_space_limits_min;
+        let max_limits = header.paper_space_limits_max;
+        for object in self.document.objects.values_mut() {
+            let ObjectType::Layout(layout) = object else {
+                continue;
+            };
+            if layout.name == self.current_layout {
+                layout.flags = if psltscale {
+                    layout.flags | 1
+                } else {
+                    layout.flags & !1
+                };
+                layout.flags = if plimcheck {
+                    layout.flags | 2
+                } else {
+                    layout.flags & !2
+                };
+                layout.insertion_base = (insertion_base.x, insertion_base.y, insertion_base.z);
+                layout.min_extents = (min_extents.x, min_extents.y, min_extents.z);
+                layout.max_extents = (max_extents.x, max_extents.y, max_extents.z);
+                layout.min_limits = (min_limits.x, min_limits.y);
+                layout.max_limits = (max_limits.x, max_limits.y);
+                break;
+            }
         }
     }
 
@@ -3305,32 +3405,17 @@ impl Scene {
         Some(wire)
     }
 
-    /// The effective plot settings for the current layout: a standalone
-    /// PlotSettings page setup if one exists, otherwise the settings embedded in
-    /// the LAYOUT object (paper size, margins, origin, rotation, scale). Loaded
-    /// The fallback preserves rotation, origin and scale from loaded files.
+    /// The effective plot settings embedded in the current layout.
     pub fn effective_plot_settings(&self) -> Option<acadrust::objects::PlotSettings> {
         self.plot_settings_for(&self.current_layout)
     }
 
-    /// Plot settings for a specific layout by name: its standalone
-    /// `PlotSettings` object if one exists, else synthesized from the `Layout`
-    /// object's embedded fields.
+    /// Plot settings embedded in a specific layout.
     pub fn plot_settings_for(&self, name: &str) -> Option<acadrust::objects::PlotSettings> {
         use acadrust::objects::{
             ObjectType, PaperMargin, PlotPaperUnits, PlotRotation, PlotSettings, PlotType,
-            PlotWindow, ScaledType,
+            PlotWindow, ScaledType, ShadePlotMode, ShadePlotResolutionLevel,
         };
-        if let Some(ps) = self.document.objects.values().find_map(|o| {
-            if let ObjectType::PlotSettings(ps) = o {
-                if ps.page_name.as_str() == name {
-                    return Some(ps.clone());
-                }
-            }
-            None
-        }) {
-            return Some(ps);
-        }
         self.document.objects.values().find_map(|o| {
             let ObjectType::Layout(l) = o else {
                 return None;
@@ -3338,10 +3423,13 @@ impl Scene {
             if l.name.as_str() != name {
                 return None;
             }
-            let mut ps = PlotSettings::new(l.name.clone());
+            let mut ps = PlotSettings::new(l.plot_page_name.clone());
+            ps.printer_name = l.plot_printer_name.clone();
             ps.paper_width = l.paper_width;
             ps.paper_height = l.paper_height;
             ps.paper_size = l.paper_size.clone();
+            ps.plot_view_name = l.plot_view_name.clone();
+            ps.current_style_sheet = l.plot_style_sheet.clone();
             ps.margins = PaperMargin::new(
                 l.plot_margin_left,
                 l.plot_margin_bottom,
@@ -3362,8 +3450,82 @@ impl Scene {
             ps.scale_type = ScaledType::from_code(l.plot_scale_type);
             ps.scale_numerator = l.plot_scale_numerator;
             ps.scale_denominator = l.plot_scale_denominator;
+            ps.flags = l.plot_flags;
+            ps.standard_scale_factor = l.plot_scale_factor;
+            ps.paper_image_origin_x = l.paper_image_origin_x;
+            ps.paper_image_origin_y = l.paper_image_origin_y;
+            ps.shade_plot_mode = ShadePlotMode::from_code(l.shade_plot_mode);
+            ps.shade_plot_resolution =
+                ShadePlotResolutionLevel::from_code(l.shade_plot_resolution);
+            ps.shade_plot_dpi = l.shade_plot_dpi;
+            ps.plot_view_handle = l.plot_view_handle;
+            ps.visual_style_handle = l.visual_style_handle;
             Some(ps)
         })
+    }
+
+    /// Replace the plot-settings portion embedded in one layout.
+    pub fn set_layout_plot_settings(
+        &mut self,
+        name: &str,
+        ps: &acadrust::objects::PlotSettings,
+    ) -> bool {
+        let Some(layout) = self.document.objects.values_mut().find_map(|object| {
+            let ObjectType::Layout(layout) = object else {
+                return None;
+            };
+            (layout.name == name).then_some(layout)
+        }) else {
+            return false;
+        };
+
+        layout.plot_page_name = ps.page_name.clone();
+        layout.plot_printer_name = ps.printer_name.clone();
+        layout.paper_size = ps.paper_size.clone();
+        layout.plot_view_name = ps.plot_view_name.clone();
+        layout.plot_style_sheet = ps.current_style_sheet.clone();
+        layout.plot_margin_left = ps.margins.left;
+        layout.plot_margin_bottom = ps.margins.bottom;
+        layout.plot_margin_right = ps.margins.right;
+        layout.plot_margin_top = ps.margins.top;
+        layout.paper_width = ps.paper_width;
+        layout.paper_height = ps.paper_height;
+        layout.plot_origin_x = ps.origin_x;
+        layout.plot_origin_y = ps.origin_y;
+        layout.plot_window_min_x = ps.plot_window.lower_left_x;
+        layout.plot_window_min_y = ps.plot_window.lower_left_y;
+        layout.plot_window_max_x = ps.plot_window.upper_right_x;
+        layout.plot_window_max_y = ps.plot_window.upper_right_y;
+        layout.plot_scale_numerator = ps.scale_numerator;
+        layout.plot_scale_denominator = ps.scale_denominator;
+        layout.plot_paper_units = ps.paper_units.to_code();
+        layout.plot_rotation = ps.rotation.to_code();
+        layout.plot_type = ps.plot_type.to_code();
+        layout.plot_scale_type = ps.scale_type.to_code();
+        layout.shade_plot_mode = ps.shade_plot_mode.to_code();
+        layout.shade_plot_resolution = ps.shade_plot_resolution.to_code();
+        layout.shade_plot_dpi = ps.shade_plot_dpi;
+        layout.plot_flags = ps.flags;
+        layout.plot_scale_factor = ps.standard_scale_factor;
+        layout.paper_image_origin_x = ps.paper_image_origin_x;
+        layout.paper_image_origin_y = ps.paper_image_origin_y;
+        layout.plot_view_handle = ps.plot_view_handle;
+        layout.visual_style_handle = ps.visual_style_handle;
+        layout.raw_plot_settings_codes = None;
+        self.display_plot_style_cache
+            .borrow_mut()
+            .retain(|(layout_name, _), _| layout_name != name);
+        self.styled_wire_cache.borrow_mut().clear();
+        self.styled_hatch_cache.borrow_mut().clear();
+        self.styled_wire_fill_cache.borrow_mut().clear();
+        true
+    }
+
+    pub fn invalidate_display_plot_style(&self) {
+        self.display_plot_style_cache.borrow_mut().clear();
+        self.styled_wire_cache.borrow_mut().clear();
+        self.styled_hatch_cache.borrow_mut().clear();
+        self.styled_wire_fill_cache.borrow_mut().clear();
     }
 
     /// PlotSettings store the paper size and plot margins in millimetres, but a

@@ -63,6 +63,8 @@ pub enum PlotFlag {
     FitToPaper,
     Center,
     ScaleLw,
+    PlotStyles,
+    DisplayStyles,
     UpsideDown,
     Lineweights,
     Transparency,
@@ -132,6 +134,10 @@ pub struct PlotDialogState {
     /// Output goes to a PDF file instead of a printer.
     pub to_file: bool,
     pub paper: String,
+    #[serde(skip)]
+    pub paper_width_mm: f64,
+    #[serde(skip)]
+    pub paper_height_mm: f64,
     pub orientation: String,
     pub upside_down: bool,
     pub copies: String,
@@ -144,6 +150,8 @@ pub struct PlotDialogState {
     pub fit_to_paper: bool,
     #[serde(skip)]
     pub scales: Vec<(String, f64)>,
+    #[serde(skip)]
+    pub plot_views: Vec<String>,
     pub scale_lw: bool,
     pub quality: String,
     pub shade: String,
@@ -155,6 +163,8 @@ pub struct PlotDialogState {
     pub stamp: bool,
     /// Display name of the active plot style table ("" = none).
     pub style_name: String,
+    pub apply_plot_styles: bool,
+    pub show_plot_styles: bool,
     /// CTB file names discovered in the per-user plot styles folder.
     #[serde(skip)]
     pub plot_styles: Vec<String>,
@@ -185,6 +195,8 @@ impl Default for PlotDialogState {
             printer: None,
             to_file: false,
             paper: "A4".into(),
+            paper_width_mm: 297.0,
+            paper_height_mm: 210.0,
             orientation: "Landscape".into(),
             upside_down: false,
             copies: "1".into(),
@@ -195,6 +207,7 @@ impl Default for PlotDialogState {
             scale: "1:1".into(),
             fit_to_paper: true,
             scales: Vec::new(),
+            plot_views: Vec::new(),
             scale_lw: false,
             quality: "Normal".into(),
             shade: "As displayed".into(),
@@ -205,6 +218,8 @@ impl Default for PlotDialogState {
             paperspace_last: false,
             stamp: false,
             style_name: String::new(),
+            apply_plot_styles: true,
+            show_plot_styles: false,
             plot_styles: Vec::new(),
             style_missing: false,
             page_setups: Vec::new(),
@@ -224,6 +239,8 @@ impl PlotDialogState {
         self.printer = o.printer.clone();
         self.to_file = o.to_file;
         self.paper = o.paper.clone();
+        self.paper_width_mm = o.paper_width_mm;
+        self.paper_height_mm = o.paper_height_mm;
         self.orientation = o.orientation.clone();
         self.upside_down = o.upside_down;
         self.copies = o.copies.clone();
@@ -243,6 +260,8 @@ impl PlotDialogState {
         self.paperspace_last = o.paperspace_last;
         self.stamp = o.stamp;
         self.style_name = o.style_name.clone();
+        self.apply_plot_styles = o.apply_plot_styles;
+        self.show_plot_styles = o.show_plot_styles;
         self.style_missing = o.style_missing;
     }
 
@@ -622,7 +641,10 @@ pub fn view_window(
             None => PlotChoice::localized(OUT_DEFAULT),
         })
     };
-    let paper_opts: Vec<String> = PaperSize::ALL.iter().map(|p| p.label().to_string()).collect();
+    let mut paper_opts: Vec<String> = PaperSize::ALL.iter().map(|p| p.label().to_string()).collect();
+    if !paper_opts.iter().any(|name| name == &s.paper) {
+        paper_opts.push(s.paper.clone());
+    }
     let paper_note: Element<'_, Message> = if s.area == "Layout" {
         text(t!("Layout plots the current sheet using the selected paper size."))
             .size(10)
@@ -685,10 +707,17 @@ pub fn view_window(
     let mut area_options = if print_all_options {
         choices(&["Layout"])
     } else {
-        choices(&["Extents", "Display", "Window"])
+        choices(&["Extents", "Limits", "Display", "Window"])
     };
     if s.paper_space && !print_all_options {
         area_options.insert(0, PlotChoice::localized("Layout"));
+    }
+    if !print_all_options {
+        area_options.extend(
+            s.plot_views
+                .iter()
+                .map(|name| PlotChoice::raw(format!("View: {name}"))),
+        );
     }
     let mut area_row = row![
         text(t!("What to plot")).size(11).style(muted_style).width(92),
@@ -778,6 +807,18 @@ pub fn view_window(
             Some(style_selected),
             PlotDlgMsg::Style,
             width,
+        ),
+        check_enabled(
+            t!("Plot with plot styles"),
+            s.apply_plot_styles,
+            PlotFlag::PlotStyles,
+            !s.style_name.is_empty(),
+        ),
+        check_enabled(
+            t!("Display plot styles"),
+            s.show_plot_styles,
+            PlotFlag::DisplayStyles,
+            s.paper_space && !s.style_name.is_empty(),
         ),
         row![
             button(text(t!("Load…")).size(11))

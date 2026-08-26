@@ -1,7 +1,7 @@
 //! Plot Style Table — CTB (color-based) and STB (named) file support.
 //!
 //! CTB files map indexed drawing colors (ACI, 1-255) to pen properties:
-//! RGB color override, lineweight, and screeing percentage.
+//! RGB color override, lineweight, and screening percentage.
 //!
 //! File format: a fixed 60-byte header followed by zlib-compressed text.
 //!
@@ -17,6 +17,21 @@ use std::path::PathBuf;
 
 pub const DEFAULT_PLOT_STYLE: &str = "ocad.ctb";
 pub const MONOCHROME_PLOT_STYLE: &str = "monochrome.ctb";
+pub const GRAYSCALE_PLOT_STYLE: &str = "Grayscale.ctb";
+pub const FILL_PATTERNS_PLOT_STYLE: &str = "Fill Patterns.ctb";
+pub const SCREENING_100_PLOT_STYLE: &str = "Screening 100%.ctb";
+pub const SCREENING_75_PLOT_STYLE: &str = "Screening 75%.ctb";
+pub const SCREENING_50_PLOT_STYLE: &str = "Screening 50%.ctb";
+pub const SCREENING_25_PLOT_STYLE: &str = "Screening 25%.ctb";
+
+const STANDARD_PLOT_STYLES: &[&str] = &[
+    GRAYSCALE_PLOT_STYLE,
+    FILL_PATTERNS_PLOT_STYLE,
+    SCREENING_100_PLOT_STYLE,
+    SCREENING_75_PLOT_STYLE,
+    SCREENING_50_PLOT_STYLE,
+    SCREENING_25_PLOT_STYLE,
+];
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn plot_styles_dir() -> Result<PathBuf, String> {
@@ -52,10 +67,14 @@ pub fn available_ctb_names() -> Vec<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let Ok(dir) = ensure_plot_styles_dir() else {
-            return vec![DEFAULT_PLOT_STYLE.into(), MONOCHROME_PLOT_STYLE.into()];
+            let mut names = vec![DEFAULT_PLOT_STYLE.into(), MONOCHROME_PLOT_STYLE.into()];
+            names.extend(STANDARD_PLOT_STYLES.iter().map(|name| (*name).to_string()));
+            return names;
         };
         let Ok(entries) = std::fs::read_dir(dir) else {
-            return vec![DEFAULT_PLOT_STYLE.into(), MONOCHROME_PLOT_STYLE.into()];
+            let mut names = vec![DEFAULT_PLOT_STYLE.into(), MONOCHROME_PLOT_STYLE.into()];
+            names.extend(STANDARD_PLOT_STYLES.iter().map(|name| (*name).to_string()));
+            return names;
         };
         let mut names: Vec<String> = entries
             .filter_map(Result::ok)
@@ -67,13 +86,16 @@ pub fn available_ctb_names() -> Vec<String> {
                     .then(|| entry.file_name().to_string_lossy().into_owned())
             })
             .collect();
+        names.extend(STANDARD_PLOT_STYLES.iter().map(|name| (*name).to_string()));
         names.sort_by_key(|name| name.to_ascii_lowercase());
         names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         names
     }
     #[cfg(target_arch = "wasm32")]
     {
-        vec![DEFAULT_PLOT_STYLE.into(), MONOCHROME_PLOT_STYLE.into()]
+        let mut names = vec![DEFAULT_PLOT_STYLE.into(), MONOCHROME_PLOT_STYLE.into()];
+        names.extend(STANDARD_PLOT_STYLES.iter().map(|name| (*name).to_string()));
+        names
     }
 }
 
@@ -199,8 +221,42 @@ impl PlotStyleTable {
                 MONOCHROME_PLOT_STYLE,
                 include_bytes!("../../assets/plotstyles/monochrome.ctb"),
             ),
+            "grayscale.ctb" => {
+                let mut table = Self::identity(GRAYSCALE_PLOT_STYLE);
+                for aci in 1..=255u8 {
+                    if let Some((r, g, b)) = acadrust::types::aci_to_rgb(aci) {
+                        let gray = if aci == 7 {
+                            0
+                        } else {
+                            (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32)
+                                .round() as u8
+                        };
+                        table.aci_entries[aci as usize].color = Some([gray, gray, gray]);
+                    }
+                }
+                Ok(table)
+            }
+            "fill patterns.ctb" => {
+                let mut table = Self::identity(FILL_PATTERNS_PLOT_STYLE);
+                for aci in 1..=9usize {
+                    table.aci_entries[aci].fill_style = 63 + aci as u8;
+                }
+                Ok(table)
+            }
+            "screening 100%.ctb" => Ok(Self::screening(SCREENING_100_PLOT_STYLE, 100)),
+            "screening 75%.ctb" => Ok(Self::screening(SCREENING_75_PLOT_STYLE, 75)),
+            "screening 50%.ctb" => Ok(Self::screening(SCREENING_50_PLOT_STYLE, 50)),
+            "screening 25%.ctb" => Ok(Self::screening(SCREENING_25_PLOT_STYLE, 25)),
             _ => Err(format!("Unknown built-in plot style: {name}")),
         }
+    }
+
+    fn screening(name: &str, percent: u8) -> Self {
+        let mut table = Self::identity(name);
+        for entry in table.aci_entries.iter_mut().skip(1) {
+            entry.screening = percent;
+        }
+        table
     }
 
     /// Load one CTB by file name from the per-user plot styles folder.
@@ -227,9 +283,11 @@ impl PlotStyleTable {
                         .to_string_lossy()
                         .eq_ignore_ascii_case(name)
                 })
-                .map(|entry| entry.path())
-                .ok_or_else(|| format!("Plot style not found: {name}"))?;
-            return Self::load(&matched);
+                .map(|entry| entry.path());
+            return match matched {
+                Some(path) => Self::load(&path),
+                None => Self::builtin(name),
+            };
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -248,9 +306,23 @@ impl PlotStyleTable {
     /// Returns None if no override (use object color).
     pub fn resolve_color(&self, aci: u8) -> Option<[f32; 3]> {
         let entry = self.aci_entries.get(aci as usize)?;
-        entry
+        let mut color = entry
             .color
-            .map(|[r, g, b]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
+            .map(|[r, g, b]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]);
+        if entry.color_policy & 2 != 0 {
+            let rgb = color.or_else(|| {
+                if aci == 7 {
+                    Some([0.0; 3])
+                } else {
+                    acadrust::types::aci_to_rgb(aci).map(|(r, g, b)| {
+                        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
+                    })
+                }
+            })?;
+            let gray = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+            color = Some([gray; 3]);
+        }
+        color
     }
 
     /// Resolve the effective lineweight in mm for the given ACI index.
@@ -260,7 +332,13 @@ impl PlotStyleTable {
         if matches!(entry.lineweight, 0 | 255) {
             None
         } else {
-            self.lineweights.get(entry.lineweight as usize).copied()
+            self.lineweights.get(entry.lineweight as usize).copied().map(|weight| {
+                if self.apply_factor {
+                    weight * self.scale_factor.max(0.0)
+                } else {
+                    weight
+                }
+            })
         }
     }
 

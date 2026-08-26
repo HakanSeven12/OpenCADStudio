@@ -25,6 +25,7 @@ use std::io::Write;
 use std::path::Path;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct PlotWire {
     pub wire: WireModel,
     pub draw_depth: f32,
@@ -120,6 +121,7 @@ pub struct PdfPageInput {
     pub scale: f32,
     pub clip: Option<(f32, f32, f32, f32)>,
     pub options: PdfPlotOptions,
+    pub plot_style: Option<PlotStyleTable>,
 }
 
 impl Default for PdfPlotOptions {
@@ -270,7 +272,7 @@ fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) 
             page.rotation_deg,
             page.scale,
             page.clip,
-            plot_style,
+            page.plot_style.as_ref().or(plot_style),
             page.options,
         );
     }
@@ -440,6 +442,8 @@ fn append_pdf_page(
 
     let mut last_color: Option<[f32; 3]> = None;
     let mut last_lw: Option<f32> = None;
+    let mut last_cap = Some(LineCapStyle::Round);
+    let mut last_join = Some(LineJoinStyle::Round);
     // Current PDF dash array (empty = solid). Tracked so the dash op is only
     // re-emitted when it actually changes between wires.
     let mut last_dash: Option<Vec<i64>> = None;
@@ -453,7 +457,9 @@ fn append_pdf_page(
                     ox,
                     oy,
                     plot_style,
+                    scale,
                     options,
+                    normal_blend.as_ref(),
                 );
                 last_color = None;
                 last_lw = None;
@@ -506,6 +512,8 @@ fn append_pdf_page(
         let mut lw_override: Option<f32> = None;
         let mut screening = 1.0;
         let mut color_overridden = false;
+        let mut cap = None;
+        let mut join = None;
         if let Some(ctb) = plot_style {
             if wire.aci > 0 {
                 if let Some([cr, cg, cb]) = ctb.resolve_color(wire.aci) {
@@ -518,6 +526,20 @@ fn append_pdf_page(
                     .resolve_lineweight(wire.aci)
                     .map(|mm| (mm * MM_TO_PT).max(0.1));
                 screening = ctb.resolve_screening(wire.aci);
+                if let Some(entry) = ctb.aci_entries.get(wire.aci as usize) {
+                    cap = match entry.end_style {
+                        0 => Some(LineCapStyle::Butt),
+                        1 | 3 => Some(LineCapStyle::ProjectingSquare),
+                        2 => Some(LineCapStyle::Round),
+                        _ => None,
+                    };
+                    join = match entry.join_style {
+                        0 => Some(LineJoinStyle::Miter),
+                        1 | 3 => Some(LineJoinStyle::Bevel),
+                        2 => Some(LineJoinStyle::Round),
+                        _ => None,
+                    };
+                }
             }
         }
         // Near-white and near-yellow (viewport active border) → dark grey for print
@@ -538,6 +560,17 @@ fn append_pdf_page(
             }
         }
         [r, g, b] = plotted_color([r, g, b], a, screening, options);
+
+        let cap = cap.unwrap_or(LineCapStyle::Round);
+        if last_cap != Some(cap) {
+            ops.push(Op::SetLineCapStyle { cap });
+            last_cap = Some(cap);
+        }
+        let join = join.unwrap_or(LineJoinStyle::Round);
+        if last_join != Some(join) {
+            ops.push(Op::SetLineJoinStyle { join });
+            last_join = Some(join);
+        }
 
         if last_color
             .map(|c| (c[0] - r).abs() > 0.01 || (c[1] - g).abs() > 0.01 || (c[2] - b).abs() > 0.01)
@@ -576,13 +609,11 @@ fn append_pdf_page(
         let lw_pt = if wire.world_width > 0.0 {
             wire.world_width * MM_TO_PT
         } else {
-            let physical = lw_override.unwrap_or_else(|| {
-                if options.object_lineweights {
-                    (wire.line_weight_px * LW_PX_TO_PT).max(0.1)
-                } else {
-                    0.1
-                }
-            });
+            let physical = if options.object_lineweights {
+                lw_override.unwrap_or_else(|| (wire.line_weight_px * LW_PX_TO_PT).max(0.1))
+            } else {
+                0.1
+            };
             physical / pen_divisor
         };
         if last_lw.map(|l| (l - lw_pt).abs() > 0.01).unwrap_or(true) {
@@ -852,10 +883,69 @@ fn emit_wire_fills(
     ox: f64,
     oy: f64,
     plot_style: Option<&PlotStyleTable>,
+    scale: f32,
     options: PdfPlotOptions,
+    normal_blend: Option<&ExtendedGraphicsStateId>,
 ) {
     for wire in wires {
         if wire.fill_tris.is_empty() {
+            continue;
+        }
+        let styled_pattern = plot_style.and_then(|table| {
+            (wire.aci > 0)
+                .then(|| table.aci_entries.get(wire.aci as usize))
+                .flatten()
+                .and_then(|entry| {
+                    (65..=72)
+                        .contains(&entry.fill_style)
+                        .then(|| {
+                            crate::scene::model::hatch_model::plot_style_fill_pattern(
+                                entry.fill_style,
+                            )
+                        })
+                        .flatten()
+                })
+        });
+        if let Some(pattern) = styled_pattern {
+            for (triangle_index, triangle) in wire.fill_tris.chunks_exact(3).enumerate() {
+                let mut boundary = Vec::with_capacity(4);
+                for (point_index, point) in triangle.iter().enumerate() {
+                    let index = triangle_index * 3 + point_index;
+                    let low = wire.fill_tris_low.get(index).copied().unwrap_or([0.0; 3]);
+                    boundary.push([point[0] + low[0], point[1] + low[1]]);
+                }
+                boundary.push(boundary[0]);
+                let hatch = HatchModel {
+                    render_instance: wire.render_instance.clone(),
+                    world_origin: [0.0, 0.0],
+                    boundary: std::sync::Arc::new(boundary),
+                    boundary_wcs: None,
+                    fill_plane: None,
+                    fill_plane_boundary: None,
+                    boundary_exterior: None,
+                    boundary_sources: None,
+                    boundary_paths: None,
+                    style: acadrust::entities::HatchStyleType::Normal,
+                    pattern: pattern.clone(),
+                    name: "PLOTSTYLE".to_string(),
+                    color: wire.color,
+                    aci: wire.aci,
+                    line_weight_px: wire.line_weight_px,
+                    angle_offset: 0.0,
+                    scale: 1.0 / scale.max(1.0e-6),
+                    draw_depth: wire.depth_override.unwrap_or(0.0),
+                };
+                emit_hatch(
+                    ops,
+                    &hatch,
+                    ox,
+                    oy,
+                    plot_style,
+                    scale,
+                    options,
+                    normal_blend,
+                );
+            }
             continue;
         }
         let [mut r, mut g, mut b, a] = wire.color;
@@ -964,6 +1054,26 @@ fn emit_hatch(
     if hatch.boundary.is_empty() {
         return;
     }
+    let mut styled_hatch = None;
+    if let Some(table) = plot_style {
+        if hatch.aci > 0 && matches!(hatch.pattern, HatchPattern::Solid) {
+            if let Some(pattern) = table
+                .aci_entries
+                .get(hatch.aci as usize)
+                .and_then(|entry| {
+                    crate::scene::model::hatch_model::plot_style_fill_pattern(
+                        entry.fill_style,
+                    )
+                })
+            {
+                let mut model = hatch.clone();
+                model.pattern = pattern;
+                model.scale = 1.0 / scale.max(1.0e-6);
+                styled_hatch = Some(model);
+            }
+        }
+    }
+    let hatch = styled_hatch.as_ref().unwrap_or(hatch);
     let [mut r, mut g, mut b, a] = hatch.color;
     if a < 0.01 {
         return;
@@ -1082,13 +1192,11 @@ fn emit_hatch(
     // Pattern hatches: rasterise the family lines clipped to the boundary
     // and emit each as a stroked line. Skips the polygon outline entirely.
     if matches!(hatch.pattern, HatchPattern::Pattern(_)) {
-        let physical = lw_override.unwrap_or_else(|| {
-            if options.object_lineweights {
-                (hatch.line_weight_px * LW_PX_TO_PT).max(0.1)
-            } else {
-                0.1
-            }
-        });
+        let physical = if options.object_lineweights {
+            lw_override.unwrap_or_else(|| (hatch.line_weight_px * LW_PX_TO_PT).max(0.1))
+        } else {
+            0.1
+        };
         let divisor = if options.scale_lineweights {
             1.0
         } else {
@@ -1248,16 +1356,16 @@ fn emit_text(
         if let Some(ctb) = plot_style {
             if wire.aci > 0 {
                 ctb_color = ctb.resolve_color(wire.aci);
-                lw_override = ctb
-                    .resolve_lineweight(wire.aci)
-                    .map(|mm| {
+                lw_override = options.object_lineweights.then(|| {
+                    ctb.resolve_lineweight(wire.aci).map(|mm| {
                         let divisor = if options.scale_lineweights {
                             1.0
                         } else {
                             scale.max(1e-6)
                         };
                         (mm * MM_TO_PT).max(0.1) / divisor
-                    });
+                    })
+                }).flatten();
                 screening = ctb.resolve_screening(wire.aci);
             }
         }

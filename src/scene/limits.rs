@@ -91,6 +91,7 @@ impl Scene {
             self.document.header.limit_check = enabled;
         } else {
             self.document.header.paper_space_limit_check = enabled;
+            self.persist_current_layout_state();
         }
     }
 

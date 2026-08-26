@@ -72,8 +72,7 @@ impl Scene {
         // Remove the Layout object itself.
         self.document.objects.remove(&layout_handle);
 
-        // Drop the layout's entry from the ACAD_LAYOUT dictionary so it does not
-        // dangle (and so AutoCAD doesn't try to recover a now-missing layout).
+        // Drop the layout's dictionary entry so it does not dangle.
         let dict_handle = self.document.header.acad_layout_dict_handle;
         if let Some(ObjectType::Dictionary(d)) = self.document.objects.get_mut(&dict_handle) {
             d.entries.retain(|(k, _)| k != name);
@@ -88,20 +87,6 @@ impl Scene {
             .map(|b| b.name.clone());
         if let Some(bn) = block_name {
             self.document.block_records.remove(&bn);
-        }
-
-        // Drop any standalone PlotSettings page setup tied to this layout.
-        let ps_handles: Vec<Handle> = self
-            .document
-            .objects
-            .iter()
-            .filter_map(|(h, o)| match o {
-                ObjectType::PlotSettings(ps) if ps.page_name == name => Some(*h),
-                _ => None,
-            })
-            .collect();
-        for h in ps_handles {
-            self.document.objects.remove(&h);
         }
 
         // If the deleted layout was active, fall back to Model space.
@@ -498,9 +483,7 @@ impl Scene {
 
 /// Reconstruct a `pane_grid` configuration from a set of (tile-index, rect)
 /// items covering `region`, by recursively finding a full vertical or
-/// horizontal guillotine cut. AutoCAD tiled configs (and anything pane_grid
-/// produces) are guillotine layouts, so this round-trips them. A non-guillotine
-/// set falls back to chaining panes so nothing is lost.
+/// horizontal guillotine cut. Non-guillotine input falls back to chained panes.
 fn config_from_rects(
     items: &[(usize, iced::Rectangle)],
     region: iced::Rectangle,

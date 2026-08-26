@@ -151,6 +151,9 @@ impl OpenCADStudio {
             if let Some(previous) = self.print_all_plot_window_prev.take() {
                 self.plot_window = previous;
             }
+            if let Some(previous) = self.print_all_plot_setup_prev.take() {
+                self.plot_setup_template = previous;
+            }
             self.print_all_options = false;
             self.active_modal = Some(PrintAll);
             self.reset_modal_geometry();
@@ -6917,6 +6920,9 @@ impl OpenCADStudio {
                         self.plot_dialog.style_missing = false;
                         self.plot_dialog.plot_styles =
                             crate::io::plot_style::available_ctb_names();
+                        self.tabs[self.active_tab]
+                            .scene
+                            .invalidate_display_plot_style();
 
                         self.command_line.push_output(
                             crate::tf!(
@@ -6968,6 +6974,9 @@ impl OpenCADStudio {
                             self.plot_dialog.style_missing = false;
                             self.plot_dialog.plot_styles =
                                 crate::io::plot_style::available_ctb_names();
+                            self.tabs[self.active_tab]
+                                .scene
+                                .invalidate_display_plot_style();
                             self.command_line.push_output(crate::tf!(
                                 "Plot style table saved to \"{}\".",
                                 path.display()

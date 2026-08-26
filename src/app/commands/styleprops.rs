@@ -412,14 +412,7 @@ impl OpenCADStudio {
                         vec![]
                     };
 
-                    // Blocks: everything the layout-reachability walk above did
-                    // NOT mark live. That covers unreferenced named blocks,
-                    // leftover anonymous blocks (*U hatch/unnamed, orphaned *D
-                    // dimension, *T table, dynamic-block variants — AutoCAD drops
-                    // these too), AND whole dead subgraphs a detached xref leaves
-                    // behind. Live xrefs stay (an attached xref's blocks are
-                    // reached from the layout that inserts them); the *Model_Space
-                    // / *Paper_Space containers are never removed.
+                    // Remove unreachable blocks but retain live xrefs and space containers.
                     let block_remove: Vec<String> = if do_blocks {
                         self.tabs[i]
                             .scene
@@ -494,15 +487,7 @@ impl OpenCADStudio {
                     n_blocks += block_remove.len();
                 }
 
-                // Draw-order cleanup. A SortEntitiesTable lists a block's
-                // entities in draw order; purging the block drops the entities
-                // and the block record, but this object lingers, still holding
-                // the (now dangling) handle of every deleted entity. On a
-                // detached-xref purge that is hundreds of thousands of stale
-                // handles — megabytes of dead weight the save re-emits, which is
-                // why an OCS-purged file stayed far larger than AutoCAD's.
-                // Drop every SortEntitiesTable whose owning block is gone
-                // (AutoCAD's "orphaned data").
+                // Remove draw-order tables whose owning blocks are gone.
                 let mut n_sortents = 0usize;
                 if do_blocks {
                     let live_blocks: rustc_hash::FxHashSet<acadrust::Handle> = self.tabs[i]
@@ -1912,6 +1897,9 @@ impl OpenCADStudio {
                                 }
                                 if name == "FILLMODE" {
                                     self.tabs[i].scene.bump_geometry();
+                                }
+                                if matches!(name.as_str(), "PSLTSCALE" | "PLIMCHECK") {
+                                    self.tabs[i].scene.persist_current_layout_state();
                                 }
                                 self.command_line.push_output(&msg);
                             } else {

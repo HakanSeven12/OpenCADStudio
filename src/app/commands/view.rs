@@ -568,63 +568,49 @@ impl OpenCADStudio {
                     }
                 } else {
                     // ── Preset viewport layout ───────────────────────────
-                    // Determine paper dimensions from PlotSettings (fallback A4 landscape).
                     let layout_name = scene.current_layout.clone();
-                    let (paper_w, paper_h) = {
-                        use acadrust::objects::ObjectType;
-                        let mut pw = 297.0_f64;
-                        let mut ph = 210.0_f64;
-                        for (_, obj) in &scene.document.objects {
-                            if let ObjectType::PlotSettings(ps) = obj {
-                                if ps.page_name == layout_name && ps.paper_width > 0.0 {
-                                    pw = ps.paper_width;
-                                    ph = ps.paper_height;
-                                    break;
-                                }
-                            }
-                        }
-                        (pw, ph)
-                    };
-                    let margin = 5.0_f64; // mm margin around the usable area
-                    let uw = paper_w - 2.0 * margin; // usable width
-                    let uh = paper_h - 2.0 * margin; // usable height
-                                                     // Collect rectangle specs: (cx, cz, w, h) in mm
+                    let ((x0, y0), (x1, y1)) = scene
+                        .printable_area_limits()
+                        .unwrap_or(((0.0, 0.0), (297.0, 210.0)));
+                    let uw = (x1 - x0).max(1.0);
+                    let uh = (y1 - y0).max(1.0);
+                    let gap = 2.0 * scene.paper_space_unit_factor();
                     let rects: Vec<(f64, f64, f64, f64)> = match sub.as_str() {
                         "2H" => {
                             // Two viewports side by side (horizontal split)
-                            let vw = (uw - 2.0) / 2.0;
+                            let vw = (uw - gap) / 2.0;
                             vec![
-                                (margin + vw / 2.0, margin + uh / 2.0, vw, uh),
-                                (margin + vw + 2.0 + vw / 2.0, margin + uh / 2.0, vw, uh),
+                                (x0 + vw / 2.0, y0 + uh / 2.0, vw, uh),
+                                (x0 + vw + gap + vw / 2.0, y0 + uh / 2.0, vw, uh),
                             ]
                         }
                         "2V" => {
                             // Two viewports stacked (vertical split)
-                            let vh = (uh - 2.0) / 2.0;
+                            let vh = (uh - gap) / 2.0;
                             vec![
-                                (margin + uw / 2.0, margin + vh + 2.0 + vh / 2.0, uw, vh),
-                                (margin + uw / 2.0, margin + vh / 2.0, uw, vh),
+                                (x0 + uw / 2.0, y0 + vh + gap + vh / 2.0, uw, vh),
+                                (x0 + uw / 2.0, y0 + vh / 2.0, uw, vh),
                             ]
                         }
                         "4" => {
                             // Four equal viewports (2×2 grid)
-                            let vw = (uw - 2.0) / 2.0;
-                            let vh = (uh - 2.0) / 2.0;
+                            let vw = (uw - gap) / 2.0;
+                            let vh = (uh - gap) / 2.0;
                             vec![
-                                (margin + vw / 2.0, margin + vh + 2.0 + vh / 2.0, vw, vh),
+                                (x0 + vw / 2.0, y0 + vh + gap + vh / 2.0, vw, vh),
                                 (
-                                    margin + vw + 2.0 + vw / 2.0,
-                                    margin + vh + 2.0 + vh / 2.0,
+                                    x0 + vw + gap + vw / 2.0,
+                                    y0 + vh + gap + vh / 2.0,
                                     vw,
                                     vh,
                                 ),
-                                (margin + vw / 2.0, margin + vh / 2.0, vw, vh),
-                                (margin + vw + 2.0 + vw / 2.0, margin + vh / 2.0, vw, vh),
+                                (x0 + vw / 2.0, y0 + vh / 2.0, vw, vh),
+                                (x0 + vw + gap + vw / 2.0, y0 + vh / 2.0, vw, vh),
                             ]
                         }
                         "SINGLE" | "1" => {
                             // Single full-page viewport
-                            vec![(margin + uw / 2.0, margin + uh / 2.0, uw, uh)]
+                            vec![(x0 + uw / 2.0, y0 + uh / 2.0, uw, uh)]
                         }
                         _ => {
                             self.command_line.push_error(

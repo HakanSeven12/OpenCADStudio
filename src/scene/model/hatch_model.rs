@@ -139,6 +139,39 @@ impl GradientKind {
     }
 }
 
+pub(crate) fn plot_style_fill_pattern(style: u8) -> Option<HatchPattern> {
+    let family = |angle_deg, dx, dy, dashes: &[f32]| PatFamily {
+        angle_deg,
+        x0: 0.0,
+        y0: 0.0,
+        dx,
+        dy,
+        dashes: dashes.to_vec(),
+    };
+    let pattern = match style {
+        64 => HatchPattern::Solid,
+        65 => HatchPattern::Pattern(vec![
+            family(0.0, 0.0, 2.0, &[2.0, -2.0]),
+            family(90.0, 2.0, 0.0, &[2.0, -2.0]),
+        ]),
+        66 => HatchPattern::Pattern(vec![
+            family(0.0, 0.0, 2.0, &[]),
+            family(90.0, 2.0, 0.0, &[]),
+        ]),
+        67 => HatchPattern::Pattern(vec![
+            family(45.0, 0.0, 2.0, &[]),
+            family(135.0, 0.0, 2.0, &[]),
+        ]),
+        68 => HatchPattern::Pattern(vec![family(0.0, 0.0, 2.0, &[])]),
+        69 => HatchPattern::Pattern(vec![family(135.0, 0.0, 2.0, &[])]),
+        70 => HatchPattern::Pattern(vec![family(45.0, 0.0, 2.0, &[])]),
+        71 => HatchPattern::Pattern(vec![family(0.0, 0.0, 2.0, &[0.0, -2.0])]),
+        72 => HatchPattern::Pattern(vec![family(90.0, 2.0, 0.0, &[])]),
+        _ => return None,
+    };
+    Some(pattern)
+}
+
 /// Hatch fill pattern.
 #[derive(Clone, Debug)]
 pub enum HatchPattern {

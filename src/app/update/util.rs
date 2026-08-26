@@ -62,8 +62,7 @@ pub(super) fn layout_entry_name(s: &str) -> &str {
     s.trim_start_matches('*').trim_end_matches('*')
 }
 
-/// Infer the closest A-series paper label and orientation from sheet
-/// dimensions (mm). Falls back to A4 when nothing is close.
+/// Infer an A-series label when dimensions match; otherwise retain the size.
 pub(super) fn paper_label_from_dims(w: f64, h: f64) -> (String, String) {
     use crate::io::paper_sizes::PaperSize;
     let orient = if w >= h { "Landscape" } else { "Portrait" };
@@ -76,7 +75,12 @@ pub(super) fn paper_label_from_dims(w: f64, h: f64) -> (String, String) {
             best = (p.label().to_string(), err);
         }
     }
-    (best.0, orient.to_string())
+    let label = if best.1 <= 2.0 {
+        best.0
+    } else {
+        format!("{w:.2} × {h:.2} mm")
+    };
+    (label, orient.to_string())
 }
 
 pub(super) fn parse_plot_scale(s: &str) -> (f64, f64) {

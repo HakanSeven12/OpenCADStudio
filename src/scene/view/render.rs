@@ -22,6 +22,8 @@ use crate::scene::{
     SceneLight, Uniforms, ViewportInstance, WireModel,
 };
 
+const DISPLAY_STYLE_CACHE_LIMIT: usize = if cfg!(target_arch = "wasm32") { 4 } else { 24 };
+
 // ── Camera hover state (shader::Program::State) ───────────────────────────
 
 #[derive(Clone, Default)]
@@ -2496,6 +2498,238 @@ impl Scene {
         };
         (final_color, pl, pat, lw, aci)
     }
+
+    fn display_plot_style(&self) -> Option<Arc<crate::io::plot_style::PlotStyleTable>> {
+        if self.current_layout == "Model" {
+            return None;
+        }
+        let settings = self.effective_plot_settings()?;
+        if !settings.flags.show_plot_styles || settings.current_style_sheet.is_empty() {
+            return None;
+        }
+        let key = (
+            self.current_layout.clone(),
+            settings.current_style_sheet.to_ascii_lowercase(),
+        );
+        if let Some(style) = self.display_plot_style_cache.borrow().get(&key) {
+            return style.clone();
+        }
+        let style = crate::io::plot_style::PlotStyleTable::load_named(
+            &settings.current_style_sheet,
+        )
+        .ok()
+        .map(Arc::new);
+        self.display_plot_style_cache
+            .borrow_mut()
+            .insert(key, style.clone());
+        style
+    }
+
+    fn apply_display_plot_style(
+        &self,
+        color: &mut [f32; 4],
+        aci: u8,
+        style: &crate::io::plot_style::PlotStyleTable,
+    ) {
+        if aci == 0 {
+            return;
+        }
+        if let Some(rgb) = style.resolve_color(aci) {
+            color[..3].copy_from_slice(&rgb);
+        }
+        let screening = style.resolve_screening(aci);
+        for (channel, paper) in color[..3]
+            .iter_mut()
+            .zip(self.paper_bg_color[..3].iter())
+        {
+            *channel = *channel * screening + *paper * (1.0 - screening);
+        }
+    }
+
+    fn display_styled_wires(
+        &self,
+        source: Arc<Vec<WireModel>>,
+        source_gen: u64,
+    ) -> (Arc<Vec<WireModel>>, u64) {
+        let Some(style) = self.display_plot_style() else {
+            return (source, source_gen);
+        };
+        let key = (source_gen, style.name.to_ascii_lowercase());
+        if let Some((gen, wires)) = self.styled_wire_cache.borrow().get(&key) {
+            return (Arc::clone(wires), *gen);
+        }
+        let mut wires = source.as_ref().clone();
+        for wire in &mut wires {
+            self.apply_display_plot_style(&mut wire.color, wire.aci, &style);
+            if wire.aci > 0 {
+                if wire.fill_is_2d_solid
+                    && style
+                        .aci_entries
+                        .get(wire.aci as usize)
+                        .is_some_and(|entry| (65..=72).contains(&entry.fill_style))
+                {
+                    wire.fill_tris.clear();
+                    wire.fill_tris_low.clear();
+                }
+                if let Some(mm) = style.resolve_lineweight(wire.aci) {
+                    wire.line_weight_px = (mm * (96.0 / 25.4) * 2.0).max(1.0);
+                }
+                for vertex in &mut wire.text_verts {
+                    self.apply_display_plot_style(&mut vertex.color, wire.aci, &style);
+                }
+            }
+        }
+        let wires = Arc::new(wires);
+        let gen = crate::scene::WIRE_CONTENT_GEN
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut cache = self.styled_wire_cache.borrow_mut();
+        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, (gen, Arc::clone(&wires)));
+        (wires, gen)
+    }
+
+    fn display_styled_hatches(
+        &self,
+        source: Arc<Vec<HatchModel>>,
+        wire_fills: Option<&Arc<Vec<HatchModel>>>,
+        pattern_scale: f32,
+    ) -> Arc<Vec<HatchModel>> {
+        let Some(style) = self.display_plot_style() else {
+            return source;
+        };
+        let key = (
+            self.geometry_epoch,
+            Arc::as_ptr(&source) as usize,
+            wire_fills.map_or(0, |fills| Arc::as_ptr(fills) as usize),
+            style.name.to_ascii_lowercase(),
+            pattern_scale.to_bits(),
+        );
+        if let Some(hatches) = self.styled_hatch_cache.borrow().get(&key) {
+            return Arc::clone(hatches);
+        }
+        let mut hatches = source.as_ref().clone();
+        for hatch in &mut hatches {
+            self.apply_display_plot_style(&mut hatch.color, hatch.aci, &style);
+            if hatch.aci > 0 {
+                if matches!(hatch.pattern, crate::scene::model::hatch_model::HatchPattern::Solid) {
+                    if let Some(fill_style) = style
+                        .aci_entries
+                        .get(hatch.aci as usize)
+                        .and_then(|entry| {
+                            crate::scene::model::hatch_model::plot_style_fill_pattern(
+                                entry.fill_style,
+                            )
+                        })
+                    {
+                        hatch.pattern = fill_style;
+                        hatch.scale = pattern_scale;
+                    }
+                }
+                if let Some(mm) = style.resolve_lineweight(hatch.aci) {
+                    hatch.line_weight_px = (mm * (96.0 / 25.4) * 2.0).max(1.0);
+                }
+                if let crate::scene::model::hatch_model::HatchPattern::Gradient {
+                    color2, ..
+                } = &mut hatch.pattern
+                {
+                    self.apply_display_plot_style(color2, hatch.aci, &style);
+                }
+            }
+        }
+        if let Some(wire_fills) = wire_fills {
+            hatches.extend(wire_fills.iter().cloned());
+        }
+        let hatches = Arc::new(hatches);
+        let mut cache = self.styled_hatch_cache.borrow_mut();
+        cache.retain(|(epoch, _, _, _, _), _| *epoch == self.geometry_epoch);
+        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT * 2 {
+            cache.clear();
+        }
+        cache.insert(key, Arc::clone(&hatches));
+        hatches
+    }
+
+    fn display_styled_wire_fills(
+        &self,
+        wires: &Arc<Vec<WireModel>>,
+        source_gen: u64,
+        pattern_scale: f32,
+    ) -> Option<Arc<Vec<HatchModel>>> {
+        let Some(style) = self.display_plot_style() else {
+            return None;
+        };
+        let key = (
+            source_gen,
+            style.name.to_ascii_lowercase(),
+            pattern_scale.to_bits(),
+        );
+        if let Some(hatches) = self.styled_wire_fill_cache.borrow().get(&key) {
+            return Some(Arc::clone(hatches));
+        }
+        let mut hatches = Vec::new();
+        for wire in wires.iter().filter(|wire| wire.fill_is_2d_solid && wire.aci > 0) {
+            let Some(pattern) = style
+                .aci_entries
+                .get(wire.aci as usize)
+                .and_then(|entry| {
+                    (65..=72)
+                        .contains(&entry.fill_style)
+                        .then(|| {
+                            crate::scene::model::hatch_model::plot_style_fill_pattern(
+                                entry.fill_style,
+                            )
+                        })
+                        .flatten()
+                })
+            else {
+                continue;
+            };
+            let mut color = wire.color;
+            self.apply_display_plot_style(&mut color, wire.aci, &style);
+            let line_weight_px = style
+                .resolve_lineweight(wire.aci)
+                .map(|mm| (mm * (96.0 / 25.4) * 2.0).max(1.0))
+                .unwrap_or(wire.line_weight_px);
+            for (triangle_index, triangle) in wire.fill_tris.chunks_exact(3).enumerate() {
+                let mut boundary = Vec::with_capacity(4);
+                for (point_index, point) in triangle.iter().enumerate() {
+                    let index = triangle_index * 3 + point_index;
+                    let low = wire.fill_tris_low.get(index).copied().unwrap_or([0.0; 3]);
+                    boundary.push([point[0] + low[0], point[1] + low[1]]);
+                }
+                boundary.push(boundary[0]);
+                hatches.push(HatchModel {
+                    render_instance: wire.render_instance.clone(),
+                    world_origin: [0.0, 0.0],
+                    boundary: Arc::new(boundary),
+                    boundary_wcs: None,
+                    fill_plane: None,
+                    fill_plane_boundary: None,
+                    boundary_exterior: None,
+                    boundary_sources: None,
+                    boundary_paths: None,
+                    style: acadrust::entities::HatchStyleType::Normal,
+                    pattern: pattern.clone(),
+                    name: "PLOTSTYLE".to_string(),
+                    color,
+                    aci: 0,
+                    line_weight_px,
+                    angle_offset: 0.0,
+                    scale: pattern_scale,
+                    draw_depth: wire.depth_override.unwrap_or(0.0),
+                });
+            }
+        }
+        let hatches = Arc::new(hatches);
+        let mut cache = self.styled_wire_fill_cache.borrow_mut();
+        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, Arc::clone(&hatches));
+        Some(hatches)
+    }
 }
 
 /// Whether an entity sits on a locked layer (via the document's layer table).
@@ -3403,11 +3637,15 @@ impl Scene {
         } else {
             self.model_wires_for_viewport_arc(inst.handle, full.height)
         };
+        let source_gen = self.last_model_wire_gen.get();
+        let styled_fill_source = Arc::clone(&base_arc);
+        let (base_arc, styled_gen) = self.display_styled_wires(base_arc, source_gen);
+        self.last_model_wire_gen.set(styled_gen);
         // Wire-buffer content id for the upload gate. Preview / interim wires
         // are NOT part of this buffer anymore (they go in a separate per-frame
         // overlay buffer below), so the base id is the source's stable content
         // gen — a drag or camera move never re-uploads the base wire set.
-        let base_wire_content_id = self.last_model_wire_gen.get();
+        let base_wire_content_id = styled_gen;
         let base_wire_patch = self.model_wire_patch_for(base_wire_content_id);
         // Split Face3D wires from the rest. The split is content-only (keyed
         // by the wire-set content id), so while the geometry is unchanged it's
@@ -3548,8 +3786,15 @@ impl Scene {
             width: full.width.max(1.0),
             height: full.height.max(1.0),
         };
-        let mut uniforms =
-            Uniforms::new(&inst.camera, full_bounds, self.document.header.lineweight_display);
+        let display_plot_lineweights = self.current_layout != "Model"
+            && self.effective_plot_settings().is_some_and(|settings| {
+                settings.flags.show_plot_styles && settings.flags.print_lineweights
+            });
+        let mut uniforms = Uniforms::new(
+            &inst.camera,
+            full_bounds,
+            self.document.header.lineweight_display || display_plot_lineweights,
+        );
         if self.document.header.paper_space_linetype_scaling
             && !inst.paper_sheet
             && inst.tile_idx.is_none()
@@ -3642,6 +3887,29 @@ impl Scene {
                 None,
             )
         };
+        let viewport_scale = if inst.paper_sheet {
+            1.0
+        } else {
+            self.document
+                .get_entity(inst.handle)
+                .and_then(|entity| match entity {
+                    EntityType::Viewport(viewport) => Some(vp_effective_scale(
+                        viewport.custom_scale,
+                        viewport.view_height,
+                        viewport.height,
+                    )),
+                    _ => None,
+                })
+                .unwrap_or(1.0)
+        };
+        let pattern_scale = (self.paper_space_unit_factor() / viewport_scale.max(1.0e-9)) as f32;
+        let styled_wire_fills =
+            self.display_styled_wire_fills(&styled_fill_source, source_gen, pattern_scale);
+        let hatches = self.display_styled_hatches(
+            hatches,
+            styled_wire_fills.as_ref().filter(|fills| !fills.is_empty()),
+            pattern_scale,
+        );
         let images = if let Some(images) = paper_images {
             images
         } else {

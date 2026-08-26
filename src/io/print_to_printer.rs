@@ -29,6 +29,11 @@ pub(crate) fn temp_pdf_path(kind: &str) -> std::path::PathBuf {
     ))
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn temp_pdf_path(kind: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{kind}.pdf"))
+}
+
 /// Extra options for a print job. On CUPS (Linux/macOS) these map to `lp`
 /// flags / `-o` options. On Windows the generated PDF already carries render
 /// options. Windows queues repeated jobs when more than one copy is requested;

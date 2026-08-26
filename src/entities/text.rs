@@ -329,14 +329,22 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
         && matches!(t.vertical_alignment, VA::Baseline);
     let is_aligned = matches!(t.horizontal_alignment, HA::Aligned);
     let is_two_point = matches!(t.horizontal_alignment, HA::Aligned | HA::Fit);
-    let pos_editable = is_plain_left || matches!(t.horizontal_alignment, HA::Aligned | HA::Fit);
-    let align_editable = !is_plain_left;
-    // The alignment point is meaningless (reset to the origin) for plain-Left text.
+    // The visible Properties palette exposes Text alignment as calculated
+    // coordinates and Position as the editable placement point. For aligned
+    // and fit text Position targets the first endpoint; for every other
+    // non-left mode it targets the alignment anchor that actually places the
+    // glyph run.
+    let position_uses_alignment = !is_plain_left && !is_two_point;
     let ap = t.alignment_point.unwrap_or(t.insertion_point);
-    let (ax, ay, az) = if align_editable {
+    let (ax, ay, az) = if !is_plain_left {
         (ap.x, ap.y, ap.z)
     } else {
         (0.0, 0.0, 0.0)
+    };
+    let position = if position_uses_alignment {
+        ap
+    } else {
+        t.insertion_point
     };
     vec![
         PropSection {
@@ -411,17 +419,17 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
                 },
                 edit(t!("Width factor").as_ref(), "width_factor", t.width_factor),
                 edit_angle(t!("Obliquing").as_ref(), "oblique_angle", t.oblique_angle.to_degrees()),
-                num_row(t!("Text alignment X").as_ref(), "align_x", ax, align_editable),
-                num_row(t!("Text alignment Y").as_ref(), "align_y", ay, align_editable),
-                num_row(t!("Text alignment Z").as_ref(), "align_z", az, align_editable),
+                num_row(t!("Text alignment X").as_ref(), "align_x", ax, false),
+                num_row(t!("Text alignment Y").as_ref(), "align_y", ay, false),
+                num_row(t!("Text alignment Z").as_ref(), "align_z", az, false),
             ],
         },
         PropSection {
             title: t!("Geometry").into_owned(),
             props: vec![
-                num_row(t!("Position X").as_ref(), "ins_x", t.insertion_point.x, pos_editable),
-                num_row(t!("Position Y").as_ref(), "ins_y", t.insertion_point.y, pos_editable),
-                num_row(t!("Position Z").as_ref(), "ins_z", t.insertion_point.z, pos_editable),
+                num_row(t!("Position X").as_ref(), "ins_x", position.x, true),
+                num_row(t!("Position Y").as_ref(), "ins_y", position.y, true),
+                num_row(t!("Position Z").as_ref(), "ins_z", position.z, true),
             ],
         },
         PropSection {
@@ -514,17 +522,25 @@ fn apply_geom_prop(t: &mut Text, field: &str, value: &str) {
         return;
     };
     match field {
-        "ins_x" => t.insertion_point.x = v,
-        "ins_y" => t.insertion_point.y = v,
-        "ins_z" => t.insertion_point.z = v,
-        "align_x" | "align_y" | "align_z" => {
-            let ins = t.insertion_point;
-            let ap = t.alignment_point.get_or_insert(ins);
+        "ins_x" | "ins_y" | "ins_z" => {
+            let plain_left = matches!(t.horizontal_alignment, HA::Left)
+                && matches!(t.vertical_alignment, VA::Baseline);
+            let two_point = matches!(t.horizontal_alignment, HA::Aligned | HA::Fit);
+            let target = if !plain_left && !two_point {
+                let insertion = t.insertion_point;
+                t.alignment_point.get_or_insert(insertion)
+            } else {
+                &mut t.insertion_point
+            };
             match field {
-                "align_x" => ap.x = v,
-                "align_y" => ap.y = v,
-                _ => ap.z = v,
+                "ins_x" => target.x = v,
+                "ins_y" => target.y = v,
+                _ => target.z = v,
             }
+        }
+        "align_x" | "align_y" | "align_z" => {
+            // Calculated display rows are intentionally not writable.
+            return;
         }
         "height"
             if v > 0.0 && !matches!(t.horizontal_alignment, HA::Aligned) =>

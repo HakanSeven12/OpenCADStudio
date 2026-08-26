@@ -2911,7 +2911,7 @@ use crate::scene::convert::tessellate::{
     add_polyline, add_segment, append_arrow, arrow_from_block_with_deferred_hatch,
     normalized_or, ArrowKind, DimGeom,
 };
-use crate::scene::model::wire_model::{SnapHint, WireModel};
+use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 
 fn apply_dimension_breaks(
     document: &CadDocument,
@@ -3075,6 +3075,28 @@ fn tessellate_dimension_inner(
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
 ) -> Vec<WireModel> {
+    if let Dimension::Arc(arc) = dim {
+        if let Some((local_arc, normal)) = arc_dimension_in_ocs(arc) {
+            let mut wires = tessellate_dimension_inner(
+                document,
+                handle,
+                &Dimension::Arc(local_arc),
+                selected,
+                entity_color,
+                line_weight_px,
+                anno_scale,
+                selected_set,
+                active_viewport,
+                bg_color,
+                None,
+                world_per_pixel,
+            );
+            for wire in &mut wires {
+                map_wire_ocs_to_wcs(wire, normal);
+            }
+            return wires;
+        }
+    }
     let name = handle.value().to_string();
     // (Baked-block fast path moved up into scene::tessellate_entity so the
     // recursive call goes through the LOD ladder, not the kernel path.)
@@ -4726,6 +4748,139 @@ pub(crate) fn arc_dimension_angles(dimension: &DimensionArc) -> Option<(f32, f32
         .atan2(dimension.second_extension_point.x - dimension.center_point.x);
     let sweep = (end - start).rem_euclid(std::f64::consts::TAU);
     (sweep > 1.0e-12).then_some((start as f32, (start + sweep) as f32))
+}
+
+pub(crate) fn arc_dimension_in_ocs(
+    dimension: &DimensionArc,
+) -> Option<(DimensionArc, Vector3)> {
+    let length = dimension.base.normal.length();
+    if !length.is_finite() || length <= 1.0e-12 {
+        return None;
+    }
+    let normal = dimension.base.normal / length;
+    if (normal - Vector3::UNIT_Z).length() <= 1.0e-12 {
+        return None;
+    }
+    let normal_tuple = (normal.x, normal.y, normal.z);
+    let to_ocs = |point: Vector3| {
+        let point = crate::scene::view::transform::wcs_point_to_ocs(
+            (point.x, point.y, point.z),
+            normal_tuple,
+        );
+        Vector3::new(point.0, point.1, point.2)
+    };
+    let mut local = dimension.clone();
+    local.center_point = to_ocs(dimension.center_point);
+    let elevation = local.center_point.z;
+    let on_plane = |point: Vector3| {
+        let mut point = to_ocs(point);
+        point.z = elevation;
+        point
+    };
+    local.definition_point = on_plane(dimension.definition_point);
+    local.first_extension_point = on_plane(dimension.first_extension_point);
+    local.second_extension_point = on_plane(dimension.second_extension_point);
+    local.first_leader_point = on_plane(dimension.first_leader_point);
+    local.second_leader_point = on_plane(dimension.second_leader_point);
+    local.base.definition_point = local.definition_point;
+    local.base.text_middle_point = on_plane(dimension.base.text_middle_point);
+    local.base.insertion_point = on_plane(dimension.base.insertion_point);
+    local.base.normal = Vector3::UNIT_Z;
+    Some((local, normal))
+}
+
+fn map_wire_ocs_to_wcs(wire: &mut WireModel, normal: Vector3) {
+    let normal_tuple = (normal.x, normal.y, normal.z);
+    let map = |x: f64, y: f64, z: f64| {
+        crate::scene::view::transform::ocs_point_to_wcs((x, y, z), normal_tuple)
+    };
+    let map_split = |high: &mut Vec<[f32; 3]>, low: &mut Vec<[f32; 3]>| {
+        let mut mapped_high = Vec::with_capacity(high.len());
+        let mut mapped_low = Vec::with_capacity(high.len());
+        for (index, point) in high.iter().enumerate() {
+            if point[0].is_nan() {
+                mapped_high.push(*point);
+                mapped_low.push([0.0; 3]);
+                continue;
+            }
+            let residual = low.get(index).copied().unwrap_or([0.0; 3]);
+            let point = map(
+                point[0] as f64 + residual[0] as f64,
+                point[1] as f64 + residual[1] as f64,
+                point[2] as f64 + residual[2] as f64,
+            );
+            let (xh, xl) = WireModel::split_ds(point.0);
+            let (yh, yl) = WireModel::split_ds(point.1);
+            let (zh, zl) = WireModel::split_ds(point.2);
+            mapped_high.push([xh, yh, zh]);
+            mapped_low.push([xl, yl, zl]);
+        }
+        *high = mapped_high;
+        *low = mapped_low;
+    };
+
+    map_split(&mut wire.points, &mut wire.points_low);
+    map_split(&mut wire.fill_tris, &mut wire.fill_tris_low);
+    map_split(&mut wire.pick_tris, &mut wire.pick_tris_low);
+    wire.text_verts = crate::scene::model::wire_model::map_text_verts(
+        &wire.text_verts,
+        map,
+    );
+    for (point, _) in &mut wire.snap_pts {
+        let mapped = map(point.x, point.y, point.z);
+        *point = DVec3::new(mapped.0, mapped.1, mapped.2);
+    }
+    for point in &mut wire.key_vertices {
+        let mapped = map(point[0], point[1], point[2]);
+        *point = [mapped.0, mapped.1, mapped.2];
+    }
+    if let Some(marker) = &mut wire.point_marker {
+        let origin = map(marker.origin.x, marker.origin.y, marker.origin.z);
+        let vector = |value: DVec3| {
+            let mapped = map(value.x, value.y, value.z);
+            DVec3::new(mapped.0, mapped.1, mapped.2)
+        };
+        marker.origin = DVec3::new(origin.0, origin.1, origin.2);
+        marker.normal = vector(marker.normal).normalize_or(DVec3::Z);
+        marker.axis_x = vector(marker.axis_x).normalize_or(DVec3::X);
+        marker.axis_y = vector(marker.axis_y).normalize_or(DVec3::Y);
+    }
+    for tangent in &mut wire.tangent_geoms {
+        match tangent {
+            TangentGeom::Line { p1, p2 } => {
+                let first = map(p1[0] as f64, p1[1] as f64, p1[2] as f64);
+                let second = map(p2[0] as f64, p2[1] as f64, p2[2] as f64);
+                *p1 = [first.0 as f32, first.1 as f32, first.2 as f32];
+                *p2 = [second.0 as f32, second.1 as f32, second.2 as f32];
+            }
+            TangentGeom::Circle { center, radius } => {
+                let center = map(
+                    center[0] as f64,
+                    center[1] as f64,
+                    center[2] as f64,
+                );
+                let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes(normal_tuple);
+                *tangent = TangentGeom::PlanarCircle {
+                    center: [center.0, center.1, center.2],
+                    axis_x: [x_axis.0, x_axis.1, x_axis.2],
+                    axis_y: [y_axis.0, y_axis.1, y_axis.2],
+                    radius: *radius as f64,
+                };
+            }
+            TangentGeom::PlanarCircle { center, axis_x, axis_y, .. }
+            | TangentGeom::Arc { center, axis_x, axis_y, .. } => {
+                let mapped = map(center[0], center[1], center[2]);
+                let map_vector = |axis: [f64; 3]| {
+                    let mapped = map(axis[0], axis[1], axis[2]);
+                    [mapped.0, mapped.1, mapped.2]
+                };
+                *center = [mapped.0, mapped.1, mapped.2];
+                *axis_x = map_vector(*axis_x);
+                *axis_y = map_vector(*axis_y);
+            }
+        }
+    }
+    wire.aabb = WireModel::UNBOUNDED_AABB;
 }
 
 fn angular_dimension_frame(dim: &Dimension) -> Option<(Vec3, f32, f32, f32)> {

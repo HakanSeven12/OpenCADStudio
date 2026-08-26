@@ -2,6 +2,7 @@ use super::helpers::{entity_type_key, entity_type_label, title_case_word};
 use super::{OpenCADStudio, VARIES_LABEL};
 use crate::io::linetypes;
 use crate::scene::view::dispatch;
+use crate::scene::model::object::PropValue;
 use crate::ui;
 use crate::t;
 use acadrust::types::{Transform, Vector3};
@@ -1310,11 +1311,88 @@ impl OpenCADStudio {
                         // Feature-control frame: FCF text style is the dimension
                         // style's DIMTXSTY.
                         acadrust::EntityType::Tolerance(tol) => {
-                            if let Some(ds) = find_dim_style(doc, &tol.dimension_style_name) {
-                                if !ds.dimtxsty.is_empty() {
-                                    set_row(&mut sections, "tol_text_style", ds.dimtxsty.clone());
-                                }
+                            use crate::entities::dim_override as dov;
+                            let style = crate::entities::tolerance::resolve_dim_style(tol, doc);
+                            let style_name = style
+                                .map(|entry| entry.name.clone())
+                                .unwrap_or_else(|| {
+                                    if tol.dimension_style_name.trim().is_empty() {
+                                        "Standard".to_string()
+                                    } else {
+                                        tol.dimension_style_name.clone()
+                                    }
+                                });
+                            let mut dim_style_names: Vec<String> = doc
+                                .dim_styles
+                                .iter()
+                                .map(|entry| entry.name.clone())
+                                .filter(|name| !name.trim().is_empty())
+                                .collect();
+                            if !dim_style_names
+                                .iter()
+                                .any(|name| name.eq_ignore_ascii_case(&style_name))
+                            {
+                                dim_style_names.push(style_name.clone());
                             }
+                            set_row_value(
+                                &mut sections,
+                                "tol_dim_style",
+                                PropValue::Choice {
+                                    selected: style_name,
+                                    options: dim_style_names,
+                                },
+                            );
+
+                            let text_style_name = dov::handle(
+                                &tol.common.extended_data,
+                                dov::DIMTXSTY,
+                            )
+                            .and_then(|handle| {
+                                doc.text_styles
+                                    .iter()
+                                    .find(|entry| entry.handle == handle)
+                            })
+                            .map(|entry| entry.name.clone())
+                            .or_else(|| style.map(|entry| entry.dimtxsty.clone()))
+                            .unwrap_or_else(|| "Standard".to_string());
+                            let text_height_editable = doc
+                                .text_styles
+                                .iter()
+                                .find(|entry| {
+                                    entry.name.eq_ignore_ascii_case(&text_style_name)
+                                })
+                                .is_none_or(|entry| !entry.has_fixed_height());
+                            let mut names = text_style_names.clone();
+                            if !names
+                                .iter()
+                                .any(|name| name.eq_ignore_ascii_case(&text_style_name))
+                            {
+                                names.push(text_style_name.clone());
+                            }
+                            set_row_value(
+                                &mut sections,
+                                "tol_text_style",
+                                PropValue::Choice {
+                                    selected: text_style_name,
+                                    options: names,
+                                },
+                            );
+
+                            let height = dov::real(
+                                &tol.common.extended_data,
+                                dov::DIMTXT,
+                            )
+                            .or_else(|| style.map(|entry| entry.dimtxt))
+                            .unwrap_or(tol.text_height);
+                            set_row_value(
+                                &mut sections,
+                                "tol_text_height",
+                                if text_height_editable {
+                                    PropValue::EditText(format!("{height:.4}"))
+                                } else {
+                                    PropValue::ReadOnly(format!("{height:.4}"))
+                                },
+                            );
                         }
                         // MultiLeader: max points + segment-angle constraints
                         // are MLeaderStyle settings, not stored on the entity.
@@ -1705,7 +1783,7 @@ impl OpenCADStudio {
                     {
                         // Which entities show an Annotative row, the field it uses,
                         // and — for those that don't already carry the row
-                        // (dimension / table) — the existing field to insert it
+                        // (dimension / table / tolerance) — the existing field to insert it
                         // after. MLeader uses its editable toggle field.
                         let anno: Option<(&str, Option<&str>)> = match entity {
                             acadrust::EntityType::Text(_)
@@ -1719,6 +1797,9 @@ impl OpenCADStudio {
                             acadrust::EntityType::Dimension(_) => {
                                 Some(("annotative", Some("style_name")))
                             }
+                            acadrust::EntityType::Tolerance(_) => {
+                                Some(("annotative", Some("tol_dim_style")))
+                            }
                             acadrust::EntityType::Table(_) => {
                                 Some(("annotative", Some("tbl_style_handle")))
                             }
@@ -1727,15 +1808,22 @@ impl OpenCADStudio {
                         if let Some((anno_field, insert_after)) = anno {
                             let is_anno = crate::scene::annotative::is_annotative(doc, entity)
                                 || match entity {
-                                    acadrust::EntityType::Dimension(dimension) => {
+                                    acadrust::EntityType::Dimension(
+                                        acadrust::entities::Dimension::Arc(dimension),
+                                    ) => {
                                         crate::scene::annotative::dim_style_is_annotative(
                                             doc,
-                                            &dimension.base().style_name,
+                                            &dimension.base.style_name,
+                                        )
+                                    }
+                                    acadrust::EntityType::Tolerance(_) => {
+                                        crate::scene::annotative::annotation_style_is_annotative(
+                                            doc, entity,
                                         )
                                     }
                                     _ => false,
                                 };
-                            // Dimensions/tables carry no Annotative row yet — add one
+                            // Dimensions/tables/tolerances carry no Annotative row yet — add one
                             // right after their style row.
                             if let Some(anchor) = insert_after {
                                 insert_row_after(
@@ -1812,6 +1900,69 @@ impl OpenCADStudio {
                                     ),
                                 );
                             }
+                        }
+                    }
+
+                    // Single-line text height rows depend on both the
+                    // justification and the active annotation scale. Aligned
+                    // text derives its paper height from the two endpoints,
+                    // while annotative text exposes that paper height and a
+                    // separate calculated model height.
+                    if let acadrust::EntityType::Text(text) = entity {
+                        let aligned = matches!(
+                            text.horizontal_alignment,
+                            acadrust::entities::TextHorizontalAlignment::Aligned
+                        );
+                        let annotative = crate::scene::annotative::is_annotative(doc, entity);
+                        let model_factor = if annotative {
+                            annotation_scale_handle
+                                .and_then(|handle| match doc.objects.get(&handle) {
+                                    Some(acadrust::objects::ObjectType::Scale(scale)) => Some(
+                                        scale.inverse_factor()
+                                            / self.tabs[i].scene.annotation_scale_unit_factor(),
+                                    ),
+                                    _ => None,
+                                })
+                                .unwrap_or(self.tabs[i].scene.annotation_scale as f64)
+                        } else {
+                            1.0
+                        };
+                        let paper_height = if aligned {
+                            crate::entities::text::text_run_placement_at_scale(
+                                text,
+                                doc,
+                                model_factor as f32,
+                            )
+                            .height as f64
+                        } else {
+                            text.height
+                        };
+                        for section in sections.iter_mut() {
+                            if let Some(row) =
+                                section.props.iter_mut().find(|row| row.field == "height")
+                            {
+                                if annotative {
+                                    row.label = t!("Paper text height").into_owned();
+                                }
+                                if aligned {
+                                    row.value = crate::scene::model::object::PropValue::ReadOnly(
+                                        crate::entities::common::format_length(paper_height),
+                                    );
+                                }
+                            }
+                        }
+                        if annotative {
+                            insert_row_after(
+                                &mut sections,
+                                "height",
+                                crate::entities::common::ro_prop(
+                                    t!("Model text height").as_ref(),
+                                    "model_text_height",
+                                    crate::entities::common::format_length(
+                                        paper_height * model_factor,
+                                    ),
+                                ),
+                            );
                         }
                     }
 

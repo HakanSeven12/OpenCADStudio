@@ -1187,6 +1187,7 @@ impl RenderConvertible for Table {
                     oblique_angle: style.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
                     is_backward: style.map(|s| s.is_backward()).unwrap_or(false),
                     is_upside_down: style.map(|s| s.is_upside_down()).unwrap_or(false),
+                    is_vertical: style.map(|s| s.is_vertical).unwrap_or(false),
                 }
             };
 
@@ -1287,6 +1288,8 @@ impl RenderConvertible for Table {
                     attach_h_anchor,
                     v_anchor,
                     line_spacing_factor: 1.0,
+                    exact_line_spacing: false,
+                    rectangle_height: 0.0,
                     vertical_text: false,
                     want_glyph_boxes: false,
                 });
@@ -1453,6 +1456,7 @@ pub fn tessellate_table(
                 oblique_angle: style.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
                 is_backward: style.map(|s| s.is_backward()).unwrap_or(false),
                 is_upside_down: style.map(|s| s.is_upside_down()).unwrap_or(false),
+                is_vertical: style.map(|s| s.is_vertical).unwrap_or(false),
             }
         };
 
@@ -1920,6 +1924,8 @@ pub fn tessellate_table(
                     attach_h_anchor,
                     v_anchor,
                     line_spacing_factor: 1.0,
+                    exact_line_spacing: false,
+                    rectangle_height: 0.0,
                     vertical_text: false,
                     want_glyph_boxes: false,
                 });

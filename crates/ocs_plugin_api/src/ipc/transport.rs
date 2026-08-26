@@ -1,4 +1,12 @@
 //! Length-framed transport over `interprocess::local_socket` streams.
+//!
+//! Messages are serialized with `bincode`, prefixed by a little-endian `u64`
+//! length, and sent over the stream. The receiver parses the length, bounds it
+//! against [`MAX_MESSAGE_SIZE`], then deserializes the payload.
+//!
+//! [`send`] and [`recv`] are synchronous and block until the full frame is read
+//! or the peer disconnects. `Disconnected` is returned on clean EOF; `TooLarge`
+//! rejects messages that exceed 64 MiB to protect host/runner memory.
 
 use std::io::{Read, Write};
 

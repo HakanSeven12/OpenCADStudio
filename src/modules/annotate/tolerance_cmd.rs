@@ -1,8 +1,6 @@
 // TOLERANCE command — place a GD&T (geometric dimensioning & tolerancing) frame.
 //
-// Workflow:
-//   1. Text: Enter tolerance string  (e.g. "%%v0.05|A" or plain text)
-//   2. Point: Click insertion point
+// The structured editor prepares the frame; this command places it.
 
 use acadrust::entities::Tolerance;
 use acadrust::types::Vector3;
@@ -25,20 +23,17 @@ pub fn tool() -> ToolDef {
     }
 }
 
-enum Step {
-    Text,
-    Insertion { text: String },
-}
-
 pub struct ToleranceCommand {
-    step: Step,
+    text: String,
+    preview_strokes: Vec<Vec<[f32; 2]>>,
     plane: WorkingPlane,
 }
 
 impl ToleranceCommand {
-    pub fn new() -> Self {
+    pub fn with_text(text: String, preview_strokes: Vec<Vec<[f32; 2]>>) -> Self {
         Self {
-            step: Step::Text,
+            text,
+            preview_strokes,
             plane: WorkingPlane::default(),
         }
     }
@@ -54,36 +49,18 @@ impl CadCommand for ToleranceCommand {
     }
 
     fn prompt(&self) -> String {
-        match &self.step {
-            Step::Text => t!("TOLERANCE  Enter tolerance text:").into_owned(),
-            Step::Insertion { text } => {
-                t!("TOLERANCE  Specify insertion point  [%{text}]:", text = text).into_owned()
-            }
-        }
+        t!("TOLERANCE  Specify insertion point:").into_owned()
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step, Step::Text)
-    }
-
-    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let t = text.trim().to_string();
-        if t.is_empty() {
-            return Some(CmdResult::Cancel);
-        }
-        self.step = Step::Insertion { text: t };
-        Some(CmdResult::NeedPoint)
+        false
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if let Step::Insertion { text } = &self.step {
-            let point = self.plane.to_local(pt);
-            let ins = Vector3::new(point.x, point.y, point.z);
-            let tol = Tolerance::with_text(ins, text.clone());
-            CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Tolerance(tol)))
-        } else {
-            CmdResult::NeedPoint
-        }
+        let point = self.plane.to_local(pt);
+        let ins = Vector3::new(point.x, point.y, point.z);
+        let tol = Tolerance::with_text(ins, self.text.clone());
+        CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Tolerance(tol)))
     }
 
     fn on_enter(&mut self) -> CmdResult {
@@ -91,17 +68,18 @@ impl CadCommand for ToleranceCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        if !matches!(self.step, Step::Insertion { .. }) {
-            return None;
+        let mut points = Vec::new();
+        for stroke in &self.preview_strokes {
+            if stroke.len() < 2 {
+                continue;
+            }
+            if !points.is_empty() {
+                points.push(DVec3::splat(f64::NAN));
+            }
+            points.extend(stroke.iter().map(|[x, y]| {
+                pt + self.plane.x * *x as f64 + self.plane.y * *y as f64
+            }));
         }
-        let d = 0.15;
-        let points = [
-            pt - self.plane.x * d,
-            pt + self.plane.x * d,
-            DVec3::splat(f64::NAN),
-            pt - self.plane.y * d,
-            pt + self.plane.y * d,
-        ];
         Some(WireModel {
             point_marker: None,
             taper_widths: Vec::new(),
@@ -119,10 +97,7 @@ impl CadCommand for ToleranceCommand {
             dash_align_end: None,
             text_verts: Vec::new(),
             name: "tolerance_preview".into(),
-            points: points
-                .iter()
-                .map(|point| point.as_vec3().to_array())
-                .collect(),
+            points: points.iter().map(|point| point.as_vec3().to_array()).collect(),
             points_low: Vec::new(),
             color: WireModel::CYAN,
             selected: false,

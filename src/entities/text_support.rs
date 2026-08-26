@@ -11,6 +11,7 @@ pub struct ResolvedTextStyle {
     pub oblique_angle: f32,
     pub is_backward: bool,
     pub is_upside_down: bool,
+    pub is_vertical: bool,
 }
 
 pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedTextStyle {
@@ -76,6 +77,7 @@ pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedT
         oblique_angle: style.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
         is_backward: style.map(|s| s.is_backward()).unwrap_or(false),
         is_upside_down: style.map(|s| s.is_upside_down()).unwrap_or(false),
+        is_vertical: style.map(|s| s.is_vertical).unwrap_or(false),
     }
 }
 
@@ -1012,6 +1014,11 @@ pub struct MTextRenderOpts<'a> {
     pub v_anchor: MTextVAnchor,
     /// DXF code 44 — multiplier on the default 5/3-em baseline gap.
     pub line_spacing_factor: f32,
+    /// `true` fixes every baseline advance to the entity spacing. `false`
+    /// treats it as a minimum and expands for taller inline runs.
+    pub exact_line_spacing: bool,
+    /// User-defined text-box/column height. Zero means content-driven.
+    pub rectangle_height: f32,
     /// `true` when the entity is laid out top-to-bottom (DXF code 71 = 2).
     pub vertical_text: bool,
     /// When true, `layout_mtext` also fills `MTextLayout::glyph_boxes` with
@@ -1025,10 +1032,15 @@ pub struct MTextRenderOpts<'a> {
 
 /// An MTEXT's column layout, flattened from its `column_data`.
 ///
-/// Content moves to the next column at a `\N` break. Filling a column and
-/// spilling into the next on its own is not modelled: `heights` / `auto_height`
-/// are not read, so a column runs as long as its content does.
-#[derive(Clone, Copy, Debug, Default)]
+/// Content moves to the next column at an explicit `\N` break or when the
+/// configured manual/automatic column height is exhausted.
+pub(crate) const MAX_MTEXT_COLUMNS: i32 = 256;
+
+pub(crate) fn clamp_mtext_column_count(count: i32) -> i32 {
+    count.clamp(1, MAX_MTEXT_COLUMNS)
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct MTextColumns {
     /// Column count. 0 or 1 both mean "no column layout".
     pub count: usize,
@@ -1036,6 +1048,12 @@ pub struct MTextColumns {
     pub width: f32,
     /// Gap between two adjacent columns, world units.
     pub gutter: f32,
+    /// Whether logical column flow starts at the opposite side.
+    pub flow_reversed: bool,
+    /// Dynamic-column height is balanced from content when true.
+    pub auto_height: bool,
+    /// Optional manual height for each logical column.
+    pub heights: Vec<f32>,
 }
 
 impl MTextColumns {
@@ -1046,7 +1064,17 @@ impl MTextColumns {
 
     /// Left edge of column `i`, relative to the text block's own left edge.
     pub fn offset_of(&self, i: usize) -> f32 {
-        i as f32 * (self.width + self.gutter)
+        let physical = if self.flow_reversed {
+            self.count.saturating_sub(1).saturating_sub(i)
+        } else {
+            i
+        };
+        physical as f32 * (self.width + self.gutter)
+    }
+
+    fn total_width(&self) -> f32 {
+        self.width * self.count as f32
+            + self.gutter.max(0.0) * self.count.saturating_sub(1) as f32
     }
 }
 
@@ -1118,6 +1146,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         indent_right: f32,
         tab_stops: Vec<TabStop>,
         is_first_in_paragraph: bool,
+        starts_column: bool,
         /// Which column this line lives in; always 0 without a column layout.
         column: usize,
         /// Extra gap above (paragraph's first wrapped line only) / below (last
@@ -1128,7 +1157,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         line_spacing: Option<ParaLineSpacing>,
     }
 
-    let cols = opts.columns;
+    let cols = opts.columns.clone();
     // A `\N` past the last column has nowhere to go — keep those lines in the
     // last one rather than laying them out beyond the block.
     let last_col = cols.count.saturating_sub(1);
@@ -1255,6 +1284,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 indent_right: para.indent_right,
                 tab_stops: para.tab_stops.clone(),
                 is_first_in_paragraph: idx == 0,
+                starts_column: idx == 0 && para.starts_column,
                 column,
                 // The gap above rides the first wrapped line; the gap below the
                 // last, so an interior wrap keeps normal single spacing.
@@ -1277,6 +1307,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             indent_right: 0.0,
             tab_stops: Vec::new(),
             is_first_in_paragraph: true,
+            starts_column: false,
             column: 0,
             space_before: 0.0,
             space_after: 0.0,
@@ -1366,15 +1397,86 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             };
             // A paragraph's own `\psm#`/`\pse#` overrides the entity factor for
             // its lines; `Exact` fixes the baseline gap outright.
+            let entity_gap = entity_h * ls_factor * (5.0 / 3.0) * base_font.line_spacing();
             match s.line_spacing {
                 Some(ParaLineSpacing::Exact(e)) if e > 0.0 => e,
                 Some(ParaLineSpacing::Multiple(m)) if m > 0.0 => {
                     mh * m * (5.0 / 3.0) * base_font.line_spacing()
                 }
-                _ => mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing(),
+                _ if opts.exact_line_spacing => entity_gap,
+                _ => (mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing())
+                    .max(entity_gap),
             }
         })
         .collect();
+
+    // Flow lines into the next column when the active column's configured
+    // height is exhausted. Explicit `\N` breaks remain authoritative. Dynamic
+    // auto-height balances the content; static/manual columns use their stored
+    // height (falling back to the entity rectangle height).
+    if cols.active() {
+        let mut pending_after = 0.0_f32;
+        let total_advance: f32 = sub_lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                if line.starts_column {
+                    pending_after = 0.0;
+                }
+                let spacing = if line.is_first_in_paragraph {
+                    line.space_before + pending_after
+                } else {
+                    0.0
+                };
+                pending_after = line.space_after;
+                per_line_h.get(index).copied().unwrap_or(entity_h) + spacing
+            })
+            .sum();
+        let balanced = (total_advance / cols.count.max(1) as f32).max(entity_h);
+        let mut current_column = 0usize;
+        let mut used = 0.0_f32;
+        let mut pending_after = 0.0_f32;
+        for (index, line) in sub_lines.iter_mut().enumerate() {
+            if line.starts_column {
+                current_column = (current_column + 1).min(cols.count - 1);
+                used = 0.0;
+                pending_after = 0.0;
+            }
+            let limit = if cols.auto_height {
+                balanced
+            } else {
+                cols.heights
+                    .get(current_column)
+                    .copied()
+                    .filter(|height| *height > 0.0)
+                    .unwrap_or(opts.rectangle_height)
+            };
+            let line_advance = per_line_h.get(index).copied().unwrap_or(entity_h);
+            let spacing = if line.is_first_in_paragraph {
+                line.space_before + pending_after
+            } else {
+                0.0
+            };
+            let mut advance = line_advance + spacing;
+            if limit > 0.0
+                && used > 0.0
+                && used + advance > limit
+                && current_column + 1 < cols.count
+            {
+                current_column += 1;
+                used = 0.0;
+                advance = line_advance
+                    + if line.is_first_in_paragraph {
+                        line.space_before
+                    } else {
+                        0.0
+                    };
+            }
+            line.column = current_column;
+            used += advance;
+            pending_after = line.space_after;
+        }
+    }
     // Per-line text height — the tallest Word on the line, an empty line
     // inheriting the previous line's height (same rule as `per_line_h`). Unlike
     // `line_max_h` it has no `entity_h` floor, so it reflects the ACTUAL text
@@ -1442,7 +1544,12 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         MTextVAnchor::BottomOfTopLine => 0.0,
     };
     let attach_h_anchor = opts.attach_h_anchor;
-    let box_left = -attach_h_anchor * rect_w;
+    let block_width = if cols.active() {
+        cols.total_width()
+    } else {
+        rect_w
+    };
+    let box_left = -attach_h_anchor * block_width;
     let rot = opts.rotation;
     let (cos_r, sin_r) = (rot.cos(), rot.sin());
     let ins_x = opts.insertion[0];
@@ -1734,6 +1841,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                 origin,
                                 color,
                                 fill_tris,
+                                plane: None,
                                 run: Some(GlyphRun {
                                     text: s,
                                     font: font_name.to_string(),
@@ -1806,6 +1914,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         origin,
                         color,
                         fill_tris,
+                        plane: None,
                         run: Some(GlyphRun {
                             text: text.clone(),
                             font: font_name.to_string(),
@@ -1840,6 +1949,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                 origin,
                                 color,
                                 fill_tris: vec![],
+                                plane: None,
                                 run: None,
                             });
                         }
@@ -1938,6 +2048,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             origin,
                             color,
                             fill_tris,
+                            plane: None,
                             run: Some(GlyphRun {
                                 text: text.to_string(),
                                 font: font_name.to_string(),
@@ -1952,6 +2063,49 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     };
                     emit(denominator, valign_dy);
                     emit(numerator, valign_dy + run_h * STACK_RAISE);
+
+                    if opts.want_glyph_boxes {
+                        let slots = numerator.chars().count()
+                            + denominator.chars().count()
+                            + usize::from(!denominator.is_empty());
+                        if slots > 0 {
+                            let top = valign_dy + run_h * (STACK_RAISE + STACK_HALF_SCALE);
+                            for index in 0..slots {
+                                let x0 = cursor_x + slot_w * index as f32 / slots as f32;
+                                let x1 = cursor_x + slot_w * (index + 1) as f32 / slots as f32;
+                                let corners = [
+                                    to_world(line_base_x, line_base_y, x0, valign_dy),
+                                    to_world(line_base_x, line_base_y, x1, valign_dy),
+                                    to_world(line_base_x, line_base_y, x0, top),
+                                    to_world(line_base_x, line_base_y, x1, top),
+                                ];
+                                let xmin = corners
+                                    .iter()
+                                    .map(|p| p.0)
+                                    .fold(f32::INFINITY, f32::min);
+                                let xmax = corners
+                                    .iter()
+                                    .map(|p| p.0)
+                                    .fold(f32::NEG_INFINITY, f32::max);
+                                let ymin = corners
+                                    .iter()
+                                    .map(|p| p.1)
+                                    .fold(f32::INFINITY, f32::min);
+                                let ymax = corners
+                                    .iter()
+                                    .map(|p| p.1)
+                                    .fold(f32::NEG_INFINITY, f32::max);
+                                glyph_boxes.push(GlyphBox {
+                                    vis,
+                                    xmin,
+                                    xmax,
+                                    ymin,
+                                    ymax,
+                                });
+                                vis += 1;
+                            }
+                        }
+                    }
 
                     if *bar && slot_w > 0.0 {
                         // The rule is plain geometry, not a glyph, so it rides a
@@ -1972,9 +2126,15 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             origin: [ox, oy],
                             color,
                             fill_tris: Vec::new(),
+                            plane: None,
                             run: None,
                         });
                     }
+                    local_bounds[0] = local_bounds[0].min(cursor_x);
+                    local_bounds[1] = local_bounds[1].min(line_ly + valign_dy);
+                    local_bounds[2] = local_bounds[2].max(cursor_x + slot_w);
+                    local_bounds[3] = local_bounds[3]
+                        .max(line_ly + valign_dy + run_h * (STACK_RAISE + STACK_HALF_SCALE));
                     cursor_x += slot_w;
                 }
                 AtomKind::Space => {
@@ -2041,6 +2201,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                 origin,
                                 color,
                                 fill_tris: vec![],
+                                plane: None,
                                 run: None,
                             });
                         }
@@ -2169,6 +2330,7 @@ mod tests {
             oblique_angle: 0.0,
             is_backward: false,
             is_upside_down: false,
+            is_vertical: false,
         }
     }
 
@@ -2199,6 +2361,8 @@ mod tests {
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
             line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
         });
@@ -2222,6 +2386,8 @@ mod tests {
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
             line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
         });
@@ -2378,6 +2544,7 @@ mod v_anchor_tests {
             oblique_angle: 0.0,
             is_backward: false,
             is_upside_down: false,
+            is_vertical: false,
         };
         layout_mtext(&MTextRenderOpts {
             columns: Default::default(),
@@ -2390,6 +2557,8 @@ mod v_anchor_tests {
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
             line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: true,
         })

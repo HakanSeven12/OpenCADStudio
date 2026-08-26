@@ -11,7 +11,7 @@ use crate::command::{
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::dimension_assoc::{
     polyline_arc_point_marker, RadialSourceGeometry,
-    POLYLINE_ARC_CENTER_MARKER,
+    ARC_DIMENSION_POINT_MARKER, POLYLINE_ARC_CENTER_MARKER,
 };
 use crate::scene::model::wire_model::WireModel;
 
@@ -66,6 +66,11 @@ impl ArcSelection {
         dvec(self.source.center_world())
     }
 
+    fn project(self, point: DVec3) -> Option<DVec3> {
+        let point = self.source.plane.project(point.to_array())?;
+        Some(DVec3::from_array(self.source.plane.point_at(point)))
+    }
+
     fn plane(self) -> WorkingPlane {
         WorkingPlane::new(
             DVec3::from_array(self.source.plane.origin),
@@ -112,18 +117,22 @@ impl ArcSelection {
     }
 
     fn association_sources(self, handle: Handle) -> Vec<Option<DimensionAssociationSource>> {
+        let source_sweep = positive_sweep(self.source.start_angle, self.source.end_angle);
+        let parameter = |angle: f64| {
+            ((angle - self.source.start_angle) / source_sweep).clamp(0.0, 1.0)
+        };
         match self.binding {
             SourceBinding::Arc => vec![
                 Some(DimensionAssociationSource::explicit(handle, -3, 0.0)),
                 Some(DimensionAssociationSource::explicit(
                     handle,
-                    -2,
-                    self.start_angle,
+                    ARC_DIMENSION_POINT_MARKER,
+                    parameter(self.start_angle),
                 )),
                 Some(DimensionAssociationSource::explicit(
                     handle,
-                    -2,
-                    self.end_angle,
+                    ARC_DIMENSION_POINT_MARKER,
+                    parameter(self.end_angle),
                 )),
             ],
             SourceBinding::PolylineSegment(segment) => {
@@ -137,12 +146,12 @@ impl ArcSelection {
                     Some(DimensionAssociationSource::explicit(
                         handle,
                         point_marker,
-                        self.start_angle,
+                        parameter(self.start_angle),
                     )),
                     Some(DimensionAssociationSource::explicit(
                         handle,
                         point_marker,
-                        self.end_angle,
+                        parameter(self.end_angle),
                     )),
                 ]
             }
@@ -202,6 +211,9 @@ impl ArcLengthDimensionCommand {
         let center = plane.to_local(selection.center());
         let first = plane.to_local(selection.point_at(selection.start_angle));
         let second = plane.to_local(selection.point_at(selection.end_angle));
+        let Some(point) = selection.project(point) else {
+            return CmdResult::NeedPoint;
+        };
         let picked = plane.to_local(point);
         let picked_radius = (picked - center).truncate().length();
         if !picked_radius.is_finite() || picked_radius <= 1.0e-12 {
@@ -520,6 +532,9 @@ fn dimension_preview(
     let center = plane.to_local(selection.center());
     let first = plane.to_local(selection.point_at(selection.start_angle));
     let second = plane.to_local(selection.point_at(selection.end_angle));
+    let Some(point) = selection.project(point) else {
+        return preview_wire(Vec::new(), "dimarc_preview");
+    };
     let point = plane.to_local(point);
     let radius = (point - center).truncate().length();
     if radius <= 1.0e-12 {
@@ -597,42 +612,12 @@ fn nan() -> DVec3 {
 }
 
 fn preview_wire(points: Vec<DVec3>, name: &str) -> WireModel {
-    WireModel {
-        point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
-        world_width: 0.0,
-        depth_override: None,
-        display_visible: true,
-        plot_visible: true,
-        fill_is_3d: false,
-        fill_is_2d_solid: false,
-        render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
-        dash_from_start: false,
-        dash_align_end: None,
-        text_verts: Vec::new(),
-        name: name.to_string(),
-        points: points
-            .into_iter()
-            .map(|point| [point.x as f32, point.y as f32, point.z as f32])
-            .collect(),
-        points_low: Vec::new(),
-        color: WireModel::CYAN,
-        selected: false,
-        pattern_length: 0.0,
-        pattern: [0.0; 8],
-        line_weight_px: 1.0,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
-        aci: 0,
-        key_vertices: vec![],
-        aabb: WireModel::UNBOUNDED_AABB,
-        plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
-    }
+    WireModel::solid_f64(
+        name.to_string(),
+        points.into_iter().map(|point| point.to_array()).collect(),
+        WireModel::CYAN,
+        false,
+    )
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMARC"] });

@@ -18,6 +18,7 @@ use super::{ChangeKind, Scene};
 
 pub(crate) const POLYLINE_ARC_CENTER_MARKER: i32 = -4;
 const POLYLINE_ARC_POINT_MARKER_BASE: i32 = -5;
+pub(crate) const ARC_DIMENSION_POINT_MARKER: i32 = -1;
 
 pub(crate) fn polyline_arc_point_marker(segment: i32) -> i32 {
     POLYLINE_ARC_POINT_MARKER_BASE - segment.max(0)
@@ -341,11 +342,19 @@ fn source_marker(entity: &EntityType, point: Vector3) -> Option<i32> {
 fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Option<Vector3> {
     let source = *reference.xrefs.first()?;
     let entity = scene.document.get_entity(source)?;
+    if reference.main_gs_marker == ARC_DIMENSION_POINT_MARKER {
+        let radial = radial_source_for_marker(entity, 0)?;
+        let sweep = positive_sweep(radial.start_angle, radial.end_angle);
+        let angle = radial.start_angle + sweep * reference.osnap_distance.clamp(0.0, 1.0);
+        return Some(radial.point_at_angle(angle));
+    }
     if let Some(segment) =
         polyline_arc_segment_from_point_marker(reference.main_gs_marker)
     {
         let radial = radial_source_for_marker(entity, segment)?;
-        return Some(radial.point_at_angle(reference.osnap_distance));
+        let sweep = positive_sweep(radial.start_angle, radial.end_angle);
+        let angle = radial.start_angle + sweep * reference.osnap_distance.clamp(0.0, 1.0);
+        return Some(radial.point_at_angle(angle));
     }
     if reference.main_gs_marker == POLYLINE_ARC_CENTER_MARKER {
         let segment = reference.osnap_distance.round().max(0.0) as usize;
@@ -486,6 +495,33 @@ fn point_on_radial_circle(
     vector3(radial.plane.point_at([
         radial.center[0] + radius * angle.cos(),
         radial.center[1] + radius * angle.sin(),
+    ]))
+}
+
+fn plane_from_normal(origin: Vector3, normal: Vector3) -> Plane {
+    let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes((
+        normal.x, normal.y, normal.z,
+    ));
+    Plane::from_axes(
+        [origin.x, origin.y, origin.z],
+        [x_axis.0, x_axis.1, x_axis.2],
+        [y_axis.0, y_axis.1, y_axis.2],
+    )
+}
+
+fn remap_plane_offset(
+    old_plane: Plane,
+    new_plane: Plane,
+    old_origin: Vector3,
+    old_point: Vector3,
+    new_origin: Vector3,
+) -> Vector3 {
+    let old_origin = old_plane.project(dpoint(old_origin)).unwrap_or([0.0; 2]);
+    let old_point = old_plane.project(dpoint(old_point)).unwrap_or(old_origin);
+    let new_origin_uv = new_plane.project(dpoint(new_origin)).unwrap_or([0.0; 2]);
+    vector3(new_plane.point_at([
+        new_origin_uv[0] + old_point[0] - old_origin[0],
+        new_origin_uv[1] + old_point[1] - old_origin[1],
     ]))
 }
 
@@ -987,6 +1023,7 @@ impl Scene {
 
                     let old_center = arc.center_point;
                     let old_definition = arc.definition_point;
+                    let old_plane = plane_from_normal(old_center, arc.base.normal);
                     let old_source_radius = old_center.distance(&arc.first_extension_point);
                     let old_dim_radius = old_center.distance(&old_definition);
                     let radial_offset = old_dim_radius - old_source_radius;
@@ -996,7 +1033,7 @@ impl Scene {
                             arc.arc_end_parameter,
                         ) * 0.5;
                     let old_definition_angle =
-                        angle_about_plane(radial.plane, old_center, old_definition);
+                        angle_about_plane(old_plane, old_center, old_definition);
                     let definition_angle_offset =
                         signed_angle_delta(old_definition_angle - old_mid);
 
@@ -1015,7 +1052,27 @@ impl Scene {
                         dim_radius,
                         middle + definition_angle_offset,
                     );
-                    let delta = definition - old_definition;
+                    let text_middle = remap_plane_offset(
+                        old_plane,
+                        radial.plane,
+                        old_definition,
+                        arc.base.text_middle_point,
+                        definition,
+                    );
+                    let insertion = remap_plane_offset(
+                        old_plane,
+                        radial.plane,
+                        old_definition,
+                        arc.base.insertion_point,
+                        definition,
+                    );
+                    let second_leader = remap_plane_offset(
+                        old_plane,
+                        radial.plane,
+                        old_definition,
+                        arc.second_leader_point,
+                        definition,
+                    );
 
                     arc.center_point = center;
                     arc.first_extension_point = first;
@@ -1024,9 +1081,12 @@ impl Scene {
                     arc.arc_end_parameter = end;
                     arc.definition_point = definition;
                     arc.base.definition_point = definition;
+                    if let Some(normal) = radial.plane.normal() {
+                        arc.base.normal = vector3(normal);
+                    }
                     if arc.base.text_user_positioned {
-                        arc.base.text_middle_point = arc.base.text_middle_point + delta;
-                        arc.base.insertion_point = arc.base.insertion_point + delta;
+                        arc.base.text_middle_point = text_middle;
+                        arc.base.insertion_point = insertion;
                     } else {
                         arc.base.text_middle_point = definition;
                         arc.base.insertion_point = definition;
@@ -1034,7 +1094,7 @@ impl Scene {
                     if arc.has_leader {
                         arc.first_leader_point =
                             point_on_radial_circle(radial, dim_radius, middle);
-                        arc.second_leader_point = arc.second_leader_point + delta;
+                        arc.second_leader_point = second_leader;
                     }
                     arc.base.actual_measurement = arc.measurement();
                 }

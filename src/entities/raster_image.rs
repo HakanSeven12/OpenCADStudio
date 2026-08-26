@@ -180,6 +180,7 @@ impl RenderConvertible for RasterImage {
             origin: ins,
             color: None,
             fill_tris: vec![],
+            plane: None,
             run: None,
         }];
 
@@ -218,6 +219,7 @@ impl RenderConvertible for RasterImage {
                 origin,
                 color: None,
                 fill_tris,
+                plane: None,
                 run: Some(GlyphRun {
                     text: path.to_string(),
                     font,

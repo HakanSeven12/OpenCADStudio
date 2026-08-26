@@ -26,7 +26,7 @@ use acadrust::tables::BlockRecord;
 use acadrust::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
 
-use crate::command::{CadCommand, CmdResult};
+use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::entities::curve::lwpolyline_world_xy;
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use glam::DVec3;
@@ -909,6 +909,24 @@ fn norm2(dx: f64, dy: f64, fx: f64, fy: f64) -> (f64, f64) {
 }
 
 fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
+    if let Dimension::Arc(arc) = dim {
+        if let Some((local_arc, normal)) =
+            crate::entities::dimension::arc_dimension_in_ocs(arc)
+        {
+            let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes((
+                normal.x, normal.y, normal.z,
+            ));
+            let plane = WorkingPlane::new(
+                DVec3::ZERO,
+                DVec3::new(x_axis.0, x_axis.1, x_axis.2),
+                DVec3::new(y_axis.0, y_axis.1, y_axis.2),
+            );
+            return explode_dimension(&Dimension::Arc(local_arc), doc)
+                .into_iter()
+                .map(|entity| plane.place_entity(entity))
+                .collect();
+        }
+    }
 
     let base = dim.base();
     let met = dim_metrics(dim, doc);

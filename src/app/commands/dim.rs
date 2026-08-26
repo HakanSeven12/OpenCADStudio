@@ -601,10 +601,7 @@ impl OpenCADStudio {
             }
 
             "TOLERANCE" => {
-                use crate::modules::annotate::tolerance_cmd::ToleranceCommand;
-                let cmd = ToleranceCommand::new();
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                self.open_tolerance_dialog(None);
             }
 
             "TABLE" => {

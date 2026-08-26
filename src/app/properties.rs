@@ -1807,10 +1807,22 @@ impl OpenCADStudio {
                         };
                         if let Some((anno_field, insert_after)) = anno {
                             let is_anno = crate::scene::annotative::is_annotative(doc, entity)
-                                || (matches!(entity, acadrust::EntityType::Tolerance(_))
-                                    && crate::scene::annotative::annotation_style_is_annotative(
-                                        doc, entity,
-                                    ));
+                                || match entity {
+                                    acadrust::EntityType::Dimension(
+                                        acadrust::entities::Dimension::Arc(dimension),
+                                    ) => {
+                                        crate::scene::annotative::dim_style_is_annotative(
+                                            doc,
+                                            &dimension.base.style_name,
+                                        )
+                                    }
+                                    acadrust::EntityType::Tolerance(_) => {
+                                        crate::scene::annotative::annotation_style_is_annotative(
+                                            doc, entity,
+                                        )
+                                    }
+                                    _ => false,
+                                };
                             // Dimensions/tables/tolerances carry no Annotative row yet — add one
                             // right after their style row.
                             if let Some(anchor) = insert_after {
@@ -1838,6 +1850,13 @@ impl OpenCADStudio {
                                             field: "is_annotative",
                                             value: t.is_annotative,
                                         },
+                                    ),
+                                    acadrust::EntityType::Dimension(
+                                        acadrust::entities::Dimension::Arc(_),
+                                    ) => set_row(
+                                        &mut sections,
+                                        "annotative",
+                                        if is_anno { "Yes" } else { "No" }.to_string(),
                                     ),
                                     acadrust::EntityType::Text(_)
                                     | acadrust::EntityType::Insert(_)

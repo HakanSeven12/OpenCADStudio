@@ -37,11 +37,6 @@ pub fn general_section(entity: &EntityType) -> PropSection {
         title: t!("General").into_owned(),
         props: vec![
             Property {
-                label: t!("Handle").into_owned(),
-                field: "handle",
-                value: PropValue::ReadOnly(common.handle.value().to_string()),
-            },
-            Property {
                 label: t!("Color").into_owned(),
                 field: "color",
                 value: PropValue::ColorChoice(common.color),
@@ -94,16 +89,7 @@ pub fn general_section(entity: &EntityType) -> PropSection {
         ],
     };
 
-    if matches!(entity, EntityType::Text(_))
-        || matches!(entity, EntityType::LwPolyline(polyline) if crate::entities::lwpolyline::is_rectangle(polyline))
-        || matches!(entity, EntityType::MText(_))
-        || matches!(entity, EntityType::Tolerance(_))
-    {
-        section.props.retain(|prop| prop.field != "handle");
-    }
-
     if matches!(entity, EntityType::Point(_)) {
-        section.props.retain(|prop| prop.field != "handle");
         let hyperlink = section.props.iter().position(|prop| prop.field == "hyperlink");
         let transparency = section.props.iter().position(|prop| prop.field == "transparency");
         if let (Some(hyperlink), Some(transparency)) = (hyperlink, transparency) {

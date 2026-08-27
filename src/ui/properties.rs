@@ -763,6 +763,9 @@ impl PropertiesPanel {
             PropValue::ColorVaries => self.render_color_varies_row(label),
             PropValue::LayerChoice(layer) => self.render_layer_row(label, layer),
             PropValue::LwChoice(lw) => self.render_lw_row(label, *lw),
+            PropValue::FieldLwChoice { field, value } => {
+                self.render_field_lw_row(label, field, *value)
+            }
             PropValue::LwVaries => self.render_lw_varies_row(label),
             PropValue::LinetypeChoice(lt) => self.render_linetype_row(label, lt),
             PropValue::Choice { selected, options } => {
@@ -861,6 +864,10 @@ impl PropertiesPanel {
                 | "dim_ext_line_color"
                 | "dim_text_color"
                 | "dim_text_fill_color"
+                | "line_color"
+                | "text_color"
+                | "block_content_color"
+                | "background_fill_color"
         ) {
             let open = self.open_color_field.as_deref() == Some(field);
             let fsel = field.to_string();
@@ -871,7 +878,9 @@ impl PropertiesPanel {
                     background: true,
                     ..Default::default()
                 }
-            } else if field.starts_with("dim_") {
+            } else if field.starts_with("dim_")
+                || matches!(field, "line_color" | "text_color" | "block_content_color")
+            {
                 crate::ui::color_select::ColorExtras {
                     by_layer: true,
                     by_block: true,
@@ -983,6 +992,36 @@ impl PropertiesPanel {
             "",
             Some(&selected),
             |item: LwItem| Message::PropLwChanged(item.0),
+        )
+        .size(FONT_SZ)
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 6.0,
+            right: 6.0,
+        })
+        .input_style(combo_input_style)
+        .on_open(Message::PropColorPickerClose)
+        .width(Length::Fill);
+
+        prop_row_widget(label, combo.into())
+    }
+
+    fn render_field_lw_row<'a>(
+        &'a self,
+        label: &'a str,
+        field: &'static str,
+        lw: LineWeight,
+    ) -> Element<'a, Message> {
+        let selected = LwItem(lw);
+        let combo = combo_box(
+            &self.lineweight_combo,
+            "",
+            Some(&selected),
+            move |item: LwItem| Message::PropFieldLwChanged {
+                field,
+                value: item.0,
+            },
         )
         .size(FONT_SZ)
         .padding(Padding {

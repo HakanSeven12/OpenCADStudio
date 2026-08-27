@@ -4665,6 +4665,42 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PropFieldLwChanged { field, value } => {
+                let i = self.active_tab;
+                let handles = self.property_target_handles(i);
+                if handles.is_empty() {
+                    return Task::none();
+                }
+                self.push_undo_snapshot(i, "CHPROP");
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    if let Some(acadrust::EntityType::MultiLeader(leader)) =
+                        self.tabs[i].scene.document.get_entity_mut(handle)
+                    {
+                        if field == "line_weight" {
+                            leader.line_weight = value;
+                            leader.property_override_flags.insert(
+                                acadrust::entities::MultiLeaderPropertyOverrideFlags::LEADER_LINE_WEIGHT,
+                            );
+                            for root in &mut leader.context.leader_roots {
+                                for line in &mut root.lines {
+                                    line.line_weight = value;
+                                    line.override_flags.insert(
+                                        acadrust::entities::LeaderLinePropertyOverrideFlags::LINE_WEIGHT,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                self.invalidate_property_targets(i, &handles);
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+                Task::none()
+            }
+
             Message::PropLinetypeChanged(lt) => {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
@@ -5132,6 +5168,63 @@ impl OpenCADStudio {
                             );
                         }
                         self.invalidate_property_targets(i, &targets);
+                        self.tabs[i].properties.open_color_field = None;
+                        self.tabs[i].dirty = true;
+                        self.refresh_properties();
+                    }
+                    return Task::none();
+                }
+                if matches!(
+                    field.as_str(),
+                    "line_color" | "text_color" | "block_content_color"
+                        | "background_fill_color"
+                ) {
+                    if !handles.is_empty() {
+                        self.push_undo_snapshot(i, "CHPROP");
+                        for &handle in &handles {
+                            if self.tabs[i].scene.is_layer_locked(handle) {
+                                continue;
+                            }
+                            if let Some(acadrust::EntityType::MultiLeader(leader)) =
+                                self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                match field.as_str() {
+                                    "line_color" => {
+                                        leader.line_color = color;
+                                        leader.property_override_flags.insert(
+                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::LINE_COLOR,
+                                        );
+                                        for root in &mut leader.context.leader_roots {
+                                            for line in &mut root.lines {
+                                                line.line_color = color;
+                                                line.override_flags.insert(
+                                                    acadrust::entities::LeaderLinePropertyOverrideFlags::LINE_COLOR,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    "text_color" => {
+                                        leader.text_color = color;
+                                        leader.context.text_color = color;
+                                        leader.property_override_flags.insert(
+                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::TEXT_COLOR,
+                                        );
+                                    }
+                                    "block_content_color" => {
+                                        leader.block_content_color = color;
+                                        leader.context.block_content_color = color;
+                                        leader.property_override_flags.insert(
+                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT_COLOR,
+                                        );
+                                    }
+                                    "background_fill_color" => {
+                                        leader.context.background_fill_color = color;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        self.invalidate_property_targets(i, &handles);
                         self.tabs[i].properties.open_color_field = None;
                         self.tabs[i].dirty = true;
                         self.refresh_properties();

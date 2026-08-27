@@ -34,6 +34,11 @@ pub enum PropValue {
     ColorVaries,
     /// Line weight — rendered as a combo_box.
     LwChoice(LineWeight),
+    /// Object-specific line weight routed by field name.
+    FieldLwChoice {
+        field: &'static str,
+        value: LineWeight,
+    },
     /// Lineweight varies across the current multi-selection.
     LwVaries,
     /// Linetype name — rendered as a combo_box.

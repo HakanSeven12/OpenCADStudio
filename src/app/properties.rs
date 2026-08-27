@@ -845,6 +845,12 @@ impl OpenCADStudio {
                                     .map(|b| b.name.clone()),
                             )
                             .collect();
+                        let block_names: Vec<String> = doc
+                            .block_records
+                            .iter()
+                            .map(|block| block.name.clone())
+                            .filter(|name| !name.is_empty() && !name.starts_with('*'))
+                            .collect();
                         let tstyle_names = text_style_names.clone();
                         // Currently selected names.
                         let cur_style = ml
@@ -878,6 +884,15 @@ impl OpenCADStudio {
                                 doc.line_types.iter().find(|l| l.handle == h).map(|l| l.name.clone())
                             })
                             .unwrap_or_else(|| "ByBlock".to_string());
+                        let cur_block = ml
+                            .block_content_handle
+                            .and_then(|handle| {
+                                doc.block_records
+                                    .iter()
+                                    .find(|block| block.handle == handle)
+                                    .map(|block| block.name.clone())
+                            })
+                            .unwrap_or_else(|| "(none)".to_string());
                         let mut set_choice =
                             |field: &str, selected: String, options: Vec<String>| {
                                 for section in sections.iter_mut() {
@@ -896,6 +911,9 @@ impl OpenCADStudio {
                         set_choice("text_style_handle", cur_tstyle, tstyle_names);
                         set_choice("arrowhead_handle", cur_arrow, arrow_names);
                         set_choice("line_type_handle", cur_ltype, ltype_names);
+                        if !block_names.is_empty() {
+                            set_choice("block_content_handle", cur_block, block_names);
+                        }
                     }
 
                     // Inject viewport-only properties that require doc access.
@@ -1404,6 +1422,19 @@ impl OpenCADStudio {
                         // MultiLeader: max points + segment-angle constraints
                         // are MLeaderStyle settings, not stored on the entity.
                         acadrust::EntityType::MultiLeader(ml) => {
+                            if ml
+                                .text_style_handle
+                                .and_then(|handle| {
+                                    doc.text_styles.iter().find(|style| style.handle == handle)
+                                })
+                                .is_some_and(|style| style.has_fixed_height())
+                            {
+                                set_row_value(
+                                    &mut sections,
+                                    "text_height",
+                                    PropValue::ReadOnly(format!("{:.4}", ml.text_height)),
+                                );
+                            }
                             if let Some(sh) = ml.style_handle {
                                 if let Some((mx, a1, a2)) =
                                     doc.objects.iter().find_map(|(h, o)| match o {
@@ -2514,9 +2545,21 @@ impl OpenCADStudio {
                     | acadrust::EntityType::Polyline2D(_)
                     | acadrust::EntityType::Polyline3D(_)
             );
-        let layer = &self.tabs[i].active_layer;
-        if layer != "0" || entity.as_entity().layer().is_empty() {
-            entity.as_entity_mut().set_layer(layer.clone());
+        let explicit_mleader_layer = match &entity {
+            acadrust::EntityType::MultiLeader(leader) => leader
+                .common
+                .layer
+                .strip_prefix("__MLEADER_LAYER__")
+                .map(str::to_owned),
+            _ => None,
+        };
+        if let Some(layer) = explicit_mleader_layer {
+            entity.as_entity_mut().set_layer(layer);
+        } else {
+            let layer = &self.tabs[i].active_layer;
+            if layer != "0" || entity.as_entity().layer().is_empty() {
+                entity.as_entity_mut().set_layer(layer.clone());
+            }
         }
 
         // INSUNITS: when inserting a block whose BlockRecord.units differ
@@ -2750,7 +2793,10 @@ fn make_sections_read_only(
                 acadrust::types::Color::Rgb { r, g, b } => format!("{r},{g},{b}"),
             },
             PropValue::ColorVaries | PropValue::LwVaries => VARIES_LABEL.to_string(),
-            PropValue::LwChoice(lineweight) => {
+            PropValue::LwChoice(lineweight)
+            | PropValue::FieldLwChoice {
+                value: lineweight, ..
+            } => {
                 ui::properties::LwItem(*lineweight).to_string()
             }
             PropValue::BoolToggle { value, .. } => {

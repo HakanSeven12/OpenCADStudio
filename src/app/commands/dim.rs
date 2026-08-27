@@ -604,9 +604,31 @@ impl OpenCADStudio {
                         _ => None,
                     });
                 let multiplier = self.tabs[i].scene.creation_annotation_multiplier();
+                let block_sources = self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .iter()
+                    .filter(|block| !block.name.is_empty() && !block.name.starts_with('*'))
+                    .map(|block| (block.name.clone(), block.handle))
+                    .collect();
+                let layers = self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .iter()
+                    .map(|layer| layer.name.clone())
+                    .collect();
+                let text_styles = self.tabs[i]
+                    .scene
+                    .document
+                    .text_styles
+                    .iter()
+                    .map(|style| (style.name.clone(), style.handle))
+                    .collect();
                 let new_cmd = style.map_or_else(MLeaderCommand::new, |style| {
                     MLeaderCommand::with_style(style, multiplier)
-                });
+                }).with_drawing_resources(block_sources, layers, text_styles);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

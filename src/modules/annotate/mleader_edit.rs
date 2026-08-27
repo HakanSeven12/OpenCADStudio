@@ -122,13 +122,31 @@ impl CadCommand for MLeaderAddCommand {
             }
             let h = *handle;
             if let EntityType::MultiLeader(ref mut ml) = entity {
-                // Add a new leader root with the collected points
                 let points: Vec<Vector3> = pts
                     .iter()
                     .map(|p| Vector3::new(p.x, p.y, p.z))
                     .collect();
+                let template_root = ml.context.leader_roots.first().cloned();
+                let path_type = ml.path_type;
+                let line_color = ml.line_color;
+                let line_type_handle = ml.line_type_handle;
+                let line_weight = ml.line_weight;
+                let arrowhead_handle = ml.arrowhead_handle;
+                let arrowhead_size = ml.arrowhead_size;
                 let root = ml.context.add_leader_root();
-                root.create_line(points);
+                if let Some(template) = template_root {
+                    root.connection_point = template.connection_point;
+                    root.direction = template.direction;
+                    root.landing_distance = template.landing_distance;
+                    root.text_attachment_direction = template.text_attachment_direction;
+                }
+                let line = root.create_line(points);
+                line.path_type = path_type;
+                line.line_color = line_color;
+                line.line_type_handle = line_type_handle;
+                line.line_weight = line_weight;
+                line.arrowhead_handle = arrowhead_handle;
+                line.arrowhead_size = arrowhead_size;
             }
             let updated = std::mem::replace(entity, EntityType::XLine(Default::default()));
             return CmdResult::ReplaceEntity(h, vec![updated]);
@@ -223,24 +241,38 @@ impl CadCommand for MLeaderRemoveCommand {
             if let Some(mut ent) = entity.take() {
                 let h = *handle;
                 if let EntityType::MultiLeader(ref mut ml) = ent {
-                    // Remove the leader root whose first point is closest to `pt`
                     let pick = Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64);
                     let best = ml
                         .context
                         .leader_roots
                         .iter()
                         .enumerate()
-                        .filter_map(|(i, root)| {
-                            root.lines.first().and_then(|l| l.points.first()).map(|p| {
-                                let dx = p.x - pick.x;
-                                let dz = p.z - pick.z;
-                                (i, dx * dx + dz * dz)
+                        .flat_map(|(root_index, root)| {
+                            root.lines.iter().enumerate().map(move |(line_index, line)| {
+                                let mut distance = line
+                                    .points
+                                    .windows(2)
+                                    .map(|segment| point_segment_distance_sq_xy(pick, segment[0], segment[1]))
+                                    .fold(f64::INFINITY, f64::min);
+                                if let Some(last) = line.points.last().copied() {
+                                    distance = distance.min(point_segment_distance_sq_xy(
+                                        pick,
+                                        last,
+                                        root.connection_point,
+                                    ));
+                                }
+                                (root_index, line_index, distance)
                             })
                         })
-                        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                    if let Some((idx, _)) = best {
-                        if ml.context.leader_roots.len() > 1 {
-                            ml.context.leader_roots.remove(idx);
+                        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+                    if let Some((root_index, line_index, _)) = best {
+                        let total_lines = ml.total_leader_line_count();
+                        if total_lines > 1 {
+                            let root = &mut ml.context.leader_roots[root_index];
+                            root.lines.remove(line_index);
+                            if root.lines.is_empty() {
+                                ml.context.leader_roots.remove(root_index);
+                            }
                         }
                     }
                 }
@@ -348,9 +380,9 @@ impl CadCommand for MLeaderAlignCommand {
                     "__MLEADERALIGN__{};{:.4},{:.4};{:.4},{:.4}",
                     hstr.join(","),
                     f.x,
-                    f.z,
+                    f.y,
                     pt.x,
-                    pt.z
+                    pt.y
                 );
                 // Use first handle as the "replaced" entity (sentinel)
                 if let Some(&first) = h.first() {
@@ -441,7 +473,7 @@ impl CadCommand for MLeaderCollectCommand {
                 "__MLEADERCOLLECT__{};{:.4},{:.4}",
                 hstr.join(","),
                 pt.x,
-                pt.z
+                pt.y
             );
             if let Some(&first) = h.first() {
                 return CmdResult::ReplaceEntity(first, vec![EntityType::XLine(xl)]);
@@ -494,6 +526,22 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
     }
+}
+
+fn point_segment_distance_sq_xy(point: Vector3, start: Vector3, end: Vector3) -> f64 {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let len_sq = dx * dx + dy * dy;
+    if len_sq <= 1.0e-18 {
+        let px = point.x - start.x;
+        let py = point.y - start.y;
+        return px * px + py * py;
+    }
+    let t = (((point.x - start.x) * dx + (point.y - start.y) * dy) / len_sq)
+        .clamp(0.0, 1.0);
+    let px = point.x - (start.x + t * dx);
+    let py = point.y - (start.y + t * dy);
+    px * px + py * py
 }
 
 // Silence unused-import warning for MultiLeader and LeaderLine if not used in all paths

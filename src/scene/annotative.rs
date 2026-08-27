@@ -1551,16 +1551,42 @@ pub fn apply_mleader_style(
     entity.context.block_content_scale = entity.block_scale;
     entity.context.scale_factor = style.scale_factor;
     entity.enable_annotation_scale = style.is_annotative;
+    match entity.content_type {
+        acadrust::entities::LeaderContentType::MText => {
+            entity.context.has_text_contents = true;
+            entity.context.has_block_contents = false;
+        }
+        acadrust::entities::LeaderContentType::Block => {
+            entity.context.has_text_contents = false;
+            entity.context.has_block_contents = entity.block_content_handle.is_some();
+            entity.context.block_content_location = entity.context.content_base_point;
+        }
+        _ => {
+            entity.context.has_text_contents = false;
+            entity.context.has_block_contents = false;
+        }
+    }
     for root in &mut entity.context.leader_roots {
         root.landing_distance = style.landing_distance;
         root.text_attachment_direction = entity.text_attachment_direction;
         for line in &mut root.lines {
-            if line.override_flags.is_empty() {
+            use acadrust::entities::LeaderLinePropertyOverrideFlags as F;
+            if !line.override_flags.contains(F::PATH_TYPE) {
                 line.path_type = entity.path_type;
+            }
+            if !line.override_flags.contains(F::LINE_COLOR) {
                 line.line_color = style.line_color;
+            }
+            if !line.override_flags.contains(F::LINE_TYPE) {
                 line.line_type_handle = style.line_type_handle;
+            }
+            if !line.override_flags.contains(F::LINE_WEIGHT) {
                 line.line_weight = style.line_weight;
+            }
+            if !line.override_flags.contains(F::ARROWHEAD) {
                 line.arrowhead_handle = style.arrowhead_handle;
+            }
+            if !line.override_flags.contains(F::ARROWHEAD_SIZE) {
                 line.arrowhead_size = style.arrowhead_size;
             }
         }
@@ -1854,4 +1880,3 @@ pub fn is_annotative(doc: &CadDocument, entity: &EntityType) -> bool {
         _ => false,
     }
 }
-

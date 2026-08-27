@@ -2135,7 +2135,7 @@ pub fn style_sections(
                     "dim_text_inside_align",
                     on(int(ov::DIMTIH, s.dimtih as i16) != 0),
                     &["On", "Off"],
-                    dimtix,
+                    dimtix || matches!(dimension, Dimension::LargeRadial(_)),
                 ),
                 property(
                     t!("Text position X").as_ref(),
@@ -2165,11 +2165,11 @@ pub fn style_sections(
                     t!("Text view direction").as_ref(),
                     "dim_text_view_direction",
                     if int(ov::DIMTXTDIRECTION, s.dimtxtdirection as i16) != 0 {
-                        "Right-to-left"
+                        "Right-to-Left"
                     } else {
-                        "Left-to-right"
+                        "Left-to-Right"
                     },
-                    &["Left-to-right", "Right-to-left"],
+                    &["Left-to-Right", "Right-to-Left"],
                     true,
                 ),
                 property(
@@ -2726,7 +2726,7 @@ pub fn style_sections(
         }
         if matches!(dimension, Dimension::LargeRadial(_)) {
             for (section_name, excluded) in [
-                (t!("Text"), &["dim_text_pos_hor", "measurement"][..]),
+                (t!("Text"), &["dim_text_pos_hor"][..]),
                 (t!("Fit"), &["dim_line_inside"][..]),
                 (
                     t!("Alternate Units"),

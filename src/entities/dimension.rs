@@ -111,29 +111,11 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
     if let Dimension::LargeRadial(d) = dim {
         return vec![PropSection {
             title: t!("Misc").into_owned(),
-            props: vec![
-                Property {
-                    label: t!("Dimension style").into_owned(),
-                    field: "style_name",
-                    value: PropValue::PlainText(d.base.style_name.clone()),
-                },
-                edit_angle(
-                    t!("Rotation").as_ref(),
-                    "large_radial_rotation",
-                    large_radial_rotation(d).to_degrees(),
-                ),
-                edit(t!("Center X").as_ref(), "definition_x", d.definition_point.x),
-                edit(t!("Center Y").as_ref(), "definition_y", d.definition_point.y),
-                edit(t!("Center Z").as_ref(), "definition_z", d.definition_point.z),
-                edit(t!("Chord X").as_ref(), "chord_x", d.chord_point.x),
-                edit(t!("Chord Y").as_ref(), "chord_y", d.chord_point.y),
-                edit(t!("Chord Z").as_ref(), "chord_z", d.chord_point.z),
-                ro(
-                    t!("Measurement").as_ref(),
-                    "measurement",
-                    format!("{:.4}", d.measurement()),
-                ),
-            ],
+            props: vec![Property {
+                label: t!("Dim style").into_owned(),
+                field: "style_name",
+                value: PropValue::PlainText(d.base.style_name.clone()),
+            }],
         }];
     }
     let compact_linear = match dim {

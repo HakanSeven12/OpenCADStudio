@@ -1063,16 +1063,6 @@ impl OpenCADStudio {
                                 &self.tabs[i].scene.document,
                             ));
 
-                            if matches!(d, acadrust::entities::Dimension::LargeRadial(_)) {
-                                if let Some(index) = sections
-                                    .iter()
-                                    .position(|section| section.title == t!("Misc").as_ref())
-                                {
-                                    let misc = sections.remove(index);
-                                    sections.push(misc);
-                                }
-                            }
-
                             // Prefer entity-level dimension-variable overrides;
                             // fall back to the assigned style values.
                             use crate::entities::dim_override as dov;

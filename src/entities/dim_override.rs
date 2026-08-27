@@ -403,8 +403,8 @@ pub fn set_property(
         let size = current.abs().max(0.01);
         let value = match trimmed.to_ascii_lowercase().as_str() {
             "none" => 0.0,
-            "center marks" => size,
-            "centerlines" => -size,
+            "mark" | "center marks" => size,
+            "line" | "centerlines" => -size,
             _ => return false,
         };
         set(doc, handle, DIMCEN, Some(XDataValue::Real(value)));
@@ -423,6 +423,7 @@ pub fn set_property(
         return true;
     }
     let handle_field = match field {
+        "dim_radial_arrow" => Some(DIMLDRBLK),
         "dim_arrowhead_1" => Some(DIMBLK1),
         "dim_arrowhead_2" => Some(DIMBLK2),
         "dim_linetype" => Some(DIMLTYPE),
@@ -433,7 +434,7 @@ pub fn set_property(
     };
     if let Some(code) = handle_field {
         let resolved = match field {
-            "dim_arrowhead_1" | "dim_arrowhead_2" => {
+            "dim_radial_arrow" | "dim_arrowhead_1" | "dim_arrowhead_2" => {
                 if trimmed == "Closed filled" {
                     Some(Handle::NULL)
                 } else {

@@ -128,29 +128,6 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
                 edit(t!("Chord X").as_ref(), "chord_x", d.chord_point.x),
                 edit(t!("Chord Y").as_ref(), "chord_y", d.chord_point.y),
                 edit(t!("Chord Z").as_ref(), "chord_z", d.chord_point.z),
-                edit(
-                    t!("Override Center X").as_ref(),
-                    "override_x",
-                    d.override_center.x,
-                ),
-                edit(
-                    t!("Override Center Y").as_ref(),
-                    "override_y",
-                    d.override_center.y,
-                ),
-                edit(
-                    t!("Override Center Z").as_ref(),
-                    "override_z",
-                    d.override_center.z,
-                ),
-                edit(t!("Jog X").as_ref(), "jog_x", d.jog_point.x),
-                edit(t!("Jog Y").as_ref(), "jog_y", d.jog_point.y),
-                edit(t!("Jog Z").as_ref(), "jog_z", d.jog_point.z),
-                edit_angle(
-                    t!("Jog Angle").as_ref(),
-                    "jog_angle",
-                    d.jog_angle.to_degrees(),
-                ),
                 ro(
                     t!("Measurement").as_ref(),
                     "measurement",
@@ -1896,18 +1873,10 @@ pub fn style_sections(
         linetype_name(document, ov::handle(data, code).unwrap_or(inherited))
     };
     let arrow_1 = if matches!(dimension, Dimension::Radius(_) | Dimension::LargeRadial(_)) {
-        let inherited = if s.dimblk1.is_null() { s.dimblk } else { s.dimblk1 };
-        let inherited_name = if s.dimblk1.is_null() {
-            &s.dimblk_name
-        } else {
-            &s.dimblk1_name
-        };
         block_name(
             document,
-            ov::handle(data, ov::DIMBLK1)
-                .or_else(|| ov::handle(data, ov::DIMBLK))
-                .unwrap_or(inherited),
-            inherited_name,
+            ov::handle(data, ov::DIMLDRBLK).unwrap_or(s.dimldrblk),
+            "Closed filled",
         )
     } else {
         let inherited = if matches!(dimension, Dimension::Diameter(_)) && !s.dimsah {
@@ -2358,14 +2327,14 @@ pub fn style_sections(
                     "dim_suppress_zero_feet",
                     yes(suppresses_zero_feet(dimzin)),
                     &["Yes", "No"],
-                    true,
+                    matches!(dimlunit, 3 | 4),
                 ),
                 choice(
                     t!("Suppress zero inches").as_ref(),
                     "dim_suppress_zero_inches",
                     yes(suppresses_zero_inches(dimzin)),
                     &["Yes", "No"],
-                    true,
+                    matches!(dimlunit, 3 | 4),
                 ),
                 property(
                     t!("Precision").as_ref(),
@@ -2603,9 +2572,9 @@ pub fn style_sections(
     ) {
         let dimcen = real(ov::DIMCEN, s.dimcen);
         let center_type = if dimcen > 1e-12 {
-            "Center marks"
+            "Mark"
         } else if dimcen < -1e-12 {
-            "Centerlines"
+            "Line"
         } else {
             "None"
         };
@@ -2618,7 +2587,7 @@ pub fn style_sections(
                 "dim_arrow_size",
                 "dim_line_lineweight",
                 "dim_ext_line_lineweight",
-                "dim_line_1",
+                "dim_line_2",
                 "dim_line_color",
                 "dim_linetype",
                 "dim_ext_linetype_1",
@@ -2647,9 +2616,15 @@ pub fn style_sections(
                 "dim_arrowhead_1",
                 "dim_arrow_size",
                 "dim_line_lineweight",
-                "dim_line_1",
+                "dim_ext_line_lineweight",
+                "dim_line_2",
                 "dim_line_color",
                 "dim_linetype",
+                "dim_ext_linetype_1",
+                "dim_ext_line_1",
+                "dim_ext_line_color",
+                "dim_ext_line_ext",
+                "dim_ext_line_offset",
             ];
             let retained = if matches!(dimension, Dimension::Diameter(_)) {
                 DIAMETER_LINE_FIELDS
@@ -2665,7 +2640,7 @@ pub fn style_sections(
                 t!("Center mark").as_ref(),
                 "dim_center_type",
                 center_type,
-                &["None", "Center marks", "Centerlines"],
+                &["None", "Mark", "Line"],
                 true,
             ));
             lines.props.push(number(
@@ -2674,6 +2649,87 @@ pub fn style_sections(
                 dimcen.abs(),
                 center_type != "None",
             ));
+            if let Dimension::LargeRadial(radial) = dimension {
+                lines.props.push(edit(
+                    t!("Center location override X").as_ref(),
+                    "override_x",
+                    radial.override_center.x,
+                ));
+                lines.props.push(edit(
+                    t!("Center location override Y").as_ref(),
+                    "override_y",
+                    radial.override_center.y,
+                ));
+                lines.props.push(edit(
+                    t!("Jog location X").as_ref(),
+                    "jog_x",
+                    radial.jog_point.x,
+                ));
+                lines.props.push(edit(
+                    t!("Jog location Y").as_ref(),
+                    "jog_y",
+                    radial.jog_point.y,
+                ));
+                lines.props.push(edit_angle(
+                    t!("Jog angle").as_ref(),
+                    "jog_angle",
+                    radial.jog_angle.to_degrees(),
+                ));
+            }
+            if matches!(dimension, Dimension::Radius(_) | Dimension::LargeRadial(_)) {
+                if let Some(arrow) = lines
+                    .props
+                    .iter_mut()
+                    .find(|property| property.field == "dim_arrowhead_1")
+                {
+                    arrow.label = t!("Arrow").into_owned();
+                    arrow.field = "dim_radial_arrow";
+                }
+                if let Some(dim_line) = lines
+                    .props
+                    .iter_mut()
+                    .find(|property| property.field == "dim_line_2")
+                {
+                    dim_line.label = t!("Dim line").into_owned();
+                }
+            }
+            if matches!(dimension, Dimension::LargeRadial(_)) {
+                for property in &mut lines.props {
+                    property.label = match property.field {
+                        "dim_ext_line_1" => t!("Ext line").into_owned(),
+                        "dim_ext_line_lineweight" => t!("Ext line weight").into_owned(),
+                        "dim_ext_linetype_1" => t!("Ext line type").into_owned(),
+                        _ => property.label.clone(),
+                    };
+                }
+                const LARGE_RADIAL_ORDER: &[&str] = &[
+                    "dim_radial_arrow",
+                    "dim_arrow_size",
+                    "dim_center_type",
+                    "dim_center_size",
+                    "dim_line_lineweight",
+                    "dim_line_2",
+                    "dim_linetype",
+                    "dim_line_color",
+                    "override_x",
+                    "override_y",
+                    "jog_x",
+                    "jog_y",
+                    "dim_ext_line_1",
+                    "jog_angle",
+                    "dim_ext_line_lineweight",
+                    "dim_ext_linetype_1",
+                    "dim_ext_line_ext",
+                    "dim_ext_line_color",
+                    "dim_ext_line_offset",
+                ];
+                lines.props.sort_by_key(|property| {
+                    LARGE_RADIAL_ORDER
+                        .iter()
+                        .position(|field| *field == property.field)
+                        .unwrap_or(LARGE_RADIAL_ORDER.len())
+                });
+            }
         }
         if let Some(primary_units) = sections
             .iter_mut()
@@ -2688,7 +2744,7 @@ pub fn style_sections(
         }
         if matches!(dimension, Dimension::LargeRadial(_)) {
             for (section_name, excluded) in [
-                (t!("Text"), &["dim_text_pos_hor"][..]),
+                (t!("Text"), &["dim_text_pos_hor", "measurement"][..]),
                 (t!("Fit"), &["dim_line_inside"][..]),
                 (
                     t!("Alternate Units"),
@@ -2702,6 +2758,26 @@ pub fn style_sections(
                     section
                         .props
                         .retain(|property| !excluded.contains(&property.field));
+                }
+            }
+            for (section_name, fields) in [
+                (
+                    t!("Text"),
+                    &["dim_text_outside_align", "dim_text_pos_vert"][..],
+                ),
+                (t!("Fit"), &["dim_fit", "dim_text_inside"][..]),
+            ] {
+                if let Some(section) = sections
+                    .iter_mut()
+                    .find(|section| section.title == section_name.as_ref())
+                {
+                    for property in &mut section.props {
+                        if fields.contains(&property.field) {
+                            if let PropValue::Choice { selected, .. } = &property.value {
+                                property.value = PropValue::ReadOnly(selected.clone());
+                            }
+                        }
+                    }
                 }
             }
             if !dimension.base().text_user_positioned {

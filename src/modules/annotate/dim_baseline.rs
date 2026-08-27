@@ -79,7 +79,6 @@ enum BaselineKind {
     },
     Ordinate {
         source: DimensionOrdinate,
-        leader_delta: DVec3,
     },
 }
 
@@ -192,7 +191,6 @@ impl DimBaselineCommand {
             }
             Dimension::Ordinate(source) => BaselineKind::Ordinate {
                 source: source.clone(),
-                leader_delta: dv(source.leader_endpoint) - dv(source.feature_location),
             },
             _ => return false,
         };
@@ -235,12 +233,12 @@ impl DimBaselineCommand {
                 result.second_point = v3(*vertex + normalized_or(*fixed_ray, DVec3::X));
                 result.angle_vertex = v3(*vertex);
                 result.definition_point = v3(point);
-                result.dimension_arc = v3(
-                    *vertex + angular_bisector(*fixed_ray, moving) * *next_radius,
-                );
+                let (definition, text) =
+                    angular_definition_and_text(*vertex, *fixed_ray, moving, *next_radius);
+                result.dimension_arc = v3(definition);
                 result.base.definition_point = result.dimension_arc;
-                result.base.text_middle_point = result.dimension_arc;
-                result.base.insertion_point = result.dimension_arc;
+                result.base.text_middle_point = v3(text);
+                result.base.insertion_point = result.base.text_middle_point;
                 result.base.actual_measurement = result.measurement_degrees();
                 Dimension::Angular2Ln(result)
             }
@@ -259,28 +257,31 @@ impl DimBaselineCommand {
                 result.angle_vertex = v3(*vertex);
                 result.first_point = v3(*vertex + normalized_or(*fixed_ray, DVec3::X));
                 result.second_point = v3(point);
-                result.definition_point = v3(
-                    *vertex + angular_bisector(*fixed_ray, moving) * *next_radius,
-                );
+                let (definition, text) =
+                    angular_definition_and_text(*vertex, *fixed_ray, moving, *next_radius);
+                result.definition_point = v3(definition);
                 result.base.definition_point = result.definition_point;
-                result.base.text_middle_point = result.definition_point;
-                result.base.insertion_point = result.definition_point;
+                result.base.text_middle_point = v3(text);
+                result.base.insertion_point = result.base.text_middle_point;
                 result.base.actual_measurement = result.measurement_degrees();
                 Dimension::Angular3Pt(result)
             }
-            BaselineKind::Ordinate {
-                source,
-                leader_delta,
-            } => {
+            BaselineKind::Ordinate { source } => {
+                let source_leader = dv(source.leader_endpoint);
+                let leader = if source.is_ordinate_type_x {
+                    DVec3::new(point.x, source_leader.y, source_leader.z)
+                } else {
+                    DVec3::new(source_leader.x, point.y, source_leader.z)
+                };
                 let mut result = DimensionOrdinate::new(
                     v3(point),
-                    v3(point + *leader_delta),
+                    v3(leader),
                     source.is_ordinate_type_x,
                 );
                 result.definition_point = source.definition_point;
                 result.base.definition_point = source.base.definition_point;
-                result.base.text_middle_point = result.leader_endpoint;
-                result.base.insertion_point = result.leader_endpoint;
+                result.base.text_middle_point = v3(leader);
+                result.base.insertion_point = result.base.text_middle_point;
                 Dimension::Ordinate(result)
             }
         };
@@ -331,15 +332,26 @@ impl CadCommand for DimBaselineCommand {
 
     fn prompt(&self) -> String {
         if self.base.is_none() {
-            "DIMBASELINE  Select base dimension (Enter to exit):".to_string()
+            "DIMBASELINE  Select base dimension:".to_string()
+        } else if self
+            .base
+            .as_ref()
+            .is_some_and(|base| matches!(&base.kind, BaselineKind::Ordinate { .. }))
+        {
+            "DIMBASELINE  Specify feature location [Undo/Select] <Select>:".to_string()
         } else {
-            "DIMBASELINE  Specify next extension origin [Select/Undo] <Select>:".to_string()
+            "DIMBASELINE  Specify second extension line origin [Select/Undo] <Select>:"
+                .to_string()
         }
     }
 
     fn options(&self) -> Vec<CmdOption> {
-        self.base.as_ref().map_or_else(Vec::new, |_| {
-            vec![CmdOption::new("Select", "S"), CmdOption::new("Undo", "U")]
+        self.base.as_ref().map_or_else(Vec::new, |base| {
+            if matches!(&base.kind, BaselineKind::Ordinate { .. }) {
+                vec![CmdOption::new("Undo", "U"), CmdOption::new("Select", "S")]
+            } else {
+                vec![CmdOption::new("Select", "S"), CmdOption::new("Undo", "U")]
+            }
         })
     }
 
@@ -451,8 +463,8 @@ fn build_linear(
     let second_line = point + perpendicular * (target - point.dot(perpendicular));
     if aligned {
         let mut result = DimensionAligned::new(v3(fixed), v3(point));
-        result.definition_point = v3(first_line);
-        result.base.definition_point = v3(first_line);
+        result.definition_point = v3(second_line);
+        result.base.definition_point = v3(second_line);
         result.base.text_middle_point = v3((first_line + second_line) * 0.5);
         result.base.insertion_point = result.base.text_middle_point;
         result.base.actual_measurement = result.measurement();
@@ -460,8 +472,8 @@ fn build_linear(
     } else {
         let mut result = DimensionLinear::new(v3(fixed), v3(point));
         result.rotation = rotation;
-        result.definition_point = v3(first_line);
-        result.base.definition_point = v3(first_line);
+        result.definition_point = v3(second_line);
+        result.base.definition_point = v3(second_line);
         result.base.text_middle_point = v3((first_line + second_line) * 0.5);
         result.base.insertion_point = result.base.text_middle_point;
         result.base.actual_measurement = result.measurement();
@@ -508,12 +520,25 @@ fn line_intersection(a: DVec3, b: DVec3, c: DVec3, d: DVec3) -> Option<DVec3> {
     Some(a + b * ((delta.x * d.y - delta.y * d.x) / cross))
 }
 
-fn angular_bisector(first: DVec3, second: DVec3) -> DVec3 {
-    let first = normalized_or(first, DVec3::X);
-    normalized_or(
-        first + normalized_or(second, DVec3::Y),
-        DVec3::new(-first.y, first.x, 0.0),
-    )
+fn angular_definition_and_text(
+    vertex: DVec3,
+    first: DVec3,
+    second: DVec3,
+    radius: f64,
+) -> (DVec3, DVec3) {
+    let start = first.y.atan2(first.x);
+    let mut sweep = second.y.atan2(second.x) - start;
+    while sweep <= -std::f64::consts::PI {
+        sweep += std::f64::consts::TAU;
+    }
+    while sweep > std::f64::consts::PI {
+        sweep -= std::f64::consts::TAU;
+    }
+    let point_at = |fraction: f64| {
+        let angle = start + sweep * fraction;
+        vertex + DVec3::new(angle.cos(), angle.sin(), 0.0) * radius
+    };
+    (point_at(2.0 / 3.0), point_at(0.5))
 }
 
 fn normalized_or(value: DVec3, fallback: DVec3) -> DVec3 {

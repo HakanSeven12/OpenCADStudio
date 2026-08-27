@@ -3507,9 +3507,10 @@ fn tessellate_dimension_inner(
         ));
 
     // Arrow selection precedence:
-    //   1. DIMTSZ>0 → oblique tick (overrides DIMBLK*).
-    //   2. DIMSAH false → DIMBLK on both ends.
-    //   3. DIMSAH true  → DIMBLK1 (first end), DIMBLK2 (second end).
+    //   1. DIMTSZ>0 → oblique tick (overrides arrow blocks).
+    //   2. Radius and large-radius dimensions → DIMLDRBLK.
+    //   3. DIMSAH false → DIMBLK on both ends.
+    //   4. DIMSAH true  → DIMBLK1 (first end), DIMBLK2 (second end).
     // Unknown / NULL block handles fall back to ClosedFilled.
     let dimasz = (dimasz_raw as f32).max(0.001);
     let defer_arrow_hatches = {
@@ -3528,8 +3529,12 @@ fn tessellate_dimension_inner(
         };
         (t.clone(), t)
     } else if let Some(s) = style {
-        if matches!(dim, Dimension::Radius(_)) {
-            let handle = if s.dimblk1.is_null() { s.dimblk } else { s.dimblk1 };
+        if matches!(dim, Dimension::Radius(_) | Dimension::LargeRadial(_)) {
+            let handle = crate::entities::dim_override::handle(
+                &dim.base().common.extended_data,
+                crate::entities::dim_override::DIMLDRBLK,
+            )
+            .unwrap_or(s.dimldrblk);
             let arrow = arrow_from_block_with_deferred_hatch(
                 document,
                 handle,
@@ -4430,17 +4435,17 @@ fn dimension_geometry(
                 let mid = center + u * (dist * 0.5);
                 let a = mid - u * half + perp * half;
                 let b = mid + u * half - perp * half;
-                if !suppress.dim1 {
+                if !suppress.dim2 {
                     add_segment(&mut g.dim_lines, center, a);
                     add_segment(&mut g.dim_lines, a, b);
                     add_segment(&mut g.dim_lines, b, point);
                 }
-            } else if !suppress.dim1 {
+            } else if !suppress.dim2 {
                 add_segment(&mut g.dim_lines, center, point);
             }
             let radius = (point - center).length();
             let text_is_outside = text.distance(center) > radius + 1e-5;
-            if text_is_outside && !suppress.dim1 {
+            if text_is_outside && !suppress.dim2 {
                 let radial = normalized_or(point - center, Vec3::X);
                 let angle_from_horizontal = radial.y.abs().atan2(radial.x.abs());
                 if params.horizontal_text
@@ -4465,12 +4470,14 @@ fn dimension_geometry(
                     add_segment(&mut g.dim_lines, point, text);
                 }
             }
-            append_arrow(
-                &mut g,
-                point,
-                normalized_or(center - point, Vec3::X),
-                arrow1,
-            );
+            if !suppress.dim2 {
+                append_arrow(
+                    &mut g,
+                    point,
+                    normalized_or(center - point, Vec3::X),
+                    arrow1,
+                );
+            }
             if text_is_outside {
                 append_center_mark(&mut g, center, params.dimcen, radius);
             }
@@ -4615,7 +4622,7 @@ fn dimension_geometry(
             let radius = chord.distance(true_center);
             let text_outside = params.text_position.distance(true_center) > radius + 1.0e-5;
             let draw_inside_line = !arrows_outside || params.dimtofl;
-            if draw_inside_line && !suppress.dim1 {
+            if draw_inside_line && !suppress.dim2 {
                 add_segment_with_text_break(&mut g.dim_lines, chord, near, params.text_break);
                 add_segment_with_text_break(&mut g.dim_lines, near, far, params.text_break);
                 add_segment_with_text_break(
@@ -4625,20 +4632,22 @@ fn dimension_geometry(
                     params.text_break,
                 );
             }
-            if arrows_outside && !suppress.dim1 {
+            if arrows_outside && !suppress.dim2 {
                 add_segment(
                     &mut g.dim_lines,
                     chord,
                     chord + axis * (params.arrow_len * 2.0),
                 );
             }
-            append_arrow(
-                &mut g,
-                chord,
-                if arrows_outside { axis } else { -axis },
-                arrow1,
-            );
-            if text_outside && params.text_movement == 0 && !suppress.dim1 {
+            if !suppress.dim2 {
+                append_arrow(
+                    &mut g,
+                    chord,
+                    if arrows_outside { axis } else { -axis },
+                    arrow1,
+                );
+            }
+            if text_outside && params.text_movement == 0 && !suppress.dim2 {
                 add_segment_with_text_break(
                     &mut g.dim_lines,
                     chord,

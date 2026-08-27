@@ -2470,7 +2470,16 @@ impl OpenCADStudio {
         preserve_dimension_layer_and_style: bool,
     ) -> Option<Handle> {
         let i = self.active_tab;
-        let is_dimension = matches!(&entity, acadrust::EntityType::Dimension(_));
+        let tracks_continuation = matches!(
+            &entity,
+            acadrust::EntityType::Dimension(
+                acadrust::entities::Dimension::Linear(_)
+                    | acadrust::entities::Dimension::Aligned(_)
+                    | acadrust::entities::Dimension::Angular2Ln(_)
+                    | acadrust::entities::Dimension::Angular3Pt(_)
+                    | acadrust::entities::Dimension::Ordinate(_)
+            )
+        );
         let inherited_dimension = if preserve_dimension_layer_and_style {
             match &entity {
                 acadrust::EntityType::Dimension(dimension) => Some((
@@ -2748,7 +2757,7 @@ impl OpenCADStudio {
                 self.tabs[i].last_draw_anchor = Some(handle);
             }
         }
-        if is_dimension {
+        if tracks_continuation {
             self.tabs[i].scene.last_created_dimension = new_handle;
         }
         new_handle

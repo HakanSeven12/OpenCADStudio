@@ -646,13 +646,15 @@ impl OpenCADStudio {
 
             "DIMCONTINUE" => {
                 use crate::modules::annotate::dim_continue::DimContinueCommand;
-                let cmd = if let Some((p1, p2, dp, rot, trot)) =
-                    find_last_linear_dim(&self.tabs[i].scene)
-                {
-                    DimContinueCommand::from_base(p1, p2, dp, rot, trot)
-                } else {
-                    DimContinueCommand::new()
-                };
+                let scene = &self.tabs[i].scene;
+                let recent = scene
+                    .last_created_dimension
+                    .and_then(|handle| scene.document.get_entity(handle))
+                    .cloned();
+                let cmd = DimContinueCommand::new(
+                    recent,
+                    self.dimension_continue_mode == 1,
+                );
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

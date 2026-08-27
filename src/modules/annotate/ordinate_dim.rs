@@ -117,6 +117,7 @@ impl CadCommand for OrdinateDimCommand {
                     )),
                     association: DimensionAssociationInput::Infer(None),
                     preserve_base_style: false,
+                    keep_active: false,
                 }
             }
         }

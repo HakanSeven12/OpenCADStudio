@@ -198,6 +198,9 @@ pub struct UserSettings {
     pub osmode: i32,
     /// Controls whether the TEXTEDIT command repeats automatically (0 = Multiple, 1 = Single).
     pub texteditmode: bool,
+    /// QDIM extension-origin priority: 0 = endpoints, 1 = intersections.
+    #[serde(default)]
+    pub quick_dimension_snap_priority: u8,
     /// TEXTFILL: fill TrueType glyphs (true) or draw them hollow (false).
     pub textfill: bool,
     /// When true, saving over an existing file first copies it to a sibling
@@ -284,6 +287,7 @@ impl Default for UserSettings {
             // off (suppress bit 16384).
             osmode: 575 | OSMODE_SUPPRESS,
             texteditmode: false,
+            quick_dimension_snap_priority: 0,
             textfill: true,
             backup_on_save: true,
             file_assoc_enabled: true,

@@ -382,6 +382,7 @@ impl OpenCADStudio {
                 self.snapper.snap_enabled,
             ),
             texteditmode: self.texteditmode,
+            quick_dimension_snap_priority: self.quick_dimension_snap_priority,
             textfill: crate::scene::text::sdf_atlas::textfill(),
             backup_on_save: self.backup_on_save,
             file_assoc_enabled: self.file_assoc_enabled,
@@ -440,6 +441,7 @@ impl OpenCADStudio {
         self.snapper.enabled = modes.into_iter().collect();
         self.snapper.snap_enabled = snap_enabled;
         self.texteditmode = s.texteditmode;
+        self.quick_dimension_snap_priority = s.quick_dimension_snap_priority.min(1);
         crate::scene::text::sdf_atlas::set_textfill(s.textfill);
         self.backup_on_save = s.backup_on_save;
         self.file_assoc_enabled = s.file_assoc_enabled;

@@ -659,23 +659,30 @@ impl OpenCADStudio {
 
             "DIMBASELINE" => {
                 use crate::modules::annotate::dim_baseline::DimBaselineCommand;
-                let cmd = if let Some((p1, p2, dp, rot, trot)) =
-                    find_last_linear_dim(&self.tabs[i].scene)
-                {
-                    let doc = &self.tabs[i].scene.document;
-                    let dimdli = doc
-                        .dim_styles
-                        .iter()
-                        .find(|s| {
-                            s.name
-                                .eq_ignore_ascii_case(&doc.header.current_dimstyle_name)
-                        })
-                        .map(|s| s.dimdli as f32)
-                        .unwrap_or(1.5);
-                    DimBaselineCommand::from_base(p1, p2, dp, rot, trot, dimdli)
+                let scene = &self.tabs[i].scene;
+                let recent = scene
+                    .last_created_dimension
+                    .and_then(|handle| scene.document.get_entity(handle))
+                    .cloned();
+                let dimdli_by_style = scene
+                    .document
+                    .dim_styles
+                    .iter()
+                    .map(|style| (style.name.to_ascii_lowercase(), style.dimdli))
+                    .collect();
+                let fallback_dimdli = if scene.document.header.measurement == 1 {
+                    3.75
                 } else {
-                    DimBaselineCommand::new()
+                    0.38
                 };
+                let current_style_name = scene.document.header.current_dimstyle_name.clone();
+                let cmd = DimBaselineCommand::new(
+                    recent,
+                    dimdli_by_style,
+                    current_style_name,
+                    fallback_dimdli,
+                    self.dimension_continue_mode == 1,
+                );
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

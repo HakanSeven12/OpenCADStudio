@@ -639,6 +639,10 @@ pub fn set_property(
             "dim_line_lineweight" | "dim_ext_line_lineweight" => {
                 parse_lineweight_label(trimmed)
             }
+            "dim_precision"
+            | "dim_alt_precision"
+            | "dim_tolerance_precision"
+            | "dim_alt_tolerance_precision" => parse_precision_label(trimmed),
             "dim_ext_line_fixed"
             | "dim_text_outside_align"
             | "dim_text_inside_align"
@@ -730,8 +734,8 @@ pub fn set_property(
                 _ => trimmed.parse().ok(),
             },
             "dim_tolerance_alignment" => match trimmed.to_ascii_lowercase().as_str() {
-                "align decimal separators" => Some(0),
-                "align operational symbols" => Some(1),
+                "decimal separator" | "align decimal separators" => Some(0),
+                "operational symbols" | "align operational symbols" => Some(1),
                 _ => trimmed.parse().ok(),
             },
             _ => trimmed.parse().ok(),
@@ -743,6 +747,16 @@ pub fn set_property(
         return true;
     }
     false
+}
+
+fn parse_precision_label(value: &str) -> Option<i16> {
+    if let Some(decimals) = value.strip_prefix("0.") {
+        return (!decimals.is_empty()
+            && decimals.len() <= 8
+            && decimals.bytes().all(|digit| digit == b'0'))
+        .then_some(decimals.len() as i16);
+    }
+    value.parse().ok()
 }
 
 fn parse_lineweight_label(value: &str) -> Option<i16> {

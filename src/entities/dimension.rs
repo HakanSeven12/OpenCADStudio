@@ -1888,7 +1888,7 @@ pub fn style_sections(
         }
     }
 
-    let precision_options: Vec<String> = (0..=8).map(|value| value.to_string()).collect();
+    let precision_options: Vec<String> = (0..=8).map(precision_label).collect();
     let linear_units = [
         "Scientific",
         "Decimal",
@@ -2248,13 +2248,13 @@ pub fn style_sections(
                     true,
                 ),
                 text(
-                    t!("Prefix").as_ref(),
+                    t!("Dim prefix").as_ref(),
                     "dim_prefix",
                     dim_prefix.clone(),
                     true,
                 ),
                 text(
-                    t!("Suffix").as_ref(),
+                    t!("Dim suffix").as_ref(),
                     "dim_suffix",
                     dim_suffix.clone(),
                     true,
@@ -2322,7 +2322,7 @@ pub fn style_sections(
                     t!("Precision").as_ref(),
                     "dim_precision",
                     PropValue::Choice {
-                        selected: int(ov::DIMDEC, s.dimdec).to_string(),
+                        selected: precision_label(int(ov::DIMDEC, s.dimdec)),
                         options: precision_options.clone(),
                     },
                 ),
@@ -2350,11 +2350,11 @@ pub fn style_sections(
                     "dim_alt_precision",
                     if dimalt {
                         PropValue::Choice {
-                            selected: int(ov::DIMALTD, s.dimaltd).to_string(),
+                            selected: precision_label(int(ov::DIMALTD, s.dimaltd)),
                             options: precision_options.clone(),
                         }
                     } else {
-                        PropValue::ReadOnly(int(ov::DIMALTD, s.dimaltd).to_string())
+                        PropValue::ReadOnly(precision_label(int(ov::DIMALTD, s.dimaltd)))
                     },
                 ),
                 number(
@@ -2370,7 +2370,7 @@ pub fn style_sections(
                     dimalt && dimaltz & 4 != 0,
                 ),
                 number(
-                    t!("Alt roundoff").as_ref(),
+                    t!("Alt round").as_ref(),
                     "dim_alt_roundoff",
                     real(ov::DIMALTRND, s.dimaltrnd),
                     dimalt,
@@ -2438,11 +2438,11 @@ pub fn style_sections(
                     "dim_tolerance_precision",
                     if tolerance_enabled {
                         PropValue::Choice {
-                            selected: int(ov::DIMTDEC, s.dimtdec).to_string(),
+                            selected: precision_label(int(ov::DIMTDEC, s.dimtdec)),
                             options: precision_options.clone(),
                         }
                     } else {
-                        PropValue::ReadOnly(int(ov::DIMTDEC, s.dimtdec).to_string())
+                        PropValue::ReadOnly(precision_label(int(ov::DIMTDEC, s.dimtdec)))
                     },
                 ),
                 number(
@@ -2474,7 +2474,7 @@ pub fn style_sections(
                     t!("Tolerance alignment").as_ref(),
                     "dim_tolerance_alignment",
                     tolerance_alignment_label(int(ov::DIMTALN, 0)),
-                    &["Align decimal separators", "Align operational symbols"],
+                    &["Decimal Separator", "Operational Symbols"],
                     true,
                 ),
                 choice(
@@ -2510,11 +2510,11 @@ pub fn style_sections(
                     "dim_alt_tolerance_precision",
                     if alternate_tolerance_enabled {
                         PropValue::Choice {
-                            selected: int(ov::DIMALTTD, s.dimalttd).to_string(),
+                            selected: precision_label(int(ov::DIMALTTD, s.dimalttd)),
                             options: precision_options,
                         }
                     } else {
-                        PropValue::ReadOnly(int(ov::DIMALTTD, s.dimalttd).to_string())
+                        PropValue::ReadOnly(precision_label(int(ov::DIMALTTD, s.dimalttd)))
                     },
                 ),
                 choice(
@@ -2778,6 +2778,59 @@ pub fn style_sections(
                         .iter()
                         .position(|field| *field == property.field)
                         .unwrap_or(LARGE_RADIAL_FIT_ORDER.len())
+                });
+            }
+            if let Some(alternate_units) = sections
+                .iter_mut()
+                .find(|section| section.title == t!("Alternate Units").as_ref())
+            {
+                const LARGE_RADIAL_ALT_UNITS_ORDER: &[&str] = &[
+                    "dim_alt_enabled",
+                    "dim_alt_format",
+                    "dim_alt_precision",
+                    "dim_alt_roundoff",
+                    "dim_alt_scale_factor",
+                    "dim_alt_suppress_leading_zeros",
+                    "dim_alt_suppress_trailing_zeros",
+                    "dim_alt_suppress_zero_feet",
+                    "dim_alt_suppress_zero_inches",
+                    "dim_alt_prefix",
+                    "dim_alt_suffix",
+                ];
+                alternate_units.props.sort_by_key(|property| {
+                    LARGE_RADIAL_ALT_UNITS_ORDER
+                        .iter()
+                        .position(|field| *field == property.field)
+                        .unwrap_or(LARGE_RADIAL_ALT_UNITS_ORDER.len())
+                });
+            }
+            if let Some(tolerances) = sections
+                .iter_mut()
+                .find(|section| section.title == t!("Tolerances").as_ref())
+            {
+                const LARGE_RADIAL_TOLERANCE_ORDER: &[&str] = &[
+                    "dim_alt_tolerance_suppress_zero_inches",
+                    "dim_tolerance_alignment",
+                    "dim_tolerance_display",
+                    "dim_tolerance_limit_lower",
+                    "dim_tolerance_limit_upper",
+                    "dim_tolerance_pos_vert",
+                    "dim_tolerance_precision",
+                    "dim_tolerance_suppress_leading_zeros",
+                    "dim_tolerance_suppress_trailing_zeros",
+                    "dim_tolerance_suppress_zero_feet",
+                    "dim_tolerance_suppress_zero_inches",
+                    "dim_tolerance_text_height",
+                    "dim_alt_tolerance_precision",
+                    "dim_alt_tolerance_suppress_leading_zeros",
+                    "dim_alt_tolerance_suppress_trailing_zeros",
+                    "dim_alt_tolerance_suppress_zero_feet",
+                ];
+                tolerances.props.sort_by_key(|property| {
+                    LARGE_RADIAL_TOLERANCE_ORDER
+                        .iter()
+                        .position(|field| *field == property.field)
+                        .unwrap_or(LARGE_RADIAL_TOLERANCE_ORDER.len())
                 });
             }
             if !dimension.base().text_user_positioned {
@@ -3053,11 +3106,20 @@ fn tolerance_vertical_label(value: i16) -> &'static str {
     }
 }
 
+fn precision_label(value: i16) -> String {
+    let decimals = value.clamp(0, 8) as usize;
+    if decimals == 0 {
+        "0".to_string()
+    } else {
+        format!("0.{}", "0".repeat(decimals))
+    }
+}
+
 fn tolerance_alignment_label(value: i16) -> &'static str {
     if value == 0 {
-        "Align decimal separators"
+        "Decimal Separator"
     } else {
-        "Align operational symbols"
+        "Operational Symbols"
     }
 }
 

@@ -633,11 +633,20 @@ impl OpenCADStudio {
                                 "CHPROP: invalid value '{}' for {}.",
                                 value, prop
                             ).as_ref());
+                    } else {
+                        let known = matches!(
+                            prop.as_str(),
+                            "LAYER" | "LINETYPE" | "LT" | "LTSCALE" | "COLOR" | "TRANSPARENCY"
+                        );
+                        if !known {
+                            self.command_line.push_error(crate::tf!(
+                                "CHPROP: unknown property '{}'. Use: LAYER COLOR LINETYPE LTSCALE TRANSPARENCY", prop
+                            ).as_ref());
                         } else {
                             let mut changed = 0usize;
-                            for handle in &handles {
+                            self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                                 if let Some(entity) =
-                                    self.tabs[i].scene.document.get_entity_mut(*handle)
+                                    app.tabs[i].scene.document.get_entity_mut(handle)
                                 {
                                     let common = entity.common_mut();
                                     match prop.as_str() {
@@ -661,29 +670,20 @@ impl OpenCADStudio {
                                             common.transparency = transparency_val.unwrap();
                                             changed += 1;
                                         }
-                                        _ => {
-                                            self.command_line.push_error(crate::tf!(
-                                                "CHPROP: unknown property '{}'. Use: LAYER COLOR LINETYPE LTSCALE TRANSPARENCY", prop
-                                            ).as_ref());
-                                            break;
-                                        }
+                                        _ => unreachable!(),
                                     }
                                 }
-                            }
-                            if changed > 0 {
-                                self.push_undo_snapshot(i, "CHPROP");
-                                self.tabs[i].dirty = true;
-                                // Colour / linetype / ltscale / transparency /
-                                // layer are baked into the cached wire geometry —
-                                // re-tessellate the changed entities so they
-                                // repaint immediately (issue #231 class).
-                                self.invalidate_property_targets(i, &handles);
-                                self.command_line.push_output(crate::tf!(
-                                    "CHPROP: {} entity/entities updated.",
-                                    changed
-                                ).as_ref());
-                            }
+                            });
+                            // Colour / linetype / ltscale / transparency /
+                            // layer are baked into the cached wire geometry —
+                            // re-tessellate the changed entities so they
+                            // repaint immediately (issue #231 class).
+                            self.command_line.push_output(crate::tf!(
+                                "CHPROP: {} entity/entities updated.",
+                                changed
+                            ).as_ref());
                         }
+                    }
                     }
                 }
             }

@@ -1608,19 +1608,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 } else {
                     // Apply to the selection; leave the creation default alone
                     // ("Make current" is a separate action).
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
-                        }
-                    }
                     // Layer drives by-layer colour/linetype/lineweight, which are
                     // baked into the cached wire geometry — re-tessellate so the
                     // change shows immediately (issue #231 class).
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(entity) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
+                        }
+                    });
                     self.ribbon.active_layer = layer;
-                    self.refresh_properties();
                 }
                 Task::none()
     }
@@ -1641,16 +1639,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.tabs[i].dirty = true;
                     self.ribbon.active_color = color;
                 } else {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(entity) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
                             crate::scene::view::dispatch::apply_color(entity, color);
                         }
-                    }
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
+                    });
                     self.ribbon.active_color = color;
-                    self.refresh_properties();
                 }
                 Task::none()
     }
@@ -1679,19 +1675,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.tabs[i].dirty = true;
                     self.ribbon.active_linetype = lt;
                 } else {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
-                        }
-                    }
                     // Linetype is baked into the cached wire geometry —
                     // re-tessellate so the dashed/solid look updates immediately
                     // (issue #231 class).
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(entity) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
+                        }
+                    });
                     self.ribbon.active_linetype = lt;
-                    self.refresh_properties();
                 }
                 Task::none()
     }

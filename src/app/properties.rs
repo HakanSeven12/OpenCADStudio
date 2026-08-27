@@ -2436,6 +2436,34 @@ impl OpenCADStudio {
         self.tabs[i].scene.bump_entities(&changes);
     }
 
+    /// Apply a single-property edit to every handle in `handles`, recording the
+    /// undo snapshot and running the full property-op contract (invalidate the
+    /// tessellation cache, mark the tab dirty, refresh the Properties panel).
+    ///
+    /// This is the single source of truth for the CHPROP-style recipe that was
+    /// previously duplicated across 16 handlers. `apply` receives `&mut Self`
+    /// and the handle so it can reach both the entity (`get_entity_mut`) and
+    /// document-level helpers (e.g. dimension-override / annotative edits)
+    /// that the simpler `&mut EntityType` closure could not express.
+    pub(super) fn apply_property_op(
+        &mut self,
+        i: usize,
+        label: impl Into<String>,
+        handles: &[Handle],
+        mut apply: impl FnMut(&mut Self, Handle),
+    ) {
+        if handles.is_empty() {
+            return;
+        }
+        self.push_undo_snapshot(i, label);
+        for &handle in handles {
+            apply(self, handle);
+        }
+        self.invalidate_property_targets(i, handles);
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+    }
+
     /// Add an entity to the correct space (model or paper space layout).
     pub(super) fn commit_entity(&mut self, entity: acadrust::EntityType) {
         let _ = self.commit_entity_handle(entity);
@@ -3427,5 +3455,108 @@ mod insert_unit_scale_tests {
 
         assert!(!apply_insert_unit_scale(&mut ins, 1.0e-13));
         assert_eq!(ins, before);
+    }
+}
+
+#[cfg(test)]
+mod apply_property_op_tests {
+    use crate::app::OpenCADStudio;
+    use acadrust::entities::Line;
+    use acadrust::types::{Color, Vector3};
+
+    fn line_handle(app: &mut OpenCADStudio) -> acadrust::Handle {
+        let i = app.active_tab;
+        let mut line = Line::new();
+        line.start = Vector3::ZERO;
+        line.end = Vector3::new(1.0, 0.0, 0.0);
+        app.commit_entity_handle(acadrust::EntityType::Line(line))
+            .expect("line should commit")
+    }
+
+    #[test]
+    fn empty_handles_does_not_invoke_or_dirty() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let before = app.tabs[i].dirty;
+        let called = std::rc::Rc::new(std::cell::Cell::new(false));
+        let called2 = called.clone();
+        app.apply_property_op(i, "TEST", &[], |_app, _h| {
+            called2.set(true);
+        });
+        assert!(!called.get(), "closure must not run for empty handles");
+        assert_eq!(
+            app.tabs[i].dirty, before,
+            "dirty must be unchanged for empty handles"
+        );
+    }
+
+    #[test]
+    fn applies_to_each_handle_sets_dirty_and_mutates() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let h1 = line_handle(&mut app);
+        let h2 = line_handle(&mut app);
+        let count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count2 = count.clone();
+        app.tabs[i].dirty = false;
+        app.apply_property_op(i, "CHPROP", &[h1, h2], |app2, h| {
+            count2.set(count2.get() + 1);
+            if let Some(e) = app2.tabs[app2.active_tab]
+                .scene
+                .document
+                .get_entity_mut(h)
+            {
+                e.common_mut().color = Color::Index(7);
+            }
+        });
+        assert_eq!(count.get(), 2, "closure runs once per handle");
+        assert!(app.tabs[i].dirty, "tab marked dirty");
+        let e = app.tabs[i]
+            .scene
+            .document
+            .get_entity(h1)
+            .expect("entity present");
+        assert_eq!(
+            e.common().color,
+            Color::Index(7),
+            "entity mutation persisted"
+        );
+    }
+
+    #[test]
+    fn missing_entity_does_not_abort_loop() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let h1 = line_handle(&mut app);
+        // A freshly allocated handle has no entity yet.
+        let missing = app.tabs[i].scene.document.allocate_handle();
+        let count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count2 = count.clone();
+        app.tabs[i].dirty = false;
+        app.apply_property_op(i, "CHPROP", &[h1, missing], |app2, h| {
+            count2.set(count2.get() + 1);
+            if let Some(e) = app2.tabs[app2.active_tab]
+                .scene
+                .document
+                .get_entity_mut(h)
+            {
+                e.common_mut().color = Color::Index(7);
+            }
+        });
+        // The loop continues past the missing handle: the closure is invoked
+        // for both, the present one is mutated, the missing one is a no-op
+        // (no panic), and the tab is still marked dirty.
+        assert_eq!(count.get(), 2, "closure still called for the missing handle");
+        assert!(app.tabs[i].dirty, "tab marked dirty even with a missing handle");
+        let e = app.tabs[i]
+            .scene
+            .document
+            .get_entity(h1)
+            .expect("entity present");
+        assert_eq!(
+            e.common().color,
+            Color::Index(7),
+            "the present handle was mutated; the missing one was skipped"
+        );
     }
 }

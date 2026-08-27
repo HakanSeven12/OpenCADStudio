@@ -26,7 +26,7 @@ use acadrust::tables::BlockRecord;
 use acadrust::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
 
-use crate::command::{CadCommand, CmdResult};
+use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::entities::curve::lwpolyline_world_xy;
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use glam::DVec3;
@@ -909,6 +909,42 @@ fn norm2(dx: f64, dy: f64, fx: f64, fy: f64) -> (f64, f64) {
 }
 
 fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
+    if let Dimension::Arc(arc) = dim {
+        if let Some((local_arc, normal)) =
+            crate::entities::dimension::arc_dimension_in_ocs(arc)
+        {
+            let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes((
+                normal.x, normal.y, normal.z,
+            ));
+            let plane = WorkingPlane::new(
+                DVec3::ZERO,
+                DVec3::new(x_axis.0, x_axis.1, x_axis.2),
+                DVec3::new(y_axis.0, y_axis.1, y_axis.2),
+            );
+            return explode_dimension(&Dimension::Arc(local_arc), doc)
+                .into_iter()
+                .map(|entity| plane.place_entity(entity))
+                .collect();
+        }
+    }
+    if let Dimension::LargeRadial(radial) = dim {
+        if let Some((local_radial, normal)) =
+            crate::entities::dimension::large_radial_dimension_in_ocs(radial)
+        {
+            let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes((
+                normal.x, normal.y, normal.z,
+            ));
+            let plane = WorkingPlane::new(
+                DVec3::ZERO,
+                DVec3::new(x_axis.0, x_axis.1, x_axis.2),
+                DVec3::new(y_axis.0, y_axis.1, y_axis.2),
+            );
+            return explode_dimension(&Dimension::LargeRadial(local_radial), doc)
+                .into_iter()
+                .map(|entity| plane.place_entity(entity))
+                .collect();
+        }
+    }
 
     let base = dim.base();
     let met = dim_metrics(dim, doc);
@@ -1190,6 +1226,8 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
             }
         }
         Dimension::Arc(d) => {
+            let explicit_sweep = crate::entities::dimension::arc_dimension_angles(d)
+                .map(|(start, end)| (start as f64, end as f64));
             result.extend(angular_block_segs(
                 d.center_point,
                 d.first_extension_point,
@@ -1198,10 +1236,7 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 &met,
                 &ext_c,
                 &dim_c,
-                d.is_partial.then_some((
-                    d.arc_start_parameter,
-                    d.arc_end_parameter,
-                )),
+                explicit_sweep,
             ));
             if d.has_leader {
                 result.push(make_seg(
@@ -1243,6 +1278,15 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 radius,
                 &dim_c,
             ));
+        }
+    }
+
+    let symbol_points =
+        crate::entities::dimension::baked_arc_length_symbol_points(dim, doc, 1.0);
+    if symbol_points.len() > 1 {
+        let text_c = dim_common(&base.common, met.dimclrt, -2);
+        for pair in symbol_points.windows(2) {
+            result.push(make_seg(&pair[0], &pair[1], &text_c));
         }
     }
 

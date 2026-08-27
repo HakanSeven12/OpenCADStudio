@@ -66,6 +66,13 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "DIMARC" => {
+                use crate::modules::annotate::arc_length_dim::ArcLengthDimensionCommand;
+                let new_cmd = ArcLengthDimensionCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             "DIMORDINATE" => {
                 use crate::modules::annotate::ordinate_dim::OrdinateDimCommand;
                 let new_cmd = OrdinateDimCommand::new();
@@ -605,10 +612,7 @@ impl OpenCADStudio {
             }
 
             "TOLERANCE" => {
-                use crate::modules::annotate::tolerance_cmd::ToleranceCommand;
-                let cmd = ToleranceCommand::new();
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                self.open_tolerance_dialog(None);
             }
 
             "TABLE" => {

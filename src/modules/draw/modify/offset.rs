@@ -415,19 +415,19 @@ fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
 // ── Command implementation ─────────────────────────────────────────────────
 
 enum Step {
-    /// Classic first step (#418): type the offset distance, press Enter /
-    /// Space to accept the last one, or choose Through mode.
+    /// Type the offset distance, accept the previous value with Enter,
+    /// choose Through, or pick the first point of a reference distance.
     Distance,
-    /// Pick the object to offset. `locked == None` is "through" mode: the
-    /// magnitude follows the cursor (perpendicular distance to the object).
+
+    /// First reference point has been picked; the second point defines
+    /// the offset distance.
+    ReferenceSecond { first: DVec3 },
+
     SelectObject { locked: Option<f64> },
+
     PickSide {
-        /// The object(s) being offset — one from a pick, or the whole
-        /// pre-selection when OFFSET starts with objects selected (#422).
         targets: Vec<EntityType>,
         locked: Option<f64>,
-        /// Keep the side-pick step active and use each new result as the source
-        /// for the next offset.
         multiple: bool,
     },
 }
@@ -499,6 +499,18 @@ impl OffsetCommand {
         }
         CmdResult::NeedPoint
     }
+    fn accept_distance(&mut self, distance: f64) -> CmdResult {
+        let distance = distance.abs().max(1e-9);
+
+        defaults::set_offset_dist(distance);
+        self.advance_from_distance(Some(distance));
+
+        let d = format!("{:.4}", distance);
+
+        CmdResult::ReportMeasurement(
+            t!("OFFSET distance = %{d}", d = d).into_owned()
+        )
+    }
 }
 
 impl CadCommand for OffsetCommand {
@@ -510,7 +522,15 @@ impl CadCommand for OffsetCommand {
         match &self.step {
             Step::Distance => {
                 let d = format!("{:.4}", defaults::get_offset_dist());
-                t!("OFFSET  Specify offset distance or [Through] <%{d}>:", d = d).into_owned()
+                t!(
+                    "OFFSET  Specify offset distance or first reference point [Through] <%{d}>:",
+                    d = d
+                )
+                .into_owned()
+            }
+
+            Step::ReferenceSecond { .. } => {
+                t!("OFFSET  Specify second reference point:").into_owned()
             }
             Step::SelectObject { .. } => {
                 t!("OFFSET  Select object to offset (Enter to finish):").into_owned()
@@ -623,7 +643,9 @@ impl CadCommand for OffsetCommand {
     fn dyn_field(&self) -> crate::command::DynField {
         match self.step {
             Step::Distance | Step::PickSide { .. } => crate::command::DynField::Scalar,
-            _ => crate::command::DynField::Point,
+
+            Step::ReferenceSecond { .. }
+            | Step::SelectObject { .. } => crate::command::DynField::Point,
         }
     }
 
@@ -648,9 +670,7 @@ impl CadCommand for OffsetCommand {
                     return Some(self.advance_from_distance(None));
                 }
                 if let Some(d) = crate::entities::common::parse_typed_length(&t) {
-                    let d = d.abs().max(1e-9);
-                    defaults::set_offset_dist(d);
-                    return Some(self.advance_from_distance(Some(d)));
+                    return Some(self.accept_distance(d));
                 }
                 Some(CmdResult::NeedPoint)
             }
@@ -698,12 +718,32 @@ impl CadCommand for OffsetCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        match &self.step {
+            Step::Distance => {
+                self.step = Step::ReferenceSecond { first: pt };
+                return CmdResult::NeedPoint;
+            }
+
+            Step::ReferenceSecond { first } => {
+                let distance = first.distance(pt);
+
+                if distance <= 1e-9 {
+                    return CmdResult::NeedPoint;
+                }
+
+                return self.accept_distance(distance);
+            }
+
+            _ => {}
+        }
+
         let (locked, targets, multiple) = match &self.step {
             Step::PickSide {
                 locked,
                 targets,
                 multiple,
             } => (*locked, targets.clone(), *multiple),
+
             _ => return CmdResult::NeedPoint,
         };
         // Each target offsets by its own through-distance (or the locked
@@ -745,6 +785,26 @@ impl CadCommand for OffsetCommand {
     }
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        if let Step::ReferenceSecond { first } = &self.step {
+            return vec![WireModel::solid(
+                "offset_reference_distance".into(),
+                vec![
+                    [
+                        first.x as f32,
+                        first.y as f32,
+                        first.z as f32,
+                    ],
+                    [
+                        pt.x as f32,
+                        pt.y as f32,
+                        pt.z as f32,
+                    ],
+                ],
+                WireModel::CYAN,
+                false,
+            )];
+        }
+
         let (locked, targets) = match &self.step {
             Step::PickSide { locked, targets, .. } => (*locked, targets.clone()),
             _ => return vec![],
@@ -779,7 +839,7 @@ impl CadCommand for OffsetCommand {
             // the "repeat the same value with just Space" flow (#418).
             Step::Distance => {
                 let d = defaults::get_offset_dist();
-                self.advance_from_distance(Some(d.abs().max(1e-9)))
+                self.accept_distance(d)
             }
             _ => CmdResult::Cancel,
         }

@@ -4,6 +4,18 @@
 //! (`--ocs-plugin-runner <socket> <cdylib>`). Keeping the runner code inside
 //! `ocs_plugin_api` means the host only needs to know the CLI contract, not the
 //! internal plugin-loading and IPC details.
+//!
+//! Entry points and loops:
+//!
+//! - [`run`] — loads the cdylib with `libloading`, connects back to the host,
+//!   and dispatches to either the V2/V3 loop or the V4 loop based on the plugin's
+//!   declared API version.
+//! - `run_v3` — synchronous request/response loop over [`crate::ipc::client::IpcClient`].
+//! - `run_v4` — multiplexed frame loop over [`crate::ipc::v4::client::V4Client`];
+//!   drains notifications and dispatches host requests.
+//!
+//! Panics inside plugin callbacks are caught by `catch_unwind` and converted to
+//! error responses so a buggy plugin callback does not tear down the runner.
 
 use std::cell::RefCell;
 use std::collections::HashMap;

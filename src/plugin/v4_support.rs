@@ -42,6 +42,15 @@ pub fn on_tab_closed(tab_id: u64) {
     broadcast(HostNotification::DocumentTabClosed { tab_id });
 }
 
+/// Broadcast a selection change to V4 plugins.
+///
+/// `HostNotification::SelectionChangedV4` carries the active tab id and the
+/// current selection set. The caller is responsible for only calling this when
+/// the selection actually changed; see `OpenCADStudio::notify_plugins_selection_changed`.
+pub fn publish_selection_changed_v4(tab_id: u64, handles: Vec<acadrust::Handle>) {
+    broadcast(HostNotification::SelectionChangedV4 { tab_id, handles });
+}
+
 /// V4 notification handler installed on the plugin manager.
 ///
 /// Forwards REPL status messages to the log; other notifications are handled

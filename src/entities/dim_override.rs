@@ -286,6 +286,7 @@ pub fn property_int_code(field: &str) -> Option<i16> {
         "dim_tolerance_precision" => DIMTDEC,
         "dim_tolerance_pos_vert" => DIMTOLJ,
         "dim_tolerance_alignment" => DIMTALN,
+        "dim_arc_symbol" => DIMARCSYM,
         _ => return None,
     })
 }
@@ -337,6 +338,7 @@ fn inherited_int(doc: &CadDocument, handle: Handle, code: i16) -> i16 {
         DIMADEC => style.dimadec,
         DIMTFILL => style.dimtfill,
         DIMTALN => 0,
+        DIMARCSYM => style.dimarcsym,
         _ => 0,
     }
 }
@@ -701,6 +703,12 @@ pub fn set_property(
                 "keep dim line with text" => Some(0),
                 "move text, add leader" => Some(1),
                 "move text, no leader" => Some(2),
+                _ => trimmed.parse().ok(),
+            },
+            "dim_arc_symbol" => match trimmed.to_ascii_lowercase().as_str() {
+                "preceding dimension text" => Some(0),
+                "above dimension text" => Some(1),
+                "none" => Some(2),
                 _ => trimmed.parse().ok(),
             },
             "dim_alt_format" => match trimmed.to_ascii_lowercase().as_str() {

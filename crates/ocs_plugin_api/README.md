@@ -120,9 +120,10 @@ The frame format supports:
 - Bi-directional, best-effort notifications (`NotificationEnvelope`)
 
 Because the socket is full-duplex, the host can push
-`HostNotification::DocumentChanged` or `InputLine` to a plugin at any time, and
-the plugin can stream `PluginNotification::Output`/`Progress`/`Log` back while a
-long command is still running.
+`HostNotification::DocumentChangedV4`, `SelectionChangedV4`, or
+`DocumentTabClosed` to a plugin at any time, and the plugin can stream
+`PluginNotification::Output`/`Progress`/`Log` back while a long command is still
+running.
 
 ```mermaid
 sequenceDiagram
@@ -420,7 +421,8 @@ std::thread::spawn(move || {
 
 ### Further reading
 
+- Internal architecture & invariants: [`ARCHITECTURE.md`](./ARCHITECTURE.md)
+- Host/plugin integration spec: [`../../docs/plugin-architecture.md`](../../docs/plugin-architecture.md)
 - Plugin template: [`../../docs/plugin-template`](../../docs/plugin-template)
 - Plugin marketplace registry: [`../../plugins/README.md`](../../plugins/README.md)
 - REPL design notes: [`../DESIGN_REPL.md`](../DESIGN_REPL.md)
-- Python REPL plugin: [`../ocs_python_repl/README.md`](../ocs_python_repl/README.md)

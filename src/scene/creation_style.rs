@@ -138,10 +138,6 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
             if text.oblique_angle.abs() <= 1.0e-9 {
                 text.oblique_angle = resolved.oblique_angle;
             }
-            if text.generation_flags == 0 {
-                text.generation_flags = (if resolved.flags.backward { 2 } else { 0 })
-                    | (if resolved.flags.upside_down { 4 } else { 0 });
-            }
         }
         EntityType::MText(text) => {
             if resolved.height > 1.0e-9 {

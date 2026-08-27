@@ -54,9 +54,12 @@ pub struct JoggedRadiusDimensionCommand {
 
 impl JoggedRadiusDimensionCommand {
     pub fn new(defaults: DimensionCreationDefaults, annotation_multiplier: f64) -> Self {
-        let editor_height = defaults.text_height
-            * defaults.scale
-            * annotation_multiplier.max(f64::EPSILON);
+        let display_scale = if defaults.annotative {
+            annotation_multiplier.max(f64::EPSILON)
+        } else {
+            defaults.scale
+        };
+        let editor_height = defaults.text_height * display_scale;
         Self {
             step: Step::SelectObject,
             defaults,

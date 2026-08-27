@@ -1162,6 +1162,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 if matches!(
                     item.action,
                     GripMenuAction::Stretch
+                        | GripMenuAction::MoveWithText
                         | GripMenuAction::MoveWithDimLine
                         | GripMenuAction::MoveWithLeader
                         | GripMenuAction::MoveIndependent
@@ -1212,7 +1213,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             {
                                 (crate::entities::multileader::MOVE_ALL_GRIP, true)
                             } else {
-                                (popup.grip_id, if is_dimension { false } else { g.is_midpoint })
+                                (
+                                    popup.grip_id,
+                                    matches!(item.action, GripMenuAction::MoveWithText)
+                                        || (!is_dimension && g.is_midpoint),
+                                )
                             };
                         self.tabs[i].active_grip = Some(GripEdit::single(
                             popup.handle,
@@ -1901,7 +1906,73 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
             }
             self.push_undo_snapshot(i, "CHPROP");
 
-            if field.starts_with("dim_") {
+            if field == "tol_text_style" {
+                use crate::entities::dim_override as dov;
+                use acadrust::xdata::XDataValue;
+                let style_handle = self.tabs[i]
+                    .scene
+                    .document
+                    .text_styles
+                    .iter()
+                    .find(|entry| entry.name.eq_ignore_ascii_case(&value))
+                    .map(|entry| entry.handle);
+                if let Some(style_handle) = style_handle {
+                    for &handle in &handles {
+                        if self.tabs[i].scene.is_layer_locked(handle)
+                            || !matches!(
+                                self.tabs[i].scene.document.get_entity(handle),
+                                Some(acadrust::EntityType::Tolerance(_))
+                            )
+                        {
+                            continue;
+                        }
+                        dov::set(
+                            &mut self.tabs[i].scene.document,
+                            handle,
+                            dov::DIMTXSTY,
+                            Some(XDataValue::Handle(style_handle)),
+                        );
+                    }
+                }
+            } else if field == "tol_dim_style" {
+                let style = self.tabs[i]
+                    .scene
+                    .document
+                    .dim_styles
+                    .iter()
+                    .find(|entry| entry.name.eq_ignore_ascii_case(&value))
+                    .map(|entry| (entry.handle, entry.name.clone(), entry.annotative));
+                if let Some((style_handle, style_name, annotative)) = style {
+                    let scale = self.tabs[i].scene.creation_annotation_scale_handle();
+                    for &handle in &handles {
+                        if self.tabs[i].scene.is_layer_locked(handle) {
+                            continue;
+                        }
+                        if let Some(acadrust::EntityType::Tolerance(tolerance)) =
+                            self.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            tolerance.dimension_style_handle = Some(style_handle);
+                            tolerance.dimension_style_name = style_name.clone();
+                        } else {
+                            continue;
+                        }
+                        crate::scene::annotative::set_entity_annotative(
+                            &mut self.tabs[i].scene.document,
+                            handle,
+                            annotative,
+                        );
+                        if annotative {
+                            if let Some(scale) = scale {
+                                crate::scene::annotative::create_annotation_context(
+                                    &mut self.tabs[i].scene.document,
+                                    handle,
+                                    scale,
+                                );
+                            }
+                        }
+                    }
+                }
+            } else if field.starts_with("dim_") {
                 for &handle in &handles {
                     if self.tabs[i].scene.is_layer_locked(handle) {
                         continue;
@@ -2552,6 +2623,27 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     continue;
                                 }
                                 match field {
+                                    "tol_text_height" => {
+                                        use crate::entities::dim_override as dov;
+                                        let trimmed = val.trim();
+                                        if trimmed.is_empty() {
+                                            dov::set(
+                                                &mut self.tabs[i].scene.document,
+                                                handle,
+                                                dov::DIMTXT,
+                                                None,
+                                            );
+                                        } else if let Ok(height) = trimmed.parse::<f64>() {
+                                            if height > 0.0 {
+                                                dov::set(
+                                                    &mut self.tabs[i].scene.document,
+                                                    handle,
+                                                    dov::DIMTXT,
+                                                    Some(acadrust::xdata::XDataValue::Real(height)),
+                                                );
+                                            }
+                                        }
+                                    }
                                     _ if field.starts_with("dim_") => {
                                         if matches!(
                                             self.tabs[i].scene.document.get_entity(handle),

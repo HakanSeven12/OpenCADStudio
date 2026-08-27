@@ -2762,6 +2762,24 @@ pub fn style_sections(
                     }
                 }
             }
+            if let Some(fit) = sections
+                .iter_mut()
+                .find(|section| section.title == t!("Fit").as_ref())
+            {
+                const LARGE_RADIAL_FIT_ORDER: &[&str] = &[
+                    "dim_line_forced",
+                    "dim_scale_overall",
+                    "dim_fit",
+                    "dim_text_inside",
+                    "dim_text_movement",
+                ];
+                fit.props.sort_by_key(|property| {
+                    LARGE_RADIAL_FIT_ORDER
+                        .iter()
+                        .position(|field| *field == property.field)
+                        .unwrap_or(LARGE_RADIAL_FIT_ORDER.len())
+                });
+            }
             if !dimension.base().text_user_positioned {
                 let dim_scale = if s.dimscale > 1.0e-6 { s.dimscale } else { 1.0 };
                 let text_position = dimension_text_pos_f64(

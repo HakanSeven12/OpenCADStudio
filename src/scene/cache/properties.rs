@@ -74,17 +74,17 @@ pub fn general_section(entity: &EntityType) -> PropSection {
                 value: PropValue::LwChoice(common.line_weight),
             },
             Property {
-                label: t!("Hyperlink").into_owned(),
-                field: "hyperlink",
-                value: PropValue::PlainText(hyperlink),
-            },
-            Property {
                 label: t!("Transparency").into_owned(),
                 field: "transparency",
                 value: PropValue::EditChoice {
                     value: transp_display,
                     options: vec!["ByLayer".to_string(), "ByBlock".to_string()],
                 },
+            },
+            Property {
+                label: t!("Hyperlink").into_owned(),
+                field: "hyperlink",
+                value: PropValue::PlainText(hyperlink),
             },
         ],
     };

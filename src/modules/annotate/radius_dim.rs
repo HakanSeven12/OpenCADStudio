@@ -111,6 +111,7 @@ impl CadCommand for RadiusDimensionCommand {
                 CmdResult::CommitDimension {
                     entity: source_plane.place_entity(EntityType::Dimension(Dimension::Radius(dim))),
                     association: DimensionAssociationInput::Infer(self.source_handle),
+                    preserve_base_style: false,
                 }
             }
         }

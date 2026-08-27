@@ -187,6 +187,7 @@ impl CadCommand for LinearDimensionCommand {
                 CmdResult::CommitDimension {
                     entity,
                     association: DimensionAssociationInput::Infer(self.source_handle),
+                    preserve_base_style: false,
                 }
             }
         }

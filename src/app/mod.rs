@@ -465,6 +465,8 @@ pub(super) struct OpenCADStudio {
     options_tab: crate::ui::window::options::OptionsTab,
     /// Controls whether the TEXTEDIT command repeats automatically (0 = Multiple, 1 = Single).
     pub texteditmode: bool,
+    /// Creation-style policy used by continuing and baseline dimensions.
+    pub dimension_continue_mode: i16,
     /// When true (default), saving over an existing file first writes a `.bak`
     /// copy of it for recovery (#205). Toggle with the ISAVEBAK command.
     pub backup_on_save: bool,
@@ -3210,6 +3212,7 @@ impl OpenCADStudio {
             dyn_input: true,
             options_tab: crate::ui::window::options::OptionsTab::General,
             texteditmode: false,
+            dimension_continue_mode: 1,
             backup_on_save: true,
             file_assoc_enabled: true,
             savetime_min: 10,

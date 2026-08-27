@@ -927,6 +927,24 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 .collect();
         }
     }
+    if let Dimension::LargeRadial(radial) = dim {
+        if let Some((local_radial, normal)) =
+            crate::entities::dimension::large_radial_dimension_in_ocs(radial)
+        {
+            let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes((
+                normal.x, normal.y, normal.z,
+            ));
+            let plane = WorkingPlane::new(
+                DVec3::ZERO,
+                DVec3::new(x_axis.0, x_axis.1, x_axis.2),
+                DVec3::new(y_axis.0, y_axis.1, y_axis.2),
+            );
+            return explode_dimension(&Dimension::LargeRadial(local_radial), doc)
+                .into_iter()
+                .map(|entity| plane.place_entity(entity))
+                .collect();
+        }
+    }
 
     let base = dim.base();
     let met = dim_metrics(dim, doc);
@@ -1235,9 +1253,11 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 d.override_center,
                 d.jog_angle,
             );
-            result.push(make_seg(&d.chord_point, &near, &dim_c));
-            result.push(make_seg(&near, &far, &dim_c));
-            result.push(make_seg(&far, &d.override_center, &dim_c));
+            if !met.dimsd1 {
+                result.push(make_seg(&d.chord_point, &near, &dim_c));
+                result.push(make_seg(&near, &far, &dim_c));
+                result.push(make_seg(&far, &d.override_center, &dim_c));
+            }
             let len = ((near.x - d.chord_point.x).powi(2)
                 + (near.y - d.chord_point.y).powi(2))
             .sqrt()
@@ -1247,6 +1267,15 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
                 (near.x - d.chord_point.x) / len,
                 (near.y - d.chord_point.y) / len,
                 &met.arrow1,
+                &dim_c,
+            ));
+            let radius = ((d.definition_point.x - d.chord_point.x).powi(2)
+                + (d.definition_point.y - d.chord_point.y).powi(2))
+            .sqrt();
+            result.extend(dim_center_mark(
+                d.definition_point,
+                met.dimcen,
+                radius,
                 &dim_c,
             ));
         }

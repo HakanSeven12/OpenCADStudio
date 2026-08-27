@@ -48,6 +48,17 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "DIMJOGGED" | "DIMJOG" => {
+                use crate::modules::annotate::jogged_radius_dim::JoggedRadiusDimensionCommand;
+                let defaults = crate::scene::creation_style::current_dimension_defaults(
+                    &self.tabs[i].scene.document,
+                );
+                let multiplier = self.tabs[i].scene.creation_annotation_multiplier();
+                let new_cmd = JoggedRadiusDimensionCommand::new(defaults, multiplier);
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             "DIMANGULAR" => {
                 use crate::modules::annotate::angular_dim::AngularDimensionCommand;
                 let new_cmd = AngularDimensionCommand::new();
@@ -1291,49 +1302,6 @@ impl OpenCADStudio {
                 let new_cmd = ExtendCommand::new(all_entities);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
-            }
-
-            // DIMJOGGED <DJO> — create a jogged radius dimension on the selected
-            // arc/circle: a standard radius dim carrying an OCS_JOGGED XData marker
-            // that the geometry generator renders with a foreshortened zig-zag.
-            "DIMJOGGED" | "DIMJOG" => {
-                use acadrust::entities::{Dimension, DimensionRadius};
-                use acadrust::types::Vector3;
-                use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-                let found =
-                    self.tabs[i]
-                        .scene
-                        .selected_entities()
-                        .iter()
-                        .find_map(|(_, e)| match e {
-                            acadrust::EntityType::Arc(a) => Some((a.center, a.radius)),
-                            acadrust::EntityType::Circle(c) => Some((c.center, c.radius)),
-                            _ => None,
-                        });
-                let Some((center, radius)) = found else {
-                    self.command_line
-                        .push_error(crate::t!("DIMJOGGED: select an arc or circle first.").as_ref());
-                    return None;
-                };
-                if radius <= 0.0 {
-                    self.command_line.push_error(crate::t!("DIMJOGGED: invalid radius.").as_ref());
-                    return None;
-                }
-                let k = std::f64::consts::FRAC_1_SQRT_2;
-                let arc_point =
-                    Vector3::new(center.x + radius * k, center.y + radius * k, center.z);
-                let mut dim = DimensionRadius::new(center, arc_point);
-                dim.base.common.layer = self.tabs[i].active_layer.clone();
-                let mut rec = ExtendedDataRecord::new("OCS_JOGGED");
-                rec.add_value(XDataValue::String("1".to_string()));
-                dim.base.common.extended_data.add_record(rec);
-                self.push_undo_snapshot(i, "DIMJOGGED");
-                self.tabs[i]
-                    .scene
-                    .add_entity(acadrust::EntityType::Dimension(Dimension::Radius(dim)));
-                self.tabs[i].dirty = true;
-                self.command_line
-                    .push_output(crate::t!("DIMJOGGED: created a jogged radius dimension.").as_ref());
             }
 
             // ARCTEXT <text> — lay the text out as one Text entity per character

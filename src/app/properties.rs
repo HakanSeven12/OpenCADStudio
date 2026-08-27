@@ -1031,22 +1031,19 @@ impl OpenCADStudio {
                         if !dim_style_names.is_empty() {
                             // Current style is already shown as text in the geom section;
                             // replace/upgrade it to a Choice if we have a list.
-                            if let Some(geom) = sections.last_mut() {
-                                // Replace the style name with a choice.
-                                if let Some(prop) =
-                                    geom.props.iter_mut().find(|p| p.field == "style_name")
-                                {
-                                    let current = match &prop.value {
-                                        crate::scene::model::object::PropValue::PlainText(s) => {
-                                            s.clone()
-                                        }
-                                        _ => String::new(),
-                                    };
-                                    prop.value = crate::scene::model::object::PropValue::Choice {
-                                        selected: current,
-                                        options: dim_style_names,
-                                    };
-                                }
+                            if let Some(prop) = sections
+                                .iter_mut()
+                                .flat_map(|section| section.props.iter_mut())
+                                .find(|property| property.field == "style_name")
+                            {
+                                let current = match &prop.value {
+                                    crate::scene::model::object::PropValue::PlainText(s) => s.clone(),
+                                    _ => String::new(),
+                                };
+                                prop.value = crate::scene::model::object::PropValue::Choice {
+                                    selected: current,
+                                    options: dim_style_names,
+                                };
                             }
                         }
 
@@ -1065,6 +1062,16 @@ impl OpenCADStudio {
                                 d,
                                 &self.tabs[i].scene.document,
                             ));
+
+                            if matches!(d, acadrust::entities::Dimension::LargeRadial(_)) {
+                                if let Some(index) = sections
+                                    .iter()
+                                    .position(|section| section.title == t!("Misc").as_ref())
+                                {
+                                    let misc = sections.remove(index);
+                                    sections.push(misc);
+                                }
+                            }
 
                             // Prefer entity-level dimension-variable overrides;
                             // fall back to the assigned style values.

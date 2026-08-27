@@ -1844,6 +1844,12 @@ annotate =
     .dimjogged-created-a-jogged-radius-dimension = DIMJOGGED: kırıklı yarıçap ölçüsü oluşturuldu.
     .dimjogged-invalid-radius = DIMJOGGED: yarıçap geçersiz.
     .dimjogged-select-an-arc-or-circle-first = DIMJOGGED: önce bir yay veya daire seçin.
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Ölçü metnini girin (boş = ölçülen değer):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Yay, daire veya çoklu çizgi yayı seçin:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Geçersiz kılınmış merkez konumunu belirtin:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Ölçü çizgisinin konumunu belirtin  [Çok satırlı metin/Metin/Açı]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Kırılma konumunu belirtin:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Metin açısını belirtin (derece):
     .dimjogline-select-linear-or-aligned-dimension = DIMJOGLINE  Doğrusal veya hizalı ölçüyü seçin:
     .dimjogline-specify-jog-location = DIMJOGLINE  Kırılma konumunu belirtin:
     .dimlinear-enter-dimension-text-blank-measured = DIMLINEAR  Ölçü metnini girin (boş = ölçülen değer):
@@ -2606,6 +2612,7 @@ properties =
     .island-detection-style = Ada algılama stili
     .italic = İtalik
     .jog-angle = Kırılma Açısı
+    .jogged-radius = Kırıklı Yarıçap
     .jog-x = Kırılma X
     .jog-y = Kırılma Y
     .jog-z = Kırılma Z

@@ -108,6 +108,52 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
             ],
         }];
     }
+    if let Dimension::LargeRadial(d) = dim {
+        return vec![PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Dimension style").into_owned(),
+                    field: "style_name",
+                    value: PropValue::PlainText(d.base.style_name.clone()),
+                },
+                edit(t!("Center X").as_ref(), "definition_x", d.definition_point.x),
+                edit(t!("Center Y").as_ref(), "definition_y", d.definition_point.y),
+                edit(t!("Center Z").as_ref(), "definition_z", d.definition_point.z),
+                edit(t!("Chord X").as_ref(), "chord_x", d.chord_point.x),
+                edit(t!("Chord Y").as_ref(), "chord_y", d.chord_point.y),
+                edit(t!("Chord Z").as_ref(), "chord_z", d.chord_point.z),
+                edit(
+                    t!("Override Center X").as_ref(),
+                    "override_x",
+                    d.override_center.x,
+                ),
+                edit(
+                    t!("Override Center Y").as_ref(),
+                    "override_y",
+                    d.override_center.y,
+                ),
+                edit(
+                    t!("Override Center Z").as_ref(),
+                    "override_z",
+                    d.override_center.z,
+                ),
+                edit(t!("Jog X").as_ref(), "jog_x", d.jog_point.x),
+                edit(t!("Jog Y").as_ref(), "jog_y", d.jog_point.y),
+                edit(t!("Jog Z").as_ref(), "jog_z", d.jog_point.z),
+                edit_angle(
+                    t!("Jog Angle").as_ref(),
+                    "jog_angle",
+                    d.jog_angle.to_degrees(),
+                ),
+                ro(
+                    t!("Measurement").as_ref(),
+                    "measurement",
+                    format!("{:.4}", d.measurement()),
+                ),
+            ],
+        }];
+    }
     let compact_linear = match dim {
         Dimension::Linear(d) => Some((
             &d.base,
@@ -281,21 +327,7 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
             props.push(edit(t!("Leader 2 Y").as_ref(), "leader2_y", d.second_leader_point.y));
             props.push(edit(t!("Leader 2 Z").as_ref(), "leader2_z", d.second_leader_point.z));
         }
-        Dimension::LargeRadial(d) => {
-            props.push(edit(t!("Center X").as_ref(), "definition_x", d.definition_point.x));
-            props.push(edit(t!("Center Y").as_ref(), "definition_y", d.definition_point.y));
-            props.push(edit(t!("Center Z").as_ref(), "definition_z", d.definition_point.z));
-            props.push(edit(t!("Chord X").as_ref(), "chord_x", d.chord_point.x));
-            props.push(edit(t!("Chord Y").as_ref(), "chord_y", d.chord_point.y));
-            props.push(edit(t!("Chord Z").as_ref(), "chord_z", d.chord_point.z));
-            props.push(edit(t!("Override Center X").as_ref(), "override_x", d.override_center.x));
-            props.push(edit(t!("Override Center Y").as_ref(), "override_y", d.override_center.y));
-            props.push(edit(t!("Override Center Z").as_ref(), "override_z", d.override_center.z));
-            props.push(edit(t!("Jog X").as_ref(), "jog_x", d.jog_point.x));
-            props.push(edit(t!("Jog Y").as_ref(), "jog_y", d.jog_point.y));
-            props.push(edit(t!("Jog Z").as_ref(), "jog_z", d.jog_point.z));
-            props.push(edit_angle(t!("Jog Angle").as_ref(), "jog_angle", d.jog_angle.to_degrees()));
-        }
+        Dimension::LargeRadial(_) => unreachable!("handled by compact large-radial properties"),
     }
     vec![PropSection {
         title: t!("Geometry").into_owned(),
@@ -1828,7 +1860,7 @@ pub fn style_sections(
     let linetype = |code, inherited| {
         linetype_name(document, ov::handle(data, code).unwrap_or(inherited))
     };
-    let arrow_1 = if matches!(dimension, Dimension::Radius(_)) {
+    let arrow_1 = if matches!(dimension, Dimension::Radius(_) | Dimension::LargeRadial(_)) {
         let inherited = if s.dimblk1.is_null() { s.dimblk } else { s.dimblk1 };
         let inherited_name = if s.dimblk1.is_null() {
             &s.dimblk_name
@@ -2530,7 +2562,10 @@ pub fn style_sections(
             ],
         },
     ];
-    if matches!(dimension, Dimension::Radius(_) | Dimension::Diameter(_)) {
+    if matches!(
+        dimension,
+        Dimension::Radius(_) | Dimension::Diameter(_) | Dimension::LargeRadial(_)
+    ) {
         let dimcen = real(ov::DIMCEN, s.dimcen);
         let center_type = if dimcen > 1e-12 {
             "Center marks"
@@ -2573,8 +2608,18 @@ pub fn style_sections(
                 "dim_ext_line_ext",
                 "dim_ext_line_offset",
             ];
+            const LARGE_RADIAL_LINE_FIELDS: &[&str] = &[
+                "dim_arrowhead_1",
+                "dim_arrow_size",
+                "dim_line_lineweight",
+                "dim_line_1",
+                "dim_line_color",
+                "dim_linetype",
+            ];
             let retained = if matches!(dimension, Dimension::Diameter(_)) {
                 DIAMETER_LINE_FIELDS
+            } else if matches!(dimension, Dimension::LargeRadial(_)) {
+                LARGE_RADIAL_LINE_FIELDS
             } else {
                 RADIUS_LINE_FIELDS
             };
@@ -3097,6 +3142,28 @@ fn tessellate_dimension_inner(
             return wires;
         }
     }
+    if let Dimension::LargeRadial(radial) = dim {
+        if let Some((local_radial, normal)) = large_radial_dimension_in_ocs(radial) {
+            let mut wires = tessellate_dimension_inner(
+                document,
+                handle,
+                &Dimension::LargeRadial(local_radial),
+                selected,
+                entity_color,
+                line_weight_px,
+                anno_scale,
+                selected_set,
+                active_viewport,
+                bg_color,
+                None,
+                world_per_pixel,
+            );
+            for wire in &mut wires {
+                map_wire_ocs_to_wcs(wire, normal);
+            }
+            return wires;
+        }
+    }
     let name = handle.value().to_string();
     // (Baked-block fast path moved up into scene::tessellate_entity so the
     // recursive call goes through the LOD ladder, not the kernel path.)
@@ -3464,8 +3531,7 @@ fn tessellate_dimension_inner(
         // DIMUPT governs interactive creation-time text placement; saved
         // geometry already carries the resulting position.
         let _ = s.dimupt;
-        // DIMJOGANG is consumed by the jogged-radius path.
-        let _ = s.dimjogang;
+        let _ = (s.dimarcsym, s.dimjogang);
         // DIMUNIT is the obsolete pre-R2000 linear unit format; DIMLUNIT
         // supersedes it. Read but not honoured.
         let _ = s.dimunit;
@@ -4345,14 +4411,22 @@ fn dimension_geometry(
             let override_center = lv(d.override_center);
             let (near, far) =
                 jogged_radial_break(chord, jog, override_center, d.jog_angle as f32);
-            add_segment(&mut g.dim_lines, chord, near);
-            add_segment(&mut g.dim_lines, near, far);
-            add_segment(&mut g.dim_lines, far, override_center);
+            if !suppress.dim1 {
+                add_segment(&mut g.dim_lines, chord, near);
+                add_segment(&mut g.dim_lines, near, far);
+                add_segment(&mut g.dim_lines, far, override_center);
+            }
             append_arrow(
                 &mut g,
                 chord,
                 normalized_or(near - chord, Vec3::X),
                 arrow1,
+            );
+            append_center_mark(
+                &mut g,
+                lv(d.definition_point),
+                params.dimcen,
+                (chord - lv(d.definition_point)).length(),
             );
         }
     }
@@ -4782,6 +4856,43 @@ pub(crate) fn arc_dimension_in_ocs(
     local.second_extension_point = on_plane(dimension.second_extension_point);
     local.first_leader_point = on_plane(dimension.first_leader_point);
     local.second_leader_point = on_plane(dimension.second_leader_point);
+    local.base.definition_point = local.definition_point;
+    local.base.text_middle_point = on_plane(dimension.base.text_middle_point);
+    local.base.insertion_point = on_plane(dimension.base.insertion_point);
+    local.base.normal = Vector3::UNIT_Z;
+    Some((local, normal))
+}
+
+pub(crate) fn large_radial_dimension_in_ocs(
+    dimension: &DimensionLargeRadial,
+) -> Option<(DimensionLargeRadial, Vector3)> {
+    let length = dimension.base.normal.length();
+    if !length.is_finite() || length <= 1.0e-12 {
+        return None;
+    }
+    let normal = dimension.base.normal / length;
+    if (normal - Vector3::UNIT_Z).length() <= 1.0e-12 {
+        return None;
+    }
+    let normal_tuple = (normal.x, normal.y, normal.z);
+    let to_ocs = |point: Vector3| {
+        let point = crate::scene::view::transform::wcs_point_to_ocs(
+            (point.x, point.y, point.z),
+            normal_tuple,
+        );
+        Vector3::new(point.0, point.1, point.2)
+    };
+    let mut local = dimension.clone();
+    local.definition_point = to_ocs(dimension.definition_point);
+    let elevation = local.definition_point.z;
+    let on_plane = |point: Vector3| {
+        let mut point = to_ocs(point);
+        point.z = elevation;
+        point
+    };
+    local.chord_point = on_plane(dimension.chord_point);
+    local.override_center = on_plane(dimension.override_center);
+    local.jog_point = on_plane(dimension.jog_point);
     local.base.definition_point = local.definition_point;
     local.base.text_middle_point = on_plane(dimension.base.text_middle_point);
     local.base.insertion_point = on_plane(dimension.base.insertion_point);

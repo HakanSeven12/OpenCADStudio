@@ -2411,6 +2411,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     }
                                     _ => None,
                                 });
+                            if matches!(field, "text_x" | "text_y") {
+                                crate::entities::dimension::materialize_large_radial_text_position(
+                                    &mut self.tabs[i].scene.document,
+                                    handle,
+                                    &value,
+                                );
+                            }
                             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
@@ -2772,6 +2779,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                     }
                                                     _ => None,
                                                 });
+                                            if matches!(field, "text_x" | "text_y") {
+                                                crate::entities::dimension::materialize_large_radial_text_position(
+                                                    &mut self.tabs[i].scene.document,
+                                                    handle,
+                                                    &val,
+                                                );
+                                            }
                                             if let Some(entity) = self.tabs[i]
                                                 .scene
                                                 .document

@@ -370,16 +370,19 @@ fn apply_base_prop(base: &mut DimensionBase, field: &str, value: &str) -> bool {
         // Editing the text position in the properties panel pins it to a
         // user-defined location (stops following DIMTAD). See #94.
         "text_x" => {
-            base.text_user_positioned = true;
-            assign_f64(value, &mut base.text_middle_point.x)
+            let changed = assign_f64(value, &mut base.text_middle_point.x);
+            base.text_user_positioned |= changed;
+            changed
         }
         "text_y" => {
-            base.text_user_positioned = true;
-            assign_f64(value, &mut base.text_middle_point.y)
+            let changed = assign_f64(value, &mut base.text_middle_point.y);
+            base.text_user_positioned |= changed;
+            changed
         }
         "text_z" => {
-            base.text_user_positioned = true;
-            assign_f64(value, &mut base.text_middle_point.z)
+            let changed = assign_f64(value, &mut base.text_middle_point.z);
+            base.text_user_positioned |= changed;
+            changed
         }
         "text_rotation" => assign_deg(value, &mut base.text_rotation),
         "horizontal_direction" => assign_deg(value, &mut base.horizontal_direction),
@@ -1695,6 +1698,139 @@ use acadrust::entities::{MText, Text};
 use acadrust::tables::DimStyle;
 use acadrust::types::{Color as AcadColor, Vector3};
 
+pub(crate) fn resolved_dimension_style(
+    source: &DimStyle,
+    dimension: &Dimension,
+    document: &CadDocument,
+) -> DimStyle {
+    use crate::entities::dim_override as ov;
+
+    let mut style = source.clone();
+    let data = &dimension.base().common.extended_data;
+    macro_rules! real {
+        ($field:ident, $code:ident) => {
+            if let Some(value) = ov::real(data, ov::$code) {
+                style.$field = value;
+            }
+        };
+    }
+    macro_rules! int {
+        ($field:ident, $code:ident) => {
+            if let Some(value) = ov::int(data, ov::$code) {
+                style.$field = value;
+            }
+        };
+    }
+    macro_rules! flag {
+        ($field:ident, $code:ident) => {
+            if let Some(value) = ov::int(data, ov::$code) {
+                style.$field = value != 0;
+            }
+        };
+    }
+    macro_rules! handle {
+        ($field:ident, $code:ident) => {
+            if let Some(value) = ov::handle(data, ov::$code) {
+                style.$field = value;
+            }
+        };
+    }
+
+    real!(dimscale, DIMSCALE);
+    real!(dimasz, DIMASZ);
+    real!(dimexo, DIMEXO);
+    real!(dimdli, DIMDLI);
+    real!(dimexe, DIMEXE);
+    real!(dimrnd, DIMRND);
+    real!(dimdle, DIMDLE);
+    real!(dimtp, DIMTP);
+    real!(dimtm, DIMTM);
+    real!(dimfxl, DIMFXL);
+    real!(dimjogang, DIMJOGANG);
+    real!(dimtxt, DIMTXT);
+    real!(dimcen, DIMCEN);
+    real!(dimtsz, DIMTSZ);
+    real!(dimaltf, DIMALTF);
+    real!(dimlfac, DIMLFAC);
+    real!(dimtvp, DIMTVP);
+    real!(dimtfac, DIMTFAC);
+    real!(dimgap, DIMGAP);
+    real!(dimaltrnd, DIMALTRND);
+    real!(dimaltmzf, DIMALTMZF);
+    real!(dimmzf, DIMMZF);
+    flag!(dimtol, DIMTOL);
+    flag!(dimlim, DIMLIM);
+    flag!(dimtih, DIMTIH);
+    flag!(dimtoh, DIMTOH);
+    flag!(dimse1, DIMSE1);
+    flag!(dimse2, DIMSE2);
+    flag!(dimalt, DIMALT);
+    flag!(dimtofl, DIMTOFL);
+    flag!(dimsah, DIMSAH);
+    flag!(dimtix, DIMTIX);
+    flag!(dimsoxd, DIMSOXD);
+    flag!(dimsd1, DIMSD1);
+    flag!(dimsd2, DIMSD2);
+    flag!(dimupt, DIMUPT);
+    flag!(dimfxlon, DIMFXLON);
+    flag!(dimtxtdirection, DIMTXTDIRECTION);
+    int!(dimzin, DIMZIN);
+    int!(dimtad, DIMTAD);
+    int!(dimazin, DIMAZIN);
+    int!(dimarcsym, DIMARCSYM);
+    int!(dimclrd, DIMCLRD);
+    int!(dimclre, DIMCLRE);
+    int!(dimclrt, DIMCLRT);
+    int!(dimadec, DIMADEC);
+    int!(dimaltd, DIMALTD);
+    int!(dimdec, DIMDEC);
+    int!(dimtdec, DIMTDEC);
+    int!(dimaltu, DIMALTU);
+    int!(dimalttd, DIMALTTD);
+    int!(dimaunit, DIMAUNIT);
+    int!(dimfrac, DIMFRAC);
+    int!(dimlunit, DIMLUNIT);
+    int!(dimdsep, DIMDSEP);
+    int!(dimtmove, DIMTMOVE);
+    int!(dimjust, DIMJUST);
+    int!(dimtolj, DIMTOLJ);
+    int!(dimtzin, DIMTZIN);
+    int!(dimaltz, DIMALTZ);
+    int!(dimalttz, DIMALTTZ);
+    int!(dimatfit, DIMATFIT);
+    int!(dimtfill, DIMTFILL);
+    int!(dimtfillclr, DIMTFILLCLR);
+    int!(dimlwd, DIMLWD);
+    int!(dimlwe, DIMLWE);
+    handle!(dimldrblk, DIMLDRBLK);
+    handle!(dimblk, DIMBLK);
+    handle!(dimblk1, DIMBLK1);
+    handle!(dimblk2, DIMBLK2);
+    handle!(dimltex_handle, DIMLTYPE);
+    handle!(dimltex1_handle, DIMLTEX1);
+    handle!(dimltex2_handle, DIMLTEX2);
+
+    if let Some(value) = ov::string(data, ov::DIMPOST) {
+        style.dimpost = value;
+    }
+    if let Some(value) = ov::string(data, ov::DIMAPOST) {
+        style.dimapost = value;
+    }
+    if let Some(value) = ov::string(data, ov::DIMALTMZS) {
+        style.dimaltmzs = value;
+    }
+    if let Some(value) = ov::string(data, ov::DIMMZS) {
+        style.dimmzs = value;
+    }
+    if let Some(value) = ov::handle(data, ov::DIMTXSTY) {
+        style.dimtxsty_handle = value;
+        if let Some(record) = document.text_styles.iter().find(|record| record.handle == value) {
+            style.dimtxsty = record.name.clone();
+        }
+    }
+    style
+}
+
 /// Build the linear-dimension property groups from the assigned style plus
 /// any entity-level DSTYLE overrides. Conditional rows remain visible but are
 /// read-only while their controlling option is disabled.
@@ -1705,6 +1841,7 @@ pub fn style_sections(
 ) -> Vec<PropSection> {
     use crate::entities::dim_override as ov;
 
+    let effective_style = resolved_dimension_style(style, dimension, document);
     let data = &dimension.base().common.extended_data;
     let real = |code, inherited| ov::real(data, code).unwrap_or(inherited);
     let int = |code, inherited| ov::int(data, code).unwrap_or(inherited);
@@ -1751,7 +1888,7 @@ pub fn style_sections(
         )
     };
 
-    let s = style;
+    let s = &effective_style;
     let dimfxlon = int(ov::DIMFXLON, s.dimfxlon as i16) != 0;
     let dimtix = int(ov::DIMTIX, s.dimtix as i16) != 0;
     let dimlunit = int(ov::DIMLUNIT, s.dimlunit);
@@ -2834,13 +2971,7 @@ pub fn style_sections(
                 });
             }
             if !dimension.base().text_user_positioned {
-                let dim_scale = if s.dimscale > 1.0e-6 { s.dimscale } else { 1.0 };
-                let text_position = dimension_text_pos_f64(
-                    dimension,
-                    Some(s),
-                    real(ov::DIMTXT, s.dimtxt) * dim_scale,
-                    dim_scale,
-                );
+                let text_position = styled_dimension_text_position(dimension, s, 1.0);
                 for section in &mut sections {
                     for property in &mut section.props {
                         match property.field {
@@ -3008,6 +3139,55 @@ pub fn style_sections(
     sections
 }
 
+fn dimension_style_scale(style: &DimStyle, fallback: f64) -> f64 {
+    if style.dimscale > 1.0e-6 {
+        style.dimscale
+    } else {
+        fallback
+    }
+}
+
+fn styled_dimension_text_position(
+    dimension: &Dimension,
+    style: &DimStyle,
+    fallback_scale: f64,
+) -> Vector3 {
+    let scale = dimension_style_scale(style, fallback_scale);
+    dimension_text_pos_f64(dimension, Some(style), style.dimtxt * scale, scale)
+}
+
+pub(crate) fn materialize_large_radial_text_position(
+    document: &mut CadDocument,
+    handle: Handle,
+    value: &str,
+) {
+    if parse_f64(value).is_none() {
+        return;
+    }
+    let Some(EntityType::Dimension(dimension)) = document.get_entity(handle) else {
+        return;
+    };
+    if !matches!(dimension, Dimension::LargeRadial(_))
+        || dimension.base().text_user_positioned
+    {
+        return;
+    }
+    let source = document.dim_styles.iter().find(|style| {
+        style.name.eq_ignore_ascii_case(&dimension.base().style_name)
+            || (dimension.base().style_name.trim().is_empty()
+                && style.name.eq_ignore_ascii_case("Standard"))
+    });
+    let position = source
+        .map(|style| resolved_dimension_style(style, dimension, document))
+        .map(|style| styled_dimension_text_position(dimension, &style, 1.0))
+        .unwrap_or_else(|| dimension_text_pos_f64(dimension, None, 2.5, 1.0));
+    if let Some(EntityType::Dimension(Dimension::LargeRadial(radial))) =
+        document.get_entity_mut(handle)
+    {
+        radial.base.text_middle_point = position;
+    }
+}
+
 fn property(label: &str, field: &'static str, value: PropValue) -> Property {
     Property {
         label: label.to_string(),
@@ -3169,8 +3349,8 @@ use acadrust::{CadDocument, EntityType, Handle};
 
 use crate::scene::convert::tess_util::aci_to_rgba;
 use crate::scene::convert::tessellate::{
-    add_polyline, add_segment, append_arrow, arrow_from_block_with_deferred_hatch,
-    normalized_or, ArrowKind, DimGeom,
+    add_polyline, add_segment, append_arrow, arrow_from_block,
+    arrow_from_block_with_deferred_hatch, normalized_or, ArrowKind, DimGeom,
 };
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 
@@ -3389,130 +3569,7 @@ fn tessellate_dimension_inner(
         s.name.eq_ignore_ascii_case(style_name)
             || (style_name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
     });
-    let mut effective_style = source_style.cloned();
-    if let Some(style) = &mut effective_style {
-        use crate::entities::dim_override as ov;
-        let data = &dim.base().common.extended_data;
-        macro_rules! real {
-            ($field:ident, $code:ident) => {
-                if let Some(value) = ov::real(data, ov::$code) {
-                    style.$field = value;
-                }
-            };
-        }
-        macro_rules! int {
-            ($field:ident, $code:ident) => {
-                if let Some(value) = ov::int(data, ov::$code) {
-                    style.$field = value;
-                }
-            };
-        }
-        macro_rules! flag {
-            ($field:ident, $code:ident) => {
-                if let Some(value) = ov::int(data, ov::$code) {
-                    style.$field = value != 0;
-                }
-            };
-        }
-        macro_rules! handle {
-            ($field:ident, $code:ident) => {
-                if let Some(value) = ov::handle(data, ov::$code) {
-                    style.$field = value;
-                }
-            };
-        }
-        real!(dimscale, DIMSCALE);
-        real!(dimasz, DIMASZ);
-        real!(dimexo, DIMEXO);
-        real!(dimdli, DIMDLI);
-        real!(dimexe, DIMEXE);
-        real!(dimrnd, DIMRND);
-        real!(dimdle, DIMDLE);
-        real!(dimtp, DIMTP);
-        real!(dimtm, DIMTM);
-        real!(dimfxl, DIMFXL);
-        real!(dimjogang, DIMJOGANG);
-        real!(dimtxt, DIMTXT);
-        real!(dimcen, DIMCEN);
-        real!(dimtsz, DIMTSZ);
-        real!(dimaltf, DIMALTF);
-        real!(dimlfac, DIMLFAC);
-        real!(dimtvp, DIMTVP);
-        real!(dimtfac, DIMTFAC);
-        real!(dimgap, DIMGAP);
-        real!(dimaltrnd, DIMALTRND);
-        real!(dimaltmzf, DIMALTMZF);
-        real!(dimmzf, DIMMZF);
-        flag!(dimtol, DIMTOL);
-        flag!(dimlim, DIMLIM);
-        flag!(dimtih, DIMTIH);
-        flag!(dimtoh, DIMTOH);
-        flag!(dimse1, DIMSE1);
-        flag!(dimse2, DIMSE2);
-        flag!(dimalt, DIMALT);
-        flag!(dimtofl, DIMTOFL);
-        flag!(dimsah, DIMSAH);
-        flag!(dimtix, DIMTIX);
-        flag!(dimsoxd, DIMSOXD);
-        flag!(dimsd1, DIMSD1);
-        flag!(dimsd2, DIMSD2);
-        flag!(dimupt, DIMUPT);
-        flag!(dimfxlon, DIMFXLON);
-        flag!(dimtxtdirection, DIMTXTDIRECTION);
-        int!(dimzin, DIMZIN);
-        int!(dimtad, DIMTAD);
-        int!(dimazin, DIMAZIN);
-        int!(dimarcsym, DIMARCSYM);
-        int!(dimclrd, DIMCLRD);
-        int!(dimclre, DIMCLRE);
-        int!(dimclrt, DIMCLRT);
-        int!(dimadec, DIMADEC);
-        int!(dimaltd, DIMALTD);
-        int!(dimdec, DIMDEC);
-        int!(dimtdec, DIMTDEC);
-        int!(dimaltu, DIMALTU);
-        int!(dimalttd, DIMALTTD);
-        int!(dimaunit, DIMAUNIT);
-        int!(dimfrac, DIMFRAC);
-        int!(dimlunit, DIMLUNIT);
-        int!(dimdsep, DIMDSEP);
-        int!(dimtmove, DIMTMOVE);
-        int!(dimjust, DIMJUST);
-        int!(dimtolj, DIMTOLJ);
-        int!(dimtzin, DIMTZIN);
-        int!(dimaltz, DIMALTZ);
-        int!(dimalttz, DIMALTTZ);
-        int!(dimatfit, DIMATFIT);
-        int!(dimtfill, DIMTFILL);
-        int!(dimtfillclr, DIMTFILLCLR);
-        int!(dimlwd, DIMLWD);
-        int!(dimlwe, DIMLWE);
-        handle!(dimldrblk, DIMLDRBLK);
-        handle!(dimblk, DIMBLK);
-        handle!(dimblk1, DIMBLK1);
-        handle!(dimblk2, DIMBLK2);
-        handle!(dimltex_handle, DIMLTYPE);
-        handle!(dimltex1_handle, DIMLTEX1);
-        handle!(dimltex2_handle, DIMLTEX2);
-        if let Some(value) = ov::string(data, ov::DIMPOST) {
-            style.dimpost = value;
-        }
-        if let Some(value) = ov::string(data, ov::DIMAPOST) {
-            style.dimapost = value;
-        }
-        if let Some(value) = ov::string(data, ov::DIMALTMZS) {
-            style.dimaltmzs = value;
-        }
-        if let Some(value) = ov::string(data, ov::DIMMZS) {
-            style.dimmzs = value;
-        }
-        if let Some(value) = ov::handle(data, ov::DIMTXSTY) {
-            style.dimtxsty_handle = value;
-            if let Some(record) = document.text_styles.iter().find(|record| record.handle == value) {
-                style.dimtxsty = record.name.clone();
-            }
-        }
-    }
+    let effective_style = source_style.map(|style| resolved_dimension_style(style, dim, document));
     let style = effective_style.as_ref();
 
     // A positive style scale is fixed. A zero style scale uses the multiplier
@@ -3663,37 +3720,7 @@ fn tessellate_dimension_inner(
         (a.clone(), a)
     };
 
-    // Text box (local space) so the dim line can be broken where the text
-    // crosses it — lets a DIMTFILL background sit over the line. The renderer
-    // draws 2D fills under all wires, so the line is gapped rather than masked.
-    let dimgap_local = style
-        .map(|s| (s.dimgap.abs() * dim_scale) as f32)
-        .unwrap_or(0.09);
-    let text_width = dimension_text_value(dim, style)
-        .map(|text| text.chars().count() as f32 * dim_txt as f32 * 0.6 + dimgap_local * 2.0)
-        .unwrap_or(0.0);
-    let text_break = {
-        let tp = vec3_local(dimension_text_pos_f64(dim, style, dim_txt, dim_scale));
-        let tw = (text_width - dimgap_local * 2.0).max(0.0);
-        if tw > 0.0 {
-            // Vertical threshold is the bare text half-height (no DIMGAP): the
-            // line only breaks when it actually passes under the glyphs. Text
-            // placed above/below the line (DIMTAD 1/4) sits exactly
-            // `text_half + DIMGAP` away, so excluding the gap here keeps it
-            // strictly outside and the line continuous — otherwise the two
-            // terms cancel at the same scaled value and the gap flickers with
-            // DIMGAP/DIMSCALE. The horizontal half-width keeps DIMGAP so a
-            // genuine break still clears the text comfortably. (#94)
-            Some((tp, tw * 0.5 + dimgap_local, dim_txt as f32 * 0.5))
-        } else {
-            None
-        }
-    };
-    let text_position = vec3_local(dimension_text_pos_f64(dim, style, dim_txt, dim_scale));
-    let text_is_outside = dimension_text_is_outside(dim, style);
-    let horizontal_text = style.is_some_and(|style| {
-        (text_is_outside && style.dimtoh) || (!text_is_outside && style.dimtih)
-    });
+    let text_layout = dimension_text_layout(dim, style, dim_txt, dim_scale);
 
     let mut geom = dimension_geometry(
         dim,
@@ -3709,13 +3736,14 @@ fn tessellate_dimension_inner(
             dimcen,
             ticks: dimtsz_raw > 1e-9,
             arrow_len: dimasz,
-            text_width,
+            text_width: text_layout.width,
             dimatfit: style.map(|s| s.dimatfit).unwrap_or(3),
+            dimtix: style.is_some_and(|s| s.dimtix),
             dimtofl: style.map(|s| s.dimtofl).unwrap_or(false),
-            text_position,
-            horizontal_text,
+            text_position: text_layout.position,
+            horizontal_text: text_layout.horizontal,
             text_movement: style.map(|s| s.dimtmove).unwrap_or(0),
-            text_break,
+            text_break: text_layout.break_box,
         },
         SuppressFlags {
             ext1: dimse1,
@@ -3737,19 +3765,17 @@ fn tessellate_dimension_inner(
         }
     }
 
-    // DIMTMOVE = 1: when the saved text_middle_point sits far from the
-    // dim-line anchor, draw a short leader connecting them. (=0 anchors text
-    // to the dim line — no leader; =2 frees text without a leader.)
+    // DIMTMOVE=1 connects the dimension line to rendered text.
     if let Some(s) = style {
         if s.dimtmove == 1 {
-            if let Some((anchor, txt)) = dimtmove_leader_endpoints(dim) {
+            if let Some((anchor, txt)) = dimtmove_leader_endpoints(dim, text_layout.position) {
                 let gap = dim_txt as f32 * 0.5;
                 if (txt - anchor).length() > gap * 2.0 {
                     add_segment_with_text_break(
                         &mut geom.dim_lines,
                         anchor,
                         txt,
-                        text_break,
+                        text_layout.break_box,
                     );
                 }
             }
@@ -4234,16 +4260,8 @@ fn split_ext_lines(points: &[[f32; 3]]) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
     (first, rest)
 }
 
-/// Endpoints for the DIMTMOVE=1 leader: (anchor on the dim line, saved
-/// text_middle_point). Returns None when the dim has no saved text position
-/// or has no well-defined dim-line midpoint (radius/diameter handled by
-/// their own leg).
-fn dimtmove_leader_endpoints(dim: &Dimension) -> Option<(Vec3, Vec3)> {
-    let base = dim.base();
-    let txt = base.text_middle_point;
-    if txt.x * txt.x + txt.y * txt.y + txt.z * txt.z <= 1e-16 {
-        return None;
-    }
+/// Endpoints for the DIMTMOVE=1 leader.
+fn dimtmove_leader_endpoints(dim: &Dimension, txt: Vec3) -> Option<(Vec3, Vec3)> {
     let lv = |v| vec3_local(v);
     let anchor = match dim {
         Dimension::Linear(d) => {
@@ -4269,7 +4287,7 @@ fn dimtmove_leader_endpoints(dim: &Dimension) -> Option<(Vec3, Vec3)> {
         Dimension::Diameter(d) => {
             let chord = lv(d.angle_vertex);
             let far_chord = lv(d.definition_point);
-            if chord.distance_squared(lv(txt)) <= far_chord.distance_squared(lv(txt)) {
+            if chord.distance_squared(txt) <= far_chord.distance_squared(txt) {
                 chord
             } else {
                 far_chord
@@ -4283,29 +4301,23 @@ fn dimtmove_leader_endpoints(dim: &Dimension) -> Option<(Vec3, Vec3)> {
             let override_center = lv(d.override_center);
             let (near, far) =
                 jogged_radial_break(chord, jog, override_center, d.jog_angle as f32);
-            [
-                closest_point_on_segment(lv(txt), chord, near),
-                closest_point_on_segment(lv(txt), near, far),
-                closest_point_on_segment(lv(txt), far, override_center),
-            ]
-            .into_iter()
-            .min_by(|left, right| {
-                left.distance_squared(lv(txt))
-                    .total_cmp(&right.distance_squared(lv(txt)))
-            })?
+            let curves = [(chord, near), (near, far), (far, override_center)].map(
+                |(start, end)| {
+                    cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+                        start: [start.x as f64, start.y as f64],
+                        end: [end.x as f64, end.y as f64],
+                    })
+                },
+            );
+            let (_, closest) = cadkernel::geom2d::nearest_of(
+                curves.iter(),
+                [txt.x as f64, txt.y as f64],
+            )?;
+            Vec3::new(closest.point[0] as f32, closest.point[1] as f32, chord.z)
         }
         _ => return None,
     };
-    Some((anchor, lv(txt)))
-}
-
-fn closest_point_on_segment(point: Vec3, start: Vec3, end: Vec3) -> Vec3 {
-    let segment = end - start;
-    let length_squared = segment.length_squared();
-    if length_squared <= 1.0e-12 {
-        return start;
-    }
-    start + segment * ((point - start).dot(segment) / length_squared).clamp(0.0, 1.0)
+    Some((anchor, txt))
 }
 
 /// Build a rectangle of filled triangles sitting under the dim text, used
@@ -4409,6 +4421,61 @@ struct SuppressFlags {
 }
 
 #[derive(Clone, Copy)]
+struct TextBreak {
+    center: Vec3,
+    half_width: f32,
+    half_height: f32,
+    padding: f32,
+    rotation: f64,
+}
+
+#[derive(Clone, Copy)]
+struct DimensionTextLayout {
+    position: Vec3,
+    width: f32,
+    break_box: Option<TextBreak>,
+    horizontal: bool,
+}
+
+fn dimension_text_layout(
+    dimension: &Dimension,
+    style: Option<&DimStyle>,
+    text_height: f64,
+    dim_scale: f64,
+) -> DimensionTextLayout {
+    let gap = style
+        .map(|style| (style.dimgap.abs() * dim_scale) as f32)
+        .unwrap_or(0.09);
+    let width = dimension_text_value(dimension, style)
+        .map(|text| text.chars().count() as f32 * text_height as f32 * 0.6 + gap * 2.0)
+        .unwrap_or(0.0);
+    let position = vec3_local(dimension_text_pos_f64(
+        dimension,
+        style,
+        text_height,
+        dim_scale,
+    ));
+    let bare_width = (width - gap * 2.0).max(0.0);
+    let break_box = (bare_width > 0.0).then_some(TextBreak {
+        center: position,
+        half_width: bare_width * 0.5,
+        half_height: text_height as f32 * 0.5,
+        padding: gap,
+        rotation: dimension_text_rotation(dimension, style),
+    });
+    let outside = dimension_text_is_outside(dimension, style);
+    let horizontal = style.is_some_and(|style| {
+        (outside && style.dimtoh) || (!outside && style.dimtih)
+    });
+    DimensionTextLayout {
+        position,
+        width,
+        break_box,
+        horizontal,
+    }
+}
+
+#[derive(Clone, Copy)]
 struct DimLineParams {
     dimexo: f32,
     dimexe: f32,
@@ -4422,14 +4489,12 @@ struct DimLineParams {
     arrow_len: f32,
     text_width: f32,
     dimatfit: i16,
+    dimtix: bool,
     dimtofl: bool,
     text_position: Vec3,
     horizontal_text: bool,
     text_movement: i16,
-    /// Text box (local centre, half-width, half-height) used to break the
-    /// dimension line where the text sits on it, so a DIMTFILL background reads
-    /// over the line. None when the text doesn't overlap the line.
-    text_break: Option<(Vec3, f32, f32)>,
+    text_break: Option<TextBreak>,
 }
 fn dimension_geometry(
     dim: &Dimension,
@@ -4672,10 +4737,14 @@ fn dimension_geometry(
             } else if available < params.arrow_len {
                 true
             } else if available < params.text_width + params.arrow_len {
-                match params.dimatfit {
-                    0 | 1 => true,
-                    2 => false,
-                    _ => params.text_width <= available,
+                if params.dimtix {
+                    true
+                } else {
+                    match params.dimatfit {
+                        0 | 1 => true,
+                        2 => false,
+                        _ => params.text_width <= available,
+                    }
                 }
             } else {
                 false
@@ -4729,31 +4798,60 @@ fn add_segment_with_text_break(
     points: &mut Vec<[f32; 3]>,
     start: Vec3,
     end: Vec3,
-    text_break: Option<(Vec3, f32, f32)>,
+    text_break: Option<TextBreak>,
 ) {
     let segment = end - start;
     let length = segment.length();
     if length <= 1.0e-6 {
         return;
     }
-    let Some((center, half_width, half_height)) = text_break else {
+    let Some(text_break) = text_break else {
         add_segment(points, start, end);
         return;
     };
-    let direction = segment / length;
-    let along = (center - start).dot(direction);
-    let perpendicular = (center - (start + direction * along)).length();
-    if perpendicular >= half_height || along + half_width <= 0.0 || along - half_width >= length {
+    let segment_curve = cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+        start: [start.x as f64, start.y as f64],
+        end: [end.x as f64, end.y as f64],
+    });
+    let tolerance = cadkernel::geom2d::Tolerance::new((length as f64 * 1.0e-9).max(1.0e-9));
+    let inside = |padding: f32| {
+        let (sin, cos) = text_break.rotation.sin_cos();
+        let x_axis = Vec3::new(cos as f32, sin as f32, 0.0);
+        let y_axis = Vec3::new(-sin as f32, cos as f32, 0.0);
+        let half_width = text_break.half_width + padding;
+        let half_height = text_break.half_height + padding;
+        let corners = [
+            text_break.center - x_axis * half_width - y_axis * half_height,
+            text_break.center + x_axis * half_width - y_axis * half_height,
+            text_break.center + x_axis * half_width + y_axis * half_height,
+            text_break.center - x_axis * half_width + y_axis * half_height,
+        ];
+        let boundary: Vec<_> = (0..4)
+            .map(|index| {
+                let next = (index + 1) % 4;
+                cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+                    start: [corners[index].x as f64, corners[index].y as f64],
+                    end: [corners[next].x as f64, corners[next].y as f64],
+                })
+            })
+            .collect();
+        cadkernel::geom2d::inside_spans(&boundary, &segment_curve, tolerance)
+    };
+    if inside(0.0).is_empty() {
         add_segment(points, start, end);
         return;
     }
-    let cut_start = (along - half_width).clamp(0.0, length);
-    let cut_end = (along + half_width).clamp(0.0, length);
-    if cut_start > 1.0e-6 {
-        add_segment(points, start, start + direction * cut_start);
+    let mut cursor = 0.0_f32;
+    for [cut_start, cut_end] in inside(text_break.padding.max(0.0)) {
+        let cut_start = (cut_start as f32).clamp(0.0, 1.0);
+        let cut_end = (cut_end as f32).clamp(0.0, 1.0);
+        if cut_start - cursor > 1.0e-6 {
+            add_segment(points, start.lerp(end, cursor), start.lerp(end, cut_start));
+        }
+        cursor = cursor.max(cut_end);
     }
-    if length - cut_end > 1.0e-6 {
-        add_segment(points, start + direction * cut_end, end);
+    if 1.0 - cursor > 1.0e-6 {
+        add_segment(points, start.lerp(end, cursor), end);
     }
 }
 
@@ -4867,44 +4965,20 @@ fn append_linear_dimension(
         false
     };
 
-    // The two suppression flags address the portions at the first and second
-    // measured points independently. The text gap is also the natural split;
-    // when there is no gap, split at the projected text position or midpoint.
     let line_dir = normalized_or(d2_out - d1_out, axis);
     let line_len = (d2_out - d1_out).length();
-    let mut split = line_len * 0.5;
-    let mut left_end = split;
-    let mut right_start = split;
-    if let Some((text_center, half_width, half_height)) = params.text_break {
-        let along = (text_center - d1_out).dot(line_dir);
-        if along > 0.0 && along < line_len {
-            split = along;
-            left_end = split;
-            right_start = split;
-            let perpendicular = (text_center - (d1_out + line_dir * along)).length();
-            if perpendicular < half_height
-                && along - half_width > 0.0
-                && along + half_width < line_len
-            {
-                left_end = along - half_width;
-                right_start = along + half_width;
-            }
-        }
-    }
+    let split = params
+        .text_break
+        .map(|text_break| (text_break.center - d1_out).dot(line_dir))
+        .filter(|along| *along > 0.0 && *along < line_len)
+        .unwrap_or(line_len * 0.5);
+    let split_point = d1_out + line_dir * split;
     let draw_inside_line = !arrows_outside || params.dimtofl;
-    if draw_inside_line && !suppress.dim1 && left_end > 1e-6 {
-        add_segment(
-            &mut g.dim_lines,
-            d1_out,
-            d1_out + line_dir * left_end,
-        );
+    if draw_inside_line && !suppress.dim1 && split > 1e-6 {
+        add_segment_with_text_break(&mut g.dim_lines, d1_out, split_point, params.text_break);
     }
-    if draw_inside_line && !suppress.dim2 && line_len - right_start > 1e-6 {
-        add_segment(
-            &mut g.dim_lines,
-            d1_out + line_dir * right_start,
-            d2_out,
-        );
+    if draw_inside_line && !suppress.dim2 && line_len - split > 1e-6 {
+        add_segment_with_text_break(&mut g.dim_lines, split_point, d2_out, params.text_break);
     }
     if arrows_outside && !params.dimsoxd {
         let stub = params.arrow_len * 2.0;
@@ -4960,34 +5034,19 @@ fn append_diameter_dimension(
     let first = chord - axis * extension;
     let second = far_chord + axis * extension;
     let line_length = first.distance(second);
-    let mut left_end = line_length * 0.5;
-    let mut right_start = left_end;
-    if let Some((text_center, half_width, half_height)) = params.text_break {
-        let along = (text_center - first).dot(axis);
-        if along > 0.0 && along < line_length {
-            left_end = along;
-            right_start = along;
-            let perpendicular = (text_center - (first + axis * along)).length();
-            if perpendicular < half_height
-                && along - half_width > 0.0
-                && along + half_width < line_length
-            {
-                left_end = along - half_width;
-                right_start = along + half_width;
-            }
-        }
-    }
+    let split = params
+        .text_break
+        .map(|text_break| (text_break.center - first).dot(axis))
+        .filter(|along| *along > 0.0 && *along < line_length)
+        .unwrap_or(line_length * 0.5);
+    let split_point = first + axis * split;
 
     let draw_inside_line = !arrows_outside || params.dimtofl;
-    if draw_inside_line && !suppress.dim1 && left_end > 1e-6 {
-        add_segment(&mut g.dim_lines, first, first + axis * left_end);
+    if draw_inside_line && !suppress.dim1 && split > 1e-6 {
+        add_segment_with_text_break(&mut g.dim_lines, first, split_point, params.text_break);
     }
-    if draw_inside_line && !suppress.dim2 && line_length - right_start > 1e-6 {
-        add_segment(
-            &mut g.dim_lines,
-            first + axis * right_start,
-            second,
-        );
+    if draw_inside_line && !suppress.dim2 && line_length - split > 1e-6 {
+        add_segment_with_text_break(&mut g.dim_lines, split_point, second, params.text_break);
     }
     if arrows_outside && !params.dimsoxd {
         let stub = params.arrow_len * 2.0;
@@ -5450,17 +5509,7 @@ fn append_angular_dimension(
             }
             let a = arc_pts[index];
             let b = arc_pts[index + 1];
-            let hidden_by_text = params.text_break.is_some_and(|(center, half_width, half_height)| {
-                let angle = draw_start + draw_delta * t;
-                let radial = Vec3::new(angle.cos(), angle.sin(), 0.0);
-                let tangent = Vec3::new(-angle.sin(), angle.cos(), 0.0);
-                let offset = center - (a + b) * 0.5;
-                offset.dot(tangent).abs() <= half_width
-                    && offset.dot(radial).abs() <= half_height
-            });
-            if !hidden_by_text {
-                add_segment(&mut g.dim_lines, a, b);
-            }
+            add_segment_with_text_break(&mut g.dim_lines, a, b, params.text_break);
         }
     }
 
@@ -5486,28 +5535,29 @@ fn append_angular_dimension(
         }
     }
 
-    if let Some((text_center, half_width, _)) = params.text_break {
-        let text_angle = (text_center.y - vertex.y).atan2(text_center.x - vertex.x);
+    if let Some(text_break) = params.text_break {
+        let text_angle = (text_break.center.y - vertex.y).atan2(text_break.center.x - vertex.x);
         let into = (text_angle - start).rem_euclid(std::f32::consts::TAU);
         if into > delta.abs() + 1.0e-6 {
             let back_to_start = (start - text_angle).rem_euclid(std::f32::consts::TAU);
             let forward_from_end = (text_angle - end).rem_euclid(std::f32::consts::TAU);
-            let text_gap = (half_width / radius).min(std::f32::consts::FRAC_PI_2);
             if back_to_start <= forward_from_end && !suppress.dim1 {
-                append_sampled_arc(
+                append_sampled_arc_with_text_break(
                     &mut g.dim_lines,
                     vertex,
                     radius,
-                    text_angle + text_gap,
+                    text_angle,
                     start,
+                    params.text_break,
                 );
             } else if !suppress.dim2 {
-                append_sampled_arc(
+                append_sampled_arc_with_text_break(
                     &mut g.dim_lines,
                     vertex,
                     radius,
                     end,
-                    text_angle - text_gap,
+                    text_angle,
+                    params.text_break,
                 );
             }
         }
@@ -5543,6 +5593,19 @@ fn append_sampled_arc(
 ) {
     for pair in sample_angular_arc(vertex, radius, start, end - start).windows(2) {
         add_segment(lines, pair[0], pair[1]);
+    }
+}
+
+fn append_sampled_arc_with_text_break(
+    lines: &mut Vec<[f32; 3]>,
+    vertex: Vec3,
+    radius: f32,
+    start: f32,
+    end: f32,
+    text_break: Option<TextBreak>,
+) {
+    for pair in sample_angular_arc(vertex, radius, start, end - start).windows(2) {
+        add_segment_with_text_break(lines, pair[0], pair[1], text_break);
     }
 }
 
@@ -6943,39 +7006,130 @@ fn perp_sign_default() -> f64 {
     1.0
 }
 
-/// The measurement-text entity (Text or MText) for a baked `*D` block, built
-/// through the SAME `dimension_text_entity` the live renderer uses — so the
-/// baked text matches the on-screen value, position, height, rotation,
-/// alignment, text style and MText handling, and nothing shifts when the file
-/// is saved and reopened (the reload renders from the block). Returns `None`
-/// when the text is suppressed (`user_text` is a single space). `anno_scale` is
-/// the annotative scale (1.0 for a plain model-space bake).
+pub(crate) fn baked_large_radial_geometry(
+    dimension: &Dimension,
+    document: &CadDocument,
+) -> Option<DimGeom> {
+    if !matches!(dimension, Dimension::LargeRadial(_)) {
+        return None;
+    }
+    let style_name = dimension.base().style_name.as_str();
+    let effective_style = document
+        .dim_styles
+        .iter()
+        .find(|style| {
+            style.name.eq_ignore_ascii_case(style_name)
+                || (style_name.trim().is_empty()
+                    && style.name.eq_ignore_ascii_case("Standard"))
+        })
+        .map(|style| resolved_dimension_style(style, dimension, document));
+    let style = effective_style.as_ref();
+    let scale = style
+        .map(|style| dimension_style_scale(style, 1.0))
+        .unwrap_or(1.0);
+    let text_height = style.map(|style| style.dimtxt * scale).unwrap_or(2.5 * scale);
+    let arrow_size_raw = style.map(|style| style.dimasz * scale).unwrap_or(0.18 * scale);
+    let tick_size = style.map(|style| style.dimtsz * scale).unwrap_or(0.0);
+    let arrow_size = (arrow_size_raw as f32).max(0.001);
+    let arrow = if tick_size > 1.0e-9 {
+        ArrowKind::Tick {
+            size: (tick_size as f32).max(0.001),
+        }
+    } else if let Some(style) = style {
+        arrow_from_block(document, style.dimldrblk, arrow_size)
+    } else {
+        ArrowKind::Triangle {
+            size: arrow_size,
+            filled: true,
+            size_mul: 1.0,
+        }
+    };
+    let text = dimension_text_layout(dimension, style, text_height, scale);
+    let mut geometry = dimension_geometry(
+        dimension,
+        &arrow,
+        &arrow,
+        DimLineParams {
+            dimexo: style.map(|style| (style.dimexo * scale) as f32).unwrap_or(0.0),
+            dimexe: style.map(|style| (style.dimexe * scale) as f32).unwrap_or(0.0),
+            dimdle: style.map(|style| (style.dimdle * scale) as f32).unwrap_or(0.0),
+            dimfxl: style.map(|style| (style.dimfxl * scale) as f32).unwrap_or(1.0),
+            dimfxlon: style.is_some_and(|style| style.dimfxlon),
+            dimsoxd: style.is_some_and(|style| style.dimsoxd),
+            dimcen: style.map(|style| (style.dimcen * scale) as f32).unwrap_or(0.09),
+            ticks: tick_size > 1.0e-9,
+            arrow_len: arrow_size,
+            text_width: text.width,
+            dimatfit: style.map(|style| style.dimatfit).unwrap_or(3),
+            dimtix: style.is_some_and(|style| style.dimtix),
+            dimtofl: style.is_some_and(|style| style.dimtofl),
+            text_position: text.position,
+            horizontal_text: text.horizontal,
+            text_movement: style.map(|style| style.dimtmove).unwrap_or(0),
+            text_break: text.break_box,
+        },
+        SuppressFlags {
+            ext1: style.is_some_and(|style| style.dimse1),
+            ext2: style.is_some_and(|style| style.dimse2),
+            dim1: style.is_some_and(|style| style.dimsd1),
+            dim2: style.is_some_and(|style| style.dimsd2),
+        },
+    );
+    if !style.is_some_and(|style| style.dimse1) {
+        if let Some(points) = crate::scene::dimension_assoc::radial_extension_points(
+            document,
+            dimension.base().common.handle,
+            style.map(|style| style.dimexo * scale).unwrap_or(0.0),
+            style.map(|style| style.dimexe * scale).unwrap_or(0.0),
+        ) {
+            let points: Vec<_> = points.into_iter().map(vec3_local).collect();
+            add_polyline(&mut geometry.ext_lines, &points);
+        }
+    }
+    if style.is_some_and(|style| style.dimtmove == 1) {
+        if let Some((anchor, endpoint)) = dimtmove_leader_endpoints(dimension, text.position) {
+            if anchor.distance(endpoint) > text_height as f32 {
+                add_segment_with_text_break(
+                    &mut geometry.dim_lines,
+                    anchor,
+                    endpoint,
+                    text.break_box,
+                );
+            }
+        }
+    }
+    apply_dimension_breaks(
+        document,
+        dimension.base().common.handle,
+        &mut geometry.dim_lines,
+    );
+    Some(geometry)
+}
+
+/// Build measurement text for a saved dimension block.
 pub(crate) fn baked_dimension_text_entity(
     dim: &Dimension,
     document: &CadDocument,
     anno_scale: f64,
 ) -> Option<EntityType> {
     let style_name = dim.base().style_name.as_str();
-    let style = document.dim_styles.iter().find(|s| {
-        s.name.eq_ignore_ascii_case(style_name)
-            || (style_name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
-    });
-    let dim_scale = style
-        .map(|s| {
-            if s.dimscale > 1e-6 {
-                s.dimscale
-            } else {
-                anno_scale
-            }
+    let effective_style = document
+        .dim_styles
+        .iter()
+        .find(|style| {
+            style.name.eq_ignore_ascii_case(style_name)
+                || (style_name.trim().is_empty()
+                    && style.name.eq_ignore_ascii_case("Standard"))
         })
+        .map(|style| resolved_dimension_style(style, dim, document));
+    let style = effective_style.as_ref();
+    let dim_scale = style
+        .map(|style| dimension_style_scale(style, anno_scale))
         .unwrap_or(1.0);
     let dim_txt = style
         .map(|s| s.dimtxt * dim_scale)
         .unwrap_or(2.5 * dim_scale);
     let mut ent = dimension_text_entity(dim, dim_txt, style, document, dim_scale)?;
-    // For a non-default-aligned Text, pin the DXF alignment point (group 11) to
-    // the insertion point so other CAD programs anchor the centred text where
-    // OCS does, not at the world origin.
     if let EntityType::Text(t) = &mut ent {
         t.alignment_point = Some(t.insertion_point);
     }

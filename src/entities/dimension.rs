@@ -117,6 +117,11 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
                     field: "style_name",
                     value: PropValue::PlainText(d.base.style_name.clone()),
                 },
+                edit_angle(
+                    t!("Rotation").as_ref(),
+                    "large_radial_rotation",
+                    large_radial_rotation(d).to_degrees(),
+                ),
                 edit(t!("Center X").as_ref(), "definition_x", d.definition_point.x),
                 edit(t!("Center Y").as_ref(), "definition_y", d.definition_point.y),
                 edit(t!("Center Z").as_ref(), "definition_z", d.definition_point.z),
@@ -791,6 +796,26 @@ fn apply_arc_fields(d: &mut DimensionArc, field: &str, value: &str) {
 }
 
 fn apply_large_radial_fields(d: &mut DimensionLargeRadial, field: &str, value: &str) {
+    if field == "large_radial_rotation" {
+        let Some(angle) = parse_f64(value).map(f64::to_radians) else {
+            return;
+        };
+        let delta = angle - large_radial_rotation(d);
+        let origin = d.definition_point;
+        let rotate = |point: &mut acadrust::types::Vector3| {
+            let x = point.x - origin.x;
+            let y = point.y - origin.y;
+            let (sin, cos) = delta.sin_cos();
+            point.x = origin.x + x * cos - y * sin;
+            point.y = origin.y + x * sin + y * cos;
+        };
+        rotate(&mut d.chord_point);
+        rotate(&mut d.override_center);
+        rotate(&mut d.jog_point);
+        rotate(&mut d.base.text_middle_point);
+        rotate(&mut d.base.insertion_point);
+        return;
+    }
     match field {
         "definition_x" => {
             let _ = assign_f64(value, &mut d.definition_point.x);
@@ -832,6 +857,16 @@ fn apply_large_radial_fields(d: &mut DimensionLargeRadial, field: &str, value: &
             let _ = assign_deg(value, &mut d.jog_angle);
         }
         _ => {}
+    }
+}
+
+fn large_radial_rotation(d: &DimensionLargeRadial) -> f64 {
+    let delta = d.chord_point - d.definition_point;
+    if delta.x.abs() <= 1.0e-12 && delta.y.abs() <= 1.0e-12 {
+        let visible = d.chord_point - d.override_center;
+        visible.y.atan2(visible.x)
+    } else {
+        delta.y.atan2(delta.x)
     }
 }
 
@@ -2651,6 +2686,49 @@ pub fn style_sections(
                 )
             });
         }
+        if matches!(dimension, Dimension::LargeRadial(_)) {
+            for (section_name, excluded) in [
+                (t!("Text"), &["dim_text_pos_hor"][..]),
+                (t!("Fit"), &["dim_line_inside"][..]),
+                (
+                    t!("Alternate Units"),
+                    &["dim_alt_sub_units_scale", "dim_alt_sub_units_suffix"][..],
+                ),
+            ] {
+                if let Some(section) = sections
+                    .iter_mut()
+                    .find(|section| section.title == section_name.as_ref())
+                {
+                    section
+                        .props
+                        .retain(|property| !excluded.contains(&property.field));
+                }
+            }
+            if !dimension.base().text_user_positioned {
+                let dim_scale = if s.dimscale > 1.0e-6 { s.dimscale } else { 1.0 };
+                let text_position = dimension_text_pos_f64(
+                    dimension,
+                    Some(s),
+                    real(ov::DIMTXT, s.dimtxt) * dim_scale,
+                    dim_scale,
+                );
+                for section in &mut sections {
+                    for property in &mut section.props {
+                        match property.field {
+                            "text_x" => {
+                                property.value =
+                                    PropValue::EditText(format!("{:.4}", text_position.x));
+                            }
+                            "text_y" => {
+                                property.value =
+                                    PropValue::EditText(format!("{:.4}", text_position.y));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if matches!(dimension, Dimension::Arc(_)) {
@@ -3524,7 +3602,12 @@ fn tessellate_dimension_inner(
             if let Some((anchor, txt)) = dimtmove_leader_endpoints(dim) {
                 let gap = dim_txt as f32 * 0.5;
                 if (txt - anchor).length() > gap * 2.0 {
-                    add_segment(&mut geom.dim_lines, anchor, txt);
+                    add_segment_with_text_break(
+                        &mut geom.dim_lines,
+                        anchor,
+                        txt,
+                        text_break,
+                    );
                 }
             }
         }
@@ -4051,9 +4134,35 @@ fn dimtmove_leader_endpoints(dim: &Dimension) -> Option<(Vec3, Vec3)> {
         }
         Dimension::Angular2Ln(d) => lv(d.dimension_arc),
         Dimension::Angular3Pt(d) => lv(d.definition_point),
+        Dimension::LargeRadial(d) => {
+            let chord = lv(d.chord_point);
+            let jog = lv(d.jog_point);
+            let override_center = lv(d.override_center);
+            let (near, far) =
+                jogged_radial_break(chord, jog, override_center, d.jog_angle as f32);
+            [
+                closest_point_on_segment(lv(txt), chord, near),
+                closest_point_on_segment(lv(txt), near, far),
+                closest_point_on_segment(lv(txt), far, override_center),
+            ]
+            .into_iter()
+            .min_by(|left, right| {
+                left.distance_squared(lv(txt))
+                    .total_cmp(&right.distance_squared(lv(txt)))
+            })?
+        }
         _ => return None,
     };
     Some((anchor, lv(txt)))
+}
+
+fn closest_point_on_segment(point: Vec3, start: Vec3, end: Vec3) -> Vec3 {
+    let segment = end - start;
+    let length_squared = segment.length_squared();
+    if length_squared <= 1.0e-12 {
+        return start;
+    }
+    start + segment * ((point - start).dot(segment) / length_squared).clamp(0.0, 1.0)
 }
 
 /// Build a rectangle of filled triangles sitting under the dim text, used
@@ -4411,26 +4520,94 @@ fn dimension_geometry(
             let override_center = lv(d.override_center);
             let (near, far) =
                 jogged_radial_break(chord, jog, override_center, d.jog_angle as f32);
-            if !suppress.dim1 {
-                add_segment(&mut g.dim_lines, chord, near);
-                add_segment(&mut g.dim_lines, near, far);
-                add_segment(&mut g.dim_lines, far, override_center);
+            let axis = normalized_or(chord - override_center, Vec3::X);
+            let available = chord.distance(override_center);
+            let arrows_outside = if params.ticks || params.arrow_len <= 1.0e-6 {
+                false
+            } else if available < params.arrow_len {
+                true
+            } else if available < params.text_width + params.arrow_len {
+                match params.dimatfit {
+                    0 | 1 => true,
+                    2 => false,
+                    _ => params.text_width <= available,
+                }
+            } else {
+                false
+            };
+            let true_center = lv(d.definition_point);
+            let radius = chord.distance(true_center);
+            let text_outside = params.text_position.distance(true_center) > radius + 1.0e-5;
+            let draw_inside_line = !arrows_outside || params.dimtofl;
+            if draw_inside_line && !suppress.dim1 {
+                add_segment_with_text_break(&mut g.dim_lines, chord, near, params.text_break);
+                add_segment_with_text_break(&mut g.dim_lines, near, far, params.text_break);
+                add_segment_with_text_break(
+                    &mut g.dim_lines,
+                    far,
+                    override_center,
+                    params.text_break,
+                );
+            }
+            if arrows_outside && !suppress.dim1 {
+                add_segment(
+                    &mut g.dim_lines,
+                    chord,
+                    chord + axis * (params.arrow_len * 2.0),
+                );
             }
             append_arrow(
                 &mut g,
                 chord,
-                normalized_or(near - chord, Vec3::X),
+                if arrows_outside { axis } else { -axis },
                 arrow1,
             );
-            append_center_mark(
-                &mut g,
-                lv(d.definition_point),
-                params.dimcen,
-                (chord - lv(d.definition_point)).length(),
-            );
+            if text_outside && params.text_movement == 0 && !suppress.dim1 {
+                add_segment_with_text_break(
+                    &mut g.dim_lines,
+                    chord,
+                    params.text_position,
+                    params.text_break,
+                );
+            }
+            if arrows_outside || text_outside {
+                append_center_mark(&mut g, true_center, params.dimcen, radius);
+            }
         }
     }
     g
+}
+
+fn add_segment_with_text_break(
+    points: &mut Vec<[f32; 3]>,
+    start: Vec3,
+    end: Vec3,
+    text_break: Option<(Vec3, f32, f32)>,
+) {
+    let segment = end - start;
+    let length = segment.length();
+    if length <= 1.0e-6 {
+        return;
+    }
+    let Some((center, half_width, half_height)) = text_break else {
+        add_segment(points, start, end);
+        return;
+    };
+    let direction = segment / length;
+    let along = (center - start).dot(direction);
+    let perpendicular = (center - (start + direction * along)).length();
+    if perpendicular >= half_height || along + half_width <= 0.0 || along - half_width >= length {
+        add_segment(points, start, end);
+        return;
+    }
+    let cut_start = (along - half_width).clamp(0.0, length);
+    let cut_end = (along + half_width).clamp(0.0, length);
+    if cut_start > 1.0e-6 {
+        add_segment(points, start, start + direction * cut_start);
+    }
+    if length - cut_end > 1.0e-6 {
+        add_segment(points, start + direction * cut_end, end);
+    }
 }
 
 fn jogged_radial_break(
@@ -5533,6 +5710,37 @@ fn dimension_text_is_outside(dim: &Dimension, style: Option<&DimStyle>) -> bool 
                 _ => text_width > span,
             };
     }
+    if let Dimension::LargeRadial(radial) = dim {
+        let radius = radial.definition_point.distance(&radial.chord_point);
+        if dim.base().text_user_positioned {
+            return radial
+                .definition_point
+                .distance(&dim.base().text_middle_point)
+                > radius + 1.0e-9;
+        }
+        if style.dimtix {
+            return false;
+        }
+        let available = radial.override_center.distance(&radial.chord_point);
+        let scale = if style.dimscale > 1.0e-9 {
+            style.dimscale
+        } else {
+            1.0
+        };
+        let height = style.dimtxt * scale;
+        let gap = style.dimgap.abs() * scale;
+        let text_width = dimension_text_value(dim, Some(style))
+            .map(|value| value.chars().count() as f64 * height * 0.6 + gap * 2.0)
+            .unwrap_or(0.0);
+        let arrow = style.dimasz * scale;
+        let insufficient = text_width + arrow > available;
+        return insufficient
+            && match style.dimatfit {
+                0 | 2 => true,
+                1 | 3 => text_width > available,
+                _ => text_width > available,
+            };
+    }
     if let Dimension::Radius(radius) = dim {
         let dx = radius.definition_point.x - radius.angle_vertex.x;
         let dy = radius.definition_point.y - radius.angle_vertex.y;
@@ -5625,6 +5833,8 @@ fn dimension_text_natural_rotation(dim: &Dimension) -> f64 {
             .atan2(d.definition_point.x - d.angle_vertex.x),
         Dimension::Diameter(d) => (d.definition_point.y - d.angle_vertex.y)
             .atan2(d.definition_point.x - d.angle_vertex.x),
+        Dimension::LargeRadial(d) => (d.chord_point.y - d.override_center.y)
+            .atan2(d.chord_point.x - d.override_center.x),
         Dimension::Ordinate(d) => {
             let axis_rotation = -d.base.horizontal_direction;
             if d.is_ordinate_type_x {
@@ -5633,7 +5843,6 @@ fn dimension_text_natural_rotation(dim: &Dimension) -> f64 {
                 axis_rotation
             }
         }
-        _ => 0.0,
     };
     // Clamp to (-π/2, π/2] so text never appears upside-down.
     let pi = std::f64::consts::PI;
@@ -6321,6 +6530,59 @@ fn text_on_dim_line(
     )
 }
 
+fn text_on_single_arrow_dim_line(
+    first: Vector3,
+    second: Vector3,
+    defpt: Vector3,
+    ax: f64,
+    ay: f64,
+    perp_off: f64,
+    text_width: f64,
+    arrow: f64,
+    dimtix: bool,
+    dimatfit: i16,
+    tad: i16,
+) -> Vector3 {
+    let (mut nx, mut ny) = (ax, ay);
+    if nx < 0.0 || (nx == 0.0 && ny < 0.0) {
+        nx = -nx;
+        ny = -ny;
+    }
+    let (perpendicular_x, perpendicular_y) = (-ny, nx);
+    let perpendicular_sign = match tad {
+        4 => -1.0,
+        2 => {
+            let offset = (defpt.x - first.x) * perpendicular_x
+                + (defpt.y - first.y) * perpendicular_y;
+            if offset >= 0.0 { 1.0 } else { -1.0 }
+        }
+        _ => 1.0,
+    };
+    let first_along = (first.x - defpt.x) * ax + (first.y - defpt.y) * ay;
+    let second_along = (second.x - defpt.x) * ax + (second.y - defpt.y) * ay;
+    let low = first_along.min(second_along);
+    let high = first_along.max(second_along);
+    let available = high - low;
+    let insufficient = text_width + arrow > available;
+    let text_outside = !dimtix
+        && insufficient
+        && match dimatfit {
+            0 | 2 => true,
+            1 | 3 => text_width > available,
+            _ => text_width > available,
+        };
+    let along = if text_outside {
+        high + arrow + text_width * 0.5
+    } else {
+        (first_along + second_along) * 0.5
+    };
+    Vector3::new(
+        defpt.x + ax * along + perpendicular_x * perp_off * perpendicular_sign,
+        defpt.y + ay * along + perpendicular_y * perp_off * perpendicular_sign,
+        defpt.z,
+    )
+}
+
 fn dimension_text_pos_f64(
     dim: &Dimension,
     style: Option<&DimStyle>,
@@ -6352,7 +6614,13 @@ fn dimension_text_pos_f64(
     let text_w = dimension_text_value(dim, style)
         .map(|t| t.chars().count() as f64 * text_height * 0.6 + 2.0 * dimgap)
         .unwrap_or(0.0);
-    let arrow = text_height; // arrows are roughly text-height sized
+    let arrow = if matches!(dim, Dimension::LargeRadial(_)) {
+        style
+            .map(|style| style.dimasz * dim_scale)
+            .unwrap_or(text_height)
+    } else {
+        text_height
+    };
 
     // Explicit per-entity override (text dragged to a custom location): the
     // saved point wins. Otherwise the dimension style governs placement.
@@ -6454,6 +6722,24 @@ fn dimension_text_pos_f64(
             }
             Vector3::new(x, y, d.definition_point.z)
         }
+        Dimension::LargeRadial(d) => {
+            let dx = d.chord_point.x - d.override_center.x;
+            let dy = d.chord_point.y - d.override_center.y;
+            let length = dx.hypot(dy).max(1.0e-12);
+            text_on_single_arrow_dim_line(
+                d.override_center,
+                d.chord_point,
+                d.definition_point,
+                dx / length,
+                dy / length,
+                perp_off,
+                text_w,
+                arrow,
+                dimtix,
+                dimatfit,
+                dimtad,
+            )
+        }
         Dimension::Diameter(d) => {
             let dx = d.definition_point.x - d.angle_vertex.x;
             let dy = d.definition_point.y - d.angle_vertex.y;
@@ -6499,7 +6785,6 @@ fn dimension_text_pos_f64(
                 Dimension::Angular2Ln(d) => d.dimension_arc,
                 Dimension::Angular3Pt(d) => d.definition_point,
                 Dimension::Arc(d) => d.definition_point,
-                Dimension::LargeRadial(d) => d.jog_point,
                 _ => base.text_middle_point,
             };
             Vector3::new(mid.x, mid.y + perp_off * perp_sign_default(), mid.z)

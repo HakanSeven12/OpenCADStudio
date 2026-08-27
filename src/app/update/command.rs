@@ -1981,12 +1981,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.tabs[i].scene.document.get_entity(handle),
                         Some(acadrust::EntityType::Dimension(_))
                     ) {
-                        crate::entities::dim_override::set_property(
+                        let applied = crate::entities::dim_override::set_property(
                             &mut self.tabs[i].scene.document,
                             handle,
                             field,
                             &value,
                         );
+                        if applied && field == "dim_text_inside" {
+                            if let Some(acadrust::EntityType::Dimension(
+                                acadrust::entities::Dimension::LargeRadial(dimension),
+                            )) = self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                dimension.base.text_user_positioned = false;
+                            }
+                        }
                     }
                 }
             } else if field == "vscale_std" {
@@ -2649,12 +2657,25 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                             self.tabs[i].scene.document.get_entity(handle),
                                             Some(acadrust::EntityType::Dimension(_))
                                         ) {
-                                            crate::entities::dim_override::set_property(
+                                            let applied = crate::entities::dim_override::set_property(
                                                 &mut self.tabs[i].scene.document,
                                                 handle,
                                                 field,
                                                 &val,
                                             );
+                                            if applied && field == "dim_text_inside" {
+                                                if let Some(acadrust::EntityType::Dimension(
+                                                    acadrust::entities::Dimension::LargeRadial(
+                                                        dimension,
+                                                    ),
+                                                )) = self.tabs[i]
+                                                    .scene
+                                                    .document
+                                                    .get_entity_mut(handle)
+                                                {
+                                                    dimension.base.text_user_positioned = false;
+                                                }
+                                            }
                                         }
                                     }
                                     "hyperlink" => {

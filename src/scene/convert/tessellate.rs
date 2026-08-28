@@ -1535,6 +1535,8 @@ pub fn tessellate(
                             | EntityType::Circle(_)
                             | EntityType::Arc(_)
                             | EntityType::Ellipse(_)
+                            | EntityType::Spline(_)
+                            | EntityType::LwPolyline(_)
                     ) {
                         (pattern_length, pattern)
                     } else {

@@ -2275,11 +2275,10 @@ impl OpenCADStudio {
                     .map(|e| crate::entities::dim_override::pairs(&e.common().extended_data));
 
                 if let Some(common) = src_common {
-                    self.push_undo_snapshot(i, "MATCHPROP");
-                    for h in &dest {
+                    self.apply_property_op(i, "MATCHPROP", &dest, |app, handle| {
                         let mut is_dim = false;
                         let mut is_hatch = false;
-                        if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
+                        if let Some(e) = app.tabs[i].scene.document.get_entity_mut(handle) {
                             e.as_entity_mut().set_layer(common.layer.clone());
                             crate::scene::view::dispatch::apply_color(e, common.color);
                             crate::scene::view::dispatch::apply_line_weight(e, common.line_weight);
@@ -2314,8 +2313,8 @@ impl OpenCADStudio {
                         if is_hatch {
                             if let Some(values) = &hatch_background_xdata {
                                 crate::scene::view::dispatch::set_entity_xdata(
-                                    &mut self.tabs[i].scene.document,
-                                    *h,
+                                    &mut app.tabs[i].scene.document,
+                                    handle,
                                     "HATCHBACKGROUNDCOLOR",
                                     values.clone(),
                                 );
@@ -2326,7 +2325,7 @@ impl OpenCADStudio {
                         // stale raw record survives.
                         if dstyle_xdata.is_some()
                             || matches!(
-                                self.tabs[i].scene.document.get_entity(*h),
+                                app.tabs[i].scene.document.get_entity(handle),
                                 Some(
                                     acadrust::EntityType::Dimension(_)
                                         | acadrust::EntityType::Leader(_)
@@ -2334,7 +2333,7 @@ impl OpenCADStudio {
                             )
                         {
                             if matches!(
-                                self.tabs[i].scene.document.get_entity(*h),
+                                app.tabs[i].scene.document.get_entity(handle),
                                 Some(
                                     acadrust::EntityType::Dimension(_)
                                         | acadrust::EntityType::Leader(_)
@@ -2347,8 +2346,8 @@ impl OpenCADStudio {
                                 )
                             ) {
                                 crate::entities::dim_override::replace(
-                                    &mut self.tabs[i].scene.document,
-                                    *h,
+                                    &mut app.tabs[i].scene.document,
+                                    handle,
                                     dstyle_xdata.clone().unwrap_or_default(),
                                 );
                             }
@@ -2356,12 +2355,11 @@ impl OpenCADStudio {
                         // A restyled dimension renders from its baked *D block —
                         // drop the stale block so the new style shows (#398).
                         if is_dim {
-                            self.tabs[i].scene.invalidate_dim_block_recorded(*h);
+                            app.tabs[i].scene.invalidate_dim_block_recorded(handle);
                         }
                         // Hatch fills render from a prebuilt model (#415).
-                        self.tabs[i].scene.refresh_fill_model(*h);
-                    }
-                    self.tabs[i].dirty = true;
+                        app.tabs[i].scene.refresh_fill_model(handle);
+                    });
                     // Color / linetype / lineweight are baked into the cached
                     // wires at tessellation time; re-tessellate only the matched
                     // objects instead of rebuilding a large drawing.
@@ -2371,7 +2369,6 @@ impl OpenCADStudio {
                         .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                         .collect();
                     self.tabs[i].scene.bump_entities(&changes);
-                    self.refresh_properties();
                     self.command_line
                         .push_info(crate::tf!("Properties matched to {} object(s).", dest.len()).as_ref());
                     // Clear the consumed target selection and keep prompting.

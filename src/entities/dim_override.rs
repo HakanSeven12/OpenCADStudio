@@ -403,8 +403,8 @@ pub fn set_property(
         let size = current.abs().max(0.01);
         let value = match trimmed.to_ascii_lowercase().as_str() {
             "none" => 0.0,
-            "center marks" => size,
-            "centerlines" => -size,
+            "mark" | "center marks" => size,
+            "line" | "centerlines" => -size,
             _ => return false,
         };
         set(doc, handle, DIMCEN, Some(XDataValue::Real(value)));
@@ -423,6 +423,7 @@ pub fn set_property(
         return true;
     }
     let handle_field = match field {
+        "dim_radial_arrow" => Some(DIMLDRBLK),
         "dim_arrowhead_1" => Some(DIMBLK1),
         "dim_arrowhead_2" => Some(DIMBLK2),
         "dim_linetype" => Some(DIMLTYPE),
@@ -433,7 +434,7 @@ pub fn set_property(
     };
     if let Some(code) = handle_field {
         let resolved = match field {
-            "dim_arrowhead_1" | "dim_arrowhead_2" => {
+            "dim_radial_arrow" | "dim_arrowhead_1" | "dim_arrowhead_2" => {
                 if trimmed == "Closed filled" {
                     Some(Handle::NULL)
                 } else {
@@ -638,6 +639,10 @@ pub fn set_property(
             "dim_line_lineweight" | "dim_ext_line_lineweight" => {
                 parse_lineweight_label(trimmed)
             }
+            "dim_precision"
+            | "dim_alt_precision"
+            | "dim_tolerance_precision"
+            | "dim_alt_tolerance_precision" => parse_precision_label(trimmed),
             "dim_ext_line_fixed"
             | "dim_text_outside_align"
             | "dim_text_inside_align"
@@ -729,8 +734,8 @@ pub fn set_property(
                 _ => trimmed.parse().ok(),
             },
             "dim_tolerance_alignment" => match trimmed.to_ascii_lowercase().as_str() {
-                "align decimal separators" => Some(0),
-                "align operational symbols" => Some(1),
+                "decimal separator" | "align decimal separators" => Some(0),
+                "operational symbols" | "align operational symbols" => Some(1),
                 _ => trimmed.parse().ok(),
             },
             _ => trimmed.parse().ok(),
@@ -742,6 +747,16 @@ pub fn set_property(
         return true;
     }
     false
+}
+
+fn parse_precision_label(value: &str) -> Option<i16> {
+    if let Some(decimals) = value.strip_prefix("0.") {
+        return (!decimals.is_empty()
+            && decimals.len() <= 8
+            && decimals.bytes().all(|digit| digit == b'0'))
+        .then_some(decimals.len() as i16);
+    }
+    value.parse().ok()
 }
 
 fn parse_lineweight_label(value: &str) -> Option<i16> {

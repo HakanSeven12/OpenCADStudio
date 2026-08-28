@@ -1420,10 +1420,8 @@ pub struct Scene {
     pub selection: Rc<RefCell<SelectionState>>,
     /// The CAD document — single source of truth for all entities.
     pub document: CadDocument,
-    /// Last linear, aligned, angular, or ordinate dimension created during this
-    /// application session. This is intentionally not reconstructed from file
-    /// handles: continuation commands must not treat an old, merely high-handle
-    /// dimension loaded from disk as the user's most recently created dimension.
+    /// Last chain-compatible dimension created this session.
+    /// Never reconstructed from loaded file handles.
     pub last_created_dimension: Option<Handle>,
     /// File-open-prepared index for non-graphical semantic object lookups.
     pub(crate) object_data_cache: crate::entities::object_data::ObjectDataCache,

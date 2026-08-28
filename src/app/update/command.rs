@@ -1608,19 +1608,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 } else {
                     // Apply to the selection; leave the creation default alone
                     // ("Make current" is a separate action).
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
-                        }
-                    }
                     // Layer drives by-layer colour/linetype/lineweight, which are
                     // baked into the cached wire geometry — re-tessellate so the
                     // change shows immediately (issue #231 class).
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(entity) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
+                        }
+                    });
                     self.ribbon.active_layer = layer;
-                    self.refresh_properties();
                 }
                 Task::none()
     }
@@ -1641,16 +1639,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.tabs[i].dirty = true;
                     self.ribbon.active_color = color;
                 } else {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(entity) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
                             crate::scene::view::dispatch::apply_color(entity, color);
                         }
-                    }
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
+                    });
                     self.ribbon.active_color = color;
-                    self.refresh_properties();
                 }
                 Task::none()
     }
@@ -1679,19 +1675,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.tabs[i].dirty = true;
                     self.ribbon.active_linetype = lt;
                 } else {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
-                        }
-                    }
                     // Linetype is baked into the cached wire geometry —
                     // re-tessellate so the dashed/solid look updates immediately
                     // (issue #231 class).
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(entity) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
+                        }
+                    });
                     self.ribbon.active_linetype = lt;
-                    self.refresh_properties();
                 }
                 Task::none()
     }
@@ -1981,12 +1975,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.tabs[i].scene.document.get_entity(handle),
                         Some(acadrust::EntityType::Dimension(_))
                     ) {
-                        crate::entities::dim_override::set_property(
+                        let applied = crate::entities::dim_override::set_property(
                             &mut self.tabs[i].scene.document,
                             handle,
                             field,
                             &value,
                         );
+                        if applied && field == "dim_text_inside" {
+                            if let Some(acadrust::EntityType::Dimension(
+                                acadrust::entities::Dimension::LargeRadial(dimension),
+                            )) = self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                dimension.base.text_user_positioned = false;
+                            }
+                        }
                     }
                 }
             } else if field == "vscale_std" {
@@ -2403,6 +2405,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     }
                                     _ => None,
                                 });
+                            if matches!(field, "text_x" | "text_y") {
+                                crate::entities::dimension::materialize_large_radial_text_position(
+                                    &mut self.tabs[i].scene.document,
+                                    handle,
+                                    &value,
+                                );
+                            }
                             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
@@ -2649,12 +2658,25 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                             self.tabs[i].scene.document.get_entity(handle),
                                             Some(acadrust::EntityType::Dimension(_))
                                         ) {
-                                            crate::entities::dim_override::set_property(
+                                            let applied = crate::entities::dim_override::set_property(
                                                 &mut self.tabs[i].scene.document,
                                                 handle,
                                                 field,
                                                 &val,
                                             );
+                                            if applied && field == "dim_text_inside" {
+                                                if let Some(acadrust::EntityType::Dimension(
+                                                    acadrust::entities::Dimension::LargeRadial(
+                                                        dimension,
+                                                    ),
+                                                )) = self.tabs[i]
+                                                    .scene
+                                                    .document
+                                                    .get_entity_mut(handle)
+                                                {
+                                                    dimension.base.text_user_positioned = false;
+                                                }
+                                            }
                                         }
                                     }
                                     "hyperlink" => {
@@ -2751,6 +2773,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                     }
                                                     _ => None,
                                                 });
+                                            if matches!(field, "text_x" | "text_y") {
+                                                crate::entities::dimension::materialize_large_radial_text_position(
+                                                    &mut self.tabs[i].scene.document,
+                                                    handle,
+                                                    &val,
+                                                );
+                                            }
                                             if let Some(entity) = self.tabs[i]
                                                 .scene
                                                 .document

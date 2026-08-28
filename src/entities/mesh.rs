@@ -1,11 +1,14 @@
 use acadrust::entities::{mesh::Mesh, polygon_mesh::PolygonMesh, Face3D, PolyfaceMesh};
 use cadkernel::geom2d::{triangulate, Tolerance};
-use cadkernel::space::{polygon, Plane, Vec3 as KernelVec3};
+use cadkernel::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
 use glam::Vec3;
 use crate::t;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{parse_f64, ro_prop as ro, square_grip};
+use crate::entities::common::{
+    edit_prop, edit_scalar_prop, parse_f64, ro_prop as ro, square_grip,
+    stepper_prop,
+};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
@@ -364,18 +367,115 @@ impl Transformable for Face3D {
 
 // ── PolygonMesh (N×M grid) ────────────────────────────────────────────────────
 
+fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
+    use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+
+    let m = mesh.m_vertex_count.max(0) as usize;
+    let n = mesh.n_vertex_count.max(0) as usize;
+    let base: Vec<[f64; 3]> = mesh
+        .vertices
+        .iter()
+        .take(m.saturating_mul(n))
+        .map(|vertex| v3(&vertex.location))
+        .collect();
+    if mesh.smooth_type == SurfaceSmoothType::NoSmooth || base.len() < m.saturating_mul(n) {
+        return (base, m, n);
+    }
+
+    let degree = match mesh.smooth_type {
+        SurfaceSmoothType::NoSmooth => return (base, m, n),
+        SurfaceSmoothType::Quadratic => 2,
+        SurfaceSmoothType::Cubic | SurfaceSmoothType::Bezier => 3,
+    };
+    let u_degree = degree.min(m.saturating_sub(1));
+    let v_degree = degree.min(n.saturating_sub(1));
+    if u_degree == 0 || v_degree == 0 {
+        return (base, m, n);
+    }
+    let control_points: Vec<Vec<[f64; 3]>> = base.chunks(n).map(|row| row.to_vec()).collect();
+    let Some(surface) = NurbsSurface3::new(
+        u_degree,
+        v_degree,
+        control_points,
+        Vec::new(),
+        Vec::new(),
+        None,
+    )
+    .map(|surface| surface.with_periodicity(mesh.is_closed_m(), mesh.is_closed_n()))
+    else {
+        return (base, m, n);
+    };
+
+    let display_m = usize::try_from(mesh.m_smooth_density.max(2))
+        .unwrap_or(2)
+        .min(256);
+    let display_n = usize::try_from(mesh.n_smooth_density.max(2))
+        .unwrap_or(2)
+        .min(256);
+    let parameter = |index: usize, count: usize, closed: bool| {
+        if closed {
+            index as f64 / count as f64
+        } else {
+            index as f64 / count.saturating_sub(1).max(1) as f64
+        }
+    };
+    let mut display = Vec::with_capacity(display_m.saturating_mul(display_n));
+    for row in 0..display_m {
+        let u = parameter(row, display_m, mesh.is_closed_m());
+        for column in 0..display_n {
+            let v = parameter(column, display_n, mesh.is_closed_n());
+            display.push(surface.point_at(u, v));
+        }
+    }
+    (display, display_m, display_n)
+}
+
 impl RenderConvertible for PolygonMesh {
     fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
-        let m = self.m_vertex_count as usize;
-        let n = self.n_vertex_count as usize;
-        if m == 0 || n == 0 || self.vertices.len() < m * n {
+        let (vertices, m, n) = polygon_mesh_display(self);
+        if m == 0 || n == 0 || vertices.len() < m * n {
             return None;
         }
 
+        let mut lines = Vec::new();
+        let mut add_segment = |a: usize, b: usize| {
+            let (Some(&a), Some(&b)) = (vertices.get(a), vertices.get(b)) else {
+                return;
+            };
+            if !lines.is_empty() {
+                lines.push([f64::NAN; 3]);
+            }
+            lines.push(a);
+            lines.push(b);
+        };
+
+        let m_segments = if self.is_closed_m() { m } else { m.saturating_sub(1) };
+        let n_segments = if self.is_closed_n() { n } else { n.saturating_sub(1) };
+        for row in 0..m {
+            for column in 0..n_segments {
+                add_segment(row * n + column, row * n + (column + 1) % n);
+            }
+        }
+        for row in 0..m_segments {
+            for column in 0..n {
+                add_segment(row * n + column, ((row + 1) % m) * n + column);
+            }
+        }
+
+        const SNAP_TABLE_MAX_VERTICES: usize = 50_000;
+        let snap_pts = if vertices.len() > SNAP_TABLE_MAX_VERTICES {
+            Vec::new()
+        } else {
+            vertices
+                .iter()
+                .map(|vertex| (glam::DVec3::from_array(*vertex), SnapHint::Node))
+                .collect()
+        };
+
         Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: RenderObject::Lines(Vec::new()),
-            snap_pts: vec![],
+            object: RenderObject::Lines(lines),
+            snap_pts,
             tangent_geoms: vec![],
             key_vertices: vec![],
             fill_tris: vec![],
@@ -417,55 +517,152 @@ impl Grippable for PolygonMesh {
 
 impl PropertyEditable for PolygonMesh {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
+        use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+
         let smooth = match self.smooth_type {
-            acadrust::entities::polygon_mesh::SurfaceSmoothType::NoSmooth => "None",
-            acadrust::entities::polygon_mesh::SurfaceSmoothType::Quadratic => "Quadratic",
-            acadrust::entities::polygon_mesh::SurfaceSmoothType::Cubic => "Cubic",
-            acadrust::entities::polygon_mesh::SurfaceSmoothType::Bezier => "Bezier",
+            SurfaceSmoothType::NoSmooth => "None",
+            SurfaceSmoothType::Quadratic => "Quadratic",
+            SurfaceSmoothType::Cubic => "Cubic",
+            SurfaceSmoothType::Bezier => "Bezier",
         };
-        let yesno = |b: bool| if b { "Yes" } else { "No" };
-        let first = self.vertices.first();
-        // Grid faces: one quad per cell; closed direction adds a wrap row/column.
-        let m = self.m_vertex_count.max(0) as i64;
-        let n = self.n_vertex_count.max(0) as i64;
-        let cells_m = if self.is_closed_m() { m } else { (m - 1).max(0) };
-        let cells_n = if self.is_closed_n() { n } else { (n - 1).max(0) };
-        let face_count = cells_m * cells_n;
+        let vertex_count = self.vertices.len();
+        let current = crate::scene::view::dispatch::prop_current_vertex()
+            .min(vertex_count.saturating_sub(1));
+        let vertex = self.vertices.get(current);
+        let display = if vertex_count == 0 {
+            "—".to_string()
+        } else {
+            format!("{} / {}", current + 1, vertex_count)
+        };
+        let smoothed = self.smooth_type != SurfaceSmoothType::NoSmooth;
+        let density_prop = |label: &str, field: &'static str, value: i16| {
+            if smoothed {
+                edit_scalar_prop(label, field, value as f64)
+            } else {
+                ro(label, field, value.to_string())
+            }
+        };
         vec![
             PropSection {
                 title: t!("Geometry").into_owned(),
                 props: vec![
-                    ro(t!("Vertex").as_ref(), "pm_vertex", String::new()),
-                    ro(t!("Vertex X").as_ref(),
+                    stepper_prop(t!("Current Vertex").as_ref(), "pm_current_vertex", display),
+                    edit_prop(t!("Vertex X").as_ref(),
                         "pm_vx",
-                        first.map(|v| format!("{:.4}", v.location.x)).unwrap_or_default(),
+                        vertex.map_or(0.0, |vertex| vertex.location.x),
                     ),
-                    ro(t!("Vertex Y").as_ref(),
+                    edit_prop(t!("Vertex Y").as_ref(),
                         "pm_vy",
-                        first.map(|v| format!("{:.4}", v.location.y)).unwrap_or_default(),
+                        vertex.map_or(0.0, |vertex| vertex.location.y),
                     ),
-                    ro(t!("Vertex Z").as_ref(),
+                    edit_prop(t!("Vertex Z").as_ref(),
                         "pm_vz",
-                        first.map(|v| format!("{:.4}", v.location.z)).unwrap_or_default(),
+                        vertex.map_or(0.0, |vertex| vertex.location.z),
                     ),
                     ro(t!("M vertex count").as_ref(), "pm_m", self.m_vertex_count.to_string()),
                     ro(t!("N vertex count").as_ref(), "pm_n", self.n_vertex_count.to_string()),
-                    ro(t!("M closed").as_ref(), "pm_closed_m", yesno(self.is_closed_m())),
-                    ro(t!("N closed").as_ref(), "pm_closed_n", yesno(self.is_closed_n())),
-                    ro(t!("M density").as_ref(), "pm_smooth_m", self.m_smooth_density.to_string()),
-                    ro(t!("N density").as_ref(), "pm_smooth_n", self.n_smooth_density.to_string()),
-                    ro(t!("Vertex count").as_ref(), "pm_v", self.vertices.len().to_string()),
-                    ro(t!("Face count").as_ref(), "pm_faces", face_count.to_string()),
+                    Property {
+                        label: t!("M closed").into_owned(),
+                        field: "pm_closed_m",
+                        value: PropValue::BoolToggle {
+                            field: "pm_closed_m",
+                            value: self.is_closed_m(),
+                        },
+                    },
+                    Property {
+                        label: t!("N closed").into_owned(),
+                        field: "pm_closed_n",
+                        value: PropValue::BoolToggle {
+                            field: "pm_closed_n",
+                            value: self.is_closed_n(),
+                        },
+                    },
+                    density_prop(t!("M density").as_ref(), "pm_smooth_m", self.m_smooth_density),
+                    density_prop(t!("N density").as_ref(), "pm_smooth_n", self.n_smooth_density),
                 ],
             },
             PropSection {
                 title: t!("Misc").into_owned(),
-                props: vec![ro(t!("Fit/smooth").as_ref(), "pm_smooth", smooth)],
+                props: vec![Property {
+                    label: t!("Fit/smooth").into_owned(),
+                    field: "pm_smooth",
+                    value: PropValue::Choice {
+                        selected: smooth.to_string(),
+                        options: vec![
+                            "None".to_string(),
+                            "Quadratic".to_string(),
+                            "Cubic".to_string(),
+                            "Bezier".to_string(),
+                        ],
+                    },
+                }],
             },
         ]
     }
 
-    fn apply_geom_prop(&mut self, _field: &str, _value: &str) {}
+    fn apply_geom_prop(&mut self, field: &str, value: &str) {
+        use acadrust::entities::polygon_mesh::{PolygonMeshFlags, SurfaceSmoothType};
+
+        let bool_value = |current: bool| {
+            if value == "toggle" {
+                !current
+            } else {
+                value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes")
+            }
+        };
+        match field {
+            "pm_closed_m" => self.flags.set(
+                PolygonMeshFlags::CLOSED_M,
+                bool_value(self.is_closed_m()),
+            ),
+            "pm_closed_n" => self.flags.set(
+                PolygonMeshFlags::CLOSED_N,
+                bool_value(self.is_closed_n()),
+            ),
+            "pm_smooth" => {
+                self.smooth_type = match value.trim().to_ascii_uppercase().as_str() {
+                    "QUADRATIC" => SurfaceSmoothType::Quadratic,
+                    "CUBIC" => SurfaceSmoothType::Cubic,
+                    "BEZIER" => SurfaceSmoothType::Bezier,
+                    _ => SurfaceSmoothType::NoSmooth,
+                };
+                if self.smooth_type != SurfaceSmoothType::NoSmooth {
+                    if self.m_smooth_density < 2 {
+                        self.m_smooth_density = 6;
+                    }
+                    if self.n_smooth_density < 2 {
+                        self.n_smooth_density = 6;
+                    }
+                }
+            }
+            "pm_smooth_m" => {
+                if let Ok(density @ 2..=256) = value.trim().parse::<i16>() {
+                    self.m_smooth_density = density;
+                }
+            }
+            "pm_smooth_n" => {
+                if let Ok(density @ 2..=256) = value.trim().parse::<i16>() {
+                    self.n_smooth_density = density;
+                }
+            }
+            "pm_vx" | "pm_vy" | "pm_vz" => {
+                let Some(number) = parse_f64(value) else {
+                    return;
+                };
+                let index = crate::scene::view::dispatch::prop_current_vertex()
+                    .min(self.vertices.len().saturating_sub(1));
+                if let Some(vertex) = self.vertices.get_mut(index) {
+                    match field {
+                        "pm_vx" => vertex.location.x = number,
+                        "pm_vy" => vertex.location.y = number,
+                        "pm_vz" => vertex.location.z = number,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Transformable for PolygonMesh {
@@ -1023,23 +1220,10 @@ pub(crate) fn tessellate_shaded_mesh(
             )
         }
         acadrust::EntityType::PolygonMesh(mesh) => {
-            let m = mesh.m_vertex_count.max(0) as usize;
-            let n = mesh.n_vertex_count.max(0) as usize;
-            if m == 0 || n == 0 || mesh.vertices.len() < m.saturating_mul(n) {
+            let (vertices, m, n) = polygon_mesh_display(mesh);
+            if m == 0 || n == 0 || vertices.len() < m.saturating_mul(n) {
                 return None;
             }
-            let vertices: Vec<[f64; 3]> = mesh
-                .vertices
-                .iter()
-                .take(m * n)
-                .map(|vertex| {
-                    [
-                        vertex.location.x,
-                        vertex.location.y,
-                        vertex.location.z,
-                    ]
-                })
-                .collect();
             let closed_m = mesh.is_closed_m();
             let closed_n = mesh.is_closed_n();
             let m_cells = if closed_m { m } else { m.saturating_sub(1) };

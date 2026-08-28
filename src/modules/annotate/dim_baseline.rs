@@ -1,6 +1,5 @@
-//! Repeating baseline dimensions from a session base or an explicitly picked base.
-
 use std::collections::HashMap;
+use std::f64::consts::PI;
 
 use acadrust::entities::{
     Dimension, DimensionAligned, DimensionAngular2Ln, DimensionAngular3Pt, DimensionBase,
@@ -8,6 +7,10 @@ use acadrust::entities::{
 };
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
+use cadkernel::geom2d::{
+    arc_span, intersect, nearest_of, Arc, Curve, Line, Tolerance, Transform, Vec2, XLine,
+};
+use cadkernel::space::Plane;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, DimensionAssociationInput};
@@ -56,35 +59,39 @@ impl SourceStyle {
 
 enum BaselineKind {
     Linear {
-        fixed: DVec3,
+        fixed: Vec2,
         rotation: f64,
         aligned: bool,
-        perpendicular: DVec3,
+        perpendicular: Vec2,
         next_offset: f64,
         increment: f64,
     },
     Angular2Ln {
-        source: DimensionAngular2Ln,
-        vertex: DVec3,
-        fixed_ray: DVec3,
+        fixed_line: [Vec2; 2],
+        fixed_is_first: bool,
+        vertex: Vec2,
+        fixed_ray: Vec2,
         next_radius: f64,
         increment: f64,
     },
     Angular3Pt {
-        source: DimensionAngular3Pt,
-        vertex: DVec3,
-        fixed_ray: DVec3,
+        vertex: Vec2,
+        fixed_point: Vec2,
+        fixed_ray: Vec2,
         next_radius: f64,
         increment: f64,
     },
     Ordinate {
-        source: DimensionOrdinate,
+        definition: Vec2,
+        leader: Vec2,
+        is_x: bool,
     },
 }
 
 struct BaselineState {
     kind: BaselineKind,
     style: SourceStyle,
+    plane: Plane,
 }
 
 pub struct DimBaselineCommand {
@@ -140,35 +147,59 @@ impl DimBaselineCommand {
         };
         let style = SourceStyle::from_base(dimension.base());
         let increment = self.effective_increment(&style.style_name);
+        let plane = plane_from_normal(dimension.base().definition_point, style.normal);
+        let pick = pick.and_then(|point| plane.project(point.to_array()).map(Vec2::from));
         let kind = match dimension {
             Dimension::Linear(source) => {
-                let (fixed, _) = nearest_end(source.first_point, source.second_point, pick);
+                let first = project(&plane, source.first_point);
+                let second = project(&plane, source.second_point);
+                let (fixed, _) = nearest_end(first, second, pick);
                 linear_base(
                     fixed,
                     source.rotation,
                     false,
-                    dv(source.base.definition_point),
+                    project(&plane, source.base.definition_point),
                     increment,
                 )
             }
             Dimension::Aligned(source) => {
-                let (fixed, other) = nearest_end(source.first_point, source.second_point, pick);
+                let first = project(&plane, source.first_point);
+                let second = project(&plane, source.second_point);
+                let (fixed, other) = nearest_end(first, second, pick);
                 linear_base(
                     fixed,
-                    (other - fixed).y.atan2((other - fixed).x),
+                    (other - fixed).angle(),
                     true,
-                    dv(source.base.definition_point),
+                    project(&plane, source.base.definition_point),
                     increment,
                 )
             }
             Dimension::Angular2Ln(source) => {
-                let vertex = angular2_vertex(source);
-                let first = dv(source.second_point) - vertex;
-                let second = dv(source.definition_point) - vertex;
-                let fixed_ray = nearest_direction(first, second, vertex, pick);
-                let radius = (dv(source.dimension_arc) - vertex).length().max(1.0e-9);
+                let lines = [
+                    [
+                        project(&plane, source.first_point),
+                        project(&plane, source.second_point),
+                    ],
+                    [
+                        project(&plane, source.angle_vertex),
+                        project(&plane, source.definition_point),
+                    ],
+                ];
+                let vertex = angular2_vertex(lines).unwrap_or(lines[1][0]);
+                let fixed_index = nearest_line(lines, pick);
+                let fixed_line = lines[fixed_index];
+                let fixed_end = if fixed_index == 0 {
+                    lines[0][1]
+                } else {
+                    lines[1][1]
+                };
+                let fixed_ray = fixed_end - vertex;
+                let radius = project(&plane, source.dimension_arc)
+                    .distance(vertex)
+                    .max(1.0e-9);
                 BaselineKind::Angular2Ln {
-                    source: source.clone(),
+                    fixed_line,
+                    fixed_is_first: fixed_index == 0,
                     vertex,
                     fixed_ray,
                     next_radius: radius + increment,
@@ -176,31 +207,42 @@ impl DimBaselineCommand {
                 }
             }
             Dimension::Angular3Pt(source) => {
-                let vertex = dv(source.angle_vertex);
-                let first = dv(source.first_point) - vertex;
-                let second = dv(source.second_point) - vertex;
-                let fixed_ray = nearest_direction(first, second, vertex, pick);
-                let radius = (dv(source.definition_point) - vertex).length().max(1.0e-9);
+                let vertex = project(&plane, source.angle_vertex);
+                let points = [
+                    project(&plane, source.first_point),
+                    project(&plane, source.second_point),
+                ];
+                let fixed_index = nearest_line(
+                    [[vertex, points[0]], [vertex, points[1]]],
+                    pick,
+                );
+                let fixed_point = points[fixed_index];
+                let radius = project(&plane, source.definition_point)
+                    .distance(vertex)
+                    .max(1.0e-9);
                 BaselineKind::Angular3Pt {
-                    source: source.clone(),
                     vertex,
-                    fixed_ray,
+                    fixed_point,
+                    fixed_ray: fixed_point - vertex,
                     next_radius: radius + increment,
                     increment,
                 }
             }
             Dimension::Ordinate(source) => BaselineKind::Ordinate {
-                source: source.clone(),
+                definition: project(&plane, source.definition_point),
+                leader: project(&plane, source.leader_endpoint),
+                is_x: source.is_ordinate_type_x,
             },
             _ => return false,
         };
-        self.base = Some(BaselineState { kind, style });
+        self.base = Some(BaselineState { kind, style, plane });
         self.committed = 0;
         true
     }
 
-    fn build_dimension(&self, point: DVec3) -> Option<Dimension> {
+    fn build_dimension(&self, point_world: DVec3) -> Option<Dimension> {
         let state = self.base.as_ref()?;
+        let point = state.plane.project(point_world.to_array()).map(Vec2::from)?;
         let mut dimension = match &state.kind {
             BaselineKind::Linear {
                 fixed,
@@ -210,82 +252,93 @@ impl DimBaselineCommand {
                 next_offset,
                 ..
             } => build_linear(
+                state.plane,
                 *fixed,
                 point,
                 *rotation,
                 *aligned,
                 *perpendicular,
                 *next_offset,
-            ),
+            )?,
             BaselineKind::Angular2Ln {
-                source,
+                fixed_line,
+                fixed_is_first,
                 vertex,
                 fixed_ray,
                 next_radius,
                 ..
             } => {
                 let moving = point - *vertex;
-                if moving.length_squared() <= 1.0e-18 {
-                    return None;
-                }
-                let mut result = source.clone();
-                result.first_point = v3(*vertex);
-                result.second_point = v3(*vertex + normalized_or(*fixed_ray, DVec3::X));
-                result.angle_vertex = v3(*vertex);
-                result.definition_point = v3(point);
                 let (definition, text) =
-                    angular_definition_and_text(*vertex, *fixed_ray, moving, *next_radius);
-                result.dimension_arc = v3(definition);
+                    angular_definition_and_text(*vertex, *fixed_ray, moving, *next_radius)?;
+                let mut result = DimensionAngular2Ln::default();
+                if *fixed_is_first {
+                    result.first_point = world(state.plane, fixed_line[0]);
+                    result.second_point = world(state.plane, fixed_line[1]);
+                    result.angle_vertex = world(state.plane, *vertex);
+                    result.definition_point = world(state.plane, point);
+                } else {
+                    result.first_point = world(state.plane, *vertex);
+                    result.second_point = world(state.plane, point);
+                    result.angle_vertex = world(state.plane, fixed_line[0]);
+                    result.definition_point = world(state.plane, fixed_line[1]);
+                }
+                result.dimension_arc = world(state.plane, definition);
                 result.base.definition_point = result.dimension_arc;
-                result.base.text_middle_point = v3(text);
+                result.base.text_middle_point = world(state.plane, text);
                 result.base.insertion_point = result.base.text_middle_point;
-                result.base.actual_measurement = result.measurement_degrees();
                 Dimension::Angular2Ln(result)
             }
             BaselineKind::Angular3Pt {
-                source,
                 vertex,
+                fixed_point,
                 fixed_ray,
                 next_radius,
                 ..
             } => {
                 let moving = point - *vertex;
-                if moving.length_squared() <= 1.0e-18 {
-                    return None;
-                }
-                let mut result = source.clone();
-                result.angle_vertex = v3(*vertex);
-                result.first_point = v3(*vertex + normalized_or(*fixed_ray, DVec3::X));
-                result.second_point = v3(point);
                 let (definition, text) =
-                    angular_definition_and_text(*vertex, *fixed_ray, moving, *next_radius);
-                result.definition_point = v3(definition);
+                    angular_definition_and_text(*vertex, *fixed_ray, moving, *next_radius)?;
+                let mut result = DimensionAngular3Pt::new(
+                    world(state.plane, *vertex),
+                    world(state.plane, *fixed_point),
+                    world(state.plane, point),
+                );
+                result.definition_point = world(state.plane, definition);
                 result.base.definition_point = result.definition_point;
-                result.base.text_middle_point = v3(text);
+                result.base.text_middle_point = world(state.plane, text);
                 result.base.insertion_point = result.base.text_middle_point;
-                result.base.actual_measurement = result.measurement_degrees();
                 Dimension::Angular3Pt(result)
             }
-            BaselineKind::Ordinate { source } => {
-                let source_leader = dv(source.leader_endpoint);
-                let leader = if source.is_ordinate_type_x {
-                    DVec3::new(point.x, source_leader.y, source_leader.z)
+            BaselineKind::Ordinate {
+                definition,
+                leader,
+                is_x,
+            } => {
+                let to_dimension = Transform::rotation(-state.style.horizontal_direction);
+                let from_dimension = Transform::rotation(state.style.horizontal_direction);
+                let feature = Vec2::from(to_dimension.apply_point(point.into()));
+                let source_leader = Vec2::from(to_dimension.apply_point((*leader).into()));
+                let leader = if *is_x {
+                    Vec2::new(feature.x, source_leader.y)
                 } else {
-                    DVec3::new(source_leader.x, point.y, source_leader.z)
+                    Vec2::new(source_leader.x, feature.y)
                 };
+                let leader = Vec2::from(from_dimension.apply_point(leader.into()));
                 let mut result = DimensionOrdinate::new(
-                    v3(point),
-                    v3(leader),
-                    source.is_ordinate_type_x,
+                    world(state.plane, point),
+                    world(state.plane, leader),
+                    *is_x,
                 );
-                result.definition_point = source.definition_point;
-                result.base.definition_point = source.base.definition_point;
-                result.base.text_middle_point = v3(leader);
+                result.definition_point = world(state.plane, *definition);
+                result.base.definition_point = result.definition_point;
+                result.base.text_middle_point = result.leader_endpoint;
                 result.base.insertion_point = result.base.text_middle_point;
                 Dimension::Ordinate(result)
             }
         };
         state.style.apply(dimension.base_mut());
+        refresh_measurement(&mut dimension, state.plane);
         dimension.base_mut().common.handle = Handle::NULL;
         dimension.base_mut().block_name.clear();
         Some(dimension)
@@ -389,6 +442,7 @@ impl CadCommand for DimBaselineCommand {
             entity: EntityType::Dimension(dimension),
             association: DimensionAssociationInput::Infer(None),
             preserve_base_style: self.preserve_base_style,
+            continue_command: true,
         }
     }
 
@@ -426,18 +480,19 @@ impl CadCommand for DimBaselineCommand {
     }
 
     fn on_mouse_move(&mut self, point: DVec3) -> Option<WireModel> {
-        self.build_dimension(point).map(|dimension| preview_for_dimension(&dimension))
+        self.build_dimension(point)
+            .map(|dimension| preview_for_dimension(&dimension))
     }
 }
 
 fn linear_base(
-    fixed: DVec3,
+    fixed: Vec2,
     rotation: f64,
     aligned: bool,
-    definition: DVec3,
+    definition: Vec2,
     increment: f64,
 ) -> BaselineKind {
-    let perpendicular = DVec3::new(-rotation.sin(), rotation.cos(), 0.0);
+    let perpendicular = Vec2::new(-rotation.sin(), rotation.cos());
     let offset = (definition - fixed).dot(perpendicular);
     let increment = increment * if offset >= 0.0 { 1.0 } else { -1.0 };
     BaselineKind::Linear {
@@ -451,39 +506,48 @@ fn linear_base(
 }
 
 fn build_linear(
-    fixed: DVec3,
-    point: DVec3,
+    plane: Plane,
+    fixed: Vec2,
+    point: Vec2,
     rotation: f64,
     aligned: bool,
-    perpendicular: DVec3,
+    source_perpendicular: Vec2,
     offset: f64,
-) -> Dimension {
-    let target = fixed.dot(perpendicular) + offset;
-    let first_line = fixed + perpendicular * (target - fixed.dot(perpendicular));
-    let second_line = point + perpendicular * (target - point.dot(perpendicular));
-    if aligned {
-        let mut result = DimensionAligned::new(v3(fixed), v3(point));
-        result.definition_point = v3(second_line);
-        result.base.definition_point = v3(second_line);
-        result.base.text_middle_point = v3((first_line + second_line) * 0.5);
-        result.base.insertion_point = result.base.text_middle_point;
-        result.base.actual_measurement = result.measurement();
-        Dimension::Aligned(result)
+) -> Option<Dimension> {
+    let (first_line, second_line) = if aligned {
+        let mut perpendicular = (point - fixed).normalize()?.perpendicular();
+        let source_side = source_perpendicular * offset.signum();
+        if perpendicular.dot(source_side) < 0.0 {
+            perpendicular = -perpendicular;
+        }
+        let distance = offset.abs();
+        (fixed + perpendicular * distance, point + perpendicular * distance)
     } else {
-        let mut result = DimensionLinear::new(v3(fixed), v3(point));
-        result.rotation = rotation;
-        result.definition_point = v3(second_line);
-        result.base.definition_point = v3(second_line);
-        result.base.text_middle_point = v3((first_line + second_line) * 0.5);
+        let target = fixed.dot(source_perpendicular) + offset;
+        (
+            project_to_line(fixed, source_perpendicular, target),
+            project_to_line(point, source_perpendicular, target),
+        )
+    };
+    if aligned {
+        let mut result = DimensionAligned::new(world(plane, fixed), world(plane, point));
+        result.definition_point = world(plane, second_line);
+        result.base.definition_point = result.definition_point;
+        result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
         result.base.insertion_point = result.base.text_middle_point;
-        result.base.actual_measurement = result.measurement();
-        Dimension::Linear(result)
+        Some(Dimension::Aligned(result))
+    } else {
+        let mut result = DimensionLinear::new(world(plane, fixed), world(plane, point));
+        result.rotation = rotation;
+        result.definition_point = world(plane, second_line);
+        result.base.definition_point = result.definition_point;
+        result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
+        result.base.insertion_point = result.base.text_middle_point;
+        Some(Dimension::Linear(result))
     }
 }
 
-fn nearest_end(first: Vector3, second: Vector3, pick: Option<DVec3>) -> (DVec3, DVec3) {
-    let first = dv(first);
-    let second = dv(second);
+fn nearest_end(first: Vec2, second: Vec2, pick: Option<Vec2>) -> (Vec2, Vec2) {
     if pick.is_some_and(|point| point.distance_squared(second) < point.distance_squared(first)) {
         (second, first)
     } else {
@@ -491,104 +555,156 @@ fn nearest_end(first: Vector3, second: Vector3, pick: Option<DVec3>) -> (DVec3, 
     }
 }
 
-fn nearest_direction(first: DVec3, second: DVec3, vertex: DVec3, pick: Option<DVec3>) -> DVec3 {
-    if let Some(point) = pick {
-        let direction = normalized_or(point - vertex, DVec3::X);
-        if normalized_or(second, DVec3::Y).dot(direction)
-            > normalized_or(first, DVec3::X).dot(direction)
-        {
-            return second;
-        }
-    }
-    first
+fn nearest_line(lines: [[Vec2; 2]; 2], pick: Option<Vec2>) -> usize {
+    let Some(pick) = pick else {
+        return 0;
+    };
+    let curves = lines.map(|line| {
+        Curve::Line(Line {
+            start: line[0].into(),
+            end: line[1].into(),
+        })
+    });
+    nearest_of(curves.iter(), pick.into())
+        .map(|(index, _)| index)
+        .unwrap_or(0)
 }
 
-fn angular2_vertex(source: &DimensionAngular2Ln) -> DVec3 {
-    let first = dv(source.first_point);
-    let first_direction = dv(source.second_point) - first;
-    let second = dv(source.angle_vertex);
-    let second_direction = dv(source.definition_point) - second;
-    line_intersection(first, first_direction, second, second_direction).unwrap_or(second)
-}
-
-fn line_intersection(a: DVec3, b: DVec3, c: DVec3, d: DVec3) -> Option<DVec3> {
-    let cross = b.x * d.y - b.y * d.x;
-    if cross.abs() <= 1.0e-12 {
-        return None;
-    }
-    let delta = c - a;
-    Some(a + b * ((delta.x * d.y - delta.y * d.x) / cross))
+fn angular2_vertex(lines: [[Vec2; 2]; 2]) -> Option<Vec2> {
+    let first = Curve::XLine(XLine {
+        base: lines[0][0].into(),
+        direction: (lines[0][1] - lines[0][0]).into(),
+    });
+    let second = Curve::XLine(XLine {
+        base: lines[1][0].into(),
+        direction: (lines[1][1] - lines[1][0]).into(),
+    });
+    let scale = lines
+        .into_iter()
+        .flatten()
+        .map(Vec2::length)
+        .fold(1.0, f64::max);
+    intersect(&first, &second, Tolerance::new(scale * 1.0e-9))
+        .first()
+        .map(|crossing| Vec2::from(crossing.point))
 }
 
 fn angular_definition_and_text(
-    vertex: DVec3,
-    first: DVec3,
-    second: DVec3,
+    vertex: Vec2,
+    first: Vec2,
+    second: Vec2,
     radius: f64,
-) -> (DVec3, DVec3) {
-    let start = first.y.atan2(first.x);
-    let mut sweep = second.y.atan2(second.x) - start;
-    while sweep <= -std::f64::consts::PI {
-        sweep += std::f64::consts::TAU;
-    }
-    while sweep > std::f64::consts::PI {
-        sweep -= std::f64::consts::TAU;
-    }
-    let point_at = |fraction: f64| {
-        let angle = start + sweep * fraction;
-        vertex + DVec3::new(angle.cos(), angle.sin(), 0.0) * radius
-    };
-    (point_at(2.0 / 3.0), point_at(0.5))
+) -> Option<(Vec2, Vec2)> {
+    let curve = angular_arc(vertex, first, second, radius)?;
+    Some((
+        Vec2::from(curve.point_at(2.0 / 3.0)),
+        Vec2::from(curve.point_at(0.5)),
+    ))
 }
 
-fn normalized_or(value: DVec3, fallback: DVec3) -> DVec3 {
-    if value.length_squared() > 1.0e-18 {
-        value.normalize()
+fn angular_arc(vertex: Vec2, first: Vec2, second: Vec2, radius: f64) -> Option<Curve> {
+    let first = first.normalize()?;
+    let second = second.normalize()?;
+    let first_angle = first.angle();
+    let second_angle = second.angle();
+    let (start_angle, end_angle) = if arc_span(first_angle, second_angle) <= PI {
+        (first_angle, second_angle)
     } else {
-        fallback
+        (second_angle, first_angle)
+    };
+    Some(Curve::Arc(Arc {
+        centre: vertex.into(),
+        radius,
+        start_angle,
+        end_angle,
+    }))
+}
+
+fn refresh_measurement(dimension: &mut Dimension, plane: Plane) {
+    match dimension {
+        Dimension::Linear(value) => {
+            let first = project(&plane, value.first_point);
+            let second = project(&plane, value.second_point);
+            let axis = Vec2::new(value.rotation.cos(), value.rotation.sin());
+            value.base.actual_measurement = (second - first).dot(axis).abs();
+        }
+        Dimension::Aligned(value) => value.base.actual_measurement = value.measurement(),
+        Dimension::Angular2Ln(value) => {
+            value.base.actual_measurement = value.measurement_degrees()
+        }
+        Dimension::Angular3Pt(value) => {
+            value.base.actual_measurement = value.measurement_degrees()
+        }
+        Dimension::Ordinate(value) => value.refresh_measurement(),
+        _ => {}
     }
 }
 
 fn preview_for_dimension(dimension: &Dimension) -> WireModel {
     let mut points = Vec::<[f32; 3]>::new();
     match dimension {
-        Dimension::Linear(dimension) => linear_preview(
-            &mut points,
-            dv(dimension.first_point),
-            dv(dimension.second_point),
-            dimension.rotation,
-            dv(dimension.definition_point),
-        ),
-        Dimension::Aligned(dimension) => {
-            let first = dv(dimension.first_point);
-            let second = dv(dimension.second_point);
-            let delta = second - first;
+        Dimension::Linear(value) => {
+            let plane = plane_from_normal(value.first_point, value.base.normal);
             linear_preview(
                 &mut points,
-                first,
-                second,
-                delta.y.atan2(delta.x),
-                dv(dimension.definition_point),
+                plane,
+                project(&plane, value.first_point),
+                project(&plane, value.second_point),
+                value.rotation,
+                project(&plane, value.definition_point),
             );
         }
-        Dimension::Angular2Ln(dimension) => angular_preview(
+        Dimension::Aligned(value) => {
+            let plane = plane_from_normal(value.first_point, value.base.normal);
+            let first = project(&plane, value.first_point);
+            let second = project(&plane, value.second_point);
+            linear_preview(
+                &mut points,
+                plane,
+                first,
+                second,
+                (second - first).angle(),
+                project(&plane, value.definition_point),
+            );
+        }
+        Dimension::Angular2Ln(value) => {
+            let plane = plane_from_normal(value.first_point, value.base.normal);
+            let lines = [
+                [
+                    project(&plane, value.first_point),
+                    project(&plane, value.second_point),
+                ],
+                [
+                    project(&plane, value.angle_vertex),
+                    project(&plane, value.definition_point),
+                ],
+            ];
+            let vertex = angular2_vertex(lines).unwrap_or(lines[1][0]);
+            angular_preview(
+                &mut points,
+                plane,
+                vertex,
+                lines[0][1] - vertex,
+                lines[1][1] - vertex,
+                project(&plane, value.dimension_arc),
+            );
+        }
+        Dimension::Angular3Pt(value) => {
+            let plane = plane_from_normal(value.angle_vertex, value.base.normal);
+            let vertex = project(&plane, value.angle_vertex);
+            angular_preview(
+                &mut points,
+                plane,
+                vertex,
+                project(&plane, value.first_point) - vertex,
+                project(&plane, value.second_point) - vertex,
+                project(&plane, value.definition_point),
+            );
+        }
+        Dimension::Ordinate(value) => segment_world(
             &mut points,
-            angular2_vertex(dimension),
-            dv(dimension.second_point) - angular2_vertex(dimension),
-            dv(dimension.definition_point) - angular2_vertex(dimension),
-            dv(dimension.dimension_arc),
-        ),
-        Dimension::Angular3Pt(dimension) => angular_preview(
-            &mut points,
-            dv(dimension.angle_vertex),
-            dv(dimension.first_point) - dv(dimension.angle_vertex),
-            dv(dimension.second_point) - dv(dimension.angle_vertex),
-            dv(dimension.definition_point),
-        ),
-        Dimension::Ordinate(dimension) => segment(
-            &mut points,
-            dv(dimension.feature_location),
-            dv(dimension.leader_endpoint),
+            point(value.feature_location),
+            point(value.leader_endpoint),
         ),
         _ => {}
     }
@@ -629,72 +745,103 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
 
 fn linear_preview(
     points: &mut Vec<[f32; 3]>,
-    first: DVec3,
-    second: DVec3,
+    plane: Plane,
+    first: Vec2,
+    second: Vec2,
     rotation: f64,
-    definition: DVec3,
+    definition: Vec2,
 ) {
-    let perpendicular = DVec3::new(-rotation.sin(), rotation.cos(), 0.0);
+    let perpendicular = Vec2::new(-rotation.sin(), rotation.cos());
     let target = definition.dot(perpendicular);
-    let first_line = first + perpendicular * (target - first.dot(perpendicular));
-    let second_line = second + perpendicular * (target - second.dot(perpendicular));
-    segment(points, first, first_line);
-    segment(points, second, second_line);
-    segment(points, first_line, second_line);
-    append_arrows(points, first_line, second_line);
+    let first_line = project_to_line(first, perpendicular, target);
+    let second_line = project_to_line(second, perpendicular, target);
+    segment_local(points, plane, first, first_line);
+    segment_local(points, plane, second, second_line);
+    segment_local(points, plane, first_line, second_line);
+    append_arrows(points, plane, first_line, second_line);
 }
 
-fn segment(points: &mut Vec<[f32; 3]>, first: DVec3, second: DVec3) {
-    points.push(first.as_vec3().to_array());
-    points.push(second.as_vec3().to_array());
-    points.push([f32::NAN, 0.0, 0.0]);
-}
-
-fn append_arrows(points: &mut Vec<[f32; 3]>, first: DVec3, second: DVec3) {
-    let axis = normalized_or(second - first, DVec3::X);
-    let normal = DVec3::new(-axis.y, axis.x, 0.0);
+fn append_arrows(points: &mut Vec<[f32; 3]>, plane: Plane, first: Vec2, second: Vec2) {
+    let Some(axis) = (second - first).normalize() else {
+        return;
+    };
+    let normal = axis.perpendicular();
     let size = first.distance(second).clamp(1.0, 100.0) * 0.035;
     for (tip, inward) in [(first, axis), (second, -axis)] {
         let back = tip + inward * size;
-        segment(points, tip, back + normal * size * 0.4);
-        segment(points, tip, back - normal * size * 0.4);
+        segment_local(points, plane, tip, back + normal * size * 0.4);
+        segment_local(points, plane, tip, back - normal * size * 0.4);
     }
 }
 
 fn angular_preview(
     points: &mut Vec<[f32; 3]>,
-    vertex: DVec3,
-    first: DVec3,
-    second: DVec3,
-    arc_point: DVec3,
+    plane: Plane,
+    vertex: Vec2,
+    first: Vec2,
+    second: Vec2,
+    arc_point: Vec2,
 ) {
-    let radius = (arc_point - vertex).length().max(1.0e-9);
-    let start = first.y.atan2(first.x);
-    let mut sweep = second.y.atan2(second.x) - start;
-    while sweep <= -std::f64::consts::PI {
-        sweep += std::f64::consts::TAU;
-    }
-    while sweep > std::f64::consts::PI {
-        sweep -= std::f64::consts::TAU;
-    }
-    segment(points, vertex, vertex + normalized_or(first, DVec3::X) * radius);
-    segment(points, vertex, vertex + normalized_or(second, DVec3::Y) * radius);
+    let radius = arc_point.distance(vertex).max(1.0e-9);
+    let Some(first_direction) = first.normalize() else {
+        return;
+    };
+    let Some(second_direction) = second.normalize() else {
+        return;
+    };
+    let Some(arc) = angular_arc(vertex, first, second, radius) else {
+        return;
+    };
+    segment_local(points, plane, vertex, vertex + first_direction * radius);
+    segment_local(points, plane, vertex, vertex + second_direction * radius);
     for index in 0..=24 {
-        let angle = start + sweep * index as f64 / 24.0;
-        points.push(
-            (vertex + DVec3::new(angle.cos(), angle.sin(), 0.0) * radius)
-                .as_vec3()
-                .to_array(),
-        );
+        push_local(points, plane, Vec2::from(arc.point_at(index as f64 / 24.0)));
     }
 }
 
-fn dv(point: Vector3) -> DVec3 {
-    DVec3::new(point.x, point.y, point.z)
+fn project_to_line(point: Vec2, perpendicular: Vec2, offset: f64) -> Vec2 {
+    point + perpendicular * (offset - point.dot(perpendicular))
 }
 
-fn v3(point: DVec3) -> Vector3 {
-    Vector3::new(point.x, point.y, point.z)
+fn plane_from_normal(origin: Vector3, normal: Vector3) -> Plane {
+    let (x_axis, y_axis) =
+        crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
+    Plane::from_axes(
+        point(origin),
+        [x_axis.0, x_axis.1, x_axis.2],
+        [y_axis.0, y_axis.1, y_axis.2],
+    )
+}
+
+fn project(plane: &Plane, value: Vector3) -> Vec2 {
+    Vec2::from(plane.project(point(value)).unwrap_or([0.0; 2]))
+}
+
+fn world(plane: Plane, value: Vec2) -> Vector3 {
+    let value = plane.point_at(value.into());
+    Vector3::new(value[0], value[1], value[2])
+}
+
+fn point(value: Vector3) -> [f64; 3] {
+    [value.x, value.y, value.z]
+}
+
+fn segment_local(points: &mut Vec<[f32; 3]>, plane: Plane, first: Vec2, second: Vec2) {
+    segment_world(points, plane.point_at(first.into()), plane.point_at(second.into()));
+}
+
+fn segment_world(points: &mut Vec<[f32; 3]>, first: [f64; 3], second: [f64; 3]) {
+    points.push(float3(first));
+    points.push(float3(second));
+    points.push([f32::NAN, 0.0, 0.0]);
+}
+
+fn push_local(points: &mut Vec<[f32; 3]>, plane: Plane, point: Vec2) {
+    points.push(float3(plane.point_at(point.into())));
+}
+
+fn float3(value: [f64; 3]) -> [f32; 3] {
+    [value[0] as f32, value[1] as f32, value[2] as f32]
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMBASELINE"] });

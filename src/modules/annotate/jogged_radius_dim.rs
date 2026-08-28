@@ -140,6 +140,7 @@ impl JoggedRadiusDimensionCommand {
             ))),
             association,
             preserve_base_style: false,
+            continue_command: false,
         }
     }
 }

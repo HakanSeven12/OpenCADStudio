@@ -1251,6 +1251,8 @@ pub enum CmdResult {
         /// Retain the source dimension's layer and style instead of replacing
         /// them with the current creation defaults (DIMCONTINUEMODE=1).
         preserve_base_style: bool,
+        /// Keep collecting points after the dimension is committed.
+        continue_command: bool,
     },
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded

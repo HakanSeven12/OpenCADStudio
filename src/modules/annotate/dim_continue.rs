@@ -1,17 +1,10 @@
-// DIMCONTINUE command — chain linear/aligned dimensions end-to-end.
-//
-// Each new point becomes the second extension line origin of a new dimension,
-// whose first extension line origin is the second extension line of the previous dim.
-// The dimension line stays at the same perpendicular offset as the base dimension.
-//
-// Constructed from commands.rs after finding the last placed linear/aligned dimension.
-
-use acadrust::entities::{Dimension, DimensionLinear};
+use acadrust::entities::{Dimension, DimensionBase, DimensionLinear};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
-use glam::{DVec3, Vec3};
+use cadkernel::space::Plane;
+use glam::DVec3;
 
-use crate::command::{CadCommand, CmdResult};
+use crate::command::{CadCommand, CmdResult, DimensionAssociationInput};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
@@ -27,74 +20,111 @@ pub fn tool() -> ToolDef {
     }
 }
 
-pub struct DimContinueCommand {
-    /// Fixed first-extension-line origin for the current step (moves each iteration).
-    chain_p1: DVec3,
-    /// Direction along the dimension axis (0.0 = horizontal, PI/2 = vertical).
-    rotation: f64,
-    /// Text reading rotation inherited from the base dim so a UCS-aligned chain
-    /// keeps its text consistent with the originating DIMLINEAR. 0 = natural.
+#[derive(Clone)]
+struct SourceStyle {
+    layer: String,
+    style_name: String,
+    normal: Vector3,
     text_rotation: f64,
-    /// Absolute perpendicular coordinate (dot with `perp`) of the base
-    /// dimension line. Each continued dim line is projected onto this exact
-    /// coordinate so the whole chain stays collinear — even when the extension
-    /// origins sit at different perpendicular positions (extension lines of
-    /// different lengths). (#151)
-    dim_line_perp: f64,
-    /// Direction of "up" perpendicular to the dim axis (points toward the dim line).
-    perp: DVec3,
-    /// True once we have a base dimension loaded.
-    ready: bool,
+    horizontal_direction: f64,
 }
 
-impl DimContinueCommand {
-    /// No base dim found — will show an error prompt and cancel immediately.
-    pub fn new() -> Self {
+impl SourceStyle {
+    fn from_base(base: &DimensionBase) -> Self {
         Self {
-            chain_p1: DVec3::ZERO,
-            rotation: 0.0,
-            text_rotation: 0.0,
-            dim_line_perp: 0.0,
-            perp: DVec3::Y,
-            ready: false,
+            layer: base.common.layer.clone(),
+            style_name: base.style_name.clone(),
+            normal: base.normal,
+            text_rotation: base.text_rotation,
+            horizontal_direction: base.horizontal_direction,
         }
     }
 
-    /// Build from the last placed dimension.
-    ///
-    /// `p2` — second extension line origin of the base dim (the chain starts
-    ///   here). `p1` is unused — the dim line position comes from
-    ///   `definition_point` alone — but kept for signature parity with the
-    ///   shared `find_last_linear_dim` tuple (DIMBASELINE uses p1).
-    /// `definition_point` — where the dim line was placed; its perpendicular
-    ///   coordinate is the line the whole chain stays collinear with.
-    /// `rotation` — 0.0 = horizontal dim, PI/2 = vertical dim.
-    pub fn from_base(
-        _p1: Vec3,
-        p2: Vec3,
-        definition_point: Vec3,
-        rotation: f64,
-        text_rotation: f64,
-    ) -> Self {
-        // Widen the base-dim points to f64 so the committed chain math runs in
-        // full precision. (The base points arrive as f32 from the entity, but
-        // every derived committed coordinate must stay f64 from here on.)
-        let p2 = p2.as_dvec3();
-        let definition_point = definition_point.as_dvec3();
-        // Axis unit vector along the measurement direction — the base dim's
-        // rotation angle (any angle, incl. a UCS-aligned one), not a world H/V.
-        let axis = DVec3::new(rotation.cos(), rotation.sin(), 0.0);
-        // Perpendicular unit vector toward the dim line.
-        let perp = DVec3::new(-axis.y, axis.x, 0.0);
-        let dim_line_perp = definition_point.dot(perp);
+    fn apply(&self, base: &mut DimensionBase) {
+        base.common.layer = self.layer.clone();
+        base.style_name = self.style_name.clone();
+        base.normal = self.normal;
+        base.text_rotation = self.text_rotation;
+        base.horizontal_direction = self.horizontal_direction;
+    }
+}
+
+struct ContinueState {
+    chain_p1: [f64; 2],
+    rotation: f64,
+    dim_line_perp: f64,
+    perpendicular: [f64; 2],
+    plane: Plane,
+    style: SourceStyle,
+}
+
+pub struct DimContinueCommand {
+    state: Option<ContinueState>,
+    preserve_base_style: bool,
+}
+
+impl DimContinueCommand {
+    pub fn new(preserve_base_style: bool) -> Self {
         Self {
-            chain_p1: p2,
-            rotation,
-            text_rotation,
-            dim_line_perp,
-            perp,
-            ready: true,
+            state: None,
+            preserve_base_style,
         }
+    }
+
+    pub fn from_dimension(dimension: &Dimension, preserve_base_style: bool) -> Self {
+        let (first, second, definition, rotation) = match dimension {
+            Dimension::Linear(source) => (
+                source.first_point,
+                source.second_point,
+                source.base.definition_point,
+                source.rotation,
+            ),
+            Dimension::Aligned(source) => {
+                let plane = plane_from_normal(source.first_point, source.base.normal);
+                let first = plane.project(point(source.first_point)).unwrap_or([0.0; 2]);
+                let second = plane.project(point(source.second_point)).unwrap_or(first);
+                let delta = [second[0] - first[0], second[1] - first[1]];
+                (
+                    source.first_point,
+                    source.second_point,
+                    source.base.definition_point,
+                    delta[1].atan2(delta[0]),
+                )
+            }
+            _ => return Self::new(preserve_base_style),
+        };
+        let plane = plane_from_normal(first, dimension.base().normal);
+        let second = plane.project(point(second)).unwrap_or([0.0; 2]);
+        let definition = plane.project(point(definition)).unwrap_or(second);
+        let perpendicular = [-rotation.sin(), rotation.cos()];
+        let dim_line_perp = dot(definition, perpendicular);
+        Self {
+            state: Some(ContinueState {
+                chain_p1: second,
+                rotation,
+                dim_line_perp,
+                perpendicular,
+                plane,
+                style: SourceStyle::from_base(dimension.base()),
+            }),
+            preserve_base_style,
+        }
+    }
+
+    fn placement(&self, point_world: DVec3) -> Option<([f64; 2], [f64; 2], [f64; 2])> {
+        let state = self.state.as_ref()?;
+        let second = state.plane.project(point_world.to_array())?;
+        let first_line = project_to_line(
+            state.chain_p1,
+            state.perpendicular,
+            state.dim_line_perp,
+        );
+        let second_line = project_to_line(
+            second,
+            state.perpendicular,
+            state.dim_line_perp,
+        );
+        Some((second, first_line, second_line))
     }
 }
 
@@ -104,61 +134,61 @@ impl CadCommand for DimContinueCommand {
     }
 
     fn prompt(&self) -> String {
-        if !self.ready {
+        if self.state.is_none() {
             t!("DIMCONTINUE  No base dimension found. Place a dimension first.").into_owned()
         } else {
             t!("DIMCONTINUE  Specify a second extension line origin (Enter to exit):").into_owned()
         }
     }
 
-    fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if !self.ready {
+    fn on_point(&mut self, point_world: DVec3) -> CmdResult {
+        let Some((second, first_line, second_line)) = self.placement(point_world) else {
             return CmdResult::Cancel;
+        };
+        let state = self.state.as_mut().expect("continue state");
+        let mut dimension = DimensionLinear::new(
+            vector3(state.plane.point_at(state.chain_p1)),
+            vector3(state.plane.point_at(second)),
+        );
+        dimension.rotation = state.rotation;
+        state.style.apply(&mut dimension.base);
+        dimension.definition_point = vector3(state.plane.point_at(first_line));
+        dimension.base.definition_point = dimension.definition_point;
+        dimension.base.text_middle_point = vector3(state.plane.point_at([
+            (first_line[0] + second_line[0]) * 0.5,
+            (first_line[1] + second_line[1]) * 0.5,
+        ]));
+        dimension.base.insertion_point = dimension.base.text_middle_point;
+        let axis = [state.rotation.cos(), state.rotation.sin()];
+        dimension.base.actual_measurement = dot(
+            [
+                second[0] - state.chain_p1[0],
+                second[1] - state.chain_p1[1],
+            ],
+            axis,
+        )
+        .abs();
+        state.chain_p1 = second;
+
+        CmdResult::CommitDimension {
+            entity: EntityType::Dimension(Dimension::Linear(dimension)),
+            association: DimensionAssociationInput::Infer(None),
+            preserve_base_style: self.preserve_base_style,
+            continue_command: true,
         }
-        let p1 = self.chain_p1;
-        let p2 = pt;
-
-        // Build a new linear dimension.
-        let mut dim = DimensionLinear::new(v3(p1), v3(p2));
-        dim.rotation = self.rotation;
-        if self.text_rotation.abs() > 1e-9 {
-            dim.base.text_rotation = self.text_rotation;
-        }
-
-        // Dim line stays collinear with the base: project both extension
-        // origins onto the base dim line's absolute perpendicular coordinate.
-        // (A fixed offset from p1 drifts off the base line whenever p1 and p2
-        // sit at different perpendicular positions.) (#151)
-        let d1 = p1 + self.perp * (self.dim_line_perp - p1.dot(self.perp));
-        let d2 = p2 + self.perp * (self.dim_line_perp - p2.dot(self.perp));
-        dim.definition_point = v3(d1);
-        dim.base.definition_point = v3(d1);
-        dim.base.text_middle_point = v3((d1 + d2) * 0.5);
-        dim.base.insertion_point = dim.base.text_middle_point;
-        dim.base.actual_measurement = dim.measurement();
-
-        // Advance chain: next dim's P1 = this dim's P2.
-        self.chain_p1 = p2;
-
-        CmdResult::CommitEntity(EntityType::Dimension(Dimension::Linear(dim)))
     }
 
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
 
-    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        if !self.ready {
-            return None;
-        }
-        // Preview / rubber-band geometry feeds an f32 GPU buffer, so drop to f32
-        // at this screen-only boundary.
-        let pt = pt.as_vec3();
-        let p1 = self.chain_p1.as_vec3();
-        let perp = self.perp.as_vec3();
-        let dim_line_perp = self.dim_line_perp as f32;
-        let dim_line_pt = p1 + perp * (dim_line_perp - p1.dot(perp));
-        let dim_line_pt2 = pt + perp * (dim_line_perp - pt.dot(perp));
+    fn on_mouse_move(&mut self, point_world: DVec3) -> Option<WireModel> {
+        let (second, first_line, second_line) = self.placement(point_world)?;
+        let state = self.state.as_ref()?;
+        let first = state.plane.point_at(state.chain_p1);
+        let second = state.plane.point_at(second);
+        let first_line = state.plane.point_at(first_line);
+        let second_line = state.plane.point_at(second_line);
         Some(WireModel {
             point_marker: None,
             taper_widths: Vec::new(),
@@ -177,14 +207,14 @@ impl CadCommand for DimContinueCommand {
             text_verts: Vec::new(),
             name: "dimcont_preview".into(),
             points: vec![
-                [p1.x, p1.y, p1.z],
-                [dim_line_pt.x, dim_line_pt.y, dim_line_pt.z],
+                float3(first),
+                float3(first_line),
                 [f32::NAN, 0.0, 0.0],
-                [pt.x, pt.y, pt.z],
-                [dim_line_pt2.x, dim_line_pt2.y, dim_line_pt2.z],
+                float3(second),
+                float3(second_line),
                 [f32::NAN, 0.0, 0.0],
-                [dim_line_pt.x, dim_line_pt.y, dim_line_pt.z],
-                [dim_line_pt2.x, dim_line_pt2.y, dim_line_pt2.z],
+                float3(first_line),
+                float3(second_line),
             ],
             points_low: Vec::new(),
             color: WireModel::CYAN,
@@ -192,22 +222,50 @@ impl CadCommand for DimContinueCommand {
             pattern_length: 0.0,
             pattern: [0.0; 8],
             line_weight_px: 1.0,
-            snap_pts: vec![],
-            tangent_geoms: vec![],
+            snap_pts: Vec::new(),
+            tangent_geoms: Vec::new(),
             aci: 0,
-            key_vertices: vec![],
+            key_vertices: Vec::new(),
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            fill_tris: vec![],
+            fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
         })
     }
 }
 
-fn v3(p: DVec3) -> Vector3 {
-    Vector3::new(p.x, p.y, p.z)
+fn plane_from_normal(origin: Vector3, normal: Vector3) -> Plane {
+    let (x_axis, y_axis) =
+        crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
+    Plane::from_axes(
+        point(origin),
+        [x_axis.0, x_axis.1, x_axis.2],
+        [y_axis.0, y_axis.1, y_axis.2],
+    )
 }
 
+fn project_to_line(point: [f64; 2], perpendicular: [f64; 2], offset: f64) -> [f64; 2] {
+    let distance = offset - dot(point, perpendicular);
+    [
+        point[0] + perpendicular[0] * distance,
+        point[1] + perpendicular[1] * distance,
+    ]
+}
 
-// ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMCONTINUE"] });  // DimContinueCommand
+fn dot(first: [f64; 2], second: [f64; 2]) -> f64 {
+    first[0] * second[0] + first[1] * second[1]
+}
+
+fn point(value: Vector3) -> [f64; 3] {
+    [value.x, value.y, value.z]
+}
+
+fn vector3(value: [f64; 3]) -> Vector3 {
+    Vector3::new(value[0], value[1], value[2])
+}
+
+fn float3(value: [f64; 3]) -> [f32; 3] {
+    [value[0] as f32, value[1] as f32, value[2] as f32]
+}
+
+inventory::submit!(crate::command::CommandRegistration { names: &["DIMCONTINUE"] });

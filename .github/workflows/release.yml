@@ -112,6 +112,7 @@ jobs:
           path: .
 
       - name: Set package version
+        id: package
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
@@ -130,31 +131,42 @@ jobs:
             exit 1
           fi
           sed -i "s/^version: .*/version: '$VERSION'/" snap/snapcraft.yaml
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build snap
         id: snapcraft
         uses: snapcore/action-build@v1
 
+      - name: Normalize snap package name
+        id: snap_package
+        env:
+          SNAP: ${{ steps.snapcraft.outputs.snap }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          PACKAGE="OpenCADStudio-v${VERSION}-linux-x86_64.snap"
+          mv "$SNAP" "$PACKAGE"
+          echo "snap=$PACKAGE" >> "$GITHUB_OUTPUT"
+
       - name: Upload snap to release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SNAP: ${{ steps.snapcraft.outputs.snap }}
+          SNAP: ${{ steps.snap_package.outputs.snap }}
         run: gh release upload "${{ github.ref_name }}" "$SNAP" --clobber
 
       - name: Upload snap as workflow artifact
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: open-cad-studio-snap
-          path: ${{ steps.snapcraft.outputs.snap }}
+          name: OpenCADStudio-v${{ steps.package.outputs.version }}-linux-x86_64-snap
+          path: ${{ steps.snap_package.outputs.snap }}
           if-no-files-found: error
 
       - name: Publish snap to edge
         if: github.event_name == 'release' && env.SNAPCRAFT_STORE_CREDENTIALS != ''
         uses: snapcore/action-publish@v1
         with:
-          snap: ${{ steps.snapcraft.outputs.snap }}
+          snap: ${{ steps.snap_package.outputs.snap }}
           release: edge
 
   build-windows:

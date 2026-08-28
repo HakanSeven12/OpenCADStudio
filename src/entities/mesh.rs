@@ -5,7 +5,9 @@ use glam::Vec3;
 use crate::t;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{parse_f64, ro_prop as ro, square_grip};
+use crate::entities::common::{
+    edit_prop as edit, parse_f64, ro_prop as ro, stepper_prop as stepper, square_grip,
+};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
@@ -238,15 +240,6 @@ impl RenderConvertible for Face3D {
             add_edge(p3, p0);
         }
 
-        if pts.is_empty() {
-            // All edges invisible — show a tiny cross at centroid.
-            let cx = (p0[0] + p1[0] + p2[0] + p3[0]) / 4.0;
-            let cy = (p0[1] + p1[1] + p2[1] + p3[1]) / 4.0;
-            let cz = (p0[2] + p1[2] + p2[2] + p3[2]) / 4.0;
-            let s = 0.1_f64;
-            pts = vec![[cx - s, cy, cz], [cx + s, cy, cz]];
-        }
-
         Some(RenderEntity {
             pick_tris: Vec::new(),
             object: RenderObject::Lines(pts),
@@ -265,15 +258,19 @@ impl RenderConvertible for Face3D {
 
 impl Grippable for Face3D {
     fn grips(&self) -> Vec<GripDef> {
-        vec![
+        let mut grips = vec![
             square_grip(0, dvec3(&self.first_corner)),
             square_grip(1, dvec3(&self.second_corner)),
             square_grip(2, dvec3(&self.third_corner)),
-            square_grip(3, dvec3(&self.fourth_corner)),
-        ]
+        ];
+        if !self.is_triangle() {
+            grips.push(square_grip(3, dvec3(&self.fourth_corner)));
+        }
+        grips
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
+        let was_triangle = self.is_triangle();
         let corner = match grip_id {
             0 => &mut self.first_corner,
             1 => &mut self.second_corner,
@@ -293,56 +290,89 @@ impl Grippable for Face3D {
                 corner.z = p.z as f64;
             }
         }
+        if was_triangle && grip_id == 2 {
+            self.fourth_corner = self.third_corner;
+        }
     }
 }
 
 impl PropertyEditable for Face3D {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        use crate::entities::common::edit_prop as edit;
+        let was_triangle = self.is_triangle();
+        let vertex_count = if was_triangle { 3 } else { 4 };
+        let current = crate::scene::view::dispatch::prop_current_vertex()
+            .min(vertex_count - 1);
+        let corner = match current {
+            0 => &self.first_corner,
+            1 => &self.second_corner,
+            2 => &self.third_corner,
+            _ => &self.fourth_corner,
+        };
         let inv = self.invisible_edges;
-        let edge = |hidden: bool| if hidden { "Invisible" } else { "Visible" };
+        let edge = |label: &str, field: &'static str, hidden: bool| Property {
+            label: label.to_string(),
+            field,
+            value: PropValue::Choice {
+                selected: if hidden {
+                    t!("Invisible").into_owned()
+                } else {
+                    t!("Visible").into_owned()
+                },
+                options: vec![t!("Visible").into_owned(), t!("Invisible").into_owned()],
+            },
+        };
         vec![PropSection {
             title: t!("Geometry").into_owned(),
             props: vec![
-                ro(t!("Current vertex").as_ref(), "f3_current", String::new()),
-                edit(t!("Vertex 1 X").as_ref(), "f3_p1x", self.first_corner.x),
-                edit(t!("Vertex 1 Y").as_ref(), "f3_p1y", self.first_corner.y),
-                edit(t!("Vertex 1 Z").as_ref(), "f3_p1z", self.first_corner.z),
-                edit(t!("Vertex 2 X").as_ref(), "f3_p2x", self.second_corner.x),
-                edit(t!("Vertex 2 Y").as_ref(), "f3_p2y", self.second_corner.y),
-                edit(t!("Vertex 2 Z").as_ref(), "f3_p2z", self.second_corner.z),
-                edit(t!("Vertex 3 X").as_ref(), "f3_p3x", self.third_corner.x),
-                edit(t!("Vertex 3 Y").as_ref(), "f3_p3y", self.third_corner.y),
-                edit(t!("Vertex 3 Z").as_ref(), "f3_p3z", self.third_corner.z),
-                edit(t!("Vertex 4 X").as_ref(), "f3_p4x", self.fourth_corner.x),
-                edit(t!("Vertex 4 Y").as_ref(), "f3_p4y", self.fourth_corner.y),
-                edit(t!("Vertex 4 Z").as_ref(), "f3_p4z", self.fourth_corner.z),
-                ro(t!("Edge 1").as_ref(), "f3_edge1", edge(inv.is_first_invisible())),
-                ro(t!("Edge 2").as_ref(), "f3_edge2", edge(inv.is_second_invisible())),
-                ro(t!("Edge 3").as_ref(), "f3_edge3", edge(inv.is_third_invisible())),
-                ro(t!("Edge 4").as_ref(), "f3_edge4", edge(inv.is_fourth_invisible())),
+                stepper(
+                    t!("Current vertex").as_ref(),
+                    "current_vertex",
+                    format!("{}", current + 1),
+                ),
+                edit(t!("Vertex X").as_ref(), "f3_vertex_x", corner.x),
+                edit(t!("Vertex Y").as_ref(), "f3_vertex_y", corner.y),
+                edit(t!("Vertex Z").as_ref(), "f3_vertex_z", corner.z),
+                edge(t!("Edge 1").as_ref(), "f3_edge1", inv.is_first_invisible()),
+                edge(t!("Edge 2").as_ref(), "f3_edge2", inv.is_second_invisible()),
+                edge(t!("Edge 3").as_ref(), "f3_edge3", inv.is_third_invisible()),
+                edge(t!("Edge 4").as_ref(), "f3_edge4", inv.is_fourth_invisible()),
             ],
         }]
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else {
+        let invisible = value == t!("Invisible").as_ref();
+        match field {
+            "f3_edge1" => self.invisible_edges.set_first_invisible(invisible),
+            "f3_edge2" => self.invisible_edges.set_second_invisible(invisible),
+            "f3_edge3" => self.invisible_edges.set_third_invisible(invisible),
+            "f3_edge4" => self.invisible_edges.set_fourth_invisible(invisible),
+            _ => {}
+        }
+        if field.starts_with("f3_edge") {
+            return;
+        }
+        let Some(value) = parse_f64(value) else {
             return;
         };
+        let was_triangle = self.is_triangle();
+        let vertex_count = if was_triangle { 3 } else { 4 };
+        let current = crate::scene::view::dispatch::prop_current_vertex()
+            .min(vertex_count - 1);
+        let corner = match current {
+            0 => &mut self.first_corner,
+            1 => &mut self.second_corner,
+            2 => &mut self.third_corner,
+            _ => &mut self.fourth_corner,
+        };
         match field {
-            "f3_p1x" => self.first_corner.x = v,
-            "f3_p1y" => self.first_corner.y = v,
-            "f3_p1z" => self.first_corner.z = v,
-            "f3_p2x" => self.second_corner.x = v,
-            "f3_p2y" => self.second_corner.y = v,
-            "f3_p2z" => self.second_corner.z = v,
-            "f3_p3x" => self.third_corner.x = v,
-            "f3_p3y" => self.third_corner.y = v,
-            "f3_p3z" => self.third_corner.z = v,
-            "f3_p4x" => self.fourth_corner.x = v,
-            "f3_p4y" => self.fourth_corner.y = v,
-            "f3_p4z" => self.fourth_corner.z = v,
+            "f3_vertex_x" => corner.x = value,
+            "f3_vertex_y" => corner.y = value,
+            "f3_vertex_z" => corner.z = value,
             _ => {}
+        }
+        if was_triangle && current == 2 {
+            self.fourth_corner = self.third_corner;
         }
     }
 }

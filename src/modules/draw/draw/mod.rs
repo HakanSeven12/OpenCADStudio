@@ -5,6 +5,7 @@ pub mod circle;
 pub mod dimcenter;
 pub mod donut;
 pub mod ellipse;
+pub mod face3d;
 pub mod hatch;
 pub mod hatchedit;
 pub mod helix;

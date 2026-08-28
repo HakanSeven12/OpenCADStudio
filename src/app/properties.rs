@@ -122,6 +122,9 @@ impl OpenCADStudio {
                     acadrust::EntityType::LwPolyline(polyline) => Some(polyline.vertices.len()),
                     acadrust::EntityType::Polyline2D(polyline) => Some(polyline.vertices.len()),
                     acadrust::EntityType::Leader(leader) => Some(leader.vertices.len()),
+                    acadrust::EntityType::Face3D(face) => {
+                        Some(if face.is_triangle() { 3 } else { 4 })
+                    }
                     acadrust::EntityType::Spline(spline) => {
                         Some(if crate::entities::spline::shows_fit_points(spline) {
                             spline.fit_points.len()

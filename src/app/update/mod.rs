@@ -4901,6 +4901,9 @@ impl OpenCADStudio {
                     match self.tabs[i].scene.document.get_entity(handles[0]) {
                         Some(acadrust::EntityType::LwPolyline(p)) => p.vertices.len(),
                         Some(acadrust::EntityType::Polyline2D(p)) => p.vertices.len(),
+                        Some(acadrust::EntityType::Face3D(face)) => {
+                            if face.is_triangle() { 3 } else { 4 }
+                        }
                         Some(acadrust::EntityType::Table(table)) => {
                             table.row_count().saturating_mul(table.column_count())
                         }

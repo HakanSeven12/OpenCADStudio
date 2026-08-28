@@ -198,6 +198,10 @@ pub struct UserSettings {
     pub osmode: i32,
     /// Controls whether the TEXTEDIT command repeats automatically (0 = Multiple, 1 = Single).
     pub texteditmode: bool,
+    /// DIMCONTINUEMODE: 1 inherits the base dimension's layer/style; 0 uses
+    /// the current creation layer/style. Registry-style, app-level preference.
+    #[serde(default = "default_dimension_continue_mode")]
+    pub dimension_continue_mode: i16,
     /// TEXTFILL: fill TrueType glyphs (true) or draw them hollow (false).
     pub textfill: bool,
     /// When true, saving over an existing file first copies it to a sibling
@@ -247,6 +251,10 @@ fn default_clipromptlines() -> i32 {
     3
 }
 
+fn default_dimension_continue_mode() -> i16 {
+    1
+}
+
 fn deserialize_clipromptlines<'de, D>(de: D) -> Result<i32, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -284,6 +292,7 @@ impl Default for UserSettings {
             // off (suppress bit 16384).
             osmode: 575 | OSMODE_SUPPRESS,
             texteditmode: false,
+            dimension_continue_mode: 1,
             textfill: true,
             backup_on_save: true,
             file_assoc_enabled: true,

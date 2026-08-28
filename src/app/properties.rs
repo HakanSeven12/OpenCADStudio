@@ -2474,9 +2474,32 @@ impl OpenCADStudio {
     /// open the in-place text editor on a freshly created MultiLeader.
     pub(super) fn commit_entity_handle(
         &mut self,
+        entity: acadrust::EntityType,
+    ) -> Option<Handle> {
+        self.commit_entity_handle_with_dimension_policy(entity, false)
+    }
+
+    /// Commit an entity while optionally retaining a dimension's source layer
+    /// and dimension style.  DIMCONTINUEMODE=1 uses this path; ordinary
+    /// creation continues to receive the current ribbon/style defaults.
+    pub(super) fn commit_entity_handle_with_dimension_policy(
+        &mut self,
         mut entity: acadrust::EntityType,
+        preserve_dimension_layer_and_style: bool,
     ) -> Option<Handle> {
         let i = self.active_tab;
+        let is_dimension = matches!(&entity, acadrust::EntityType::Dimension(_));
+        let inherited_dimension = if preserve_dimension_layer_and_style {
+            match &entity {
+                acadrust::EntityType::Dimension(dimension) => Some((
+                    dimension.base().common.layer.clone(),
+                    dimension.base().style_name.clone(),
+                )),
+                _ => None,
+            }
+        } else {
+            None
+        };
         if let acadrust::EntityType::Table(table) = &mut entity {
             const PREFIX: &str = "__OPENCAD_LINK_PENDING__";
             if let Some(path) = table.name.strip_prefix(PREFIX).map(str::to_string) {
@@ -2578,6 +2601,12 @@ impl OpenCADStudio {
             &self.tabs[i].scene.document,
             &mut entity,
         );
+        if let (Some((layer, style_name)), acadrust::EntityType::Dimension(dimension)) =
+            (inherited_dimension, &mut entity)
+        {
+            dimension.base_mut().common.layer = layer;
+            dimension.base_mut().style_name = style_name;
+        }
 
         // Smart centre objects carry their own drawing-level creation style.
         // Apply it after the generic ribbon style so ordinary LINE entities
@@ -2736,6 +2765,9 @@ impl OpenCADStudio {
             if let Some(handle) = new_handle {
                 self.tabs[i].last_draw_anchor = Some(handle);
             }
+        }
+        if is_dimension {
+            self.tabs[i].scene.last_created_dimension = new_handle;
         }
         new_handle
     }

@@ -856,7 +856,7 @@ impl OpenCADStudio {
                             .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_dimension_association(handle, sources.to_vec());
+                            .attach_dimension_association(handle, sources);
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1269,7 +1269,7 @@ impl OpenCADStudio {
                             .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_dimension_association(handle, sources.to_vec());
+                            .attach_dimension_association(handle, sources);
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1287,6 +1287,8 @@ impl OpenCADStudio {
             CmdResult::CommitDimension {
                 mut entity,
                 association,
+                preserve_base_style,
+                continue_command,
             } => {
                 let label = self.history_label_from_active_cmd(i, "DIMENSION");
                 let association_mode = self.tabs[i]
@@ -1300,6 +1302,17 @@ impl OpenCADStudio {
                         acadrust::entities::Dimension::Ordinate(_)
                     )
                 );
+                let inherited_dimension = if preserve_base_style {
+                    match &entity {
+                        acadrust::EntityType::Dimension(dimension) => Some((
+                            dimension.base().common.layer.clone(),
+                            dimension.base().style_name.clone(),
+                        )),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 let pending = if association_mode == 0 {
                     let layer = self.tabs[i].active_layer.clone();
                     if layer != "0" || entity.as_entity().layer().is_empty() {
@@ -1330,6 +1343,12 @@ impl OpenCADStudio {
                         &self.tabs[i].scene.document,
                         &mut entity,
                     );
+                    if let (Some((layer, style_name)), acadrust::EntityType::Dimension(dimension)) =
+                        (inherited_dimension, &mut entity)
+                    {
+                        dimension.base_mut().common.layer = layer;
+                        dimension.base_mut().style_name = style_name;
+                    }
                     let pieces = crate::modules::draw::modify::explode::explode_entity(
                         &entity,
                         &self.tabs[i].scene.document,
@@ -1345,7 +1364,10 @@ impl OpenCADStudio {
                 } else {
                     let delta_safe = self.delta_add_safe(i, &entity);
                     let pending = self.begin_undo(i, label, 1, delta_safe);
-                    if let Some(handle) = self.commit_entity_handle(entity) {
+                    if let Some(handle) = self.commit_entity_handle_with_dimension_policy(
+                        entity,
+                        preserve_base_style,
+                    ) {
                         if association_mode == 2 {
                             let mut changes = vec![
                                 (handle, crate::scene::ChangeKind::Modified),
@@ -1357,8 +1379,6 @@ impl OpenCADStudio {
                                             self.tabs[i]
                                                 .scene
                                                 .infer_dimension_sources(handle)
-                                                .into_iter()
-                                                .collect()
                                         },
                                         |source| {
                                             if single_source_dimension {
@@ -1393,11 +1413,21 @@ impl OpenCADStudio {
                 };
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();
-                self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.restore_pre_cmd_tangent();
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
+                }
+                if continue_command {
+                    if let Some(prompt) = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|cmd| cmd.prompt())
+                    {
+                        self.command_line.push_info(&prompt);
+                    }
+                } else {
+                    self.tabs[i].active_cmd = None;
+                    self.restore_pre_cmd_tangent();
                 }
             }
             CmdResult::CommitSolid {

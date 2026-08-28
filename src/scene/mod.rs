@@ -1420,6 +1420,11 @@ pub struct Scene {
     pub selection: Rc<RefCell<SelectionState>>,
     /// The CAD document — single source of truth for all entities.
     pub document: CadDocument,
+    /// Last dimension created during this application session.  This is
+    /// intentionally not reconstructed from file handles: continuation and
+    /// baseline commands must not treat an old, merely high-handle dimension
+    /// loaded from disk as the user's most recently created dimension.
+    pub last_created_dimension: Option<Handle>,
     /// File-open-prepared index for non-graphical semantic object lookups.
     pub(crate) object_data_cache: crate::entities::object_data::ObjectDataCache,
     /// Native AcDbLight/Sun inputs, separated by rendered block and viewport
@@ -1848,6 +1853,7 @@ impl Scene {
             model_pane_min_px: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             selection: Rc::new(RefCell::new(SelectionState::default())),
             document: CadDocument::new(),
+            last_created_dimension: None,
             object_data_cache: crate::entities::object_data::ObjectDataCache::default(),
             lighting_cache: RefCell::new(HashMap::default()),
             selected: HashSet::default(),

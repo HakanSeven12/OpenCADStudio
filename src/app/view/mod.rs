@@ -432,14 +432,25 @@ impl OpenCADStudio {
         };
 
         let selection_overlay = {
-            let sel = tab.scene.selection.borrow().clone();
+            // Hold a single `Ref<'_, SelectionState>` for the whole overlay
+            // block. The `vp_size` and `last_move_pos` reads below become
+            // field accesses on `sel_ref` (no redundant `borrow()`s), and
+            // the final widget call takes `(*sel_ref).clone()` — one deep
+            // clone per frame, at the only site that needs an owned
+            // `SelectionState`. The `Ref` is dropped at the end of this
+            // block. **Invariant:** no `selection.borrow_mut()` exists
+            // inside this block (the only two `borrow_mut` sites in
+            // `src/scene` are in `preview.rs:282` and `render.rs:3443`,
+            // neither reachable from here). Holding the `Ref` is therefore
+            // safe.
+            let sel_ref = tab.scene.selection.borrow();
             let snap_info = tab.snap_result.map(|s| (s.screen, s.snap_type));
             let snap_ext_base = tab.snap_result.and_then(|s| s.extension_base);
             let snap_ext_base2 = tab.snap_result.and_then(|s| s.extension_base2);
 
             let grips: Vec<crate::ui::overlay::GripMarker> =
                 if tab.active_cmd.is_none() && !tab.selected_grips.is_empty() {
-                    let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                    let (vw, vh) = sel_ref.vp_size;
                     // Overlays project through the active tile's camera, so
                     // they must use the active tile's screen rectangle (with
                     // its canvas offset) — not the whole canvas — or they
@@ -561,7 +572,7 @@ impl OpenCADStudio {
             let grip_clip = if grips.is_empty() {
                 None
             } else {
-                let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                let (vw, vh) = sel_ref.vp_size;
                 Some(
                     tab.scene
                         .viewport_edit_frame((vw, vh))
@@ -570,7 +581,7 @@ impl OpenCADStudio {
                 )
             };
 
-            let (vw, vh) = tab.scene.selection.borrow().vp_size;
+            let (vw, vh) = sel_ref.vp_size;
             // Active tile rectangle (canvas-offset included) so grid / UCS
             // icon / crosshair project through the active pane's camera at
             // the correct place and scale.
@@ -706,7 +717,7 @@ impl OpenCADStudio {
 
             // Model-space pane dividers (none in paper / single-pane layouts).
             let dividers = if !is_paper {
-                let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                let (vw, vh) = sel_ref.vp_size;
                 tab.scene.model_pane_dividers(vw, vh)
             } else {
                 vec![]
@@ -716,8 +727,8 @@ impl OpenCADStudio {
             // target pane under the cursor.
             let (pane_move_rect, pane_drop_rect) = match self.pane_move_from {
                 Some(from) if !is_paper => {
-                    let (vw, vh) = tab.scene.selection.borrow().vp_size;
-                    let cursor = tab.scene.selection.borrow().last_move_pos;
+                    let (vw, vh) = sel_ref.vp_size;
+                    let cursor = sel_ref.last_move_pos;
                     let tiles = tab.scene.model_tiles.borrow();
                     let px = |t: &crate::scene::ModelTile| iced::Rectangle {
                         x: t.rect.x * vw,
@@ -746,7 +757,7 @@ impl OpenCADStudio {
                 .map(|h| tab.scene.is_layer_locked(h))
                 .unwrap_or(false);
             crate::ui::overlay::selection_overlay(
-                sel,
+                (*sel_ref).clone(),
                 snap_info,
                 snap_ext_base,
                 snap_ext_base2,

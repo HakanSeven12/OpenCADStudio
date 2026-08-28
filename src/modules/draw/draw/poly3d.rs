@@ -67,7 +67,7 @@ impl CadCommand for Poly3dCommand {
     fn prompt(&self) -> String {
         match self.points.len() {
             0 => t!("3DPOLY  Specify start point of polyline:").into_owned(),
-            1 => t!("3DPOLY  Specify next point  [Undo]:").into_owned(),
+            1 | 2 => t!("3DPOLY  Specify next point  [Undo]:").into_owned(),
             _ => t!("3DPOLY  Specify next point  [Close/Undo]:").into_owned(),
         }
     }
@@ -98,10 +98,10 @@ impl CadCommand for Poly3dCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         match text.trim().to_uppercase().as_str() {
-            "C" | "CLOSE" => match self.build(true) {
-                Some(e) => Some(CmdResult::CommitAndExit(e)),
-                None => Some(CmdResult::NeedPoint),
-            },
+            "C" | "CLOSE" if self.points.len() >= 3 => self
+                .build(true)
+                .map(CmdResult::CommitAndExit),
+            "C" | "CLOSE" => Some(CmdResult::NeedPoint),
             "U" | "UNDO" => {
                 self.points.pop();
                 Some(CmdResult::NeedPoint)

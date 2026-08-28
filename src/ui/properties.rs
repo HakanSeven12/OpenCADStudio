@@ -1701,6 +1701,9 @@ fn coord_suffix(label: &str) -> Option<(&str, usize)> {
 /// Length of the coordinate group starting at `idx`: consecutive text rows
 /// labelled "<Base> X", "<Base> Y" and optionally "<Base> Z". 0/1 = no group.
 fn coord_group_len(props: &[crate::scene::model::object::Property], idx: usize) -> usize {
+    if props[idx].field == "pl3_vertex_x" {
+        return 0;
+    }
     let groupable = |p: &crate::scene::model::object::Property| {
         matches!(
             p.value,

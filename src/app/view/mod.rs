@@ -432,6 +432,7 @@ impl OpenCADStudio {
                             let indexed = match tab.scene.document.get_entity(h) {
                                 Some(acadrust::EntityType::LwPolyline(_))
                                 | Some(acadrust::EntityType::Polyline2D(_))
+                                | Some(acadrust::EntityType::Polyline3D(_))
                                 | Some(acadrust::EntityType::Spline(_)) => true,
                                 _ => false,
                             };

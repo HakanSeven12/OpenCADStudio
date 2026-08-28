@@ -4927,6 +4927,9 @@ impl OpenCADStudio {
                     match self.tabs[i].scene.document.get_entity(handles[0]) {
                         Some(acadrust::EntityType::LwPolyline(p)) => p.vertices.len(),
                         Some(acadrust::EntityType::Polyline2D(p)) => p.vertices.len(),
+                        Some(acadrust::EntityType::Polyline3D(p)) => {
+                            crate::entities::polyline::polyline3d_control_vertex_count(p)
+                        }
                         Some(acadrust::EntityType::Table(table)) => {
                             table.row_count().saturating_mul(table.column_count())
                         }

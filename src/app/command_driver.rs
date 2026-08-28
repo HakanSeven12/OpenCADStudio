@@ -2931,6 +2931,9 @@ impl OpenCADStudio {
                             .map(|e| apply_pedit(e, &op))
                             .unwrap_or(false);
                         if changed {
+                            if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                                command.on_pedit_applied();
+                            }
                             self.tabs[i].dirty = true;
                             // Repaint immediately (wide-band fill included).
                             self.tabs[i].scene.refresh_fill_model(handle);

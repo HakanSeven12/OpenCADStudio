@@ -434,7 +434,8 @@ impl OpenCADStudio {
                                 | Some(acadrust::EntityType::Polyline2D(_))
                                 | Some(acadrust::EntityType::Polyline3D(_))
                                 | Some(acadrust::EntityType::Spline(_))
-                                | Some(acadrust::EntityType::Face3D(_)) => true,
+                                | Some(acadrust::EntityType::Face3D(_))
+                                | Some(acadrust::EntityType::PolygonMesh(_)) => true,
                                 _ => false,
                             };
                             indexed.then_some(tab.properties.prop_vertex)

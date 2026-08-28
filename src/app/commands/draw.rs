@@ -454,6 +454,13 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "3DMESH" => {
+                use crate::modules::draw::draw::mesh3d::Mesh3dCommand;
+                let new_cmd = Mesh3dCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             "3DFACE" => {
                 use crate::modules::draw::draw::face3d::Face3dCommand;
                 let new_cmd = Face3dCommand::new();

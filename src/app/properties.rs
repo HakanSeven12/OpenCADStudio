@@ -121,6 +121,7 @@ impl OpenCADStudio {
                 .and_then(|entity| match entity {
                     acadrust::EntityType::LwPolyline(polyline) => Some(polyline.vertices.len()),
                     acadrust::EntityType::Polyline2D(polyline) => Some(polyline.vertices.len()),
+                    acadrust::EntityType::PolygonMesh(mesh) => Some(mesh.vertices.len()),
                     acadrust::EntityType::Leader(leader) => Some(leader.vertices.len()),
                     acadrust::EntityType::Spline(spline) => {
                         Some(if crate::entities::spline::shows_fit_points(spline) {

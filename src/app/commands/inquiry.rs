@@ -262,6 +262,7 @@ impl OpenCADStudio {
                                 PeditTarget {
                                     is_poly: true,
                                     convertible: false,
+                                    mesh_size: None,
                                 },
                             )),
                             acadrust::EntityType::Line(_) | acadrust::EntityType::Arc(_) => {
@@ -270,9 +271,21 @@ impl OpenCADStudio {
                                     PeditTarget {
                                         is_poly: false,
                                         convertible: true,
+                                        mesh_size: None,
                                     },
                                 ))
                             }
+                            acadrust::EntityType::PolygonMesh(mesh) => Some((
+                                h,
+                                PeditTarget {
+                                    is_poly: true,
+                                    convertible: false,
+                                    mesh_size: Some((
+                                        mesh.m_vertex_count.max(0) as usize,
+                                        mesh.n_vertex_count.max(0) as usize,
+                                    )),
+                                },
+                            )),
                             _ => None,
                         }
                     })

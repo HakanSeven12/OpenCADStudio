@@ -31,6 +31,7 @@ const PATTERN_PREVIEW_H: f32 = 58.0;
 const PATTERN_PICKER_W: f32 = 348.0;
 const PATTERN_PICKER_H: f32 = 720.0;
 const LINETYPE_MENU_W: f32 = 220.0;
+const PROPERTIES_SCROLLBAR_GUTTER: f32 = 16.0;
 
 use crate::app::Message;
 use crate::scene::model::object::{PropSection, PropValue};
@@ -620,7 +621,13 @@ impl PropertiesPanel {
             for section in &self.sections {
                 col = col.push(self.render_section(section));
             }
-            scrollable(col).into()
+            let gutter = Padding {
+                right: PROPERTIES_SCROLLBAR_GUTTER,
+                ..Padding::ZERO
+            };
+            scrollable(container(col.width(Length::Fill)).padding(gutter))
+                .width(Length::Fill)
+                .into()
         };
 
         container(column![header, title_bar, content])
@@ -673,7 +680,15 @@ impl PropertiesPanel {
             sections = sections.push(self.render_section(section));
         }
 
-        let content = scrollable(sections).height(Length::Shrink);
+        let gutter = Padding {
+            right: PROPERTIES_SCROLLBAR_GUTTER,
+            ..Padding::ZERO
+        };
+        let content = scrollable(
+            container(sections.width(Length::Fill)).padding(gutter),
+        )
+        .width(Length::Fill)
+        .height(Length::Shrink);
 
         Some(
             container(column![title, content].spacing(0))

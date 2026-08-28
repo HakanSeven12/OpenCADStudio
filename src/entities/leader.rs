@@ -269,7 +269,7 @@ fn properties(leader: &Leader) -> Vec<PropSection> {
     let vertex_label = if n == 0 {
         "—".to_string()
     } else {
-        format!("{} / {}", vi + 1, n)
+        (vi + 1).to_string()
     };
 
     // Geometry sits right after General — a leader owns editable path vertices,

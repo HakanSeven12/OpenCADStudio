@@ -1003,6 +1003,22 @@ impl OpenCADStudio {
                         }
                     }
 
+                    // Legacy leaders expose the same General tail as the
+                    // reference palette: Handle is omitted and associativity is
+                    // reported as a calculated, read-only value.
+                    if matches!(entity, acadrust::EntityType::Leader(_)) {
+                        if let Some(general) = sections.first_mut() {
+                            general.props.retain(|property| property.field != "handle");
+                            general.props.push(crate::scene::model::object::Property {
+                                label: t!("Associative").into_owned(),
+                                field: "associative",
+                                value: crate::scene::model::object::PropValue::ReadOnly(
+                                    "No".to_string(),
+                                ),
+                            });
+                        }
+                    }
+
                     // Inject DimStyle picker + style-derived groups for Dimensions.
                     if let acadrust::EntityType::Dimension(d) = entity {
                         if let Some(general) = sections.first_mut() {
@@ -1204,7 +1220,8 @@ impl OpenCADStudio {
                             // scale and dim-line lineweight drive the render; text
                             // offset / vertical position round-trip to file but
                             // don't change the leader glyph here (its annotation
-                            // is a separate entity). Dim-line colour is read-only.
+                            // is a separate entity). Dim-line colour is stored as
+                            // a per-object override as well.
                             if let Some(ds) = find_dim_style(doc, &ld.dimension_style) {
                                 use crate::entities::dim_override as dov;
                                 use crate::scene::model::object::PropValue;
@@ -1250,7 +1267,7 @@ impl OpenCADStudio {
                                 set_row_value(
                                     &mut sections,
                                     "arrow_size",
-                                    PropValue::EditText(format!("{asz:.4}")),
+                                    PropValue::EditText(asz.to_string()),
                                 );
 
                                 let lwd = dov::int(xd, dov::DIMLWD).unwrap_or(ds.dimlwd);
@@ -1284,7 +1301,7 @@ impl OpenCADStudio {
                                 set_row_value(
                                     &mut sections,
                                     "text_offset",
-                                    PropValue::EditText(format!("{gap:.4}")),
+                                    PropValue::EditText(gap.to_string()),
                                 );
 
                                 let tad = dov::int(xd, dov::DIMTAD).unwrap_or(ds.dimtad);
@@ -1301,7 +1318,7 @@ impl OpenCADStudio {
                                 set_row_value(
                                     &mut sections,
                                     "dim_scale_overall",
-                                    PropValue::EditText(format!("{scl:.4}")),
+                                    PropValue::EditText(scl.to_string()),
                                 );
                             }
                         }
@@ -1818,6 +1835,11 @@ impl OpenCADStudio {
                                             doc, entity,
                                         )
                                     }
+                                    acadrust::EntityType::Leader(_) => {
+                                        crate::scene::annotative::annotation_style_is_annotative(
+                                            doc, entity,
+                                        )
+                                    }
                                     _ => false,
                                 };
                             // Dimensions/tables/tolerances carry no Annotative row yet — add one
@@ -1857,6 +1879,7 @@ impl OpenCADStudio {
                                     ),
                                     acadrust::EntityType::Text(_)
                                     | acadrust::EntityType::Insert(_)
+                                    | acadrust::EntityType::Leader(_)
                                     | acadrust::EntityType::Hatch(_)
                                     | acadrust::EntityType::Dimension(_) => set_row_value(
                                         &mut sections,

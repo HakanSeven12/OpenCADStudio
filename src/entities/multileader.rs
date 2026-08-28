@@ -905,9 +905,7 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
     // ── Leaders ──────────────────────────────────────────────────────────
     // Landing rows are folded in here: the standalone "Leader Structure" group
     // is a style-dialog tab, not a palette group.
-    let leaders = PropSection {
-        title: t!("Leaders").into_owned(),
-        props: vec![
+    let mut leader_props = vec![
             choice(
                 t!("Leader type").as_ref(),
                 "path_type",
@@ -931,20 +929,27 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
             },
             // Arrowhead block name resolved by the panel builder (default "Closed filled").
             ro(t!("Arrowhead").as_ref(), "arrowhead_handle", "Closed filled"),
-            edit(t!("Arrowhead size").as_ref(), "arrowhead_size", ml.arrowhead_size),
+            edit(t!("Arrowhead Size").as_ref(), "arrowhead_size", ml.arrowhead_size),
             bool_toggle(t!("Horizontal Landing").as_ref(), "enable_dogleg", ml.enable_dogleg),
             num_row(
                 t!("Landing distance").as_ref(),
                 "landing_distance",
-                ml.dogleg_length,
+                if ml.enable_dogleg { ml.dogleg_length } else { 0.0 },
                 ml.enable_dogleg,
             ),
-            bool_toggle(
-                t!("Extend leader to text").as_ref(),
+        ];
+    // The extension is an MText-only landing option. It is absent for block
+    // content and whenever the horizontal landing itself is disabled.
+    if ml.content_type == LeaderContentType::MText && ml.enable_dogleg {
+        leader_props.push(bool_toggle(
+                t!("Leader extension").as_ref(),
                 "extend_leader_to_text",
                 ml.extend_leader_to_text,
-            ),
-        ],
+            ));
+    }
+    let leaders = PropSection {
+        title: t!("Leaders").into_owned(),
+        props: leader_props,
     };
 
     // ── Text (shown only for MText content) ──────────────────────────────
@@ -958,11 +963,6 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
             },
             // Text-style name resolved from text_style_handle by the panel builder.
             ro(t!("Text style").as_ref(), "text_style_handle", "Standard"),
-            Property {
-                label: t!("Text color").into_owned(),
-                field: "text_color",
-                value: PropValue::ColorChoice(ml.text_color),
-            },
             choice(
                 t!("Justify").as_ref(),
                 "text_alignment",
@@ -993,40 +993,6 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
             bool_toggle(
                 t!("Background mask").as_ref(),
                 "background_fill_enabled",
-                ctx.background_fill_enabled,
-            ),
-            if ctx.background_fill_enabled {
-                bool_toggle(
-                    t!("Use drawing background color").as_ref(),
-                    "background_mask_fill_on",
-                    ctx.background_mask_fill_on,
-                )
-            } else {
-                ro(
-                    t!("Use drawing background color").as_ref(),
-                    "background_mask_fill_on",
-                    if ctx.background_mask_fill_on { "Yes" } else { "No" },
-                )
-            },
-            Property {
-                label: t!("Background mask color").into_owned(),
-                field: "background_fill_color",
-                value: if ctx.background_fill_enabled && !ctx.background_mask_fill_on {
-                    PropValue::ColorChoice(ctx.background_fill_color)
-                } else {
-                    PropValue::ReadOnly(format!("{:?}", ctx.background_fill_color))
-                },
-            },
-            num_row(
-                t!("Border offset factor").as_ref(),
-                "background_scale_factor",
-                ctx.background_scale_factor,
-                ctx.background_fill_enabled,
-            ),
-            num_row(
-                t!("Background transparency").as_ref(),
-                "background_transparency",
-                ctx.background_transparency as f64,
                 ctx.background_fill_enabled,
             ),
             choice(
@@ -1087,7 +1053,7 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
                 hexh(ml.block_content_handle),
             ),
             choice(
-                t!("Block connection").as_ref(),
+                t!("Attachment").as_ref(),
                 "block_connection_type",
                 match ml.block_connection_type {
                     BlockContentConnectionType::BasePoint => "Insertion point",
@@ -1095,17 +1061,7 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
                 },
                 &["Extents", "Insertion point"],
             ),
-            Property {
-                label: t!("Block color").into_owned(),
-                field: "block_content_color",
-                value: PropValue::ColorChoice(ml.block_content_color),
-            },
-            edit(t!("Block scale").as_ref(), "block_scale", ml.block_scale.x),
-            edit(
-                t!("Block rotation").as_ref(),
-                "block_rotation",
-                ml.block_rotation.to_degrees(),
-            ),
+            edit(t!("Scale").as_ref(), "block_scale", ml.block_scale.x),
         ],
     };
 
@@ -1409,6 +1365,11 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 "Vertical" => TextAttachmentDirectionType::Vertical,
                 _ => TextAttachmentDirectionType::Horizontal,
             };
+            if ml.text_attachment_direction == TextAttachmentDirectionType::Vertical {
+                ml.enable_dogleg = false;
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::ENABLE_DOGLEG);
+            }
             for root in &mut ml.context.leader_roots {
                 root.text_attachment_direction = ml.text_attachment_direction;
             }

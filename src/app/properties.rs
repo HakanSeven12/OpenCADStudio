@@ -2479,16 +2479,23 @@ impl OpenCADStudio {
         self.commit_entity_handle_with_dimension_policy(entity, false)
     }
 
-    /// Commit an entity while optionally retaining a dimension's source layer
-    /// and dimension style.  DIMCONTINUEMODE=1 uses this path; ordinary
-    /// creation continues to receive the current ribbon/style defaults.
+    /// Commit an entity, optionally preserving its source dimension style.
     pub(super) fn commit_entity_handle_with_dimension_policy(
         &mut self,
         mut entity: acadrust::EntityType,
         preserve_dimension_layer_and_style: bool,
     ) -> Option<Handle> {
         let i = self.active_tab;
-        let is_dimension = matches!(&entity, acadrust::EntityType::Dimension(_));
+        let tracks_dimension_chain = matches!(
+            &entity,
+            acadrust::EntityType::Dimension(
+                acadrust::entities::Dimension::Linear(_)
+                    | acadrust::entities::Dimension::Aligned(_)
+                    | acadrust::entities::Dimension::Angular2Ln(_)
+                    | acadrust::entities::Dimension::Angular3Pt(_)
+                    | acadrust::entities::Dimension::Ordinate(_)
+            )
+        );
         let inherited_dimension = if preserve_dimension_layer_and_style {
             match &entity {
                 acadrust::EntityType::Dimension(dimension) => Some((
@@ -2766,7 +2773,7 @@ impl OpenCADStudio {
                 self.tabs[i].last_draw_anchor = Some(handle);
             }
         }
-        if is_dimension {
+        if tracks_dimension_chain {
             self.tabs[i].scene.last_created_dimension = new_handle;
         }
         new_handle

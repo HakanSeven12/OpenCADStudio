@@ -647,18 +647,15 @@ impl OpenCADStudio {
             "DIMCONTINUE" => {
                 use crate::modules::annotate::dim_continue::DimContinueCommand;
                 let scene = &self.tabs[i].scene;
-                let preserve_base_style = self.dimension_continue_mode == 1;
-                let cmd = scene
+                let recent = scene
                     .last_created_dimension
                     .filter(|handle| scene.entity_belongs_to_active_space(*handle))
                     .and_then(|handle| scene.document.get_entity(handle))
-                    .and_then(|entity| match entity {
-                        acadrust::EntityType::Dimension(dimension) => Some(
-                            DimContinueCommand::from_dimension(dimension, preserve_base_style),
-                        ),
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| DimContinueCommand::new(preserve_base_style));
+                    .cloned();
+                let cmd = DimContinueCommand::new(
+                    recent,
+                    self.dimension_continue_mode == 1,
+                );
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

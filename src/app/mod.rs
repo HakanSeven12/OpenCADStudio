@@ -465,6 +465,10 @@ pub(super) struct OpenCADStudio {
     options_tab: crate::ui::window::options::OptionsTab,
     /// Controls whether the TEXTEDIT command repeats automatically (0 = Multiple, 1 = Single).
     pub texteditmode: bool,
+    /// QDIM extension-origin priority: 0 = endpoints, 1 = intersections.
+    pub quick_dimension_snap_priority: u8,
+    /// Creation-style policy used by continuing and baseline dimensions.
+    pub dimension_continue_mode: i16,
     /// When true (default), saving over an existing file first writes a `.bak`
     /// copy of it for recovery (#205). Toggle with the ISAVEBAK command.
     pub backup_on_save: bool,
@@ -2398,6 +2402,11 @@ pub enum Message {
     PropColorChanged(AcadColor),
     /// User selected a lineweight from the Properties pick_list.
     PropLwChanged(LineWeight),
+    /// User selected an object-specific lineweight override.
+    PropFieldLwChanged {
+        field: &'static str,
+        value: LineWeight,
+    },
     /// User selected a linetype from the linetype pick_list.
     PropLinetypeChanged(String),
     /// User toggled a boolean property (e.g. Invisible).
@@ -3210,6 +3219,8 @@ impl OpenCADStudio {
             dyn_input: true,
             options_tab: crate::ui::window::options::OptionsTab::General,
             texteditmode: false,
+            quick_dimension_snap_priority: 0,
+            dimension_continue_mode: 1,
             backup_on_save: true,
             file_assoc_enabled: true,
             savetime_min: 10,

@@ -19,6 +19,13 @@ pub const GRIP_RADIUS: usize = 10_004;
 pub const GRIP_OUTER_RADIUS: usize = 10_005;
 pub const GRIP_INNER_RADIUS: usize = 10_006;
 pub const GRIP_SIDES: usize = 10_007;
+pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
+pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
+pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
+pub const GRIP_BOX_FACE_Y_MIN: usize = 10_112;
+pub const GRIP_BOX_FACE_Y_MAX: usize = 10_113;
+pub const GRIP_BOX_FACE_Z_MIN: usize = 10_114;
+pub const GRIP_BOX_FACE_Z_MAX: usize = 10_115;
 
 pub const PROP_LENGTH: &str = "solid_history_length";
 pub const PROP_WIDTH: &str = "solid_history_width";
@@ -497,7 +504,7 @@ fn grip(
         world,
         is_midpoint: false,
         shape,
-        dir: None,
+        dir: (shape == GripShape::Triangle).then_some(axis).flatten(),
         axis,
     }
 }
@@ -521,7 +528,62 @@ pub fn primitive_grips(
         }
     };
     match operation {
-        SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => {
+        SolidHistoryOperation::Box(value) => {
+            for corner in 0..8 {
+                add(
+                    GRIP_BOX_CORNER_FIRST + corner,
+                    value.base.transform,
+                    [
+                        if corner & 1 == 0 { 0.0 } else { value.length },
+                        if corner & 2 == 0 { 0.0 } else { value.width },
+                        if corner & 4 == 0 { 0.0 } else { value.height },
+                    ],
+                    GripShape::Square,
+                    None,
+                );
+            }
+            for (id, point, axis) in [
+                (
+                    GRIP_BOX_FACE_X_MIN,
+                    [0.0, value.width * 0.5, value.height * 0.5],
+                    [-1.0, 0.0, 0.0],
+                ),
+                (
+                    GRIP_BOX_FACE_X_MAX,
+                    [value.length, value.width * 0.5, value.height * 0.5],
+                    [1.0, 0.0, 0.0],
+                ),
+                (
+                    GRIP_BOX_FACE_Y_MIN,
+                    [value.length * 0.5, 0.0, value.height * 0.5],
+                    [0.0, -1.0, 0.0],
+                ),
+                (
+                    GRIP_BOX_FACE_Y_MAX,
+                    [value.length * 0.5, value.width, value.height * 0.5],
+                    [0.0, 1.0, 0.0],
+                ),
+                (
+                    GRIP_BOX_FACE_Z_MIN,
+                    [value.length * 0.5, value.width * 0.5, 0.0],
+                    [0.0, 0.0, -1.0],
+                ),
+                (
+                    GRIP_BOX_FACE_Z_MAX,
+                    [value.length * 0.5, value.width * 0.5, value.height],
+                    [0.0, 0.0, 1.0],
+                ),
+            ] {
+                add(
+                    id,
+                    value.base.transform,
+                    point,
+                    GripShape::Triangle,
+                    Some(axis),
+                );
+            }
+        }
+        SolidHistoryOperation::Wedge(value) => {
             add(
                 GRIP_LENGTH,
                 value.base.transform,
@@ -632,7 +694,49 @@ pub fn apply_primitive_grip(
     };
     let positive = |value: f64| value.abs().max(1e-6);
     match operation {
-        SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => {
+        SolidHistoryOperation::Box(value) => {
+            let old_size = glam::DVec3::new(value.length, value.width, value.height);
+            let mut low = glam::DVec3::ZERO;
+            let mut high = old_size;
+            if (GRIP_BOX_CORNER_FIRST..GRIP_BOX_CORNER_FIRST + 8).contains(&grip_id) {
+                let corner = grip_id - GRIP_BOX_CORNER_FIRST;
+                for axis in 0..3 {
+                    let opposite = if corner & (1 << axis) == 0 {
+                        old_size[axis]
+                    } else {
+                        0.0
+                    };
+                    low[axis] = local[axis].min(opposite);
+                    high[axis] = local[axis].max(opposite);
+                }
+            } else {
+                match grip_id {
+                    GRIP_BOX_FACE_X_MIN => low.x = local.x.min(old_size.x - 1e-6),
+                    GRIP_BOX_FACE_X_MAX => high.x = local.x.max(1e-6),
+                    GRIP_BOX_FACE_Y_MIN => low.y = local.y.min(old_size.y - 1e-6),
+                    GRIP_BOX_FACE_Y_MAX => high.y = local.y.max(1e-6),
+                    GRIP_BOX_FACE_Z_MIN => low.z = local.z.min(old_size.z - 1e-6),
+                    GRIP_BOX_FACE_Z_MAX => high.z = local.z.max(1e-6),
+                    GRIP_LENGTH => high.x = positive(local.x),
+                    GRIP_WIDTH => high.y = positive(local.y),
+                    GRIP_HEIGHT => high.z = local.z.max(1e-6),
+                    _ => return false,
+                }
+            }
+            let size = high - low;
+            if size.min_element() < 1e-6 {
+                return false;
+            }
+            let Some(current) = matrix(value.base.transform) else {
+                return false;
+            };
+            value.base.transform =
+                (current * glam::DMat4::from_translation(low)).to_cols_array();
+            value.length = size.x;
+            value.width = size.y;
+            value.height = size.z;
+        }
+        SolidHistoryOperation::Wedge(value) => {
             match grip_id {
                 GRIP_LENGTH => value.length = positive(local.x),
                 GRIP_WIDTH => value.width = positive(local.y),

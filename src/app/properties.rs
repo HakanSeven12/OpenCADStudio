@@ -2322,6 +2322,12 @@ impl OpenCADStudio {
                     annotation_scale_handle,
                 );
                 let mut entity_grips = dispatch::grips(contextual.as_ref());
+                if crate::scene::model::solid_history::is_box_primitive(
+                    &self.tabs[i].scene.document,
+                    handle,
+                ) {
+                    entity_grips.clear();
+                }
                 // Dimension::grips() cannot see the document, so an automatic dimension
                 // text grip cannot resolve its real DIMSTYLE/annotation-scaled position
                 // there. Correct it here, where both the document and displayed annotation

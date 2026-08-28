@@ -649,6 +649,7 @@ impl OpenCADStudio {
                 let scene = &self.tabs[i].scene;
                 let recent = scene
                     .last_created_dimension
+                    .filter(|handle| scene.entity_belongs_to_active_space(*handle))
                     .and_then(|handle| scene.document.get_entity(handle))
                     .cloned();
                 let cmd = DimContinueCommand::new(

@@ -266,7 +266,7 @@ impl ArcLengthDimensionCommand {
             entity: plane.place_entity(EntityType::Dimension(Dimension::Arc(dimension))),
             association,
             preserve_base_style: false,
-            keep_active: false,
+            continue_command: false,
         }
     }
 }

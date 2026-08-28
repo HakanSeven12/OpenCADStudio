@@ -856,7 +856,7 @@ impl OpenCADStudio {
                             .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_dimension_association(handle, sources.to_vec());
+                            .attach_dimension_association(handle, sources);
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1269,7 +1269,7 @@ impl OpenCADStudio {
                             .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_dimension_association(handle, sources.to_vec());
+                            .attach_dimension_association(handle, sources);
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1288,7 +1288,7 @@ impl OpenCADStudio {
                 mut entity,
                 association,
                 preserve_base_style,
-                keep_active,
+                continue_command,
             } => {
                 let label = self.history_label_from_active_cmd(i, "DIMENSION");
                 let association_mode = self.tabs[i]
@@ -1379,8 +1379,6 @@ impl OpenCADStudio {
                                             self.tabs[i]
                                                 .scene
                                                 .infer_dimension_sources(handle)
-                                                .into_iter()
-                                                .collect()
                                         },
                                         |source| {
                                             if single_source_dimension {
@@ -1416,17 +1414,20 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].snap_result = None;
-                if keep_active {
-                    let prompt = self.tabs[i].active_cmd.as_ref().map(|command| command.prompt());
-                    if let Some(prompt) = prompt {
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+                if continue_command {
+                    if let Some(prompt) = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|cmd| cmd.prompt())
+                    {
                         self.command_line.push_info(&prompt);
                     }
                 } else {
                     self.tabs[i].active_cmd = None;
                     self.restore_pre_cmd_tangent();
-                }
-                if let Some(pd) = pending {
-                    self.commit_undo_delta(i, pd);
                 }
             }
             CmdResult::CommitSolid {

@@ -136,7 +136,7 @@ impl CadCommand for AlignedDimensionCommand {
                     entity: self.plane.place_entity(EntityType::Dimension(Dimension::Aligned(dim))),
                     association: DimensionAssociationInput::Infer(self.source_handle),
                     preserve_base_style: false,
-                    keep_active: false,
+                    continue_command: false,
                 }
             }
         }

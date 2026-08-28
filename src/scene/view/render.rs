@@ -3795,14 +3795,21 @@ impl Scene {
             full_bounds,
             self.document.header.lineweight_display || display_plot_lineweights,
         );
-        if self.document.header.paper_space_linetype_scaling
+
+        // Model space: scale linetypes using the current annotation scale so their
+        // appearance can match a paper-space viewport at the same drawing scale.
+        if self.current_layout == "Model" {
+            if self.annotation_scale.is_finite() && self.annotation_scale > 1e-9 {
+                uniforms.linetype_scale = self.annotation_scale;
+            }
+        } else if self.document.header.paper_space_linetype_scaling
             && !inst.paper_sheet
-            && inst.tile_idx.is_none()
             && inst.handle != Handle::NULL
         {
             if let Some(EntityType::Viewport(vp)) = self.document.get_entity(inst.handle) {
                 let viewport_scale =
                     vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
+
                 if viewport_scale.is_finite() && viewport_scale > 1e-9 {
                     uniforms.linetype_scale = (1.0 / viewport_scale) as f32;
                 }

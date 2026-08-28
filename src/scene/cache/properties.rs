@@ -89,14 +89,6 @@ pub fn general_section(entity: &EntityType) -> PropSection {
         ],
     };
 
-    if matches!(entity, EntityType::Point(_)) {
-        let hyperlink = section.props.iter().position(|prop| prop.field == "hyperlink");
-        let transparency = section.props.iter().position(|prop| prop.field == "transparency");
-        if let (Some(hyperlink), Some(transparency)) = (hyperlink, transparency) {
-            section.props.swap(hyperlink, transparency);
-        }
-    }
-
     // Thickness (DXF 39) is a General-group property, but only the entity
     // types that carry an extrusion thickness expose it (line, circle, arc,
     // polyline, text, 2D solid, …). Show it right after Hyperlink for those.

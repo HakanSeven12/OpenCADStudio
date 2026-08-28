@@ -3,6 +3,7 @@ use acadrust::entities::{
     MultiLeader, MultiLeaderPathType, MultiLeaderPropertyOverrideFlags, TextAlignmentType,
     TextAttachmentDirectionType, TextAttachmentType,
 };
+use cadkernel::geom2d::Transform;
 
 use crate::entities::text_support::{
     layout_mtext, resolve_text_style, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
@@ -1120,7 +1121,9 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 !ml.text_frame
             } else {
                 value == "true"
-            }
+            };
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::TEXT_FRAME);
         }
         "path_type" => {
             ml.path_type = match value {
@@ -1200,6 +1203,8 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         "dogleg_length" => {
             if let Some(v) = f64(value) {
                 ml.dogleg_length = v;
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::LANDING_DISTANCE);
             }
         }
         "arrowhead_size" => {
@@ -1395,6 +1400,8 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                     ml.context.text_rotation.sin(),
                     0.0,
                 );
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::TEXT_ANGLE);
             }
         }
         "line_spacing" => {
@@ -1941,9 +1948,7 @@ impl MultiLeaderTess for MultiLeader {
                 }
             }
 
-            // Vertically-attached leaders (text above/below) have no dogleg:
-            // the leader meets the text edge directly, so the short horizontal
-            // dash would be a stray mark AutoCAD never draws.
+            // Vertically attached leaders meet the text edge directly.
             let vertical_attach = matches!(
                 ml.text_attachment_direction,
                 acadrust::entities::multileader::TextAttachmentDirectionType::Vertical
@@ -2074,20 +2079,28 @@ impl MultiLeaderTess for MultiLeader {
                         }
                     }
                     if bounds[0] <= bounds[2] && bounds[1] <= bounds[3] {
+                        let to_block = Transform::rotation(-ml.block_rotation);
                         let from_left = ml
                             .context
                             .leader_roots
                             .first()
-                            .map_or(true, |root| root.direction.x >= 0.0);
+                            .map_or(true, |root| {
+                                to_block.apply_vector([
+                                    root.direction.x,
+                                    root.direction.y,
+                                ])[0]
+                                    >= 0.0
+                            });
                         let anchor_x = if from_left { bounds[0] } else { bounds[2] } as f64;
                         let anchor_y = ((bounds[1] + bounds[3]) * 0.5) as f64;
                         let local_x =
                             (anchor_x - block_record.base_point.x) * ml.block_scale.x;
                         let local_y =
                             (anchor_y - block_record.base_point.y) * ml.block_scale.y;
-                        let (sin_r, cos_r) = ml.block_rotation.sin_cos();
-                        insertion.x -= local_x * cos_r - local_y * sin_r;
-                        insertion.y -= local_x * sin_r + local_y * cos_r;
+                        let rotated = Transform::rotation(ml.block_rotation)
+                            .apply_vector([local_x, local_y]);
+                        insertion.x -= rotated[0];
+                        insertion.y -= rotated[1];
                     }
                 }
                 let mut synth_ins = acadrust::entities::Insert::new(block_name, insertion);
@@ -2171,12 +2184,7 @@ impl MultiLeaderTess for MultiLeader {
             let local_ins_x = (ins.x) as f32;
             let z = (ins.z) as f32;
 
-            // Rotation: the annotation context is AutoCAD's BAKED display
-            // state — text_direction / text_rotation already reflect whatever
-            // the style's angle setting produced at edit time. Re-deriving
-            // from ml.text_angle_type here (e.g. forcing Horizontal to 0)
-            // un-rotated leaders whose stored context is angled; the angle
-            // type only guides recomputation during edits, not display.
+            // The context stores the resolved display rotation.
             let td = ctx.text_direction;
             let mut rot = if td.x.abs() > 1e-9 || td.y.abs() > 1e-9 {
                 (td.y as f32).atan2(td.x as f32)

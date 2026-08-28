@@ -766,6 +766,9 @@ impl PropertiesPanel {
             PropValue::FieldLwChoice { field, value } => {
                 self.render_field_lw_row(label, field, *value)
             }
+            PropValue::FieldLwVaries { field } => {
+                self.render_field_lw_varies_row(label, field)
+            }
             PropValue::LwVaries => self.render_lw_varies_row(label),
             PropValue::LinetypeChoice(lt) => self.render_linetype_row(label, lt),
             PropValue::Choice { selected, options } => {
@@ -1043,6 +1046,34 @@ impl PropertiesPanel {
             VARIES_LABEL,
             None,
             |item: LwItem| Message::PropLwChanged(item.0),
+        )
+        .size(FONT_SZ)
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 6.0,
+            right: 6.0,
+        })
+        .input_style(combo_input_style)
+        .on_open(Message::PropColorPickerClose)
+        .width(Length::Fill);
+
+        prop_row_widget(label, combo.into())
+    }
+
+    fn render_field_lw_varies_row<'a>(
+        &'a self,
+        label: &'a str,
+        field: &'static str,
+    ) -> Element<'a, Message> {
+        let combo = combo_box(
+            &self.lineweight_combo,
+            VARIES_LABEL,
+            None,
+            move |item: LwItem| Message::PropFieldLwChanged {
+                field,
+                value: item.0,
+            },
         )
         .size(FONT_SZ)
         .padding(Padding {

@@ -39,6 +39,8 @@ pub enum PropValue {
         field: &'static str,
         value: LineWeight,
     },
+    /// Object-specific lineweight varies across the current selection.
+    FieldLwVaries { field: &'static str },
     /// Lineweight varies across the current multi-selection.
     LwVaries,
     /// Linetype name — rendered as a combo_box.

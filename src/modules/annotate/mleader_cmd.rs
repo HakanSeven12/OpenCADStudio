@@ -236,19 +236,31 @@ impl MLeaderCommand {
                     acadrust::entities::multileader::FlowDirectionType::ByStyle
                 }
             };
-            ml.context.text_attachment_point = match source.attachment_point {
+            let (attachment, alignment) = match source.attachment_point {
                 acadrust::entities::mtext::AttachmentPoint::TopCenter
                 | acadrust::entities::mtext::AttachmentPoint::MiddleCenter
                 | acadrust::entities::mtext::AttachmentPoint::BottomCenter => {
-                    acadrust::entities::multileader::TextAttachmentPointType::Center
+                    (
+                        acadrust::entities::multileader::TextAttachmentPointType::Center,
+                        acadrust::entities::TextAlignmentType::Center,
+                    )
                 }
                 acadrust::entities::mtext::AttachmentPoint::TopRight
                 | acadrust::entities::mtext::AttachmentPoint::MiddleRight
                 | acadrust::entities::mtext::AttachmentPoint::BottomRight => {
-                    acadrust::entities::multileader::TextAttachmentPointType::Right
+                    (
+                        acadrust::entities::multileader::TextAttachmentPointType::Right,
+                        acadrust::entities::TextAlignmentType::Right,
+                    )
                 }
-                _ => acadrust::entities::multileader::TextAttachmentPointType::Left,
+                _ => (
+                    acadrust::entities::multileader::TextAttachmentPointType::Left,
+                    acadrust::entities::TextAlignmentType::Left,
+                ),
             };
+            ml.context.text_attachment_point = attachment;
+            ml.text_alignment = alignment;
+            ml.context.text_alignment = alignment;
             let style_handle = self
                 .text_styles
                 .iter()

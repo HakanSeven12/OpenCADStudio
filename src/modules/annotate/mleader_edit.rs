@@ -8,6 +8,7 @@
 use acadrust::entities::{LeaderLine, MultiLeader};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
+use cadkernel::geom2d::{closest_point, Curve, Line};
 use glam::{DVec3, Vec3};
 
 use crate::command::{CadCommand, CmdResult};
@@ -92,6 +93,9 @@ impl CadCommand for MLeaderAddCommand {
         match &mut self.step {
             AddStep::PickArrowhead { handle, entity } => {
                 if let Some(ent) = entity.take() {
+                    if !matches!(ent, EntityType::MultiLeader(_)) {
+                        return CmdResult::Cancel;
+                    }
                     let h = *handle;
                     self.step = AddStep::CollectPoints {
                         handle: h,
@@ -121,12 +125,16 @@ impl CadCommand for MLeaderAddCommand {
                 return CmdResult::Cancel;
             }
             let h = *handle;
-            if let EntityType::MultiLeader(ref mut ml) = entity {
+                if let EntityType::MultiLeader(ref mut ml) = entity {
                 let points: Vec<Vector3> = pts
                     .iter()
                     .map(|p| Vector3::new(p.x, p.y, p.z))
                     .collect();
                 let template_root = ml.context.leader_roots.first().cloned();
+                let template_line = template_root
+                    .as_ref()
+                    .and_then(|root| root.lines.first())
+                    .cloned();
                 let path_type = ml.path_type;
                 let line_color = ml.line_color;
                 let line_type_handle = ml.line_type_handle;
@@ -141,12 +149,22 @@ impl CadCommand for MLeaderAddCommand {
                     root.text_attachment_direction = template.text_attachment_direction;
                 }
                 let line = root.create_line(points);
-                line.path_type = path_type;
-                line.line_color = line_color;
-                line.line_type_handle = line_type_handle;
-                line.line_weight = line_weight;
-                line.arrowhead_handle = arrowhead_handle;
-                line.arrowhead_size = arrowhead_size;
+                if let Some(template) = template_line {
+                    line.path_type = template.path_type;
+                    line.line_color = template.line_color;
+                    line.line_type_handle = template.line_type_handle;
+                    line.line_weight = template.line_weight;
+                    line.arrowhead_handle = template.arrowhead_handle;
+                    line.arrowhead_size = template.arrowhead_size;
+                    line.override_flags = template.override_flags;
+                } else {
+                    line.path_type = path_type;
+                    line.line_color = line_color;
+                    line.line_type_handle = line_type_handle;
+                    line.line_weight = line_weight;
+                    line.arrowhead_handle = arrowhead_handle;
+                    line.arrowhead_size = arrowhead_size;
+                }
             }
             let updated = std::mem::replace(entity, EntityType::XLine(Default::default()));
             return CmdResult::ReplaceEntity(h, vec![updated]);
@@ -252,10 +270,10 @@ impl CadCommand for MLeaderRemoveCommand {
                                 let mut distance = line
                                     .points
                                     .windows(2)
-                                    .map(|segment| point_segment_distance_sq_xy(pick, segment[0], segment[1]))
+                                    .map(|segment| point_segment_distance_xy(pick, segment[0], segment[1]))
                                     .fold(f64::INFINITY, f64::min);
                                 if let Some(last) = line.points.last().copied() {
-                                    distance = distance.min(point_segment_distance_sq_xy(
+                                    distance = distance.min(point_segment_distance_xy(
                                         pick,
                                         last,
                                         root.connection_point,
@@ -265,16 +283,19 @@ impl CadCommand for MLeaderRemoveCommand {
                             })
                         })
                         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-                    if let Some((root_index, line_index, _)) = best {
-                        let total_lines = ml.total_leader_line_count();
-                        if total_lines > 1 {
-                            let root = &mut ml.context.leader_roots[root_index];
-                            root.lines.remove(line_index);
-                            if root.lines.is_empty() {
-                                ml.context.leader_roots.remove(root_index);
-                            }
-                        }
+                    let Some((root_index, line_index, _)) = best else {
+                        return CmdResult::Cancel;
+                    };
+                    if ml.total_leader_line_count() <= 1 {
+                        return CmdResult::Cancel;
                     }
+                    let root = &mut ml.context.leader_roots[root_index];
+                    root.lines.remove(line_index);
+                    if root.lines.is_empty() {
+                        ml.context.leader_roots.remove(root_index);
+                    }
+                } else {
+                    return CmdResult::Cancel;
                 }
                 return CmdResult::ReplaceEntity(h, vec![ent]);
             }
@@ -370,25 +391,11 @@ impl CadCommand for MLeaderAlignCommand {
                 CmdResult::NeedPoint
             }
             AlignStep::PickEndDir { handles, from } => {
-                let h = handles.clone();
-                let f = *from;
-                // Emit sentinel for commands.rs
-                use acadrust::entities::XLine;
-                let mut xl = XLine::default();
-                let hstr: Vec<String> = h.iter().map(|hh| hh.value().to_string()).collect();
-                xl.common.layer = format!(
-                    "__MLEADERALIGN__{};{:.4},{:.4};{:.4},{:.4}",
-                    hstr.join(","),
-                    f.x,
-                    f.y,
-                    pt.x,
-                    pt.y
-                );
-                // Use first handle as the "replaced" entity (sentinel)
-                if let Some(&first) = h.first() {
-                    return CmdResult::ReplaceEntity(first, vec![EntityType::XLine(xl)]);
+                CmdResult::AlignMLeaders {
+                    handles: handles.clone(),
+                    from: *from,
+                    to: pt,
                 }
-                CmdResult::Cancel
             }
             _ => CmdResult::NeedPoint,
         }
@@ -463,21 +470,10 @@ impl CadCommand for MLeaderCollectCommand {
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         if let CollectStep::PickLocation { handles } = &self.step {
-            let h = handles.clone();
-            // Build a new combined multileader at the collection point, delete originals.
-            // The first handle is the "base" — the rest are erased and their leaders merged.
-            use acadrust::entities::XLine;
-            let mut xl = XLine::default();
-            let hstr: Vec<String> = h.iter().map(|hh| hh.value().to_string()).collect();
-            xl.common.layer = format!(
-                "__MLEADERCOLLECT__{};{:.4},{:.4}",
-                hstr.join(","),
-                pt.x,
-                pt.y
-            );
-            if let Some(&first) = h.first() {
-                return CmdResult::ReplaceEntity(first, vec![EntityType::XLine(xl)]);
-            }
+            return CmdResult::CollectMLeaders {
+                handles: handles.clone(),
+                point: pt,
+            };
         }
         CmdResult::NeedPoint
     }
@@ -528,20 +524,15 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
     }
 }
 
-fn point_segment_distance_sq_xy(point: Vector3, start: Vector3, end: Vector3) -> f64 {
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-    let len_sq = dx * dx + dy * dy;
-    if len_sq <= 1.0e-18 {
-        let px = point.x - start.x;
-        let py = point.y - start.y;
-        return px * px + py * py;
-    }
-    let t = (((point.x - start.x) * dx + (point.y - start.y) * dy) / len_sq)
-        .clamp(0.0, 1.0);
-    let px = point.x - (start.x + t * dx);
-    let py = point.y - (start.y + t * dy);
-    px * px + py * py
+fn point_segment_distance_xy(point: Vector3, start: Vector3, end: Vector3) -> f64 {
+    closest_point(
+        &Curve::Line(Line {
+            start: [start.x, start.y],
+            end: [end.x, end.y],
+        }),
+        [point.x, point.y],
+    )
+    .distance
 }
 
 // Silence unused-import warning for MultiLeader and LeaderLine if not used in all paths

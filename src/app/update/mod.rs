@@ -4576,19 +4576,17 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                     self.ribbon.active_lineweight = lw;
                 } else {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::view::dispatch::apply_line_weight(entity, lw);
-                        }
-                    }
                     // Lineweight is baked into the cached wire geometry —
                     // re-tessellate so the change shows immediately (issue #231
                     // class).
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(entity) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            crate::scene::view::dispatch::apply_line_weight(entity, lw);
+                        }
+                    });
                     self.ribbon.active_lineweight = lw;
-                    self.refresh_properties();
                 }
                 Task::none()
             }
@@ -4603,17 +4601,15 @@ impl OpenCADStudio {
                     self.refresh_properties();
                     return task;
                 }
-                self.push_undo_snapshot(i, "CHPROP");
-                for &handle in &handles {
-                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if let Some(entity) =
+                        app.tabs[i].scene.document.get_entity_mut(handle)
+                    {
                         crate::scene::view::dispatch::apply_common_prop(
                             entity, "layer", &layer,
                         );
                     }
-                }
-                self.invalidate_property_targets(i, &handles);
-                self.tabs[i].dirty = true;
-                self.refresh_properties();
+                });
                 Task::none()
             }
 
@@ -4626,17 +4622,15 @@ impl OpenCADStudio {
                     self.refresh_properties();
                     return task;
                 }
-                self.push_undo_snapshot(i, "CHPROP");
-                for &handle in &handles {
-                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if let Some(entity) =
+                        app.tabs[i].scene.document.get_entity_mut(handle)
+                    {
                         crate::scene::view::dispatch::apply_color(entity, color);
                     }
-                }
-                self.invalidate_property_targets(i, &handles);
+                });
                 self.tabs[i].properties.color_picker_open = false;
                 self.tabs[i].properties.color_palette_open = false;
-                self.tabs[i].dirty = true;
-                self.refresh_properties();
                 Task::none()
             }
 
@@ -4653,31 +4647,22 @@ impl OpenCADStudio {
                     self.refresh_properties();
                     return Task::none();
                 }
-                self.push_undo_snapshot(i, "CHPROP");
-                for &handle in &handles {
-                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if let Some(entity) =
+                        app.tabs[i].scene.document.get_entity_mut(handle)
+                    {
                         crate::scene::view::dispatch::apply_line_weight(entity, lw);
                     }
-                }
-                self.invalidate_property_targets(i, &handles);
-                self.tabs[i].dirty = true;
-                self.refresh_properties();
+                });
                 Task::none()
             }
 
             Message::PropFieldLwChanged { field, value } => {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
-                if handles.is_empty() {
-                    return Task::none();
-                }
-                self.push_undo_snapshot(i, "CHPROP");
-                for &handle in &handles {
-                    if self.tabs[i].scene.is_layer_locked(handle) {
-                        continue;
-                    }
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                     if let Some(acadrust::EntityType::MultiLeader(leader)) =
-                        self.tabs[i].scene.document.get_entity_mut(handle)
+                        app.tabs[i].scene.document.get_entity_mut(handle)
                     {
                         if field == "line_weight" {
                             leader.line_weight = value;
@@ -4694,10 +4679,7 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                }
-                self.invalidate_property_targets(i, &handles);
-                self.tabs[i].dirty = true;
-                self.refresh_properties();
+                });
                 Task::none()
             }
 
@@ -4709,17 +4691,15 @@ impl OpenCADStudio {
                     self.refresh_properties();
                     return task;
                 }
-                self.push_undo_snapshot(i, "CHPROP");
-                for &handle in &handles {
-                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if let Some(entity) =
+                        app.tabs[i].scene.document.get_entity_mut(handle)
+                    {
                         crate::scene::view::dispatch::apply_common_prop(
                             entity, "linetype", &lt,
                         );
                     }
-                }
-                self.invalidate_property_targets(i, &handles);
-                self.tabs[i].dirty = true;
-                self.refresh_properties();
+                });
                 Task::none()
             }
 
@@ -4801,8 +4781,7 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                         match field {
                             // Per-object annotative toggle: MTEXT/MULTILEADER carry
                             // a native flag; single-line TEXT is annotative purely
@@ -4811,7 +4790,7 @@ impl OpenCADStudio {
                             // representation and turning it off removes it (not just
                             // the flag).
                             "is_annotative" | "enable_annotation_scale" | "annotative_ctx" => {
-                                let doc = &self.tabs[i].scene.document;
+                                let doc = &app.tabs[i].scene.document;
                                 let cur = match doc.get_entity(handle) {
                                     Some(acadrust::EntityType::MText(t)) => t.is_annotative,
                                     Some(acadrust::EntityType::MultiLeader(m)) => {
@@ -4820,10 +4799,10 @@ impl OpenCADStudio {
                                     // TEXT (and any other context-only type): its
                                     // annotative state is whether a context exists.
                                     Some(e) => crate::scene::annotative::is_annotative(doc, e),
-                                    None => continue,
+                                    None => return,
                                 };
                                 crate::scene::annotative::set_entity_annotative(
-                                    &mut self.tabs[i].scene.document,
+                                    &mut app.tabs[i].scene.document,
                                     handle,
                                     !cur,
                                 );
@@ -4834,10 +4813,10 @@ impl OpenCADStudio {
                                 // object. Off is handled inside set_entity_*.
                                 if !cur {
                                     if let Some(sh) =
-                                        self.tabs[i].scene.creation_annotation_scale_handle()
+                                        app.tabs[i].scene.creation_annotation_scale_handle()
                                     {
                                         crate::scene::annotative::create_annotation_context(
-                                            &mut self.tabs[i].scene.document,
+                                            &mut app.tabs[i].scene.document,
                                             handle,
                                             sh,
                                         );
@@ -4846,7 +4825,7 @@ impl OpenCADStudio {
                             }
                             "invisible" => {
                                 if let Some(entity) =
-                                    self.tabs[i].scene.document.get_entity_mut(handle)
+                                    app.tabs[i].scene.document.get_entity_mut(handle)
                                 {
                                     crate::scene::view::dispatch::toggle_invisible(entity);
                                 }
@@ -4855,22 +4834,22 @@ impl OpenCADStudio {
                             // (#427): checking collapses Y/Z onto X; unchecking
                             // only switches the panel to per-axis rows.
                             "ins_uniform" => {
-                                let scales = match self.tabs[i].scene.document.get_entity(handle) {
+                                let scales = match app.tabs[i].scene.document.get_entity(handle) {
                                     Some(acadrust::EntityType::Insert(ins)) => {
                                         Some((ins.x_scale(), ins.y_scale(), ins.z_scale()))
                                     }
                                     _ => None,
                                 };
-                                let Some((sx, sy, sz)) = scales else { continue };
+                                let Some((sx, sy, sz)) = scales else { return };
                                 let eq = (sx - sy).abs() < 1e-12 && (sx - sz).abs() < 1e-12;
                                 let checked =
-                                    eq && !self.props_asym_scale.contains(&handle.value());
+                                    eq && !app.props_asym_scale.contains(&handle.value());
                                 if checked {
-                                    self.props_asym_scale.insert(handle.value());
+                                    app.props_asym_scale.insert(handle.value());
                                 } else {
-                                    self.props_asym_scale.remove(&handle.value());
+                                    app.props_asym_scale.remove(&handle.value());
                                     if let Some(acadrust::EntityType::Insert(ins)) =
-                                        self.tabs[i].scene.document.get_entity_mut(handle)
+                                        app.tabs[i].scene.document.get_entity_mut(handle)
                                     {
                                         ins.set_y_scale(sx);
                                         ins.set_z_scale(sx);
@@ -4879,11 +4858,11 @@ impl OpenCADStudio {
                             }
                             "tbl_title_suppressed" | "tbl_header_suppressed" => {
                                 let next = {
-                                    let document = &self.tabs[i].scene.document;
+                                    let document = &app.tabs[i].scene.document;
                                     let Some(acadrust::EntityType::Table(table)) =
                                         document.get_entity(handle)
                                     else {
-                                        continue;
+                                        return;
                                     };
                                     let table_style = table.table_style_handle.and_then(|style_handle| {
                                         document.objects.get(&style_handle).and_then(|object| {
@@ -4909,7 +4888,7 @@ impl OpenCADStudio {
                                     !current
                                 };
                                 if let Some(entity) =
-                                    self.tabs[i].scene.document.get_entity_mut(handle)
+                                    app.tabs[i].scene.document.get_entity_mut(handle)
                                 {
                                     crate::scene::view::dispatch::apply_geom_prop(
                                         entity,
@@ -4920,7 +4899,7 @@ impl OpenCADStudio {
                             }
                             _ => {
                                 if let Some(entity) =
-                                    self.tabs[i].scene.document.get_entity_mut(handle)
+                                    app.tabs[i].scene.document.get_entity_mut(handle)
                                 {
                                     crate::scene::view::dispatch::apply_geom_prop(
                                         entity, field, "toggle",
@@ -4928,19 +4907,14 @@ impl OpenCADStudio {
                                 }
                             }
                         }
-                    }
-                    if field.starts_with("tbl_") {
-                        for &handle in &handles {
+                        if field.starts_with("tbl_") {
                             if let Some(acadrust::EntityType::Table(table)) =
-                                self.tabs[i].scene.document.get_entity_mut(handle)
+                                app.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 table.block_record_handle = None;
                             }
                         }
-                    }
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
+                    });
                 }
                 Task::none()
             }
@@ -5070,9 +5044,8 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for &handle in &handles {
-                        match self.tabs[i].scene.document.get_entity_mut(handle) {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        match app.tabs[i].scene.document.get_entity_mut(handle) {
                             Some(acadrust::EntityType::MText(m)) => {
                                 m.background_color = color.clone();
                                 // Picking a colour turns the background on in Fill
@@ -5085,11 +5058,8 @@ impl OpenCADStudio {
                             }
                             _ => {}
                         }
-                    }
-                    self.invalidate_property_targets(i, &handles);
+                    });
                     self.tabs[i].properties.bg_color_picker_open = false;
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
                 }
                 Task::none()
             }
@@ -5145,11 +5115,10 @@ impl OpenCADStudio {
                         })
                         .collect();
                     if !targets.is_empty() {
-                        self.push_undo_snapshot(i, "CHPROP");
-                        for &handle in &targets {
+                        self.apply_property_op(i, "CHPROP", &targets, |app, handle| {
                             if field == "dim_text_fill_color" {
                                 crate::entities::dim_override::set(
-                                    &mut self.tabs[i].scene.document,
+                                    &mut app.tabs[i].scene.document,
                                     handle,
                                     crate::entities::dim_override::DIMTFILL,
                                     Some(acadrust::xdata::XDataValue::Integer16(
@@ -5157,20 +5126,17 @@ impl OpenCADStudio {
                                     )),
                                 );
                                 if fill_mode != Some(2) {
-                                    continue;
+                                    return;
                                 }
                             }
                             crate::entities::dim_override::set(
-                                &mut self.tabs[i].scene.document,
+                                &mut app.tabs[i].scene.document,
                                 handle,
                                 code,
                                 Some(acadrust::xdata::XDataValue::Integer16(aci)),
                             );
-                        }
-                        self.invalidate_property_targets(i, &targets);
+                        });
                         self.tabs[i].properties.open_color_field = None;
-                        self.tabs[i].dirty = true;
-                        self.refresh_properties();
                     }
                     return Task::none();
                 }
@@ -5179,14 +5145,9 @@ impl OpenCADStudio {
                     "line_color" | "text_color" | "block_content_color"
                         | "background_fill_color"
                 ) {
-                    if !handles.is_empty() {
-                        self.push_undo_snapshot(i, "CHPROP");
-                        for &handle in &handles {
-                            if self.tabs[i].scene.is_layer_locked(handle) {
-                                continue;
-                            }
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                             if let Some(acadrust::EntityType::MultiLeader(leader)) =
-                                self.tabs[i].scene.document.get_entity_mut(handle)
+                                app.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 match field.as_str() {
                                     "line_color" => {
@@ -5223,12 +5184,8 @@ impl OpenCADStudio {
                                     _ => {}
                                 }
                             }
-                        }
-                        self.invalidate_property_targets(i, &handles);
-                        self.tabs[i].properties.open_color_field = None;
-                        self.tabs[i].dirty = true;
-                        self.refresh_properties();
-                    }
+                    });
+                    self.tabs[i].properties.open_color_field = None;
                     return Task::none();
                 }
                 if matches!(
@@ -5237,16 +5194,15 @@ impl OpenCADStudio {
                 ) {
                     let cell_index = self.tabs[i].properties.prop_vertex;
                     if !handles.is_empty() {
-                        self.push_undo_snapshot(i, "TABLE CELL COLOR");
-                        for &handle in &handles {
+                        self.apply_property_op(i, "TABLE CELL COLOR", &handles, |app, handle| {
                             let Some(acadrust::EntityType::Table(table)) =
-                                self.tabs[i].scene.document.get_entity_mut(handle)
+                                app.tabs[i].scene.document.get_entity_mut(handle)
                             else {
-                                continue;
+                                return;
                             };
                             let columns = table.column_count();
                             if columns == 0 {
-                                continue;
+                                return;
                             }
                             if let Some(cell) = table.cell_mut(
                                 cell_index / columns,
@@ -5257,7 +5213,7 @@ impl OpenCADStudio {
                                     CellStateFlags::FORMAT_LOCKED
                                         | CellStateFlags::FORMAT_READ_ONLY,
                                 ) {
-                                    continue;
+                                    return;
                                 }
                                 let style = cell.style.get_or_insert_with(Default::default);
                                 if field == "tbl_cell_content_color" {
@@ -5274,20 +5230,16 @@ impl OpenCADStudio {
                                 }
                             }
                             table.block_record_handle = None;
-                        }
-                        self.invalidate_property_targets(i, &handles);
+                        });
                         self.tabs[i].properties.open_color_field = None;
-                        self.tabs[i].dirty = true;
-                        self.refresh_properties();
                     }
                     return Task::none();
                 }
                 if !handles.is_empty() {
-                    self.push_undo_snapshot(i, "CHPROP");
                     let idx = if field == "gradient_color_2" { 1 } else { 0 };
-                    for &handle in &handles {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                         if let Some(acadrust::EntityType::Hatch(h)) =
-                            self.tabs[i].scene.document.get_entity_mut(handle)
+                            app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             while h.gradient_color.colors.len() <= idx {
                                 let value = if h.gradient_color.colors.is_empty() {
@@ -5304,14 +5256,11 @@ impl OpenCADStudio {
                             }
                             h.gradient_color.colors[idx].color = color.clone();
                         }
-                    }
+                    });
                     // Rebuild hatch seeds so the gradient fill picks up the new
                     // colour (synced_hatch_models only patches the main colour).
                     self.tabs[i].scene.populate_hatches_from_document();
-                    self.invalidate_property_targets(i, &handles);
                     self.tabs[i].properties.open_color_field = None;
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
                 }
                 Task::none()
             }

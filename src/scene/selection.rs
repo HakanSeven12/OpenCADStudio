@@ -568,7 +568,8 @@ impl Scene {
                                 PropValue::AttrText { .. } => QSelectValueEditor::Text,
                                 PropValue::Stepper { .. }
                                 | PropValue::ColorVaries
-                                | PropValue::LwVaries => continue,
+                                | PropValue::LwVaries
+                                | PropValue::FieldLwVaries { .. } => continue,
                             }
                         };
                         out.push(choice(prop.field, prop.label, editor));
@@ -706,7 +707,9 @@ impl Scene {
                     PropValue::BoolToggle { value, .. } => value.to_string(),
                     PropValue::AttrText { value, .. } => value,
                     PropValue::Stepper { display, .. } => display,
-                    PropValue::ColorVaries | PropValue::LwVaries => return None,
+                    PropValue::ColorVaries
+                    | PropValue::LwVaries
+                    | PropValue::FieldLwVaries { .. } => return None,
                 })
             }
         }

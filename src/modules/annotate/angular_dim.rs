@@ -234,6 +234,8 @@ impl AngularDimensionCommand {
         CmdResult::CommitDimension {
             entity,
             association: DimensionAssociationInput::Explicit(self.source_refs.clone()),
+            preserve_base_style: false,
+            continue_command: false,
         }
     }
 

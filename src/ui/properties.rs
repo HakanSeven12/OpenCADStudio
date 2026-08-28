@@ -31,6 +31,7 @@ const PATTERN_PREVIEW_H: f32 = 58.0;
 const PATTERN_PICKER_W: f32 = 348.0;
 const PATTERN_PICKER_H: f32 = 720.0;
 const LINETYPE_MENU_W: f32 = 220.0;
+const PROPERTIES_SCROLLBAR_GUTTER: f32 = 16.0;
 
 use crate::app::Message;
 use crate::scene::model::object::{PropSection, PropValue};
@@ -620,7 +621,13 @@ impl PropertiesPanel {
             for section in &self.sections {
                 col = col.push(self.render_section(section));
             }
-            scrollable(col).into()
+            let gutter = Padding {
+                right: PROPERTIES_SCROLLBAR_GUTTER,
+                ..Padding::ZERO
+            };
+            scrollable(container(col.width(Length::Fill)).padding(gutter))
+                .width(Length::Fill)
+                .into()
         };
 
         container(column![header, title_bar, content])
@@ -673,7 +680,15 @@ impl PropertiesPanel {
             sections = sections.push(self.render_section(section));
         }
 
-        let content = scrollable(sections).height(Length::Shrink);
+        let gutter = Padding {
+            right: PROPERTIES_SCROLLBAR_GUTTER,
+            ..Padding::ZERO
+        };
+        let content = scrollable(
+            container(sections.width(Length::Fill)).padding(gutter),
+        )
+        .width(Length::Fill)
+        .height(Length::Shrink);
 
         Some(
             container(column![title, content].spacing(0))
@@ -763,6 +778,12 @@ impl PropertiesPanel {
             PropValue::ColorVaries => self.render_color_varies_row(label),
             PropValue::LayerChoice(layer) => self.render_layer_row(label, layer),
             PropValue::LwChoice(lw) => self.render_lw_row(label, *lw),
+            PropValue::FieldLwChoice { field, value } => {
+                self.render_field_lw_row(label, field, *value)
+            }
+            PropValue::FieldLwVaries { field } => {
+                self.render_field_lw_varies_row(label, field)
+            }
             PropValue::LwVaries => self.render_lw_varies_row(label),
             PropValue::LinetypeChoice(lt) => self.render_linetype_row(label, lt),
             PropValue::Choice { selected, options } => {
@@ -861,6 +882,10 @@ impl PropertiesPanel {
                 | "dim_ext_line_color"
                 | "dim_text_color"
                 | "dim_text_fill_color"
+                | "line_color"
+                | "text_color"
+                | "block_content_color"
+                | "background_fill_color"
         ) {
             let open = self.open_color_field.as_deref() == Some(field);
             let fsel = field.to_string();
@@ -871,7 +896,9 @@ impl PropertiesPanel {
                     background: true,
                     ..Default::default()
                 }
-            } else if field.starts_with("dim_") {
+            } else if field.starts_with("dim_")
+                || matches!(field, "line_color" | "text_color" | "block_content_color")
+            {
                 crate::ui::color_select::ColorExtras {
                     by_layer: true,
                     by_block: true,
@@ -998,12 +1025,70 @@ impl PropertiesPanel {
         prop_row_widget(label, combo.into())
     }
 
+    fn render_field_lw_row<'a>(
+        &'a self,
+        label: &'a str,
+        field: &'static str,
+        lw: LineWeight,
+    ) -> Element<'a, Message> {
+        let selected = LwItem(lw);
+        let combo = combo_box(
+            &self.lineweight_combo,
+            "",
+            Some(&selected),
+            move |item: LwItem| Message::PropFieldLwChanged {
+                field,
+                value: item.0,
+            },
+        )
+        .size(FONT_SZ)
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 6.0,
+            right: 6.0,
+        })
+        .input_style(combo_input_style)
+        .on_open(Message::PropColorPickerClose)
+        .width(Length::Fill);
+
+        prop_row_widget(label, combo.into())
+    }
+
     fn render_lw_varies_row<'a>(&'a self, label: &'a str) -> Element<'a, Message> {
         let combo = combo_box(
             &self.lineweight_combo,
             VARIES_LABEL,
             None,
             |item: LwItem| Message::PropLwChanged(item.0),
+        )
+        .size(FONT_SZ)
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 6.0,
+            right: 6.0,
+        })
+        .input_style(combo_input_style)
+        .on_open(Message::PropColorPickerClose)
+        .width(Length::Fill);
+
+        prop_row_widget(label, combo.into())
+    }
+
+    fn render_field_lw_varies_row<'a>(
+        &'a self,
+        label: &'a str,
+        field: &'static str,
+    ) -> Element<'a, Message> {
+        let combo = combo_box(
+            &self.lineweight_combo,
+            VARIES_LABEL,
+            None,
+            move |item: LwItem| Message::PropFieldLwChanged {
+                field,
+                value: item.0,
+            },
         )
         .size(FONT_SZ)
         .padding(Padding {
@@ -1701,6 +1786,9 @@ fn coord_suffix(label: &str) -> Option<(&str, usize)> {
 /// Length of the coordinate group starting at `idx`: consecutive text rows
 /// labelled "<Base> X", "<Base> Y" and optionally "<Base> Z". 0/1 = no group.
 fn coord_group_len(props: &[crate::scene::model::object::Property], idx: usize) -> usize {
+    if props[idx].field == "pl3_vertex_x" {
+        return 0;
+    }
     let groupable = |p: &crate::scene::model::object::Property| {
         matches!(
             p.value,

@@ -17,7 +17,7 @@ enum Step {
     Vertices,
 }
 
-/// Creates a legacy M by N polygon mesh from row-major 3D vertex input.
+/// Creates an M by N polygon mesh from row-major 3D input.
 pub struct Mesh3dCommand {
     step: Step,
     m: usize,
@@ -157,6 +157,9 @@ impl CadCommand for Mesh3dCommand {
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         if self.step != Step::Vertices {
+            return CmdResult::NeedPoint;
+        }
+        if !point.is_finite() {
             return CmdResult::NeedPoint;
         }
         self.points.push(point);

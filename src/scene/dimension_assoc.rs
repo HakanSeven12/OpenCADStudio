@@ -408,12 +408,23 @@ fn resolve_reference(scene: &Scene, reference: &AssocDimensionReference) -> Opti
         .copied()
 }
 
-fn dimension_inference_points(dimension: &Dimension) -> Option<[Option<Vector3>; 2]> {
+fn dimension_inference_points(dimension: &Dimension) -> Vec<Option<Vector3>> {
     match dimension {
-        Dimension::Linear(linear) => Some([Some(linear.first_point), Some(linear.second_point)]),
-        Dimension::Aligned(aligned) => Some([Some(aligned.first_point), Some(aligned.second_point)]),
-        Dimension::Ordinate(ordinate) => Some([Some(ordinate.feature_location), None]),
-        _ => None,
+        Dimension::Linear(linear) => vec![Some(linear.first_point), Some(linear.second_point)],
+        Dimension::Aligned(aligned) => vec![Some(aligned.first_point), Some(aligned.second_point)],
+        Dimension::Angular3Pt(angular) => vec![
+            Some(angular.angle_vertex),
+            Some(angular.first_point),
+            Some(angular.second_point),
+        ],
+        Dimension::Angular2Ln(angular) => vec![
+            Some(angular.first_point),
+            Some(angular.second_point),
+            Some(angular.angle_vertex),
+            Some(angular.definition_point),
+        ],
+        Dimension::Ordinate(ordinate) => vec![Some(ordinate.feature_location)],
+        _ => Vec::new(),
     }
 }
 
@@ -800,10 +811,10 @@ impl Scene {
     pub(crate) fn infer_dimension_sources(
         &self,
         dimension: Handle,
-    ) -> [Option<Handle>; 2] {
+    ) -> Vec<Option<Handle>> {
         let Some(EntityType::Dimension(entity)) = self.document.get_entity(dimension)
         else {
-            return [None, None];
+            return Vec::new();
         };
         let radial_data = match entity {
             Dimension::Radius(radius) => Some((
@@ -845,23 +856,25 @@ impl Scene {
                 })
                 .min_by(|first, second| first.0.total_cmp(&second.0))
                 .map(|(_, handle)| handle);
-            return [source, None];
+            return vec![source];
         }
-        let Some(points) = dimension_inference_points(entity) else {
-            return [None, None];
-        };
-        points.map(|point| {
-            point.and_then(|point| self.document
-                .entities()
-                .filter(|entity| entity.common().handle != dimension)
-                .filter_map(|entity| {
-                    source_distance_squared(entity, point)
-                        .map(|distance| (distance, entity.common().handle))
+        dimension_inference_points(entity)
+            .into_iter()
+            .map(|point| {
+                point.and_then(|point| {
+                    self.document
+                        .entities()
+                        .filter(|entity| entity.common().handle != dimension)
+                        .filter_map(|entity| {
+                            source_distance_squared(entity, point)
+                                .map(|distance| (distance, entity.common().handle))
+                        })
+                        .filter(|(distance, _)| *distance <= 1e-16)
+                        .min_by(|first, second| first.0.total_cmp(&second.0))
+                        .map(|(_, handle)| handle)
                 })
-                .filter(|(distance, _)| *distance <= 1e-16)
-                .min_by(|first, second| first.0.total_cmp(&second.0))
-                .map(|(_, handle)| handle))
-        })
+            })
+            .collect()
     }
 
     pub(crate) fn refresh_associative_dimensions(
@@ -970,7 +983,7 @@ impl Scene {
                     if let Some(point) = resolved[3] {
                         angular.definition_point = point;
                     }
-                    angular.base.definition_point = angular.definition_point;
+                    angular.base.definition_point = angular.dimension_arc;
                 }
                 Dimension::Radius(radius) => {
                     let Some((radial, angle)) = radial_source else {
@@ -1137,9 +1150,21 @@ impl Scene {
                     arc.base.actual_measurement = arc.measurement();
                 }
             }
-            dimension.base_mut().actual_measurement = dimension.measurement();
+            let measurement = match &*dimension {
+                Dimension::Linear(linear) => linear_measurement(linear),
+                _ => dimension.measurement(),
+            };
+            dimension.base_mut().actual_measurement = measurement;
             refreshed.push((association.dimension, ChangeKind::Modified));
         }
         refreshed
     }
+}
+
+fn linear_measurement(linear: &acadrust::entities::DimensionLinear) -> f64 {
+    let plane = plane_from_normal(linear.first_point, linear.base.normal);
+    let first = plane.project(dpoint(linear.first_point)).unwrap_or([0.0; 2]);
+    let second = plane.project(dpoint(linear.second_point)).unwrap_or(first);
+    let axis = [linear.rotation.cos(), linear.rotation.sin()];
+    ((second[0] - first[0]) * axis[0] + (second[1] - first[1]) * axis[1]).abs()
 }

@@ -1248,6 +1248,28 @@ pub enum CmdResult {
     CommitDimension {
         entity: EntityType,
         association: DimensionAssociationInput,
+        /// Retain the source dimension's layer and style instead of replacing
+        /// them with the current creation defaults (DIMCONTINUEMODE=1).
+        preserve_base_style: bool,
+        /// Keep collecting points after the dimension is committed.
+        continue_command: bool,
+    },
+    /// Commit several dimensions with independent association sources in one
+    /// undo step, then end the command.
+    CommitDimensionsAndExit(Vec<(EntityType, DimensionAssociationInput)>),
+    /// Persist the quick-dimension extension-origin priority while keeping the
+    /// active command at its current prompt (0 = endpoints, 1 = intersections).
+    SetQuickDimensionSnapPriority(u8),
+    /// Align multileader content points along a picked infinite line.
+    AlignMLeaders {
+        handles: Vec<Handle>,
+        from: DVec3,
+        to: DVec3,
+    },
+    /// Merge compatible block multileaders at a picked content point.
+    CollectMLeaders {
+        handles: Vec<Handle>,
+        point: DVec3,
     },
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded
@@ -1929,6 +1951,9 @@ pub trait CadCommand: Send {
     /// `old` is the erased handle; `new_handles` are the handles assigned to the replacement entities.
     /// Commands that stay active across replaces should update their internal snapshots here.
     fn on_entity_replaced(&mut self, _old: Handle, _new_handles: &[Handle]) {}
+
+    /// Called after a PEDIT operation changed its target.
+    fn on_pedit_applied(&mut self) {}
 
     /// Consume a lasso or drag-box gesture while the command is active.
     /// `fence` is the gesture boundary in drawing coordinates; `window` is

@@ -1561,6 +1561,48 @@ impl OpenCADStudio {
                     self.command_line.push_info(&prompt);
                 }
             }
+            CmdResult::AlignMLeaders {
+                mut handles,
+                from,
+                to,
+            } => {
+                handles.retain(|handle| {
+                    !self.tabs[i].scene.is_layer_locked(*handle)
+                        && matches!(
+                            self.tabs[i].scene.document.get_entity(*handle),
+                            Some(acadrust::EntityType::MultiLeader(_))
+                        )
+                });
+                if !handles.is_empty() {
+                    self.push_undo_snapshot(i, "MLEADERALIGN");
+                    if apply_mleader_align(&mut self.tabs[i].scene, &handles, from, to) {
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            crate::t!("MLEADERALIGN  Leaders aligned.").as_ref(),
+                        );
+                    }
+                }
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+            }
+            CmdResult::CollectMLeaders { handles, point } => {
+                let compatible = compatible_mleader_collect_handles(&self.tabs[i].scene, &handles);
+                if compatible.len() >= 2 {
+                    self.push_undo_snapshot(i, "MLEADERCOLLECT");
+                    if apply_mleader_collect(&mut self.tabs[i].scene, &compatible, point) {
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            crate::t!("MLEADERCOLLECT  Leaders collected.").as_ref(),
+                        );
+                    }
+                }
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+            }
             CmdResult::CommitSolid {
                 entity,
                 solid,
@@ -2016,30 +2058,6 @@ impl OpenCADStudio {
                             // Report honestly rather than faking success. (DIM-019)
                             self.command_line
                                 .push_info(crate::t!("DIMJOGLINE: not yet implemented — nothing changed.").as_ref());
-                            self.tabs[i].active_cmd = None;
-                            self.tabs[i].snap_result = None;
-                            return Task::none();
-                        }
-                        if layer.starts_with("__MLEADERALIGN__") {
-                            if let Some(encoded) = layer.strip_prefix("__MLEADERALIGN__") {
-                                apply_mleader_align(&mut self.tabs[i].scene, encoded);
-                            }
-                            self.push_undo_snapshot(i, "MLEADERALIGN");
-                            self.command_line
-                                .push_output(crate::t!("MLEADERALIGN  Leaders aligned.").as_ref());
-                            self.tabs[i].dirty = true;
-                            self.tabs[i].active_cmd = None;
-                            self.tabs[i].snap_result = None;
-                            return Task::none();
-                        }
-                        if layer.starts_with("__MLEADERCOLLECT__") {
-                            if let Some(encoded) = layer.strip_prefix("__MLEADERCOLLECT__") {
-                                apply_mleader_collect(&mut self.tabs[i].scene, encoded);
-                            }
-                            self.push_undo_snapshot(i, "MLEADERCOLLECT");
-                            self.command_line
-                                .push_output(crate::t!("MLEADERCOLLECT  Leaders collected.").as_ref());
-                            self.tabs[i].dirty = true;
                             self.tabs[i].active_cmd = None;
                             self.tabs[i].snap_result = None;
                             return Task::none();
@@ -4598,92 +4616,154 @@ fn apply_dimspace(scene: &mut crate::scene::Scene, encoded: &str) {
     }
 }
 
-// ── MLEADERALIGN helper ───────────────────────────────────────────────────────
+fn apply_mleader_align(
+    scene: &mut crate::scene::Scene,
+    handles: &[acadrust::Handle],
+    from: glam::DVec3,
+    to: glam::DVec3,
+) -> bool {
+    use cadkernel::geom2d::{closest_point, Curve, Vec2, XLine};
 
-/// Parse `h1,h2,...;fx,fz;tx,tz` and align multileader content points along the direction.
-fn apply_mleader_align(scene: &mut crate::scene::Scene, encoded: &str) {
-    // Format: "<h1>,<h2>,...;<fx>,<fz>;<tx>,<tz>"
-    let parts: Vec<&str> = encoded.splitn(3, ';').collect();
-    if parts.len() < 3 {
-        return;
-    }
-    let handles: Vec<acadrust::Handle> = parts[0]
-        .split(',')
-        .filter_map(|s| s.parse::<u64>().ok().map(acadrust::Handle::from))
-        .collect();
-    let from_parts: Vec<f64> = parts[1].split(',').filter_map(|s| s.parse().ok()).collect();
-    let to_parts: Vec<f64> = parts[2].split(',').filter_map(|s| s.parse().ok()).collect();
-    if from_parts.len() < 2 || to_parts.len() < 2 || handles.is_empty() {
-        return;
-    }
-
-    let fx = from_parts[0];
-    let fz = from_parts[1];
-    let tx = to_parts[0];
-    let tz = to_parts[1];
-    let dx = tx - fx;
-    let dz = tz - fz;
-    let len = (dx * dx + dz * dz).sqrt();
-    if len < 1e-9 {
-        return;
-    }
-
-    // Project each multileader's content point onto the alignment line, then
-    // snap it to the line (preserve perpendicular offset from line is discarded;
-    // align along direction through `from`).
-    for h in handles {
-        if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(h) {
-            let cp = &mut ml.context.content_base_point;
-            // Project onto line from_pt + t * dir: keep t component, set perpendicular = 0
-            let rel_x = cp.x - fx;
-            let rel_z = cp.z - fz;
-            let t = (rel_x * (dx / len) + rel_z * (dz / len)) / len;
-            let t = t.clamp(0.0, 1.0);
-            cp.x = fx + t * dx;
-            cp.z = fz + t * dz;
+    let Some(direction) = Vec2::new(to.x - from.x, to.y - from.y).normalize() else {
+        return false;
+    };
+    let line = Curve::XLine(XLine {
+        base: [from.x, from.y],
+        direction: direction.into(),
+    });
+    let mut changed = Vec::new();
+    for &handle in handles {
+        if let Some(acadrust::EntityType::MultiLeader(ml)) =
+            scene.document.get_entity_mut(handle)
+        {
+            let old = ml.context.content_base_point;
+            let projected = closest_point(&line, [old.x, old.y]).point;
+            let new_x = projected[0];
+            let new_y = projected[1];
+            let shift_x = new_x - old.x;
+            let shift_y = new_y - old.y;
+            if shift_x.abs() <= 1.0e-12 && shift_y.abs() <= 1.0e-12 {
+                continue;
+            }
+            ml.context.content_base_point.x = new_x;
+            ml.context.content_base_point.y = new_y;
+            ml.context.text_location.x += shift_x;
+            ml.context.text_location.y += shift_y;
+            ml.context.block_content_location.x += shift_x;
+            ml.context.block_content_location.y += shift_y;
+            for root in &mut ml.context.leader_roots {
+                root.connection_point.x += shift_x;
+                root.connection_point.y += shift_y;
+            }
+            changed.push((handle, crate::scene::ChangeKind::Modified));
         }
     }
+    if !changed.is_empty() {
+        scene.bump_entities(&changed);
+    }
+    !changed.is_empty()
 }
 
-// ── MLEADERCOLLECT helper ─────────────────────────────────────────────────────
-
-/// Parse `h1,h2,...;px,pz` — merge all selected multileaders into the first one at position.
-fn apply_mleader_collect(scene: &mut crate::scene::Scene, encoded: &str) {
-    let parts: Vec<&str> = encoded.splitn(2, ';').collect();
-    if parts.len() < 2 {
-        return;
-    }
-    let handles: Vec<acadrust::Handle> = parts[0]
-        .split(',')
-        .filter_map(|s| s.parse::<u64>().ok().map(acadrust::Handle::from))
-        .collect();
-    let pos_parts: Vec<f64> = parts[1].split(',').filter_map(|s| s.parse().ok()).collect();
-    if handles.len() < 2 || pos_parts.len() < 2 {
-        return;
-    }
-
-    let px = pos_parts[0];
-    let pz = pos_parts[1];
-
-    // Collect all leader roots from the secondary multileaders.
-    let mut extra_roots: Vec<acadrust::entities::LeaderRoot> = Vec::new();
-    for &h in &handles[1..] {
-        if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity(h) {
-            extra_roots.extend(ml.context.leader_roots.iter().cloned());
+fn compatible_mleader_collect_handles(
+    scene: &crate::scene::Scene,
+    handles: &[acadrust::Handle],
+) -> Vec<acadrust::Handle> {
+    let Some((base_block, base_style)) = handles.iter().find_map(|handle| {
+        if scene.is_layer_locked(*handle) {
+            return None;
+        }
+        let acadrust::EntityType::MultiLeader(leader) =
+            scene.document.get_entity(*handle)?
+        else {
+            return None;
+        };
+        (leader.content_type == acadrust::entities::LeaderContentType::Block)
+            .then_some((leader.block_content_handle, leader.style_handle))
+    }) else {
+        return Vec::new();
+    };
+    let mut compatible = Vec::new();
+    for handle in handles.iter().copied() {
+        if compatible.contains(&handle) {
+            continue;
+        }
+        if !scene.is_layer_locked(handle)
+            && matches!(
+                scene.document.get_entity(handle),
+                Some(acadrust::EntityType::MultiLeader(leader))
+                    if leader.content_type == acadrust::entities::LeaderContentType::Block
+                        && leader.block_content_handle == base_block
+                        && leader.style_handle == base_style
+            )
+        {
+            compatible.push(handle);
         }
     }
+    compatible
+}
 
-    // Add collected roots to the first multileader and move its content point.
+fn apply_mleader_collect(
+    scene: &mut crate::scene::Scene,
+    handles: &[acadrust::Handle],
+    point: glam::DVec3,
+) -> bool {
+    if handles.len() < 2 {
+        return false;
+    }
+    let px = point.x;
+    let py = point.y;
+    let Some(acadrust::EntityType::MultiLeader(base)) =
+        scene.document.get_entity(handles[0])
+    else {
+        return false;
+    };
+    let base_block = base.block_content_handle;
+    let base_style = base.style_handle;
+
+    let mut extra_roots: Vec<acadrust::entities::LeaderRoot> = Vec::new();
+    let mut merged_handles = Vec::new();
+    for &h in &handles[1..] {
+        if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity(h) {
+            if ml.content_type == acadrust::entities::LeaderContentType::Block
+                && ml.block_content_handle == base_block
+                && ml.style_handle == base_style
+            {
+                let shift_x = px - ml.context.content_base_point.x;
+                let shift_y = py - ml.context.content_base_point.y;
+                extra_roots.extend(ml.context.leader_roots.iter().cloned().map(|mut root| {
+                    root.connection_point.x += shift_x;
+                    root.connection_point.y += shift_y;
+                    root
+                }));
+                merged_handles.push(h);
+            }
+        }
+    }
+    if merged_handles.is_empty() {
+        return false;
+    }
+
     if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handles[0]) {
+        let shift_x = px - ml.context.content_base_point.x;
+        let shift_y = py - ml.context.content_base_point.y;
+        for root in &mut ml.context.leader_roots {
+            root.connection_point.x += shift_x;
+            root.connection_point.y += shift_y;
+        }
         ml.context.content_base_point.x = px;
-        ml.context.content_base_point.z = pz;
+        ml.context.content_base_point.y = py;
+        ml.context.block_content_location.x = px;
+        ml.context.block_content_location.y = py;
+        ml.context.text_location.x = px;
+        ml.context.text_location.y = py;
         for root in extra_roots {
             ml.context.leader_roots.push(root);
         }
     }
 
-    // Erase the secondary multileaders.
-    scene.erase_entities(&handles[1..]);
+    scene.erase_entities(&merged_handles);
+    scene.bump_entities(&[(handles[0], crate::scene::ChangeKind::Modified)]);
+    true
 }
 
 /// MATCHPROP special properties (#281): copy every STYLE-affecting field from

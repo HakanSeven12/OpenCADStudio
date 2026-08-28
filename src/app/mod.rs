@@ -2402,6 +2402,11 @@ pub enum Message {
     PropColorChanged(AcadColor),
     /// User selected a lineweight from the Properties pick_list.
     PropLwChanged(LineWeight),
+    /// User selected an object-specific lineweight override.
+    PropFieldLwChanged {
+        field: &'static str,
+        value: LineWeight,
+    },
     /// User selected a linetype from the linetype pick_list.
     PropLinetypeChanged(String),
     /// User toggled a boolean property (e.g. Invisible).

@@ -1260,6 +1260,17 @@ pub enum CmdResult {
     /// Persist the quick-dimension extension-origin priority while keeping the
     /// active command at its current prompt (0 = endpoints, 1 = intersections).
     SetQuickDimensionSnapPriority(u8),
+    /// Align multileader content points along a picked infinite line.
+    AlignMLeaders {
+        handles: Vec<Handle>,
+        from: DVec3,
+        to: DVec3,
+    },
+    /// Merge compatible block multileaders at a picked content point.
+    CollectMLeaders {
+        handles: Vec<Handle>,
+        point: DVec3,
+    },
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded
     /// rendering). Ends the command.

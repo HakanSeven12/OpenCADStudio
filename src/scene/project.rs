@@ -250,7 +250,7 @@ impl Scene {
                 let source_length = stationed.then(|| wire.pattern_stations[wire.points.len()]);
                 let (clipped, mut clipped_stations) = clip_polyline_to_rect(
                     &projected_pts,
-                    stationed.then_some(&wire.pattern_stations[..wire.points.len()]),
+                    stationed.then(|| &wire.pattern_stations[..wire.points.len()]),
                     vp_x0,
                     vp_y0,
                     vp_x1,

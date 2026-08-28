@@ -646,36 +646,47 @@ impl OpenCADStudio {
 
             "DIMCONTINUE" => {
                 use crate::modules::annotate::dim_continue::DimContinueCommand;
-                let cmd = if let Some((p1, p2, dp, rot, trot)) =
-                    find_last_linear_dim(&self.tabs[i].scene)
-                {
-                    DimContinueCommand::from_base(p1, p2, dp, rot, trot)
-                } else {
-                    DimContinueCommand::new()
-                };
+                let scene = &self.tabs[i].scene;
+                let recent = scene
+                    .last_created_dimension
+                    .filter(|handle| scene.entity_belongs_to_active_space(*handle))
+                    .and_then(|handle| scene.document.get_entity(handle))
+                    .cloned();
+                let cmd = DimContinueCommand::new(
+                    recent,
+                    self.dimension_continue_mode == 1,
+                );
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
             "DIMBASELINE" => {
                 use crate::modules::annotate::dim_baseline::DimBaselineCommand;
-                let cmd = if let Some((p1, p2, dp, rot, trot)) =
-                    find_last_linear_dim(&self.tabs[i].scene)
-                {
-                    let doc = &self.tabs[i].scene.document;
-                    let dimdli = doc
-                        .dim_styles
-                        .iter()
-                        .find(|s| {
-                            s.name
-                                .eq_ignore_ascii_case(&doc.header.current_dimstyle_name)
-                        })
-                        .map(|s| s.dimdli as f32)
-                        .unwrap_or(1.5);
-                    DimBaselineCommand::from_base(p1, p2, dp, rot, trot, dimdli)
+                let scene = &self.tabs[i].scene;
+                let recent = scene
+                    .last_created_dimension
+                    .filter(|handle| scene.entity_belongs_to_active_space(*handle))
+                    .and_then(|handle| scene.document.get_entity(handle))
+                    .cloned();
+                let dimdli_by_style = scene
+                    .document
+                    .dim_styles
+                    .iter()
+                    .map(|style| (style.name.to_ascii_lowercase(), style.dimdli))
+                    .collect();
+                let fallback_dimdli = if scene.document.header.measurement == 1 {
+                    3.75
                 } else {
-                    DimBaselineCommand::new()
+                    0.38
                 };
+                let current_style_name = scene.document.header.current_dimstyle_name.clone();
+                let cmd = DimBaselineCommand::new(
+                    recent,
+                    dimdli_by_style,
+                    current_style_name,
+                    fallback_dimdli,
+                    self.dimension_continue_mode == 1,
+                );
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
@@ -692,7 +703,13 @@ impl OpenCADStudio {
                             .eq_ignore_ascii_case(&document.header.current_dimstyle_name)
                     })
                     .map(|style| style.dimdli)
-                    .unwrap_or(1.5);
+                    .unwrap_or_else(|| {
+                        if document.header.measurement == 1 {
+                            3.75
+                        } else {
+                            0.38
+                        }
+                    });
                 let selection = self.tabs[i]
                     .scene
                     .selected_entities()
@@ -1306,72 +1323,6 @@ impl OpenCADStudio {
         }
         Some(self.finish_dispatch(cmd))
     }
-}
-
-/// Find the last placed linear or aligned dimension in the document.
-/// Returns `(first_point, second_point, definition_point, rotation_rad)` in world-space.
-fn find_last_linear_dim(
-    scene: &crate::scene::Scene,
-) -> Option<(glam::Vec3, glam::Vec3, glam::Vec3, f64, f64)> {
-    use acadrust::entities::Dimension;
-    let mut best_handle: u64 = 0;
-    let mut result: Option<(glam::Vec3, glam::Vec3, glam::Vec3, f64, f64)> = None;
-
-    for entity in scene.document.entities() {
-        if let acadrust::EntityType::Dimension(dim) = entity {
-            let h = entity.common().handle.value();
-            if h <= best_handle {
-                continue;
-            }
-            let item = match dim {
-                Dimension::Linear(d) => {
-                    let p1 = glam::Vec3::new(
-                        d.first_point.x as f32,
-                        d.first_point.y as f32,
-                        d.first_point.z as f32,
-                    );
-                    let p2 = glam::Vec3::new(
-                        d.second_point.x as f32,
-                        d.second_point.y as f32,
-                        d.second_point.z as f32,
-                    );
-                    let dp = glam::Vec3::new(
-                        d.base.definition_point.x as f32,
-                        d.base.definition_point.y as f32,
-                        d.base.definition_point.z as f32,
-                    );
-                    Some((p1, p2, dp, d.rotation, d.base.text_rotation))
-                }
-                Dimension::Aligned(d) => {
-                    let p1 = glam::Vec3::new(
-                        d.first_point.x as f32,
-                        d.first_point.y as f32,
-                        d.first_point.z as f32,
-                    );
-                    let p2 = glam::Vec3::new(
-                        d.second_point.x as f32,
-                        d.second_point.y as f32,
-                        d.second_point.z as f32,
-                    );
-                    let dp = glam::Vec3::new(
-                        d.base.definition_point.x as f32,
-                        d.base.definition_point.y as f32,
-                        d.base.definition_point.z as f32,
-                    );
-                    let dx = (d.second_point.x - d.first_point.x) as f32;
-                    let dy = (d.second_point.y - d.first_point.y) as f32;
-                    let rot = dy.atan2(dx) as f64;
-                    Some((p1, p2, dp, rot, d.base.text_rotation))
-                }
-                _ => None,
-            };
-            if let Some(data) = item {
-                best_handle = h;
-                result = Some(data);
-            }
-        }
-    }
-    result
 }
 
 // ── TCASE helpers ──────────────────────────────────────────────────────────

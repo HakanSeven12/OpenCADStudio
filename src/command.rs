@@ -1248,6 +1248,11 @@ pub enum CmdResult {
     CommitDimension {
         entity: EntityType,
         association: DimensionAssociationInput,
+        /// Retain the source dimension's layer and style instead of replacing
+        /// them with the current creation defaults (DIMCONTINUEMODE=1).
+        preserve_base_style: bool,
+        /// Keep collecting points after the dimension is committed.
+        continue_command: bool,
     },
     /// Commit several dimensions with independent association sources in one
     /// undo step, then end the command.

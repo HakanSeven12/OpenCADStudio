@@ -85,10 +85,8 @@ impl QdimCommand {
                     for crossing in intersect(&curves[first].curve, &curves[second].curve, Tolerance::default()) {
                         hits.push(Candidate {
                             point: DVec3::new(crossing.point[0], crossing.point[1], 0.0),
-                            // An intersection depends on two source curves. The
-                            // current association record stores one source per
-                            // extension origin, so do not bind it to an
-                            // unrelated endpoint marker.
+                            // Intersections depend on two curves, but each
+                            // extension origin stores one source.
                             sources: Vec::new(),
                         });
                     }
@@ -180,8 +178,11 @@ impl QdimCommand {
                 let datum = self.datum.unwrap_or(points[0].point);
                 let datum_candidate = Candidate {
                     point: datum,
-                    sources: points.iter().min_by(|first, second| first.point.distance(datum).total_cmp(&second.point.distance(datum)))
-                        .map(|point| point.sources.clone()).unwrap_or_default(),
+                    sources: points
+                        .iter()
+                        .find(|point| point.point.distance(datum) <= tolerance)
+                        .map(|point| point.sources.clone())
+                        .unwrap_or_default(),
                 };
                 points.iter().filter(|point| point.point.distance(datum) > tolerance)
                     .map(|point| self.linear_dimension(&datum_candidate, point, place, horizontal)).collect()
@@ -347,13 +348,16 @@ impl CadCommand for QdimCommand {
         if self.step == Step::Edit {
             let size = self.dim_spacing * 0.12;
             return self.candidates().into_iter().enumerate().flat_map(|(index, candidate)| {
-                let point = self.plane.to_world(candidate.point);
+                let x_start = self.plane.to_world(candidate.point - DVec3::X * size);
+                let x_end = self.plane.to_world(candidate.point + DVec3::X * size);
+                let y_start = self.plane.to_world(candidate.point - DVec3::Y * size);
+                let y_end = self.plane.to_world(candidate.point + DVec3::Y * size);
                 [
                     WireModel::solid_f64(format!("qdim_edit_{index}_x"), vec![
-                        [point.x - size, point.y, point.z], [point.x + size, point.y, point.z],
+                        x_start.to_array(), x_end.to_array(),
                     ], WireModel::CYAN, false),
                     WireModel::solid_f64(format!("qdim_edit_{index}_y"), vec![
-                        [point.x, point.y - size, point.z], [point.x, point.y + size, point.z],
+                        y_start.to_array(), y_end.to_array(),
                     ], WireModel::CYAN, false),
                 ]
             }).collect();

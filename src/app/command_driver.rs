@@ -856,7 +856,7 @@ impl OpenCADStudio {
                             .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_dimension_association(handle, sources.to_vec());
+                            .attach_dimension_association(handle, sources);
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1269,7 +1269,7 @@ impl OpenCADStudio {
                             .infer_dimension_sources(handle);
                         self.tabs[i]
                             .scene
-                            .attach_dimension_association(handle, sources.to_vec());
+                            .attach_dimension_association(handle, sources);
                     }
                 }
                 self.tabs[i].dirty = true;
@@ -1287,6 +1287,8 @@ impl OpenCADStudio {
             CmdResult::CommitDimension {
                 mut entity,
                 association,
+                preserve_base_style,
+                continue_command,
             } => {
                 let label = self.history_label_from_active_cmd(i, "DIMENSION");
                 let association_mode = self.tabs[i]
@@ -1300,6 +1302,17 @@ impl OpenCADStudio {
                         acadrust::entities::Dimension::Ordinate(_)
                     )
                 );
+                let inherited_dimension = if preserve_base_style {
+                    match &entity {
+                        acadrust::EntityType::Dimension(dimension) => Some((
+                            dimension.base().common.layer.clone(),
+                            dimension.base().style_name.clone(),
+                        )),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 let pending = if association_mode == 0 {
                     let layer = self.tabs[i].active_layer.clone();
                     if layer != "0" || entity.as_entity().layer().is_empty() {
@@ -1330,6 +1343,12 @@ impl OpenCADStudio {
                         &self.tabs[i].scene.document,
                         &mut entity,
                     );
+                    if let (Some((layer, style_name)), acadrust::EntityType::Dimension(dimension)) =
+                        (inherited_dimension, &mut entity)
+                    {
+                        dimension.base_mut().common.layer = layer;
+                        dimension.base_mut().style_name = style_name;
+                    }
                     let pieces = crate::modules::draw::modify::explode::explode_entity(
                         &entity,
                         &self.tabs[i].scene.document,
@@ -1345,7 +1364,10 @@ impl OpenCADStudio {
                 } else {
                     let delta_safe = self.delta_add_safe(i, &entity);
                     let pending = self.begin_undo(i, label, 1, delta_safe);
-                    if let Some(handle) = self.commit_entity_handle(entity) {
+                    if let Some(handle) = self.commit_entity_handle_with_dimension_policy(
+                        entity,
+                        preserve_base_style,
+                    ) {
                         if association_mode == 2 {
                             let mut changes = vec![
                                 (handle, crate::scene::ChangeKind::Modified),
@@ -1357,8 +1379,6 @@ impl OpenCADStudio {
                                             self.tabs[i]
                                                 .scene
                                                 .infer_dimension_sources(handle)
-                                                .into_iter()
-                                                .collect()
                                         },
                                         |source| {
                                             if single_source_dimension {
@@ -1393,11 +1413,21 @@ impl OpenCADStudio {
                 };
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();
-                self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.restore_pre_cmd_tangent();
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
+                }
+                if continue_command {
+                    if let Some(prompt) = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|cmd| cmd.prompt())
+                    {
+                        self.command_line.push_info(&prompt);
+                    }
+                } else {
+                    self.tabs[i].active_cmd = None;
+                    self.restore_pre_cmd_tangent();
                 }
             }
             CmdResult::CommitDimensionsAndExit(dimensions) => {
@@ -1406,7 +1436,7 @@ impl OpenCADStudio {
                     .document
                     .header
                     .dimension_associativity;
-                let made = dimensions.len();
+                let mut made = 0;
                 let pending = if association_mode == 0 {
                     let mut pieces = Vec::new();
                     for (mut entity, _) in dimensions {
@@ -1439,12 +1469,14 @@ impl OpenCADStudio {
                             &self.tabs[i].scene.document,
                             &mut entity,
                         );
-                        pieces.extend(
-                            crate::modules::draw::modify::explode::explode_entity(
-                                &entity,
-                                &self.tabs[i].scene.document,
-                            ),
+                        let exploded = crate::modules::draw::modify::explode::explode_entity(
+                            &entity,
+                            &self.tabs[i].scene.document,
                         );
+                        if !exploded.is_empty() {
+                            made += 1;
+                        }
+                        pieces.extend(exploded);
                     }
                     let delta_safe = pieces
                         .iter()
@@ -1463,6 +1495,7 @@ impl OpenCADStudio {
                         let Some(handle) = self.commit_entity_handle(entity) else {
                             continue;
                         };
+                        made += 1;
                         if association_mode != 2 {
                             continue;
                         }
@@ -1507,7 +1540,9 @@ impl OpenCADStudio {
                     }
                     pending
                 };
-                self.tabs[i].dirty = made > 0;
+                if made > 0 {
+                    self.tabs[i].dirty = true;
+                }
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -2371,11 +2406,10 @@ impl OpenCADStudio {
                     .map(|e| crate::entities::dim_override::pairs(&e.common().extended_data));
 
                 if let Some(common) = src_common {
-                    self.push_undo_snapshot(i, "MATCHPROP");
-                    for h in &dest {
+                    self.apply_property_op(i, "MATCHPROP", &dest, |app, handle| {
                         let mut is_dim = false;
                         let mut is_hatch = false;
-                        if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
+                        if let Some(e) = app.tabs[i].scene.document.get_entity_mut(handle) {
                             e.as_entity_mut().set_layer(common.layer.clone());
                             crate::scene::view::dispatch::apply_color(e, common.color);
                             crate::scene::view::dispatch::apply_line_weight(e, common.line_weight);
@@ -2410,8 +2444,8 @@ impl OpenCADStudio {
                         if is_hatch {
                             if let Some(values) = &hatch_background_xdata {
                                 crate::scene::view::dispatch::set_entity_xdata(
-                                    &mut self.tabs[i].scene.document,
-                                    *h,
+                                    &mut app.tabs[i].scene.document,
+                                    handle,
                                     "HATCHBACKGROUNDCOLOR",
                                     values.clone(),
                                 );
@@ -2422,7 +2456,7 @@ impl OpenCADStudio {
                         // stale raw record survives.
                         if dstyle_xdata.is_some()
                             || matches!(
-                                self.tabs[i].scene.document.get_entity(*h),
+                                app.tabs[i].scene.document.get_entity(handle),
                                 Some(
                                     acadrust::EntityType::Dimension(_)
                                         | acadrust::EntityType::Leader(_)
@@ -2430,7 +2464,7 @@ impl OpenCADStudio {
                             )
                         {
                             if matches!(
-                                self.tabs[i].scene.document.get_entity(*h),
+                                app.tabs[i].scene.document.get_entity(handle),
                                 Some(
                                     acadrust::EntityType::Dimension(_)
                                         | acadrust::EntityType::Leader(_)
@@ -2443,8 +2477,8 @@ impl OpenCADStudio {
                                 )
                             ) {
                                 crate::entities::dim_override::replace(
-                                    &mut self.tabs[i].scene.document,
-                                    *h,
+                                    &mut app.tabs[i].scene.document,
+                                    handle,
                                     dstyle_xdata.clone().unwrap_or_default(),
                                 );
                             }
@@ -2452,12 +2486,11 @@ impl OpenCADStudio {
                         // A restyled dimension renders from its baked *D block —
                         // drop the stale block so the new style shows (#398).
                         if is_dim {
-                            self.tabs[i].scene.invalidate_dim_block_recorded(*h);
+                            app.tabs[i].scene.invalidate_dim_block_recorded(handle);
                         }
                         // Hatch fills render from a prebuilt model (#415).
-                        self.tabs[i].scene.refresh_fill_model(*h);
-                    }
-                    self.tabs[i].dirty = true;
+                        app.tabs[i].scene.refresh_fill_model(handle);
+                    });
                     // Color / linetype / lineweight are baked into the cached
                     // wires at tessellation time; re-tessellate only the matched
                     // objects instead of rebuilding a large drawing.
@@ -2467,7 +2500,6 @@ impl OpenCADStudio {
                         .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                         .collect();
                     self.tabs[i].scene.bump_entities(&changes);
-                    self.refresh_properties();
                     self.command_line
                         .push_info(crate::tf!("Properties matched to {} object(s).", dest.len()).as_ref());
                     // Clear the consumed target selection and keep prompting.

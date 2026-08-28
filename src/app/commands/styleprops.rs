@@ -633,11 +633,20 @@ impl OpenCADStudio {
                                 "CHPROP: invalid value '{}' for {}.",
                                 value, prop
                             ).as_ref());
+                    } else {
+                        let known = matches!(
+                            prop.as_str(),
+                            "LAYER" | "LINETYPE" | "LT" | "LTSCALE" | "COLOR" | "TRANSPARENCY"
+                        );
+                        if !known {
+                            self.command_line.push_error(crate::tf!(
+                                "CHPROP: unknown property '{}'. Use: LAYER COLOR LINETYPE LTSCALE TRANSPARENCY", prop
+                            ).as_ref());
                         } else {
                             let mut changed = 0usize;
-                            for handle in &handles {
+                            self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                                 if let Some(entity) =
-                                    self.tabs[i].scene.document.get_entity_mut(*handle)
+                                    app.tabs[i].scene.document.get_entity_mut(handle)
                                 {
                                     let common = entity.common_mut();
                                     match prop.as_str() {
@@ -661,29 +670,20 @@ impl OpenCADStudio {
                                             common.transparency = transparency_val.unwrap();
                                             changed += 1;
                                         }
-                                        _ => {
-                                            self.command_line.push_error(crate::tf!(
-                                                "CHPROP: unknown property '{}'. Use: LAYER COLOR LINETYPE LTSCALE TRANSPARENCY", prop
-                                            ).as_ref());
-                                            break;
-                                        }
+                                        _ => unreachable!(),
                                     }
                                 }
-                            }
-                            if changed > 0 {
-                                self.push_undo_snapshot(i, "CHPROP");
-                                self.tabs[i].dirty = true;
-                                // Colour / linetype / ltscale / transparency /
-                                // layer are baked into the cached wire geometry —
-                                // re-tessellate the changed entities so they
-                                // repaint immediately (issue #231 class).
-                                self.invalidate_property_targets(i, &handles);
-                                self.command_line.push_output(crate::tf!(
-                                    "CHPROP: {} entity/entities updated.",
-                                    changed
-                                ).as_ref());
-                            }
+                            });
+                            // Colour / linetype / ltscale / transparency /
+                            // layer are baked into the cached wire geometry —
+                            // re-tessellate the changed entities so they
+                            // repaint immediately (issue #231 class).
+                            self.command_line.push_output(crate::tf!(
+                                "CHPROP: {} entity/entities updated.",
+                                changed
+                            ).as_ref());
                         }
+                    }
                     }
                 }
             }
@@ -931,6 +931,7 @@ impl OpenCADStudio {
                     | "CENTERCROSSSIZE"
                     | "CENTERCROSSGAP"
                     | "CENTERMARKEXE"
+                    | "DIMCONTINUEMODE"
             ) =>
             {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
@@ -953,7 +954,7 @@ impl OpenCADStudio {
                 let value = it.next().map(|s| s.trim().to_string());
                 if name.is_empty() || name == "?" {
                     self.command_line.push_info(
-                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES ATTREQ ATTDIA DIMASSOC ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE | CLAYER CELTYPE TEXTSTYLE (read-only)",
+                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE | CLAYER CELTYPE TEXTSTYLE (read-only)",
                     );
                 } else {
                     let frame_kind = crate::scene::frame::kind_for_name(&name);
@@ -1060,6 +1061,28 @@ impl OpenCADStudio {
                                     self.command_line.push_output(&message);
                                 }
                                 Err(error) => self.command_line.push_error(&error),
+                            }
+                        } else {
+                            self.command_line.push_output(crate::tf!(
+                                "Enter new value for {name} <{current}>:"
+                            ).as_ref());
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "DIMCONTINUEMODE" {
+                        let current = self.dimension_continue_mode;
+                        if let Some(value) = &value {
+                            match value.parse::<i16>() {
+                                Ok(mode @ 0..=1) => {
+                                    self.dimension_continue_mode = mode;
+                                    self.persist_settings_if_changed();
+                                    self.command_line
+                                        .push_output(&format!("DIMCONTINUEMODE = {mode}"));
+                                }
+                                _ => self.command_line.push_error(
+                                    "SETVAR: DIMCONTINUEMODE requires 0 or 1.",
+                                ),
                             }
                         } else {
                             self.command_line.push_output(crate::tf!(

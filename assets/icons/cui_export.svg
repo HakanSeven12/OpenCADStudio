@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="4" y="4" width="10" height="13" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="7" y1="8" x2="11" y2="8" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="7" y1="11" x2="11" y2="11" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="17" y1="10" x2="17" y2="19" stroke="#4cc9f0" stroke-width="1.5"/>
-  <polyline points="14,16 17,19 20,16" stroke="#4cc9f0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Cui Export">
+  <rect x="4" y="4" width="12" height="16" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="7" y1="8" x2="13" y2="8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="7" y1="12" x2="13" y2="12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="17" x2="21" y2="17" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="21" y1="17" x2="19.09087686895899" y2="18.28267255000026" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="21" y1="17" x2="19.09087686895899" y2="15.717327449999742" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

@@ -1,9 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <line x1="4" y1="18" x2="12" y2="10" stroke="#4cc9f0" stroke-width="1.4"/>
-  <polygon points="4,18 6,16 4,14 3,17" fill="#4cc9f0"/>
-  <line x1="12" y1="10" x2="20" y2="10" stroke="#4cc9f0" stroke-width="1.4"/>
-  <rect x="14" y="7" width="7" height="5" fill="none" stroke="#e0e0e0" stroke-width="1.0"/>
-  <line x1="8" y1="18" x2="12" y2="14" stroke="#e0e0e0" stroke-width="1.2" stroke-dasharray="2,1"/>
-  <polygon points="8,18 10,16 8,14 7,17" fill="#e0e0e0"/>
-  <line x1="19" y1="16" x2="23" y2="16" stroke="#4cc9f0" stroke-width="1.6"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Mleader Remove">
+  <polyline points="4,18 10,12 18,12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polygon points="3.5,18.5 6.5,17.5 4.5,15.5" stroke="none" fill="#6DB7ED"/>
+  <line x1="14" y1="8" x2="20" y2="8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="14" y1="5" x2="19" y2="5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="16.8" y1="18" x2="21.2" y2="18" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

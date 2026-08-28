@@ -1,7 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="3" y="5" width="8" height="6" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <rect x="13" y="13" width="8" height="6" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="11" y1="8" x2="14" y2="8" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="10" y1="16" x2="13" y2="16" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="14" y1="8" x2="14" y2="16" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="2 2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Data Link">
+  <rect x="4" y="4" width="13" height="14" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="10.5" y1="4" x2="10.5" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="4" y1="11.0" x2="17" y2="11.0" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M15 15 C17 12 20 12 21 14 C22 16 20 18 18 18 H15 M18 15 H11" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

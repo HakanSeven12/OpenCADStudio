@@ -53,12 +53,12 @@
      y1="16.5"
      x2="7.75"
      y2="4.5"
-     stroke="#e0e0e0"
+     stroke="#B4B6B9"
      stroke-width="1.5"
      id="line2" />
   <polyline
      points="1,9 4,6 7,9"
-     stroke="#e0e0e0"
+     stroke="#B4B6B9"
      stroke-width="1.5"
      id="polyline2"
      transform="translate(3.75,-1.5)" />

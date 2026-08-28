@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
   <!-- Start + end (no center), small angle arc at start between tangent & chord -->
-  <path d="M 4 18 A 11 11 0 0 1 20 6" stroke="#e0e0e0" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M 4 18 A 11 11 0 0 1 20 6" stroke="#B4B6B9" stroke-width="2" fill="none" stroke-linecap="round"/>
   <!-- Chord line -->
-  <line x1="4" y1="18" x2="20" y2="6" stroke="#606060" stroke-width="1" stroke-dasharray="2 2"/>
+  <line x1="4" y1="18" x2="20" y2="6" stroke="#B4B6B9" stroke-width="1" stroke-dasharray="2 2"/>
   <!-- Small angle arc at start point (between tangent and chord) -->
   <path d="M 4 14.5 A 3.5 3.5 0 0 1 7.2 16.6" stroke="#4cc9f0" stroke-width="1.3" fill="none"/>
   <circle cx="4"  cy="18" r="2"   fill="#4cc9f0"/>

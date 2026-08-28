@@ -1,10 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="3" y="4" width="7" height="16" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="5" y1="7" x2="8" y2="7" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="5" y1="10" x2="8" y2="10" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="5" y1="13" x2="8" y2="13" stroke="#e0e0e0" stroke-width="1.5"/>
-  <rect x="12" y="4" width="9" height="9" rx="1" stroke="#4cc9f0" stroke-width="1.5" fill="#4cc9f0" fill-opacity="0.15"/>
-  <line x1="14" y1="7" x2="19" y2="7" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="14" y1="10" x2="19" y2="10" stroke="#4cc9f0" stroke-width="1.5"/>
-  <line x1="12" y1="16" x2="21" y2="16" stroke="#e0e0e0" stroke-width="1.5" stroke-dasharray="2 2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Design Center">
+  <circle cx="12" cy="12" r="8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="12" cy="12" r="3" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polygon points="12,3 14,10 12,12 10,10" stroke="none" fill="#6DB7ED"/>
 </svg>

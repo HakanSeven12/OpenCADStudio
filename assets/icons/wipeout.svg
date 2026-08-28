@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
   <!-- Background area being masked -->
-  <line x1="4" y1="6" x2="20" y2="6" stroke="#555" stroke-width="1" stroke-dasharray="1.5,1.5"/>
-  <line x1="4" y1="10" x2="20" y2="10" stroke="#555" stroke-width="1" stroke-dasharray="1.5,1.5"/>
-  <line x1="4" y1="14" x2="20" y2="14" stroke="#555" stroke-width="1" stroke-dasharray="1.5,1.5"/>
-  <line x1="4" y1="18" x2="20" y2="18" stroke="#555" stroke-width="1" stroke-dasharray="1.5,1.5"/>
+  <line x1="4" y1="6" x2="20" y2="6" stroke="#B4B6B9" stroke-width="1" stroke-dasharray="1.5,1.5"/>
+  <line x1="4" y1="10" x2="20" y2="10" stroke="#B4B6B9" stroke-width="1" stroke-dasharray="1.5,1.5"/>
+  <line x1="4" y1="14" x2="20" y2="14" stroke="#B4B6B9" stroke-width="1" stroke-dasharray="1.5,1.5"/>
+  <line x1="4" y1="18" x2="20" y2="18" stroke="#B4B6B9" stroke-width="1" stroke-dasharray="1.5,1.5"/>
   <!-- Wipeout polygon (covers the background) -->
-  <polygon points="6,7 18,7 18,17 6,17" fill="#1a1a1a" stroke="#4cc9f0" stroke-width="1.5"/>
+  <polygon points="6,7 18,7 18,17 6,17" fill="#B4B6B9" stroke="#4cc9f0" stroke-width="1.5"/>
   <!-- Wipeout border -->
   <polygon points="6,7 18,7 18,17 6,17" fill="none" stroke="#4cc9f0" stroke-width="1.5"/>
 </svg>

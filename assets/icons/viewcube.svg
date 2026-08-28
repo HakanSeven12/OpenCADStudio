@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="6" y="10" width="10" height="10" rx="1" stroke="#e0e0e0" stroke-width="1.5"/>
-  <polygon points="6,10 10,6 20,6 16,10" fill="#4cc9f0" fill-opacity="0.45" stroke="#4cc9f0" stroke-width="1.5"/>
-  <polygon points="16,10 20,6 20,16 16,20" fill="#4cc9f0" fill-opacity="0.18" stroke="#e0e0e0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Viewcube">
+  <polygon points="12,3.5 20,8 12,12.5 4,8" fill="#B4B6B9" fill-opacity="0.88" stroke="#B4B6B9" stroke-width="1.25" stroke-linejoin="round"/>
+  <polygon points="4,8 12,12.5 12,20.5 4,16" fill="#B4B6B9" fill-opacity="0.48" stroke="#B4B6B9" stroke-width="1.25" stroke-linejoin="round"/>
+  <polygon points="20,8 12,12.5 12,20.5 20,16" fill="#B4B6B9" fill-opacity="0.68" stroke="#B4B6B9" stroke-width="1.25" stroke-linejoin="round"/>
 </svg>

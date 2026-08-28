@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M3 3 h8 l10 9 -10 9 H3 Z" stroke="#e0e0e0" stroke-width="1.5"/>
-  <circle cx="9" cy="12" r="1.5" fill="#4cc9f0"/>
-  <text x="13" y="9" font-size="4" fill="#4cc9f0" stroke="none">@</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Attdef">
+  <path d="M4 7 L10 3 H19 V12 L13 18 L4 9 Z" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="8" cy="7" r="1.2" stroke="none" fill="#6DB7ED"/>
+  <line x1="15.6" y1="18" x2="20.4" y2="18" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="18" y1="15.6" x2="18" y2="20.4" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

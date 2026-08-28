@@ -37,7 +37,7 @@
      cy="12"
      rx="9"
      ry="5.5"
-     stroke="#606060"
+     stroke="#B4B6B9"
      stroke-width="1.5"
      stroke-dasharray="3 2"
      fill="none"
@@ -46,7 +46,7 @@
   <!-- Start: (18.36, 15.89)  End: (18.36, 8.11)  large-arc=1, sweep=0 -->
   <path
      d="m 5.3878288,16.16352 a 9,5.5 0 1 0 0,-7.7800001"
-     stroke="#e0e0e0"
+     stroke="#B4B6B9"
      stroke-width="2"
      fill="none"
      stroke-linecap="round"

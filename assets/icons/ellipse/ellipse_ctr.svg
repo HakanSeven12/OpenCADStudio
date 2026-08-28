@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
   <!-- Full ellipse -->
-  <ellipse cx="12" cy="12" rx="9" ry="5.5" stroke="#e0e0e0" stroke-width="2" fill="none"/>
+  <ellipse cx="12" cy="12" rx="9" ry="5.5" stroke="#B4B6B9" stroke-width="2" fill="none"/>
   <!-- Dashed radius to major endpoint -->
   <line x1="12" y1="12" x2="21" y2="12" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="2 2"/>
   <!-- Center dot -->

@@ -1,14 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <!-- Small objects being grouped -->
-  <circle cx="8.5" cy="8.5" r="2" fill="none" stroke="#cccccc" stroke-width="1.3"/>
-  <line x1="13" y1="7" x2="17" y2="10" stroke="#cccccc" stroke-width="1.3" stroke-linecap="round"/>
-  <rect x="12.5" y="12" width="4" height="3" fill="none" stroke="#cccccc" stroke-width="1.2" rx="0.5"/>
-  <!-- Dashed selection boundary -->
-  <rect x="4.5" y="4.5" width="15" height="15" fill="none" stroke="#aaaaaa" stroke-width="1.2"
-        stroke-dasharray="2.5,1.5" rx="1"/>
-  <!-- Base point indicator at bottom-left corner -->
-  <circle cx="4.5" cy="19.5" r="1.5" fill="#4a9eff"/>
-  <!-- Small cross at base point -->
-  <line x1="2.5" y1="19.5" x2="6.5" y2="19.5" stroke="#4a9eff" stroke-width="1" stroke-linecap="round"/>
-  <line x1="4.5" y1="17.5" x2="4.5" y2="21.5" stroke="#4a9eff" stroke-width="1" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Block">
+  <rect x="3" y="3" width="18" height="18" stroke-dasharray="None" rx="1.5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="6" y="7" width="5" height="4" rx="0.6" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="16" cy="15" r="3" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="4" cy="4" r="1.3" stroke="none" fill="#6DB7ED"/>
 </svg>

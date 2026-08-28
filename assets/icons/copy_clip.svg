@@ -1,12 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <!-- Back page (copy) -->
-  <rect x="7" y="4" width="12" height="14" rx="1"
-        fill="#37474F" stroke="#546E7A" stroke-width="1"/>
-  <!-- Front page -->
-  <rect x="4" y="7" width="12" height="14" rx="1"
-        fill="#455A64" stroke="#78909C" stroke-width="1"/>
-  <!-- Lines on front page -->
-  <line x1="7" y1="11" x2="13" y2="11" stroke="#90A4AE" stroke-width="1"/>
-  <line x1="7" y1="14" x2="13" y2="14" stroke="#90A4AE" stroke-width="1"/>
-  <line x1="7" y1="17" x2="11" y2="17" stroke="#90A4AE" stroke-width="1"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Copy Clip">
+  <rect x="5" y="5" width="10" height="12" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="9" y="8" width="10" height="12" rx="1" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M8 4 H12 V7 H8 Z" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

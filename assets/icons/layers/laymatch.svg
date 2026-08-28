@@ -37,7 +37,7 @@
      y1="4.6006422"
      x2="22.828165"
      y2="4.6006422"
-     stroke="#888888"
+     stroke="#B4B6B9"
      stroke-width="1.52727"
      stroke-linecap="round"
      stroke-dasharray="3, 2"
@@ -60,7 +60,7 @@
      y1="8.4000006"
      x2="12"
      y2="14.400001"
-     stroke="#e0e0e0"
+     stroke="#B4B6B9"
      stroke-width="2.04"
      stroke-linecap="round"
      id="line3"
@@ -68,7 +68,7 @@
   <polyline
      points="9.5,13 12,15.5 14.5,13"
      fill="none"
-     stroke="#e0e0e0"
+     stroke="#B4B6B9"
      stroke-width="1.7"
      stroke-linecap="round"
      stroke-linejoin="round"
@@ -80,7 +80,7 @@
      cx="5.902493"
      cy="4.6579514"
      r="2.1599998"
-     fill="#888888"
+     fill="#B4B6B9"
      id="circle3"
      style="stroke-width:1.5;stroke-dasharray:none" />
   <!-- Small object dot on target (matched) -->

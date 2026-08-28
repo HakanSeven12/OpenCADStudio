@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
   <!-- 3 points on arc, no construction lines -->
-  <path d="M 4 18 A 11 11 0 0 1 20 6" stroke="#e0e0e0" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M 4 18 A 11 11 0 0 1 20 6" stroke="#B4B6B9" stroke-width="2" fill="none" stroke-linecap="round"/>
   <circle cx="4"  cy="18" r="2"   fill="#4cc9f0"/>
   <circle cx="8"  cy="7"  r="2"   fill="#4cc9f0"/>
   <circle cx="20" cy="6"  r="2"   fill="#4cc9f0"/>

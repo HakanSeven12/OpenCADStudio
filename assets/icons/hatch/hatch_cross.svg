@@ -17,5 +17,5 @@
     <line x1="7"  y1="-7" x2="31" y2="17"   stroke="#4cc9f0" stroke-width="1.2"/>
     <line x1="-8" y1="8"  x2="16" y2="32"   stroke="#4cc9f0" stroke-width="1.2"/>
   </g>
-  <rect x="4" y="4" width="16" height="16" stroke="#e0e0e0" stroke-width="1.5" fill="none"/>
+  <rect x="4" y="4" width="16" height="16" stroke="#B4B6B9" stroke-width="1.5" fill="none"/>
 </svg>

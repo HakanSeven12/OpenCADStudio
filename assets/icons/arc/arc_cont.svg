@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
   <!-- Continue: previous segment (dim) feeds a tangent-continuing arc (bright) -->
-  <line x1="3" y1="9" x2="11" y2="9" stroke="#7a7a7a" stroke-width="2" fill="none" stroke-linecap="round"/>
-  <path d="M 11 9 A 9 9 0 0 1 20 18" stroke="#e0e0e0" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <line x1="3" y1="9" x2="11" y2="9" stroke="#B4B6B9" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M 11 9 A 9 9 0 0 1 20 18" stroke="#B4B6B9" stroke-width="2" fill="none" stroke-linecap="round"/>
   <circle cx="11" cy="9"  r="2" fill="#4cc9f0"/>
   <circle cx="20" cy="18" r="2" fill="#4cc9f0"/>
 </svg>

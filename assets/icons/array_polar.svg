@@ -35,13 +35,13 @@
      cx="12"
      cy="12"
      r="1.5"
-     fill="#e0e0e0"
+     fill="#B4B6B9"
      id="circle1"
      style="stroke-width:2.25;stroke-dasharray:none" />
   <circle
      cx="11.842643"
      cy="12.592643"
-     stroke="#e0e0e0"
+     stroke="#B4B6B9"
      stroke-width="1"
      fill="none"
      stroke-dasharray="2 2"

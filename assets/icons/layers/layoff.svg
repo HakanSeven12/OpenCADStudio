@@ -40,7 +40,7 @@
      stroke-width="1.85829"
      stroke-linejoin="round"
      id="path1-3"
-     style="stroke-width:2.25;stroke-dasharray:none;stroke:#888888;stroke-opacity:1;fill:#888888;fill-opacity:0.34999999" />
+     style="stroke-width:2.25;stroke-dasharray:none;stroke:#B4B6B9;stroke-opacity:1;fill:#B4B6B9;fill-opacity:0.34999999" />
   <line
      x1="10.158565"
      y1="13.421756"
@@ -50,7 +50,7 @@
      stroke-width="1.23886"
      stroke-linecap="round"
      id="line1-5"
-     style="stroke-width:1.5;stroke-dasharray:none;stroke:#888888;stroke-opacity:1" />
+     style="stroke-width:1.5;stroke-dasharray:none;stroke:#B4B6B9;stroke-opacity:1" />
   <line
      x1="10.158565"
      y1="15.280031"
@@ -60,7 +60,7 @@
      stroke-width="1.23886"
      stroke-linecap="round"
      id="line2-6"
-     style="stroke-width:1.5;stroke-dasharray:none;stroke:#888888;stroke-opacity:1" />
+     style="stroke-width:1.5;stroke-dasharray:none;stroke:#B4B6B9;stroke-opacity:1" />
   <line
      x1="9.5391397"
      y1="18.377151"
@@ -70,7 +70,7 @@
      stroke-width="1.73439"
      stroke-linecap="round"
      id="line3-2"
-     style="stroke-width:2.25;stroke-dasharray:none;stroke:#888888;stroke-opacity:1" />
+     style="stroke-width:2.25;stroke-dasharray:none;stroke:#B4B6B9;stroke-opacity:1" />
   <line
      x1="10.158565"
      y1="20.854855"
@@ -80,7 +80,7 @@
      stroke-width="1.73439"
      stroke-linecap="round"
      id="line4"
-     style="stroke-width:2.25;stroke-dasharray:none;stroke:#888888;stroke-opacity:1" />
+     style="stroke-width:2.25;stroke-dasharray:none;stroke:#B4B6B9;stroke-opacity:1" />
   <!-- Base lines -->
   <!-- Off slash (red diagonal) -->
   <line

@@ -1,5 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <circle cx="12" cy="12" r="9" stroke="#e0e0e0" stroke-width="1.5"/>
-  <polyline points="12,7 12,12 15.5,15.5" stroke="#4cc9f0" stroke-width="1.5"/>
-  <path d="M5 4 A9 9 0 0 0 3 12" stroke="#4cc9f0" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Changelog">
+  <path d="M5 3 H14 L18 7 V21 H5 Z M14 3 V7 H18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="8" y1="9" x2="15" y2="9" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="8" y1="13" x2="15" y2="13" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="17" cy="17" r="3" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="17" y1="17" x2="17" y2="15" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="17" y1="17" x2="19" y2="18" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

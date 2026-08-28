@@ -36,7 +36,7 @@
        id="swatch9"
        inkscape:swatch="solid">
       <stop
-         style="stop-color:#ffffff;stop-opacity:1;"
+         style="stop-color:#B4B6B9;stop-opacity:1;"
          offset="0"
          id="stop10" />
     </linearGradient>
@@ -138,11 +138,11 @@
   <!-- Move arrow from source to dest -->
   <!-- Arrowhead -->
   <path
-     style="opacity:1;fill:#ffffff;fill-opacity:1;stroke:#e0e0e0;stroke-width:1.43826;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#Triangle);marker-end:url(#marker10)"
+     style="opacity:1;fill:#B4B6B9;fill-opacity:1;stroke:#B4B6B9;stroke-width:1.43826;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#Triangle);marker-end:url(#marker10)"
      d="M 11.995087,4.8926948 V 19.007075"
      id="path3" />
   <path
-     style="fill:#ffffff;fill-opacity:1;stroke:#e0e0e0;stroke-width:1.5;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#Triangle-7);marker-end:url(#marker10-3)"
+     style="fill:#B4B6B9;fill-opacity:1;stroke:#B4B6B9;stroke-width:1.5;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#Triangle-7);marker-end:url(#marker10-3)"
      d="M 19.107613,12 H 4.9940785"
      id="path3-2" />
 </svg>

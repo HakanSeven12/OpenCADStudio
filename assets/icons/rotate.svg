@@ -46,7 +46,7 @@
   <!-- Rotation arc around pivot -->
   <path
      d="M 17.73509,3.1359223 A 9.8994949,9.8994949 0 0 1 3.7350902,17.135922"
-     stroke="#e0e0e0"
+     stroke="#B4B6B9"
      stroke-width="1.5"
      fill="none"
      stroke-linecap="round"
@@ -55,7 +55,7 @@
   <!-- Arrow at arc end -->
   <polyline
      points="3,16 5,19 8,18"
-     stroke="#e0e0e0"
+     stroke="#B4B6B9"
      stroke-width="1.5"
      fill="none"
      stroke-linecap="round"

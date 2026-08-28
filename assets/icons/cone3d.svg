@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <path d="M12 3 L5 18 M12 3 L19 18" stroke="#e0e0e0" stroke-width="1.7" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-  <ellipse cx="12" cy="18" rx="7" ry="2.6" stroke="#e0e0e0" stroke-width="1.7" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Cone3D">
+  <ellipse cx="12" cy="18" rx="7" ry="2.5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="3" x2="5" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="3" x2="19" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="3" x2="12" y2="18" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

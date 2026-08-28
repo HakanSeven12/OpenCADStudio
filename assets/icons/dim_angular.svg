@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
   <!-- Two lines forming an angle -->
-  <line x1="4" y1="20" x2="20" y2="20" stroke="#e0e0e0" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="4" y1="20" x2="14" y2="6" stroke="#e0e0e0" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="4" y1="20" x2="20" y2="20" stroke="#B4B6B9" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="4" y1="20" x2="14" y2="6" stroke="#B4B6B9" stroke-width="1.5" stroke-linecap="round"/>
   <!-- Arc dimension -->
   <path d="M 16 20 A 12 12 0 0 0 10.8 10.4" stroke="#4cc9f0" stroke-width="1.5" fill="none" stroke-linecap="round"/>
   <!-- Arrow at arc end -->

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <path d="M12 3 L20 7 L12 11 L4 7 Z" stroke="#e0e0e0" stroke-width="1.7" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M4 7 L4 16 L12 20 L12 11" stroke="#e0e0e0" stroke-width="1.7" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M20 7 L20 16 L12 20" stroke="#e0e0e0" stroke-width="1.7" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M12 11 L12 20" stroke="#4cc9f0" stroke-width="1.4" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Box3D">
+  <polygon points="12.0,4 20,8 12.0,12 4,8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="4,8 4,16 12.0,20 12.0,12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="20,8 20,16 12.0,20" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="12" y1="12" x2="20" y2="8" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

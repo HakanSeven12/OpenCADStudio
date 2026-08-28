@@ -1,8 +1,8 @@
 use acadrust::entities::Solid3D;
 use acadrust::objects::{
-    SolidHistoryBox, SolidHistoryBrep, SolidHistoryCylinder,
-    SolidHistoryNodeBase, SolidHistoryOperation, SolidHistoryPyramid,
-    SolidHistorySphere, SolidHistoryTorus,
+    DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep,
+    SolidHistoryCylinder, SolidHistoryNodeBase, SolidHistoryOperation,
+    SolidHistoryPyramid, SolidHistorySphere, SolidHistoryTorus,
 };
 use cadkernel::brep::Body;
 
@@ -27,6 +27,12 @@ pub const PROP_RADIUS: &str = "solid_history_radius";
 pub const PROP_OUTER_RADIUS: &str = "solid_history_outer_radius";
 pub const PROP_INNER_RADIUS: &str = "solid_history_inner_radius";
 pub const PROP_SIDES: &str = "solid_history_sides";
+pub const PROP_POSITION_X: &str = "solid_history_position_x";
+pub const PROP_POSITION_Y: &str = "solid_history_position_y";
+pub const PROP_POSITION_Z: &str = "solid_history_position_z";
+pub const PROP_ROTATION: &str = "solid_history_rotation";
+pub const PROP_HISTORY: &str = "solid_history_record";
+pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
 
 fn history_prop(label: &str, field: &'static str, value: impl ToString) -> Property {
     Property {
@@ -34,6 +40,132 @@ fn history_prop(label: &str, field: &'static str, value: impl ToString) -> Prope
         field,
         value: PropValue::EditText(value.to_string()),
     }
+}
+
+fn history_flags(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> Option<(bool, bool)> {
+    let graph = document.solid_history_graph(handle)?;
+    let ObjectType::DynamicBlock(object) = document.objects.get(&graph.root)? else {
+        return None;
+    };
+    let DynamicBlockData::SolidHistory(history) = &object.data else {
+        return None;
+    };
+    Some((history.record_history, history.show_history))
+}
+
+pub fn is_box_primitive(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> bool {
+    matches!(
+        document.solid_history_operation(handle),
+        Some(SolidHistoryOperation::Box(_))
+    )
+}
+
+pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3> {
+    match operation {
+        SolidHistoryOperation::Box(value) => world_point(
+            value.base.transform,
+            [value.length * 0.5, value.width * 0.5, 0.0],
+        ),
+        _ => None,
+    }
+}
+
+fn box_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryBox,
+) -> Vec<PropSection> {
+    let Some(position) = world_point(
+        value.base.transform,
+        [value.length * 0.5, value.width * 0.5, 0.0],
+    ) else {
+        return Vec::new();
+    };
+    let rotation = matrix(value.base.transform)
+        .map(|matrix| matrix.x_axis.y.atan2(matrix.x_axis.x))
+        .unwrap_or(0.0);
+    let (record_history, show_history) = history_flags(document, handle).unwrap_or((false, false));
+    let show_value = if show_history { "Yes" } else { "No" };
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Solid type").into_owned(),
+                    field: "solid_history_type",
+                    value: PropValue::ReadOnly(t!("Box").into_owned()),
+                },
+                crate::entities::common::edit_prop(
+                    t!("Position X").as_ref(),
+                    PROP_POSITION_X,
+                    position.x,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Y").as_ref(),
+                    PROP_POSITION_Y,
+                    position.y,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Z").as_ref(),
+                    PROP_POSITION_Z,
+                    position.z,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Length").as_ref(),
+                    PROP_LENGTH,
+                    value.length,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Width").as_ref(),
+                    PROP_WIDTH,
+                    value.width,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Height").as_ref(),
+                    PROP_HEIGHT,
+                    value.height,
+                ),
+                Property {
+                    label: t!("Rotation").into_owned(),
+                    field: PROP_ROTATION,
+                    value: PropValue::EditText(
+                        crate::entities::common::format_direction(rotation),
+                    ),
+                },
+            ],
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::Choice {
+                        selected: if record_history { "Record" } else { "None" }.to_string(),
+                        options: vec!["None".to_string(), "Record".to_string()],
+                    },
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: if record_history {
+                        PropValue::Choice {
+                            selected: show_value.to_string(),
+                            options: vec!["No".to_string(), "Yes".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(show_value.to_string())
+                    },
+                },
+            ],
+        },
+    ]
 }
 
 pub fn primitive_properties(
@@ -44,7 +176,8 @@ pub fn primitive_properties(
         return Vec::new();
     };
     let props = match operation {
-        SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => vec![
+        SolidHistoryOperation::Box(value) => return box_properties(document, handle, value),
+        SolidHistoryOperation::Wedge(value) => vec![
             history_prop(t!("Length").as_ref(), PROP_LENGTH, value.length),
             history_prop(t!("Width").as_ref(), PROP_WIDTH, value.width),
             history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
@@ -93,7 +226,90 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_OUTER_RADIUS
             | PROP_INNER_RADIUS
             | PROP_SIDES
+            | PROP_POSITION_X
+            | PROP_POSITION_Y
+            | PROP_POSITION_Z
+            | PROP_ROTATION
     )
+}
+
+pub fn is_history_choice(field: &str) -> bool {
+    matches!(field, PROP_HISTORY | PROP_SHOW_HISTORY)
+}
+
+pub fn apply_history_choice(
+    document: &mut acadrust::CadDocument,
+    handle: acadrust::Handle,
+    field: &str,
+    value: &str,
+) -> bool {
+    let Some(graph) = document.solid_history_graph(handle) else {
+        return false;
+    };
+    let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&graph.root) else {
+        return false;
+    };
+    let DynamicBlockData::SolidHistory(history) = &mut object.data else {
+        return false;
+    };
+    match field {
+        PROP_HISTORY => {
+            history.record_history = value.eq_ignore_ascii_case("Record");
+            if !history.record_history {
+                history.show_history = false;
+            }
+        }
+        PROP_SHOW_HISTORY if history.record_history => {
+            history.show_history = value.eq_ignore_ascii_case("Yes");
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn apply_box_geometry_property(
+    value: &mut SolidHistoryBox,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    if field == PROP_ROTATION {
+        let target = crate::entities::common::parse_direction(text)?;
+        let current = matrix(value.base.transform)?;
+        let center = current.transform_point3(glam::DVec3::new(
+            value.length * 0.5,
+            value.width * 0.5,
+            0.0,
+        ));
+        let (sin, cos) = target.sin_cos();
+        let x_axis = glam::DVec3::new(cos, sin, 0.0);
+        let y_axis = glam::DVec3::new(-sin, cos, 0.0);
+        let origin = center - x_axis * value.length * 0.5 - y_axis * value.width * 0.5;
+        value.base.transform = glam::DMat4::from_cols(
+            x_axis.extend(0.0),
+            y_axis.extend(0.0),
+            glam::DVec3::Z.extend(0.0),
+            origin.extend(1.0),
+        )
+        .to_cols_array();
+        return Some(true);
+    }
+    let axis = match field {
+        PROP_POSITION_X => 0,
+        PROP_POSITION_Y => 1,
+        PROP_POSITION_Z => 2,
+        _ => return None,
+    };
+    let target = crate::entities::common::parse_length(text)?;
+    let current = matrix(value.base.transform)?;
+    let center = current.transform_point3(glam::DVec3::new(
+        value.length * 0.5,
+        value.width * 0.5,
+        0.0,
+    ));
+    let mut delta = glam::DVec3::ZERO;
+    delta[axis] = target - center[axis];
+    value.base.transform = (glam::DMat4::from_translation(delta) * current).to_cols_array();
+    Some(true)
 }
 
 pub fn apply_primitive_property(
@@ -101,7 +317,16 @@ pub fn apply_primitive_property(
     field: &str,
     value: &str,
 ) -> bool {
-    let Ok(number) = value.trim().parse::<f64>() else {
+    if let SolidHistoryOperation::Box(box_value) = operation {
+        if let Some(applied) = apply_box_geometry_property(box_value, field, value) {
+            return applied;
+        }
+    }
+    let Some(number) = (if field == PROP_SIDES {
+        value.trim().parse::<f64>().ok()
+    } else {
+        crate::entities::common::parse_length(value)
+    }) else {
         return false;
     };
     if !number.is_finite() {

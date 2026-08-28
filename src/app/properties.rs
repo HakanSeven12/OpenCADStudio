@@ -1021,6 +1021,26 @@ impl OpenCADStudio {
                         }
                     }
 
+                    // Legacy leaders omit Handle and report annotation association.
+                    if let acadrust::EntityType::Leader(leader) = entity {
+                        if let Some(general) = sections.first_mut() {
+                            general.props.retain(|property| property.field != "handle");
+                            let associative = !leader.annotation_handle.is_null()
+                                && self.tabs[i]
+                                    .scene
+                                    .document
+                                    .get_entity(leader.annotation_handle)
+                                    .is_some();
+                            general.props.push(crate::scene::model::object::Property {
+                                label: t!("Associative").into_owned(),
+                                field: "associative",
+                                value: crate::scene::model::object::PropValue::ReadOnly(
+                                    if associative { "Yes" } else { "No" }.to_string(),
+                                ),
+                            });
+                        }
+                    }
+
                     // Inject DimStyle picker + style-derived groups for Dimensions.
                     if let acadrust::EntityType::Dimension(d) = entity {
                         if let Some(general) = sections.first_mut() {
@@ -1215,14 +1235,7 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
-                            // Lines & Arrows / Text / Fit default to the assigned
-                            // dimension style (the same source the tessellator
-                            // uses); most rows are editable per-object overrides
-                            // stored in ACAD_DSTYLE. Arrow size / block / overall
-                            // scale and dim-line lineweight drive the render; text
-                            // offset / vertical position round-trip to file but
-                            // don't change the leader glyph here (its annotation
-                            // is a separate entity). Dim-line colour is read-only.
+                            // Resolve editable overrides from the assigned dimension style.
                             if let Some(ds) = find_dim_style(doc, &ld.dimension_style) {
                                 use crate::entities::dim_override as dov;
                                 use crate::scene::model::object::PropValue;
@@ -1268,7 +1281,7 @@ impl OpenCADStudio {
                                 set_row_value(
                                     &mut sections,
                                     "arrow_size",
-                                    PropValue::EditText(format!("{asz:.4}")),
+                                    PropValue::EditText(asz.to_string()),
                                 );
 
                                 let lwd = dov::int(xd, dov::DIMLWD).unwrap_or(ds.dimlwd);
@@ -1286,10 +1299,7 @@ impl OpenCADStudio {
                                     },
                                 );
 
-                                // Dim-line colour: a per-object ACAD_DSTYLE
-                                // override (code 176, an ACI index) wins over the
-                                // style's DIMCLRD. Editable — the picked colour is
-                                // written back as that override so it round-trips.
+                                // A per-object color override wins over the style.
                                 let dim_c = dov::color(xd, dov::DIMCLRD)
                                     .unwrap_or_else(|| acadrust::types::Color::from_index(ds.dimclrd));
                                 set_row_value(
@@ -1302,7 +1312,7 @@ impl OpenCADStudio {
                                 set_row_value(
                                     &mut sections,
                                     "text_offset",
-                                    PropValue::EditText(format!("{gap:.4}")),
+                                    PropValue::EditText(gap.to_string()),
                                 );
 
                                 let tad = dov::int(xd, dov::DIMTAD).unwrap_or(ds.dimtad);
@@ -1319,7 +1329,7 @@ impl OpenCADStudio {
                                 set_row_value(
                                     &mut sections,
                                     "dim_scale_overall",
-                                    PropValue::EditText(format!("{scl:.4}")),
+                                    PropValue::EditText(scl.to_string()),
                                 );
                             }
                         }
@@ -1851,6 +1861,11 @@ impl OpenCADStudio {
                                             doc, entity,
                                         )
                                     }
+                                    acadrust::EntityType::Leader(_) => {
+                                        crate::scene::annotative::annotation_style_is_annotative(
+                                            doc, entity,
+                                        )
+                                    }
                                     _ => false,
                                 };
                             // Dimensions/tables/tolerances carry no Annotative row yet — add one
@@ -1888,8 +1903,17 @@ impl OpenCADStudio {
                                         "annotative",
                                         if is_anno { "Yes" } else { "No" }.to_string(),
                                     ),
+                                    acadrust::EntityType::Leader(_)
+                                        if crate::scene::annotative::annotation_style_is_annotative(
+                                            doc, entity,
+                                        ) => set_row(
+                                            &mut sections,
+                                            "annotative",
+                                            "Yes".to_string(),
+                                        ),
                                     acadrust::EntityType::Text(_)
                                     | acadrust::EntityType::Insert(_)
+                                    | acadrust::EntityType::Leader(_)
                                     | acadrust::EntityType::Hatch(_)
                                     | acadrust::EntityType::Dimension(_) => set_row_value(
                                         &mut sections,

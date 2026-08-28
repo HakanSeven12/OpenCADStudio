@@ -1254,6 +1254,12 @@ pub enum CmdResult {
         /// Keep collecting points after the dimension is committed.
         continue_command: bool,
     },
+    /// Commit several dimensions with independent association sources in one
+    /// undo step, then end the command.
+    CommitDimensionsAndExit(Vec<(EntityType, DimensionAssociationInput)>),
+    /// Persist the quick-dimension extension-origin priority while keeping the
+    /// active command at its current prompt (0 = endpoints, 1 = intersections).
+    SetQuickDimensionSnapPriority(u8),
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded
     /// rendering). Ends the command.

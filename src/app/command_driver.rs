@@ -1430,6 +1430,137 @@ impl OpenCADStudio {
                     self.restore_pre_cmd_tangent();
                 }
             }
+            CmdResult::CommitDimensionsAndExit(dimensions) => {
+                let association_mode = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .dimension_associativity;
+                let mut made = 0;
+                let pending = if association_mode == 0 {
+                    let mut pieces = Vec::new();
+                    for (mut entity, _) in dimensions {
+                        let layer = self.tabs[i].active_layer.clone();
+                        if layer != "0" || entity.as_entity().layer().is_empty() {
+                            entity.as_entity_mut().set_layer(layer);
+                        }
+                        crate::scene::view::dispatch::apply_color(
+                            &mut entity,
+                            self.ribbon.active_color,
+                        );
+                        crate::scene::view::dispatch::apply_common_prop(
+                            &mut entity,
+                            "linetype",
+                            &self.ribbon.active_linetype.clone(),
+                        );
+                        crate::scene::view::dispatch::apply_line_weight(
+                            &mut entity,
+                            self.ribbon.active_lineweight,
+                        );
+                        let celtscale = self.tabs[i]
+                            .scene
+                            .document
+                            .header
+                            .current_entity_linetype_scale;
+                        if (celtscale - 1.0).abs() > 1e-9 && celtscale.abs() > 1e-9 {
+                            entity.common_mut().linetype_scale = celtscale;
+                        }
+                        crate::scene::creation_style::apply_current_creation_styles(
+                            &self.tabs[i].scene.document,
+                            &mut entity,
+                        );
+                        let exploded = crate::modules::draw::modify::explode::explode_entity(
+                            &entity,
+                            &self.tabs[i].scene.document,
+                        );
+                        if !exploded.is_empty() {
+                            made += 1;
+                        }
+                        pieces.extend(exploded);
+                    }
+                    let delta_safe = pieces
+                        .iter()
+                        .all(|piece| self.delta_add_safe(i, piece));
+                    let pending = self.begin_undo(i, "QDIM", pieces.len(), delta_safe);
+                    for piece in pieces {
+                        self.tabs[i].scene.add_entity(piece);
+                    }
+                    pending
+                } else {
+                    let delta_safe = dimensions
+                        .iter()
+                        .all(|(entity, _)| self.delta_add_safe(i, entity));
+                    let pending = self.begin_undo(i, "QDIM", dimensions.len(), delta_safe);
+                    for (entity, association) in dimensions {
+                        let Some(handle) = self.commit_entity_handle(entity) else {
+                            continue;
+                        };
+                        made += 1;
+                        if association_mode != 2 {
+                            continue;
+                        }
+                        let sources = match association {
+                            crate::command::DimensionAssociationInput::Infer(source) => {
+                                source.map_or_else(
+                                    || {
+                                        self.tabs[i]
+                                            .scene
+                                            .infer_dimension_sources(handle)
+                                            .into_iter()
+                                            .map(|source| {
+                                                source.map(
+                                                    crate::command::DimensionAssociationSource::inferred,
+                                                )
+                                            })
+                                            .collect()
+                                    },
+                                    |source| {
+                                        vec![Some(
+                                            crate::command::DimensionAssociationSource::inferred(
+                                                source,
+                                            ),
+                                        )]
+                                    },
+                                )
+                            }
+                            crate::command::DimensionAssociationInput::Explicit(sources) => {
+                                sources
+                            }
+                        };
+                        self.tabs[i]
+                            .scene
+                            .attach_dimension_association_sources(handle, sources.clone());
+                        let mut changes = vec![(handle, crate::scene::ChangeKind::Modified)];
+                        changes.extend(sources.into_iter().flatten().map(|source| {
+                            (source.handle, crate::scene::ChangeKind::Modified)
+                        }));
+                        changes.sort_by_key(|(handle, _)| handle.value());
+                        changes.dedup_by_key(|(handle, _)| handle.value());
+                        self.tabs[i].scene.bump_entities(&changes);
+                    }
+                    pending
+                };
+                if made > 0 {
+                    self.tabs[i].dirty = true;
+                }
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                self.command_line
+                    .push_output(crate::tf!("QDIM  {made} dimensions created.").as_ref());
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+            }
+            CmdResult::SetQuickDimensionSnapPriority(priority) => {
+                self.quick_dimension_snap_priority = priority.min(1);
+                self.persist_settings_if_changed();
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|command| command.prompt());
+                if let Some(prompt) = prompt {
+                    self.command_line.push_info(&prompt);
+                }
+            }
             CmdResult::CommitSolid {
                 entity,
                 solid,

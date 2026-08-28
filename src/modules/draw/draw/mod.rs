@@ -10,6 +10,7 @@ pub mod hatchedit;
 pub mod helix;
 pub mod line;
 pub mod mline;
+pub mod mesh3d;
 pub mod point;
 pub mod poly3d;
 pub mod polyline;

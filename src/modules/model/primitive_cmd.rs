@@ -200,11 +200,23 @@ impl PrimitiveCommand {
                 )
             };
         let height_abs = height.abs();
-        if length < 1e-6 || width < 1e-6 || height_abs < 1e-6 {
+        if !origin.is_finite()
+            || !x_axis.is_finite()
+            || !y_axis.is_finite()
+            || !length.is_finite()
+            || !width.is_finite()
+            || !height_abs.is_finite()
+            || length < 1e-6
+            || width < 1e-6
+            || height_abs < 1e-6
+        {
             return None;
         }
         if height < 0.0 {
             origin.z += height;
+        }
+        if !origin.is_finite() {
+            return None;
         }
         Some((origin, x_axis, y_axis, length, width, height_abs))
     }
@@ -237,10 +249,13 @@ impl PrimitiveCommand {
         ))
     }
 
-    fn set_box_corner_footprint(&mut self, point: DVec3) {
+    fn set_box_corner_footprint(&mut self, point: DVec3) -> bool {
         let first = self.pts[0];
+        let delta = point - first;
+        if delta.x.abs() < 1e-6 || delta.y.abs() < 1e-6 {
+            return false;
+        }
         if self.box_centered {
-            let delta = point - first;
             self.pts = vec![
                 DVec3::new(first.x - delta.x.abs(), first.y - delta.y.abs(), first.z),
                 DVec3::new(first.x + delta.x.abs(), first.y + delta.y.abs(), first.z),
@@ -250,11 +265,12 @@ impl PrimitiveCommand {
         }
         self.box_step = BoxStep::Height;
         self.height_step = true;
+        true
     }
 
     fn set_box_cube(&mut self, size: f64) -> Option<CmdResult> {
         let size = size.abs();
-        if size < 1e-6 {
+        if !size.is_finite() || size < 1e-6 {
             return None;
         }
         let origin = if self.box_centered {
@@ -270,7 +286,7 @@ impl PrimitiveCommand {
 
     fn set_box_length(&mut self, length: f64, angle: f64) -> bool {
         let length = length.abs();
-        if length < 1e-6 {
+        if !length.is_finite() || !angle.is_finite() || length < 1e-6 {
             return false;
         }
         self.box_origin = self.pts.first().copied();
@@ -282,7 +298,7 @@ impl PrimitiveCommand {
 
     fn set_box_width(&mut self, width: f64, sign: f64) -> bool {
         let width = width.abs();
-        if width < 1e-6 {
+        if !width.is_finite() || !sign.is_finite() || width < 1e-6 {
             return false;
         }
         self.box_width = Some(width);
@@ -424,9 +440,7 @@ impl PrimitiveCommand {
     fn commit(&self, height: f64) -> CmdResult {
         match self.build(height) {
             Some((solid, history)) => {
-                // Built upright in its own frame, then put on the working
-                // plane — the same move `place_entity` makes for the ACIS
-                // copy, so the two stay on top of each other.
+                // Place the local body on the working plane.
                 let placed = solid_model::placed(
                     &solid,
                     [self.plane.x.x, self.plane.x.y, self.plane.x.z],
@@ -468,7 +482,12 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
-        self.height_step.then(|| {
+        let constrained = if self.shape == Shape::Box {
+            self.box_step == BoxStep::Height
+        } else {
+            self.height_step
+        };
+        constrained.then(|| {
             (
                 self.plane.to_world(self.pts[0]),
                 self.plane.z.normalize_or_zero(),
@@ -538,6 +557,9 @@ impl CadCommand for PrimitiveCommand {
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         if self.shape == Shape::Box {
             let local = self.plane.to_local(pt);
+            if !local.is_finite() {
+                return CmdResult::NeedPoint;
+            }
             return match self.box_step {
                 BoxStep::FirstCorner | BoxStep::CenterPoint => {
                     self.pts = vec![local];
@@ -625,7 +647,19 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        self.shape == Shape::Box || self.height_step
+        if self.shape == Shape::Box {
+            matches!(
+                self.box_step,
+                BoxStep::FirstCorner
+                    | BoxStep::OppositeCorner
+                    | BoxStep::CubeSize
+                    | BoxStep::Length
+                    | BoxStep::Width
+                    | BoxStep::Height
+            )
+        } else {
+            self.height_step
+        }
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
@@ -658,24 +692,21 @@ impl CadCommand for PrimitiveCommand {
                     self.box_step = BoxStep::HeightFirstPoint;
                     Some(CmdResult::NeedPoint)
                 }
-                BoxStep::CubeSize => token
-                    .replace(',', ".")
-                    .parse::<f64>()
-                    .ok()
+                BoxStep::CubeSize => crate::entities::common::parse_typed_length(token)
                     .and_then(|value| self.set_box_cube(value)),
                 BoxStep::Length => {
-                    let value = token.replace(',', ".").parse::<f64>().ok()?;
+                    let value = crate::entities::common::parse_typed_length(token)?;
                     self.set_box_length(value, 0.0)
                         .then_some(CmdResult::NeedPoint)
                 }
                 BoxStep::Width => {
-                    let value = token.replace(',', ".").parse::<f64>().ok()?;
+                    let value = crate::entities::common::parse_typed_length(token)?;
                     self.set_box_width(value, value)
                         .then_some(CmdResult::NeedPoint)
                 }
                 BoxStep::Height => {
-                    let value = token.replace(',', ".").parse::<f64>().ok()?;
-                    (value.abs() >= 1e-6).then(|| self.commit(value))
+                    let value = crate::entities::common::parse_typed_length(token)?;
+                    (value.is_finite() && value.abs() >= 1e-6).then(|| self.commit(value))
                 }
                 _ => None,
             };
@@ -693,6 +724,9 @@ impl CadCommand for PrimitiveCommand {
         }
         if self.shape == Shape::Box {
             let local = self.plane.to_local(pt);
+            if !local.is_finite() {
+                return None;
+            }
             return match self.box_step {
                 BoxStep::OppositeCorner => {
                     let first = self.pts[0];
@@ -720,7 +754,11 @@ impl CadCommand for PrimitiveCommand {
                     let mut preview = PrimitiveCommand::new("BOX");
                     preview.plane = self.plane;
                     preview.pts = self.pts.clone();
-                    preview.box_origin = Some(self.pts[0]);
+                    preview.box_origin = Some(if self.box_centered {
+                        self.pts[0] - DVec3::new(size * 0.5, size * 0.5, 0.0)
+                    } else {
+                        self.pts[0]
+                    });
                     preview.box_length = Some(size);
                     preview.box_width = Some(size);
                     preview.box_preview(size)
@@ -768,15 +806,21 @@ impl CadCommand for PrimitiveCommand {
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
         use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
 
-        (self.height_step && self.shape != Shape::Box
-            || self.shape == Shape::Box
-                && matches!(
-                    self.box_step,
-                    BoxStep::CubeSize | BoxStep::Length | BoxStep::Width | BoxStep::Height
-                ))
-        .then(|| DynSpec {
+        let role = if self.shape == Shape::Box {
+            match self.box_step {
+                BoxStep::CubeSize | BoxStep::Length => DynRole::Distance,
+                BoxStep::Width => DynRole::Width,
+                BoxStep::Height => DynRole::Height,
+                _ => return None,
+            }
+        } else if self.height_step {
+            DynRole::Height
+        } else {
+            return None;
+        };
+        Some(DynSpec {
             anchor: DynAnchor::Point(self.plane.to_world(self.pts[0])),
-            fields: vec![DynFieldSpec::new(DynRole::Height)],
+            fields: vec![DynFieldSpec::new(role)],
             guide: DynGuide::None,
             ref_point: None,
         })
@@ -785,6 +829,9 @@ impl CadCommand for PrimitiveCommand {
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         if self.shape == Shape::Box {
             let local = self.plane.to_local(cursor);
+            if !local.is_finite() {
+                return None;
+            }
             return match self.box_step {
                 BoxStep::CubeSize | BoxStep::Length => Some((local - self.pts[0]).length()),
                 BoxStep::Width => {

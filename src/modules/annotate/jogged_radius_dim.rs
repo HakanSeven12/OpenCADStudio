@@ -139,6 +139,8 @@ impl JoggedRadiusDimensionCommand {
                 dimension,
             ))),
             association,
+            preserve_base_style: false,
+            continue_command: false,
         }
     }
 }

@@ -1,142 +1,58 @@
 use acadrust::entities::{mesh::Mesh, polygon_mesh::PolygonMesh, Face3D, PolyfaceMesh};
 use cadkernel::geom2d::{triangulate, Tolerance};
-use cadkernel::space::{polygon, Plane, Vec3 as KernelVec3};
+use cadkernel::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
 use glam::Vec3;
-use crate::t;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{parse_f64, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::common::{
+    edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64, ro_prop as ro,
+    square_grip, stepper_prop as stepper,
+};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
+use crate::t;
 
-/// Triangulate a planar (possibly concave) polygon into a flat triangle-soup
-/// (3 vertices per triangle), preserving the polygon's winding. A simple fan
-/// from vertex 0 is only valid for convex faces — a concave face (e.g. an
-/// L-shaped mesh face) fans into triangles that spill outside the outline. Ear
-/// clipping handles both. Falls back to a fan when the polygon is degenerate.
+/// Triangulate a planar polygon through the kernel.
 pub(crate) fn triangulate_planar(poly: &[[f64; 3]]) -> Vec<[f64; 3]> {
-    let n = poly.len();
-    if n < 3 {
+    if poly.len() < 3 {
         return Vec::new();
     }
-    if n == 3 {
-        return vec![poly[0], poly[1], poly[2]];
-    }
-    let cross = |a: [f64; 3], b: [f64; 3]| {
-        [
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0],
-        ]
+    let origin = KernelVec3::from(poly[0]);
+    let tolerance = Tolerance::default().linear();
+    let Some(axis) = poly[1..]
+        .iter()
+        .map(|point| KernelVec3::from(*point) - origin)
+        .find(|axis| axis.length() > tolerance)
+    else {
+        return Vec::new();
     };
-    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let fan = || {
-        let mut out = Vec::new();
-        for i in 1..n - 1 {
-            out.push(poly[0]);
-            out.push(poly[i]);
-            out.push(poly[i + 1]);
-        }
-        out
+    let Some(normal) = polygon::normal(poly) else {
+        return Vec::new();
     };
-    // Face normal via Newell's method (robust for near-planar polygons).
-    let mut normal = [0.0f64; 3];
-    for i in 0..n {
-        let a = poly[i];
-        let b = poly[(i + 1) % n];
-        normal[0] += (a[1] - b[1]) * (a[2] + b[2]);
-        normal[1] += (a[2] - b[2]) * (a[0] + b[0]);
-        normal[2] += (a[0] - b[0]) * (a[1] + b[1]);
-    }
-    let nlen = dot(normal, normal).sqrt();
-    if nlen < 1e-12 {
-        return fan();
-    }
-    let normal = [normal[0] / nlen, normal[1] / nlen, normal[2] / nlen];
-    // Orthonormal in-plane basis.
-    let seed = if normal[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
-    let mut u = cross(seed, normal);
-    let ul = dot(u, u).sqrt();
-    if ul < 1e-12 {
-        return fan();
-    }
-    u = [u[0] / ul, u[1] / ul, u[2] / ul];
-    let v = cross(normal, u);
-    let p2: Vec<[f64; 2]> = poly.iter().map(|&p| [dot(p, u), dot(p, v)]).collect();
-    // Signed area → winding (CCW when positive in the (u, v) frame).
-    let mut area = 0.0;
-    for i in 0..n {
-        let a = p2[i];
-        let b = p2[(i + 1) % n];
-        area += a[0] * b[1] - b[0] * a[1];
-    }
-    let ccw = area > 0.0;
-    let tri_area2 = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
-        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    let Some(plane) = Plane::orthonormal(poly[0], axis.to_array(), normal) else {
+        return Vec::new();
     };
-    let in_tri = |p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
-        let d1 = tri_area2(a, b, p);
-        let d2 = tri_area2(b, c, p);
-        let d3 = tri_area2(c, a, p);
-        let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-        let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-        !(neg && pos)
-    };
-    let mut idx: Vec<usize> = (0..n).collect();
-    let mut out: Vec<[f64; 3]> = Vec::with_capacity((n - 2) * 3);
-    let mut guard = 0usize;
-    while idx.len() > 3 && guard < n * n {
-        guard += 1;
-        let m = idx.len();
-        let mut clipped = false;
-        for k in 0..m {
-            let i0 = idx[(k + m - 1) % m];
-            let i1 = idx[k];
-            let i2 = idx[(k + 1) % m];
-            let (a, b, c) = (p2[i0], p2[i1], p2[i2]);
-            let convex = if ccw { tri_area2(a, b, c) > 0.0 } else { tri_area2(a, b, c) < 0.0 };
-            if !convex {
-                continue;
-            }
-            let mut contains = false;
-            for &j in &idx {
-                if j == i0 || j == i1 || j == i2 {
-                    continue;
-                }
-                if in_tri(p2[j], a, b, c) {
-                    contains = true;
-                    break;
-                }
-            }
-            if contains {
-                continue;
-            }
-            out.push(poly[i0]);
-            out.push(poly[i1]);
-            out.push(poly[i2]);
-            idx.remove(k);
-            clipped = true;
-            break;
-        }
-        if !clipped {
-            // No ear found (self-intersecting / numerically degenerate) — bail
-            // to a fan of the remainder rather than loop forever.
-            for i in 1..idx.len() - 1 {
-                out.push(poly[idx[0]]);
-                out.push(poly[idx[i]]);
-                out.push(poly[idx[i + 1]]);
-            }
-            return out;
-        }
+    let projected: Vec<[f64; 2]> = poly
+        .iter()
+        .filter_map(|&point| plane.project(point))
+        .collect();
+    if projected.len() != poly.len() {
+        return Vec::new();
     }
-    if idx.len() == 3 {
-        out.push(poly[idx[0]]);
-        out.push(poly[idx[1]]);
-        out.push(poly[idx[2]]);
+    let (points, triangles) = triangulate(&projected, &[]);
+    let source: Vec<usize> = points
+        .iter()
+        .filter_map(|point| projected.iter().position(|candidate| candidate == point))
+        .collect();
+    if source.len() != points.len() {
+        return Vec::new();
     }
-    out
+    triangles
+        .into_iter()
+        .flat_map(|triangle| triangle.map(|index| poly[source[index]]))
+        .collect()
 }
 
 // ── Face3D ────────────────────────────────────────────────────────────────────
@@ -174,32 +90,7 @@ fn face3d_fill(corners: [[f64; 3]; 4]) -> Vec<[f64; 3]> {
         return Vec::new();
     }
 
-    let Some(normal) = polygon::normal(&ring) else {
-        return Vec::new();
-    };
-    let axis = (KernelVec3::from(ring[1]) - KernelVec3::from(ring[0])).to_array();
-    let Some(plane) = Plane::orthonormal(ring[0], axis, normal) else {
-        return Vec::new();
-    };
-    let projected: Vec<[f64; 2]> = ring
-        .iter()
-        .filter_map(|&point| plane.project(point))
-        .collect();
-    if projected.len() != ring.len() {
-        return Vec::new();
-    }
-    let (points, triangles) = triangulate(&projected, &[]);
-    let source: Vec<usize> = points
-        .iter()
-        .filter_map(|point| projected.iter().position(|candidate| candidate == point))
-        .collect();
-    if source.len() != points.len() {
-        return Vec::new();
-    }
-    triangles
-        .into_iter()
-        .flat_map(|triangle| triangle.map(|index| ring[source[index]]))
-        .collect()
+    triangulate_planar(&ring)
 }
 
 impl RenderConvertible for Face3D {
@@ -238,15 +129,6 @@ impl RenderConvertible for Face3D {
             add_edge(p3, p0);
         }
 
-        if pts.is_empty() {
-            // All edges invisible — show a tiny cross at centroid.
-            let cx = (p0[0] + p1[0] + p2[0] + p3[0]) / 4.0;
-            let cy = (p0[1] + p1[1] + p2[1] + p3[1]) / 4.0;
-            let cz = (p0[2] + p1[2] + p2[2] + p3[2]) / 4.0;
-            let s = 0.1_f64;
-            pts = vec![[cx - s, cy, cz], [cx + s, cy, cz]];
-        }
-
         Some(RenderEntity {
             pick_tris: Vec::new(),
             object: RenderObject::Lines(pts),
@@ -265,15 +147,22 @@ impl RenderConvertible for Face3D {
 
 impl Grippable for Face3D {
     fn grips(&self) -> Vec<GripDef> {
-        vec![
+        let mut grips = vec![
             square_grip(0, dvec3(&self.first_corner)),
             square_grip(1, dvec3(&self.second_corner)),
             square_grip(2, dvec3(&self.third_corner)),
-            square_grip(3, dvec3(&self.fourth_corner)),
-        ]
+        ];
+        if !self.is_triangle() {
+            grips.push(square_grip(3, dvec3(&self.fourth_corner)));
+        }
+        grips
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
+        let was_triangle = self.is_triangle();
+        if was_triangle && grip_id == 3 {
+            return;
+        }
         let corner = match grip_id {
             0 => &mut self.first_corner,
             1 => &mut self.second_corner,
@@ -281,68 +170,106 @@ impl Grippable for Face3D {
             3 => &mut self.fourth_corner,
             _ => return,
         };
-        match apply {
-            GripApply::Translate(d) => {
-                corner.x += d.x as f64;
-                corner.y += d.y as f64;
-                corner.z += d.z as f64;
-            }
-            GripApply::Absolute(p) => {
-                corner.x = p.x as f64;
-                corner.y = p.y as f64;
-                corner.z = p.z as f64;
-            }
+        let current = dvec3(corner);
+        let updated = match apply {
+            GripApply::Translate(delta) => current + delta,
+            GripApply::Absolute(position) => position,
+        };
+        if !updated.is_finite() {
+            return;
+        }
+        corner.x = updated.x;
+        corner.y = updated.y;
+        corner.z = updated.z;
+        if was_triangle && grip_id == 2 {
+            self.fourth_corner = self.third_corner;
         }
     }
 }
 
 impl PropertyEditable for Face3D {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        use crate::entities::common::edit_prop as edit;
+        let was_triangle = self.is_triangle();
+        let vertex_count = if was_triangle { 3 } else { 4 };
+        let current = crate::scene::view::dispatch::prop_current_vertex()
+            .min(vertex_count - 1);
+        let corner = match current {
+            0 => &self.first_corner,
+            1 => &self.second_corner,
+            2 => &self.third_corner,
+            _ => &self.fourth_corner,
+        };
         let inv = self.invisible_edges;
-        let edge = |hidden: bool| if hidden { "Invisible" } else { "Visible" };
+        let edge = |label: &str, field: &'static str, hidden: bool| Property {
+            label: label.to_string(),
+            field,
+            value: PropValue::Choice {
+                selected: if hidden {
+                    t!("Invisible").into_owned()
+                } else {
+                    t!("Visible").into_owned()
+                },
+                options: vec![t!("Visible").into_owned(), t!("Invisible").into_owned()],
+            },
+        };
         vec![PropSection {
             title: t!("Geometry").into_owned(),
             props: vec![
-                ro(t!("Current vertex").as_ref(), "f3_current", String::new()),
-                edit(t!("Vertex 1 X").as_ref(), "f3_p1x", self.first_corner.x),
-                edit(t!("Vertex 1 Y").as_ref(), "f3_p1y", self.first_corner.y),
-                edit(t!("Vertex 1 Z").as_ref(), "f3_p1z", self.first_corner.z),
-                edit(t!("Vertex 2 X").as_ref(), "f3_p2x", self.second_corner.x),
-                edit(t!("Vertex 2 Y").as_ref(), "f3_p2y", self.second_corner.y),
-                edit(t!("Vertex 2 Z").as_ref(), "f3_p2z", self.second_corner.z),
-                edit(t!("Vertex 3 X").as_ref(), "f3_p3x", self.third_corner.x),
-                edit(t!("Vertex 3 Y").as_ref(), "f3_p3y", self.third_corner.y),
-                edit(t!("Vertex 3 Z").as_ref(), "f3_p3z", self.third_corner.z),
-                edit(t!("Vertex 4 X").as_ref(), "f3_p4x", self.fourth_corner.x),
-                edit(t!("Vertex 4 Y").as_ref(), "f3_p4y", self.fourth_corner.y),
-                edit(t!("Vertex 4 Z").as_ref(), "f3_p4z", self.fourth_corner.z),
-                ro(t!("Edge 1").as_ref(), "f3_edge1", edge(inv.is_first_invisible())),
-                ro(t!("Edge 2").as_ref(), "f3_edge2", edge(inv.is_second_invisible())),
-                ro(t!("Edge 3").as_ref(), "f3_edge3", edge(inv.is_third_invisible())),
-                ro(t!("Edge 4").as_ref(), "f3_edge4", edge(inv.is_fourth_invisible())),
+                stepper(
+                    t!("Current vertex").as_ref(),
+                    "current_vertex",
+                    format!("{}", current + 1),
+                ),
+                edit(t!("Vertex X").as_ref(), "f3_vertex_x", corner.x),
+                edit(t!("Vertex Y").as_ref(), "f3_vertex_y", corner.y),
+                edit(t!("Vertex Z").as_ref(), "f3_vertex_z", corner.z),
+                edge(t!("Edge 1").as_ref(), "f3_edge1", inv.is_first_invisible()),
+                edge(t!("Edge 2").as_ref(), "f3_edge2", inv.is_second_invisible()),
+                edge(t!("Edge 3").as_ref(), "f3_edge3", inv.is_third_invisible()),
+                edge(t!("Edge 4").as_ref(), "f3_edge4", inv.is_fourth_invisible()),
             ],
         }]
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else {
+        if field.starts_with("f3_edge") {
+            let invisible = if value == t!("Invisible").as_ref() {
+                true
+            } else if value == t!("Visible").as_ref() {
+                false
+            } else {
+                return;
+            };
+            match field {
+                "f3_edge1" => self.invisible_edges.set_first_invisible(invisible),
+                "f3_edge2" => self.invisible_edges.set_second_invisible(invisible),
+                "f3_edge3" => self.invisible_edges.set_third_invisible(invisible),
+                "f3_edge4" => self.invisible_edges.set_fourth_invisible(invisible),
+                _ => {}
+            }
+            return;
+        }
+        let Some(value) = parse_f64(value).filter(|value| value.is_finite()) else {
             return;
         };
+        let was_triangle = self.is_triangle();
+        let vertex_count = if was_triangle { 3 } else { 4 };
+        let current = crate::scene::view::dispatch::prop_current_vertex()
+            .min(vertex_count - 1);
+        let corner = match current {
+            0 => &mut self.first_corner,
+            1 => &mut self.second_corner,
+            2 => &mut self.third_corner,
+            _ => &mut self.fourth_corner,
+        };
         match field {
-            "f3_p1x" => self.first_corner.x = v,
-            "f3_p1y" => self.first_corner.y = v,
-            "f3_p1z" => self.first_corner.z = v,
-            "f3_p2x" => self.second_corner.x = v,
-            "f3_p2y" => self.second_corner.y = v,
-            "f3_p2z" => self.second_corner.z = v,
-            "f3_p3x" => self.third_corner.x = v,
-            "f3_p3y" => self.third_corner.y = v,
-            "f3_p3z" => self.third_corner.z = v,
-            "f3_p4x" => self.fourth_corner.x = v,
-            "f3_p4y" => self.fourth_corner.y = v,
-            "f3_p4z" => self.fourth_corner.z = v,
+            "f3_vertex_x" => corner.x = value,
+            "f3_vertex_y" => corner.y = value,
+            "f3_vertex_z" => corner.z = value,
             _ => {}
+        }
+        if was_triangle && current == 2 {
+            self.fourth_corner = self.third_corner;
         }
     }
 }
@@ -364,18 +291,112 @@ impl Transformable for Face3D {
 
 // ── PolygonMesh (N×M grid) ────────────────────────────────────────────────────
 
+fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
+    use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+
+    let m = mesh.m_vertex_count.max(0) as usize;
+    let n = mesh.n_vertex_count.max(0) as usize;
+    let base: Vec<[f64; 3]> = mesh
+        .vertices
+        .iter()
+        .take(m.saturating_mul(n))
+        .map(|vertex| v3(&vertex.location))
+        .collect();
+    if mesh.smooth_type == SurfaceSmoothType::NoSmooth || base.len() < m.saturating_mul(n) {
+        return (base, m, n);
+    }
+
+    let degree = match mesh.smooth_type {
+        SurfaceSmoothType::NoSmooth => return (base, m, n),
+        SurfaceSmoothType::Quadratic => 2,
+        SurfaceSmoothType::Cubic | SurfaceSmoothType::Bezier => 3,
+    };
+    let u_degree = degree.min(m.saturating_sub(1));
+    let v_degree = degree.min(n.saturating_sub(1));
+    if u_degree == 0 || v_degree == 0 {
+        return (base, m, n);
+    }
+    let control_points: Vec<Vec<[f64; 3]>> = base.chunks(n).map(|row| row.to_vec()).collect();
+    let Some(surface) = NurbsSurface3::from_control_net(
+        u_degree,
+        v_degree,
+        control_points,
+        mesh.is_closed_m(),
+        mesh.is_closed_n(),
+    ) else {
+        return (base, m, n);
+    };
+
+    let display_m = usize::try_from(mesh.m_smooth_density.max(2))
+        .unwrap_or(2)
+        .min(256);
+    let display_n = usize::try_from(mesh.n_smooth_density.max(2))
+        .unwrap_or(2)
+        .min(256);
+    let parameter = |index: usize, count: usize, closed: bool| {
+        if closed {
+            index as f64 / count as f64
+        } else {
+            index as f64 / count.saturating_sub(1).max(1) as f64
+        }
+    };
+    let mut display = Vec::with_capacity(display_m.saturating_mul(display_n));
+    for row in 0..display_m {
+        let u = parameter(row, display_m, mesh.is_closed_m());
+        for column in 0..display_n {
+            let v = parameter(column, display_n, mesh.is_closed_n());
+            display.push(surface.point_at(u, v));
+        }
+    }
+    (display, display_m, display_n)
+}
+
 impl RenderConvertible for PolygonMesh {
     fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
-        let m = self.m_vertex_count as usize;
-        let n = self.n_vertex_count as usize;
-        if m == 0 || n == 0 || self.vertices.len() < m * n {
+        let (vertices, m, n) = polygon_mesh_display(self);
+        if m == 0 || n == 0 || vertices.len() < m * n {
             return None;
         }
 
+        let mut lines = Vec::new();
+        let mut add_segment = |a: usize, b: usize| {
+            let (Some(&a), Some(&b)) = (vertices.get(a), vertices.get(b)) else {
+                return;
+            };
+            if !lines.is_empty() {
+                lines.push([f64::NAN; 3]);
+            }
+            lines.push(a);
+            lines.push(b);
+        };
+
+        let m_segments = if self.is_closed_m() { m } else { m.saturating_sub(1) };
+        let n_segments = if self.is_closed_n() { n } else { n.saturating_sub(1) };
+        for row in 0..m {
+            for column in 0..n_segments {
+                add_segment(row * n + column, row * n + (column + 1) % n);
+            }
+        }
+        for row in 0..m_segments {
+            for column in 0..n {
+                add_segment(row * n + column, ((row + 1) % m) * n + column);
+            }
+        }
+
+        const SNAP_TABLE_MAX_VERTICES: usize = 50_000;
+        let snap_pts = if vertices.len() > SNAP_TABLE_MAX_VERTICES {
+            Vec::new()
+        } else {
+            vertices
+                .iter()
+                .map(|vertex| (glam::DVec3::from_array(*vertex), SnapHint::Node))
+                .collect()
+        };
+
         Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: RenderObject::Lines(Vec::new()),
-            snap_pts: vec![],
+            object: RenderObject::Lines(lines),
+            snap_pts,
             tangent_geoms: vec![],
             key_vertices: vec![],
             fill_tris: vec![],
@@ -399,73 +420,185 @@ impl Grippable for PolygonMesh {
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         if let Some(v) = self.vertices.get_mut(grip_id) {
-            match apply {
-                GripApply::Translate(d) => {
-                    v.location.x += d.x as f64;
-                    v.location.y += d.y as f64;
-                    v.location.z += d.z as f64;
-                }
-                GripApply::Absolute(p) => {
-                    v.location.x = p.x as f64;
-                    v.location.y = p.y as f64;
-                    v.location.z = p.z as f64;
-                }
+            let current = glam::DVec3::new(v.location.x, v.location.y, v.location.z);
+            let updated = match apply {
+                GripApply::Translate(delta) => current + delta,
+                GripApply::Absolute(position) => position,
+            };
+            if !updated.is_finite() {
+                return;
             }
+            v.location.x = updated.x;
+            v.location.y = updated.y;
+            v.location.z = updated.z;
         }
     }
 }
 
 impl PropertyEditable for PolygonMesh {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
+        use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+
         let smooth = match self.smooth_type {
-            acadrust::entities::polygon_mesh::SurfaceSmoothType::NoSmooth => "None",
-            acadrust::entities::polygon_mesh::SurfaceSmoothType::Quadratic => "Quadratic",
-            acadrust::entities::polygon_mesh::SurfaceSmoothType::Cubic => "Cubic",
-            acadrust::entities::polygon_mesh::SurfaceSmoothType::Bezier => "Bezier",
+            SurfaceSmoothType::NoSmooth => "None",
+            SurfaceSmoothType::Quadratic => "Quadratic",
+            SurfaceSmoothType::Cubic => "Cubic",
+            SurfaceSmoothType::Bezier => "Bezier",
         };
-        let yesno = |b: bool| if b { "Yes" } else { "No" };
-        let first = self.vertices.first();
-        // Grid faces: one quad per cell; closed direction adds a wrap row/column.
-        let m = self.m_vertex_count.max(0) as i64;
-        let n = self.n_vertex_count.max(0) as i64;
-        let cells_m = if self.is_closed_m() { m } else { (m - 1).max(0) };
-        let cells_n = if self.is_closed_n() { n } else { (n - 1).max(0) };
-        let face_count = cells_m * cells_n;
+        let vertex_count = self.vertices.len();
+        let current = crate::scene::view::dispatch::prop_current_vertex()
+            .min(vertex_count.saturating_sub(1));
+        let vertex = self.vertices.get(current);
+        let display = if vertex_count == 0 {
+            "—".to_string()
+        } else {
+            format!("{} / {}", current + 1, vertex_count)
+        };
+        let smoothed = self.smooth_type != SurfaceSmoothType::NoSmooth;
+        let density_prop = |label: &str, field: &'static str, value: i16| {
+            if smoothed {
+                edit_scalar(label, field, value as f64)
+            } else {
+                ro(label, field, value.to_string())
+            }
+        };
         vec![
             PropSection {
                 title: t!("Geometry").into_owned(),
                 props: vec![
-                    ro(t!("Vertex").as_ref(), "pm_vertex", String::new()),
-                    ro(t!("Vertex X").as_ref(),
+                    stepper(t!("Current Vertex").as_ref(), "pm_current_vertex", display),
+                    edit(t!("Vertex X").as_ref(),
                         "pm_vx",
-                        first.map(|v| format!("{:.4}", v.location.x)).unwrap_or_default(),
+                        vertex.map_or(0.0, |vertex| vertex.location.x),
                     ),
-                    ro(t!("Vertex Y").as_ref(),
+                    edit(t!("Vertex Y").as_ref(),
                         "pm_vy",
-                        first.map(|v| format!("{:.4}", v.location.y)).unwrap_or_default(),
+                        vertex.map_or(0.0, |vertex| vertex.location.y),
                     ),
-                    ro(t!("Vertex Z").as_ref(),
+                    edit(t!("Vertex Z").as_ref(),
                         "pm_vz",
-                        first.map(|v| format!("{:.4}", v.location.z)).unwrap_or_default(),
+                        vertex.map_or(0.0, |vertex| vertex.location.z),
                     ),
                     ro(t!("M vertex count").as_ref(), "pm_m", self.m_vertex_count.to_string()),
                     ro(t!("N vertex count").as_ref(), "pm_n", self.n_vertex_count.to_string()),
-                    ro(t!("M closed").as_ref(), "pm_closed_m", yesno(self.is_closed_m())),
-                    ro(t!("N closed").as_ref(), "pm_closed_n", yesno(self.is_closed_n())),
-                    ro(t!("M density").as_ref(), "pm_smooth_m", self.m_smooth_density.to_string()),
-                    ro(t!("N density").as_ref(), "pm_smooth_n", self.n_smooth_density.to_string()),
-                    ro(t!("Vertex count").as_ref(), "pm_v", self.vertices.len().to_string()),
-                    ro(t!("Face count").as_ref(), "pm_faces", face_count.to_string()),
+                    Property {
+                        label: t!("M closed").into_owned(),
+                        field: "pm_closed_m",
+                        value: PropValue::BoolToggle {
+                            field: "pm_closed_m",
+                            value: self.is_closed_m(),
+                        },
+                    },
+                    Property {
+                        label: t!("N closed").into_owned(),
+                        field: "pm_closed_n",
+                        value: PropValue::BoolToggle {
+                            field: "pm_closed_n",
+                            value: self.is_closed_n(),
+                        },
+                    },
+                    density_prop(t!("M density").as_ref(), "pm_smooth_m", self.m_smooth_density),
+                    density_prop(t!("N density").as_ref(), "pm_smooth_n", self.n_smooth_density),
                 ],
             },
             PropSection {
                 title: t!("Misc").into_owned(),
-                props: vec![ro(t!("Fit/smooth").as_ref(), "pm_smooth", smooth)],
+                props: vec![Property {
+                    label: t!("Fit/smooth").into_owned(),
+                    field: "pm_smooth",
+                    value: PropValue::Choice {
+                        selected: smooth.to_string(),
+                        options: vec![
+                            "None".to_string(),
+                            "Quadratic".to_string(),
+                            "Cubic".to_string(),
+                            "Bezier".to_string(),
+                        ],
+                    },
+                }],
             },
         ]
     }
 
-    fn apply_geom_prop(&mut self, _field: &str, _value: &str) {}
+    fn apply_geom_prop(&mut self, field: &str, value: &str) {
+        use acadrust::entities::polygon_mesh::{PolygonMeshFlags, SurfaceSmoothType};
+
+        let bool_value = |current: bool| {
+            if value == "toggle" {
+                Some(!current)
+            } else if value.eq_ignore_ascii_case("true")
+                || value.eq_ignore_ascii_case("yes")
+            {
+                Some(true)
+            } else if value.eq_ignore_ascii_case("false")
+                || value.eq_ignore_ascii_case("no")
+            {
+                Some(false)
+            } else {
+                None
+            }
+        };
+        match field {
+            "pm_closed_m" => {
+                if let Some(closed) = bool_value(self.is_closed_m()) {
+                    self.flags.set(PolygonMeshFlags::CLOSED_M, closed);
+                }
+            }
+            "pm_closed_n" => {
+                if let Some(closed) = bool_value(self.is_closed_n()) {
+                    self.flags.set(PolygonMeshFlags::CLOSED_N, closed);
+                }
+            }
+            "pm_smooth" => {
+                let smooth = match value.trim().to_ascii_uppercase().as_str() {
+                    "NONE" => SurfaceSmoothType::NoSmooth,
+                    "QUADRATIC" => SurfaceSmoothType::Quadratic,
+                    "CUBIC" => SurfaceSmoothType::Cubic,
+                    "BEZIER" => SurfaceSmoothType::Bezier,
+                    _ => return,
+                };
+                self.smooth_type = smooth;
+                if self.smooth_type != SurfaceSmoothType::NoSmooth {
+                    if !(2..=256).contains(&self.m_smooth_density) {
+                        self.m_smooth_density = 6;
+                    }
+                    if !(2..=256).contains(&self.n_smooth_density) {
+                        self.n_smooth_density = 6;
+                    }
+                }
+            }
+            "pm_smooth_m" => {
+                if self.smooth_type != SurfaceSmoothType::NoSmooth {
+                    if let Ok(density @ 2..=256) = value.trim().parse::<i16>() {
+                        self.m_smooth_density = density;
+                    }
+                }
+            }
+            "pm_smooth_n" => {
+                if self.smooth_type != SurfaceSmoothType::NoSmooth {
+                    if let Ok(density @ 2..=256) = value.trim().parse::<i16>() {
+                        self.n_smooth_density = density;
+                    }
+                }
+            }
+            "pm_vx" | "pm_vy" | "pm_vz" => {
+                let Some(number) = parse_f64(value).filter(|number| number.is_finite()) else {
+                    return;
+                };
+                let index = crate::scene::view::dispatch::prop_current_vertex()
+                    .min(self.vertices.len().saturating_sub(1));
+                if let Some(vertex) = self.vertices.get_mut(index) {
+                    match field {
+                        "pm_vx" => vertex.location.x = number,
+                        "pm_vy" => vertex.location.y = number,
+                        "pm_vz" => vertex.location.z = number,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Transformable for PolygonMesh {
@@ -1023,23 +1156,10 @@ pub(crate) fn tessellate_shaded_mesh(
             )
         }
         acadrust::EntityType::PolygonMesh(mesh) => {
-            let m = mesh.m_vertex_count.max(0) as usize;
-            let n = mesh.n_vertex_count.max(0) as usize;
-            if m == 0 || n == 0 || mesh.vertices.len() < m.saturating_mul(n) {
+            let (vertices, m, n) = polygon_mesh_display(mesh);
+            if m == 0 || n == 0 || vertices.len() < m.saturating_mul(n) {
                 return None;
             }
-            let vertices: Vec<[f64; 3]> = mesh
-                .vertices
-                .iter()
-                .take(m * n)
-                .map(|vertex| {
-                    [
-                        vertex.location.x,
-                        vertex.location.y,
-                        vertex.location.z,
-                    ]
-                })
-                .collect();
             let closed_m = mesh.is_closed_m();
             let closed_n = mesh.is_closed_n();
             let m_cells = if closed_m { m } else { m.saturating_sub(1) };

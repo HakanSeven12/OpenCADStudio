@@ -259,19 +259,32 @@ pub fn apply_history_choice(
     let DynamicBlockData::SolidHistory(history) = &mut object.data else {
         return false;
     };
+    let before = (history.record_history, history.show_history);
     match field {
         PROP_HISTORY => {
-            history.record_history = value.eq_ignore_ascii_case("Record");
+            history.record_history = if value.eq_ignore_ascii_case("Record") {
+                true
+            } else if value.eq_ignore_ascii_case("None") {
+                false
+            } else {
+                return false;
+            };
             if !history.record_history {
                 history.show_history = false;
             }
         }
         PROP_SHOW_HISTORY if history.record_history => {
-            history.show_history = value.eq_ignore_ascii_case("Yes");
+            history.show_history = if value.eq_ignore_ascii_case("Yes") {
+                true
+            } else if value.eq_ignore_ascii_case("No") {
+                false
+            } else {
+                return false;
+            };
         }
         _ => return false,
     }
-    true
+    before != (history.record_history, history.show_history)
 }
 
 fn apply_box_geometry_property(
@@ -281,23 +294,37 @@ fn apply_box_geometry_property(
 ) -> Option<bool> {
     if field == PROP_ROTATION {
         let target = crate::entities::common::parse_direction(text)?;
+        if !target.is_finite() {
+            return Some(false);
+        }
         let current = matrix(value.base.transform)?;
         let center = current.transform_point3(glam::DVec3::new(
             value.length * 0.5,
             value.width * 0.5,
             0.0,
         ));
-        let (sin, cos) = target.sin_cos();
-        let x_axis = glam::DVec3::new(cos, sin, 0.0);
-        let y_axis = glam::DVec3::new(-sin, cos, 0.0);
-        let origin = center - x_axis * value.length * 0.5 - y_axis * value.width * 0.5;
-        value.base.transform = glam::DMat4::from_cols(
-            x_axis.extend(0.0),
-            y_axis.extend(0.0),
-            glam::DVec3::Z.extend(0.0),
-            origin.extend(1.0),
-        )
-        .to_cols_array();
+        if !center.is_finite() {
+            return Some(false);
+        }
+        let projected = current.x_axis.truncate();
+        if projected.length_squared() <= 1e-12 {
+            return Some(false);
+        }
+        let current_angle = projected.y.atan2(projected.x);
+        let delta = (target - current_angle + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        if delta.abs() <= 1e-12 {
+            return Some(false);
+        }
+        let updated = glam::DMat4::from_translation(center)
+            * glam::DMat4::from_rotation_z(delta)
+            * glam::DMat4::from_translation(-center)
+            * current;
+        if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
+            return Some(false);
+        }
+        value.base.transform = updated.to_cols_array();
         return Some(true);
     }
     let axis = match field {
@@ -307,12 +334,21 @@ fn apply_box_geometry_property(
         _ => return None,
     };
     let target = crate::entities::common::parse_length(text)?;
+    if !target.is_finite() {
+        return Some(false);
+    }
     let current = matrix(value.base.transform)?;
     let center = current.transform_point3(glam::DVec3::new(
         value.length * 0.5,
         value.width * 0.5,
         0.0,
     ));
+    if !center.is_finite() {
+        return Some(false);
+    }
+    if target == center[axis] {
+        return Some(false);
+    }
     let mut delta = glam::DVec3::ZERO;
     delta[axis] = target - center[axis];
     value.base.transform = (glam::DMat4::from_translation(delta) * current).to_cols_array();
@@ -340,8 +376,42 @@ pub fn apply_primitive_property(
         return false;
     }
     let positive = || (number > 0.0).then_some(number);
+    if let SolidHistoryOperation::Box(value) = operation {
+        let Some(next) = positive() else {
+            return false;
+        };
+        let (current_size, local_shift) = match field {
+            PROP_LENGTH => (
+                value.length,
+                glam::DVec3::new((value.length - next) * 0.5, 0.0, 0.0),
+            ),
+            PROP_WIDTH => (
+                value.width,
+                glam::DVec3::new(0.0, (value.width - next) * 0.5, 0.0),
+            ),
+            PROP_HEIGHT => (value.height, glam::DVec3::ZERO),
+            _ => return false,
+        };
+        if !current_size.is_finite() || current_size < 1e-6 || next == current_size {
+            return false;
+        }
+        if local_shift != glam::DVec3::ZERO {
+            let Some(current) = matrix(value.base.transform) else {
+                return false;
+            };
+            value.base.transform =
+                (current * glam::DMat4::from_translation(local_shift)).to_cols_array();
+        }
+        match field {
+            PROP_LENGTH => value.length = next,
+            PROP_WIDTH => value.width = next,
+            PROP_HEIGHT => value.height = next,
+            _ => unreachable!(),
+        }
+        return true;
+    }
     match operation {
-        SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => match field {
+        SolidHistoryOperation::Wedge(value) => match field {
             PROP_LENGTH => value.length = positive().unwrap_or(value.length),
             PROP_WIDTH => value.width = positive().unwrap_or(value.width),
             PROP_HEIGHT => value.height = positive().unwrap_or(value.height),
@@ -692,10 +762,16 @@ pub fn apply_primitive_grip(
     let Some(local) = local_point(transform, world) else {
         return false;
     };
+    if !local.is_finite() {
+        return false;
+    }
     let positive = |value: f64| value.abs().max(1e-6);
     match operation {
         SolidHistoryOperation::Box(value) => {
             let old_size = glam::DVec3::new(value.length, value.width, value.height);
+            if !old_size.is_finite() || old_size.min_element() < 1e-6 {
+                return false;
+            }
             let mut low = glam::DVec3::ZERO;
             let mut high = old_size;
             if (GRIP_BOX_CORNER_FIRST..GRIP_BOX_CORNER_FIRST + 8).contains(&grip_id) {
@@ -724,7 +800,12 @@ pub fn apply_primitive_grip(
                 }
             }
             let size = high - low;
-            if size.min_element() < 1e-6 {
+            if !size.is_finite() || size.min_element() < 1e-6 {
+                return false;
+            }
+            if low.abs().max_element() <= 1e-12
+                && (size - old_size).abs().max_element() <= 1e-12
+            {
                 return false;
             }
             let Some(current) = matrix(value.base.transform) else {

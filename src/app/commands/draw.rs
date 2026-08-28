@@ -454,6 +454,38 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "3DMESH" => {
+                use crate::modules::draw::draw::mesh3d::Mesh3dCommand;
+                let new_cmd = Mesh3dCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "3DFACE" => {
+                use crate::modules::draw::draw::face3d::Face3dCommand;
+                let new_cmd = Face3dCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "EDGE" => {
+                use crate::modules::draw::draw::face3d::FaceEdgeCommand;
+                let faces = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter_map(|entity| match entity {
+                        acadrust::EntityType::Face3D(face) => {
+                            Some((face.common.handle, face.clone()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let new_cmd = FaceEdgeCommand::new(faces);
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             // 2D filled solid. Reached via SO / SOLID2D — the bare SOLID verb is
             // currently the shaded-display toggle (token collision tracked).
             "SOLID" | "SOLID2D" => {

@@ -70,12 +70,7 @@ fn capture_text_orient(e: &EntityType) -> Option<TextOrient> {
     }
 }
 
-/// MIRRTEXT off: after the mirror reflects a text's points and rotation, put
-/// the glyphs back to right-reading. Restores the captured rotation / oblique /
-/// x-scale, and for single-line TEXT also flips the horizontal justification
-/// (left ↔ right) so the box lands mirror-symmetric to the source instead of
-/// hugging the axis — AutoCAD's behaviour. Center/Middle/Aligned/Fit are already
-/// symmetric about their (reflected) anchor, so they stay.
+/// Restores readable text orientation after a mirror.
 fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
     match e {
         EntityType::Text(t) => {
@@ -168,14 +163,10 @@ impl Scene {
             .filter(|&h| !self.is_layer_locked(h))
             .collect();
         let handles = &handles[..];
-        // MIRRTEXT (header.mirror_text): when false AutoCAD positions text /
-        // mtext / shape by the mirror but keeps the original rotation +
-        // oblique so the text stays right-reading. Capture before the
-        // transform and re-apply afterwards.
+        // Preserve readable text orientation when MIRRTEXT is disabled.
         let preserve_text_orientation =
             matches!(t, EntityTransform::Mirror { .. }) && !self.document.header.mirror_text;
-        // MIRRTEXT on: toggle the group-71 flags after the reflect so text
-        // becomes a true glyph mirror (see `mirror_true_text_flags`).
+        // Toggle group-71 flags when glyph mirroring is enabled.
         let mirror_true =
             matches!(t, EntityTransform::Mirror { .. }) && self.document.header.mirror_text;
         let mut text_orient_backup: Vec<(Handle, TextOrient)> = Vec::new();

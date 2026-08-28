@@ -4657,6 +4657,32 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PropFieldLwChanged { field, value } => {
+                let i = self.active_tab;
+                let handles = self.property_target_handles(i);
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if let Some(acadrust::EntityType::MultiLeader(leader)) =
+                        app.tabs[i].scene.document.get_entity_mut(handle)
+                    {
+                        if field == "line_weight" {
+                            leader.line_weight = value;
+                            leader.property_override_flags.insert(
+                                acadrust::entities::MultiLeaderPropertyOverrideFlags::LEADER_LINE_WEIGHT,
+                            );
+                            for root in &mut leader.context.leader_roots {
+                                for line in &mut root.lines {
+                                    line.line_weight = value;
+                                    line.override_flags.insert(
+                                        acadrust::entities::LeaderLinePropertyOverrideFlags::LINE_WEIGHT,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                });
+                Task::none()
+            }
+
             Message::PropLinetypeChanged(lt) => {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
@@ -4896,11 +4922,18 @@ impl OpenCADStudio {
             Message::PropVertexStep(delta) => {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
-                // Vertex navigation applies to a single selected polyline.
+                // Navigate the active vertex or table cell.
                 let n = if handles.len() == 1 {
                     match self.tabs[i].scene.document.get_entity(handles[0]) {
                         Some(acadrust::EntityType::LwPolyline(p)) => p.vertices.len(),
                         Some(acadrust::EntityType::Polyline2D(p)) => p.vertices.len(),
+                        Some(acadrust::EntityType::PolygonMesh(p)) => p.vertices.len(),
+                        Some(acadrust::EntityType::Face3D(face)) => {
+                            if face.is_triangle() { 3 } else { 4 }
+                        }
+                        Some(acadrust::EntityType::Polyline3D(p)) => {
+                            crate::entities::polyline::polyline3d_control_vertex_count(p)
+                        }
                         Some(acadrust::EntityType::Table(table)) => {
                             table.row_count().saturating_mul(table.column_count())
                         }
@@ -5112,6 +5145,54 @@ impl OpenCADStudio {
                         });
                         self.tabs[i].properties.open_color_field = None;
                     }
+                    return Task::none();
+                }
+                if matches!(
+                    field.as_str(),
+                    "line_color" | "text_color" | "block_content_color"
+                        | "background_fill_color"
+                ) {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                            if let Some(acadrust::EntityType::MultiLeader(leader)) =
+                                app.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                match field.as_str() {
+                                    "line_color" => {
+                                        leader.line_color = color;
+                                        leader.property_override_flags.insert(
+                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::LINE_COLOR,
+                                        );
+                                        for root in &mut leader.context.leader_roots {
+                                            for line in &mut root.lines {
+                                                line.line_color = color;
+                                                line.override_flags.insert(
+                                                    acadrust::entities::LeaderLinePropertyOverrideFlags::LINE_COLOR,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    "text_color" => {
+                                        leader.text_color = color;
+                                        leader.context.text_color = color;
+                                        leader.property_override_flags.insert(
+                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::TEXT_COLOR,
+                                        );
+                                    }
+                                    "block_content_color" => {
+                                        leader.block_content_color = color;
+                                        leader.context.block_content_color = color;
+                                        leader.property_override_flags.insert(
+                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT_COLOR,
+                                        );
+                                    }
+                                    "background_fill_color" => {
+                                        leader.context.background_fill_color = color;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                    });
+                    self.tabs[i].properties.open_color_field = None;
                     return Task::none();
                 }
                 if matches!(

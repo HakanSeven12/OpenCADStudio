@@ -2062,6 +2062,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             | "text_style_handle"
                             | "arrowhead_handle"
                             | "line_type_handle"
+                            | "block_content_handle"
                     ) {
                         // Resolve a picked name back to the handle the MLEADER
                         // stores. The style/text-style rows keep their existing
@@ -2107,6 +2108,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         .map(|l| l.handle)
                                 }
                             }
+                            "block_content_handle" => doc
+                                .block_records
+                                .iter()
+                                .find(|block| block.name == value)
+                                .map(|block| block.handle),
                             _ => None,
                         };
                         for &handle in &handles {
@@ -2130,10 +2136,52 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     "text_style_handle" => {
                                         if let Some(h) = resolved {
                                             ml.text_style_handle = Some(h);
+                                            ml.context.text_style_handle = Some(h);
+                                            ml.property_override_flags.insert(
+                                                acadrust::entities::MultiLeaderPropertyOverrideFlags::TEXT_STYLE,
+                                            );
                                         }
                                     }
-                                    "arrowhead_handle" => ml.arrowhead_handle = resolved,
-                                    "line_type_handle" => ml.line_type_handle = resolved,
+                                    "arrowhead_handle" => {
+                                        ml.arrowhead_handle = resolved;
+                                        for root in &mut ml.context.leader_roots {
+                                            for line in &mut root.lines {
+                                                line.arrowhead_handle = resolved;
+                                                line.override_flags.insert(
+                                                    acadrust::entities::LeaderLinePropertyOverrideFlags::ARROWHEAD,
+                                                );
+                                            }
+                                        }
+                                        ml.property_override_flags.insert(
+                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::ARROWHEAD,
+                                        );
+                                    }
+                                    "line_type_handle" => {
+                                        ml.line_type_handle = resolved;
+                                        for root in &mut ml.context.leader_roots {
+                                            for line in &mut root.lines {
+                                                line.line_type_handle = resolved;
+                                                line.override_flags.insert(
+                                                    acadrust::entities::LeaderLinePropertyOverrideFlags::LINE_TYPE,
+                                                );
+                                            }
+                                        }
+                                        ml.property_override_flags.insert(
+                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::LEADER_LINE_TYPE,
+                                        );
+                                    }
+                                    "block_content_handle" => {
+                                        if let Some(block_handle) = resolved {
+                                            ml.block_content_handle = Some(block_handle);
+                                            ml.context.block_content_handle = Some(block_handle);
+                                            ml.context.has_block_contents = true;
+                                            ml.context.block_content_location =
+                                                ml.context.content_base_point;
+                                            ml.property_override_flags.insert(
+                                                acadrust::entities::MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT,
+                                            );
+                                        }
+                                    }
                                     _ => {}
                                 }
                             }

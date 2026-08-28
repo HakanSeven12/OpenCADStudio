@@ -10,7 +10,7 @@ use crate::entities::traits::{Grippable, PropertyEditable, Transformable, Render
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;
-use cadkernel::space::NurbsCurve3;
+use cadkernel::space::{NurbsCurve3, Vec3};
 
 // ── Polyline (old-style 3D heavy polyline) ────────────────────────────────────
 
@@ -852,20 +852,11 @@ fn polyline3d_length(pl: &Polyline3D) -> f64 {
     let points = polyline3d_wire_points(pl);
     let mut length = points
         .windows(2)
-        .map(|pair| {
-            let dx = pair[1][0] - pair[0][0];
-            let dy = pair[1][1] - pair[0][1];
-            let dz = pair[1][2] - pair[0][2];
-            (dx * dx + dy * dy + dz * dz).sqrt()
-        })
+        .map(|pair| Vec3::from(pair[0]).distance(Vec3::from(pair[1])))
         .sum::<f64>();
     if pl.is_closed() && points.len() >= 2 {
-        let first = points[0];
-        let last = points[points.len() - 1];
-        let dx = first[0] - last[0];
-        let dy = first[1] - last[1];
-        let dz = first[2] - last[2];
-        length += (dx * dx + dy * dy + dz * dz).sqrt();
+        length += Vec3::from(points[0])
+            .distance(Vec3::from(points[points.len() - 1]));
     }
     length
 }
@@ -875,6 +866,9 @@ fn polyline3d_spline_samples(
     degree: usize,
     closed: bool,
 ) -> Option<Vec<[f64; 3]>> {
+    if !controls.iter().flatten().all(|value| value.is_finite()) {
+        return None;
+    }
     let curve = if closed {
         let mut periodic_controls = controls.to_vec();
         periodic_controls.extend(controls.iter().take(degree).copied());
@@ -885,7 +879,14 @@ fn polyline3d_spline_samples(
     } else {
         NurbsCurve3::new(degree, controls.to_vec(), Vec::new(), None)?
     };
-    Some(curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE))
+    let mut samples = curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE);
+    if closed
+        && samples.len() >= 2
+        && Vec3::from(samples[0]).distance(Vec3::from(samples[samples.len() - 1])) <= 1.0e-9
+    {
+        samples.pop();
+    }
+    Some(samples)
 }
 
 fn rebuild_polyline3d_fit(pl: &mut Polyline3D) -> bool {
@@ -894,16 +895,21 @@ fn rebuild_polyline3d_fit(pl: &mut Polyline3D) -> bool {
     let mut controls = polyline3d_controls(pl);
     if pl.smooth_type == SST::None {
         for vertex in &mut controls {
-            vertex.flags = POLY3D_VERTEX;
+            vertex.flags =
+                (vertex.flags & !(POLY3D_SPLINE_POINT | POLY3D_SPLINE_CONTROL)) | POLY3D_VERTEX;
         }
         pl.vertices = controls;
         pl.flags.spline_fit = false;
         return true;
     }
 
+    if pl.smooth_type == SST::Bezier {
+        pl.smooth_type = SST::CubicBSpline;
+    }
     let degree = match pl.smooth_type {
         SST::QuadraticBSpline => 2,
-        SST::CubicBSpline | SST::Bezier => 3,
+        SST::CubicBSpline => 3,
+        SST::Bezier => unreachable!(),
         SST::None => unreachable!(),
     };
     if controls.len() <= degree {
@@ -918,7 +924,9 @@ fn rebuild_polyline3d_fit(pl: &mut Polyline3D) -> bool {
     };
 
     for vertex in &mut controls {
-        vertex.flags = POLY3D_VERTEX | POLY3D_SPLINE_CONTROL;
+        vertex.flags = (vertex.flags & !(POLY3D_SPLINE_POINT | POLY3D_SPLINE_CONTROL))
+            | POLY3D_VERTEX
+            | POLY3D_SPLINE_CONTROL;
     }
     let vertex_layer = controls
         .first()
@@ -943,9 +951,7 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> RenderEntity {
         [v.position.x, v.position.y, v.position.z]
     };
 
-    // DXF vertex flags:  8 = spline-fit curve point,  16 = spline frame control point.
-    // When spline-fit vertices are present use them for the wire and control points for snap;
-    // otherwise treat all vertices uniformly.
+    // Spline samples draw the wire; frame vertices remain snap points.
     let spline_curve: Vec<_> = pl
         .vertices
         .iter()
@@ -959,7 +965,11 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> RenderEntity {
 
     let (wire_pts, key_verts) = if !spline_curve.is_empty() {
         let wire: Vec<[f64; 3]> = spline_curve.iter().map(|v| to_pt(v)).collect();
-        let ctrl: Vec<[f64; 3]> = ctrl_pts.iter().map(|v| to_pt(v)).collect();
+        let ctrl: Vec<[f64; 3]> = if ctrl_pts.is_empty() {
+            polyline3d_controls(pl).iter().map(to_pt).collect()
+        } else {
+            ctrl_pts.iter().map(|v| to_pt(v)).collect()
+        };
         (wire, ctrl)
     } else {
         let pts: Vec<[f64; 3]> = pl.vertices.iter().map(to_pt).collect();
@@ -1027,7 +1037,9 @@ impl Grippable for Polyline3D {
 
     fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
         use crate::scene::model::object::{GripMenuAction, GripMenuItem};
-        vec![
+        use acadrust::entities::polyline3d::SmoothSurfaceType as SST;
+
+        let mut items = vec![
             GripMenuItem {
                 label: "Stretch",
                 action: GripMenuAction::Stretch,
@@ -1036,11 +1048,20 @@ impl Grippable for Polyline3D {
                 label: "Add Vertex",
                 action: GripMenuAction::AddVertex,
             },
-            GripMenuItem {
+        ];
+        let minimum = match self.smooth_type {
+            SST::None if self.is_closed() => 3,
+            SST::None => 2,
+            SST::QuadraticBSpline => 3,
+            SST::CubicBSpline | SST::Bezier => 4,
+        };
+        if polyline3d_control_vertex_count(self) > minimum {
+            items.push(GripMenuItem {
                 label: "Remove Vertex",
                 action: GripMenuAction::RemoveVertex,
-            },
-        ]
+            });
+        }
+        items
     }
 
     fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
@@ -1053,19 +1074,31 @@ impl Grippable for Polyline3D {
             A::AddVertex if grip_id < n => {
                 if grip_id == n - 1 && !self.is_closed() {
                     let mut new_v = controls[grip_id].clone();
+                    if n >= 2 {
+                        let previous = &controls[n - 2].position;
+                        let last = &controls[n - 1].position;
+                        let next = Vec3::new(previous.x, previous.y, previous.z).lerp(
+                            Vec3::new(last.x, last.y, last.z),
+                            2.0,
+                        );
+                        new_v.position.x = next.x;
+                        new_v.position.y = next.y;
+                        new_v.position.z = next.z;
+                    }
                     new_v.handle = acadrust::Handle::NULL;
                     controls.push(new_v);
                 } else {
                     let i1 = (grip_id + 1) % n;
                     let v0 = &controls[grip_id];
                     let v1 = &controls[i1];
-                    let mx = (v0.position.x + v1.position.x) * 0.5;
-                    let my = (v0.position.y + v1.position.y) * 0.5;
-                    let mz = (v0.position.z + v1.position.z) * 0.5;
+                    let midpoint = Vec3::new(v0.position.x, v0.position.y, v0.position.z).lerp(
+                        Vec3::new(v1.position.x, v1.position.y, v1.position.z),
+                        0.5,
+                    );
                     let mut new_v = v0.clone();
-                    new_v.position.x = mx;
-                    new_v.position.y = my;
-                    new_v.position.z = mz;
+                    new_v.position.x = midpoint.x;
+                    new_v.position.y = midpoint.y;
+                    new_v.position.z = midpoint.z;
                     new_v.handle = acadrust::Handle::NULL;
                     controls.insert(grip_id + 1, new_v);
                 }
@@ -1074,6 +1107,7 @@ impl Grippable for Polyline3D {
             }
             A::RemoveVertex if grip_id < n => {
                 let minimum = match self.smooth_type {
+                    SST::None if self.is_closed() => 3,
                     SST::None => 2,
                     SST::QuadraticBSpline => 3,
                     SST::CubicBSpline | SST::Bezier => 4,
@@ -1115,6 +1149,13 @@ impl PropertyEditable for Polyline3D {
             SST::QuadraticBSpline => "Quadratic",
             SST::CubicBSpline | SST::Bezier => "Cubic",
         };
+        let mut smooth_options = vec!["None".to_string()];
+        if n >= 3 {
+            smooth_options.push("Quadratic".to_string());
+        }
+        if n >= 4 {
+            smooth_options.push("Cubic".to_string());
+        }
 
         vec![
             PropSection {
@@ -1143,19 +1184,19 @@ impl PropertyEditable for Polyline3D {
                         field: "pl3_smooth",
                         value: PropValue::Choice {
                             selected: fit_smooth.to_string(),
-                            options: vec![
-                                "None".to_string(),
-                                "Quadratic".to_string(),
-                                "Cubic".to_string(),
-                            ],
+                            options: smooth_options,
                         },
                     },
                     Property {
                         label: t!("Closed").into_owned(),
                         field: "pl3_closed",
-                        value: PropValue::BoolToggle {
-                            field: "pl3_closed",
-                            value: self.is_closed(),
+                        value: if n >= 3 {
+                            PropValue::BoolToggle {
+                                field: "pl3_closed",
+                                value: self.is_closed(),
+                            }
+                        } else {
+                            PropValue::ReadOnly("No".to_string())
                         },
                     },
                 ],
@@ -1171,6 +1212,9 @@ impl PropertyEditable for Polyline3D {
                 } else {
                     value == "true"
                 };
+                if closed && polyline3d_control_vertex_count(self) < 3 {
+                    return;
+                }
                 if closed {
                     self.close();
                 } else {
@@ -1200,7 +1244,7 @@ impl PropertyEditable for Polyline3D {
                 let vi = crate::scene::view::dispatch::prop_current_vertex();
                 let raw_index = polyline3d_control_indices(self).get(vi).copied();
                 if let (Some(v), Some(vert)) = (
-                    parse_f64(value),
+                    parse_f64(value).filter(|value| value.is_finite()),
                     raw_index.and_then(|index| self.vertices.get_mut(index)),
                 ) {
                     vert.position.x = v;
@@ -1211,7 +1255,7 @@ impl PropertyEditable for Polyline3D {
                 let vi = crate::scene::view::dispatch::prop_current_vertex();
                 let raw_index = polyline3d_control_indices(self).get(vi).copied();
                 if let (Some(v), Some(vert)) = (
-                    parse_f64(value),
+                    parse_f64(value).filter(|value| value.is_finite()),
                     raw_index.and_then(|index| self.vertices.get_mut(index)),
                 ) {
                     vert.position.y = v;
@@ -1222,7 +1266,7 @@ impl PropertyEditable for Polyline3D {
                 let vi = crate::scene::view::dispatch::prop_current_vertex();
                 let raw_index = polyline3d_control_indices(self).get(vi).copied();
                 if let (Some(v), Some(vert)) = (
-                    parse_f64(value),
+                    parse_f64(value).filter(|value| value.is_finite()),
                     raw_index.and_then(|index| self.vertices.get_mut(index)),
                 ) {
                     vert.position.z = v;

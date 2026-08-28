@@ -1,11 +1,4 @@
-// 3D polyline tool — interactive command.
-//
-// Command: 3DPOLY — pick a sequence of points whose Z ordinates may differ and
-// commit them as a single 3D polyline of straight segments. Unlike PLINE (a
-// planar lightweight polyline with bulge arcs), every vertex keeps its own Z,
-// so the result is a true non-planar path. Close (C) adds a closing segment
-// back to the first point; Undo (U) drops the last picked vertex. Enter / Esc
-// finishes the open polyline.
+// 3DPOLY creates open or closed non-planar paths.
 
 use acadrust::entities::Polyline3D;
 use acadrust::types::Vector3;

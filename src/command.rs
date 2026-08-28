@@ -1248,6 +1248,28 @@ pub enum CmdResult {
     CommitDimension {
         entity: EntityType,
         association: DimensionAssociationInput,
+        /// Retain the source dimension's layer and style instead of replacing
+        /// them with the current creation defaults (DIMCONTINUEMODE=1).
+        preserve_base_style: bool,
+        /// Keep collecting points after the dimension is committed.
+        continue_command: bool,
+    },
+    /// Commit several dimensions with independent association sources in one
+    /// undo step, then end the command.
+    CommitDimensionsAndExit(Vec<(EntityType, DimensionAssociationInput)>),
+    /// Persist the quick-dimension extension-origin priority while keeping the
+    /// active command at its current prompt (0 = endpoints, 1 = intersections).
+    SetQuickDimensionSnapPriority(u8),
+    /// Align multileader content points along a picked infinite line.
+    AlignMLeaders {
+        handles: Vec<Handle>,
+        from: DVec3,
+        to: DVec3,
+    },
+    /// Merge compatible block multileaders at a picked content point.
+    CollectMLeaders {
+        handles: Vec<Handle>,
+        point: DVec3,
     },
     /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded

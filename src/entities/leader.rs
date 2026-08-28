@@ -272,8 +272,7 @@ fn properties(leader: &Leader) -> Vec<PropSection> {
         (vi + 1).to_string()
     };
 
-    // Geometry sits right after General — a leader owns editable path vertices,
-    // navigated one at a time by the Current Vertex spinner.
+    // Geometry exposes one editable vertex at a time.
     let mut geometry = vec![stepper(t!("Current Vertex").as_ref(), "current_vertex", vertex_label)];
     if let Some(v) = leader.vertices.get(vi) {
         geometry.push(edit(t!("Vertex X").as_ref(), "vertex_x", v.x));
@@ -285,8 +284,7 @@ fn properties(leader: &Leader) -> Vec<PropSection> {
         geometry.push(ro(t!("Vertex Z").as_ref(), "vertex_z", String::new()));
     }
 
-    // Misc: Dim style (upgraded to a dropdown by the panel builder), the
-    // combined path/arrow Type, and annotative state (from the dim style).
+    // The panel builder resolves the dimension style and annotative state.
     let misc = vec![
         Property {
             label: t!("Dim style").into_owned(),

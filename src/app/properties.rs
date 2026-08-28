@@ -441,8 +441,21 @@ impl OpenCADStudio {
                     let display_entity = dispatch::entity_in_working_plane(contextual.as_ref(), plane);
                     let entity = &display_entity;
                     let group_names = self.tabs[i].scene.group_names_for_entity(handle);
+                    let box_primitive =
+                        crate::scene::model::solid_history::is_box_primitive(
+                            &self.tabs[i].scene.document,
+                            handle,
+                        );
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
+                    if box_primitive {
+                        sections.retain(|section| {
+                            !section.props.iter().any(|property| {
+                                property.field.starts_with("acis_")
+                                    || property.field.starts_with("s3d_")
+                            })
+                        });
+                    }
                     sections.extend(
                         crate::scene::model::solid_history::primitive_properties(
                             &self.tabs[i].scene.document,
@@ -607,7 +620,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if matches!(
+                    if !box_primitive && matches!(
                         entity,
                         acadrust::EntityType::Solid3D(_)
                             | acadrust::EntityType::Region(_)
@@ -681,12 +694,14 @@ impl OpenCADStudio {
                         }
                     }
 
-                    sections.extend(crate::entities::object_data::sections(
-                        &self.tabs[i].scene.document,
-                        &self.tabs[i].scene.object_data_cache,
-                        handle,
-                        entity,
-                    ));
+                    if !box_primitive {
+                        sections.extend(crate::entities::object_data::sections(
+                            &self.tabs[i].scene.document,
+                            &self.tabs[i].scene.object_data_cache,
+                            handle,
+                            entity,
+                        ));
+                    }
 
                     {
                         use crate::entities::common::ro_prop;
@@ -2371,6 +2386,12 @@ impl OpenCADStudio {
                     annotation_scale_handle,
                 );
                 let mut entity_grips = dispatch::grips(contextual.as_ref());
+                if crate::scene::model::solid_history::is_box_primitive(
+                    &self.tabs[i].scene.document,
+                    handle,
+                ) {
+                    entity_grips.clear();
+                }
                 // Dimension::grips() cannot see the document, so an automatic dimension
                 // text grip cannot resolve its real DIMSTYLE/annotation-scaled position
                 // there. Correct it here, where both the document and displayed annotation

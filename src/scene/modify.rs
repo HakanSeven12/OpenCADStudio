@@ -70,12 +70,7 @@ fn capture_text_orient(e: &EntityType) -> Option<TextOrient> {
     }
 }
 
-/// MIRRTEXT off: after the mirror reflects a text's points and rotation, put
-/// the glyphs back to right-reading. Restores the captured rotation / oblique /
-/// x-scale, and for single-line TEXT also flips the horizontal justification
-/// (left ↔ right) so the box lands mirror-symmetric to the source instead of
-/// hugging the axis — AutoCAD's behaviour. Center/Middle/Aligned/Fit are already
-/// symmetric about their (reflected) anchor, so they stay.
+/// Restores readable text orientation after a mirror.
 fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
     match e {
         EntityType::Text(t) => {
@@ -168,14 +163,10 @@ impl Scene {
             .filter(|&h| !self.is_layer_locked(h))
             .collect();
         let handles = &handles[..];
-        // MIRRTEXT (header.mirror_text): when false AutoCAD positions text /
-        // mtext / shape by the mirror but keeps the original rotation +
-        // oblique so the text stays right-reading. Capture before the
-        // transform and re-apply afterwards.
+        // Preserve readable text orientation when MIRRTEXT is disabled.
         let preserve_text_orientation =
             matches!(t, EntityTransform::Mirror { .. }) && !self.document.header.mirror_text;
-        // MIRRTEXT on: toggle the group-71 flags after the reflect so text
-        // becomes a true glyph mirror (see `mirror_true_text_flags`).
+        // Toggle group-71 flags when glyph mirroring is enabled.
         let mirror_true =
             matches!(t, EntityTransform::Mirror { .. }) && self.document.header.mirror_text;
         let mut text_orient_backup: Vec<(Handle, TextOrient)> = Vec::new();
@@ -773,6 +764,7 @@ impl Scene {
         handle: Handle,
         operation: acadrust::objects::SolidHistoryOperation,
     ) -> bool {
+        let box_primitive = matches!(operation, acadrust::objects::SolidHistoryOperation::Box(_));
         let Some(graph) = self.document.create_solid_history(handle, operation) else {
             return false;
         };
@@ -780,7 +772,34 @@ impl Scene {
         for node in graph.nodes {
             self.record_undo_object_before(node, None);
         }
+        if box_primitive {
+            let _ = crate::scene::model::solid_history::apply_history_choice(
+                &mut self.document,
+                handle,
+                crate::scene::model::solid_history::PROP_HISTORY,
+                "None",
+            );
+        }
+        self.sync_solid_reference_point(handle);
         true
+    }
+
+    fn sync_solid_reference_point(&mut self, handle: Handle) {
+        let reference = self
+            .document
+            .solid_history_operation(handle)
+            .and_then(crate::scene::model::solid_history::reference_point);
+        let Some(reference) = reference else {
+            return;
+        };
+        let Some(EntityType::Solid3D(entity)) = self.document.get_entity_mut(handle) else {
+            return;
+        };
+        entity.point_of_reference = acadrust::types::Vector3::new(
+            reference.x,
+            reference.y,
+            reference.z,
+        );
     }
 
     fn copy_solid_history(&mut self, source: Handle, target: Handle) -> bool {
@@ -822,6 +841,7 @@ impl Scene {
             return false;
         };
         entity.set_sat_document(&document);
+        self.sync_solid_reference_point(handle);
         self.register_solid_model(handle, body);
         true
     }
@@ -840,6 +860,7 @@ impl Scene {
             return false;
         };
         entity.set_sat_document(&document);
+        self.sync_solid_reference_point(handle);
         self.register_solid_model(handle, body);
         true
     }
@@ -892,6 +913,21 @@ impl Scene {
             return true;
         }
         self.rebuild_solid_history(handle, operation)
+    }
+
+    pub fn apply_solid_history_choice(
+        &mut self,
+        handle: Handle,
+        field: &str,
+        value: &str,
+    ) -> bool {
+        self.record_solid_history_before(handle);
+        crate::scene::model::solid_history::apply_history_choice(
+            &mut self.document,
+            handle,
+            field,
+            value,
+        )
     }
 
     fn apply_solid_history_grip(

@@ -1,14 +1,14 @@
 use acadrust::entities::{face3d::InvisibleEdgeFlags, Face3D};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
+use cadkernel::geom2d::Tolerance;
+use cadkernel::space::{curve::segments_overlap_collinearly, Vec3 as KernelVec3};
 use glam::DVec3;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
-
-const EPSILON: f64 = 1.0e-9;
 
 fn vector(point: DVec3) -> Vector3 {
     Vector3::new(point.x, point.y, point.z)
@@ -38,12 +38,12 @@ fn edge_is_invisible(flags: InvisibleEdgeFlags, edge: usize) -> bool {
     }
 }
 
-fn append_segment(points: &mut Vec<[f64; 3]>, start: DVec3, end: DVec3) {
+fn append_segment(points: &mut Vec<[f64; 3]>, start: [f64; 3], end: [f64; 3]) {
     if !points.is_empty() {
         points.push([f64::NAN; 3]);
     }
-    points.push(start.to_array());
-    points.push(end.to_array());
+    points.push(start);
+    points.push(end);
 }
 
 pub struct Face3dCommand {
@@ -171,15 +171,23 @@ impl CadCommand for Face3dCommand {
         let mut preview = Vec::new();
         for edge in 0..self.points.len().saturating_sub(1) {
             if !self.invisible[edge] {
-                append_segment(&mut preview, self.points[edge], self.points[edge + 1]);
+                append_segment(
+                    &mut preview,
+                    self.points[edge].to_array(),
+                    self.points[edge + 1].to_array(),
+                );
             }
         }
         let pending_edge = self.points.len() - 1;
         if !self.invisible[pending_edge] {
-            append_segment(&mut preview, *self.points.last().unwrap(), cursor);
+            append_segment(
+                &mut preview,
+                self.points.last()?.to_array(),
+                cursor.to_array(),
+            );
         }
         if self.points.len() == 3 && !(self.invisible[3] || self.pending_invisible) {
-            append_segment(&mut preview, cursor, self.points[0]);
+            append_segment(&mut preview, cursor.to_array(), self.points[0].to_array());
         }
         Some(WireModel::solid_f64(
             "face3d_preview".to_string(),
@@ -202,6 +210,7 @@ pub struct FaceEdgeCommand {
     mode: EdgeMode,
     show_all_hidden: bool,
     displayed_faces: HashSet<Handle>,
+    pending_replacements: HashMap<Handle, Face3D>,
 }
 
 impl FaceEdgeCommand {
@@ -211,33 +220,32 @@ impl FaceEdgeCommand {
             mode: EdgeMode::Toggle,
             show_all_hidden: false,
             displayed_faces: HashSet::new(),
+            pending_replacements: HashMap::new(),
         }
     }
 
-    fn corners(face: &Face3D) -> [DVec3; 4] {
+    fn corners(face: &Face3D) -> [KernelVec3; 4] {
         [
-            point(face.first_corner),
-            point(face.second_corner),
-            point(face.third_corner),
-            point(face.fourth_corner),
+            KernelVec3::from(point(face.first_corner).to_array()),
+            KernelVec3::from(point(face.second_corner).to_array()),
+            KernelVec3::from(point(face.third_corner).to_array()),
+            KernelVec3::from(point(face.fourth_corner).to_array()),
         ]
     }
 
-    fn nearest_edge(face: &Face3D, picked: DVec3) -> Option<usize> {
+    fn nearest_edge(face: &Face3D, picked: KernelVec3) -> Option<usize> {
         let corners = Self::corners(face);
+        let tolerance = Tolerance::default().linear();
         let mut best = None;
         for edge in 0..4 {
             let start = corners[edge];
             let end = corners[(edge + 1) % 4];
-            let segment = end - start;
-            let length_squared = segment.length_squared();
-            if length_squared <= EPSILON * EPSILON {
+            if start.distance(end) <= tolerance {
                 continue;
             }
-            let parameter = ((picked - start).dot(segment) / length_squared).clamp(0.0, 1.0);
-            let distance_squared = (picked - (start + segment * parameter)).length_squared();
-            if best.is_none_or(|(_, distance)| distance_squared < distance) {
-                best = Some((edge, distance_squared));
+            let distance = picked.distance_to_segment(start, end);
+            if best.is_none_or(|(_, best_distance)| distance < best_distance) {
+                best = Some((edge, distance));
             }
         }
         best.map(|(edge, _)| edge)
@@ -253,39 +261,6 @@ impl FaceEdgeCommand {
         )
     }
 
-    fn edges_overlap_collinearly(
-        selected_start: DVec3,
-        selected_end: DVec3,
-        candidate_start: DVec3,
-        candidate_end: DVec3,
-    ) -> bool {
-        let selected = selected_end - selected_start;
-        let selected_length = selected.length();
-        let candidate = candidate_end - candidate_start;
-        if selected_length <= EPSILON || candidate.length() <= EPSILON {
-            return false;
-        }
-        let direction = selected / selected_length;
-        let scale = selected_length
-            .max(candidate.length())
-            .max(1.0);
-        let tolerance = EPSILON * scale;
-        let line_distance = |point: DVec3| {
-            let offset = point - selected_start;
-            (offset - direction * offset.dot(direction)).length()
-        };
-        if line_distance(candidate_start) > tolerance
-            || line_distance(candidate_end) > tolerance
-        {
-            return false;
-        }
-        let t0 = (candidate_start - selected_start).dot(direction);
-        let t1 = (candidate_end - selected_start).dot(direction);
-        let candidate_min = t0.min(t1);
-        let candidate_max = t0.max(t1);
-        candidate_max.min(selected_length) - candidate_min.max(0.0) > tolerance
-    }
-
     fn collinear_replacements(
         &mut self,
         selected_face: usize,
@@ -299,16 +274,18 @@ impl FaceEdgeCommand {
             selected_edge,
         );
         let mut replacements = Vec::new();
-        for (handle, face) in &mut self.faces {
+        self.pending_replacements.clear();
+        for (handle, face) in &self.faces {
             let corners = Self::corners(face);
             let mut updated = face.clone();
             let mut changed = false;
             for edge in 0..4 {
-                if Self::edges_overlap_collinearly(
-                    selected_start,
-                    selected_end,
-                    corners[edge],
-                    corners[(edge + 1) % 4],
+                if segments_overlap_collinearly(
+                    selected_start.to_array(),
+                    selected_end.to_array(),
+                    corners[edge].to_array(),
+                    corners[(edge + 1) % 4].to_array(),
+                    Tolerance::default().linear(),
                 ) && edge_is_invisible(updated.invisible_edges, edge) != make_invisible
                 {
                     set_edge_invisible(&mut updated.invisible_edges, edge, make_invisible);
@@ -316,7 +293,7 @@ impl FaceEdgeCommand {
                 }
             }
             if changed {
-                *face = updated.clone();
+                self.pending_replacements.insert(*handle, updated.clone());
                 replacements.push((*handle, vec![EntityType::Face3D(updated)]));
             }
         }
@@ -332,10 +309,14 @@ impl FaceEdgeCommand {
             let corners = Self::corners(face);
             for edge in 0..4 {
                 if edge_is_invisible(face.invisible_edges, edge)
-                    && (corners[(edge + 1) % 4] - corners[edge]).length_squared()
-                        > EPSILON * EPSILON
+                    && corners[edge].distance(corners[(edge + 1) % 4])
+                        > Tolerance::default().linear()
                 {
-                    append_segment(&mut points, corners[edge], corners[(edge + 1) % 4]);
+                    append_segment(
+                        &mut points,
+                        corners[edge].to_array(),
+                        corners[(edge + 1) % 4].to_array(),
+                    );
                 }
             }
         }
@@ -402,6 +383,7 @@ impl CadCommand for FaceEdgeCommand {
             self.displayed_faces.insert(handle);
             return CmdResult::Preview(self.hidden_edges_wire());
         }
+        let picked = KernelVec3::from(picked.to_array());
         let Some(edge) = Self::nearest_edge(&self.faces[index].1, picked) else {
             return CmdResult::NeedPoint;
         };
@@ -424,10 +406,14 @@ impl CadCommand for FaceEdgeCommand {
             let mut points = Vec::new();
             let corners = Self::corners(face);
             for edge in 0..4 {
-                if (corners[(edge + 1) % 4] - corners[edge]).length_squared()
-                    > EPSILON * EPSILON
+                if corners[edge].distance(corners[(edge + 1) % 4])
+                    > Tolerance::default().linear()
                 {
-                    append_segment(&mut points, corners[edge], corners[(edge + 1) % 4]);
+                    append_segment(
+                        &mut points,
+                        corners[edge].to_array(),
+                        corners[(edge + 1) % 4].to_array(),
+                    );
                 }
             }
             return vec![WireModel::solid_f64(
@@ -437,7 +423,7 @@ impl CadCommand for FaceEdgeCommand {
                 false,
             )];
         }
-        Self::nearest_edge(face, picked)
+        Self::nearest_edge(face, KernelVec3::from(picked.to_array()))
             .map(|edge| vec![Self::edge_wire(face, edge, "face3d_edge")])
             .unwrap_or_default()
     }
@@ -494,7 +480,12 @@ impl CadCommand for FaceEdgeCommand {
 
     fn on_entity_replaced(&mut self, old: Handle, new_handles: &[Handle]) {
         if let Some(new_handle) = new_handles.first().copied() {
-            if let Some((handle, _)) = self.faces.iter_mut().find(|(handle, _)| *handle == old) {
+            if let Some((handle, face)) =
+                self.faces.iter_mut().find(|(handle, _)| *handle == old)
+            {
+                if let Some(updated) = self.pending_replacements.remove(&old) {
+                    *face = updated;
+                }
                 *handle = new_handle;
             }
             if self.displayed_faces.remove(&old) {

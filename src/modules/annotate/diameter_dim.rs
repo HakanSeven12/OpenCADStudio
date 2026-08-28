@@ -113,6 +113,8 @@ impl CadCommand for DiameterDimensionCommand {
                     entity: source_plane
                         .place_entity(EntityType::Dimension(Dimension::Diameter(dim))),
                     association: DimensionAssociationInput::Infer(self.source_handle),
+                    preserve_base_style: false,
+                    continue_command: false,
                 }
             }
         }

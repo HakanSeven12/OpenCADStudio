@@ -539,7 +539,8 @@ impl Scene {
                                     "ByLayer".into(),
                                     "ByBlock".into(),
                                 ]),
-                                PropValue::LwChoice(_) => QSelectValueEditor::Choice(vec![
+                                PropValue::LwChoice(_)
+                                | PropValue::FieldLwChoice { .. } => QSelectValueEditor::Choice(vec![
                                     "ByLayer".into(),
                                     "ByBlock".into(),
                                     "Default".into(),
@@ -567,7 +568,8 @@ impl Scene {
                                 PropValue::AttrText { .. } => QSelectValueEditor::Text,
                                 PropValue::Stepper { .. }
                                 | PropValue::ColorVaries
-                                | PropValue::LwVaries => continue,
+                                | PropValue::LwVaries
+                                | PropValue::FieldLwVaries { .. } => continue,
                             }
                         };
                         out.push(choice(prop.field, prop.label, editor));
@@ -696,13 +698,18 @@ impl Scene {
                     PropValue::Choice { selected, .. } => selected,
                     PropValue::EditChoice { value, .. } => value,
                     PropValue::ColorChoice(c) => Self::format_color(c),
-                    PropValue::LwChoice(lw) => Self::format_lineweight(lw),
+                    PropValue::LwChoice(lw)
+                    | PropValue::FieldLwChoice { value: lw, .. } => {
+                        Self::format_lineweight(lw)
+                    }
                     PropValue::LinetypeChoice(s) => s,
                     PropValue::HatchPatternChoice(s) => s,
                     PropValue::BoolToggle { value, .. } => value.to_string(),
                     PropValue::AttrText { value, .. } => value,
                     PropValue::Stepper { display, .. } => display,
-                    PropValue::ColorVaries | PropValue::LwVaries => return None,
+                    PropValue::ColorVaries
+                    | PropValue::LwVaries
+                    | PropValue::FieldLwVaries { .. } => return None,
                 })
             }
         }

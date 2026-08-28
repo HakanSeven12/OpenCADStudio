@@ -1,5 +1,4 @@
-// Persistent command defaults — last-used values survive across command runs
-// within the same session.  Uses thread_local! so no synchronisation needed.
+// Last-used command values for this session.
 
 use std::cell::Cell;
 

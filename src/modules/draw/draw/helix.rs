@@ -1,7 +1,7 @@
 use acadrust::entities::{Helix, HelixConstraint, Spline};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
-use cadkernel::space::{HelixCurve, HelixDirection};
+use cadkernel::space::{HelixCurve, HelixDirection, Vec3};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, DynField, WorkingPlane};
@@ -70,14 +70,16 @@ impl HelixCommand {
         crate::entities::common::parse_typed_length(text)
     }
 
-    fn axis_start_direction(&self, axis: DVec3) -> DVec3 {
-        let axis = axis.normalize_or(self.plane.z);
-        let first = self.plane.x - axis * self.plane.x.dot(axis);
-        if first.length_squared() > EPSILON * EPSILON {
-            first.normalize()
-        } else {
-            (self.plane.y - axis * self.plane.y.dot(axis)).normalize_or(DVec3::X)
-        }
+    fn parse_turns(text: &str) -> Option<f64> {
+        text.trim().replace(',', ".").parse().ok().filter(|value: &f64| value.is_finite())
+    }
+
+    fn axis_start_direction(&self, axis: Vec3) -> Option<Vec3> {
+        let project = |direction: DVec3| {
+            let direction = Vec3::from(direction.to_array());
+            (direction - axis * direction.dot(axis)).normalize()
+        };
+        project(self.plane.x).or_else(|| project(self.plane.y))
     }
 
     fn resolved_turns(&self, height: f64) -> f64 {
@@ -88,11 +90,13 @@ impl HelixCommand {
     }
 
     fn kernel_curve(&self, height: f64, axis: DVec3) -> Option<HelixCurve> {
-        let axis = axis.normalize_or(self.plane.z);
-        let curve = HelixCurve {
+        let axis = Vec3::from(axis.to_array())
+            .normalize()
+            .or_else(|| Vec3::from(self.plane.z.to_array()).normalize())?;
+        Some(HelixCurve {
             base_center: self.center.to_array(),
             axis_direction: axis.to_array(),
-            start_direction: self.axis_start_direction(axis).to_array(),
+            start_direction: self.axis_start_direction(axis)?.to_array(),
             base_radius: self.base_radius,
             top_radius: self.top_radius,
             height,
@@ -102,8 +106,7 @@ impl HelixCommand {
             } else {
                 HelixDirection::Clockwise
             },
-        };
-        curve.nurbs().map(|_| curve)
+        })
     }
 
     fn build(&self, height: f64, axis: DVec3) -> Option<EntityType> {
@@ -253,7 +256,12 @@ impl CadCommand for HelixCommand {
             }
             Step::BaseRadius | Step::BaseDiameter => {
                 let local = self.plane.vector_to_local(point - self.center);
-                let radius = local.x.hypot(local.y);
+                let distance = local.x.hypot(local.y);
+                let radius = if self.step == Step::BaseDiameter {
+                    distance * 0.5
+                } else {
+                    distance
+                };
                 if radius > EPSILON {
                     self.base_radius = radius;
                     self.top_radius = radius;
@@ -263,7 +271,12 @@ impl CadCommand for HelixCommand {
             }
             Step::TopRadius | Step::TopDiameter => {
                 let local = self.plane.vector_to_local(point - self.center);
-                self.top_radius = local.x.hypot(local.y);
+                let distance = local.x.hypot(local.y);
+                self.top_radius = if self.step == Step::TopDiameter {
+                    distance * 0.5
+                } else {
+                    distance
+                };
                 self.step = Step::Final;
                 CmdResult::NeedPoint
             }
@@ -407,7 +420,7 @@ impl CadCommand for HelixCommand {
             }
             Step::AxisEndpoint => None,
             Step::Turns => {
-                let turns = Self::parse_value(value)?;
+                let turns = Self::parse_turns(value)?;
                 if turns > EPSILON {
                     self.turns = turns;
                     self.requested_turn_height = None;
@@ -443,7 +456,13 @@ impl CadCommand for HelixCommand {
             Step::BaseRadius | Step::BaseDiameter => {
                 let local = self.plane.vector_to_local(point - self.center);
                 let old = (self.base_radius, self.top_radius);
-                self.base_radius = local.x.hypot(local.y).max(EPSILON);
+                let distance = local.x.hypot(local.y);
+                self.base_radius = if self.step == Step::BaseDiameter {
+                    distance * 0.5
+                } else {
+                    distance
+                }
+                .max(EPSILON);
                 self.top_radius = self.base_radius;
                 let preview = self.preview(0.0, self.plane.z);
                 (self.base_radius, self.top_radius) = old;
@@ -452,7 +471,12 @@ impl CadCommand for HelixCommand {
             Step::TopRadius | Step::TopDiameter => {
                 let local = self.plane.vector_to_local(point - self.center);
                 let old = self.top_radius;
-                self.top_radius = local.x.hypot(local.y);
+                let distance = local.x.hypot(local.y);
+                self.top_radius = if self.step == Step::TopDiameter {
+                    distance * 0.5
+                } else {
+                    distance
+                };
                 let preview = self.preview(0.0, self.plane.z);
                 self.top_radius = old;
                 preview

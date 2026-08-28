@@ -1,6 +1,6 @@
 use acadrust::entities::{Helix, HelixConstraint, Spline};
 use acadrust::types::Vector3;
-use cadkernel::space::{HelixCurve, HelixDirection, NurbsCurve3};
+use cadkernel::space::{HelixCurve, HelixDirection, NurbsCurve3, Vec3};
 use glam::DVec3;
 
 use crate::command::EntityTransform;
@@ -15,40 +15,50 @@ use crate::t;
 
 const EPSILON: f64 = 1.0e-9;
 
-fn point(vector: Vector3) -> DVec3 {
-    DVec3::new(vector.x, vector.y, vector.z)
+fn point(vector: Vector3) -> Vec3 {
+    Vec3::new(vector.x, vector.y, vector.z)
 }
 
-fn vector(value: DVec3) -> Vector3 {
+fn vector(value: Vec3) -> Vector3 {
     Vector3::new(value.x, value.y, value.z)
 }
 
+fn display(value: Vec3) -> DVec3 {
+    DVec3::new(value.x, value.y, value.z)
+}
+
+fn kernel(value: DVec3) -> Vec3 {
+    Vec3::new(value.x, value.y, value.z)
+}
+
+fn finite(value: Vec3) -> bool {
+    value.x.is_finite() && value.y.is_finite() && value.z.is_finite()
+}
+
 fn spline_curve(spline: &Spline) -> Option<NurbsCurve3> {
-    let controls = spline
+    let controls: Vec<[f64; 3]> = spline
         .control_points
         .iter()
         .map(|value| [value.x, value.y, value.z])
         .collect();
-    let weights = (spline.weights.len() == spline.control_points.len())
-        .then(|| spline.weights.clone());
-    NurbsCurve3::new(spline.degree.max(1) as usize, controls, spline.knots.clone(), weights)
+    let degree = usize::try_from(spline.degree).ok()?;
+    let weights = if spline.weights.is_empty() {
+        vec![1.0; controls.len()]
+    } else {
+        spline.weights.clone()
+    };
+    NurbsCurve3::new_strict(degree, controls, spline.knots.clone(), weights)
 }
 
-fn axis_frame(helix: &Helix) -> Option<(DVec3, DVec3, DVec3)> {
+fn axis_frame(helix: &Helix) -> Option<(Vec3, Vec3, Vec3)> {
     let base = point(helix.axis_base_point);
-    let axis = point(helix.axis_vector).normalize_or_zero();
-    if axis.length_squared() <= EPSILON * EPSILON {
-        return None;
-    }
+    let axis = point(helix.axis_vector).normalize()?;
     let radial = point(helix.start_point) - base;
-    let start_direction = (radial - axis * radial.dot(axis)).normalize_or_zero();
-    if start_direction.length_squared() <= EPSILON * EPSILON {
-        return None;
-    }
+    let start_direction = (radial - axis * radial.dot(axis)).normalize()?;
     Some((base, axis, start_direction))
 }
 
-fn radius_from_axis(helix: &Helix, value: DVec3) -> Option<f64> {
+fn radius_from_axis(helix: &Helix, value: Vec3) -> Option<f64> {
     let (base, axis, _) = axis_frame(helix)?;
     let delta = value - base;
     Some((delta - axis * delta.dot(axis)).length())
@@ -56,7 +66,7 @@ fn radius_from_axis(helix: &Helix, value: DVec3) -> Option<f64> {
 
 fn top_radius(helix: &Helix) -> f64 {
     spline_curve(&helix.spline)
-        .map(|curve| DVec3::from_array(curve.point_at(1.0)))
+        .map(|curve| Vec3::from(curve.point_at(1.0)))
         .and_then(|endpoint| radius_from_axis(helix, endpoint))
         .unwrap_or(helix.radius)
 }
@@ -77,6 +87,21 @@ fn kernel_curve(helix: &Helix, top_radius: f64) -> Option<HelixCurve> {
             HelixDirection::Clockwise
         },
     })
+}
+
+fn projected_direction(direction: Vec3, axis: Vec3) -> Option<Vec3> {
+    (direction - axis * direction.dot(axis)).normalize()
+}
+
+fn perpendicular(axis: Vec3) -> Option<Vec3> {
+    let basis = if axis.x.abs() <= axis.y.abs() && axis.x.abs() <= axis.z.abs() {
+        Vec3::X
+    } else if axis.y.abs() <= axis.z.abs() {
+        Vec3::Y
+    } else {
+        Vec3::Z
+    };
+    projected_direction(basis, axis)
 }
 
 fn rebuild(helix: &mut Helix, top_radius: f64) -> bool {
@@ -125,13 +150,13 @@ fn grips(helix: &Helix) -> Vec<GripDef> {
     let height = helix.turns * helix.turn_height;
     let top_center = base + axis * height;
     let top_endpoint = spline_curve(&helix.spline)
-        .map(|curve| DVec3::from_array(curve.point_at(1.0)))
+        .map(|curve| Vec3::from(curve.point_at(1.0)))
         .unwrap_or(top_center);
     vec![
-        center_grip(0, base),
-        square_grip(1, point(helix.start_point)),
-        square_grip(2, top_center),
-        square_grip(3, top_endpoint),
+        center_grip(0, display(base)),
+        square_grip(1, display(point(helix.start_point))),
+        square_grip(2, display(top_center)),
+        square_grip(3, display(top_endpoint)),
     ]
 }
 
@@ -180,22 +205,34 @@ fn properties(helix: &Helix) -> Vec<PropSection> {
 
 fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
     if field == "constrain" {
-        helix.constraint = if value == t!("Height").as_ref() {
+        let constraint = if value == t!("Height").as_ref() {
             HelixConstraint::Height
         } else if value == t!("Turns").as_ref() {
             HelixConstraint::Turns
-        } else {
+        } else if value == t!("Turn Height").as_ref() {
             HelixConstraint::TurnHeight
+        } else {
+            return;
         };
+        helix.constraint = constraint;
         return;
     }
+    let original = helix.clone();
     let top = top_radius(helix);
     if field == "twist" {
-        helix.handedness = value == t!("CCW").as_ref();
-        let _ = rebuild(helix, top);
+        if value == t!("CCW").as_ref() {
+            helix.handedness = true;
+        } else if value == t!("CW").as_ref() {
+            helix.handedness = false;
+        } else {
+            return;
+        }
+        if !rebuild(helix, top) {
+            *helix = original;
+        }
         return;
     }
-    let Some(number) = parse_f64(value) else {
+    let Some(number) = parse_f64(value).filter(|number| number.is_finite()) else {
         return;
     };
     let old_base = point(helix.axis_base_point);
@@ -214,7 +251,11 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
         }
         "height" if number.abs() > EPSILON => {
             if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON {
-                helix.turns = (number / helix.turn_height).abs().max(EPSILON);
+                let turns = number / helix.turn_height;
+                if turns <= EPSILON {
+                    return;
+                }
+                helix.turns = turns;
             } else {
                 helix.turn_height = number / helix.turns.max(EPSILON);
             }
@@ -231,8 +272,12 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
             if helix.constraint == HelixConstraint::Turns {
                 helix.turn_height = number;
             } else {
+                let turns = old_height / number;
+                if turns <= EPSILON {
+                    return;
+                }
                 helix.turn_height = number;
-                helix.turns = (old_height / number).abs().max(EPSILON);
+                helix.turns = turns;
             }
         }
         "base_radius" if number > EPSILON => {
@@ -243,30 +288,47 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
             helix.start_point = vector(base + start_direction * number);
         }
         "top_radius" if number >= 0.0 => {
-            let _ = rebuild(helix, number);
+            if !rebuild(helix, number) {
+                *helix = original;
+            }
             return;
         }
         _ => return,
     }
-    let _ = rebuild(helix, top);
+    if !rebuild(helix, top) {
+        *helix = original;
+    }
 }
 
 fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
+    let original = helix.clone();
     let top = top_radius(helix);
-    let Some((base, axis, _)) = axis_frame(helix) else {
+    let Some((base, axis, start_direction)) = axis_frame(helix) else {
         return;
     };
     match (grip_id, apply) {
         (0, GripApply::Translate(delta)) => {
+            let delta = kernel(delta);
+            if !finite(delta) {
+                return;
+            }
             helix.axis_base_point = vector(base + delta);
             helix.start_point = vector(point(helix.start_point) + delta);
         }
         (0, GripApply::Absolute(position)) => {
+            let position = kernel(position);
+            if !finite(position) {
+                return;
+            }
             let delta = position - base;
             helix.axis_base_point = vector(position);
             helix.start_point = vector(point(helix.start_point) + delta);
         }
         (1, GripApply::Absolute(position)) => {
+            let position = kernel(position);
+            if !finite(position) {
+                return;
+            }
             let radial = position - base - axis * (position - base).dot(axis);
             let radius = radial.length();
             if radius <= EPSILON {
@@ -276,19 +338,37 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
             helix.start_point = vector(base + radial);
         }
         (2, GripApply::Absolute(position)) => {
+            let position = kernel(position);
+            if !finite(position) {
+                return;
+            }
             let axis_vector = position - base;
             let height = axis_vector.length();
             if height <= EPSILON {
                 return;
             }
-            helix.axis_vector = vector(axis_vector / height);
+            let target_axis = axis_vector / height;
             if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON {
-                helix.turns = (height / helix.turn_height).abs().max(EPSILON);
+                helix.axis_vector = vector(target_axis * helix.turn_height.signum());
+                helix.turns = height / helix.turn_height.abs();
             } else {
+                helix.axis_vector = vector(target_axis);
                 helix.turn_height = height / helix.turns.max(EPSILON);
             }
+            let new_axis = point(helix.axis_vector);
+            let start_direction = projected_direction(start_direction, new_axis)
+                .or_else(|| perpendicular(new_axis));
+            let Some(start_direction) = start_direction else {
+                *helix = original;
+                return;
+            };
+            helix.start_point = vector(base + start_direction * helix.radius);
         }
         (3, GripApply::Absolute(position)) => {
+            let position = kernel(position);
+            if !finite(position) {
+                return;
+            }
             let delta = position - base;
             let height = delta.dot(axis);
             let radius = (delta - axis * height).length();
@@ -296,16 +376,24 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
                 return;
             }
             if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON {
-                helix.turns = (height / helix.turn_height).abs().max(EPSILON);
+                let turns = height / helix.turn_height;
+                if turns <= EPSILON {
+                    return;
+                }
+                helix.turns = turns;
             } else {
                 helix.turn_height = height / helix.turns.max(EPSILON);
             }
-            let _ = rebuild(helix, radius);
+            if !rebuild(helix, radius) {
+                *helix = original;
+            }
             return;
         }
         _ => return,
     }
-    let _ = rebuild(helix, top);
+    if !rebuild(helix, top) {
+        *helix = original;
+    }
 }
 
 fn apply_transform(helix: &mut Helix, transform: &EntityTransform) {

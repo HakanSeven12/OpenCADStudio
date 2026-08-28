@@ -1,7 +1,9 @@
 use acadrust::entities::{
-    FlowDirectionType, LeaderContentType, LineSpacingStyle, MultiLeader, MultiLeaderPathType,
-    TextAlignmentType, TextAttachmentDirectionType, TextAttachmentType,
+    BlockContentConnectionType, FlowDirectionType, LeaderContentType, LineSpacingStyle,
+    MultiLeader, MultiLeaderPathType, MultiLeaderPropertyOverrideFlags, TextAlignmentType,
+    TextAttachmentDirectionType, TextAttachmentType,
 };
+use cadkernel::geom2d::Transform;
 
 use crate::entities::text_support::{
     layout_mtext, resolve_text_style, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
@@ -904,9 +906,7 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
     // ── Leaders ──────────────────────────────────────────────────────────
     // Landing rows are folded in here: the standalone "Leader Structure" group
     // is a style-dialog tab, not a palette group.
-    let leaders = PropSection {
-        title: t!("Leaders").into_owned(),
-        props: vec![
+    let mut leader_props = vec![
             choice(
                 t!("Leader type").as_ref(),
                 "path_type",
@@ -923,20 +923,34 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
             Property {
                 label: t!("Leader lineweight").into_owned(),
                 field: "line_weight",
-                value: PropValue::LwChoice(ml.line_weight),
+                value: PropValue::FieldLwChoice {
+                    field: "line_weight",
+                    value: ml.line_weight,
+                },
             },
             // Arrowhead block name resolved by the panel builder (default "Closed filled").
             ro(t!("Arrowhead").as_ref(), "arrowhead_handle", "Closed filled"),
-            edit(t!("Arrowhead size").as_ref(), "arrowhead_size", ml.arrowhead_size),
+            edit(t!("Arrowhead Size").as_ref(), "arrowhead_size", ml.arrowhead_size),
             bool_toggle(t!("Horizontal Landing").as_ref(), "enable_dogleg", ml.enable_dogleg),
             num_row(
                 t!("Landing distance").as_ref(),
                 "landing_distance",
-                ml.dogleg_length,
+                if ml.enable_dogleg { ml.dogleg_length } else { 0.0 },
                 ml.enable_dogleg,
             ),
-            bool_toggle(t!("Leader extension").as_ref(), "enable_landing", ml.enable_landing),
-        ],
+        ];
+    // The extension is an MText-only landing option. It is absent for block
+    // content and whenever the horizontal landing itself is disabled.
+    if ml.content_type == LeaderContentType::MText && ml.enable_dogleg {
+        leader_props.push(bool_toggle(
+                t!("Leader extension").as_ref(),
+                "extend_leader_to_text",
+                ml.extend_leader_to_text,
+            ));
+    }
+    let leaders = PropSection {
+        title: t!("Leaders").into_owned(),
+        props: leader_props,
     };
 
     // ── Text (shown only for MText content) ──────────────────────────────
@@ -988,6 +1002,18 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
                 attach_dir_str(&ml.text_attachment_direction),
                 &["Horizontal", "Vertical"],
             ),
+            edit(
+                t!("Landing gap").as_ref(),
+                "landing_gap",
+                ctx.landing_gap / ctx.scale_factor.max(1.0e-12),
+            ),
+            bool_toggle(t!("Text frame").as_ref(), "text_frame", ml.text_frame),
+        ],
+    };
+    let mut text = text;
+    let attachment_insert = text.props.len().saturating_sub(2);
+    let attachment_rows = match ml.text_attachment_direction {
+        TextAttachmentDirectionType::Horizontal => vec![
             choice(
                 t!("Left Attachment").as_ref(),
                 "text_left_attachment",
@@ -1000,10 +1026,23 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
                 attachment_str(&ml.text_right_attachment),
                 &ATTACH_LABELS,
             ),
-            edit(t!("Landing gap").as_ref(), "landing_gap", ctx.landing_gap),
-            bool_toggle(t!("Text frame").as_ref(), "text_frame", ml.text_frame),
+        ],
+        TextAttachmentDirectionType::Vertical => vec![
+            choice(
+                t!("Top Attachment").as_ref(),
+                "text_top_attachment",
+                attachment_str(&ml.text_top_attachment),
+                &ATTACH_LABELS,
+            ),
+            choice(
+                t!("Bottom Attachment").as_ref(),
+                "text_bottom_attachment",
+                attachment_str(&ml.text_bottom_attachment),
+                &ATTACH_LABELS,
+            ),
         ],
     };
+    text.props.splice(attachment_insert..attachment_insert, attachment_rows);
 
     // ── Block ────────────────────────────────────────────────────────────
     let block = PropSection {
@@ -1014,29 +1053,16 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
                 "block_content_handle",
                 hexh(ml.block_content_handle),
             ),
-            ro(
-                t!("Block connection").as_ref(),
+            choice(
+                t!("Attachment").as_ref(),
                 "block_connection_type",
-                format!("{:?}", ml.block_connection_type),
+                match ml.block_connection_type {
+                    BlockContentConnectionType::BasePoint => "Insertion point",
+                    BlockContentConnectionType::BlockExtents => "Extents",
+                },
+                &["Extents", "Insertion point"],
             ),
-            ro(
-                t!("Block color").as_ref(),
-                "block_content_color",
-                format!("{:?}", ml.block_content_color),
-            ),
-            ro(
-                t!("Block scale").as_ref(),
-                "block_scale",
-                format!(
-                    "{:.3} × {:.3} × {:.3}",
-                    ml.block_scale.x, ml.block_scale.y, ml.block_scale.z
-                ),
-            ),
-            edit(
-                t!("Block rotation").as_ref(),
-                "block_rotation",
-                ml.block_rotation.to_degrees(),
-            ),
+            edit(t!("Scale").as_ref(), "block_scale", ml.block_scale.x),
         ],
     };
 
@@ -1067,7 +1093,9 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         "text_height" => {
             if let Some(v) = f64(value) {
                 ml.text_height = v;
-                ml.context.text_height = v;
+                ml.context.text_height = v * ml.context.scale_factor.max(1.0e-12);
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::TEXT_HEIGHT);
             }
         }
         "text_x" => {
@@ -1093,7 +1121,9 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 !ml.text_frame
             } else {
                 value == "true"
-            }
+            };
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::TEXT_FRAME);
         }
         "path_type" => {
             ml.path_type = match value {
@@ -1101,17 +1131,38 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 "None" => MultiLeaderPathType::Invisible,
                 _ => MultiLeaderPathType::StraightLineSegments,
             };
+            for root in &mut ml.context.leader_roots {
+                for line in &mut root.lines {
+                    line.path_type = ml.path_type;
+                    line.override_flags.insert(
+                        acadrust::entities::LeaderLinePropertyOverrideFlags::PATH_TYPE,
+                    );
+                }
+            }
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::PATH_TYPE);
         }
         "enable_landing" => {
             ml.enable_landing = if value == "toggle" {
                 !ml.enable_landing
             } else {
                 value == "true"
-            }
+            };
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::ENABLE_LANDING);
         }
         "enable_dogleg" => {
             ml.enable_dogleg = if value == "toggle" {
                 !ml.enable_dogleg
+            } else {
+                value == "true"
+            };
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::ENABLE_DOGLEG);
+        }
+        "extend_leader_to_text" => {
+            ml.extend_leader_to_text = if value == "toggle" {
+                !ml.extend_leader_to_text
             } else {
                 value == "true"
             }
@@ -1130,38 +1181,129 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 value == "true"
             }
         }
+        "background_mask_fill_on" => {
+            ml.context.background_mask_fill_on = if value == "toggle" {
+                !ml.context.background_mask_fill_on
+            } else {
+                value == "true"
+            }
+        }
+        "background_scale_factor" => {
+            if let Some(v) = f64(value) {
+                if v > 0.0 {
+                    ml.context.background_scale_factor = v;
+                }
+            }
+        }
+        "background_transparency" => {
+            if let Ok(v) = value.trim().parse::<i32>() {
+                ml.context.background_transparency = v.clamp(0, 90);
+            }
+        }
         "dogleg_length" => {
             if let Some(v) = f64(value) {
                 ml.dogleg_length = v;
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::LANDING_DISTANCE);
             }
         }
         "arrowhead_size" => {
             if let Some(v) = f64(value) {
                 ml.arrowhead_size = v;
+                ml.context.arrowhead_size = v * ml.context.scale_factor.max(1.0e-12);
+                for root in &mut ml.context.leader_roots {
+                    for line in &mut root.lines {
+                        line.arrowhead_size = v;
+                        line.override_flags.insert(
+                            acadrust::entities::LeaderLinePropertyOverrideFlags::ARROWHEAD_SIZE,
+                        );
+                    }
+                }
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::ARROWHEAD_SIZE);
             }
         }
         "scale_factor" => {
             if let Some(v) = f64(value) {
-                ml.scale_factor = v;
+                if v > 0.0 {
+                    let old = ml.context.scale_factor.max(1.0e-12);
+                    let ratio = v / old;
+                    ml.scale_factor = v;
+                    ml.context.scale_factor = v;
+                    ml.context.arrowhead_size *= ratio;
+                    ml.context.text_height *= ratio;
+                    ml.context.landing_gap *= ratio;
+                    ml.block_scale.x *= ratio;
+                    ml.block_scale.y *= ratio;
+                    ml.block_scale.z *= ratio;
+                    ml.context.block_content_scale = ml.block_scale;
+                    if let Some(root) = ml.context.leader_roots.first() {
+                        let anchor = root.connection_point;
+                        for point in [
+                            &mut ml.context.content_base_point,
+                            &mut ml.context.text_location,
+                            &mut ml.context.block_content_location,
+                        ] {
+                            point.x = anchor.x + (point.x - anchor.x) * ratio;
+                            point.y = anchor.y + (point.y - anchor.y) * ratio;
+                            point.z = anchor.z + (point.z - anchor.z) * ratio;
+                        }
+                    }
+                    for root in &mut ml.context.leader_roots {
+                        root.landing_distance *= ratio;
+                    }
+                    ml.property_override_flags
+                        .insert(MultiLeaderPropertyOverrideFlags::SCALE_FACTOR);
+                }
             }
         }
         "landing_distance" => {
             if let Some(v) = f64(value) {
                 ml.dogleg_length = v;
-                if let Some(root) = ml.context.leader_roots.first_mut() {
-                    root.landing_distance = v;
+                let display = v * ml.context.scale_factor.max(1.0e-12);
+                for root in &mut ml.context.leader_roots {
+                    root.landing_distance = display;
                 }
+                place_content_after_landing(ml);
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::LANDING_DISTANCE);
             }
         }
         "landing_gap" => {
             if let Some(v) = f64(value) {
-                ml.context.landing_gap = v;
+                ml.context.landing_gap = v * ml.context.scale_factor.max(1.0e-12);
+                place_content_after_landing(ml);
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::LANDING_GAP);
             }
         }
         "block_rotation" => {
             if let Some(v) = f64(value) {
                 ml.block_rotation = v.to_radians();
+                ml.context.block_rotation = ml.block_rotation;
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT_ROTATION);
             }
+        }
+        "block_scale" => {
+            if let Some(v) = f64(value) {
+                if v > 0.0 {
+                    ml.block_scale = acadrust::types::Vector3::new(v, v, v);
+                    ml.context.block_content_scale = ml.block_scale;
+                    ml.property_override_flags
+                        .insert(MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT_SCALE);
+                }
+            }
+        }
+        "block_connection_type" => {
+            ml.block_connection_type = if value == "Insertion point" {
+                BlockContentConnectionType::BasePoint
+            } else {
+                BlockContentConnectionType::BlockExtents
+            };
+            ml.context.block_connection_type = ml.block_connection_type;
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT_CONNECTION);
         }
         "conn_x" => {
             if let (Some(v), Some(root)) = (f64(value), ml.context.leader_roots.first_mut()) {
@@ -1181,18 +1323,26 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         "text_left_attachment" => {
             ml.text_left_attachment = parse_attachment(value);
             ml.context.text_left_attachment = parse_attachment(value);
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::TEXT_LEFT_ATTACHMENT);
         }
         "text_right_attachment" => {
             ml.text_right_attachment = parse_attachment(value);
             ml.context.text_right_attachment = parse_attachment(value);
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::TEXT_RIGHT_ATTACHMENT);
         }
         "text_top_attachment" => {
             ml.text_top_attachment = parse_attachment(value);
             ml.context.text_top_attachment = parse_attachment(value);
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::TEXT_TOP_ATTACHMENT);
         }
         "text_bottom_attachment" => {
             ml.text_bottom_attachment = parse_attachment(value);
             ml.context.text_bottom_attachment = parse_attachment(value);
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::TEXT_BOTTOM_ATTACHMENT);
         }
         "text_alignment" => {
             ml.text_alignment = match value {
@@ -1205,6 +1355,8 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 "Right" => TextAlignmentType::Right,
                 _ => TextAlignmentType::Left,
             };
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::TEXT_ALIGNMENT);
         }
         "text_flow_direction" => {
             ml.context.text_flow_direction = match value {
@@ -1218,6 +1370,16 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 "Vertical" => TextAttachmentDirectionType::Vertical,
                 _ => TextAttachmentDirectionType::Horizontal,
             };
+            if ml.text_attachment_direction == TextAttachmentDirectionType::Vertical {
+                ml.enable_dogleg = false;
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::ENABLE_DOGLEG);
+            }
+            for root in &mut ml.context.leader_roots {
+                root.text_attachment_direction = ml.text_attachment_direction;
+            }
+            ml.property_override_flags
+                .insert(MultiLeaderPropertyOverrideFlags::TEXT_ATTACHMENT_DIRECTION);
         }
         "line_space_style" => {
             ml.context.line_spacing_style = match value {
@@ -1233,6 +1395,13 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         "text_rotation" => {
             if let Some(v) = f64(value) {
                 ml.context.text_rotation = v.to_radians();
+                ml.context.text_direction = acadrust::types::Vector3::new(
+                    ml.context.text_rotation.cos(),
+                    ml.context.text_rotation.sin(),
+                    0.0,
+                );
+                ml.property_override_flags
+                    .insert(MultiLeaderPropertyOverrideFlags::TEXT_ANGLE);
             }
         }
         "line_spacing" => {
@@ -1252,6 +1421,27 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         }
         _ => {}
     }
+}
+
+fn place_content_after_landing(ml: &mut MultiLeader) {
+    let Some(root) = ml.context.leader_roots.first() else {
+        return;
+    };
+    let length = (root.direction.x * root.direction.x + root.direction.y * root.direction.y).sqrt();
+    let (ux, uy) = if length > 1.0e-12 {
+        (root.direction.x / length, root.direction.y / length)
+    } else {
+        (1.0, 0.0)
+    };
+    let distance = root.landing_distance.max(0.0) + ml.context.landing_gap.max(0.0);
+    let location = acadrust::types::Vector3::new(
+        root.connection_point.x + ux * distance,
+        root.connection_point.y + uy * distance,
+        root.connection_point.z,
+    );
+    ml.context.content_base_point = location;
+    ml.context.text_location = location;
+    ml.context.block_content_location = location;
 }
 
 fn parse_attachment(s: &str) -> TextAttachmentType {
@@ -1758,9 +1948,7 @@ impl MultiLeaderTess for MultiLeader {
                 }
             }
 
-            // Vertically-attached leaders (text above/below) have no dogleg:
-            // the leader meets the text edge directly, so the short horizontal
-            // dash would be a stray mark AutoCAD never draws.
+            // Vertically attached leaders meet the text edge directly.
             let vertical_attach = matches!(
                 ml.text_attachment_direction,
                 acadrust::entities::multileader::TextAttachmentDirectionType::Vertical
@@ -1785,11 +1973,7 @@ impl MultiLeaderTess for MultiLeader {
                 // for a rotated leader that is the angled baseline, not world
                 // X. Roots without a usable direction keep the legacy
                 // horizontal toward the text side.
-                let (ux, uy) = ml
-                    .context
-                    .leader_roots
-                    .first()
-                    .map(|r| (r.direction.x, r.direction.y))
+                let (ux, uy) = Some((root.direction.x, root.direction.y))
                     .filter(|(x, y)| (x * x + y * y).sqrt() > 1e-9)
                     .map(|(x, y)| {
                         let l = (x * x + y * y).sqrt();
@@ -1804,6 +1988,15 @@ impl MultiLeaderTess for MultiLeader {
                 points.push(nan);
                 points.push(cp_f);
                 points.push(landing_end);
+                if ml.extend_leader_to_text {
+                    let gap = ml.context.landing_gap.max(0.0)
+                        * context_scale_correction as f64;
+                    points.push([
+                        (text_loc_w.x - ux * gap) as f32,
+                        (text_loc_w.y - uy * gap) as f32,
+                        text_loc_w.z as f32,
+                    ]);
+                }
             }
         }
 
@@ -1856,31 +2049,66 @@ impl MultiLeaderTess for MultiLeader {
         // synthetic Insert supplies that context to the shared scene graph;
         // every child then uses its normal tessellator.
         if ml.content_type == LeaderContentType::Block && ml.context.has_block_contents {
-            let block_name = match ml.block_content_handle {
+            let block_record = match ml.block_content_handle {
                 Some(h) if !h.is_null() => document
                     .block_records
                     .iter()
                     .find(|br| br.handle == h)
-                    .map(|br| br.name.clone()),
+                    .cloned(),
                 _ => None,
             };
-            if let Some(block_name) = block_name {
+            if let Some(block_record) = block_record {
+                let block_name = block_record.name.clone();
                 let block_color = if selected {
                     line_color
                 } else {
                     color_or_inherit(&ml.block_content_color, entity_color)
                 };
-                let mut synth_ins =
-                    acadrust::entities::Insert::new(block_name, ml.context.block_content_location);
+                let mut insertion = ml.context.block_content_location;
+                if ml.block_connection_type == BlockContentConnectionType::BlockExtents {
+                    let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+                    for entity_handle in &block_record.entity_handles {
+                        if let Some(entity) = document.get_entity(*entity_handle) {
+                            let aabb = crate::scene::convert::tess::entity_aabb(entity);
+                            if aabb != WireModel::UNBOUNDED_AABB {
+                                bounds[0] = bounds[0].min(aabb[0]);
+                                bounds[1] = bounds[1].min(aabb[1]);
+                                bounds[2] = bounds[2].max(aabb[2]);
+                                bounds[3] = bounds[3].max(aabb[3]);
+                            }
+                        }
+                    }
+                    if bounds[0] <= bounds[2] && bounds[1] <= bounds[3] {
+                        let to_block = Transform::rotation(-ml.block_rotation);
+                        let from_left = ml
+                            .context
+                            .leader_roots
+                            .first()
+                            .map_or(true, |root| {
+                                to_block.apply_vector([
+                                    root.direction.x,
+                                    root.direction.y,
+                                ])[0]
+                                    >= 0.0
+                            });
+                        let anchor_x = if from_left { bounds[0] } else { bounds[2] } as f64;
+                        let anchor_y = ((bounds[1] + bounds[3]) * 0.5) as f64;
+                        let local_x =
+                            (anchor_x - block_record.base_point.x) * ml.block_scale.x;
+                        let local_y =
+                            (anchor_y - block_record.base_point.y) * ml.block_scale.y;
+                        let rotated = Transform::rotation(ml.block_rotation)
+                            .apply_vector([local_x, local_y]);
+                        insertion.x -= rotated[0];
+                        insertion.y -= rotated[1];
+                    }
+                }
+                let mut synth_ins = acadrust::entities::Insert::new(block_name, insertion);
                 synth_ins.set_x_scale(ml.block_scale.x);
                 synth_ins.set_y_scale(ml.block_scale.y);
                 synth_ins.set_z_scale(ml.block_scale.z);
                 synth_ins.rotation = ml.block_rotation;
                 synth_ins.common.layer = ml.common.layer.clone();
-                // block_connection_type (BlockExtents vs BasePoint) chooses the
-                // anchor when *creating* the multileader; at render time the
-                // file's stored leader endpoints already encode that choice.
-                let _ = ml.block_connection_type;
                 let depths = rustc_hash::FxHashMap::default();
                 let graph = crate::scene::render_graph::RenderSceneGraph::new(
                     document,
@@ -1956,12 +2184,7 @@ impl MultiLeaderTess for MultiLeader {
             let local_ins_x = (ins.x) as f32;
             let z = (ins.z) as f32;
 
-            // Rotation: the annotation context is AutoCAD's BAKED display
-            // state — text_direction / text_rotation already reflect whatever
-            // the style's angle setting produced at edit time. Re-deriving
-            // from ml.text_angle_type here (e.g. forcing Horizontal to 0)
-            // un-rotated leaders whose stored context is angled; the angle
-            // type only guides recomputation during edits, not display.
+            // The context stores the resolved display rotation.
             let td = ctx.text_direction;
             let mut rot = if td.x.abs() > 1e-9 || td.y.abs() > 1e-9 {
                 (td.y as f32).atan2(td.x as f32)
@@ -2013,14 +2236,14 @@ impl MultiLeaderTess for MultiLeader {
             // anchor within the text block (Left/Center/Right) — honour it
             // instead of guessing from the leader side.
             use acadrust::entities::multileader::{
-                TextAttachmentDirectionType, TextAttachmentPointType,
+                TextAttachmentDirectionType,
             };
             // The context's attachment point exists in every DWG version;
             // the entity-level copy only exists from R2010 on.
-            let h_anchor: f32 = match ctx.text_attachment_point {
-                TextAttachmentPointType::Left => 0.0,
-                TextAttachmentPointType::Center => 0.5,
-                TextAttachmentPointType::Right => 1.0,
+            let h_anchor: f32 = match ctx.text_alignment {
+                TextAlignmentType::Left => 0.0,
+                TextAlignmentType::Center => 0.5,
+                TextAlignmentType::Right => 1.0,
             };
             // Pick the vertical-anchor attachment based on text_attachment_direction:
             //   Horizontal — leader attaches left/right; use ml.text_left_attachment
@@ -2273,14 +2496,9 @@ impl MultiLeaderTess for MultiLeader {
 
             // Text frame / background-fill rectangle in local frame, then rotated to WCS.
             if ml.text_frame || ctx.background_fill_enabled {
-                // Frame/fill offset from the glyphs: the context's landing gap
-                // (AutoCAD spaces the box by exactly that), with the old
-                // quarter-height heuristic as the no-gap fallback.
-                let pad = if ctx.landing_gap > 0.0 {
-                    ctx.landing_gap as f32
-                } else {
-                    height * 0.25
-                };
+                // Border offset is a scale factor around the laid-out text box.
+                let pad = height
+                    * ((ctx.background_scale_factor.max(1.0) as f32 - 1.0) * 0.5);
                 // Box the glyphs that were actually laid out (valid for
                 // vertical flow too); the metric-derived box is only the
                 // no-glyph fallback.
@@ -2311,11 +2529,16 @@ impl MultiLeaderTess for MultiLeader {
 
                 // Background fill — emit two triangles; renders under the text strokes.
                 if ctx.background_fill_enabled {
-                    let fill_color = if selected {
+                    let mut fill_color = if selected {
                         line_color
+                    } else if ctx.background_mask_fill_on {
+                        bg_color
                     } else {
                         color_or_inherit(&ctx.background_fill_color, entity_color)
                     };
+                    fill_color[3] *=
+                        (1.0 - ctx.background_transparency.clamp(0, 90) as f32 / 100.0)
+                            .clamp(0.1, 1.0);
                     let fill_tris: Vec<[f32; 3]> = vec![
                         wcs_corners[0],
                         wcs_corners[1],

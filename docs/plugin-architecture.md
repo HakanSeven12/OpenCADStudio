@@ -130,6 +130,7 @@ pub trait BuiltinPlugin: Send + Sync {
     fn manifest(&self) -> &'static PluginManifest;
     fn ribbon(&self) -> Box<dyn CadModule>;            // the ribbon tab
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool;
+    fn on_load(&mut self, host: &mut dyn HostApi) {}
 }
 ```
 
@@ -146,6 +147,7 @@ concrete types:
 | Command line | `push_info`, `push_output`, `push_error` |
 | Undo / dirty | `push_undo`, `set_dirty` |
 | Tab | `tab_index()` |
+| Document identity (V5) | `document_path(tab_id)` returns the saved path for a document tab. |
 | Notifications (V4) | `on_notification` receives `HostNotification::SelectionChangedV4 { tab_id, handles }` when the active tab's selection changes, plus `DocumentChangedV4` / `DocumentTabClosed`. |
 
 ### `export_plugin!` — the C-ABI export

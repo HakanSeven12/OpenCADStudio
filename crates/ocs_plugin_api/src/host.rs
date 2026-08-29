@@ -542,9 +542,8 @@ pub trait HostApi {
     }
 
     /// Return the filesystem path of the document in tab `tab_id`, if any.
-    /// Added after API v4; appended at the very end so older plugins compiled
-    /// without it keep stable vtable indices. The default returns `None`;
-    /// in-process hosts should override it to expose the real path.
+    /// Added in API v5. The default returns `None`; in-process hosts should
+    /// override it to expose the real path.
     fn document_path(&self, tab_id: u64) -> Option<PathBuf> {
         let _ = tab_id;
         None

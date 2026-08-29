@@ -69,6 +69,39 @@ impl Scene {
         self.bump_selection_set();
     }
 
+    pub fn select_all_visible(&mut self) -> usize {
+        let block = self.interaction_block_handle();
+        let frozen: Option<HashSet<Handle>> = self
+            .interaction_viewport_frozen_layers()
+            .map(|layers| layers.iter().copied().collect());
+        let annotation_scale = self.displayed_annotation_scale_handle();
+        let all_visible = self.annotation_all_visible();
+        let handles = self
+            .document
+            .block_records
+            .iter()
+            .find(|record| record.handle == block)
+            .map(|record| record.entity_handles.clone())
+            .unwrap_or_default();
+        let selected = handles
+            .into_iter()
+            .filter(|handle| self.passes_selection_filter(*handle))
+            .filter(|handle| {
+                self.document.get_entity(*handle).is_some_and(|entity| {
+                    self.resident_entity_visible(
+                        entity,
+                        block,
+                        frozen.as_ref(),
+                        annotation_scale,
+                        all_visible,
+                    )
+                })
+            })
+            .collect();
+        self.replace_selection(selected);
+        self.selected.len()
+    }
+
     pub(crate) fn selection_fingerprint(&mut self) -> u64 {
         if self.selection_fingerprint_dirty {
             let mut fingerprint = self.selected.len() as u64;

@@ -2123,16 +2123,14 @@ impl Scene {
             .collect();
     }
 
-    /// Tessellate all `Solid3D` entities in the current document into
-    /// GPU-ready `MeshModel`s and store them in `self.meshes`.
-    ///
-    /// Called after loading a document or after undo/redo so that every
-    /// `Solid3D` entity is represented in the mesh cache.
-    /// ImageModel for an edited image-bearing entity (RasterImage, or a PDF
-    /// UNDERLAY resolved through its definition object). `None` for others.
-    fn image_seed_for(&self, entity: &acadrust::entities::EntityType) -> Option<ImageModel> {
+    /// ImageModel for an image-bearing entity. `None` when it cannot decode.
+    pub(super) fn image_seed_for(
+        &self,
+        entity: &acadrust::entities::EntityType,
+    ) -> Option<ImageModel> {
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
+            EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole),
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
                 Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
                     ImageModel::from_underlay(u, def)

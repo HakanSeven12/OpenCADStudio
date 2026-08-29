@@ -10,17 +10,7 @@ impl OpenCADStudio {
 
             // ── Selection utilities ───────────────────────────────────────
             "SELECTALL" => {
-                use crate::scene::Scene;
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
-                    .scene
-                    .entity_wires()
-                    .iter()
-                    .filter_map(|w| Scene::handle_from_wire_name(&w.name))
-                    .collect();
-                let count = handles.len();
-                for h in handles {
-                    self.tabs[i].scene.select_entity(h, false);
-                }
+                let count = self.tabs[i].scene.select_all_visible();
                 self.command_line
                     .push_output(crate::tf!("SELECTALL: {} object(s) selected.", count).as_ref());
                 self.refresh_properties();

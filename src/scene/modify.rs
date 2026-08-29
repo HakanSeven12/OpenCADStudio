@@ -245,6 +245,24 @@ impl Scene {
                     self.hatches.insert(h, model);
                 }
             }
+            let image_bearing = self.document.get_entity(h).is_some_and(|entity| {
+                matches!(
+                    entity,
+                    EntityType::RasterImage(_)
+                        | EntityType::Ole2Frame(_)
+                        | EntityType::Underlay(_)
+                )
+            });
+            if image_bearing {
+                let model = self
+                    .document
+                    .get_entity(h)
+                    .and_then(|entity| self.image_seed_for(entity));
+                self.images.remove(&h);
+                if let Some(model) = model {
+                    self.images.insert(h, model);
+                }
+            }
         }
         if preserve_text_orientation {
             for (h, o) in text_orient_backup {
@@ -458,12 +476,21 @@ impl Scene {
         }
     }
 
-    /// Add a freshly-cloned entity, allocating a new handle for it *and* every
-    /// inline sub-entity so the copy never shares a handle with its source.
-    /// Use this (not `add_entity`) whenever inserting a duplicate. (#129)
+    /// Add a clone to the active space with fresh top-level and inline handles.
+    /// Source owner handles are document-local and must not cross drawings.
+    /// (#129, #934)
     pub fn add_entity_clone(&mut self, mut entity: EntityType) -> Handle {
         Self::reset_clone_subhandles(&mut self.document, &mut entity);
-        entity.common_mut().handle = Handle::NULL;
+        let common = entity.common_mut();
+        common.handle = Handle::NULL;
+        common.owner_handle = Handle::NULL;
+        common.entity_mode = Some(
+            if self.current_layout != "Model" && self.active_viewport.is_none() {
+                1
+            } else {
+                2
+            },
+        );
         self.add_entity(entity)
     }
 

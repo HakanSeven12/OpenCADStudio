@@ -1303,6 +1303,20 @@ fn render_group<'a>(
     let mut items_row: Vec<Element<Message>> = Vec::new();
     let mut small_buf: Vec<Element<Message>> = Vec::new();
 
+    let ctx = widgets::RenderCtx {
+        active_tool,
+        open_dd,
+        last_cmd,
+        state,
+        layer_infos,
+        active_layer,
+        active_color,
+        active_linetype,
+        active_lineweight,
+        style_ctx,
+        compact,
+    };
+
     for item in &group.tools {
         let is_large = match item {
             RibbonItem::LargeTool(_) | RibbonItem::LargeDropdown { .. } => !compact,
@@ -1314,20 +1328,7 @@ fn render_group<'a>(
 
         if is_large {
             flush_small_col(&mut small_buf, &mut items_row);
-            items_row.push(render_large(
-                item,
-                active_tool,
-                open_dd,
-                last_cmd,
-                state,
-                layer_infos,
-                active_layer,
-                active_color,
-                active_linetype,
-                active_lineweight,
-                style_ctx,
-                compact,
-            ));
+            items_row.push(render_large(item, &ctx));
         } else {
             small_buf.push(render_small(
                 item,
@@ -1467,34 +1468,42 @@ fn collapse_button<'a>(
     // For a Properties panel the representative is its Match button.
     let rep = representative(group, last_used);
     let face: Element<'_, Message> = match rep {
-        Some(RibbonItem::PropertiesGroup { match_prop }) => render_large(
-            &RibbonItem::LargeTool(match_prop.clone()),
-            active_tool,
-            open_dd,
-            last_cmd,
-            state,
-            layer_infos,
-            active_layer,
-            active_color,
-            active_linetype,
-            active_lineweight,
-            style_ctx,
-            false,
-        ),
-        Some(item) => render_large(
-            item,
-            active_tool,
-            open_dd,
-            last_cmd,
-            state,
-            layer_infos,
-            active_layer,
-            active_color,
-            active_linetype,
-            active_lineweight,
-            style_ctx,
-            false,
-        ),
+        Some(RibbonItem::PropertiesGroup { match_prop }) => {
+            render_large(
+                &RibbonItem::LargeTool(match_prop.clone()),
+                &widgets::RenderCtx {
+                    active_tool,
+                    open_dd,
+                    last_cmd,
+                    state,
+                    layer_infos,
+                    active_layer,
+                    active_color,
+                    active_linetype,
+                    active_lineweight,
+                    style_ctx,
+                    compact: false,
+                },
+            )
+        }
+        Some(item) => {
+            render_large(
+                item,
+                &widgets::RenderCtx {
+                    active_tool,
+                    open_dd,
+                    last_cmd,
+                    state,
+                    layer_infos,
+                    active_layer,
+                    active_color,
+                    active_linetype,
+                    active_lineweight,
+                    style_ctx,
+                    compact: false,
+                },
+            )
+        }
         None => text("").into(),
     };
 

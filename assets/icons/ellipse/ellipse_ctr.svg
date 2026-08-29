@@ -2,9 +2,9 @@
   <!-- Full ellipse -->
   <ellipse cx="12" cy="12" rx="9" ry="5.5" stroke="#B4B6B9" stroke-width="2" fill="none"/>
   <!-- Dashed radius to major endpoint -->
-  <line x1="12" y1="12" x2="21" y2="12" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="2 2"/>
+  <line x1="12" y1="12" x2="21" y2="12" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
   <!-- Center dot -->
-  <circle cx="12" cy="12" r="2" fill="#4cc9f0"/>
+  <circle cx="12" cy="12" r="2" fill="#6DB7ED"/>
   <!-- Major axis endpoint -->
-  <circle cx="21" cy="12" r="1.5" fill="#4cc9f0"/>
+  <circle cx="21" cy="12" r="1.5" fill="#6DB7ED"/>
 </svg>

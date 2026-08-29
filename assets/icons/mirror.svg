@@ -16,7 +16,7 @@
   <sodipodi:namedview
      id="namedview2"
      pagecolor="#505050"
-     bordercolor="#eeeeee"
+     bordercolor="#B4B6B9"
      borderopacity="1"
      inkscape:showpageshadow="0"
      inkscape:pageopacity="0"
@@ -37,7 +37,7 @@
      y1="2"
      x2="12"
      y2="22"
-     stroke="#4cc9f0"
+     stroke="#6DB7ED"
      stroke-width="1.5"
      stroke-dasharray="3 2"
      stroke-linecap="round"
@@ -53,7 +53,7 @@
      x="1.125"
      y="5" />
   <rect
-     style="fill:none;stroke:#4bc8f0;stroke-width:2.25"
+     style="fill:none;stroke:#6DB7ED;stroke-width:2.25"
      id="rect3"
      width="7"
      height="14"

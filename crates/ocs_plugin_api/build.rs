@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::SystemTime;
 
 use cargo_lock::Lockfile;
@@ -383,11 +384,26 @@ fn generate_version_info(out_dir: &Path) {
         .find(|p| p.name.as_str() == "acadrust")
         .expect("acadrust package in Cargo.lock");
 
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let rustc_version = Command::new(rustc)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
     let info = serde_json::json!({
         "ocs_version": ocs.version.to_string(),
         "ocs_plugin_api_version": env!("CARGO_PKG_VERSION"),
         "acadrust_version": acadrust.version.to_string(),
         "acadrust_source": acadrust.source.as_ref().map(|s| s.to_string()),
+        "rustc_version": rustc_version,
         "api_version": 4,
         "api_version_min_supported": 2,
         "build_timestamp": build_timestamp,

@@ -6,12 +6,12 @@
   </defs>
   <!-- ANSI31: 45° diagonal hatch lines clipped to square -->
   <g clip-path="url(#sq)">
-    <line x1="-2" y1="22" x2="22" y2="-2" stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="2"  y1="26" x2="26" y2="2"  stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="-6" y1="18" x2="18" y2="-6" stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="-10" y1="14" x2="14" y2="-10" stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="6"  y1="30" x2="30" y2="6"  stroke="#4cc9f0" stroke-width="1.2"/>
-    <line x1="10" y1="34" x2="34" y2="10" stroke="#4cc9f0" stroke-width="1.2"/>
+    <line x1="-2" y1="22" x2="22" y2="-2" stroke="#6DB7ED" stroke-width="1.2"/>
+    <line x1="2"  y1="26" x2="26" y2="2"  stroke="#6DB7ED" stroke-width="1.2"/>
+    <line x1="-6" y1="18" x2="18" y2="-6" stroke="#6DB7ED" stroke-width="1.2"/>
+    <line x1="-10" y1="14" x2="14" y2="-10" stroke="#6DB7ED" stroke-width="1.2"/>
+    <line x1="6"  y1="30" x2="30" y2="6"  stroke="#6DB7ED" stroke-width="1.2"/>
+    <line x1="10" y1="34" x2="34" y2="10" stroke="#6DB7ED" stroke-width="1.2"/>
   </g>
   <!-- Square boundary -->
   <rect x="4" y="4" width="16" height="16" stroke="#B4B6B9" stroke-width="1.5" fill="none"/>

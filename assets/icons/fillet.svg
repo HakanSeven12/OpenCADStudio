@@ -16,7 +16,7 @@
   <sodipodi:namedview
      id="namedview4"
      pagecolor="#505050"
-     bordercolor="#eeeeee"
+     bordercolor="#B4B6B9"
      borderopacity="1"
      inkscape:showpageshadow="0"
      inkscape:pageopacity="0"
@@ -39,9 +39,9 @@
        originy="0"
        spacingx="0.375"
        spacingy="0.375"
-       empcolor="#0099e5"
+       empcolor="#6DB7ED"
        empopacity="0.30196078"
-       color="#0099e5"
+       color="#6DB7ED"
        opacity="0.14901961"
        empspacing="5"
        enabled="true"
@@ -73,7 +73,7 @@
   <!-- Fillet arc (blue, replacing the sharp corner) -->
   <path
      d="m 3.375,11.25 c 0,3.333333 2.4166667,9.75 9.75,9.75"
-     stroke="#4cc9f0"
+     stroke="#6DB7ED"
      stroke-width="2"
      fill="none"
      stroke-linecap="round"

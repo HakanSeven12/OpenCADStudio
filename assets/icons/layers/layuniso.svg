@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
   <!-- Restored layer stack -->
   <line x1="2" y1="5" x2="22" y2="5"
-        stroke="#e0e0e0" stroke-width="2.25" stroke-linecap="round"/>
+        stroke="#B4B6B9" stroke-width="2.25" stroke-linecap="round"/>
   <line x1="2" y1="12" x2="22" y2="12"
-        stroke="#4cc9f0" stroke-width="2.25" stroke-linecap="round"/>
+        stroke="#6DB7ED" stroke-width="2.25" stroke-linecap="round"/>
   <line x1="2" y1="19" x2="22" y2="19"
-        stroke="#e0e0e0" stroke-width="2.25" stroke-linecap="round"/>
+        stroke="#B4B6B9" stroke-width="2.25" stroke-linecap="round"/>
   <!-- Outward arrows indicate restoring the isolated layers -->
   <path d="M8 9L5 6L2 9 M16 15L19 18L22 15"
         fill="none" stroke="#f0c040" stroke-width="1.75"

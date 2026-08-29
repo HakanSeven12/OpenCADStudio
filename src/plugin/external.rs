@@ -36,6 +36,12 @@ pub struct ReleaseInfo {
     pub acadrust_declared: bool,
     /// Whether the release matches this host.
     pub acadrust_compatible: bool,
+    /// Full `rustc --version` output used by the release.
+    pub rustc_version: Option<String>,
+    /// Whether `[opencad]` declares `rustc_version`.
+    pub rustc_declared: bool,
+    /// Whether the release's rustc matches this host.
+    pub rustc_compatible: bool,
 }
 
 /// An add-on package found on disk (not necessarily loaded or compatible).
@@ -54,6 +60,10 @@ pub struct ExternalPlugin {
     pub acadrust_source: Option<String>,
     /// Whether `[opencad]` declares `acadrust_source`.
     pub acadrust_declared: bool,
+    /// Full `rustc --version` output used by the plugin.
+    pub rustc_version: Option<String>,
+    /// Whether `[opencad]` declares `rustc_version`.
+    pub rustc_declared: bool,
     pub ribbon_order: i32,
     pub command_prefixes: Vec<String>,
     /// The package directory under the plugins folder.
@@ -85,10 +95,30 @@ impl ExternalPlugin {
         }
     }
 
+    /// Returns whether the package's rustc matches the host.
+    pub fn rustc_compatible(&self) -> bool {
+        if !ocs_plugin_api::version_info::uses_acadrust_gate(self.api_version) {
+            return true;
+        }
+        if !self.rustc_declared {
+            return true;
+        }
+        match self.rustc_version.as_deref() {
+            None | Some("") => false,
+            Some(version) => ocs_plugin_api::version_info::rustc_versions_compatible(
+                version,
+                ocs_plugin_api::version_info::host_rustc_version(),
+            ),
+        }
+    }
+
     /// Returns whether the package can be loaded.
     #[allow(dead_code)] // plugin-host surface (issue #100); not yet wired
     pub fn loadable(&self) -> bool {
-        self.api_compatible() && self.acadrust_compatible() && self.lib_present
+        self.api_compatible()
+            && self.acadrust_compatible()
+            && self.rustc_compatible()
+            && self.lib_present
     }
 }
 
@@ -204,6 +234,8 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
     let mut api_version: u32 = 0;
     let mut acadrust_source: Option<String> = None;
     let mut acadrust_declared = false;
+    let mut rustc_version: Option<String> = None;
+    let mut rustc_declared = false;
     let mut ribbon_order: i32 = 0;
     let mut command_prefixes: Vec<String> = Vec::new();
     let mut section = None;
@@ -236,6 +268,11 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
                 let v = unquote(value);
                 acadrust_source = if v.is_empty() { None } else { Some(v) };
             }
+            "rustc_version" if section == Some("opencad") => {
+                rustc_declared = true;
+                let v = unquote(value);
+                rustc_version = if v.is_empty() { None } else { Some(v) };
+            }
             "ribbon_order" => ribbon_order = value.parse().unwrap_or(0),
             "command_prefixes" => command_prefixes = parse_string_array(value),
             _ => {}
@@ -251,6 +288,8 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
         api_version,
         acadrust_source,
         acadrust_declared,
+        rustc_version,
+        rustc_declared,
         ribbon_order,
         command_prefixes,
         dir: PathBuf::new(),
@@ -372,6 +411,17 @@ mod loader {
                 ));
                 continue;
             }
+            if !d.rustc_compatible() {
+                let host_rustc = ocs_plugin_api::version_info::host_rustc_version();
+                let plugin_rustc = d.rustc_version.as_deref().unwrap_or("unknown");
+                out.push((
+                    d.id.clone(),
+                    Err(format!(
+                        "Plugin built with {plugin_rustc}, host requires {host_rustc} - rebuild required"
+                    )),
+                ));
+                continue;
+            }
             let Some(path) = lib_file(&d.dir) else {
                 out.push((
                     d.id.clone(),
@@ -481,6 +531,117 @@ xdata_apps = ["MYPLUGIN_RECORD"]
         let p = parse_plugin_toml("id=\"a\"\napi_version = 9999").unwrap();
         assert!(!p.api_compatible());
         assert!(!p.loadable());
+    }
+
+    #[test]
+    fn undeclared_rustc_falls_back_to_api_gate() {
+        let toml = r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 4
+"#;
+        let p = parse_plugin_toml(toml).expect("parsed");
+        assert!(!p.rustc_declared);
+        assert!(p.rustc_version.is_none());
+        assert!(p.rustc_compatible(), "undeclared rustc is treated as compatible");
+    }
+
+    #[test]
+    fn declared_empty_rustc_version_is_incompatible() {
+        let toml = r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 4
+
+[opencad]
+rustc_version = ""
+"#;
+        let p = parse_plugin_toml(toml).expect("parsed");
+        assert!(p.rustc_declared);
+        assert!(p.rustc_version.is_none());
+        assert!(!p.rustc_compatible(), "declared but empty rustc is incompatible");
+        assert!(!p.loadable());
+    }
+
+    #[test]
+    fn rustc_version_outside_opencad_is_ignored() {
+        let toml = r#"
+[plugin]
+id = "opencad.test"
+api_version = 4
+rustc_version = "rustc 1.98.0"
+"#;
+        let p = parse_plugin_toml(toml).expect("parsed");
+        assert!(!p.rustc_declared);
+        assert!(p.rustc_version.is_none());
+    }
+
+    #[test]
+    fn rustc_mismatch_detected() {
+        let _host = ocs_plugin_api::version_info::host_rustc_version();
+        let other = "rustc 0.0.0-fake (not matching anything)";
+        let toml = format!(
+            r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 4
+
+[opencad]
+rustc_version = "{other}"
+"#
+        );
+        let p = parse_plugin_toml(&toml).expect("parsed");
+        assert!(p.rustc_declared);
+        assert!(!p.rustc_compatible(), "mismatched rustc should be incompatible");
+        assert!(!p.loadable());
+    }
+
+    #[test]
+    fn rustc_match_detected() {
+        let host = ocs_plugin_api::version_info::host_rustc_version();
+        let toml = format!(
+            r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 4
+
+[opencad]
+rustc_version = "{host}"
+"#
+        );
+        let p = parse_plugin_toml(&toml).expect("parsed");
+        assert!(p.rustc_declared);
+        assert!(p.rustc_compatible(), "matching rustc should be compatible");
+    }
+
+    #[test]
+    fn rustc_gate_only_applies_to_api_v4_and_newer() {
+        let toml = r#"
+[plugin]
+id = "opencad.test"
+name = "Test"
+version = "0.1.0"
+api_version = 2
+
+[opencad]
+rustc_version = "rustc 0.0.0-fake"
+"#;
+        let mut p = parse_plugin_toml(toml).expect("parsed");
+        p.lib_present = true;
+        assert!(p.rustc_declared);
+        assert!(
+            p.rustc_compatible(),
+            "API v2 plugin should bypass rustc gate"
+        );
+        assert!(p.loadable());
     }
 
     #[test]

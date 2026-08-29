@@ -236,12 +236,32 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
                     ),
                 }
             };
+            let rustc_version = manifest.rustc_version.clone();
+            let rustc_declared = manifest.rustc_declared;
+            let rustc_compatible = if !ocs_plugin_api::version_info::uses_acadrust_gate(
+                manifest.api_version,
+            ) {
+                true
+            } else if !rustc_declared {
+                true
+            } else {
+                match rustc_version.as_deref() {
+                    None | Some("") => false,
+                    Some(version) => ocs_plugin_api::version_info::rustc_versions_compatible(
+                        version,
+                        ocs_plugin_api::version_info::host_rustc_version(),
+                    ),
+                }
+            };
             Ok::<_, String>(ReleaseInfo {
                 tag: release.tag,
                 api_version: manifest.api_version,
                 acadrust_source,
                 acadrust_declared,
                 acadrust_compatible,
+                rustc_version,
+                rustc_declared,
+                rustc_compatible,
             })
         })();
         match result {
@@ -251,13 +271,23 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
     }
 
     // Once a repo declares a fingerprint, require it on later API versions.
-    let any_declared = info.iter().any(|r| r.acadrust_declared);
-    if any_declared {
+    let any_acadrust_declared = info.iter().any(|r| r.acadrust_declared);
+    if any_acadrust_declared {
         for r in &mut info {
             if !r.acadrust_declared
                 && ocs_plugin_api::version_info::uses_acadrust_gate(r.api_version)
             {
                 r.acadrust_compatible = false;
+            }
+        }
+    }
+    let any_rustc_declared = info.iter().any(|r| r.rustc_declared);
+    if any_rustc_declared {
+        for r in &mut info {
+            if !r.rustc_declared
+                && ocs_plugin_api::version_info::uses_acadrust_gate(r.api_version)
+            {
+                r.rustc_compatible = false;
             }
         }
     }
@@ -357,6 +387,30 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
                 .unwrap_or("unknown");
             return Err(format!(
                 "Plugin built for acadrust @{plugin_hash}, but this host uses @{host_hash}"
+            ));
+        }
+    }
+
+    if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version)
+        && manifest.rustc_declared
+    {
+        let Some(version) = manifest.rustc_version.as_deref() else {
+            return Err(
+                "Release declares rustc metadata but has no version; cannot verify ABI compatibility".to_string(),
+            );
+        };
+        if version.is_empty() {
+            return Err(
+                "Release declares rustc metadata but has no version; cannot verify ABI compatibility".to_string(),
+            );
+        }
+        if !ocs_plugin_api::version_info::rustc_versions_compatible(
+            version,
+            ocs_plugin_api::version_info::host_rustc_version(),
+        ) {
+            let host_rustc = ocs_plugin_api::version_info::host_rustc_version();
+            return Err(format!(
+                "Plugin built with {version}, host requires {host_rustc} - rebuild required"
             ));
         }
     }

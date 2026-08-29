@@ -44,12 +44,23 @@ pub struct LinetypeItem {
     pub art: String,
 }
 
+pub fn linetype_display_name(name: &str) -> String {
+    if name.is_empty() || name.eq_ignore_ascii_case("ByLayer") {
+        crate::t!("ByLayer").into_owned()
+    } else if name.eq_ignore_ascii_case("ByBlock") {
+        crate::t!("ByBlock").into_owned()
+    } else {
+        name.to_string()
+    }
+}
+
 impl fmt::Display for LinetypeItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = linetype_display_name(&self.name);
         if self.art.is_empty() {
-            write!(f, "{}", self.name)
+            write!(f, "{name}")
         } else {
-            write!(f, "{}  {}", self.name, self.art)
+            write!(f, "{name}  {}", self.art)
         }
     }
 }

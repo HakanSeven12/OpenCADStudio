@@ -22,7 +22,7 @@ use crate::app::Message;
 use crate::modules::{IconKind, ModuleEvent, RibbonItem, StyleKey, ToolDef};
 use crate::ui::wrap_bar::PosReport;
 use crate::ui::icons;
-use crate::ui::properties::{acad_color_display, LwItem};
+use crate::ui::properties::{acad_color_display, linetype_display_name, LwItem};
 use crate::t;
 
 use super::LayerInfo;
@@ -998,7 +998,11 @@ pub(super) fn render_large<'a>(
                 PROP_COLOR_ID,
                 Some(color_swatch),
             );
-            let lt_row = prop_row(active_linetype.to_string(), PROP_LINETYPE_ID, None);
+            let lt_row = prop_row(
+                linetype_display_name(active_linetype),
+                PROP_LINETYPE_ID,
+                None,
+            );
             let lw_row = prop_row(LwItem(active_lineweight).to_string(), PROP_LW_ID, None);
 
             let combos = container(

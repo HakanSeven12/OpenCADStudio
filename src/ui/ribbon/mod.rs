@@ -18,7 +18,7 @@ use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 use crate::app::Message;
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 use crate::plugin::all_ribbon_modules;
-use crate::ui::properties::{lw_options, LinetypeItem};
+use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod widgets;
 use widgets::{StyleContext, *};
@@ -1182,7 +1182,7 @@ impl Ribbon {
                 let is_cur = lt.name == *active_lt;
                 let check: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_cur);
-                let name_col = text(lt.name.clone())
+                let name_col = text(linetype_display_name(&lt.name))
                     .size(11)
                     .style(move |theme: &Theme| iced::widget::text::Style {
                         color: (!is_cur).then_some(

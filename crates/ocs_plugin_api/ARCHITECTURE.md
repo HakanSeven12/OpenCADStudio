@@ -44,11 +44,12 @@ The host and each plugin run in separate OS processes. The host re-executes itse
 
 ## Versioning and ABI stability
 
-- `API_VERSION` (currently `4`) is the host's advertised major.
+- `API_VERSION` (currently `5`) is the host's advertised major.
 - `API_VERSION_MIN_SUPPORTED` (currently `2`) is the oldest plugin major the host loads.
-- `OCS_PLUGIN_MAX_API_VERSION` can cap the accepted major at runtime (e.g. `3` to disable V4).
+- `OCS_PLUGIN_MAX_API_VERSION` can cap the accepted major at runtime (e.g. `4` to disable V5).
 - A plugin built against major `N` runs on a host whose major is `>= N` because new vtable entries and enum variants are appended at the end.
 - V4 introduces the **acadrust gate**: plugins targeting API v4 or later must resolve the same `acadrust` source as the host (see [`src/version_info.rs`](src/version_info.rs)).
+- V5 introduces `BuiltinPlugin::on_load`, invoked once after the runner connects.
 
 The runtime enforces three gates:
 
@@ -72,18 +73,21 @@ sequenceDiagram
     PP->>R: spawn --ocs-plugin-runner <socket> <cdylib>
     R->>L: unsafe { load(cdylib_path) }
     L-->>R: Box<dyn BuiltinPlugin>
-    alt API v4
+    alt API v4+
         R->>PP: connect + RunnerHandshake::TokenV4
         PP->>PP: verify token + V4 protocol/API gate
     else API v2/v3
         R->>PP: connect + RunnerHandshake::Token
         PP->>PP: verify token
     end
+    opt API v5+
+        R->>L: on_load(HostApi)
+    end
     PP->>R: HostToPlugin::Request(GetManifest)
     R->>L: manifest()
     L-->>R: PluginManifest { api_version }
     R-->>PP: HostResponse::Manifest
-    PP->>PP: verify api_version + acadrust gate
+    PP->>PP: verify api_version + ABI metadata gates
     alt accepted
         PP-->>PM: success, keep alive
     else rejected

@@ -147,7 +147,7 @@ mod tests {
             value["ocs_plugin_api_version"].as_str(),
             Some(env!("CARGO_PKG_VERSION"))
         );
-        assert_eq!(value["api_version"].as_i64(), Some(4));
+        assert_eq!(value["api_version"].as_i64(), Some(5));
         assert_eq!(value["api_version_min_supported"].as_i64(), Some(2));
 
         // acadrust_version should have a patch component (e.g. "0.4.0").

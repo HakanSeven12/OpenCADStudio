@@ -229,7 +229,7 @@ version = "0.1.0"
 description = "…"
 
 [opencad]
-api_version = 4
+api_version = 5
 ribbon_order = 50
 command_prefixes = ["EX_"]
 xdata_apps = []

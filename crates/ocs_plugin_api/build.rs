@@ -404,7 +404,7 @@ fn generate_version_info(out_dir: &Path) {
         "acadrust_version": acadrust.version.to_string(),
         "acadrust_source": acadrust.source.as_ref().map(|s| s.to_string()),
         "rustc_version": rustc_version,
-        "api_version": 4,
+        "api_version": 5,
         "api_version_min_supported": 2,
         "build_timestamp": build_timestamp,
     });

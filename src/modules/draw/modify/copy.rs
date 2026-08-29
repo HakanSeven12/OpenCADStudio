@@ -92,7 +92,10 @@ impl CadCommand for CopyCommand {
         match &self.step {
             Step::Base => {
                 self.step = Step::Placing(pt);
-                CmdResult::NeedPoint
+                CmdResult::CopyToClipboard {
+                    handles: self.handles.clone(),
+                    base: pt,
+                }
             }
             Step::Placing(base) => {
                 let delta = pt - *base;

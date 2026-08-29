@@ -1216,6 +1216,36 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
+            CmdResult::CopyToClipboard { handles, base } => {
+                let count = self.copy_entities_to_clipboard(i, &handles, base);
+                self.command_line.push_info(crate::tf!(
+                    "{} object(s) copied to clipboard.",
+                    count
+                ).as_ref());
+                let prompt = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|command| command.prompt());
+                if let Some(prompt) = prompt {
+                    self.command_line.push_info(&prompt);
+                }
+                self.command_line.set_step_options(
+                    self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|command| command.options())
+                        .unwrap_or_default(),
+                );
+                if !self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.entity_pick_highlights_hover())
+                {
+                    self.tabs[i].scene.set_hover_highlight(None);
+                }
+                self.sync_dyn_fields();
+                self.refresh_area_preview(i);
+            }
             CmdResult::CommitAndExit(entity) => {
                 // For XATTACH: ensure the xref block definition exists before
                 // committing the INSERT entity that references it.

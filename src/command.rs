@@ -1299,6 +1299,8 @@ pub enum CmdResult {
     TransformSelected(Vec<Handle>, EntityTransform),
     /// Copy selected entities with a transform; command stays active for more copies.
     CopySelected(Vec<Handle>, EntityTransform),
+    /// Store selected entities in the shared clipboard; command stays active.
+    CopyToClipboard { handles: Vec<Handle>, base: DVec3 },
     /// Commit a hatch fill (stored in Scene::hatches, not the DXF document).
     CommitHatch(HatchModel),
     /// Commit a hatch with the selected hatch's entity colour and transparency.

@@ -1,6 +1,28 @@
 use super::*;
 
 impl OpenCADStudio {
+    pub(in crate::app) fn copy_entities_to_clipboard(
+        &mut self,
+        i: usize,
+        handles: &[acadrust::Handle],
+        base: glam::DVec3,
+    ) -> usize {
+        let (entities, deps) = {
+            let document = &self.tabs[i].scene.document;
+            let entities: Vec<_> = handles
+                .iter()
+                .filter_map(|&handle| document.get_entity(handle).cloned())
+                .collect();
+            let deps = super::super::ClipboardDeps::capture(document, &entities);
+            (entities, deps)
+        };
+        let count = entities.len();
+        self.clipboard_base = base;
+        self.clipboard = entities;
+        self.clipboard_deps = deps;
+        count
+    }
+
     pub(super) fn dispatch_blocks(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
             // ── BASE — drawing insertion base point ───────────────────────
@@ -79,22 +101,14 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let entities: Vec<_> = handles
-                        .iter()
-                        .filter_map(|&h| self.tabs[i].scene.document.get_entity(h).cloned())
-                        .collect();
-                    self.clipboard_base = super::super::helpers::entities_lower_left_by_bbox(
+                    let base = super::super::helpers::entities_lower_left_by_bbox(
                         &self.tabs[i].scene.document,
                         &handles,
                     );
-                    self.clipboard = entities;
-                    self.clipboard_deps = super::super::ClipboardDeps::capture(
-                        &self.tabs[i].scene.document,
-                        &self.clipboard,
-                    );
+                    let count = self.copy_entities_to_clipboard(i, &handles, base);
                     self.command_line.push_info(crate::tf!(
                         "{} object(s) copied to clipboard.",
-                        self.clipboard.len()
+                        count
                     ).as_ref());
                 }
             }
@@ -136,19 +150,10 @@ impl OpenCADStudio {
                     .collect();
                 if coords.len() == 3 && !handles.is_empty() {
                     let base = glam::DVec3::new(coords[0], coords[1], coords[2]);
-                    let entities: Vec<_> = handles
-                        .iter()
-                        .filter_map(|&h| self.tabs[i].scene.document.get_entity(h).cloned())
-                        .collect();
-                    self.clipboard_base = base;
-                    self.clipboard = entities;
-                    self.clipboard_deps = super::super::ClipboardDeps::capture(
-                        &self.tabs[i].scene.document,
-                        &self.clipboard,
-                    );
+                    let count = self.copy_entities_to_clipboard(i, &handles, base);
                     self.command_line.push_info(crate::tf!(
                         "{} object(s) copied to clipboard (base {:.3},{:.3}).",
-                        self.clipboard.len(),
+                        count,
                         base.x,
                         base.y
                     ).as_ref());
@@ -169,20 +174,11 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let entities: Vec<_> = handles
-                        .iter()
-                        .filter_map(|&h| self.tabs[i].scene.document.get_entity(h).cloned())
-                        .collect();
-                    self.clipboard_base = super::super::helpers::entities_lower_left_by_bbox(
+                    let base = super::super::helpers::entities_lower_left_by_bbox(
                         &self.tabs[i].scene.document,
                         &handles,
                     );
-                    let count = entities.len();
-                    self.clipboard = entities;
-                    self.clipboard_deps = super::super::ClipboardDeps::capture(
-                        &self.tabs[i].scene.document,
-                        &self.clipboard,
-                    );
+                    let count = self.copy_entities_to_clipboard(i, &handles, base);
                     self.push_undo_snapshot(i, "CUTCLIP");
                     self.tabs[i].scene.erase_entities(&handles);
                     self.tabs[i].scene.deselect_all();
@@ -193,7 +189,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "PASTECLIP" => {
+            "PASTE" | "PASTECLIP" => {
                 if self.clipboard.is_empty() {
                     return Some(self.read_system_clipboard_for_paste());
                 } else {

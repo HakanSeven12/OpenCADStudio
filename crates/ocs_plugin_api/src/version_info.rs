@@ -73,15 +73,20 @@ pub fn host_rustc_version() -> &'static str {
 /// Returns whether two `rustc --version` outputs are considered compatible.
 ///
 /// The full version line (e.g. "rustc 1.98.0 (hash date)") is compared
-/// verbatim after normalising whitespace. This is intentionally strict: Rust
-/// has no stable ABI, so even the same nominal compiler built in different
+/// token-by-token after normalising whitespace. This is intentionally strict:
+/// Rust has no stable ABI, so even the same nominal compiler built in different
 /// environments can produce incompatible layouts.
 pub fn rustc_versions_compatible(a: &str, b: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    a.split_whitespace().collect::<String>()
-        .eq_ignore_ascii_case(&b.split_whitespace().collect::<String>())
+    let a_tokens: Vec<&str> = a.split_whitespace().collect();
+    let b_tokens: Vec<&str> = b.split_whitespace().collect();
+    a_tokens.len() == b_tokens.len()
+        && a_tokens
+            .iter()
+            .zip(b_tokens)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
 /// Extracts the full git commit hash from a Cargo source.
@@ -185,6 +190,13 @@ mod tests {
         assert!(!rustc_versions_compatible("", "rustc 1.98.0"));
         assert!(!rustc_versions_compatible("rustc 1.98.0", ""));
         assert!(!rustc_versions_compatible("", ""));
+    }
+
+    #[test]
+    fn rustc_version_comparison_rejects_collapsed_tokens() {
+        // A concatenated version must not accidentally match a spaced one.
+        assert!(!rustc_versions_compatible("rustc 1.98.0", "rustc1.98.0"));
+        assert!(!rustc_versions_compatible("rustc1.98.0", "rustc 1.98.0"));
     }
 
     #[test]

@@ -242,8 +242,6 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
                 manifest.api_version,
             ) {
                 true
-            } else if !rustc_declared {
-                true
             } else {
                 match rustc_version.as_deref() {
                     None | Some("") => false,
@@ -281,17 +279,6 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
             }
         }
     }
-    let any_rustc_declared = info.iter().any(|r| r.rustc_declared);
-    if any_rustc_declared {
-        for r in &mut info {
-            if !r.rustc_declared
-                && ocs_plugin_api::version_info::uses_acadrust_gate(r.api_version)
-            {
-                r.rustc_compatible = false;
-            }
-        }
-    }
-
     if info.is_empty() {
         Err(last_error.unwrap_or_else(|| "no installable releases found".to_string()))
     } else {
@@ -391,18 +378,12 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
         }
     }
 
-    if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version)
-        && manifest.rustc_declared
-    {
+    if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version) {
         let Some(version) = manifest.rustc_version.as_deref() else {
-            return Err(
-                "Release declares rustc metadata but has no version; cannot verify ABI compatibility".to_string(),
-            );
+            return Err("Release has no rustc version; cannot verify ABI compatibility".to_string());
         };
         if version.is_empty() {
-            return Err(
-                "Release declares rustc metadata but has no version; cannot verify ABI compatibility".to_string(),
-            );
+            return Err("Release has no rustc version; cannot verify ABI compatibility".to_string());
         }
         if !ocs_plugin_api::version_info::rustc_versions_compatible(
             version,

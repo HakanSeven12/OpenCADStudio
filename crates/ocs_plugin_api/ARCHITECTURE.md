@@ -54,7 +54,7 @@ The runtime enforces three gates:
 
 1. `ocs_plugin_api_version()` exported by the cdylib must be within `[API_VERSION_MIN_SUPPORTED, effective_max_api_version()]`.
 2. For v4+, `acadrust_sources_compatible(host_acadrust_source(), plugin_acadrust_source)` must be true.
-3. For v4+, when the plugin declares `rustc_version`, `rustc_versions_compatible(host_rustc_version(), plugin_rustc_version)` must be true.
+3. For v4+, the plugin must declare `rustc_version`, and `rustc_versions_compatible(host_rustc_version(), plugin_rustc_version)` must be true.
 
 ---
 

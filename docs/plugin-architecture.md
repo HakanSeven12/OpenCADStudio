@@ -99,10 +99,10 @@ affect whether a prebuilt plugin can safely be loaded:
 - `rustc_version` — the output of `rustc --version` for the compiler that built
   the host.
 
-A plugin's `plugin.toml` may declare the same values under `[opencad]`. When
-either is declared, the host refuses to load the plugin unless it matches the
-host exactly. This turns the current silent runner crash into a one-line
-diagnosis such as:
+A plugin's `plugin.toml` declares the same values under `[opencad]`. For API v4
+and later, `rustc_version` is required and the host refuses to load the plugin
+unless it matches exactly. This turns the current silent runner crash into a
+one-line diagnosis such as:
 
 ```
 Plugin built with rustc 1.96.0, host requires 1.98.0 - rebuild required
@@ -229,12 +229,12 @@ version = "0.1.0"
 description = "…"
 
 [opencad]
-api_version = 3
+api_version = 4
 ribbon_order = 50
 command_prefixes = ["EX_"]
 xdata_apps = []
-# For API v4+, also record the exact rustc used to build the release asset.
-# rustc_version = "rustc 1.98.0 (hash date)"
+# Filled with the exact compiler output while staging the release asset.
+rustc_version = "rustc 1.98.0 (hash date)"
 ```
 
 The full, buildable scaffold is in [`docs/plugin-template/`](plugin-template);

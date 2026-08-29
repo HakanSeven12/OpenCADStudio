@@ -226,7 +226,8 @@ fn external_card<'a>(
 ) -> Element<'a, Message> {
     let failed_old_api = load_error.is_some() && !p.api_compatible();
     let acadrust_mismatch = p.acadrust_declared && !p.acadrust_compatible();
-    let rustc_mismatch = p.rustc_declared && !p.rustc_compatible();
+    let rustc_mismatch = ocs_plugin_api::version_info::uses_acadrust_gate(p.api_version)
+        && !p.rustc_compatible();
     let (status, kind) = if loaded && disabled {
         (t!("Disabled"), StatusKind::Muted)
     } else if loaded {

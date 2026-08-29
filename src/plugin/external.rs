@@ -100,9 +100,6 @@ impl ExternalPlugin {
         if !ocs_plugin_api::version_info::uses_acadrust_gate(self.api_version) {
             return true;
         }
-        if !self.rustc_declared {
-            return true;
-        }
         match self.rustc_version.as_deref() {
             None | Some("") => false,
             Some(version) => ocs_plugin_api::version_info::rustc_versions_compatible(
@@ -534,7 +531,7 @@ xdata_apps = ["MYPLUGIN_RECORD"]
     }
 
     #[test]
-    fn undeclared_rustc_falls_back_to_api_gate() {
+    fn undeclared_rustc_is_incompatible() {
         let toml = r#"
 [plugin]
 id = "opencad.test"
@@ -545,7 +542,8 @@ api_version = 4
         let p = parse_plugin_toml(toml).expect("parsed");
         assert!(!p.rustc_declared);
         assert!(p.rustc_version.is_none());
-        assert!(p.rustc_compatible(), "undeclared rustc is treated as compatible");
+        assert!(!p.rustc_compatible());
+        assert!(!p.loadable());
     }
 
     #[test]

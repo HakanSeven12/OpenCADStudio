@@ -384,7 +384,8 @@ fn generate_version_info(out_dir: &Path) {
         .find(|p| p.name.as_str() == "acadrust")
         .expect("acadrust package in Cargo.lock");
 
-    let rustc_version = Command::new("rustc")
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let rustc_version = Command::new(rustc)
         .arg("--version")
         .output()
         .ok()

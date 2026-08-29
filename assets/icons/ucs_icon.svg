@@ -19,7 +19,7 @@
   <sodipodi:namedview
      id="namedview2"
      pagecolor="#505050"
-     bordercolor="#eeeeee"
+     bordercolor="#B4B6B9"
      borderopacity="1"
      inkscape:showpageshadow="0"
      inkscape:pageopacity="0"
@@ -39,12 +39,12 @@
      y1="16.5"
      x2="19.619564"
      y2="16.5"
-     stroke="#4cc9f0"
+     stroke="#6DB7ED"
      stroke-width="1.62521"
      id="line1" />
   <polyline
      points="11,15 14,18 11,21"
-     stroke="#4cc9f0"
+     stroke="#6DB7ED"
      stroke-width="1.5"
      id="polyline1"
      transform="translate(5.7684904,-1.5665742)" />

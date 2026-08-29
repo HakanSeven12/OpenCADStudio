@@ -56,13 +56,31 @@ pub fn run(socket_name: &str, cdylib_path: &Path) -> Result<(), Box<dyn std::err
 
     if version >= 4 {
         let client = V4Client::connect_handshake(socket_name, &token)?;
+        if version >= 5 {
+            invoke_on_load(&mut *plugin, &client, &interactive)?;
+        }
         run_v4(&mut *plugin, &interactive, client)
     } else {
         let client = IpcClient::connect(socket_name)?;
         eprintln!("[runner] connected to host");
         client.send_handshake(&token)?;
+        // V2/V3 plugins receive HostApi only during dispatch, so on_load is not
+        // meaningful there; skip it to keep the old protocol unchanged.
         run_v3(&*plugin, &interactive, client)
     }
+}
+
+fn invoke_on_load(
+    plugin: &mut dyn BuiltinPlugin,
+    client: &V4Client,
+    interactive: &InteractiveRegistry,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut proxy = client.plugin_host_api(0, interactive.clone());
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        plugin.on_load(&mut proxy)
+    }))
+    .map_err(|_| std::io::Error::other("plugin on_load() panicked"))?;
+    Ok(())
 }
 
 fn run_v3(

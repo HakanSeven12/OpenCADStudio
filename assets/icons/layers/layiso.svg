@@ -8,9 +8,9 @@
         stroke-dasharray="3 3"/>
   <!-- The selected layer remains visible -->
   <line x1="2" y1="12" x2="22" y2="12"
-        stroke="#4cc9f0" stroke-width="2.25" stroke-linecap="round"/>
+        stroke="#6DB7ED" stroke-width="2.25" stroke-linecap="round"/>
   <circle cx="12" cy="12" r="2.5"
-          fill="#4cc9f0" stroke="#e0e0e0" stroke-width="1.25"/>
+          fill="#6DB7ED" stroke="#B4B6B9" stroke-width="1.25"/>
   <!-- Focus brackets -->
   <path d="M6 9V7H9 M15 7H18V9 M18 15V17H15 M9 17H6V15"
         fill="none" stroke="#f0c040" stroke-width="1.75"

@@ -2802,7 +2802,7 @@ fn viewport_override(
         .find_map(|(handle, value)| (handle == viewport).then_some(value))
 }
 
-pub(in crate::scene) fn render_style_for_viewport(
+pub(crate) fn render_style_for_viewport(
     document: &CadDocument,
     e: &EntityType,
     viewport: Option<Handle>,

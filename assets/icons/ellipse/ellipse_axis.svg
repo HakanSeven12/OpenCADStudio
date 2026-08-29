@@ -2,13 +2,13 @@
   <!-- Full ellipse -->
   <ellipse cx="12" cy="12" rx="9" ry="5.5" stroke="#B4B6B9" stroke-width="2" fill="none"/>
   <!-- Major axis line (dashed) -->
-  <line x1="3" y1="12" x2="21" y2="12" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="2 2"/>
+  <line x1="3" y1="12" x2="21" y2="12" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
   <!-- Minor distance line -->
-  <line x1="12" y1="12" x2="12" y2="6.5" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="2 2"/>
+  <line x1="12" y1="12" x2="12" y2="6.5" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
   <!-- Axis endpoint 1 -->
-  <circle cx="3"  cy="12"  r="2"   fill="#4cc9f0"/>
+  <circle cx="3"  cy="12"  r="2"   fill="#6DB7ED"/>
   <!-- Axis endpoint 2 -->
-  <circle cx="21" cy="12"  r="2"   fill="#4cc9f0"/>
+  <circle cx="21" cy="12"  r="2"   fill="#6DB7ED"/>
   <!-- Minor axis point -->
-  <circle cx="12" cy="6.5" r="1.5" fill="#4cc9f0"/>
+  <circle cx="12" cy="6.5" r="1.5" fill="#6DB7ED"/>
 </svg>

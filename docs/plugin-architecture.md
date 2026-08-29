@@ -89,6 +89,25 @@ plugin compiles against. Two tiers:
 
 A plugin enables the `host` feature.
 
+### Build-time ABI metadata
+
+For API v4 and later the host records two pieces of build-time metadata that
+affect whether a prebuilt plugin can safely be loaded:
+
+- `acadrust_source` — the exact git source of the `acadrust` crate the host was
+  built against.
+- `rustc_version` — the output of `rustc --version` for the compiler that built
+  the host.
+
+A plugin's `plugin.toml` declares the same values under `[opencad]`. For API v4
+and later, `rustc_version` is required and the host refuses to load the plugin
+unless it matches exactly. This turns the current silent runner crash into a
+one-line diagnosis such as:
+
+```
+Plugin built with rustc 1.96.0, host requires 1.98.0 - rebuild required
+```
+
 ### `PluginManifest`
 
 ```rust
@@ -161,6 +180,10 @@ ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", featur
 acadrust = { git = "https://github.com/HakanSeven12/acadrust", branch = "main" }
 ```
 
+Your release build must also use the same `rustc` as the host. Record it in
+`plugin.toml` (see below) and pin the toolchain in your CI matrix so every
+published asset matches the host's compiler.
+
 ```rust
 // src/lib.rs
 use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
@@ -206,10 +229,12 @@ version = "0.1.0"
 description = "…"
 
 [opencad]
-api_version = 3
+api_version = 5
 ribbon_order = 50
 command_prefixes = ["EX_"]
 xdata_apps = []
+# Filled with the exact compiler output while staging the release asset.
+rustc_version = "rustc 1.98.0 (hash date)"
 ```
 
 The full, buildable scaffold is in [`docs/plugin-template/`](plugin-template);

@@ -16,7 +16,7 @@
   <sodipodi:namedview
      id="namedview2"
      pagecolor="#505050"
-     bordercolor="#eeeeee"
+     bordercolor="#B4B6B9"
      borderopacity="1"
      inkscape:showpageshadow="0"
      inkscape:pageopacity="0"
@@ -56,13 +56,13 @@
      cx="5.7273746"
      cy="16.250023"
      r="2"
-     fill="#4cc9f0"
+     fill="#6DB7ED"
      id="circle1" />
   <circle
      cx="5.7598271"
      cy="7.7543044"
      r="2"
-     fill="#4cc9f0"
+     fill="#6DB7ED"
      id="circle1-6" />
   <!-- End angle dot -->
 </svg>

@@ -8,7 +8,8 @@ license = "GPL-3.0-only"
 repository = "your-account/your-plugin-repo"
 
 [opencad]
-api_version = 3
+api_version = 5
+rustc_version = "__RUSTC_VERSION__"
 ribbon_order = 60
 command_prefixes = ["MP_"]
 xdata_apps = ["MYPLUGIN_RECORD"]

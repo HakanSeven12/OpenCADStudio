@@ -2,10 +2,10 @@
   <!-- Start + end + dashed radius line from implied center -->
   <path d="M 4 18 A 11 11 0 0 1 20 6" stroke="#B4B6B9" stroke-width="2" fill="none" stroke-linecap="round"/>
   <!-- Dashed radius from implied center to start -->
-  <line x1="15" y1="16" x2="4"  y2="18" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="2 2"/>
+  <line x1="15" y1="16" x2="4"  y2="18" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
   <!-- "R" label stub: small tick at midpoint of radius -->
-  <line x1="10" y1="16.5" x2="9"  y2="14.5" stroke="#4cc9f0" stroke-width="1.2"/>
-  <line x1="10" y1="16.5" x2="11" y2="14.5" stroke="#4cc9f0" stroke-width="1.2"/>
-  <circle cx="4"  cy="18" r="2"   fill="#4cc9f0"/>
-  <circle cx="20" cy="6"  r="2"   fill="#4cc9f0"/>
+  <line x1="10" y1="16.5" x2="9"  y2="14.5" stroke="#6DB7ED" stroke-width="1.2"/>
+  <line x1="10" y1="16.5" x2="11" y2="14.5" stroke="#6DB7ED" stroke-width="1.2"/>
+  <circle cx="4"  cy="18" r="2"   fill="#6DB7ED"/>
+  <circle cx="20" cy="6"  r="2"   fill="#6DB7ED"/>
 </svg>

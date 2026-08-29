@@ -299,6 +299,14 @@ pub trait BuiltinPlugin: Send + Sync {
     /// the V4 runner guarantees it is only called for plugins that report
     /// API major 4 or newer.
     fn on_notification(&mut self, _command_id: Option<u64>, _notification: HostNotification) {}
+
+    /// Lifecycle callback invoked once after the runner connects. The plugin
+    /// receives the active document tab's `HostApi` so it can set up worker
+    /// threads or cache `plugin_request_sender()` before any user command runs.
+    ///
+    /// Added in API v5. The runner only calls this for plugins that report API
+    /// major 5 or newer.
+    fn on_load(&mut self, _host: &mut dyn HostApi) {}
 }
 
 /// A point-driven interactive command a plugin starts via

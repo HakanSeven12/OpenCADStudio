@@ -203,6 +203,7 @@ fn newest_update(installed: &str, releases: &[ReleaseInfo]) -> Option<String> {
         .filter(|release| {
             ocs_plugin_api::manifest::host_accepts_plugin_version(release.api_version)
                 && release.acadrust_compatible
+                && release.rustc_compatible
         })
         .filter_map(|release| {
             semver::Version::parse(trim_version_prefix(&release.tag))
@@ -225,13 +226,15 @@ fn external_card<'a>(
 ) -> Element<'a, Message> {
     let failed_old_api = load_error.is_some() && !p.api_compatible();
     let acadrust_mismatch = p.acadrust_declared && !p.acadrust_compatible();
+    let rustc_mismatch = ocs_plugin_api::version_info::uses_acadrust_gate(p.api_version)
+        && !p.rustc_compatible();
     let (status, kind) = if loaded && disabled {
         (t!("Disabled"), StatusKind::Muted)
     } else if loaded {
         (t!("Loaded"), StatusKind::Success)
     } else if !p.api_compatible() || failed_old_api {
         (t!("API incompatible"), StatusKind::Danger)
-    } else if acadrust_mismatch {
+    } else if acadrust_mismatch || rustc_mismatch {
         (t!("Incompatible"), StatusKind::Danger)
     } else if load_error.is_some() {
         (t!("Load failed"), StatusKind::Danger)
@@ -375,7 +378,8 @@ fn install_controls<'a>(
     let action = match selected_release {
         Some(release)
             if ocs_plugin_api::manifest::host_accepts_plugin_version(release.api_version)
-                && release.acadrust_compatible =>
+                && release.acadrust_compatible
+                && release.rustc_compatible =>
         {
             pill_button(
                 t!("Install"),
@@ -990,6 +994,9 @@ mod tests {
                 acadrust_source: None,
                 acadrust_declared: false,
                 acadrust_compatible: true,
+                rustc_version: None,
+                rustc_declared: false,
+                rustc_compatible: true,
             },
             ReleaseInfo {
                 tag: "v2.0.0".to_string(),
@@ -997,6 +1004,9 @@ mod tests {
                 acadrust_source: None,
                 acadrust_declared: false,
                 acadrust_compatible: true,
+                rustc_version: None,
+                rustc_declared: false,
+                rustc_compatible: true,
             },
             ReleaseInfo {
                 tag: "v1.9.9".to_string(),
@@ -1004,6 +1014,9 @@ mod tests {
                 acadrust_source: None,
                 acadrust_declared: false,
                 acadrust_compatible: true,
+                rustc_version: None,
+                rustc_declared: false,
+                rustc_compatible: true,
             },
         ];
         assert_eq!(newest_update("1.3.0", &releases).as_deref(), Some("v2.0.0"));
@@ -1021,6 +1034,9 @@ mod tests {
                 ),
                 acadrust_declared: true,
                 acadrust_compatible: true,
+                rustc_version: None,
+                rustc_declared: false,
+                rustc_compatible: true,
             },
             ReleaseInfo {
                 tag: "v2.0.0".to_string(),
@@ -1030,6 +1046,9 @@ mod tests {
                 ),
                 acadrust_declared: true,
                 acadrust_compatible: false,
+                rustc_version: None,
+                rustc_declared: false,
+                rustc_compatible: true,
             },
         ];
         assert_eq!(newest_update("1.3.0", &releases).as_deref(), Some("v1.4.0"));

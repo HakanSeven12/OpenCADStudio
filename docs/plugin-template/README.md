@@ -28,7 +28,8 @@ folder into a new repo and rename the placeholders.
 cargo build --release
 mkdir -p "<config>/OpenCADStudio/plugins/opencad.my_plugin"
 cp target/release/*my_plugin*.so "<config>/OpenCADStudio/plugins/opencad.my_plugin/"
-cp plugin.toml                    "<config>/OpenCADStudio/plugins/opencad.my_plugin/"
+sed "s|__RUSTC_VERSION__|$(rustc --version)|" plugin.toml > \
+  "<config>/OpenCADStudio/plugins/opencad.my_plugin/plugin.toml"
 ```
 
 Restart Open CAD Studio: the ribbon tab appears and `MP_` commands route to your

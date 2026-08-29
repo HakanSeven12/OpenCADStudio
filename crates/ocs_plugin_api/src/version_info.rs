@@ -11,6 +11,12 @@
 //! `acadrust` source with its own via [`acadrust_sources_compatible`]. Two
 //! sources are considered compatible only when they resolve to the same 40
 //! character git commit hash.
+//!
+//! The rustc version string is also recorded because Rust has no stable ABI:
+//! a plugin built with a different compiler than the host can pass simple calls
+//! and then crash the runner on compound types. For API v4 and later the host
+//! can compare the plugin's declared rustc with its own via
+//! [`rustc_versions_compatible`].
 
 use std::sync::OnceLock;
 
@@ -26,6 +32,7 @@ pub fn get_embedded_version_info_json() -> &'static str {
 #[derive(Debug, Clone)]
 struct VersionInfo {
     acadrust_source: String,
+    rustc_version: String,
 }
 
 pub const ACADRUST_GATE_API_VERSION: u32 = 4;
@@ -48,12 +55,38 @@ fn parsed_version_info() -> &'static VersionInfo {
     INFO.get_or_init(|| VersionInfo {
         acadrust_source: json_string_value(EMBEDDED_VERSION_INFO_JSON, "acadrust_source")
             .unwrap_or_default(),
+        rustc_version: json_string_value(EMBEDDED_VERSION_INFO_JSON, "rustc_version")
+            .unwrap_or_default(),
     })
 }
 
 /// Returns the host's full `acadrust` Cargo source.
 pub fn host_acadrust_source() -> &'static str {
     &parsed_version_info().acadrust_source
+}
+
+/// Returns the host's `rustc --version` output.
+pub fn host_rustc_version() -> &'static str {
+    &parsed_version_info().rustc_version
+}
+
+/// Returns whether two `rustc --version` outputs are considered compatible.
+///
+/// The full version line (e.g. "rustc 1.98.0 (hash date)") is compared
+/// token-by-token after normalising whitespace. This is intentionally strict:
+/// Rust has no stable ABI, so even the same nominal compiler built in different
+/// environments can produce incompatible layouts.
+pub fn rustc_versions_compatible(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    let a_tokens: Vec<&str> = a.split_whitespace().collect();
+    let b_tokens: Vec<&str> = b.split_whitespace().collect();
+    a_tokens.len() == b_tokens.len()
+        && a_tokens
+            .iter()
+            .zip(b_tokens)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
 /// Extracts the full git commit hash from a Cargo source.
@@ -85,6 +118,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(json).expect("valid JSON");
         assert!(value.get("ocs_version").is_some());
         assert!(value.get("acadrust_source").is_some());
+        assert!(value.get("rustc_version").is_some());
     }
 
     #[test]
@@ -96,6 +130,7 @@ mod tests {
             "ocs_plugin_api_version",
             "acadrust_version",
             "acadrust_source",
+            "rustc_version",
             "api_version",
             "api_version_min_supported",
             "build_timestamp",
@@ -123,6 +158,45 @@ mod tests {
     #[test]
     fn host_acadrust_source_is_non_empty() {
         assert!(!host_acadrust_source().is_empty());
+    }
+
+    #[test]
+    fn host_rustc_version_is_non_empty() {
+        assert!(!host_rustc_version().is_empty());
+    }
+
+    #[test]
+    fn rustc_version_comparison_is_strict() {
+        assert!(rustc_versions_compatible(
+            "rustc 1.98.0 (abc123 2026-01-01)",
+            "rustc 1.98.0 (abc123 2026-01-01)"
+        ));
+        assert!(!rustc_versions_compatible(
+            "rustc 1.96.0 (def456 2025-11-01)",
+            "rustc 1.98.0 (abc123 2026-01-01)"
+        ));
+    }
+
+    #[test]
+    fn rustc_version_comparison_normalises_whitespace() {
+        assert!(rustc_versions_compatible(
+            "rustc  1.98.0  (abc123  2026-01-01)",
+            "rustc 1.98.0 (abc123 2026-01-01)"
+        ));
+    }
+
+    #[test]
+    fn rustc_version_comparison_rejects_empty() {
+        assert!(!rustc_versions_compatible("", "rustc 1.98.0"));
+        assert!(!rustc_versions_compatible("rustc 1.98.0", ""));
+        assert!(!rustc_versions_compatible("", ""));
+    }
+
+    #[test]
+    fn rustc_version_comparison_rejects_collapsed_tokens() {
+        // A concatenated version must not accidentally match a spaced one.
+        assert!(!rustc_versions_compatible("rustc 1.98.0", "rustc1.98.0"));
+        assert!(!rustc_versions_compatible("rustc1.98.0", "rustc 1.98.0"));
     }
 
     #[test]

@@ -401,6 +401,21 @@ impl HostApi for PluginHostApi {
             None => Box::new(EmptyDocumentReader),
         }
     }
+
+    fn document_path(&self, tab_id: u64) -> Option<std::path::PathBuf> {
+        match self.client.request(PluginRequest::DocumentPath { tab_id }) {
+            Ok(PluginResponse::DocumentPath(Some(path))) => Some(std::path::PathBuf::from(path)),
+            Ok(PluginResponse::DocumentPath(None)) => None,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected DocumentPath response: {other:?}");
+                None
+            }
+            Err(e) => {
+                eprintln!("[plugin] DocumentPath request failed: {e}");
+                None
+            }
+        }
+    }
 }
 
 /// Sentinel reader used when the shared-memory view could not be initialized.

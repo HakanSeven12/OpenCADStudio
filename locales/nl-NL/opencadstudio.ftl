@@ -236,6 +236,7 @@ command-copy =
         } | Reeks | Enter=gereed | basis { $x },{ $y }]:
 
 common =
+    .jogged-radius = Geknikte straal
     .none-use-shortcuts-set-key-command = (geen gebruik: SHORTCUTS SET <toets> <opdracht>)
     .alignment-indented-label-title-case = Uitlijning:
     .background-fill-enabled = Achtergrond vullen ingeschakeld
@@ -1167,6 +1168,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__ Area=__ocs_fmt_1__ Perimeter=__ocs_fmt_2__ Centroid=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = Geladen multilijnstijlen: __ocs_fmt_0__
+    .mline-current-settings = MLINE  Huidige instellingen: Uitlijning = __ocs_fmt_0__, Schaal = __ocs_fmt_1__, Stijl = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  Voer uitlijning in [Boven/Nul/Onder] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  Voer schaalfactor in <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  Voer stijlnaam of [?] in <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  Geef volgend punt op of [Sluiten/Ongedaan maken]:
+    .mline-specify-next-point-undo = MLINE  Geef volgend punt op of [Ongedaan maken]:
+    .multiline-style-was-not-found = Multilijnstijl ‘__ocs_arg_style__’ is niet gevonden.
+    .donut-specify-second-point-for-inside-diameter = DONUT  Geef tweede punt voor binnendiameter op:
+    .donut-specify-second-point-for-outside-diameter = DONUT  Geef tweede punt voor buitendiameter op:
+    .spline-specify-first-point = SPLINE  Geef eerste punt op:
     .insert-x-no-attributes = __ocs_fmt_0__ invoegen: geen attributen.
     .tag-val = [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ Geen gesloten grens gevonden.
@@ -1450,6 +1462,24 @@ draw =
     .n-object-s-erased = __ocs_fmt_0__ object(en) gewist.
 
 modify =
+    .add-vertex = Hoekpunt toevoegen
+    .closed-cross = Gesloten kruis
+    .closed-tee = Gesloten T-stuk
+    .corner-joint = Hoekverbinding
+    .cut-all = Alles snijden
+    .cut-single = Enkel snijden
+    .delete-vertex = Hoekpunt verwijderen
+    .merged-cross = Samengevoegd kruis
+    .merged-tee = Samengevoegd T-stuk
+    .mledit-choose-an-edit-tool = MLEDIT  Kies een bewerkingsgereedschap:
+    .mledit-select-first-multiline = MLEDIT  Selecteer de eerste multilijn:
+    .mledit-select-second-multiline = MLEDIT  Selecteer de tweede multilijn:
+    .mledit-specify-end-of-weld-range = MLEDIT  Geef het einde van het lasbereik op:
+    .mledit-specify-second-cut-point = MLEDIT  Geef het tweede snijpunt op:
+    .open-cross = Open kruis
+    .open-tee = Open T-stuk
+    .remove-vertex = Hoekpunt wegnemen
+    .weld-all = Alles lassen
     .count-objects = (__ocs_arg_count__ objecten)
     .edge-extend-indented-title-case = [Rand: Verlengen]
     .align-scale-objects-based-on-alignment-points = ALIGN Objecten schalen op basis van uitlijnpunten? [Y/N]:
@@ -1786,6 +1816,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: stijl '__ocs_fmt_1__' niet gevonden.
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Voer maattekst in (leeg = gemeten waarde):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Selecteer boog, cirkel of polylijnboog:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Geef alternatieve middelpuntlocatie op:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Geef locatie van maatlijn op [Mtekst/Tekst/Hoek]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Geef kniklocatie op:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Geef teksthoek op (graden):
+    .table-cell-enter-text-row-column-current = TABLE CELL  Voer tekst in voor [__ocs_arg_row__,__ocs_arg_column__] <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  Voer kolombreedte in [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  Voer aantal gegevensrijen in [__ocs_arg_rows__] (__ocs_arg_cols__ kolommen):
+    .table-enter-row-height-height = TABLE  Voer rijhoogte in [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  Invoeggedrag [Punt/Venster] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT Voer tekstbewerkingsmodus [Single/Multiple] <__ocs_arg_mode__> in:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE Geef nieuwe waarde voor TEXTEDITMODE <__ocs_arg_v__>:
     .arctext-text-to-place-along-the-arc = ARCTEXT  tekst die langs de boog moet worden geplaatst:
@@ -2148,6 +2189,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER F <laag> = Bevriezen | T <laag> = Ontdooien | Enter = Afsluiten
 
 view =
+    .datalink-specify-insertion-point = DATALINK  Geef invoegpunt op:
+    .table-block-definition-not-found = TABLE: blokdefinitie niet gevonden.
+    .table-edit-applied = TABLE: bewerking toegepast.
+    .table-field-handle-not-found = TABLE: veldhandle niet gevonden.
+    .table-row-column-out-of-range-or-cell-locked = TABLE: rij/kolom ligt buiten bereik of de cel is vergrendeld.
+    .table-select-a-table-first = TABLE: selecteer eerst een tabel.
+    .usage-table-edit-actions = Gebruik: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message = __ocs_fmt_0__
     .code-page = Codepagina: __ocs_fmt_0__
     .created-julian-6 = Aangemaakt (Julian): __ocs_fmt_0__
@@ -2364,6 +2412,34 @@ view =
     .viewport-s-in-layout = __ocs_fmt_0__ weergavevenster(s) in indeling "__ocs_fmt_1__":
 
 properties =
+    .arrowhead-size = Pijlpuntgrootte
+    .attachment = Koppeling
+    .chord = Koorde
+    .control-point-x-sentence-case = Controlepunt X
+    .control-point-y-sentence-case = Controlepunt Y
+    .control-point-z-sentence-case = Controlepunt Z
+    .control-vertices = Controlehoekpunten
+    .current-control-point = Huidig controlepunt
+    .current-fit-point = Huidig aanpassingspunt
+    .cv-frame = CV-kader
+    .end-tangent-vector-x = Eindraakvector X
+    .end-tangent-vector-y = Eindraakvector Y
+    .end-tangent-vector-z = Eindraakvector Z
+    .extended-data = Uitgebreide gegevens
+    .fit-point-x-sentence-case = Aanpassingspunt X
+    .fit-point-y-sentence-case = Aanpassingspunt Y
+    .fit-point-z-sentence-case = Aanpassingspunt Z
+    .fit-tolerance-sentence-case = Aanpassingstolerantie
+    .hide = Verbergen
+    .knot-parameterization-sentence-case = Knoopparametrisering
+    .number-of-control-points = Aantal controlepunten
+    .number-of-fit-points = Aantal aanpassingspunten
+    .periodic = Periodiek
+    .square-root = Vierkantswortel
+    .start-tangent-vector-x = Beginraakvector X
+    .start-tangent-vector-y = Beginraakvector Y
+    .start-tangent-vector-z = Beginraakvector Z
+    .uniform = Gelijkmatig
     .count-objects-selected = __ocs_arg_count__ objecten geselecteerd
     .scope-visual-style = __ocs_arg_scope__ Visuele stijl
     .value-3d-face = 3D gezicht

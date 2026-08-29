@@ -2353,6 +2353,7 @@ view =
     .viewport-s-in-layout = "__ocs_fmt_1__" yerleşiminde __ocs_fmt_0__ görünüm alanı:
 
 properties =
+    .extended-data = Genişletilmiş Veri
     .count-objects-selected = __ocs_arg_count__ nesne seçildi
     .scope-visual-style = __ocs_arg_scope__ Görsel Stil
     .value-3d-face = 3B Yüz

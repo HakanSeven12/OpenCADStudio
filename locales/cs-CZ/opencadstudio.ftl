@@ -235,6 +235,7 @@ command-copy =
         } | Pole | Enter=hotovo | základna { $x },{ $y }]:
 
 common =
+    .jogged-radius = Zalomený poloměr
     .none-use-shortcuts-set-key-command =(žádné — použijte: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Zarovnání:
     .background-fill-enabled =   Výplň pozadí povolena
@@ -1166,6 +1167,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__ Plocha=__ocs_fmt_1__ Obvod=__ocs_fmt_2__ Centroid=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = Načtené styly multičar: __ocs_fmt_0__
+    .mline-current-settings = MLINE  Aktuální nastavení: Zarovnání = __ocs_fmt_0__, Měřítko = __ocs_fmt_1__, Styl = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  Zadejte zarovnání [Nahoře/Nula/Dole] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  Zadejte měřítko <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  Zadejte název stylu nebo [?] <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  Určete další bod nebo [Zavřít/Zpět]:
+    .mline-specify-next-point-undo = MLINE  Určete další bod nebo [Zpět]:
+    .multiline-style-was-not-found = Styl multičáry „__ocs_arg_style__“ nebyl nalezen.
+    .donut-specify-second-point-for-inside-diameter = DONUT  Určete druhý bod vnitřního průměru:
+    .donut-specify-second-point-for-outside-diameter = DONUT  Určete druhý bod vnějšího průměru:
+    .spline-specify-first-point = SPLINE  Určete první bod:
     .insert-x-no-attributes =   Vložit __ocs_fmt_0__: žádné atributy.
     .tag-val =   [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ Nebyla nalezena žádná uzavřená hranice.
@@ -1449,6 +1461,24 @@ draw =
     .n-object-s-erased = Objekty __ocs_fmt_0__ byly vymazány.
 
 modify =
+    .add-vertex = Přidat vrchol
+    .closed-cross = Uzavřený kříž
+    .closed-tee = Uzavřené T
+    .corner-joint = Rohový spoj
+    .cut-all = Oříznout vše
+    .cut-single = Oříznout jednotlivě
+    .delete-vertex = Odstranit vrchol
+    .merged-cross = Sloučený kříž
+    .merged-tee = Sloučené T
+    .mledit-choose-an-edit-tool = MLEDIT  Vyberte nástroj úprav:
+    .mledit-select-first-multiline = MLEDIT  Vyberte první multičáru:
+    .mledit-select-second-multiline = MLEDIT  Vyberte druhou multičáru:
+    .mledit-specify-end-of-weld-range = MLEDIT  Určete konec rozsahu spojení:
+    .mledit-specify-second-cut-point = MLEDIT  Určete druhý bod řezu:
+    .open-cross = Otevřený kříž
+    .open-tee = Otevřené T
+    .remove-vertex = Odebrat vrchol
+    .weld-all = Spojit vše
     .count-objects =  (Objekty __ocs_arg_count__)
     .edge-extend-indented-title-case =  [Okraj: Prodloužit]
     .align-scale-objects-based-on-alignment-points = ALIGN Měřítko objektů na základě bodů zarovnání? [Y/N]:
@@ -1785,6 +1815,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: styl '__ocs_fmt_1__' nebyl nalezen.
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Zadejte text kóty (prázdné = změřená hodnota):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Vyberte oblouk, kružnici nebo oblouk křivky:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Určete náhradní polohu středu:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Určete polohu kótovací čáry [Mtext/Text/Úhel]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Určete polohu zalomení:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Určete úhel textu (stupně):
+    .table-cell-enter-text-row-column-current = TABLE CELL  Zadejte text pro [__ocs_arg_row__,__ocs_arg_column__] <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  Zadejte šířku sloupce [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  Zadejte počet datových řádků [__ocs_arg_rows__] (__ocs_arg_cols__ sloupců):
+    .table-enter-row-height-height = TABLE  Zadejte výšku řádku [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  Způsob vložení [Bod/Okno] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT Režim úpravy textu Enter [Jeden/Více] <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE Enter nová hodnota pro TEXTEDITMODE <__ocs_arg_v__>:
     .arctext-text-to-place-along-the-arc = Text ARCTEXT k umístění podél oblouku:
@@ -2147,6 +2188,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER F <layer> = Zmrazit | T <layer> = Rozmrazit | Enter = Konec
 
 view =
+    .datalink-specify-insertion-point = DATALINK  Určete bod vložení:
+    .table-block-definition-not-found = TABLE: definice bloku nebyla nalezena.
+    .table-edit-applied = TABLE: úprava byla použita.
+    .table-field-handle-not-found = TABLE: identifikátor pole nebyl nalezen.
+    .table-row-column-out-of-range-or-cell-locked = TABLE: řádek/sloupec je mimo rozsah nebo je buňka uzamčena.
+    .table-select-a-table-first = TABLE: nejprve vyberte tabulku.
+    .usage-table-edit-actions = Použití: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message =     __ocs_fmt_0__
     .code-page =   Kódová stránka: __ocs_fmt_0__
     .created-julian-6 =   Vytvořeno (Julian): __ocs_fmt_0__
@@ -2363,6 +2411,34 @@ view =
     .viewport-s-in-layout =Výřezy __ocs_fmt_0__ v rozložení "__ocs_fmt_1__":
 
 properties =
+    .arrowhead-size = Velikost hrotu šipky
+    .attachment = Připojení
+    .chord = Tětiva
+    .control-point-x-sentence-case = Řídicí bod X
+    .control-point-y-sentence-case = Řídicí bod Y
+    .control-point-z-sentence-case = Řídicí bod Z
+    .control-vertices = Řídicí vrcholy
+    .current-control-point = Aktuální řídicí bod
+    .current-fit-point = Aktuální prokládací bod
+    .cv-frame = Rámec ŘV
+    .end-tangent-vector-x = Koncový tečný vektor X
+    .end-tangent-vector-y = Koncový tečný vektor Y
+    .end-tangent-vector-z = Koncový tečný vektor Z
+    .extended-data = Rozšířená data
+    .fit-point-x-sentence-case = Prokládací bod X
+    .fit-point-y-sentence-case = Prokládací bod Y
+    .fit-point-z-sentence-case = Prokládací bod Z
+    .fit-tolerance-sentence-case = Tolerance proložení
+    .hide = Skrýt
+    .knot-parameterization-sentence-case = Parametrizace uzlů
+    .number-of-control-points = Počet řídicích bodů
+    .number-of-fit-points = Počet prokládacích bodů
+    .periodic = Periodická
+    .square-root = Druhá odmocnina
+    .start-tangent-vector-x = Počáteční tečný vektor X
+    .start-tangent-vector-y = Počáteční tečný vektor Y
+    .start-tangent-vector-z = Počáteční tečný vektor Z
+    .uniform = Rovnoměrná
     .count-objects-selected = Vybrány objekty __ocs_arg_count__
     .scope-visual-style = Vizuální styl __ocs_arg_scope__
     .value-3d-face = 3D obličej

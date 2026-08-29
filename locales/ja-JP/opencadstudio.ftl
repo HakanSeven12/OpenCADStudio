@@ -226,6 +226,7 @@ command-copy =
     .target = COPY  移動先を指定  [これまでに { $count } 個複写 | 配列 | Enter=完了 | 基点 { $x },{ $y }]:
 
 common =
+    .jogged-radius = 折れ曲がり半径
     .none-use-shortcuts-set-key-command =   （なし — SHORTCUTS SET <key> <command> を使用）
     .alignment-indented-label-title-case =   配置:
     .background-fill-enabled =   背景塗り潰しを有効化
@@ -1157,6 +1158,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__  面積=__ocs_fmt_1__  周長=__ocs_fmt_2__  図心=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = 読み込まれたマルチラインスタイル: __ocs_fmt_0__
+    .mline-current-settings = MLINE  現在の設定: 位置合わせ = __ocs_fmt_0__、尺度 = __ocs_fmt_1__、スタイル = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  位置合わせの種類を入力 [上/ゼロ/下] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  尺度係数を入力 <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  スタイル名または [?] を入力 <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  次の点を指定 または [閉じる/元に戻す]:
+    .mline-specify-next-point-undo = MLINE  次の点を指定 または [元に戻す]:
+    .multiline-style-was-not-found = マルチラインスタイル「__ocs_arg_style__」が見つかりません。
+    .donut-specify-second-point-for-inside-diameter = DONUT  内径の2点目を指定:
+    .donut-specify-second-point-for-outside-diameter = DONUT  外径の2点目を指定:
+    .spline-specify-first-point = SPLINE  最初の点を指定:
     .insert-x-no-attributes =   挿入 __ocs_fmt_0__: 属性なし。
     .tag-val =   [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ 閉じた境界が見つかりません。
@@ -1440,6 +1452,24 @@ draw =
     .n-object-s-erased = __ocs_fmt_0__ 個のオブジェクトを削除しました。
 
 modify =
+    .add-vertex = 頂点を追加
+    .closed-cross = 閉じた交差
+    .closed-tee = 閉じたT字
+    .corner-joint = コーナージョイント
+    .cut-all = すべて切断
+    .cut-single = 単一切断
+    .delete-vertex = 頂点を削除
+    .merged-cross = 結合交差
+    .merged-tee = 結合T字
+    .mledit-choose-an-edit-tool = MLEDIT  編集ツールを選択:
+    .mledit-select-first-multiline = MLEDIT  1本目のマルチラインを選択:
+    .mledit-select-second-multiline = MLEDIT  2本目のマルチラインを選択:
+    .mledit-specify-end-of-weld-range = MLEDIT  結合範囲の終点を指定:
+    .mledit-specify-second-cut-point = MLEDIT  2つ目の切断点を指定:
+    .open-cross = 開いた交差
+    .open-tee = 開いたT字
+    .remove-vertex = 頂点を除去
+    .weld-all = すべて結合
     .count-objects =  （__ocs_arg_count__ 個のオブジェクト）
     .edge-extend-indented-title-case =  [エッジ: 延長]
     .align-scale-objects-based-on-alignment-points = ALIGN  位置合わせ点に基づいてオブジェクトを尺度変更しますか？ [はい/いいえ]:
@@ -1776,6 +1806,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: スタイル「__ocs_fmt_1__」が見つかりません。
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  寸法値を入力 (空欄 = 計測値):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  円弧、円、またはポリライン円弧を選択:
+    .dimjogged-specify-center-location-override = DIMJOGGED  中心位置の変更先を指定:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  寸法線の位置を指定 [マルチテキスト/テキスト/角度]:
+    .dimjogged-specify-jog-location = DIMJOGGED  折れ曲がり位置を指定:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  文字角度 (度) を指定:
+    .table-cell-enter-text-row-column-current = TABLE CELL  セル [__ocs_arg_row__,__ocs_arg_column__] の文字列を入力 <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  列幅を入力 [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  データ行数を入力 [__ocs_arg_rows__] (__ocs_arg_cols__ 列):
+    .table-enter-row-height-height = TABLE  行の高さを入力 [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  挿入方法 [点/窓] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT 文字編集モードを入力 [単一/複数] <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE TEXTEDITMODE の新しい値を入力 <__ocs_arg_v__>:
     .arctext-text-to-place-along-the-arc = ARCTEXT  円弧に沿って配置する文字:
@@ -2136,6 +2177,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER  F <layer> = フリーズ  |  T <layer> = フリーズ解除  |  Enter = 終了
 
 view =
+    .datalink-specify-insertion-point = DATALINK  挿入点を指定:
+    .table-block-definition-not-found = TABLE: ブロック定義が見つかりません。
+    .table-edit-applied = TABLE: 編集を適用しました。
+    .table-field-handle-not-found = TABLE: フィールドハンドルが見つかりません。
+    .table-row-column-out-of-range-or-cell-locked = TABLE: 行/列が範囲外か、セルがロックされています。
+    .table-select-a-table-first = TABLE: 最初に表を選択してください。
+    .usage-table-edit-actions = 使用法: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message =     __ocs_fmt_0__
     .code-page =   コードページ: __ocs_fmt_0__
     .created-julian-6 =   作成日（ユリウス日）: __ocs_fmt_0__
@@ -2352,6 +2400,34 @@ view =
     .viewport-s-in-layout = レイアウト「__ocs_fmt_1__」内の __ocs_fmt_0__ 個のビューポート:
 
 properties =
+    .arrowhead-size = 矢印の先端サイズ
+    .attachment = アタッチ
+    .chord = 弦
+    .control-point-x-sentence-case = 制御点 X
+    .control-point-y-sentence-case = 制御点 Y
+    .control-point-z-sentence-case = 制御点 Z
+    .control-vertices = 制御頂点
+    .current-control-point = 現在の制御点
+    .current-fit-point = 現在のフィット点
+    .cv-frame = CVフレーム
+    .end-tangent-vector-x = 終点接線ベクトル X
+    .end-tangent-vector-y = 終点接線ベクトル Y
+    .end-tangent-vector-z = 終点接線ベクトル Z
+    .extended-data = 拡張データ
+    .fit-point-x-sentence-case = フィット点 X
+    .fit-point-y-sentence-case = フィット点 Y
+    .fit-point-z-sentence-case = フィット点 Z
+    .fit-tolerance-sentence-case = フィット許容差
+    .hide = 非表示
+    .knot-parameterization-sentence-case = ノットのパラメータ化
+    .number-of-control-points = 制御点の数
+    .number-of-fit-points = フィット点の数
+    .periodic = 周期
+    .square-root = 平方根
+    .start-tangent-vector-x = 始点接線ベクトル X
+    .start-tangent-vector-y = 始点接線ベクトル Y
+    .start-tangent-vector-z = 始点接線ベクトル Z
+    .uniform = 均一
     .count-objects-selected = __ocs_arg_count__ 個のオブジェクトを選択
     .scope-visual-style = __ocs_arg_scope__ 表示スタイル
     .value-3d-face = 3D 面

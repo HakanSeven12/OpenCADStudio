@@ -224,6 +224,7 @@ command-copy =
     .target = COPY  गंतव्य निर्दिष्ट करें  [अब तक { $count } प्रतियाँ | ऐरे | Enter=पूर्ण | आधार { $x },{ $y }]:
 
 common =
+    .jogged-radius = मोड़ वाला त्रिज्या माप
     .none-use-shortcuts-set-key-command = (कोई नहीं — उपयोग: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case = संरेखण:
     .background-fill-enabled = पृष्ठभूमि भरने सक्षम
@@ -1155,6 +1156,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__  क्षेत्रफल=__ocs_fmt_1__  परिमाप=__ocs_fmt_2__  केन्द्रक=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = लोड की गई मल्टीलाइन शैलियाँ: __ocs_fmt_0__
+    .mline-current-settings = MLINE  वर्तमान सेटिंग्स: संरेखण = __ocs_fmt_0__, स्केल = __ocs_fmt_1__, शैली = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  संरेखण प्रकार दर्ज करें [ऊपर/शून्य/नीचे] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  स्केल गुणांक दर्ज करें <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  शैली का नाम या [?] दर्ज करें <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  अगला बिंदु निर्दिष्ट करें या [बंद करें/पूर्ववत करें]:
+    .mline-specify-next-point-undo = MLINE  अगला बिंदु निर्दिष्ट करें या [पूर्ववत करें]:
+    .multiline-style-was-not-found = मल्टीलाइन शैली “__ocs_arg_style__” नहीं मिली।
+    .donut-specify-second-point-for-inside-diameter = DONUT  अंदरूनी व्यास के लिए दूसरा बिंदु निर्दिष्ट करें:
+    .donut-specify-second-point-for-outside-diameter = DONUT  बाहरी व्यास के लिए दूसरा बिंदु निर्दिष्ट करें:
+    .spline-specify-first-point = SPLINE  पहला बिंदु निर्दिष्ट करें:
     .insert-x-no-attributes = __ocs_fmt_0__: कोई विशेषता नहीं है।
     .tag-val = [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ कोई बंद सीमा नहीं मिली।
@@ -1438,6 +1450,24 @@ draw =
     .n-object-s-erased = __ocs_fmt_0__ ऑब्जेक्ट (s) मिटा दिया गया।
 
 modify =
+    .add-vertex = शीर्ष जोड़ें
+    .closed-cross = बंद क्रॉस
+    .closed-tee = बंद T-जोड़
+    .corner-joint = कोने का जोड़
+    .cut-all = सभी काटें
+    .cut-single = एक काटें
+    .delete-vertex = शीर्ष हटाएँ
+    .merged-cross = मर्ज किया हुआ क्रॉस
+    .merged-tee = मर्ज किया हुआ T-जोड़
+    .mledit-choose-an-edit-tool = MLEDIT  संपादन उपकरण चुनें:
+    .mledit-select-first-multiline = MLEDIT  पहली मल्टीलाइन चुनें:
+    .mledit-select-second-multiline = MLEDIT  दूसरी मल्टीलाइन चुनें:
+    .mledit-specify-end-of-weld-range = MLEDIT  जोड़ सीमा का अंत निर्दिष्ट करें:
+    .mledit-specify-second-cut-point = MLEDIT  दूसरा कट बिंदु निर्दिष्ट करें:
+    .open-cross = खुला क्रॉस
+    .open-tee = खुला T-जोड़
+    .remove-vertex = शीर्ष निकालें
+    .weld-all = सभी जोड़ें
     .count-objects = (__ocs_arg_count__ ऑब्जेक्ट)
     .edge-extend-indented-title-case = [किनारा: बढ़ाएँ]
     .align-scale-objects-based-on-alignment-points = ALIGN संरेखण बिंदुओं के आधार पर ऑब्जेक्ट स्केल करें? [हाँ/नहीं]:
@@ -1774,6 +1804,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: शैली '__ocs_fmt_1__' नहीं मिली।
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  माप पाठ दर्ज करें (खाली = मापा गया मान):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  चाप, वृत्त या पॉलीलाइन चाप चुनें:
+    .dimjogged-specify-center-location-override = DIMJOGGED  केंद्र का वैकल्पिक स्थान निर्दिष्ट करें:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  माप रेखा का स्थान निर्दिष्ट करें [बहुपंक्ति पाठ/पाठ/कोण]:
+    .dimjogged-specify-jog-location = DIMJOGGED  मोड़ का स्थान निर्दिष्ट करें:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  पाठ कोण (डिग्री) निर्दिष्ट करें:
+    .table-cell-enter-text-row-column-current = TABLE CELL  कक्ष [__ocs_arg_row__,__ocs_arg_column__] के लिए पाठ दर्ज करें <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  कॉलम की चौड़ाई दर्ज करें [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  डेटा पंक्तियों की संख्या दर्ज करें [__ocs_arg_rows__] (__ocs_arg_cols__ कॉलम):
+    .table-enter-row-height-height = TABLE  पंक्ति की ऊँचाई दर्ज करें [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  सम्मिलन व्यवहार [बिंदु/विंडो] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT टेक्स्ट संपादित मोड दर्ज करें [एकल / एकाधिक] <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE का नया मान दर्ज करें <__ocs_arg_v__>:
     .arctext-text-to-place-along-the-arc = ARCTEXT  चाप के साथ रखने के लिए पाठ:
@@ -2136,6 +2177,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER F <लेयर> = फ़्रीज़ | T <लेयर> = थॉ | Enter = बाहर निकलें
 
 view =
+    .datalink-specify-insertion-point = DATALINK  सम्मिलन बिंदु निर्दिष्ट करें:
+    .table-block-definition-not-found = TABLE: ब्लॉक परिभाषा नहीं मिली।
+    .table-edit-applied = TABLE: संपादन लागू किया गया।
+    .table-field-handle-not-found = TABLE: फ़ील्ड हैंडल नहीं मिला।
+    .table-row-column-out-of-range-or-cell-locked = TABLE: पंक्ति/कॉलम सीमा से बाहर है या कक्ष लॉक है।
+    .table-select-a-table-first = TABLE: पहले एक तालिका चुनें।
+    .usage-table-edit-actions = उपयोग: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message =     __ocs_fmt_0__
     .code-page = कोड पृष्ठ: __ocs_fmt_0__
     .created-julian-6 = बनाया गया (जूलियाई): __ocs_fmt_0__
@@ -2352,6 +2400,34 @@ view =
     .viewport-s-in-layout = लेआउट "__ocs_fmt_1__" में __ocs_fmt_0__ व्यूपोर्ट:
 
 properties =
+    .arrowhead-size = तीर शीर्ष का आकार
+    .attachment = संलग्नक
+    .chord = जीवा
+    .control-point-x-sentence-case = नियंत्रण बिंदु X
+    .control-point-y-sentence-case = नियंत्रण बिंदु Y
+    .control-point-z-sentence-case = नियंत्रण बिंदु Z
+    .control-vertices = नियंत्रण शीर्ष
+    .current-control-point = वर्तमान नियंत्रण बिंदु
+    .current-fit-point = वर्तमान फ़िट बिंदु
+    .cv-frame = नियंत्रण शीर्ष फ़्रेम
+    .end-tangent-vector-x = अंतिम स्पर्शरेखा वेक्टर X
+    .end-tangent-vector-y = अंतिम स्पर्शरेखा वेक्टर Y
+    .end-tangent-vector-z = अंतिम स्पर्शरेखा वेक्टर Z
+    .extended-data = विस्तारित डेटा
+    .fit-point-x-sentence-case = फ़िट बिंदु X
+    .fit-point-y-sentence-case = फ़िट बिंदु Y
+    .fit-point-z-sentence-case = फ़िट बिंदु Z
+    .fit-tolerance-sentence-case = फ़िट सहनशीलता
+    .hide = छिपाएँ
+    .knot-parameterization-sentence-case = नॉट पैरामीटरीकरण
+    .number-of-control-points = नियंत्रण बिंदुओं की संख्या
+    .number-of-fit-points = फ़िट बिंदुओं की संख्या
+    .periodic = आवर्ती
+    .square-root = वर्गमूल
+    .start-tangent-vector-x = आरंभिक स्पर्शरेखा वेक्टर X
+    .start-tangent-vector-y = आरंभिक स्पर्शरेखा वेक्टर Y
+    .start-tangent-vector-z = आरंभिक स्पर्शरेखा वेक्टर Z
+    .uniform = समान
     .count-objects-selected = __ocs_arg_count__ ऑब्जेक्ट चयनित
     .scope-visual-style = __ocs_arg_scope__ विजुअल स्टाइल
     .value-3d-face = 3D फेस

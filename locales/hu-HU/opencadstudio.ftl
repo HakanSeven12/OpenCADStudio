@@ -235,6 +235,7 @@ command-copy =
         } | tömb | Enter=kész | alap { $x },{ $y }]:
 
 common =
+    .jogged-radius = Tört sugarú méret
     .none-use-shortcuts-set-key-command =(nincs – használat: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Igazítás:
     .background-fill-enabled =   Háttérkitöltés engedélyezve
@@ -1166,6 +1167,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__ Terület=__ocs_fmt_1__ Kerület=__ocs_fmt_2__ Centroid=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = Betöltött többvonal-stílusok: __ocs_fmt_0__
+    .mline-current-settings = MLINE  Jelenlegi beállítások: Igazítás = __ocs_fmt_0__, Méretarány = __ocs_fmt_1__, Stílus = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  Adja meg az igazítást [Felső/Nulla/Alsó] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  Adja meg a méretarányt <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  Adja meg a stílus nevét vagy [?] <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  Adja meg a következő pontot vagy [Bezárás/Visszavonás]:
+    .mline-specify-next-point-undo = MLINE  Adja meg a következő pontot vagy [Visszavonás]:
+    .multiline-style-was-not-found = A(z) „__ocs_arg_style__” többvonal-stílus nem található.
+    .donut-specify-second-point-for-inside-diameter = DONUT  Adja meg a belső átmérő második pontját:
+    .donut-specify-second-point-for-outside-diameter = DONUT  Adja meg a külső átmérő második pontját:
+    .spline-specify-first-point = SPLINE  Adja meg az első pontot:
     .insert-x-no-attributes =   __ocs_fmt_0__ beszúrása: nincsenek attribútumok.
     .tag-val =   [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ Nem található zárt határ.
@@ -1449,6 +1461,24 @@ draw =
     .n-object-s-erased = __ocs_fmt_0__ objektum(ok) törölve.
 
 modify =
+    .add-vertex = Csúcspont hozzáadása
+    .closed-cross = Zárt kereszt
+    .closed-tee = Zárt T-idom
+    .corner-joint = Sarokkötés
+    .cut-all = Összes vágása
+    .cut-single = Egyetlen vágása
+    .delete-vertex = Csúcspont törlése
+    .merged-cross = Egyesített kereszt
+    .merged-tee = Egyesített T-idom
+    .mledit-choose-an-edit-tool = MLEDIT  Válasszon szerkesztőeszközt:
+    .mledit-select-first-multiline = MLEDIT  Válassza ki az első többvonalat:
+    .mledit-select-second-multiline = MLEDIT  Válassza ki a második többvonalat:
+    .mledit-specify-end-of-weld-range = MLEDIT  Adja meg az összeillesztési tartomány végét:
+    .mledit-specify-second-cut-point = MLEDIT  Adja meg a második vágási pontot:
+    .open-cross = Nyitott kereszt
+    .open-tee = Nyitott T-idom
+    .remove-vertex = Csúcspont eltávolítása
+    .weld-all = Összes összeillesztése
     .count-objects =  (__ocs_arg_count__ objektumok)
     .edge-extend-indented-title-case =  [Ége: meghosszabbítás]
     .align-scale-objects-based-on-alignment-points = ALIGN Méretezi az objektumokat igazítási pontok alapján? [Y/N]:
@@ -1785,6 +1815,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: a '__ocs_fmt_1__' stílus nem található.
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Adja meg a méretszöveget (üres = mért érték):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Válasszon ívet, kört vagy vonalláncívet:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Adja meg a felülírt középpont helyét:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Adja meg a méretvonal helyét [Bekezdés/Szöveg/Szög]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Adja meg a törés helyét:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Adja meg a szöveg szögét (fok):
+    .table-cell-enter-text-row-column-current = TABLE CELL  Adja meg a szöveget ehhez: [__ocs_arg_row__,__ocs_arg_column__] <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  Adja meg az oszlopszélességet [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  Adja meg az adatsorok számát [__ocs_arg_rows__] (__ocs_arg_cols__ oszlop):
+    .table-enter-row-height-height = TABLE  Adja meg a sormagasságot [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  Beszúrás módja [Pont/Ablak] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT Enter szövegszerkesztő mód [Egyszeres/Többszörös] <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE Enter új érték a TEXTEDITMODE <__ocs_arg_v__> számára:
     .arctext-text-to-place-along-the-arc = Az ív mentén elhelyezendő ARCTEXT szöveg:
@@ -2147,6 +2188,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER F <layer> = Fagyasztás | T <layer> = Felengedés | Enter = Kilépés
 
 view =
+    .datalink-specify-insertion-point = DATALINK  Adja meg a beszúrási pontot:
+    .table-block-definition-not-found = TABLE: a blokkdefiníció nem található.
+    .table-edit-applied = TABLE: a módosítás alkalmazva.
+    .table-field-handle-not-found = TABLE: a mező azonosítója nem található.
+    .table-row-column-out-of-range-or-cell-locked = TABLE: a sor/oszlop tartományon kívül van, vagy a cella zárolt.
+    .table-select-a-table-first = TABLE: először válasszon ki egy táblázatot.
+    .usage-table-edit-actions = Használat: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message =     __ocs_fmt_0__
     .code-page =   Kódlap: __ocs_fmt_0__
     .created-julian-6 =   Létrehozva (Julian): __ocs_fmt_0__
@@ -2363,6 +2411,34 @@ view =
     .viewport-s-in-layout =__ocs_fmt_0__ nézetablak(ok) a „__ocs_fmt_1__” elrendezésben:
 
 properties =
+    .arrowhead-size = Nyílhegy mérete
+    .attachment = Csatolás
+    .chord = Húr
+    .control-point-x-sentence-case = X vezérlőpont
+    .control-point-y-sentence-case = Y vezérlőpont
+    .control-point-z-sentence-case = Z vezérlőpont
+    .control-vertices = Vezérlőcsúcsok
+    .current-control-point = Jelenlegi vezérlőpont
+    .current-fit-point = Jelenlegi illesztési pont
+    .cv-frame = Vezérlőcsúcs-keret
+    .end-tangent-vector-x = X végérintővektor
+    .end-tangent-vector-y = Y végérintővektor
+    .end-tangent-vector-z = Z végérintővektor
+    .extended-data = Kiterjesztett adatok
+    .fit-point-x-sentence-case = X illesztési pont
+    .fit-point-y-sentence-case = Y illesztési pont
+    .fit-point-z-sentence-case = Z illesztési pont
+    .fit-tolerance-sentence-case = Illesztési tűrés
+    .hide = Elrejtés
+    .knot-parameterization-sentence-case = Csomóparaméterezés
+    .number-of-control-points = Vezérlőpontok száma
+    .number-of-fit-points = Illesztési pontok száma
+    .periodic = Periodikus
+    .square-root = Négyzetgyök
+    .start-tangent-vector-x = X kezdő érintővektor
+    .start-tangent-vector-y = Y kezdő érintővektor
+    .start-tangent-vector-z = Z kezdő érintővektor
+    .uniform = Egyenletes
     .count-objects-selected = __ocs_arg_count__ objektumok kiválasztva
     .scope-visual-style = __ocs_arg_scope__ vizuális stílus
     .value-3d-face = 3D-s arc

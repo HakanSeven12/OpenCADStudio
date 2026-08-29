@@ -223,6 +223,7 @@ command-copy =
     .target = COPY  指定目标点  [已复制 { $count } 个 | 阵列 | 回车=完成 | 基点 { $x },{ $y }]：
 
 common =
+    .jogged-radius = 折弯半径
     .none-use-shortcuts-set-key-command =   （无 — 使用：SHORTCUTS SET <key> <command>）
     .alignment-indented-label-title-case = 对齐:
     .background-fill-enabled =   启用背景填充
@@ -1154,6 +1155,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__  面积=__ocs_fmt_1__  周边=__ocs_fmt_2__  中心=(单位:千兆克;__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = 已加载的多线样式：__ocs_fmt_0__
+    .mline-current-settings = MLINE  当前设置：对正 = __ocs_fmt_0__，比例 = __ocs_fmt_1__，样式 = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  输入对正类型 [上/零/下] <__ocs_fmt_0__>：
+    .mline-enter-scale-factor-default = MLINE  输入比例因子 <__ocs_fmt_0__>：
+    .mline-enter-style-name = MLINE  输入样式名称或 [?] <__ocs_fmt_0__>：
+    .mline-specify-next-point-close-undo = MLINE  指定下一点或 [闭合/放弃]：
+    .mline-specify-next-point-undo = MLINE  指定下一点或 [放弃]：
+    .multiline-style-was-not-found = 未找到多线样式“__ocs_arg_style__”。
+    .donut-specify-second-point-for-inside-diameter = DONUT  指定内径的第二点：
+    .donut-specify-second-point-for-outside-diameter = DONUT  指定外径的第二点：
+    .spline-specify-first-point = SPLINE  指定第一点：
     .insert-x-no-attributes = 插入__ocs_fmt_0__:没有属性。
     .tag-val =   [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ 未找到闭合边界。
@@ -1437,6 +1449,24 @@ draw =
     .n-object-s-erased = __ocs_fmt_0__ 对象已去除。
 
 modify =
+    .add-vertex = 添加顶点
+    .closed-cross = 闭合十字
+    .closed-tee = 闭合T形
+    .corner-joint = 角点接合
+    .cut-all = 全部剪切
+    .cut-single = 单个剪切
+    .delete-vertex = 删除顶点
+    .merged-cross = 合并十字
+    .merged-tee = 合并T形
+    .mledit-choose-an-edit-tool = MLEDIT  选择编辑工具：
+    .mledit-select-first-multiline = MLEDIT  选择第一条多线：
+    .mledit-select-second-multiline = MLEDIT  选择第二条多线：
+    .mledit-specify-end-of-weld-range = MLEDIT  指定接合范围的终点：
+    .mledit-specify-second-cut-point = MLEDIT  指定第二个剪切点：
+    .open-cross = 开放十字
+    .open-tee = 开放T形
+    .remove-vertex = 移除顶点
+    .weld-all = 全部接合
     .count-objects = （__ocs_arg_count__ 个对象）
     .edge-extend-indented-title-case = [标题:延伸]
     .align-scale-objects-based-on-alignment-points = ALIGN  是否基于对齐点缩放对象？[Y/N]：
@@ -1773,6 +1803,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__:样式“__ocs_fmt_1__”未找到。
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  输入标注文字（留空 = 测量值）：
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  选择圆弧、圆或多段线圆弧：
+    .dimjogged-specify-center-location-override = DIMJOGGED  指定替代圆心位置：
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  指定尺寸线位置 [多行文字/文字/角度]：
+    .dimjogged-specify-jog-location = DIMJOGGED  指定折弯位置：
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  指定文字角度（度）：
+    .table-cell-enter-text-row-column-current = TABLE CELL  输入单元格 [__ocs_arg_row__,__ocs_arg_column__] 的文字 <__ocs_arg_current__>：
+    .table-enter-column-width-width = TABLE  输入列宽 [__ocs_arg_width__]：
+    .table-enter-number-of-data-rows-rows-cols = TABLE  输入数据行数 [__ocs_arg_rows__]（__ocs_arg_cols__ 列）：
+    .table-enter-row-height-height = TABLE  输入行高 [__ocs_arg_height__]：
+    .table-insertion-behavior-point-window-mode = TABLE  插入方式 [点/窗口] <__ocs_arg_mode__>：
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT 输入文字编辑模式 [单个/多个] <__ocs_arg_mode__>：
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE 输入 TEXTEDITMODE 的新值 <__ocs_arg_v__>：
     .arctext-text-to-place-along-the-arc = ARCTEXT  将文字放在弧上:
@@ -2131,6 +2172,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER  F <图层> = 冻结  |  T <图层> = 解冻  |  Enter = 退出
 
 view =
+    .datalink-specify-insertion-point = DATALINK  指定插入点：
+    .table-block-definition-not-found = TABLE：未找到块定义。
+    .table-edit-applied = TABLE：已应用编辑。
+    .table-field-handle-not-found = TABLE：未找到字段句柄。
+    .table-row-column-out-of-range-or-cell-locked = TABLE：行/列超出范围或单元格已锁定。
+    .table-select-a-table-first = TABLE：请先选择表格。
+    .usage-table-edit-actions = 用法：TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message = __ocs_fmt_0__ , 来点
     .code-page = 代码页 : __ocs_fmt_0__
     .created-julian-6 = 创建 (Julian): __ocs_fmt_0__
@@ -2347,6 +2395,34 @@ view =
     .viewport-s-in-layout = 布局“__ocs_fmt_1__”中的视口（__ocs_fmt_0__ 个）：
 
 properties =
+    .arrowhead-size = 箭头大小
+    .attachment = 附着
+    .chord = 弦
+    .control-point-x-sentence-case = 控制点 X
+    .control-point-y-sentence-case = 控制点 Y
+    .control-point-z-sentence-case = 控制点 Z
+    .control-vertices = 控制顶点
+    .current-control-point = 当前控制点
+    .current-fit-point = 当前拟合点
+    .cv-frame = CV 框架
+    .end-tangent-vector-x = 终点切向量 X
+    .end-tangent-vector-y = 终点切向量 Y
+    .end-tangent-vector-z = 终点切向量 Z
+    .extended-data = 扩展数据
+    .fit-point-x-sentence-case = 拟合点 X
+    .fit-point-y-sentence-case = 拟合点 Y
+    .fit-point-z-sentence-case = 拟合点 Z
+    .fit-tolerance-sentence-case = 拟合公差
+    .hide = 隐藏
+    .knot-parameterization-sentence-case = 节点参数化
+    .number-of-control-points = 控制点数量
+    .number-of-fit-points = 拟合点数量
+    .periodic = 周期
+    .square-root = 平方根
+    .start-tangent-vector-x = 起点切向量 X
+    .start-tangent-vector-y = 起点切向量 Y
+    .start-tangent-vector-z = 起点切向量 Z
+    .uniform = 均匀
     .count-objects-selected = __ocs_arg_count__ 个对象已选择
     .scope-visual-style = __ocs_arg_scope__ 视觉样式
     .value-3d-face = 三维面

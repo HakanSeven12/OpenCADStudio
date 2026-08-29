@@ -248,6 +248,7 @@ command-copy =
         } | مصفوفة | Enter=إنهاء | الأساس { $x },{ $y }]:
 
 common =
+    .jogged-radius = نصف قطر منكسر
     .none-use-shortcuts-set-key-command =   (لا شيء — استخدم: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   المحاذاة:
     .background-fill-enabled =   تعبئة الخلفية مفعّلة
@@ -1179,6 +1180,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__  المساحة=__ocs_fmt_1__  المحيط=__ocs_fmt_2__  مركز الكتلة=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = أنماط الخطوط المتعددة المحمّلة: __ocs_fmt_0__
+    .mline-current-settings = MLINE  الإعدادات الحالية: المحاذاة = __ocs_fmt_0__، المقياس = __ocs_fmt_1__، النمط = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  أدخل نوع المحاذاة [أعلى/صفر/أسفل] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  أدخل معامل المقياس <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  أدخل اسم النمط أو [?] <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  حدد النقطة التالية أو [إغلاق/تراجع]:
+    .mline-specify-next-point-undo = MLINE  حدد النقطة التالية أو [تراجع]:
+    .multiline-style-was-not-found = لم يتم العثور على نمط الخطوط المتعددة «__ocs_arg_style__».
+    .donut-specify-second-point-for-inside-diameter = DONUT  حدد النقطة الثانية للقطر الداخلي:
+    .donut-specify-second-point-for-outside-diameter = DONUT  حدد النقطة الثانية للقطر الخارجي:
+    .spline-specify-first-point = SPLINE  حدد النقطة الأولى:
     .insert-x-no-attributes =   الإدراج __ocs_fmt_0__: بلا سمات.
     .tag-val =   [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ لم يُعثر على حد مغلق.
@@ -1462,6 +1474,24 @@ draw =
     .n-object-s-erased = مُسح __ocs_fmt_0__ كائن.
 
 modify =
+    .add-vertex = إضافة رأس
+    .closed-cross = تقاطع مغلق
+    .closed-tee = وصلة T مغلقة
+    .corner-joint = وصلة زاوية
+    .cut-all = قص الكل
+    .cut-single = قص مفرد
+    .delete-vertex = حذف رأس
+    .merged-cross = تقاطع مدمج
+    .merged-tee = وصلة T مدمجة
+    .mledit-choose-an-edit-tool = MLEDIT  اختر أداة تحرير:
+    .mledit-select-first-multiline = MLEDIT  حدد الخط المتعدد الأول:
+    .mledit-select-second-multiline = MLEDIT  حدد الخط المتعدد الثاني:
+    .mledit-specify-end-of-weld-range = MLEDIT  حدد نهاية نطاق الدمج:
+    .mledit-specify-second-cut-point = MLEDIT  حدد نقطة القص الثانية:
+    .open-cross = تقاطع مفتوح
+    .open-tee = وصلة T مفتوحة
+    .remove-vertex = إزالة رأس
+    .weld-all = دمج الكل
     .count-objects =  (__ocs_arg_count__ كائنات)
     .edge-extend-indented-title-case =  [الحافة: تمديد]
     .align-scale-objects-based-on-alignment-points = ALIGN  هل تريد تغيير مقياس الكائنات وفق نقاط المحاذاة؟ [نعم/لا]:
@@ -1798,6 +1828,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: لم يُعثر على النمط '__ocs_fmt_1__'.
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  أدخل نص البعد (فارغ = القيمة المقاسة):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  حدد قوسًا أو دائرة أو قوس خط متعدد:
+    .dimjogged-specify-center-location-override = DIMJOGGED  حدد موقع المركز البديل:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  حدد موقع خط البعد [نص متعدد/نص/زاوية]:
+    .dimjogged-specify-jog-location = DIMJOGGED  حدد موقع الانكسار:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  حدد زاوية النص (بالدرجات):
+    .table-cell-enter-text-row-column-current = TABLE CELL  أدخل نص الخلية [__ocs_arg_row__,__ocs_arg_column__] <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  أدخل عرض العمود [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  أدخل عدد صفوف البيانات [__ocs_arg_rows__] (__ocs_arg_cols__ أعمدة):
+    .table-enter-row-height-height = TABLE  أدخل ارتفاع الصف [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  سلوك الإدراج [نقطة/نافذة] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT أدخل وضع تحرير النص [مفرد/متعدد] <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE أدخل قيمة جديدة لـ TEXTEDITMODE <__ocs_arg_v__>:
     .arctext-text-to-place-along-the-arc = ARCTEXT  النص المراد وضعه على طول القوس:
@@ -2160,6 +2201,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER  F <layer> = تجميد | T <layer> = إلغاء التجميد | Enter = خروج
 
 view =
+    .datalink-specify-insertion-point = DATALINK  حدد نقطة الإدراج:
+    .table-block-definition-not-found = TABLE: لم يتم العثور على تعريف الكتلة.
+    .table-edit-applied = TABLE: تم تطبيق التعديل.
+    .table-field-handle-not-found = TABLE: لم يتم العثور على معرّف الحقل.
+    .table-row-column-out-of-range-or-cell-locked = TABLE: الصف/العمود خارج النطاق أو الخلية مقفلة.
+    .table-select-a-table-first = TABLE: حدد جدولًا أولًا.
+    .usage-table-edit-actions = الاستخدام: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message =     __ocs_fmt_0__
     .code-page =   صفحة الرموز:      __ocs_fmt_0__
     .created-julian-6 =   تاريخ الإنشاء (يولياني): __ocs_fmt_0__
@@ -2376,6 +2424,34 @@ view =
     .viewport-s-in-layout = __ocs_fmt_0__ منفذ عرض في التخطيط "__ocs_fmt_1__":
 
 properties =
+    .arrowhead-size = حجم رأس السهم
+    .attachment = إرفاق
+    .chord = وتر
+    .control-point-x-sentence-case = نقطة التحكم X
+    .control-point-y-sentence-case = نقطة التحكم Y
+    .control-point-z-sentence-case = نقطة التحكم Z
+    .control-vertices = رؤوس التحكم
+    .current-control-point = نقطة التحكم الحالية
+    .current-fit-point = نقطة الملاءمة الحالية
+    .cv-frame = إطار رؤوس التحكم
+    .end-tangent-vector-x = متجه المماس النهائي X
+    .end-tangent-vector-y = متجه المماس النهائي Y
+    .end-tangent-vector-z = متجه المماس النهائي Z
+    .extended-data = بيانات موسعة
+    .fit-point-x-sentence-case = نقطة الملاءمة X
+    .fit-point-y-sentence-case = نقطة الملاءمة Y
+    .fit-point-z-sentence-case = نقطة الملاءمة Z
+    .fit-tolerance-sentence-case = سماحية الملاءمة
+    .hide = إخفاء
+    .knot-parameterization-sentence-case = معلمة العقد
+    .number-of-control-points = عدد نقاط التحكم
+    .number-of-fit-points = عدد نقاط الملاءمة
+    .periodic = دوري
+    .square-root = الجذر التربيعي
+    .start-tangent-vector-x = متجه المماس الابتدائي X
+    .start-tangent-vector-y = متجه المماس الابتدائي Y
+    .start-tangent-vector-z = متجه المماس الابتدائي Z
+    .uniform = منتظم
     .count-objects-selected = تم تحديد __ocs_arg_count__ كائنات
     .scope-visual-style = النمط المرئي __ocs_arg_scope__
     .value-3d-face = وجه ثلاثي الأبعاد

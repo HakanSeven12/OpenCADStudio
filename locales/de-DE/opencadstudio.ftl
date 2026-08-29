@@ -236,6 +236,7 @@ command-copy =
         } | Array | Eingabe=fertig | Basis { $x },{ $y }]:
 
 common =
+    .jogged-radius = Geknickter Radius
     .none-use-shortcuts-set-key-command = (keine — verwenden: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case = Ausrichtung:
     .background-fill-enabled = Hintergrundfüllung aktiviert
@@ -1167,6 +1168,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__ Fläche=__ocs_fmt_1__ Umfang=__ocs_fmt_2__ Schwerpunkt=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = Geladene Multilinienstile: __ocs_fmt_0__
+    .mline-current-settings = MLINE  Aktuelle Einstellungen: Ausrichtung = __ocs_fmt_0__, Skalierung = __ocs_fmt_1__, Stil = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  Ausrichtung eingeben [Oben/Null/Unten] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  Skalierungsfaktor eingeben <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  Stilnamen oder [?] eingeben <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  Nächsten Punkt angeben oder [Schließen/Rückgängig]:
+    .mline-specify-next-point-undo = MLINE  Nächsten Punkt angeben oder [Rückgängig]:
+    .multiline-style-was-not-found = Multilinienstil „__ocs_arg_style__“ wurde nicht gefunden.
+    .donut-specify-second-point-for-inside-diameter = DONUT  Zweiten Punkt für Innendurchmesser angeben:
+    .donut-specify-second-point-for-outside-diameter = DONUT  Zweiten Punkt für Außendurchmesser angeben:
+    .spline-specify-first-point = SPLINE  Ersten Punkt angeben:
     .insert-x-no-attributes = __ocs_fmt_0__ einfügen: keine Attribute.
     .tag-val = [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ Keine geschlossene Begrenzung gefunden.
@@ -1450,6 +1462,24 @@ draw =
     .n-object-s-erased = __ocs_fmt_0__ Objekt(e) gelöscht.
 
 modify =
+    .add-vertex = Scheitelpunkt hinzufügen
+    .closed-cross = Geschlossenes Kreuz
+    .closed-tee = Geschlossenes T-Stück
+    .corner-joint = Eckverbindung
+    .cut-all = Alle schneiden
+    .cut-single = Einzeln schneiden
+    .delete-vertex = Scheitelpunkt löschen
+    .merged-cross = Vereintes Kreuz
+    .merged-tee = Vereintes T-Stück
+    .mledit-choose-an-edit-tool = MLEDIT  Bearbeitungswerkzeug auswählen:
+    .mledit-select-first-multiline = MLEDIT  Erste Multilinie auswählen:
+    .mledit-select-second-multiline = MLEDIT  Zweite Multilinie auswählen:
+    .mledit-specify-end-of-weld-range = MLEDIT  Ende des Schweißbereichs angeben:
+    .mledit-specify-second-cut-point = MLEDIT  Zweiten Schnittpunkt angeben:
+    .open-cross = Offenes Kreuz
+    .open-tee = Offenes T-Stück
+    .remove-vertex = Scheitelpunkt entfernen
+    .weld-all = Alle verschweißen
     .count-objects = (__ocs_arg_count__ Objekte)
     .edge-extend-indented-title-case = [Kante: Verlängern]
     .align-scale-objects-based-on-alignment-points = ALIGN Skalierung von Objekten auf Basis von Ausrichtungspunkten? [Y/N]:
@@ -1786,6 +1816,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: Stil '__ocs_fmt_1__' nicht gefunden.
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Maßtext eingeben (leer = Messwert):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Bogen, Kreis oder Polylinienbogen auswählen:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Überschriebene Mittelpunktposition angeben:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Position der Maßlinie angeben [MText/Text/Winkel]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Knickposition angeben:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Textwinkel (Grad) angeben:
+    .table-cell-enter-text-row-column-current = TABLE CELL  Text für [__ocs_arg_row__,__ocs_arg_column__] eingeben <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  Spaltenbreite eingeben [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  Anzahl der Datenzeilen eingeben [__ocs_arg_rows__] (__ocs_arg_cols__ Spalten):
+    .table-enter-row-height-height = TABLE  Zeilenhöhe eingeben [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  Einfügeverhalten [Punkt/Fenster] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT Geben Sie den Textbearbeitungsmodus [Single/Multiple] ein <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE Geben Sie neuen Wert für TEXTEDITMODE <__ocs_arg_v__> ein:
     .arctext-text-to-place-along-the-arc = ARCTEXT  Text zum Platzieren entlang des Bogens:
@@ -2146,6 +2187,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER F <Ebene> = Einfrieren | T <Ebene> = Auftauen | Eingabe = Beenden
 
 view =
+    .datalink-specify-insertion-point = DATALINK  Einfügepunkt angeben:
+    .table-block-definition-not-found = TABLE: Blockdefinition nicht gefunden.
+    .table-edit-applied = TABLE: Bearbeitung angewendet.
+    .table-field-handle-not-found = TABLE: Feld-Handle nicht gefunden.
+    .table-row-column-out-of-range-or-cell-locked = TABLE: Zeile/Spalte liegt außerhalb des Bereichs oder die Zelle ist gesperrt.
+    .table-select-a-table-first = TABLE: Zuerst eine Tabelle auswählen.
+    .usage-table-edit-actions = Verwendung: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message = __ocs_fmt_0__
     .code-page = Codeseite: __ocs_fmt_0__
     .created-julian-6 = Erstellt (Julian): __ocs_fmt_0__
@@ -2362,6 +2410,34 @@ view =
     .viewport-s-in-layout = __ocs_fmt_0__ Ansichtsfenster(s) im Layout "__ocs_fmt_1__":
 
 properties =
+    .arrowhead-size = Pfeilspitzengröße
+    .attachment = Zuordnung
+    .chord = Sehne
+    .control-point-x-sentence-case = Kontrollpunkt X
+    .control-point-y-sentence-case = Kontrollpunkt Y
+    .control-point-z-sentence-case = Kontrollpunkt Z
+    .control-vertices = Kontrollscheitelpunkte
+    .current-control-point = Aktueller Kontrollpunkt
+    .current-fit-point = Aktueller Anpassungspunkt
+    .cv-frame = KS-Rahmen
+    .end-tangent-vector-x = Endtangentenvektor X
+    .end-tangent-vector-y = Endtangentenvektor Y
+    .end-tangent-vector-z = Endtangentenvektor Z
+    .extended-data = Erweiterte Daten
+    .fit-point-x-sentence-case = Anpassungspunkt X
+    .fit-point-y-sentence-case = Anpassungspunkt Y
+    .fit-point-z-sentence-case = Anpassungspunkt Z
+    .fit-tolerance-sentence-case = Anpassungstoleranz
+    .hide = Ausblenden
+    .knot-parameterization-sentence-case = Knotenparametrisierung
+    .number-of-control-points = Anzahl der Kontrollpunkte
+    .number-of-fit-points = Anzahl der Anpassungspunkte
+    .periodic = Periodisch
+    .square-root = Quadratwurzel
+    .start-tangent-vector-x = Starttangentenvektor X
+    .start-tangent-vector-y = Starttangentenvektor Y
+    .start-tangent-vector-z = Starttangentenvektor Z
+    .uniform = Gleichmäßig
     .count-objects-selected = __ocs_arg_count__ Objekte ausgewählt
     .scope-visual-style = __ocs_arg_scope__ visueller Stil
     .value-3d-face = 3D-Gesicht

@@ -235,6 +235,7 @@ command-copy =
         } | Serie | Enter=completato | base { $x },{ $y }]:
 
 common =
+    .jogged-radius = Raggio spezzato
     .none-use-shortcuts-set-key-command =(nessuno — utilizzare: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Allineamento:
     .background-fill-enabled =   Riempimento dello sfondo abilitato
@@ -1166,6 +1167,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__ Area=__ocs_fmt_1__ Perimetro=__ocs_fmt_2__ Centroide=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = Stili multilinea caricati: __ocs_fmt_0__
+    .mline-current-settings = MLINE  Impostazioni correnti: Giustificazione = __ocs_fmt_0__, Scala = __ocs_fmt_1__, Stile = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  Immettere la giustificazione [Superiore/Zero/Inferiore] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  Immettere il fattore di scala <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  Immettere il nome dello stile o [?] <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  Specificare il punto successivo o [Chiudi/Annulla]:
+    .mline-specify-next-point-undo = MLINE  Specificare il punto successivo o [Annulla]:
+    .multiline-style-was-not-found = Stile multilinea "__ocs_arg_style__" non trovato.
+    .donut-specify-second-point-for-inside-diameter = DONUT  Specificare il secondo punto del diametro interno:
+    .donut-specify-second-point-for-outside-diameter = DONUT  Specificare il secondo punto del diametro esterno:
+    .spline-specify-first-point = SPLINE  Specificare il primo punto:
     .insert-x-no-attributes =   Inserisci __ocs_fmt_0__: nessun attributo.
     .tag-val =   [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ Nessun confine chiuso trovato.
@@ -1449,6 +1461,24 @@ draw =
     .n-object-s-erased = __ocs_fmt_0__ oggetto/i cancellati.
 
 modify =
+    .add-vertex = Aggiungi vertice
+    .closed-cross = Croce chiusa
+    .closed-tee = T chiusa
+    .corner-joint = Giunto d’angolo
+    .cut-all = Taglia tutto
+    .cut-single = Taglio singolo
+    .delete-vertex = Elimina vertice
+    .merged-cross = Croce unita
+    .merged-tee = T unita
+    .mledit-choose-an-edit-tool = MLEDIT  Scegliere uno strumento di modifica:
+    .mledit-select-first-multiline = MLEDIT  Selezionare la prima multilinea:
+    .mledit-select-second-multiline = MLEDIT  Selezionare la seconda multilinea:
+    .mledit-specify-end-of-weld-range = MLEDIT  Specificare la fine dell’intervallo di unione:
+    .mledit-specify-second-cut-point = MLEDIT  Specificare il secondo punto di taglio:
+    .open-cross = Croce aperta
+    .open-tee = T aperta
+    .remove-vertex = Rimuovi vertice
+    .weld-all = Unisci tutto
     .count-objects =  (oggetti __ocs_arg_count__)
     .edge-extend-indented-title-case =  [Bordo: Estendi]
     .align-scale-objects-based-on-alignment-points = ALIGN Scalare gli oggetti in base ai punti di allineamento? [Y/N]:
@@ -1785,6 +1815,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: stile '__ocs_fmt_1__' non trovato.
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Immettere il testo della quota (vuoto = valore misurato):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Selezionare un arco, un cerchio o un arco di polilinea:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Specificare la posizione alternativa del centro:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Specificare la posizione della linea di quota [TestoM/Testo/Angolo]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Specificare la posizione dello spezzamento:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Specificare l’angolo del testo (gradi):
+    .table-cell-enter-text-row-column-current = TABLE CELL  Immettere il testo per [__ocs_arg_row__,__ocs_arg_column__] <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  Immettere la larghezza della colonna [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  Immettere il numero di righe dati [__ocs_arg_rows__] (__ocs_arg_cols__ colonne):
+    .table-enter-row-height-height = TABLE  Immettere l’altezza della riga [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  Modalità di inserimento [Punto/Finestra] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT Enter modalità di modifica del testo [Singola/Multipla] <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE Enter nuovo valore per TEXTEDITMODE <__ocs_arg_v__>:
     .arctext-text-to-place-along-the-arc = ARCTEXT testo da posizionare lungo l'arco:
@@ -2147,6 +2188,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER F <layer> = Congela | T <layer> = Scongela | Enter = Esci
 
 view =
+    .datalink-specify-insertion-point = DATALINK  Specificare il punto di inserimento:
+    .table-block-definition-not-found = TABLE: definizione del blocco non trovata.
+    .table-edit-applied = TABLE: modifica applicata.
+    .table-field-handle-not-found = TABLE: handle del campo non trovato.
+    .table-row-column-out-of-range-or-cell-locked = TABLE: riga/colonna fuori intervallo o cella bloccata.
+    .table-select-a-table-first = TABLE: selezionare prima una tabella.
+    .usage-table-edit-actions = Uso: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message =     __ocs_fmt_0__
     .code-page =   Tabella codici: __ocs_fmt_0__
     .created-julian-6 =   Creato (Julian): __ocs_fmt_0__
@@ -2363,6 +2411,34 @@ view =
     .viewport-s-in-layout =Finestre __ocs_fmt_0__ nel layout "__ocs_fmt_1__":
 
 properties =
+    .arrowhead-size = Dimensione punta freccia
+    .attachment = Collegamento
+    .chord = Corda
+    .control-point-x-sentence-case = Punto di controllo X
+    .control-point-y-sentence-case = Punto di controllo Y
+    .control-point-z-sentence-case = Punto di controllo Z
+    .control-vertices = Vertici di controllo
+    .current-control-point = Punto di controllo corrente
+    .current-fit-point = Punto di adattamento corrente
+    .cv-frame = Cornice VC
+    .end-tangent-vector-x = Vettore tangente finale X
+    .end-tangent-vector-y = Vettore tangente finale Y
+    .end-tangent-vector-z = Vettore tangente finale Z
+    .extended-data = Dati estesi
+    .fit-point-x-sentence-case = Punto di adattamento X
+    .fit-point-y-sentence-case = Punto di adattamento Y
+    .fit-point-z-sentence-case = Punto di adattamento Z
+    .fit-tolerance-sentence-case = Tolleranza di adattamento
+    .hide = Nascondi
+    .knot-parameterization-sentence-case = Parametrizzazione dei nodi
+    .number-of-control-points = Numero di punti di controllo
+    .number-of-fit-points = Numero di punti di adattamento
+    .periodic = Periodica
+    .square-root = Radice quadrata
+    .start-tangent-vector-x = Vettore tangente iniziale X
+    .start-tangent-vector-y = Vettore tangente iniziale Y
+    .start-tangent-vector-z = Vettore tangente iniziale Z
+    .uniform = Uniforme
     .count-objects-selected = __ocs_arg_count__ oggetti selezionati
     .scope-visual-style = __ocs_arg_scope__ Stile visivo
     .value-3d-face = Volto 3D

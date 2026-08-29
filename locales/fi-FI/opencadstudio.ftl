@@ -235,6 +235,7 @@ command-copy =
         } | taulukko | Enter=valmis | pohja { $x },{ $y }]:
 
 common =
+    .jogged-radius = Katkaistu säde
     .none-use-shortcuts-set-key-command =(ei mitään — käytä: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Tasaus:
     .background-fill-enabled =   Taustan täyttö käytössä
@@ -1166,6 +1167,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__-alue=__ocs_fmt_1__ Kehä=__ocs_fmt_2__ Keskivartalo=(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = Ladatut moniviivatyylit: __ocs_fmt_0__
+    .mline-current-settings = MLINE  Nykyiset asetukset: Tasaus = __ocs_fmt_0__, Mittakaava = __ocs_fmt_1__, Tyyli = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  Anna tasaus [Ylä/Nolla/Ala] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  Anna mittakaavakerroin <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  Anna tyylin nimi tai [?] <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  Määritä seuraava piste tai [Sulje/Kumoa]:
+    .mline-specify-next-point-undo = MLINE  Määritä seuraava piste tai [Kumoa]:
+    .multiline-style-was-not-found = Moniviivatyyliä ”__ocs_arg_style__” ei löytynyt.
+    .donut-specify-second-point-for-inside-diameter = DONUT  Määritä sisähalkaisijan toinen piste:
+    .donut-specify-second-point-for-outside-diameter = DONUT  Määritä ulkohalkaisijan toinen piste:
+    .spline-specify-first-point = SPLINE  Määritä ensimmäinen piste:
     .insert-x-no-attributes =   Lisää __ocs_fmt_0__: ei määritteitä.
     .tag-val =   [__ocs_fmt_0__] = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ Suljettua rajaa ei löytynyt.
@@ -1449,6 +1461,24 @@ draw =
     .n-object-s-erased = __ocs_fmt_0__ objekti(t) poistettu.
 
 modify =
+    .add-vertex = Lisää kärkipiste
+    .closed-cross = Suljettu risteys
+    .closed-tee = Suljettu T-liitos
+    .corner-joint = Kulmaliitos
+    .cut-all = Leikkaa kaikki
+    .cut-single = Leikkaa yksi
+    .delete-vertex = Poista kärkipiste
+    .merged-cross = Yhdistetty risteys
+    .merged-tee = Yhdistetty T-liitos
+    .mledit-choose-an-edit-tool = MLEDIT  Valitse muokkaustyökalu:
+    .mledit-select-first-multiline = MLEDIT  Valitse ensimmäinen moniviiva:
+    .mledit-select-second-multiline = MLEDIT  Valitse toinen moniviiva:
+    .mledit-specify-end-of-weld-range = MLEDIT  Määritä liitosalueen loppu:
+    .mledit-specify-second-cut-point = MLEDIT  Määritä toinen leikkauspiste:
+    .open-cross = Avoin risteys
+    .open-tee = Avoin T-liitos
+    .remove-vertex = Irrota kärkipiste
+    .weld-all = Yhdistä kaikki
     .count-objects =  (__ocs_arg_count__ objektit)
     .edge-extend-indented-title-case =  [Reuna: Laajenna]
     .align-scale-objects-based-on-alignment-points = ALIGN Skaalataanko objektit kohdistuspisteiden perusteella? [Y/N]:
@@ -1785,6 +1815,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: tyyliä '__ocs_fmt_1__' ei löydy.
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Anna mittateksti (tyhjä = mitattu arvo):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Valitse kaari, ympyrä tai murtoviivan kaari:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Määritä korvaava keskipisteen sijainti:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Määritä mittaviivan sijainti [Moniriviteksti/Teksti/Kulma]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Määritä katkaisun sijainti:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Määritä tekstin kulma (astetta):
+    .table-cell-enter-text-row-column-current = TABLE CELL  Anna solun [__ocs_arg_row__,__ocs_arg_column__] teksti <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  Anna sarakkeen leveys [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  Anna tietorivien määrä [__ocs_arg_rows__] (__ocs_arg_cols__ saraketta):
+    .table-enter-row-height-height = TABLE  Anna rivin korkeus [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  Lisäystapa [Piste/Ikkuna] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT Enter tekstin muokkaustila [yksi/useita] <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE Enter uusi arvo TEXTEDITMODE <__ocs_arg_v__>:
     .arctext-text-to-place-along-the-arc = ARCTEXT kaarelle sijoitettava teksti:
@@ -2147,6 +2188,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER F <layer> = Jäädytys | T <layer> = Sulatus | Enter = Poistu
 
 view =
+    .datalink-specify-insertion-point = DATALINK  Määritä lisäyspiste:
+    .table-block-definition-not-found = TABLE: lohkomääritystä ei löytynyt.
+    .table-edit-applied = TABLE: muokkaus otettu käyttöön.
+    .table-field-handle-not-found = TABLE: kentän tunnistetta ei löytynyt.
+    .table-row-column-out-of-range-or-cell-locked = TABLE: rivi/sarake on alueen ulkopuolella tai solu on lukittu.
+    .table-select-a-table-first = TABLE: valitse ensin taulukko.
+    .usage-table-edit-actions = Käyttö: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message =     __ocs_fmt_0__
     .code-page =   Koodisivu: __ocs_fmt_0__
     .created-julian-6 =   Luotu (Julian): __ocs_fmt_0__
@@ -2363,6 +2411,34 @@ view =
     .viewport-s-in-layout =__ocs_fmt_0__-näkymä(t) asettelussa "__ocs_fmt_1__":
 
 properties =
+    .arrowhead-size = Nuolenkärjen koko
+    .attachment = Liitos
+    .chord = Jänne
+    .control-point-x-sentence-case = Ohjauspiste X
+    .control-point-y-sentence-case = Ohjauspiste Y
+    .control-point-z-sentence-case = Ohjauspiste Z
+    .control-vertices = Ohjauskärkipisteet
+    .current-control-point = Nykyinen ohjauspiste
+    .current-fit-point = Nykyinen sovituspiste
+    .cv-frame = Ohjauskärkipistekehys
+    .end-tangent-vector-x = Lopputangenttivektori X
+    .end-tangent-vector-y = Lopputangenttivektori Y
+    .end-tangent-vector-z = Lopputangenttivektori Z
+    .extended-data = Laajennetut tiedot
+    .fit-point-x-sentence-case = Sovituspiste X
+    .fit-point-y-sentence-case = Sovituspiste Y
+    .fit-point-z-sentence-case = Sovituspiste Z
+    .fit-tolerance-sentence-case = Sovitustoleranssi
+    .hide = Piilota
+    .knot-parameterization-sentence-case = Solmuparametrisointi
+    .number-of-control-points = Ohjauspisteiden määrä
+    .number-of-fit-points = Sovituspisteiden määrä
+    .periodic = Jaksollinen
+    .square-root = Neliöjuuri
+    .start-tangent-vector-x = Alkutangenttivektori X
+    .start-tangent-vector-y = Alkutangenttivektori Y
+    .start-tangent-vector-z = Alkutangenttivektori Z
+    .uniform = Tasainen
     .count-objects-selected = __ocs_arg_count__ objektia valittu
     .scope-visual-style = __ocs_arg_scope__ visuaalinen tyyli
     .value-3d-face = 3D-kasvot

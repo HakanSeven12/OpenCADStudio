@@ -239,6 +239,7 @@ command-copy =
         } | Массив | Enter=готово | база { $x },{ $y }]:
 
 common =
+    .jogged-radius = Радиус с изломом
     .none-use-shortcuts-set-key-command = (нет — используйте: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case = Выравнивание:
     .background-fill-enabled = Заполненный фон включен
@@ -1170,6 +1171,17 @@ inquiry =
     .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__ Площадь =__ocs_fmt_1__ Периметр =__ocs_fmt_2__ Центроид =(__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
+    .loaded-multiline-styles = Загруженные стили мультилиний: __ocs_fmt_0__
+    .mline-current-settings = MLINE  Текущие параметры: Выравнивание = __ocs_fmt_0__, Масштаб = __ocs_fmt_1__, Стиль = __ocs_fmt_2__
+    .mline-enter-justification = MLINE  Введите выравнивание [Сверху/Ноль/Снизу] <__ocs_fmt_0__>:
+    .mline-enter-scale-factor-default = MLINE  Введите масштабный коэффициент <__ocs_fmt_0__>:
+    .mline-enter-style-name = MLINE  Введите имя стиля или [?] <__ocs_fmt_0__>:
+    .mline-specify-next-point-close-undo = MLINE  Укажите следующую точку или [Замкнуть/Отменить]:
+    .mline-specify-next-point-undo = MLINE  Укажите следующую точку или [Отменить]:
+    .multiline-style-was-not-found = Стиль мультилинии «__ocs_arg_style__» не найден.
+    .donut-specify-second-point-for-inside-diameter = DONUT  Укажите вторую точку внутреннего диаметра:
+    .donut-specify-second-point-for-outside-diameter = DONUT  Укажите вторую точку внешнего диаметра:
+    .spline-specify-first-point = SPLINE  Укажите первую точку:
     .insert-x-no-attributes = Вставить __ocs_fmt_0__: никаких атрибутов.
     .tag-val = [__ocs_fmt_0__ = __ocs_fmt_1__
     .no-closed-boundary-found =   ⚠ Замкнутая граница не найдена.
@@ -1453,6 +1465,24 @@ draw =
     .n-object-s-erased = Удалено объектов: __ocs_fmt_0__.
 
 modify =
+    .add-vertex = Добавить вершину
+    .closed-cross = Закрытое пересечение
+    .closed-tee = Закрытое Т-соединение
+    .corner-joint = Угловое соединение
+    .cut-all = Обрезать всё
+    .cut-single = Обрезать один
+    .delete-vertex = Удалить вершину
+    .merged-cross = Объединённое пересечение
+    .merged-tee = Объединённое Т-соединение
+    .mledit-choose-an-edit-tool = MLEDIT  Выберите инструмент редактирования:
+    .mledit-select-first-multiline = MLEDIT  Выберите первую мультилинию:
+    .mledit-select-second-multiline = MLEDIT  Выберите вторую мультилинию:
+    .mledit-specify-end-of-weld-range = MLEDIT  Укажите конец диапазона соединения:
+    .mledit-specify-second-cut-point = MLEDIT  Укажите вторую точку разреза:
+    .open-cross = Открытое пересечение
+    .open-tee = Открытое Т-соединение
+    .remove-vertex = Убрать вершину
+    .weld-all = Соединить всё
     .count-objects = (__ocs_arg_count__ объекты)
     .edge-extend-indented-title-case = [Перенаправлено с Extend]
     .align-scale-objects-based-on-alignment-points = ALIGN Объекты масштаба, основанные на точках выравнивания? [Y/N]:
@@ -1789,6 +1819,17 @@ layers =
     .prefix-style-style-name-not-found = __ocs_fmt_0__: стиль __ocs_fmt_1__ не найден.
 
 annotate =
+    .dimjogged-enter-dimension-text-blank-measured = DIMJOGGED  Введите текст размера (пусто = измеренное значение):
+    .dimjogged-select-arc-circle-or-polyline-arc = DIMJOGGED  Выберите дугу, окружность или дуговой сегмент полилинии:
+    .dimjogged-specify-center-location-override = DIMJOGGED  Укажите переопределённое положение центра:
+    .dimjogged-specify-dimension-line-location-text = DIMJOGGED  Укажите положение размерной линии [Мтекст/Текст/Угол]:
+    .dimjogged-specify-jog-location = DIMJOGGED  Укажите положение излома:
+    .dimjogged-specify-text-angle-degrees = DIMJOGGED  Укажите угол текста (в градусах):
+    .table-cell-enter-text-row-column-current = TABLE CELL  Введите текст для [__ocs_arg_row__,__ocs_arg_column__] <__ocs_arg_current__>:
+    .table-enter-column-width-width = TABLE  Введите ширину столбца [__ocs_arg_width__]:
+    .table-enter-number-of-data-rows-rows-cols = TABLE  Введите число строк данных [__ocs_arg_rows__] (столбцов: __ocs_arg_cols__):
+    .table-enter-row-height-height = TABLE  Введите высоту строки [__ocs_arg_height__]:
+    .table-insertion-behavior-point-window-mode = TABLE  Способ вставки [Точка/Окно] <__ocs_arg_mode__>:
     .prefix-textedit-enter-text-edit-mode-single-mu = __ocs_arg_prefix__TEXTEDIT Введите режим редактирования текста [Один/Множество] <__ocs_arg_mode__>:
     .prefix-texteditmode-enter-new-value-for-texted = __ocs_arg_prefix__TEXTEDITMODE Введите новое значение TEXTEDITMODE <__ocs_arg_v__:
     .arctext-text-to-place-along-the-arc = ARCTEXT  Текст для размещения по дуге:
@@ -2151,6 +2192,13 @@ layout =
     .vplayer-f-layer-freeze-t-layer-thaw-enter-exit = VPLAYER F <слой> = заморозить | T <слой> = разморозить | Enter = выход
 
 view =
+    .datalink-specify-insertion-point = DATALINK  Укажите точку вставки:
+    .table-block-definition-not-found = TABLE: определение блока не найдено.
+    .table-edit-applied = TABLE: изменение применено.
+    .table-field-handle-not-found = TABLE: дескриптор поля не найден.
+    .table-row-column-out-of-range-or-cell-locked = TABLE: строка/столбец вне диапазона или ячейка заблокирована.
+    .table-select-a-table-first = TABLE: сначала выберите таблицу.
+    .usage-table-edit-actions = Использование: TABLE CELL | INSERTROW | DELETEROW | INSERTCOL | DELETECOL | MERGE | UNMERGE | ROWHEIGHT | COLWIDTH | LOCK | BLOCK | FORMULA | FIELD
     .message = __ocs_fmt_0__
     .code-page = Страница кода: __ocs_fmt_0__
     .created-julian-6 = Создано (Julian): __ocs_fmt_0__
@@ -2367,6 +2415,34 @@ view =
     .viewport-s-in-layout = Видовые экраны (__ocs_fmt_0__) на листе «__ocs_fmt_1__»:
 
 properties =
+    .arrowhead-size = Размер стрелки
+    .attachment = Прикрепление
+    .chord = Хорда
+    .control-point-x-sentence-case = Контрольная точка X
+    .control-point-y-sentence-case = Контрольная точка Y
+    .control-point-z-sentence-case = Контрольная точка Z
+    .control-vertices = Контрольные вершины
+    .current-control-point = Текущая контрольная точка
+    .current-fit-point = Текущая точка аппроксимации
+    .cv-frame = Рамка КВ
+    .end-tangent-vector-x = Конечный вектор касательной X
+    .end-tangent-vector-y = Конечный вектор касательной Y
+    .end-tangent-vector-z = Конечный вектор касательной Z
+    .extended-data = Расширенные данные
+    .fit-point-x-sentence-case = Точка аппроксимации X
+    .fit-point-y-sentence-case = Точка аппроксимации Y
+    .fit-point-z-sentence-case = Точка аппроксимации Z
+    .fit-tolerance-sentence-case = Допуск аппроксимации
+    .hide = Скрыть
+    .knot-parameterization-sentence-case = Параметризация узлов
+    .number-of-control-points = Число контрольных точек
+    .number-of-fit-points = Число точек аппроксимации
+    .periodic = Периодический
+    .square-root = Квадратный корень
+    .start-tangent-vector-x = Начальный вектор касательной X
+    .start-tangent-vector-y = Начальный вектор касательной Y
+    .start-tangent-vector-z = Начальный вектор касательной Z
+    .uniform = Равномерный
     .count-objects-selected = __ocs_arg_count__ Выбранные объекты
     .scope-visual-style = __ocs_arg_scope__ Визуальный стиль
     .value-3d-face = 3D-лицо

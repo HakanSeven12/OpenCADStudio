@@ -21,7 +21,7 @@ use crate::host::{CommandSource, CommandStep};
 use crate::manifest::ApiVersion;
 use crate::ribbon::owned::{OwnedPluginManifest, OwnedRibbonGroup};
 
-pub use acadrust::xdata::ExtendedDataRecord;
+pub use acadrust::xdata::{ExtendedDataRecord, XDataValue};
 pub use acadrust::{CadDocument, EntityType, Handle};
 
 /// Events the host forwards to an active plugin `InteractiveCommand`.

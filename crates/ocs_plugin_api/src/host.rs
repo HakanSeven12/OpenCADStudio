@@ -24,7 +24,7 @@ use crate::ribbon::CadModule;
 // dependency (which would risk an ABI-mismatching version).
 pub use acadrust;
 pub use acadrust::{CadDocument, EntityType, Handle};
-pub use acadrust::xdata::ExtendedDataRecord;
+pub use acadrust::xdata::{ExtendedDataRecord, XDataValue};
 
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 

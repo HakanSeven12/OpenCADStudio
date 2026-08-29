@@ -49,7 +49,7 @@ The host and each plugin run in separate OS processes. The host re-executes itse
 - `OCS_PLUGIN_MAX_API_VERSION` can cap the accepted major at runtime (e.g. `4` to disable V5).
 - A plugin built against major `N` runs on a host whose major is `>= N` because new vtable entries and enum variants are appended at the end.
 - V4 introduces the **acadrust gate**: plugins targeting API v4 or later must resolve the same `acadrust` source as the host (see [`src/version_info.rs`](src/version_info.rs)).
-- V5 introduces `BuiltinPlugin::on_load`, invoked once after the runner connects.
+- V5 introduces `BuiltinPlugin::on_load` and tab-keyed document paths.
 
 The runtime enforces three gates:
 

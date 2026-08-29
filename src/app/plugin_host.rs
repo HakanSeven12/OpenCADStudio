@@ -35,6 +35,14 @@ impl<'a> HostSession<'a> {
         self.app.tabs[self.tab].id
     }
 
+    pub fn document_path(&self, tab_id: u64) -> Option<std::path::PathBuf> {
+        self.app
+            .tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| t.current_path.clone())
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn document_view_v4(&mut self, tab_id: u64) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
         if tab_id != self.tab_id() {
@@ -340,6 +348,9 @@ impl HostApi for HostSession<'_> {
     }
     fn tab_id(&self) -> u64 {
         self.tab_id()
+    }
+    fn document_path(&self, tab_id: u64) -> Option<std::path::PathBuf> {
+        self.document_path(tab_id)
     }
     #[cfg(not(target_arch = "wasm32"))]
     fn document_view_v4(&mut self, tab_id: u64) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {

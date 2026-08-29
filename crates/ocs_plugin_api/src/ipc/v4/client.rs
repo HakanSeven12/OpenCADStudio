@@ -715,6 +715,21 @@ impl HostApi for V4PluginHostApi {
             view.take();
         }
     }
+
+    fn document_path(&self, tab_id: u64) -> Option<std::path::PathBuf> {
+        match self.request(PluginRequest::DocumentPath { tab_id }) {
+            Ok(PluginResponse::DocumentPath(Some(path))) => Some(std::path::PathBuf::from(path)),
+            Ok(PluginResponse::DocumentPath(None)) => None,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected DocumentPath response: {other:?}");
+                None
+            }
+            Err(e) => {
+                eprintln!("[plugin] DocumentPath request failed: {e}");
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]

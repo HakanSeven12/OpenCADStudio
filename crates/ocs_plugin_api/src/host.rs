@@ -12,6 +12,7 @@
 //! [`ensure_plugin_state`] helpers for the ergonomic typed access.
 
 use std::any::Any;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -538,6 +539,14 @@ pub trait HostApi {
     /// entity; hosts should override it for batch efficiency.
     fn add_entities(&mut self, entities: Vec<EntityType>) -> Vec<Handle> {
         entities.into_iter().map(|e| self.add_entity(e)).collect()
+    }
+
+    /// Return the filesystem path of the document in tab `tab_id`, if any.
+    /// Added in API v5. The default returns `None`; in-process hosts should
+    /// override it to expose the real path.
+    fn document_path(&self, tab_id: u64) -> Option<PathBuf> {
+        let _ = tab_id;
+        None
     }
 }
 

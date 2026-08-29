@@ -136,6 +136,8 @@ pub enum PluginRequest {
     CloseDocumentViewV4 { tab_id: u64 },
     /// V4: ask the host for the stable tab identifier of the active tab.
     GetTabId,
+    /// V5: ask the host for the filesystem path of the document in `tab_id`.
+    DocumentPath { tab_id: u64 },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -160,6 +162,8 @@ pub enum PluginResponse {
     },
     /// V4: stable tab identifier of the active tab.
     TabId(u64),
+    /// V5: filesystem path of the document in the requested tab, if any.
+    DocumentPath(Option<std::ffi::OsString>),
 }
 
 /// Messages sent from the host to the plugin runner.

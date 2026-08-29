@@ -18,7 +18,7 @@ enum variants at the end, so older plugins continue to load on newer hosts.
 | **V2** | Out-of-process runner | Synchronous commands + interactive point collection (`HostApi::start_interactive`) | Baseline |
 | **V3** | Out-of-process runner | Local cached `document()`/`document_mut()` + shared-memory `DocumentReader`/`document_view` for large reads | New vtable entries appended; new `PluginRequest`/`PluginResponse` variants appended |
 | **V4** | Out-of-process runner over a multiplexed local socket | Full-duplex notifications + asynchronous REPL `ExecuteCode` | New `HostToPluginV4`/`PluginToHostV4` frame layer; `BuiltinPlugin::on_notification` and `start_execute_code` appended to trait |
-| **V5** | V4 multiplexed runner | One-shot `BuiltinPlugin::on_load` initialization | Lifecycle callback appended to `BuiltinPlugin` |
+| **V5** | V4 multiplexed runner | One-shot initialization + tab-keyed document paths | `BuiltinPlugin::on_load` and `HostApi::document_path` appended to the traits |
 
 The host controls which generations are accepted at runtime through
 `OCS_PLUGIN_MAX_API_VERSION` (e.g. `2` for V2-only mode, `4` to disable V5). The
@@ -28,6 +28,7 @@ back to `API_VERSION_MIN_SUPPORTED = 2`.
 V5 calls `BuiltinPlugin::on_load` once after the runner connects and before the
 first user command. Plugins can cache `HostApi::plugin_request_sender()` there
 for worker-thread access. A panic in the callback fails plugin loading.
+`HostApi::document_path(tab_id)` returns the saved path for a document tab.
 
 ### High-level layout
 

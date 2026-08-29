@@ -74,5 +74,8 @@ pub fn handle_plugin_request(
             PluginResponse::Ok
         }
         GetTabId => PluginResponse::TabId(host.tab_id()),
+        DocumentPath { tab_id } => PluginResponse::DocumentPath(
+            host.document_path(tab_id).map(|path| path.into_os_string()),
+        ),
     }
 }

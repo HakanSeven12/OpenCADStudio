@@ -45,7 +45,10 @@ pub struct PrintOptions {
     pub printer: Option<String>,
     /// Number of copies (treated as at least 1).
     pub copies: u32,
-    /// Print quality label selected in the plot dialog.
+    /// Print quality label selected in the plot dialog. Read only on the CUPS
+    /// path (`lp -o print-quality=…`); on Windows the driver's own quality
+    /// setting wins, so the field is legitimately unread there.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub quality: Option<String>,
     /// Controls applied while building the intermediate PDF.
     pub render: crate::io::pdf_export::PdfPlotOptions,

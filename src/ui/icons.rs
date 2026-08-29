@@ -346,13 +346,19 @@ fn semantic_color<'a>(
     token: &[u8],
     colors: &'a SemanticColors,
 ) -> Option<&'a [u8; 7]> {
-    if is_one_of(token, &["#e0e0e0", "#eeeeee", "#ffffff", "#e1e1e1"]) {
+    if is_one_of(
+        token,
+        &["#b4b6b9", "#e0e0e0", "#eeeeee", "#ffffff", "#e1e1e1"],
+    ) {
         Some(&colors.text)
     } else if is_one_of(token, &["#cccccc", "#bdbdbd", "#aaaaaa"]) {
         Some(&colors.secondary_strong)
     } else if is_one_of(
         token,
-        &["#888888", "#888", "#9e9e9e", "#90a4ae", "#78909c", "#7a7a7a"],
+        &[
+            "#888888", "#888", "#9e9e9e", "#90a4ae", "#78909c", "#7a7a7a",
+            "#777777",
+        ],
     ) {
         Some(&colors.secondary)
     } else if is_one_of(
@@ -365,7 +371,10 @@ fn semantic_color<'a>(
         Some(&colors.secondary_weak)
     } else if is_one_of(token, &["#1a1a1a"]) {
         Some(&colors.background)
-    } else if is_one_of(token, &["#4cc9f0", "#4bc8f0", "#4a9eff", "#0099e5"]) {
+    } else if is_one_of(
+        token,
+        &["#6db7ed", "#4cc9f0", "#4bc8f0", "#4a9eff", "#0099e5"],
+    ) {
         Some(&colors.primary)
     } else if is_one_of(token, &["#1565c0"]) {
         Some(&colors.primary_strong)

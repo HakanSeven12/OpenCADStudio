@@ -16,7 +16,7 @@
   <sodipodi:namedview
      id="namedview5"
      pagecolor="#505050"
-     bordercolor="#eeeeee"
+     bordercolor="#B4B6B9"
      borderopacity="1"
      inkscape:showpageshadow="0"
      inkscape:pageopacity="0"
@@ -39,9 +39,9 @@
        originy="0"
        spacingx="0.375"
        spacingy="0.375"
-       empcolor="#0099e5"
+       empcolor="#6DB7ED"
        empopacity="0.30196078"
-       color="#0099e5"
+       color="#6DB7ED"
        opacity="0.14901961"
        empspacing="5"
        enabled="true"
@@ -61,7 +61,7 @@
   <!-- Top line extension (stretched, blue) -->
   <!-- Stretch arrow -->
   <path
-     style="fill:none;stroke:#4bc8f0;stroke-width:2.25;stroke-dasharray:none;stroke-opacity:1"
+     style="fill:none;stroke:#6DB7ED;stroke-width:2.25;stroke-dasharray:none;stroke-opacity:1"
      d="m 15,4.875 h 7.875 v 14.25 H 15"
      id="path8"
      sodipodi:nodetypes="cccc" />

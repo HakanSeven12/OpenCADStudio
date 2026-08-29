@@ -3,9 +3,9 @@
   <polygon points="12,3 21,9 18,20 6,20 3,9"
            stroke="#B4B6B9" stroke-width="1.5" fill="none"/>
   <!-- Corner dots at vertices -->
-  <circle cx="12" cy="3"  r="1.4" fill="#4cc9f0"/>
-  <circle cx="21" cy="9"  r="1.4" fill="#4cc9f0"/>
-  <circle cx="18" cy="20" r="1.4" fill="#4cc9f0"/>
-  <circle cx="6"  cy="20" r="1.4" fill="#4cc9f0"/>
-  <circle cx="3"  cy="9"  r="1.4" fill="#4cc9f0"/>
+  <circle cx="12" cy="3"  r="1.4" fill="#6DB7ED"/>
+  <circle cx="21" cy="9"  r="1.4" fill="#6DB7ED"/>
+  <circle cx="18" cy="20" r="1.4" fill="#6DB7ED"/>
+  <circle cx="6"  cy="20" r="1.4" fill="#6DB7ED"/>
+  <circle cx="3"  cy="9"  r="1.4" fill="#6DB7ED"/>
 </svg>

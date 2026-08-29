@@ -6,7 +6,7 @@ use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
 use crate::ui::dock::{DockMsg, PanelId};
 use iced::widget::canvas::{Frame, Path, Program, Stroke};
-use iced::widget::{button, canvas, column, container, mouse_area, row, scrollable, svg, text, text_input, tooltip};
+use iced::widget::{button, canvas, column, container, mouse_area, row, scrollable, text, text_input, tooltip};
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
 const TOOL_H: f32 = 22.0;
@@ -355,10 +355,7 @@ fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'
 fn icon_button<'a>(icon: IconKind, msg: BlockPaletteMsg) -> Element<'a, Message> {
     let icon_el: Element<'_, Message> = match icon {
         IconKind::Glyph(s) => text(s).size(15).color(Color::WHITE).into(),
-        IconKind::Svg(bytes) => svg(svg::Handle::from_memory(bytes))
-            .width(Length::Fixed(TOOL_H))
-            .height(Length::Fixed(TOOL_H))
-            .into(),
+        IconKind::Svg(bytes) => crate::ui::icons::semantic(bytes, TOOL_H),
     };
     button(icon_el)
         .on_press(Message::BlockPalette(msg))

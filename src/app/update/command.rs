@@ -826,7 +826,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 }
                 // Cancel layout rename first, then fall through.
                 let i_e = self.active_tab;
-                if self.qselect.take().is_some() {
+                if let Some(state) = self.qselect.take() {
+                    self.qselect_settings = Some((&state).into());
                     self.reset_modal_geometry();
                     return Task::none();
                 }
@@ -1546,35 +1547,74 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     pub(super) fn on_qselect_open(&mut self) -> Task<Message> {
                 let i = self.active_tab;
                 self.tabs[i].scene.selection.borrow_mut().context_menu = None;
-                // Seed the type filter from the first selected entity so a
-                // right-click → Quick Select on a known object opens the
-                // panel pre-tuned to that entity's type. Property defaults
-                // to "(Any property)" so the user immediately picks what
-                // they want to compare.
-                let mut type_filter: Option<String> = None;
-                if let Some(&h) = self.tabs[i].scene.selected.iter().next() {
-                    if let Some(e) = self.tabs[i].scene.document.get_entity(h) {
-                        use crate::entities::traits::entity_type_name;
-                        type_filter = Some(entity_type_name(e).to_string());
-                    }
-                }
-                let scope = crate::app::QSelectScope::CurrentSpace;
+                let remembered = self.qselect_settings.clone();
+                let scope = remembered.as_ref().map_or(
+                    crate::app::QSelectScope::CurrentSpace,
+                    |settings| settings.scope,
+                );
                 let available_types = self.tabs[i].scene.qselect_entity_type_names(scope);
+                let type_filter = if let Some(settings) = remembered.as_ref() {
+                    settings
+                        .type_filter
+                        .as_ref()
+                        .filter(|selected| available_types.iter().any(|item| item == *selected))
+                        .cloned()
+                } else {
+                    self.tabs[i]
+                        .scene
+                        .selected
+                        .iter()
+                        .next()
+                        .and_then(|handle| self.tabs[i].scene.document.get_entity(*handle))
+                        .map(crate::entities::traits::entity_type_name)
+                        .map(str::to_string)
+                };
                 let available_properties = self.tabs[i]
                     .scene
                     .qselect_properties(type_filter.as_deref(), scope);
                 let candidate_count = self.tabs[i].scene.qselect_candidate_count(scope);
+                let property = remembered
+                    .as_ref()
+                    .and_then(|settings| settings.property_field.as_ref())
+                    .and_then(|field| {
+                        available_properties
+                            .iter()
+                            .find(|property| property.field == *field)
+                            .cloned()
+                    });
+                let mut operator = remembered
+                    .as_ref()
+                    .map_or(crate::app::QSelectOp::Eq, |settings| settings.operator);
+                if matches!(operator, crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt)
+                    && !property.as_ref().is_some_and(|property| {
+                        matches!(property.editor, crate::app::QSelectValueEditor::Number)
+                    })
+                {
+                    operator = crate::app::QSelectOp::Eq;
+                }
+                let value = remembered.as_ref().map_or_else(String::new, |settings| {
+                    if settings.property_field.is_none() || property.is_some() {
+                        settings.value.clone()
+                    } else {
+                        String::new()
+                    }
+                });
+                let mode = remembered
+                    .as_ref()
+                    .map_or(crate::app::QSelectMode::Include, |settings| settings.mode);
+                let append = matches!(scope, crate::app::QSelectScope::CurrentSpace)
+                    && remembered.as_ref().is_some_and(|settings| settings.append);
                 self.qselect = Some(crate::app::QSelectState {
                     scope,
                     available_types,
                     available_properties,
                     candidate_count,
                     type_filter,
-                    property: None,
-                    operator: crate::app::QSelectOp::Eq,
-                    value: String::new(),
-                    mode: crate::app::QSelectMode::Include,
-                    append: false,
+                    property,
+                    operator,
+                    value,
+                    mode,
+                    append,
                     error: None,
                 });
                 self.reset_modal_geometry();

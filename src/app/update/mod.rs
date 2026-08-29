@@ -4349,7 +4349,9 @@ impl OpenCADStudio {
             Message::QSelectOpen => self.on_qselect_open(),
 
             Message::QSelectClose => {
-                self.qselect = None;
+                if let Some(state) = self.qselect.take() {
+                    self.qselect_settings = Some((&state).into());
+                }
                 self.reset_modal_geometry();
                 Task::none()
             }
@@ -4530,6 +4532,7 @@ impl OpenCADStudio {
                 let Some(state) = self.qselect.take() else {
                     return Task::none();
                 };
+                self.qselect_settings = Some((&state).into());
                 self.reset_modal_geometry();
                 let i = self.active_tab;
                 let matched = self.tabs[i].scene.qselect(

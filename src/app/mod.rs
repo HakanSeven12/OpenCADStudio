@@ -202,6 +202,31 @@ pub struct QSelectState {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+struct QSelectSettings {
+    scope: QSelectScope,
+    type_filter: Option<String>,
+    property_field: Option<String>,
+    operator: QSelectOp,
+    value: String,
+    mode: QSelectMode,
+    append: bool,
+}
+
+impl From<&QSelectState> for QSelectSettings {
+    fn from(state: &QSelectState) -> Self {
+        Self {
+            scope: state.scope,
+            type_filter: state.type_filter.clone(),
+            property_field: state.property.as_ref().map(|property| property.field.clone()),
+            operator: state.operator,
+            value: state.value.clone(),
+            mode: state.mode,
+            append: state.append,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FindReplaceState {
     pub search: String,
@@ -578,6 +603,7 @@ pub(super) struct OpenCADStudio {
     /// applied via `Message::QSelectApply`; the panel is dismissed on
     /// Apply / Cancel / Esc / outside-click.
     qselect: Option<QSelectState>,
+    qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
     /// Anchor the UCS icon to the projected UCS origin when it is on-screen,
@@ -3252,6 +3278,7 @@ impl OpenCADStudio {
             grip_text_verts: Vec::new(),
             grip_text_slide: false,
             qselect: None,
+            qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,
             show_viewcube: true,

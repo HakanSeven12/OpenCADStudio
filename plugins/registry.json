@@ -23,5 +23,10 @@
     "repo": "piyton/ocs-mcp-bridge",
     "name": "MCP Bridge",
     "description": "Read/write bridge for external tools: serves the live selection and accepts draw/remove requests over a local socket (MCP servers, scripts)."
+  }  
+  {
+    "repo": "schoeller/ocs_python_repl",
+    "name": "Python REPL Plugin",
+    "description": "Out-of-process V4 plugin for Open CAD Studio that opens an IPython REPL in an OS terminal window bound to the active document tab. Python code reads the live document through a zero-copy shared-memory snapshot and mutates it through the plugin API. Limited to entity types Point, Line, Circle, Arc, Ellipse, Polyline, Polyline2D, Polyline3D, LwPolyline, Spline, MText and XData"
   }
 ]

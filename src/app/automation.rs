@@ -562,14 +562,11 @@ mod tests {
                 _ => None,
             })
             .expect("CIRCLE should create one entity");
-        let center = crate::scene::view::transform::ocs_point_to_wcs(
-            (circle.center.x, circle.center.y, circle.center.z),
-            (circle.normal.x, circle.normal.y, circle.normal.z),
-        );
+        let center = circle.center_wcs();
         let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
-        assert!(close(center.0, 2.0));
-        assert!(close(center.1, 0.0));
-        assert!(close(center.2, 3.0));
+        assert!(close(center.x, 2.0));
+        assert!(close(center.y, 0.0));
+        assert!(close(center.z, 3.0));
         assert!(close(circle.normal.x, 0.0));
         assert!(close(circle.normal.y, -1.0));
         assert!(close(circle.normal.z, 0.0));
@@ -621,17 +618,11 @@ mod tests {
 
     #[test]
     fn start_page_runs_tools_that_need_no_drawing_but_still_refuses_the_rest() {
-        // The welcome page's own buttons (Donate / Send Feedback / OCS Web) and
-        // Manage > About route through RibbonToolClick, so a blanket is_start
-        // refusal killed them outright — by definition they are only ever
-        // clickable while is_start holds. `dispatch_command` owns the list of
-        // commands that stand alone; this door must not shadow it. (#388, #389)
+        // App-wide commands remain available on the welcome page; drawing
+        // commands and scene tools do not. (#388, #389)
         use crate::app::Message;
         use crate::modules::ModuleEvent;
-
-        let command_refusal =
-            crate::t!("No drawing open. Use NEW or OPEN to start a drawing.");
-        let tool_refusal = crate::t!("No drawing open — use New or Open first.");
+        use crate::ui::command_line::EntryKind;
 
         // Fresh app = welcome tab, no drawing.
         let mut app = OpenCADStudio::new_for_test();
@@ -640,22 +631,14 @@ mod tests {
             "test needs the welcome tab"
         );
 
-        // ABOUT is safe to drive: it opens a modal. DONATE / WEBVERSION / REPORT
-        // take the same path but shell out to a browser, so they are covered by
-        // the allowlist assertion below rather than by dispatching them here.
-        let start = app.command_line.history.len();
+        // ABOUT opens a modal; link commands are checked without launching them.
         let _ = app.update(Message::RibbonToolClick {
             tool_id: "ABOUT".to_string(),
             event: ModuleEvent::Command("ABOUT".to_string()),
         });
-        let out: String = app.command_line.history[start..]
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
         assert!(
-            !out.contains(command_refusal.as_ref()),
-            "ABOUT needs no drawing and must not be refused on the welcome page: {out:?}"
+            app.active_modal == Some(crate::app::ModalKind::About),
+            "ABOUT must open on the welcome page"
         );
 
         // …but a tool that does need a drawing is still turned away (#299).
@@ -664,15 +647,9 @@ mod tests {
             tool_id: "LINE".to_string(),
             event: ModuleEvent::Command("LINE".to_string()),
         });
-        let out: String = app.command_line.history[start..]
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            out.contains(command_refusal.as_ref()),
-            "LINE must still be refused on the welcome page: {out:?}"
-        );
+        let refusal = &app.command_line.history[start..];
+        assert_eq!(refusal.len(), 1, "LINE must emit one refusal");
+        assert_eq!(refusal[0].kind, EntryKind::Info);
         assert!(
             app.tabs[app.active_tab].active_cmd.is_none(),
             "LINE must not have started"
@@ -684,30 +661,19 @@ mod tests {
             tool_id: "LAYERS".to_string(),
             event: ModuleEvent::ToggleLayers,
         });
-        let out: String = app.command_line.history[start..]
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            out.contains(tool_refusal.as_ref()),
-            "a scene-touching event must stay inert on the welcome page: {out:?}"
-        );
+        let refusal = &app.command_line.history[start..];
+        assert_eq!(refusal.len(), 1, "scene tools must emit one refusal");
+        assert_eq!(refusal[0].kind, EntryKind::Info);
 
-        // Every welcome-page button must also clear dispatch's own gate, or the
-        // fix above just moves the refusal one door down. Asserted on the source
-        // rather than by dispatching: DONATE / REPORT / WEBVERSION shell out to
-        // a real browser, which a test must not do.
+        // Check link commands in source without launching them.
         let dispatch_src = include_str!("commands/mod.rs");
-        // The gate's allow-list lives in the `start_allowed` fn (#388/389);
-        // its first `}` closes the `matches!` body, past every name.
+        // Extract the `start_allowed` match body.
         let gate = dispatch_src
             .split("pub fn start_allowed")
             .nth(1)
             .and_then(|s| s.split('}').next())
             .expect("the start_allowed gate moved — re-point this test");
-        // DONATE/REPORT/WEBVERSION are the welcome page's own buttons; the rest
-        // are ribbon tools that configure the application, not a drawing.
+        // Welcome-page links plus app-wide configuration commands.
         let standalone = [
             "DONATE",
             "REPORT",
@@ -724,7 +690,7 @@ mod tests {
                  list, so it is refused on the welcome page"
             );
         }
-        // …and each must actually have somewhere to land.
+        // Every allowed command needs a dispatch arm.
         let view_src = include_str!("commands/view.rs");
         for cmd in standalone {
             assert!(
@@ -1033,7 +999,11 @@ mod tests {
     #[test]
     fn save_then_open_round_trips() {
         let mut app = OpenCADStudio::new_for_test();
-        let path = std::env::temp_dir().join("ocs_automation_test.dxf");
+        let path = std::env::temp_dir().join(format!(
+            "ocs_automation_test_{}.dxf",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
         let p = path.to_string_lossy().replace('\\', "\\\\");
         app.automation_op(r#"{"op":"new"}"#);
         assert_eq!(
@@ -1044,6 +1014,12 @@ mod tests {
             app.automation_op(&format!(r#"{{"op":"open","path":"{p}"}}"#))["ok"],
             true
         );
+        drop(app);
+        let sidecar = path.with_file_name(format!(
+            ".{}.ocs.lock",
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
         let _ = std::fs::remove_file(&path);
     }
 }

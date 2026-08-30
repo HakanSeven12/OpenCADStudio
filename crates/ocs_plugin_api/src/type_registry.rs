@@ -38,10 +38,25 @@ mod tests {
 
     #[test]
     fn embedded_type_registry_contains_expected_acadrust_types() {
-        let registry: TypeRegistry =
-            serde_json::from_str(get_embedded_type_registry_json()).expect("valid TypeRegistry JSON");
+        let registry: TypeRegistry = serde_json::from_str(get_embedded_type_registry_json())
+            .expect("valid TypeRegistry JSON");
 
-        for name in ["Point", "Line", "Circle", "MText", "EntityCommon"] {
+        for name in [
+            "Point",
+            "Line",
+            "Circle",
+            "MText",
+            "EntityCommon",
+            "XRecord",
+            "XRecordEntry",
+            "XRecordValue",
+            "XRecordValueType",
+            "XRecordSection",
+            "DictionaryCloningFlags",
+            "KnownXRecordKind",
+            "ProxyObjectReference",
+            "ProxyReferenceKind",
+        ] {
             assert!(
                 registry.types.contains_key(&TypeId::new(name)),
                 "registry should contain {}",
@@ -52,8 +67,8 @@ mod tests {
 
     #[test]
     fn embedded_type_registry_mtext_is_struct_with_expected_fields() {
-        let registry: TypeRegistry =
-            serde_json::from_str(get_embedded_type_registry_json()).expect("valid TypeRegistry JSON");
+        let registry: TypeRegistry = serde_json::from_str(get_embedded_type_registry_json())
+            .expect("valid TypeRegistry JSON");
 
         let mtext = registry
             .types
@@ -79,8 +94,8 @@ mod tests {
 
     #[test]
     fn embedded_type_registry_point_is_struct_with_expected_fields() {
-        let registry: TypeRegistry =
-            serde_json::from_str(get_embedded_type_registry_json()).expect("valid TypeRegistry JSON");
+        let registry: TypeRegistry = serde_json::from_str(get_embedded_type_registry_json())
+            .expect("valid TypeRegistry JSON");
 
         let point = registry
             .types
@@ -107,8 +122,8 @@ mod tests {
 
     #[test]
     fn embedded_type_registry_does_not_contain_entity_type() {
-        let registry: TypeRegistry =
-            serde_json::from_str(get_embedded_type_registry_json()).expect("valid TypeRegistry JSON");
+        let registry: TypeRegistry = serde_json::from_str(get_embedded_type_registry_json())
+            .expect("valid TypeRegistry JSON");
         assert!(
             !registry.types.contains_key(&TypeId::new("EntityType")),
             "EntityType should not be in the allow-list registry"
@@ -119,5 +134,63 @@ mod tests {
     fn type_id_as_str_returns_inner_value() {
         let id = TypeId::new("Point");
         assert_eq!(id.as_str(), "Point");
+    }
+
+    #[test]
+    fn embedded_type_registry_xrecord_is_struct_with_expected_fields() {
+        let registry: TypeRegistry = serde_json::from_str(get_embedded_type_registry_json())
+            .expect("valid TypeRegistry JSON");
+
+        let xrecord = registry
+            .types
+            .get(&TypeId::new("XRecord"))
+            .expect("XRecord in registry");
+        assert_eq!(xrecord.kind, TypeKind::Struct);
+
+        let field_names: Vec<&str> = xrecord.fields.iter().map(|f| f.name.as_str()).collect();
+        for expected in [
+            "handle",
+            "owner",
+            "reactors",
+            "xdictionary_handle",
+            "name",
+            "cloning_flags",
+            "entries",
+            "object_references",
+            "preserve_object_reference_stream",
+            "entries_complete",
+            "raw_data",
+            "raw_dwg_handle_bits",
+        ] {
+            assert!(
+                field_names.contains(&expected),
+                "XRecord should have field {}",
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_type_registry_xrecord_value_is_enum_with_expected_variants() {
+        let registry: TypeRegistry = serde_json::from_str(get_embedded_type_registry_json())
+            .expect("valid TypeRegistry JSON");
+
+        let value = registry
+            .types
+            .get(&TypeId::new("XRecordValue"))
+            .expect("XRecordValue in registry");
+        assert_eq!(value.kind, TypeKind::Enum);
+
+        let variant_names: Vec<&str> = value.variants.iter().map(|v| v.name.as_str()).collect();
+        for expected in [
+            "String", "Double", "Int16", "Int32", "Int64", "Byte", "Bool", "Handle", "Point3D",
+            "Chunk",
+        ] {
+            assert!(
+                variant_names.contains(&expected),
+                "XRecordValue should have variant {}",
+                expected
+            );
+        }
     }
 }

@@ -23,8 +23,12 @@ use crate::ribbon::CadModule;
 // so out-of-tree plugins can use them without adding their own acadrust
 // dependency (which would risk an ABI-mismatching version).
 pub use acadrust;
+pub use acadrust::objects::{
+    DictionaryCloningFlags, KnownXRecordKind, ProxyObjectReference, ProxyReferenceKind, XRecord,
+    XRecordEntry, XRecordSection, XRecordValue, XRecordValueType,
+};
+pub use acadrust::xdata::{ExtendedDataRecord, XDataValue};
 pub use acadrust::{CadDocument, EntityType, Handle};
-pub use acadrust::xdata::ExtendedDataRecord;
 
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 

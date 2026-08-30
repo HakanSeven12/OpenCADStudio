@@ -23,7 +23,7 @@
     "repo": "piyton/ocs-mcp-bridge",
     "name": "MCP Bridge",
     "description": "Read/write bridge for external tools: serves the live selection and accepts draw/remove requests over a local socket (MCP servers, scripts)."
-  }  
+  },
   {
     "repo": "schoeller/ocs_python_repl",
     "name": "Python REPL Plugin",

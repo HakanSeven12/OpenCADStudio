@@ -3886,7 +3886,7 @@ dependencies = [
 
 [[package]]
 name = "ocs_plugin_api"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "acadrust",
  "bincode",

@@ -57,13 +57,40 @@ fn generate_type_registry(out_dir: &Path) {
         ("Color", trace::<acadrust::Color>),
         ("Layer", trace::<acadrust::Layer>),
         ("XDataValue", trace::<acadrust::xdata::XDataValue>),
+        ("XRecord", trace::<acadrust::objects::XRecord>),
+        ("XRecordEntry", trace::<acadrust::objects::XRecordEntry>),
+        ("XRecordValue", trace::<acadrust::objects::XRecordValue>),
+        (
+            "XRecordValueType",
+            trace::<acadrust::objects::XRecordValueType>,
+        ),
+        ("XRecordSection", trace::<acadrust::objects::XRecordSection>),
+        (
+            "DictionaryCloningFlags",
+            trace::<acadrust::objects::DictionaryCloningFlags>,
+        ),
+        (
+            "KnownXRecordKind",
+            trace::<acadrust::objects::KnownXRecordKind>,
+        ),
+        (
+            "ProxyObjectReference",
+            trace::<acadrust::objects::ProxyObjectReference>,
+        ),
+        (
+            "ProxyReferenceKind",
+            trace::<acadrust::objects::ProxyReferenceKind>,
+        ),
     ];
 
     for (name, f) in types {
         f(&mut tracer, &samples);
         // serde-reflection accumulates named types as it traces; we only need
         // to ensure the seed types are recorded even if a nested trace fails.
-        eprintln!("[ocs_plugin_api build] traced type registry entry: {}", name);
+        eprintln!(
+            "[ocs_plugin_api build] traced type registry entry: {}",
+            name
+        );
     }
 
     let traced = tracer
@@ -80,7 +107,10 @@ where
 {
     let name = std::any::type_name::<T>();
     if let Err(e) = tracer.trace_type::<T>(samples) {
-        eprintln!("[ocs_plugin_api build] warning: tracing {} failed: {}", name, e);
+        eprintln!(
+            "[ocs_plugin_api build] warning: tracing {} failed: {}",
+            name, e
+        );
     }
 }
 
@@ -94,8 +124,14 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
     let _ = tracer.trace_value(samples, &acadrust::LineWeight::Value(0));
 
     let _ = tracer.trace_value(samples, &acadrust::entities::SmoothSurfaceType::None);
-    let _ = tracer.trace_value(samples, &acadrust::entities::SmoothSurfaceType::QuadraticBSpline);
-    let _ = tracer.trace_value(samples, &acadrust::entities::SmoothSurfaceType::CubicBSpline);
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::entities::SmoothSurfaceType::QuadraticBSpline,
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::entities::SmoothSurfaceType::CubicBSpline,
+    );
     let _ = tracer.trace_value(samples, &acadrust::entities::SmoothSurfaceType::Bezier);
 
     let _ = tracer.trace_value(samples, &acadrust::entities::AttachmentPoint::TopLeft);
@@ -116,19 +152,84 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
     let _ = tracer.trace_value(samples, &acadrust::entities::LineSpacingStyle::Exactly);
 
     let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::String(String::new()));
-    let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::ControlString(String::new()));
-    let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::LayerName(String::new()));
-    let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::BinaryData(Vec::new()));
-    let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Handle(acadrust::Handle::default()));
-    let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Point3D(acadrust::Vector3::default()));
-    let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Position3D(acadrust::Vector3::default()));
-    let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Displacement3D(acadrust::Vector3::default()));
-    let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Direction3D(acadrust::Vector3::default()));
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::xdata::XDataValue::ControlString(String::new()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::xdata::XDataValue::LayerName(String::new()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::xdata::XDataValue::BinaryData(Vec::new()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::xdata::XDataValue::Handle(acadrust::Handle::default()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::xdata::XDataValue::Point3D(acadrust::Vector3::default()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::xdata::XDataValue::Position3D(acadrust::Vector3::default()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::xdata::XDataValue::Displacement3D(acadrust::Vector3::default()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::xdata::XDataValue::Direction3D(acadrust::Vector3::default()),
+    );
     let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Real(0.0));
     let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Distance(0.0));
     let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::ScaleFactor(0.0));
     let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Integer16(0));
     let _ = tracer.trace_value(samples, &acadrust::xdata::XDataValue::Integer32(0));
+
+    // XRecord value variants
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::objects::XRecordValue::String(String::new()),
+    );
+    let _ = tracer.trace_value(samples, &acadrust::objects::XRecordValue::Double(0.0));
+    let _ = tracer.trace_value(samples, &acadrust::objects::XRecordValue::Int16(0));
+    let _ = tracer.trace_value(samples, &acadrust::objects::XRecordValue::Int32(0));
+    let _ = tracer.trace_value(samples, &acadrust::objects::XRecordValue::Int64(0));
+    let _ = tracer.trace_value(samples, &acadrust::objects::XRecordValue::Byte(0));
+    let _ = tracer.trace_value(samples, &acadrust::objects::XRecordValue::Bool(false));
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::objects::XRecordValue::Handle(acadrust::Handle::default()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::objects::XRecordValue::Point3D(0.0, 0.0, 0.0),
+    );
+    let _ = tracer.trace_value(samples, &acadrust::objects::XRecordValue::Chunk(Vec::new()));
+
+    // Proxy reference kinds pulled in by XRecord.object_references
+    let _ = tracer.trace_value(samples, &acadrust::objects::ProxyReferenceKind::Undefined);
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::objects::ProxyReferenceKind::SoftOwnership,
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::objects::ProxyReferenceKind::HardOwnership,
+    );
+    let _ = tracer.trace_value(samples, &acadrust::objects::ProxyReferenceKind::SoftPointer);
+    let _ = tracer.trace_value(samples, &acadrust::objects::ProxyReferenceKind::HardPointer);
+
+    // KnownXRecordKind variants
+    let _ = tracer.trace_value(
+        samples,
+        &acadrust::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+    );
+    let _ = tracer.trace_value(samples, &acadrust::objects::KnownXRecordKind::Unknown);
 }
 
 fn map_to_custom_schema(traced: &Registry) -> TypeRegistry {

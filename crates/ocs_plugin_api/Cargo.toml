@@ -1,6 +1,6 @@
 [package]
 name = "ocs_plugin_api"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Stable, dependency-free contract for Open CAD Studio add-on packages: plugin manifest, version handshake, and ribbon/CadModule types."
 license = "GPL-3.0-only"

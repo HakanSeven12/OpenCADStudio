@@ -142,6 +142,8 @@ pub struct Snapper {
     pub dwell_since: Option<Instant>,
     /// Whether the current dwell already acquired/removed a point (fire once).
     pub dwell_acquired: bool,
+    /// Stable observations of the current dwell candidate.
+    dwell_observations: u8,
     /// The point the in-progress command is drawing *from* (the rubber-band
     /// origin), if any. Perpendicular snap drops its foot from here so the new
     /// segment is genuinely perpendicular to the target — without it, perp
@@ -188,6 +190,7 @@ impl Default for Snapper {
             last_snap_world: None,
             dwell_since: None,
             dwell_acquired: false,
+            dwell_observations: 0,
             from_point: None,
             parallel_ref: None,
             parallel_dwell: None,
@@ -293,6 +296,7 @@ impl Snapper {
             self.last_snap_world = None;
             self.dwell_since = None;
             self.dwell_acquired = false;
+            self.dwell_observations = 0;
             return;
         }
         // Acquire only stable geometric snap points for OTRACK. (#716)
@@ -322,15 +326,23 @@ impl Snapper {
         // does not create accidental tracking points.
         const DWELL_MS: u128 = 250;
         const DWELL_PX: f32 = 8.0;
+        const MIN_OBSERVATIONS: u8 = 3;
 
         match snap_world {
             None => {
                 // Leaving all geometry: capture the point we were dwelling on if
                 // it qualified, before the reset loses it.
-                self.acquire_on_leave(now, DWELL_MS, wires, endpoints_only);
+                self.acquire_on_leave(
+                    now,
+                    DWELL_MS,
+                    MIN_OBSERVATIONS,
+                    wires,
+                    endpoints_only,
+                );
                 self.last_snap_world = None;
                 self.dwell_since = None;
                 self.dwell_acquired = false;
+                self.dwell_observations = 0;
             }
             Some(p) => {
                 // Convert to screen to measure pixel distance.
@@ -344,10 +356,14 @@ impl Snapper {
                     false
                 };
                 if is_same {
+                    self.dwell_observations = self.dwell_observations.saturating_add(1);
                     let elapsed = self
                         .dwell_since
                         .map_or(0, |t| now.duration_since(t).as_millis());
-                    if !self.dwell_acquired && elapsed >= DWELL_MS {
+                    if !self.dwell_acquired
+                        && self.dwell_observations >= MIN_OBSERVATIONS
+                        && elapsed >= DWELL_MS
+                    {
                         self.dwell_acquired = true;
                         // Dwelling over an already-acquired point removes it;
                         // otherwise acquire it.
@@ -374,31 +390,20 @@ impl Snapper {
                     // Moved to a different snap point: capture the previous one
                     // first if it was dwelt on long enough, so a pause-then-drag
                     // gesture reliably acquires it even without in-place events.
-                    self.acquire_on_leave(now, DWELL_MS, wires, endpoints_only);
+                    self.acquire_on_leave(
+                        now,
+                        DWELL_MS,
+                        MIN_OBSERVATIONS,
+                        wires,
+                        endpoints_only,
+                    );
                     self.last_snap_world = Some(p);
                     self.dwell_since = Some(now);
                     self.dwell_acquired = false;
+                    self.dwell_observations = 1;
                 }
             }
         }
-    }
-    /// Immediately acquire an explicit grip origin as a tracking point.
-    ///
-    /// Unlike normal cursor acquisition, a grip was deliberately selected by the
-    /// user, so it should not require OTRACK dwell before Extension/OTRACK can use it.
-    pub fn acquire_grip_tracking_point<W: WireSource + ?Sized>(
-        &mut self,
-        p: DVec3,
-        wires: &W,
-    ) {
-        if !self.tracking_active() {
-            return;
-        }
-
-        // With OTRACK disabled, Extension acquisition must remain endpoint-only.
-        let endpoints_only = !self.otrack_enabled;
-
-        self.acquire_tracking_point(p, wires, endpoints_only);
     }
     /// Add `p` as a tracking point (capturing its corner edge directions) unless
     /// it is already tracked; drops the oldest when the 4-point cap is reached.
@@ -449,10 +454,11 @@ impl Snapper {
         &mut self,
         now: Instant,
         dwell_ms: u128,
+        min_observations: u8,
         wires: &W,
         endpoints_only: bool,
     ) {
-        if self.dwell_acquired {
+        if self.dwell_acquired || self.dwell_observations < min_observations {
             return; // already handled by the in-place branch
         }
         let Some(prev) = self.last_snap_world else {
@@ -732,6 +738,7 @@ impl Snapper {
         self.last_snap_world = None;
         self.dwell_since = None;
         self.dwell_acquired = false;
+        self.dwell_observations = 0;
     }
 
     /// Parallel snap acquisition. When the Parallel object snap is on, hovering
@@ -862,6 +869,7 @@ impl Snapper {
             last_snap_world: None,
             dwell_since: None,
             dwell_acquired: false,
+            dwell_observations: 0,
             from_point: None,
             parallel_ref: None,
             parallel_dwell: None,

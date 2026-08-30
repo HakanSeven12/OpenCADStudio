@@ -1266,17 +1266,6 @@ impl OpenCADStudio {
                 // the re-wrap is exact).
                let snap = self.tabs[i].scene.wire_models_for(&edited_handles);
 
-                // Keep the entity's original geometry available for self-OSNAP,
-                // Extension and OTRACK while the live grip preview is being deformed.
-                self.grip_snap_wires = snap.clone();
-                // The user explicitly picked this grip, so treat its original position as an
-                // acquired tracking point immediately. This lets Extension/OTRACK use the
-                // original edge direction on the very first movement instead of requiring the
-                // cursor to return to the old grip position and dwell there first.
-                self.snapper.acquire_grip_tracking_point(
-                    grip.origin_world,
-                    &self.grip_snap_wires,
-                );
                 self.grip_text_verts = snap
                     .iter()
                     .flat_map(|w| w.text_verts.iter().copied())
@@ -1321,19 +1310,6 @@ impl OpenCADStudio {
                 bounds,
                 self.snapper.osnap_radius_px,
             );
-            // `snap_candidates` contains only the spatially-local wires from the rest of
-            // the drawing. Add the frozen pre-drag geometry of the edited entity so its
-            // own vertices and segments remain valid snap references.
-            //
-            // This intentionally uses a plain Vec<WireModel>: Snapper will use its normal
-            // unindexed fallback over this already-small local candidate set rather than
-            // cloning/scanning the whole drawing.
-            let mut grip_snap_candidates: Vec<_> =
-                snap_candidates.iter().cloned().collect();
-
-            grip_snap_candidates.extend(
-                self.grip_snap_wires.iter().cloned()
-            );
             // The engaged grip is the rubber-band origin. Perpendicular
             // snapping must drop its foot from this point, including when a
             // hot-grip set is moved by the same drag vector.
@@ -1347,7 +1323,7 @@ impl OpenCADStudio {
             let snap_hit = self.snapper.snap(
                 raw,
                 p,
-                &grip_snap_candidates,
+                &snap_candidates,
                 view_rot,
                 eye,
                 bounds,
@@ -1360,7 +1336,7 @@ impl OpenCADStudio {
 
             self.snapper.update_otrack_dwell(
                 snap_hit,
-                &grip_snap_candidates,
+                &snap_candidates,
                 view_rot,
                 eye,
                 bounds,
@@ -1579,7 +1555,9 @@ impl OpenCADStudio {
                 .filter(|handle| self.tabs[i].scene.meshes.contains_key(handle))
                 .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                 .collect();
-            self.tabs[i].scene.bump_entities(&mesh_changes);
+            if !mesh_changes.is_empty() {
+                self.tabs[i].scene.bump_entities(&mesh_changes);
+            }
             self.tabs[i].scene.set_preview_hatches(&edited_handles);
             self.tabs[i].dirty = true;
             if let Some(active) = self.tabs[i].active_grip.as_mut() {
@@ -3032,7 +3010,6 @@ impl OpenCADStudio {
                     );
                     self.tabs[i].dirty = true;
                 }
-                self.grip_snap_wires.clear();
                 self.grip_text_verts = Vec::new();
                 self.grip_text_slide = false;
                 for &handle in &handles {

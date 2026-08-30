@@ -381,6 +381,8 @@ impl shader::Primitive for Primitive {
                 inner.cached_selection = (u64::MAX, u64::MAX);
                 inner.cached_mesh_content_id = u64::MAX;
                 inner.cached_face3d_key = (u64::MAX, false, false, u64::MAX);
+                inner.cached_solid_visibility =
+                    (u64::MAX, [u32::MAX; 3], u64::MAX);
                 inner.cached_hatch_source = None;
                 inner.cached_preview_hatch_source = None;
                 inner.cached_wipeout_source = None;
@@ -487,11 +489,25 @@ impl shader::Primitive for Primitive {
             // the Wireframe overlay style.
             let face3d_fill_active = fill_mode && !vp.view_wireframe;
             let solid_fill_active = fill_mode && vp.show_2d_solid_fills;
-            let solid_visibility_key =
+            let view_dir_key = [
+                vp.view_dir.x.to_bits(),
+                vp.view_dir.y.to_bits(),
+                vp.view_dir.z.to_bits(),
+            ];
+            let solid_visibility_key = if !solid_fill_active {
+                0
+            } else if inner.cached_solid_visibility.0 == vp.wire_content_id
+                && inner.cached_solid_visibility.1 == view_dir_key
+            {
+                inner.cached_solid_visibility.2
+            } else {
                 crate::scene::pipeline::face3d_gpu::planar_solid_visibility_key(
                     &vp_wires,
                     vp.view_dir,
-                );
+                )
+            };
+            inner.cached_solid_visibility =
+                (vp.wire_content_id, view_dir_key, solid_visibility_key);
             let fill_changed = inner.cached_fill_mode != fill_mode;
             let hatch_changed = inner
                 .cached_hatch_source

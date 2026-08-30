@@ -583,13 +583,6 @@ pub(super) struct OpenCADStudio {
     )>,
     /// Document dirty state before the live grip mutation began.
     grip_dirty_before: Option<bool>,
-    /// Frozen wire geometry of the entities being grip-edited.
-    ///
-    /// The live entities are hidden from the resident hit-test set while their
-    /// grip preview is active. Keep their pre-drag geometry here so OSNAP,
-    /// Extension and OTRACK can still reference the entity's own vertices and
-    /// segments without snapping against the geometry being deformed.
-    grip_snap_wires: Vec<crate::scene::model::wire_model::WireModel>,
     /// Drag-start snapshot of the dragged entity's SDF glyph quads. A whole-
     /// entity text move slides these each frame (translating the already-shaped
     /// glyphs) instead of re-tessellating the run every cursor move (issue #316).
@@ -3274,7 +3267,6 @@ impl OpenCADStudio {
             grip_originals: Vec::new(),
             grip_history_originals: Vec::new(),
             grip_dirty_before: None,
-            grip_snap_wires: Vec::new(),
             grip_text_verts: Vec::new(),
             grip_text_slide: false,
             qselect: None,

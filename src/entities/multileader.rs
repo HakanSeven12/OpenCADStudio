@@ -2104,11 +2104,19 @@ impl MultiLeaderTess for MultiLeader {
             fill_tris_low: Vec::new(),
         });
 
-        if let Some(insert) = block_content_insert(document, ml) {
+        let host = acadrust::EntityType::MultiLeader(ml.clone());
+        for block_use in crate::scene::render_graph::entity_render_block_uses(document, &host, 1.0)
+            .into_iter()
+            .filter(|block_use| {
+                block_use.active
+                    && block_use.role
+                        == crate::scene::render_graph::BlockRole::MultiLeaderContent
+            })
+        {
             wires.extend(
                 crate::scene::convert::tess::expand_block_object(
                     document,
-                    &insert,
+                    &block_use.insert,
                     handle,
                     selected,
                     active_viewport,

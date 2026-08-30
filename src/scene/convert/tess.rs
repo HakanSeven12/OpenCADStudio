@@ -122,6 +122,7 @@ pub(crate) fn expand_block_object(
         .map(|record| record.flags.is_xref || record.flags.is_xref_overlay)
         .unwrap_or(false);
     let mut wires = cache::block_cache::expand_insert(
+        document,
         cache,
         insert,
         owner,
@@ -146,7 +147,11 @@ pub(crate) fn expand_block_object(
 
     if options.apply_xclip {
         if let Some(filter) = pick::xclip::insert_spatial_filter(document, insert) {
-            let transform = crate::scene::render_graph::insert_transform(document, insert);
+            let transform = crate::scene::render_graph::insert_transform_at_scale(
+                document,
+                insert,
+                anno_scale,
+            );
             let polygon = pick::xclip::world_clip_polygon_for_transform(filter, &transform);
             pick::xclip::clip_wires(&mut wires, &polygon);
             for wire in &mut wires {
@@ -952,12 +957,17 @@ fn tessellate_entity_inner(
     // Render non-annotative dimensions from their stored picture block.
     // Rebuild geometry only when no usable block exists.
     if matches!(e, EntityType::Dimension(_)) {
-        if let Some(owned) = crate::scene::render_graph::owned_block_insert(document, e)
-            .filter(|owned| owned.render_picture)
+        if let Some(block_use) = crate::scene::render_graph::entity_render_block_uses(
+            document,
+            e,
+            anno_scale,
+        )
+        .into_iter()
+        .find(|block_use| block_use.active)
         {
             let mut wires = expand_block_object(
                 document,
-                &owned.insert,
+                &block_use.insert,
                 h,
                 sel,
                 active_viewport,
@@ -969,7 +979,7 @@ fn tessellate_entity_inner(
                 world_per_pixel,
                 pslt_factor,
                 BlockObjectOptions {
-                    suppress_root_points: owned.suppress_root_points,
+                    suppress_root_points: block_use.suppress_root_points,
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1054,10 +1064,19 @@ fn tessellate_entity_inner(
     // When the block exists we render it directly. Same pattern as
     // Dimension's `block_name`.
     if let EntityType::Table(table) = e {
-        if let Some(owned) = crate::scene::render_graph::owned_block_insert(document, e) {
+        if let Some(block_use) = crate::scene::render_graph::entity_render_block_uses(
+            document,
+            e,
+            anno_scale,
+        )
+        .into_iter()
+        .find(|block_use| {
+            block_use.active
+                && block_use.role == crate::scene::render_graph::BlockRole::TablePicture
+        }) {
             let mut wires = expand_block_object(
                 document,
-                &owned.insert,
+                &block_use.insert,
                 h,
                 sel,
                 active_viewport,
@@ -1091,9 +1110,15 @@ fn tessellate_entity_inner(
             line_weight_px,
             table_anno,
         );
-        for insert in
-            crate::entities::table::block_cell_inserts(table, document, table_anno)
-        {
+        for block_use in crate::scene::render_graph::entity_render_block_uses(
+            document,
+            e,
+            table_anno,
+        )
+        .into_iter()
+        .filter(|block_use| {
+            block_use.role == crate::scene::render_graph::BlockRole::TableCell
+        }) {
             wires.extend(tessellate_entity(
                 document,
                 selected,
@@ -1101,7 +1126,7 @@ fn tessellate_entity_inner(
                 bg_color,
                 1.0,
                 None,
-                &EntityType::Insert(insert),
+                &EntityType::Insert(block_use.insert),
                 block_cache,
                 view_aabb,
                 world_per_pixel,

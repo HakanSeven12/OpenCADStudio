@@ -261,28 +261,10 @@ impl OpenCADStudio {
                         .filter(|s| !s.is_empty())
                         .collect();
 
-                    // Which block definitions are LIVE — reachable from a real
-                    // layout container by following every block reference. A
-                    // block nothing reachable inserts is dead and purges, even a
-                    // whole mutually-referencing subgraph (e.g. the dependent
-                    // blocks a detached xref leaves behind: they insert one
-                    // another but hang off no layout, so a flat "is it named by
-                    // any INSERT" scan keeps them alive forever). Roots:
-                    //   • *Model_Space / *Paper_Space(N),
-                    //   • any block whose layout handle resolves to a real Layout
-                    //     object — a DANGLING layout handle, as orphaned xref
-                    //     blocks carry, does NOT count, so is_layout() alone can't
-                    //     shield the dead subgraph it heads,
-                    //   • dimension-style arrowhead blocks (referenced by handle).
-                    // A block's out-edges: its members' INSERT names, dimension
-                    // *D blocks, table *T / cell blocks, and MultiLeader content.
+                    // Live blocks are reachable from layouts and style roots
+                    // through the shared graph. Dangling layouts do not count.
                     let live_blocks: rustc_hash::FxHashSet<String> = {
                         let doc = &self.tabs[i].scene.document;
-                        let by_handle: rustc_hash::FxHashMap<acadrust::Handle, String> = doc
-                            .block_records
-                            .iter()
-                            .map(|br| (br.handle, br.name.clone()))
-                            .collect();
                         let is_real_layout = |br: &acadrust::BlockRecord| -> bool {
                             let up = br.name.to_ascii_uppercase();
                             up.starts_with("*MODEL_SPACE")
@@ -298,44 +280,19 @@ impl OpenCADStudio {
                                 return out;
                             };
                             for &h in &br.entity_handles {
-                                match doc.get_entity(h) {
-                                    Some(acadrust::EntityType::Insert(ins))
-                                        if !ins.block_name.is_empty() =>
-                                    {
-                                        out.push(ins.block_name.clone());
-                                    }
-                                    Some(acadrust::EntityType::Dimension(d))
-                                        if !d.base().block_name.is_empty() =>
-                                    {
-                                        out.push(d.base().block_name.clone());
-                                    }
-                                    Some(acadrust::EntityType::Table(t)) => {
-                                        if let Some(bh) = t.block_record_handle {
-                                            if let Some(n) = by_handle.get(&bh) {
-                                                out.push(n.clone());
-                                            }
-                                        }
-                                        for row in &t.rows {
-                                            for cell in &row.cells {
-                                                for c in &cell.contents {
-                                                    if let Some(bh) = c.block_handle {
-                                                        if let Some(n) = by_handle.get(&bh) {
-                                                            out.push(n.clone());
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Some(acadrust::EntityType::MultiLeader(ml)) => {
-                                        if let Some(bh) = ml.block_content_handle {
-                                            if let Some(n) = by_handle.get(&bh) {
-                                                out.push(n.clone());
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                }
+                                let Some(entity) = doc.get_entity(h) else {
+                                    continue;
+                                };
+                                out.extend(
+                                    crate::scene::render_graph::entity_block_uses(
+                                        doc,
+                                        entity,
+                                        1.0,
+                                    )
+                                    .into_iter()
+                                    .filter(|block_use| !block_use.block.is_null())
+                                    .map(|block_use| block_use.insert.block_name),
+                                );
                             }
                             out
                         };
@@ -346,15 +303,11 @@ impl OpenCADStudio {
                             .filter(|&br| is_real_layout(br))
                             .map(|br| br.name.clone())
                             .collect();
-                        for ds in doc.dim_styles.iter() {
-                            for h in [ds.dimblk, ds.dimblk1, ds.dimblk2, ds.dimldrblk] {
-                                if !h.is_null() {
-                                    if let Some(n) = by_handle.get(&h) {
-                                        stack.push(n.clone());
-                                    }
-                                }
-                            }
-                        }
+                        stack.extend(
+                            crate::scene::render_graph::document_block_uses(doc)
+                                .into_iter()
+                                .map(|block_use| block_use.insert.block_name),
+                        );
                         while let Some(n) = stack.pop() {
                             if !live.insert(n.clone()) {
                                 continue;
@@ -422,9 +375,8 @@ impl OpenCADStudio {
                             .filter(|br| {
                                 let up = br.name.to_ascii_uppercase();
                                 // Never PURGE an xref *definition* — that is a
-                                // detach, not a purge. (Orphaned dependent blocks
-                                // a past detach left behind are is_xref=false and
-                                // still fall to the reachability test.)
+                                // detach, not a purge. Orphaned dependencies from
+                                // a past detach still use the reachability test.
                                 !br.flags.is_xref
                                     && !br.flags.is_xref_overlay
                                     && !up.starts_with("*MODEL_SPACE")

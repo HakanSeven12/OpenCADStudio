@@ -1,6 +1,6 @@
 //! DGN line-style rendering (first pass).
 //!
-//! Linetypes converted from MicroStation DGN store their real pattern as DGN
+//! Imported DGN linetypes store their real pattern as DGN
 //! line-style objects (`AcDbLS*`), not standard `LTYPE` dashes — the standard
 //! table entry is empty, so acadrust exposes the structure in
 //! [`CadDocument::dgn_ls_definitions`] / `dgn_ls_components` instead. See
@@ -12,7 +12,7 @@
 //! lengths are carried through to the pipe walls.
 
 use acadrust::objects::DgnLsComponentType;
-use acadrust::types::{Handle, Transform, Vector3};
+use acadrust::types::{Handle, Vector3};
 use acadrust::{CadDocument, EntityType};
 use std::collections::HashSet;
 
@@ -133,29 +133,52 @@ pub fn wall_dashes(doc: &CadDocument, lt_name: &str) -> Vec<f64> {
 /// radius, which is also the offset of the two pipe walls (they sit tangent to
 /// the end circles) — so it doubles as the rail offset for the double line.
 pub fn symbol_radius(doc: &CadDocument, block: Handle, scale: f64) -> f64 {
-    let Some(br) = doc.block_records.iter().find(|b| b.handle == block) else {
+    let mut r = 0.0_f64;
+    let depths = rustc_hash::FxHashMap::default();
+    let graph = crate::scene::render_graph::RenderSceneGraph::new(doc, None, None, true, &depths);
+    let Some(block_use) = crate::scene::render_graph::block_use_from_handle(
+        doc,
+        block,
+        crate::scene::render_graph::BlockRole::LineStyleSymbol,
+        Vector3::ZERO,
+    ) else {
         return 0.0;
     };
-    let bx = br.base_point.x;
-    let by = br.base_point.y;
-    let d = |x: f64, y: f64| ((x - bx).powi(2) + (y - by).powi(2)).sqrt();
-    let mut r = 0.0_f64;
-    for eh in &br.entity_handles {
-        let Some(e) = doc.get_entity(*eh) else {
-            continue;
-        };
-        let ext = match e {
-            EntityType::Ellipse(el) => {
-                let a = (el.major_axis.x.powi(2) + el.major_axis.y.powi(2)).sqrt();
-                d(el.center.x, el.center.y) + a
-            }
-            EntityType::Circle(c) => d(c.center.x, c.center.y) + c.radius,
-            EntityType::Arc(a) => d(a.center.x, a.center.y) + a.radius,
-            EntityType::Line(l) => d(l.start.x, l.start.y).max(d(l.end.x, l.end.y)),
-            _ => 0.0,
-        };
-        r = r.max(ext);
-    }
+    graph.walk_insert(
+        &block_use.insert,
+        block,
+        |_, _| true,
+        |entity, context| {
+            let mut placed = entity.clone();
+            placed.apply_transform(&context.transform);
+            let distance = |x: f64, y: f64| x.hypot(y);
+            let extent = match &placed {
+                EntityType::Ellipse(ellipse) => {
+                    distance(ellipse.center.x, ellipse.center.y)
+                        + distance(ellipse.major_axis.x, ellipse.major_axis.y)
+                }
+                EntityType::Circle(circle) => {
+                    distance(circle.center.x, circle.center.y) + circle.radius
+                }
+                EntityType::Arc(arc) => distance(arc.center.x, arc.center.y) + arc.radius,
+                EntityType::Line(line) => distance(line.start.x, line.start.y)
+                    .max(distance(line.end.x, line.end.y)),
+                _ => crate::scene::convert::tess::entity_world_aabb_f64(&placed)
+                    .map(|[min_x, min_y, max_x, max_y]| {
+                        [
+                            distance(min_x, min_y),
+                            distance(max_x, min_y),
+                            distance(max_x, max_y),
+                            distance(min_x, max_y),
+                        ]
+                        .into_iter()
+                        .fold(0.0_f64, f64::max)
+                    })
+                    .unwrap_or(0.0),
+            };
+            r = r.max(extent);
+        },
+    );
     let s = if scale.abs() > 1e-9 { scale } else { 1.0 };
     r / s
 }
@@ -286,46 +309,50 @@ pub fn place_block_wires(
     world_per_pixel: Option<f32>,
     bg_color: [f32; 4],
 ) -> Vec<WireModel> {
-    let Some(br) = doc.block_records.iter().find(|b| b.handle == block) else {
-        return Vec::new();
-    };
-    // The symbol block's native geometry is drawn at 1 / scale_divisor (the
-    // divisor is read from the symbol component's leaf data). Scale about the
-    // origin, then translate the (scaled) base point to the placement point.
     let s = if scale_divisor.abs() > 1e-9 {
         1.0 / scale_divisor
     } else {
         1.0
     };
-    let scale = Transform::from_scale(s);
-    let offset = Vector3::new(
-        at[0] - br.base_point.x * s,
-        at[1] - br.base_point.y * s,
-        at[2] - br.base_point.z * s,
-    );
+    let Some(mut block_use) = crate::scene::render_graph::block_use_from_handle(
+        doc,
+        block,
+        crate::scene::render_graph::BlockRole::LineStyleSymbol,
+        Vector3::new(at[0], at[1], at[2]),
+    ) else {
+        return Vec::new();
+    };
+    let insert = &mut block_use.insert;
+    insert.set_x_scale(s);
+    insert.set_y_scale(s);
+    insert.set_z_scale(s);
+    let depths = rustc_hash::FxHashMap::default();
+    let graph = crate::scene::render_graph::RenderSceneGraph::new(doc, None, None, true, &depths)
+        .with_annotation_scale(anno_scale);
     let mut out = Vec::new();
-    for eh in &br.entity_handles {
-        let Some(ent) = doc.get_entity(*eh) else {
-            continue;
-        };
-        let mut clone = ent.clone();
-        clone.as_entity_mut().apply_transform(&scale);
-        clone.as_entity_mut().translate(offset);
-        out.extend(super::tessellate::tessellate(
-            doc,
-            *eh,
-            &clone,
-            false,
-            color,
-            0.0,
-            [0.0; 8],
-            line_weight_px,
-            anno_scale,
-            None,
-            world_per_pixel,
-            bg_color,
-            false,
-        ));
-    }
+    graph.walk_insert(
+        insert,
+        block,
+        |_, _| true,
+        |entity, context| {
+            let mut placed = entity.clone();
+            placed.apply_transform(&context.transform);
+            out.extend(super::tessellate::tessellate(
+                doc,
+                entity.common().handle,
+                &placed,
+                false,
+                color,
+                0.0,
+                [0.0; 8],
+                line_weight_px,
+                anno_scale,
+                None,
+                world_per_pixel,
+                bg_color,
+                false,
+            ));
+        },
+    );
     out
 }

@@ -115,6 +115,9 @@ pub struct NestedRef {
     pub block_name: String,
     pub xform: Transform,
     pub style: crate::scene::render_graph::InsertStyleSpec,
+    /// ATTRIB geometry is stored in the parent definition's frame, but resolves
+    /// ByBlock and layer-0 properties through this nested insert's style.
+    pub attachments: Vec<LocalWire>,
     pub instance_offsets: Vec<[f64; 3]>,
     pub plot_visible: bool,
     pub plot_l0: bool,
@@ -139,12 +142,8 @@ pub enum LocalSub {
 #[derive(Clone, Debug, Default)]
 pub struct BlockDefn {
     pub subs: Vec<LocalSub>,
-    pub base_point: Vector3,
     pub has_point_marker: bool,
-    /// Union of every sub's local AABB (including nested-INSERT contributions
-    /// resolved at expand time via their own defn's `aabb_local`). XY only —
-    /// the wire renderer is 2D-dominant. Expressed in this defn's *offset*
-    /// Absolute world-space XY (the double-single render path keeps it precise).
+    /// Union of direct and nested geometry in definition coordinates.
     pub aabb_local: [f32; 4],
     /// Raw entity count of the source block record (`entity_handles.len()`).
     /// Divisor for nested depth composition: a nested insert's children get a
@@ -207,7 +206,12 @@ impl BlockCache {
     }
 
     pub fn defn(&self, block_name: &str) -> Option<&Arc<BlockDefn>> {
-        self.defns.get(block_name)
+        self.defns.get(block_name).or_else(|| {
+            self.defns
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(block_name))
+                .map(|(_, definition)| definition)
+        })
     }
 
     /// Build definitions referenced by block-backed entities. Space records stay
@@ -225,7 +229,7 @@ impl BlockCache {
     ) -> Self {
         use crate::par::prelude::*;
         let mut cache = Self::new();
-        let referenced = collect_referenced_blocks(doc);
+        let referenced = collect_referenced_blocks(doc, anno_scale);
         let mut reference_counts: HashMap<String, usize> = HashMap::default();
         for entity in doc.entities() {
             if let EntityType::Insert(insert) = entity {
@@ -280,7 +284,7 @@ impl BlockCache {
     ) -> Self {
         use crate::par::prelude::*;
         let mut cache = Self::new();
-        let referenced = referenced_block_tree(doc, block_name);
+        let referenced = referenced_block_tree(doc, block_name, anno_scale);
         cache.defns = referenced
             .par_iter()
             .map(|name| {
@@ -355,7 +359,11 @@ impl BlockCache {
         let found = defn.subs.iter().any(|sub| match sub {
             LocalSub::Wire(wire) => wire.point_marker.is_some(),
             LocalSub::Nested(insert) => {
-                self.defn_has_point_marker_recursive(&insert.block_name, visited)
+                insert
+                    .attachments
+                    .iter()
+                    .any(|wire| wire.point_marker.is_some())
+                    || self.defn_has_point_marker_recursive(&insert.block_name, visited)
             }
         });
         visited.pop();
@@ -385,7 +393,10 @@ impl BlockCache {
                 LocalSub::Wire(lw) => lw.aabb_local,
                 LocalSub::Nested(nref) => {
                     let nested = self.defn_aabb_recursive(&nref.block_name, visited);
-                    transform_aabb_xy(nested, &nref.xform)
+                    nref.attachments.iter().fold(
+                        transform_aabb_xy(nested, &nref.xform),
+                        |aabb, wire| aabb_union(aabb, wire.aabb_local),
+                    )
                 }
             };
             acc = aabb_union(acc, aabb);
@@ -395,36 +406,39 @@ impl BlockCache {
     }
 }
 
-fn block_object_name(doc: &CadDocument, entity: &EntityType) -> Option<String> {
-    if let EntityType::Insert(insert) = entity {
-        Some(insert.block_name.clone())
-    } else {
-        crate::scene::render_graph::owned_block_insert(doc, entity)
-            .map(|owned| owned.insert.block_name)
-    }
+fn block_object_names(
+    doc: &CadDocument,
+    entity: &EntityType,
+    anno_scale: f32,
+) -> Vec<String> {
+    crate::scene::render_graph::entity_render_block_uses(doc, entity, anno_scale)
+        .into_iter()
+        .filter(|block_use| !block_use.block.is_null())
+        .map(|block_use| block_use.insert.block_name)
+        .collect()
 }
 
-/// Collect every referenced block-backed object.
-fn collect_referenced_blocks(doc: &CadDocument) -> Vec<String> {
+/// Collect block definitions needed by rendered representations.
+fn collect_referenced_blocks(doc: &CadDocument, anno_scale: f32) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::default();
     let mut queue: Vec<String> = Vec::new();
 
     for entity in doc.entities() {
-        if let Some(name) = block_object_name(doc, entity) {
+        for name in block_object_names(doc, entity, anno_scale) {
             if seen.insert(name.clone()) {
                 queue.push(name);
             }
         }
     }
     while let Some(name) = queue.pop() {
-        let Some(br) = doc.block_records.get(&name) else {
+        let Some(br) = crate::scene::render_graph::block_record_by_name(doc, &name) else {
             continue;
         };
         for &eh in &br.entity_handles {
             let Some(entity) = doc.get_entity(eh) else {
                 continue;
             };
-            if let Some(name) = block_object_name(doc, entity) {
+            for name in block_object_names(doc, entity, anno_scale) {
                 if seen.insert(name.clone()) {
                     queue.push(name);
                 }
@@ -434,19 +448,19 @@ fn collect_referenced_blocks(doc: &CadDocument) -> Vec<String> {
     seen.into_iter().collect()
 }
 
-fn referenced_block_tree(doc: &CadDocument, root: &str) -> Vec<String> {
+fn referenced_block_tree(doc: &CadDocument, root: &str, anno_scale: f32) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::default();
     let mut queue = vec![root.to_string()];
     seen.insert(root.to_string());
     while let Some(name) = queue.pop() {
-        let Some(record) = doc.block_records.get(&name) else {
+        let Some(record) = crate::scene::render_graph::block_record_by_name(doc, &name) else {
             continue;
         };
         for &handle in &record.entity_handles {
             let Some(entity) = doc.get_entity(handle) else {
                 continue;
             };
-            if let Some(name) = block_object_name(doc, entity) {
+            for name in block_object_names(doc, entity, anno_scale) {
                 if seen.insert(name.clone()) {
                     queue.push(name);
                 }
@@ -474,7 +488,7 @@ fn build_defn(
     viewport: Option<Handle>,
     depth_map: &HashMap<u64, [f32; 2]>,
 ) -> BlockDefn {
-    let br = match doc.block_records.get(block_name) {
+    let br = match crate::scene::render_graph::block_record_by_name(doc, block_name) {
         Some(br) => br,
         None => return BlockDefn::default(),
     };
@@ -520,19 +534,31 @@ fn build_defn(
         ) {
             continue;
         }
-        if let Some(owned) = crate::scene::render_graph::owned_block_insert(doc, entity) {
-            if owned.render_picture {
-                let mut nested = build_nested_ref(
-                    &owned.insert,
-                    doc,
-                    bg_color,
-                    viewport,
-                    depth_map,
-                );
-                nested.suppress_root_points = owned.suppress_root_points;
-                subs.push(LocalSub::Nested(nested));
-                continue;
-            }
+        let block_uses: Vec<_> = crate::scene::render_graph::entity_render_block_uses(
+            doc,
+            entity,
+            anno_scale,
+        )
+        .into_iter()
+        .filter(|block_use| block_use.active)
+        .collect();
+        let replaces_host = block_uses
+            .iter()
+            .any(|block_use| block_use.replaces_host_wire);
+        for block_use in &block_uses {
+            let mut nested = build_nested_ref(
+                &block_use.insert,
+                doc,
+                anno_scale,
+                bg_color,
+                viewport,
+                depth_map,
+            );
+            nested.suppress_root_points = block_use.suppress_root_points;
+            subs.push(LocalSub::Nested(nested));
+        }
+        if replaces_host {
+            continue;
         }
         match entity {
             EntityType::Block(_) | EntityType::BlockEnd(_) => continue,
@@ -548,50 +574,6 @@ fn build_defn(
                 if !ad.flags.constant || ad.flags.invisible || ad.default_value.is_empty() =>
             {
                 continue
-            }
-            EntityType::Insert(nested_ins) => {
-                subs.push(LocalSub::Nested(build_nested_ref(
-                    nested_ins, doc, bg_color, viewport, depth_map,
-                )));
-            }
-            EntityType::Dimension(_) => {
-                for wire in tessellate_sub_local(
-                    doc,
-                    entity,
-                    anno_scale,
-                    annotation_scale_handle,
-                    bg_color,
-                    viewport,
-                    depth_map,
-                ) {
-                    subs.push(LocalSub::Wire(wire));
-                }
-            }
-            EntityType::Table(table) => {
-                for wire in tessellate_sub_local(
-                    doc,
-                    entity,
-                    anno_scale,
-                    annotation_scale_handle,
-                    bg_color,
-                    viewport,
-                    depth_map,
-                ) {
-                    subs.push(LocalSub::Wire(wire));
-                }
-                for insert in crate::entities::table::block_cell_inserts(
-                    table,
-                    doc,
-                    anno_scale,
-                ) {
-                    subs.push(LocalSub::Nested(build_nested_ref(
-                        &insert,
-                        doc,
-                        bg_color,
-                        viewport,
-                        depth_map,
-                    )));
-                }
             }
             _ => {
                 // A wide polyline inside a block carries its `world_width` on
@@ -614,7 +596,6 @@ fn build_defn(
     }
     BlockDefn {
         subs,
-        base_point: crate::scene::render_graph::block_base_point(doc, block_name),
         has_point_marker: false,
         aabb_local: [0.0; 4],
         child_count: br.entity_handles.len(),
@@ -624,16 +605,19 @@ fn build_defn(
 fn build_nested_ref(
     nested_ins: &acadrust::entities::Insert,
     doc: &CadDocument,
+    anno_scale: f32,
     bg_color: [f32; 4],
     viewport: Option<Handle>,
     depth_map: &HashMap<u64, [f32; 2]>,
 ) -> NestedRef {
-    let _ = bg_color;
-
     // Bake the XCLIP boundary (parent-defn-local) so the nested insert keeps
     // its clip when the parent block is expanded — the spatial filter object
     // isn't reachable at expand time.
-    let xform = crate::scene::render_graph::insert_transform(doc, nested_ins);
+    let xform = crate::scene::render_graph::insert_transform_at_scale(
+        doc,
+        nested_ins,
+        anno_scale,
+    );
     let clip_poly = crate::scene::pick::xclip::insert_spatial_filter(doc, nested_ins)
         .map(|filter| {
             crate::scene::pick::xclip::world_clip_polygon_for_transform(filter, &xform)
@@ -646,11 +630,30 @@ fn build_nested_ref(
         .get(&nested_ins.common.layer)
         .map(|layer| layer.is_plottable)
         .unwrap_or(true);
+    let attachments = crate::entities::insert::insert_attribute_entities(
+        doc,
+        nested_ins,
+        anno_scale,
+    )
+        .into_iter()
+        .flat_map(|attribute| {
+            tessellate_sub_local(
+                doc,
+                &attribute,
+                1.0,
+                None,
+                bg_color,
+                viewport,
+                depth_map,
+            )
+        })
+        .collect();
 
     NestedRef {
         block_name: nested_ins.block_name.clone(),
         xform,
         style: crate::scene::render_graph::InsertStyleSpec::new(doc, nested_ins, viewport),
+        attachments,
         instance_offsets: crate::scene::render_graph::array_offsets(nested_ins),
         plot_visible,
         plot_l0,
@@ -941,6 +944,7 @@ pub fn aabb_disjoint_xy(a: [f32; 4], b: [f32; 4]) -> bool {
 /// Returns `None` if no defn is cached for `ins.block_name`. Returns
 /// `Some(empty)` if the defn exists but is empty.
 pub fn expand_insert(
+    doc: &CadDocument,
     cache: &BlockCache,
     ins: &acadrust::entities::Insert,
     ins_handle: Handle,
@@ -975,26 +979,7 @@ pub fn expand_insert(
     suppress_root_points: bool,
 ) -> Option<Vec<WireModel>> {
     let defn = cache.defn(&ins.block_name)?;
-    let base = defn.base_point;
-    let mut xform = Transform::from_translation(Vector3::new(-base.x, -base.y, -base.z))
-        .then(&ins.get_transform());
-    // Annotative blocks (the flag lives on the block definition; the instance is
-    // marked with the AcAnnotativeData XDATA) scale as ONE uniform unit about
-    // their insertion point — internal geometry/text/attributes are carried by
-    // this transform, never scaled individually (which would double-scale).
-    if (anno_scale - 1.0).abs() > 1e-6
-        && ins
-            .common
-            .extended_data
-            .get_record("AcAnnotativeData")
-            .is_some()
-    {
-        let p = ins.insert_point;
-        let scale_about_p = Transform::from_translation(Vector3::new(-p.x, -p.y, -p.z))
-            .then(&Transform::from_scale(anno_scale as f64))
-            .then(&Transform::from_translation(Vector3::new(p.x, p.y, p.z)));
-        xform = xform.then(&scale_about_p);
-    }
+    let xform = crate::scene::render_graph::insert_transform_at_scale(doc, ins, anno_scale);
     let name = ins_handle.value().to_string();
     let prototype_key = if !ins.is_array()
         && cache.prototype_blocks.contains(&ins.block_name)
@@ -1793,41 +1778,6 @@ fn expand_defn(
                 emit_wire(lw, accum_xform, ctx, out, d_range);
             }
             LocalSub::Nested(nref) => {
-                if visited.iter().any(|n| n == &nref.block_name) {
-                    // Cycle — skip.
-                    continue;
-                }
-                let Some(nested_defn) = ctx.cache.defn(&nref.block_name) else {
-                    continue;
-                };
-                // Nested-INSERT cull: union AABB of the nested defn,
-                // transformed by composed xform, vs view rect + pixel size.
-                // `nested_defn.aabb_local` lives in the nested defn's offset
-                // frame — re-add `nested_defn.local_offset` in f64 before
-                // composing with the parent transforms.
-                let composed = nref.xform.then(accum_xform);
-                let world = transform_aabb_xy(nested_defn.aabb_local, &composed);
-                let local = [
-                    world[0] as f32,
-                    world[1] as f32,
-                    world[2] as f32,
-                    world[3] as f32,
-                ];
-                if let Some(view) = ctx.view_aabb {
-                    if aabb_disjoint_xy(local, view) {
-                        continue;
-                    }
-                }
-                if let Some(wpp) = ctx.world_per_pixel {
-                    if aabb_pixel_size(local, wpp) < MIN_PIXEL_SIZE {
-                        continue;
-                    }
-                }
-                // Resolve the nested insert's own style against the outer ctx:
-                // ByBlock inherits the outer insert; a nested insert that is
-                // itself on layer "0" with ByLayer props inherits the outer
-                // layer-0 target (so its ByBlock leaves resolve to that layer,
-                // not layer 0). Mirrors the leaf resolution in emit_wire.
                 let parent_style = crate::scene::render_graph::BlockStyle {
                     insert: (
                         ctx.ins_color,
@@ -1863,6 +1813,33 @@ fn expand_defn(
                     is_xref: ctx.is_xref,
                     bg_color: ctx.bg_color,
                 };
+                for attachment in &nref.attachments {
+                    emit_wire(attachment, accum_xform, &inner_ctx, out, d_range);
+                }
+                if visited.iter().any(|n| n == &nref.block_name) {
+                    continue;
+                }
+                let Some(nested_defn) = ctx.cache.defn(&nref.block_name) else {
+                    continue;
+                };
+                let composed = nref.xform.then(accum_xform);
+                let world = transform_aabb_xy(nested_defn.aabb_local, &composed);
+                let local = [
+                    world[0] as f32,
+                    world[1] as f32,
+                    world[2] as f32,
+                    world[3] as f32,
+                ];
+                if let Some(view) = ctx.view_aabb {
+                    if aabb_disjoint_xy(local, view) {
+                        continue;
+                    }
+                }
+                if let Some(wpp) = ctx.world_per_pixel {
+                    if aabb_pixel_size(local, wpp) < MIN_PIXEL_SIZE {
+                        continue;
+                    }
+                }
                 visited.push(nref.block_name.clone());
                 // Children of this nested insert stack inside the slot its own
                 // rank owns — same composition the scene graph applies.

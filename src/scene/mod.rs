@@ -6082,6 +6082,7 @@ impl Scene {
             all_visible,
             depth_map.as_ref(),
         )
+        .with_annotation_scale(self.annotation_scale)
         .with_viewport(viewport);
         let mut models = Vec::new();
         let mut image_sources = rustc_hash::FxHashMap::default();
@@ -6739,6 +6740,7 @@ impl Scene {
             all_visible,
             depth_map.as_ref(),
         )
+        .with_annotation_scale(self.annotation_scale)
         .with_viewport(viewport);
         let mut out = Vec::new();
         graph.walk_root(
@@ -7027,9 +7029,7 @@ impl Scene {
         self.belongs_to_visible_block(handle, common.owner_handle, self.interaction_block_handle())
     }
 
-    /// Per-Insert hatch models in the current layout, keyed by the Insert
-    /// handle so a click on a block-internal hatch can select the parent
-    /// Insert; block-owned leaves resolve to their owning instance.
+    /// Instanced hatch models keyed by their block-backed host handle.
 
     pub fn insert_hatches_for_click(&self) -> Arc<HashMap<Handle, Vec<HatchModel>>> {
         let interaction_block = self.interaction_block_handle();
@@ -7042,10 +7042,15 @@ impl Scene {
                         epoch,
                         CACHE_CATEGORY_INSERT_HATCH,
                         |handle| {
-                            matches!(
-                                self.document.get_entity(handle),
-                                Some(EntityType::Insert(_))
-                            )
+                            self.document.get_entity(handle).is_some_and(|entity| {
+                                render_graph::entity_render_block_uses(
+                                    &self.document,
+                                    entity,
+                                    self.annotation_scale,
+                                )
+                                .into_iter()
+                                .any(|block_use| block_use.active)
+                            })
                         },
                     )
                 {
@@ -7082,22 +7087,22 @@ impl Scene {
             annotation_scale_handle,
             all_visible,
             depth_map.as_ref(),
-        );
+        )
+        .with_annotation_scale(self.annotation_scale);
         for entity in self.document.entities() {
             let contextual = crate::scene::annotative::entity_for_annotation_context(
                 &self.document,
                 entity,
                 annotation_scale_handle,
             );
-            let EntityType::Insert(ins) = contextual.as_ref() else {
-                continue;
-            };
-            if ins.common.invisible
-                || self.entity_temporarily_hidden(ins.common.handle)
-                || layer_hidden(&ins.common.layer)
+            let host = contextual.as_ref();
+            let common = host.common();
+            if common.invisible
+                || self.entity_temporarily_hidden(common.handle)
+                || layer_hidden(&common.layer)
                 || crate::scene::annotative::annotative_offscale_for(
                     &self.document,
-                    &ins.common,
+                    common,
                     annotation_scale_handle,
                     all_visible,
                 )
@@ -7105,58 +7110,67 @@ impl Scene {
                 continue;
             }
             if !self.belongs_to_visible_block(
-                ins.common.handle,
-                ins.common.owner_handle,
+                common.handle,
+                common.owner_handle,
                 interaction_block,
             ) {
                 continue;
             }
-            if !render_graph::block_contains_hatch(
+            for block_use in render_graph::entity_render_block_uses(
                 &self.document,
-                &ins.block_name,
-                &mut hatch_memo,
-            ) {
-                continue;
-            }
-            graph.walk_insert(
-                ins,
-                ins.common.handle,
-                |_, _| true,
-                |entity, context| {
-                    let EntityType::Hatch(source) = entity else {
-                        return;
-                    };
-                    let mut placed = EntityType::Hatch(source.clone());
-                    placed.apply_transform(&context.transform);
-                    let EntityType::Hatch(hatch) = placed else {
-                        return;
-                    };
-                    let color = crate::scene::view::render::adapt_to_bg(
-                        context.style_for(&self.document, entity).0,
-                        self.current_bg(),
-                    );
-                    let Some(mut model) = Self::hatch_model_from_dxf(&hatch, color)
-                    else {
-                        return;
-                    };
-                    for clip in &context.clips {
-                        let clip: Vec<[f32; 2]> = clip
-                            .iter()
-                            .map(|point| [point[0] as f32, point[1] as f32])
-                            .collect();
-                        let clipped = pick::xclip::clip_hatch_boundary(
-                            &model.boundary,
-                            model.world_origin,
-                            &clip,
-                        );
-                        if clipped.is_empty() {
+                host,
+                self.annotation_scale,
+            )
+            .into_iter()
+            .filter(|block_use| block_use.active)
+            {
+                if !render_graph::block_contains_hatch(
+                    &self.document,
+                    &block_use.insert.block_name,
+                    &mut hatch_memo,
+                ) {
+                    continue;
+                }
+                graph.walk_insert(
+                    &block_use.insert,
+                    common.handle,
+                    |_, _| true,
+                    |entity, context| {
+                        let EntityType::Hatch(source) = entity else {
                             return;
+                        };
+                        let mut placed = EntityType::Hatch(source.clone());
+                        placed.apply_transform(&context.transform);
+                        let EntityType::Hatch(hatch) = placed else {
+                            return;
+                        };
+                        let color = crate::scene::view::render::adapt_to_bg(
+                            context.style_for(&self.document, entity).0,
+                            self.current_bg(),
+                        );
+                        let Some(mut model) = Self::hatch_model_from_dxf(&hatch, color)
+                        else {
+                            return;
+                        };
+                        for clip in &context.clips {
+                            let clip: Vec<[f32; 2]> = clip
+                                .iter()
+                                .map(|point| [point[0] as f32, point[1] as f32])
+                                .collect();
+                            let clipped = pick::xclip::clip_hatch_boundary(
+                                &model.boundary,
+                                model.world_origin,
+                                &clip,
+                            );
+                            if clipped.is_empty() {
+                                return;
+                            }
+                            model.boundary = Arc::new(clipped);
                         }
-                        model.boundary = Arc::new(clipped);
-                    }
-                    out.entry(ins.common.handle).or_default().push(model);
-                },
-            );
+                        out.entry(common.handle).or_default().push(model);
+                    },
+                );
+            }
         }
         let arc = Arc::new(out);
         *self.insert_hatch_cache.borrow_mut() =
@@ -8872,11 +8886,7 @@ impl Scene {
         let mut roots: HashMap<String, HashSet<Handle>> = HashMap::default();
         let mut parents: HashMap<String, HashSet<String>> = HashMap::default();
         for entity in self.document.entities() {
-            let EntityType::Insert(insert) = entity else {
-                continue;
-            };
-            let target = normalize_name(&insert.block_name);
-            let common = &insert.common;
+            let common = entity.common();
             let owner = if common.owner_handle.is_null() {
                 membership
                     .get(&common.handle)
@@ -8885,13 +8895,19 @@ impl Scene {
             } else {
                 common.owner_handle
             };
-            if owner.is_null() || layout_blocks.contains(&owner) {
-                roots.entry(target).or_default().insert(common.handle);
-            } else if let Some(parent) = block_names.get(&owner) {
-                parents.entry(target).or_default().insert(parent.clone());
+            for block_use in render_graph::entity_block_uses(&self.document, entity, 1.0) {
+                let target = normalize_name(&block_use.insert.block_name);
+                if target.is_empty() {
+                    continue;
+                }
+                if owner.is_null() || layout_blocks.contains(&owner) {
+                    roots.entry(target).or_default().insert(common.handle);
+                } else if let Some(parent) = block_names.get(&owner) {
+                    parents.entry(target).or_default().insert(parent.clone());
+                }
             }
         }
-        // Propagate top-level INSERT users through nested block references.
+        // Propagate root users through nested block references.
         // Fixed-point form is cycle-safe and block graphs are normally shallow.
         let mut changed = true;
         while changed {

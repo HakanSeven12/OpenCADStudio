@@ -2091,15 +2091,17 @@ fn custom_arrow_from_block(
         true,
         &depths,
     );
-    let insert = acadrust::entities::Insert::new(
-        record.name.clone(),
+    let block_use = crate::scene::render_graph::block_use_from_handle(
+        doc,
+        record.handle,
+        crate::scene::render_graph::BlockRole::ArrowHead,
         acadrust::types::Vector3::ZERO,
-    );
+    )?;
     let mut lines = Vec::new();
     let mut fill = Vec::new();
     let mut deferred_hatch = false;
     graph.walk_insert(
-        &insert,
+        &block_use.insert,
         record.handle,
         |_, _| true,
         |entity, context| {

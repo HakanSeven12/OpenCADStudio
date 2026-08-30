@@ -73,6 +73,7 @@ fn block_entity_transform(
     block_name: &str,
     target: Handle,
     visited: &mut Vec<String>,
+    annotation_scale: f32,
 ) -> Option<acadrust::types::Transform> {
     if visited
         .iter()
@@ -90,12 +91,28 @@ fn block_entity_transform(
 
     visited.push(record.name.clone());
     let transform = record.entity_handles.iter().find_map(|handle| {
-        let EntityType::Insert(insert) = document.get_entity(*handle)? else {
-            return None;
-        };
-        let inner =
-            block_entity_transform(document, &insert.block_name, target, visited)?;
-        Some(inner.then(&insert.get_transform()))
+        let entity = document.get_entity(*handle)?;
+        crate::scene::render_graph::entity_render_block_uses(
+            document,
+            entity,
+            annotation_scale,
+        )
+        .into_iter()
+        .filter(|block_use| block_use.active)
+        .find_map(|block_use| {
+            let inner = block_entity_transform(
+                document,
+                &block_use.insert.block_name,
+                target,
+                visited,
+                annotation_scale,
+            )?;
+            Some(inner.then(&crate::scene::render_graph::insert_transform_at_scale(
+                document,
+                &block_use.insert,
+                annotation_scale,
+            )))
+        })
     });
     visited.pop();
     transform
@@ -461,7 +478,7 @@ impl Scene {
     /// Centre on a text entity stored in a block definition, transformed
     /// through the concrete visible INSERT occurrence that FIND is visiting.
     pub fn center_camera_on_block_entity(&mut self, insert: Handle, entity: Handle) -> bool {
-        let (source, mut transform) = {
+        let (source, transform) = {
             let Some(EntityType::Insert(insert_entity)) = self.document.get_entity(insert) else {
                 return false;
             };
@@ -474,39 +491,19 @@ impl Scene {
                 &insert_entity.block_name,
                 entity,
                 &mut visited,
+                self.annotation_scale,
             ) else {
                 return false;
             };
             (
                 source.clone(),
-                inner.then(&insert_entity.get_transform()),
+                inner.then(&crate::scene::render_graph::insert_transform_at_scale(
+                    &self.document,
+                    insert_entity,
+                    self.annotation_scale,
+                )),
             )
         };
-
-        if (self.annotation_scale - 1.0).abs() > 1e-6 {
-            let Some(EntityType::Insert(insert_entity)) = self.document.get_entity(insert) else {
-                return false;
-            };
-            if insert_entity
-                .common
-                .extended_data
-                .get_record("AcAnnotativeData")
-                .is_some()
-            {
-                let point = insert_entity.insert_point;
-                let scale_about =
-                    acadrust::types::Transform::from_translation(acadrust::types::Vector3::new(
-                        -point.x, -point.y, -point.z,
-                    ))
-                    .then(&acadrust::types::Transform::from_scale(
-                        self.annotation_scale as f64,
-                    ))
-                    .then(&acadrust::types::Transform::from_translation(
-                        acadrust::types::Vector3::new(point.x, point.y, point.z),
-                    ));
-                transform = transform.then(&scale_about);
-            }
-        }
 
         let fallback_z = self.active_camera_target().z;
         let wires = self.tessellate_one(&source);

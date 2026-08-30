@@ -1700,6 +1700,59 @@ impl crate::entities::traits::Transformable for MultiLeader {
     }
 }
 
+pub(crate) fn block_content_insert(
+    document: &acadrust::CadDocument,
+    ml: &MultiLeader,
+) -> Option<acadrust::entities::Insert> {
+    if ml.content_type != LeaderContentType::Block || !ml.context.has_block_contents {
+        return None;
+    }
+    let record = ml.block_content_handle.and_then(|handle| {
+        document
+            .block_records
+            .iter()
+            .find(|record| record.handle == handle)
+    })?;
+    let mut insertion = ml.context.block_content_location;
+    if ml.block_connection_type == BlockContentConnectionType::BlockExtents {
+        let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        for handle in &record.entity_handles {
+            if let Some(entity) = document.get_entity(*handle) {
+                let aabb = crate::scene::convert::tess::entity_aabb(entity);
+                if aabb != crate::scene::model::wire_model::WireModel::UNBOUNDED_AABB {
+                    bounds[0] = bounds[0].min(aabb[0]);
+                    bounds[1] = bounds[1].min(aabb[1]);
+                    bounds[2] = bounds[2].max(aabb[2]);
+                    bounds[3] = bounds[3].max(aabb[3]);
+                }
+            }
+        }
+        if bounds[0] <= bounds[2] && bounds[1] <= bounds[3] {
+            let to_block = Transform::rotation(-ml.block_rotation);
+            let from_left = ml.context.leader_roots.first().map_or(true, |root| {
+                to_block.apply_vector([root.direction.x, root.direction.y])[0] >= 0.0
+            });
+            let anchor_x = if from_left { bounds[0] } else { bounds[2] } as f64;
+            let anchor_y = ((bounds[1] + bounds[3]) * 0.5) as f64;
+            let local_x = (anchor_x - record.base_point.x) * ml.block_scale.x;
+            let local_y = (anchor_y - record.base_point.y) * ml.block_scale.y;
+            let rotated =
+                Transform::rotation(ml.block_rotation).apply_vector([local_x, local_y]);
+            insertion.x -= rotated[0];
+            insertion.y -= rotated[1];
+        }
+    }
+    let mut insert = acadrust::entities::Insert::new(record.name.clone(), insertion);
+    insert.set_x_scale(ml.block_scale.x);
+    insert.set_y_scale(ml.block_scale.y);
+    insert.set_z_scale(ml.block_scale.z);
+    insert.rotation = ml.block_rotation;
+    insert.normal = ml.context.block_content_normal;
+    insert.common = ml.common.clone();
+    insert.common.color = ml.block_content_color.clone();
+    Some(insert)
+}
+
 /// Per-entity tessellation entry for `MultiLeader`. Returns multiple
 /// `WireModel`s (leader/dogleg + arrow fill, optional block content,
 /// text strokes, frame, background fill) so each piece can carry its
@@ -1713,6 +1766,10 @@ pub trait MultiLeaderTess {
         entity_color: [f32; 4],
         line_weight_px: f32,
         anno_scale: f32,
+        active_viewport: Option<acadrust::Handle>,
+        annotation_scale_handle: Option<acadrust::Handle>,
+        block_cache: Option<&crate::scene::cache::block_cache::BlockCache>,
+        view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
     ) -> Vec<crate::scene::model::wire_model::WireModel>;
@@ -1727,11 +1784,15 @@ impl MultiLeaderTess for MultiLeader {
         entity_color: [f32; 4],
         line_weight_px: f32,
         anno_scale: f32,
-        _world_per_pixel: Option<f32>,
+        active_viewport: Option<acadrust::Handle>,
+        annotation_scale_handle: Option<acadrust::Handle>,
+        block_cache: Option<&crate::scene::cache::block_cache::BlockCache>,
+        view_aabb: Option<[f32; 4]>,
+        world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
     ) -> Vec<crate::scene::model::wire_model::WireModel> {
         use crate::scene::convert::tessellate::{
-            append_arrow, arrow_from_block, color_or_inherit, tessellate, ArrowKind, DimGeom,
+            append_arrow, arrow_from_block, color_or_inherit, ArrowKind, DimGeom,
         };
         use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
         use glam::Vec3;
@@ -2043,117 +2104,25 @@ impl MultiLeaderTess for MultiLeader {
             fill_tris_low: Vec::new(),
         });
 
-        // ── Block content ───────────────────────────────────────────────────────
-        // When content_type == Block, the MultiLeader displays a block reference
-        // at block_content_location with the recorded rotation/scale. A
-        // synthetic Insert supplies that context to the shared scene graph;
-        // every child then uses its normal tessellator.
-        if ml.content_type == LeaderContentType::Block && ml.context.has_block_contents {
-            let block_record = match ml.block_content_handle {
-                Some(h) if !h.is_null() => document
-                    .block_records
-                    .iter()
-                    .find(|br| br.handle == h)
-                    .cloned(),
-                _ => None,
-            };
-            if let Some(block_record) = block_record {
-                let block_name = block_record.name.clone();
-                let block_color = if selected {
-                    line_color
-                } else {
-                    color_or_inherit(&ml.block_content_color, entity_color)
-                };
-                let mut insertion = ml.context.block_content_location;
-                if ml.block_connection_type == BlockContentConnectionType::BlockExtents {
-                    let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-                    for entity_handle in &block_record.entity_handles {
-                        if let Some(entity) = document.get_entity(*entity_handle) {
-                            let aabb = crate::scene::convert::tess::entity_aabb(entity);
-                            if aabb != WireModel::UNBOUNDED_AABB {
-                                bounds[0] = bounds[0].min(aabb[0]);
-                                bounds[1] = bounds[1].min(aabb[1]);
-                                bounds[2] = bounds[2].max(aabb[2]);
-                                bounds[3] = bounds[3].max(aabb[3]);
-                            }
-                        }
-                    }
-                    if bounds[0] <= bounds[2] && bounds[1] <= bounds[3] {
-                        let to_block = Transform::rotation(-ml.block_rotation);
-                        let from_left = ml
-                            .context
-                            .leader_roots
-                            .first()
-                            .map_or(true, |root| {
-                                to_block.apply_vector([
-                                    root.direction.x,
-                                    root.direction.y,
-                                ])[0]
-                                    >= 0.0
-                            });
-                        let anchor_x = if from_left { bounds[0] } else { bounds[2] } as f64;
-                        let anchor_y = ((bounds[1] + bounds[3]) * 0.5) as f64;
-                        let local_x =
-                            (anchor_x - block_record.base_point.x) * ml.block_scale.x;
-                        let local_y =
-                            (anchor_y - block_record.base_point.y) * ml.block_scale.y;
-                        let rotated = Transform::rotation(ml.block_rotation)
-                            .apply_vector([local_x, local_y]);
-                        insertion.x -= rotated[0];
-                        insertion.y -= rotated[1];
-                    }
-                }
-                let mut synth_ins = acadrust::entities::Insert::new(block_name, insertion);
-                synth_ins.set_x_scale(ml.block_scale.x);
-                synth_ins.set_y_scale(ml.block_scale.y);
-                synth_ins.set_z_scale(ml.block_scale.z);
-                synth_ins.rotation = ml.block_rotation;
-                synth_ins.common.layer = ml.common.layer.clone();
-                let depths = rustc_hash::FxHashMap::default();
-                let graph = crate::scene::render_graph::RenderSceneGraph::new(
+        if let Some(insert) = block_content_insert(document, ml) {
+            wires.extend(
+                crate::scene::convert::tess::expand_block_object(
                     document,
-                    None,
-                    None,
-                    true,
-                    &depths,
-                );
-                graph.walk_insert(
-                    &synth_ins,
+                    &insert,
                     handle,
-                    |_, _| true,
-                    |entity, context| {
-                        let mut placed = entity.clone();
-                        placed.apply_transform(&context.transform);
-                        let mut sub_wires = tessellate(
-                            document,
-                            handle,
-                            &placed,
-                            selected,
-                            block_color,
-                            leader_pat_len,
-                            leader_pat,
-                            leader_lw_px,
-                            1.0,
-                            None,
-                            None,
-                            bg_color,
-                            false,
-                        );
-                        for w in &mut sub_wires {
-                            w.name = name.clone();
-                        }
-                        wires.extend(sub_wires);
-                    },
-                );
-                // Block attributes attached to the multileader — render each as
-                // its own attribute entity at WCS location like INSERT does.
-                for ba in &ml.block_attributes {
-                    let _ = ba; // BlockAttribute carries only the value override
-                                // string; we'd need the AttributeDefinition handle
-                                // to materialise it as ATTRIB geometry. Skipped
-                                // until that wiring exists.
-                }
-            }
+                    selected,
+                    active_viewport,
+                    bg_color,
+                    1.0,
+                    annotation_scale_handle,
+                    block_cache,
+                    view_aabb,
+                    world_per_pixel,
+                    1.0,
+                    crate::scene::convert::tess::BlockObjectOptions::default(),
+                )
+                .wires,
+            );
         }
 
         // ── Text strokes / frame / background fill ──────────────────────────────

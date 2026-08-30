@@ -42,6 +42,7 @@ pub struct LocalWire {
     /// Low-bit residual paired with `points` so block-instance wires keep
     /// sub-f32 precision once the renderer translates them to world space.
     pub points_low: Vec<[f32; 3]>,
+    pub is_point: bool,
     pub point_marker: Option<PointMarker>,
     /// SDF glyph quads for block-internal text, in block-local coordinates.
     /// Non-empty only when SDF text is on and this sub is a TEXT/MTEXT. The
@@ -126,6 +127,7 @@ pub struct NestedRef {
     /// The nested INSERT's own signed draw-order rank in (-1,1) within the
     /// parent block — narrows the depth sub-range its children may occupy.
     pub local_rank: f32,
+    pub suppress_root_points: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +174,7 @@ struct ExpansionPrototypeKey {
     insert_style: Vec<u32>,
     selected: bool,
     is_xref: bool,
+    suppress_root_points: bool,
 }
 
 #[derive(Debug)]
@@ -207,11 +210,8 @@ impl BlockCache {
         self.defns.get(block_name)
     }
 
-    /// Build (flat) defns only for block records actually referenced by
-    /// Inserts in the document — transitively, so nested-insert targets are
-    /// included too. The Model_Space / Paper_Space block_records are skipped
-    /// because their entities are emitted as top-level wires, not via the
-    /// cache.
+    /// Build definitions referenced by block-backed entities. Space records stay
+    /// roots so their direct entities preserve individual selection handles.
     pub fn build(
         doc: &CadDocument,
         anno_scale: f32,
@@ -395,16 +395,24 @@ impl BlockCache {
     }
 }
 
-/// Walk all entities + all block_record contents collecting every distinct
-/// `block_name` that appears in an Insert (transitively).
+fn block_object_name(doc: &CadDocument, entity: &EntityType) -> Option<String> {
+    if let EntityType::Insert(insert) = entity {
+        Some(insert.block_name.clone())
+    } else {
+        crate::scene::render_graph::owned_block_insert(doc, entity)
+            .map(|owned| owned.insert.block_name)
+    }
+}
+
+/// Collect every referenced block-backed object.
 fn collect_referenced_blocks(doc: &CadDocument) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::default();
     let mut queue: Vec<String> = Vec::new();
 
     for entity in doc.entities() {
-        if let EntityType::Insert(ins) = entity {
-            if seen.insert(ins.block_name.clone()) {
-                queue.push(ins.block_name.clone());
+        if let Some(name) = block_object_name(doc, entity) {
+            if seen.insert(name.clone()) {
+                queue.push(name);
             }
         }
     }
@@ -416,9 +424,9 @@ fn collect_referenced_blocks(doc: &CadDocument) -> Vec<String> {
             let Some(entity) = doc.get_entity(eh) else {
                 continue;
             };
-            if let EntityType::Insert(ins) = entity {
-                if seen.insert(ins.block_name.clone()) {
-                    queue.push(ins.block_name.clone());
+            if let Some(name) = block_object_name(doc, entity) {
+                if seen.insert(name.clone()) {
+                    queue.push(name);
                 }
             }
         }
@@ -435,11 +443,13 @@ fn referenced_block_tree(doc: &CadDocument, root: &str) -> Vec<String> {
             continue;
         };
         for &handle in &record.entity_handles {
-            let Some(EntityType::Insert(insert)) = doc.get_entity(handle) else {
+            let Some(entity) = doc.get_entity(handle) else {
                 continue;
             };
-            if seen.insert(insert.block_name.clone()) {
-                queue.push(insert.block_name.clone());
+            if let Some(name) = block_object_name(doc, entity) {
+                if seen.insert(name.clone()) {
+                    queue.push(name);
+                }
             }
         }
     }
@@ -510,6 +520,20 @@ fn build_defn(
         ) {
             continue;
         }
+        if let Some(owned) = crate::scene::render_graph::owned_block_insert(doc, entity) {
+            if owned.render_picture {
+                let mut nested = build_nested_ref(
+                    &owned.insert,
+                    doc,
+                    bg_color,
+                    viewport,
+                    depth_map,
+                );
+                nested.suppress_root_points = owned.suppress_root_points;
+                subs.push(LocalSub::Nested(nested));
+                continue;
+            }
+        }
         match entity {
             EntityType::Block(_) | EntityType::BlockEnd(_) => continue,
             // A non-constant ATTDEF is only a template — the insert supplies an
@@ -543,91 +567,30 @@ fn build_defn(
                     subs.push(LocalSub::Wire(wire));
                 }
             }
-            // A nested table's stored graphics use the same scene-graph
-            // traversal as top-level table content. The resulting leaf wires
-            // remain local to this cached definition; the parent instance
-            // transform is composed later by the cache expansion.
             EntityType::Table(table) => {
-                let baked = table.block_record_handle.and_then(|handle| {
-                    doc.block_records
-                        .iter()
-                        .find(|record| record.handle == handle)
-                });
-                if let Some(record) = baked.filter(|record| {
-                    !record.entity_handles.is_empty()
-                }) {
-                    let table_plot_l0 = crate::scene::view::render::is_effective_layer_zero(
-                        &table.common.layer,
-                    );
-                    let table_plot_visible = doc
-                        .layers
-                        .get(&table.common.layer)
-                        .map(|layer| layer.is_plottable)
-                        .unwrap_or(true);
-                    let mut insert = acadrust::entities::Insert::new(
-                        record.name.clone(),
-                        table.insertion_point,
-                    );
-                    insert.rotation = table
-                        .horizontal_direction
-                        .y
-                        .atan2(table.horizontal_direction.x);
-                    insert.common = table.common.clone();
-                    let graph = crate::scene::render_graph::RenderSceneGraph::new(
-                        doc,
-                        None,
-                        annotation_scale_handle,
-                        all_visible,
-                        depth_map,
-                    )
-                    .with_viewport(viewport);
-                    graph.walk_insert(
+                for wire in tessellate_sub_local(
+                    doc,
+                    entity,
+                    anno_scale,
+                    annotation_scale_handle,
+                    bg_color,
+                    viewport,
+                    depth_map,
+                ) {
+                    subs.push(LocalSub::Wire(wire));
+                }
+                for insert in crate::entities::table::block_cell_inserts(
+                    table,
+                    doc,
+                    anno_scale,
+                ) {
+                    subs.push(LocalSub::Nested(build_nested_ref(
                         &insert,
-                        table.common.handle,
-                        |_, _| true,
-                        |leaf, context| {
-                            let mut placed = leaf.clone();
-                            placed.apply_transform(&context.transform);
-                            for mut wire in tessellate_sub_local(
-                                doc,
-                                &placed,
-                                anno_scale,
-                                annotation_scale_handle,
-                                bg_color,
-                                viewport,
-                                depth_map,
-                            ) {
-                                wire.plot_visible &= table_plot_l0 || table_plot_visible;
-                                wire.plot_l0 |= table_plot_l0;
-                                subs.push(LocalSub::Wire(wire));
-                            }
-                        },
-                    );
-                } else {
-                    for wire in tessellate_sub_local(
                         doc,
-                        entity,
-                        anno_scale,
-                        annotation_scale_handle,
                         bg_color,
                         viewport,
                         depth_map,
-                    ) {
-                        subs.push(LocalSub::Wire(wire));
-                    }
-                    for insert in crate::entities::table::block_cell_inserts(
-                        table,
-                        doc,
-                        anno_scale,
-                    ) {
-                        subs.push(LocalSub::Nested(build_nested_ref(
-                            &insert,
-                            doc,
-                            bg_color,
-                            viewport,
-                            depth_map,
-                        )));
-                    }
+                    )));
                 }
             }
             _ => {
@@ -695,6 +658,7 @@ fn build_nested_ref(
         local_rank: depth_map
             .get(&nested_ins.common.handle.value())
             .map_or(0.0, |d| d[0]),
+        suppress_root_points: false,
     }
 }
 
@@ -850,6 +814,7 @@ fn tessellate_sub_local(
         result.push(LocalWire {
             points: wire.points,
             points_low: wire.points_low,
+            is_point: matches!(sub, EntityType::Point(_)),
             point_marker: wire.point_marker,
             text_verts: wire.text_verts,
             key_vertices: wire.key_vertices,
@@ -1005,6 +970,9 @@ pub fn expand_insert(
     // Current annotation scale. An annotative block scales as one uniform unit
     // about its insertion point; a non-annotative block is unaffected.
     anno_scale: f32,
+    // Dimension picture blocks store definition POINTs at their root. They are
+    // metadata, not visible geometry; nested POINTs remain regular block data.
+    suppress_root_points: bool,
 ) -> Option<Vec<WireModel>> {
     let defn = cache.defn(&ins.block_name)?;
     let base = defn.base_point;
@@ -1045,6 +1013,7 @@ pub fn expand_insert(
             is_xref,
             bg_color,
             anno_scale,
+            suppress_root_points,
         ))
     } else {
         None
@@ -1148,6 +1117,7 @@ pub fn expand_insert(
             &mut first_batches,
             &mut visited,
             0,
+            suppress_root_points,
             (0.0, 1.0),
         );
         let mut first = first_batches.finalize(&name, selected, bg_color);
@@ -1185,7 +1155,16 @@ pub fn expand_insert(
             ));
             translation.then(&xform)
         };
-        expand_defn(defn, &base_xform, &ctx, &mut batches, &mut visited, 0, (0.0, 1.0));
+        expand_defn(
+            defn,
+            &base_xform,
+            &ctx,
+            &mut batches,
+            &mut visited,
+            0,
+            suppress_root_points,
+            (0.0, 1.0),
+        );
     }
     let mut wires = batches.finalize(&name, selected, bg_color);
     if let Some(guard) = prototype_guard.as_mut() {
@@ -1230,6 +1209,7 @@ fn expansion_prototype_key(
     is_xref: bool,
     bg_color: [f32; 4],
     anno_scale: f32,
+    suppress_root_points: bool,
 ) -> ExpansionPrototypeKey {
     let matrix = &transform.matrix.m;
     let linear = [
@@ -1262,6 +1242,7 @@ fn expansion_prototype_key(
         insert_style,
         selected,
         is_xref,
+        suppress_root_points,
     }
 }
 
@@ -1384,6 +1365,7 @@ fn nested_prototype_key(
     transform: &Transform,
     ctx: &ExpandCtx<'_>,
     depth_scale: f32,
+    suppress_root_points: bool,
 ) -> NestedPrototypeKey {
     let matrix = &transform.matrix.m;
     let linear = [
@@ -1411,6 +1393,7 @@ fn nested_prototype_key(
         selected: ctx.selected,
         is_xref: ctx.is_xref,
         depth_scale: depth_scale.to_bits(),
+        suppress_root_points,
     }
 }
 
@@ -1527,6 +1510,7 @@ struct NestedPrototypeKey {
     selected: bool,
     is_xref: bool,
     depth_scale: u32,
+    suppress_root_points: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1766,6 +1750,7 @@ fn expand_defn(
     out: &mut Batches,
     visited: &mut Vec<String>,
     depth: usize,
+    suppress_root_points: bool,
     // Block-local depth sub-range `(base, scale)` accumulated through nested
     // inserts: a child at rank r lands at `base + r * scale`, all within
     // (-1,1) of the top-level insert. Seeded `(0.0, 1.0)` by `expand_insert`.
@@ -1778,6 +1763,9 @@ fn expand_defn(
     for sub in &defn.subs {
         match sub {
             LocalSub::Wire(lw) => {
+                if suppress_root_points && lw.is_point {
+                    continue;
+                }
                 // `lw.aabb_local` is in the defn's offset frame; re-add
                 // `defn_lo` (in f64) before composing with `accum_xform`
                 // so culling uses correct world-space corners.
@@ -1926,6 +1914,7 @@ fn expand_defn(
                             &mut sub,
                             visited,
                             depth + 1,
+                            nref.suppress_root_points,
                             nested_range,
                         );
                         let mut wires = sub.finalize("", ctx.selected, ctx.bg_color);
@@ -1958,6 +1947,7 @@ fn expand_defn(
                             &composed,
                             &inner_ctx,
                             nested_range.1,
+                            nref.suppress_root_points,
                         );
                         if let Some(cached) = out.nested_prototypes.get(&key).cloned() {
                             let delta = [
@@ -1986,6 +1976,7 @@ fn expand_defn(
                                 &mut sub,
                                 visited,
                                 depth + 1,
+                                nref.suppress_root_points,
                                 nested_range,
                             );
                             let mut wires = sub.finalize("", ctx.selected, ctx.bg_color);

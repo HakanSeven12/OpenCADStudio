@@ -17,6 +17,172 @@ fn fade_if_locked(
     }
 }
 
+#[derive(Clone, Copy)]
+struct BlockObjectStyle {
+    color: [f32; 4],
+    aci: u8,
+    pattern_length: f32,
+    pattern: [f32; 8],
+    line_weight_px: f32,
+    layer: view::render::InheritStyle,
+    layer_aci: u8,
+    layer_plottable: bool,
+}
+
+pub(crate) struct ExpandedBlockObject {
+    pub(crate) wires: Vec<WireModel>,
+    style: BlockObjectStyle,
+    is_xref: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BlockObjectOptions {
+    pub(crate) suppress_root_points: bool,
+    pub(crate) apply_xclip: bool,
+}
+
+fn block_object_style(
+    document: &acadrust::CadDocument,
+    insert: &acadrust::entities::Insert,
+    active_viewport: Option<Handle>,
+    bg_color: [f32; 4],
+) -> BlockObjectStyle {
+    let entity = EntityType::Insert(insert.clone());
+    let (color, pattern_length, pattern, line_weight_px, aci) =
+        view::render::render_style_for_viewport(document, &entity, active_viewport);
+    let mut layer = view::render::layer_render_style_viewport(
+        document,
+        &insert.common.layer,
+        active_viewport,
+    );
+    layer.color = view::render::adapt_to_bg(layer.color, bg_color);
+    let layer_aci = document
+        .layers
+        .get(&insert.common.layer)
+        .and_then(|layer| match &layer.color {
+            acadrust::types::Color::Index(index) => Some(*index),
+            _ => None,
+        })
+        .unwrap_or(0);
+    let layer_plottable = document
+        .layers
+        .get(&insert.common.layer)
+        .map(|layer| layer.is_plottable)
+        .unwrap_or(true);
+    BlockObjectStyle {
+        color: view::render::adapt_to_bg(color, bg_color),
+        aci,
+        pattern_length,
+        pattern,
+        line_weight_px,
+        layer,
+        layer_aci,
+        layer_plottable,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand_block_object(
+    document: &acadrust::CadDocument,
+    insert: &acadrust::entities::Insert,
+    owner: Handle,
+    selected: bool,
+    active_viewport: Option<Handle>,
+    bg_color: [f32; 4],
+    anno_scale: f32,
+    annotation_scale_handle: Option<Handle>,
+    block_cache: Option<&cache::block_cache::BlockCache>,
+    view_aabb: Option<[f32; 4]>,
+    world_per_pixel: Option<f32>,
+    pslt_factor: f32,
+    options: BlockObjectOptions,
+) -> ExpandedBlockObject {
+    let style = block_object_style(document, insert, active_viewport, bg_color);
+    let fallback_depths = rustc_hash::FxHashMap::default();
+    let fallback_cache;
+    let cache = match block_cache {
+        Some(cache) if cache.defn(&insert.block_name).is_some() => cache,
+        _ => {
+            fallback_cache = cache::block_cache::BlockCache::build_for_block(
+                document,
+                &insert.block_name,
+                anno_scale,
+                annotation_scale_handle,
+                true,
+                bg_color,
+                active_viewport,
+                &fallback_depths,
+            );
+            &fallback_cache
+        }
+    };
+    let is_xref = document
+        .block_records
+        .get(&insert.block_name)
+        .map(|record| record.flags.is_xref || record.flags.is_xref_overlay)
+        .unwrap_or(false);
+    let mut wires = cache::block_cache::expand_insert(
+        cache,
+        insert,
+        owner,
+        style.color,
+        style.aci,
+        style.pattern_length,
+        style.pattern,
+        style.line_weight_px,
+        style.layer,
+        style.layer_aci,
+        style.layer_plottable,
+        selected,
+        pslt_factor,
+        view_aabb,
+        world_per_pixel,
+        is_xref,
+        bg_color,
+        anno_scale,
+        options.suppress_root_points,
+    )
+    .unwrap_or_default();
+
+    if options.apply_xclip {
+        if let Some(filter) = pick::xclip::insert_spatial_filter(document, insert) {
+            let transform = crate::scene::render_graph::insert_transform(document, insert);
+            let polygon = pick::xclip::world_clip_polygon_for_transform(filter, &transform);
+            pick::xclip::clip_wires(&mut wires, &polygon);
+            for wire in &mut wires {
+                if let Some(mut instance) = wire.render_instance {
+                    instance.source_id = cache.clip_source_id(
+                        instance.source_id,
+                        &polygon,
+                        instance.translation,
+                    );
+                    wire.render_instance = Some(instance);
+                }
+            }
+            let frame_mode =
+                crate::scene::frame::mode(document, crate::scene::frame::FrameKind::Xclip);
+            if polygon.len() >= 3 {
+                let mut frame = pick::xclip::frame_wire(
+                    &polygon,
+                    owner.value().to_string(),
+                    style.color,
+                    selected,
+                    style.line_weight_px,
+                );
+                frame.display_visible = frame_mode != 0;
+                frame.plot_visible = frame_mode == 1;
+                wires.push(frame);
+            }
+        }
+    }
+
+    ExpandedBlockObject {
+        wires,
+        style,
+        is_xref,
+    }
+}
+
 /// The section mark's viewing direction (paper-space, unit), derived entirely
 /// from the decoded model-documentation view graph:
 ///
@@ -785,99 +951,32 @@ fn tessellate_entity_inner(
 
     // Render non-annotative dimensions from their stored picture block.
     // Rebuild geometry only when no usable block exists.
-    if let EntityType::Dimension(dim) = e {
-        let baked = Some(dim.base().block_name.trim())
-            .filter(|name| !name.is_empty())
-            .filter(|_| !crate::scene::annotative::is_annotative(document, e))
-            .and_then(|name| {
-                document
-                    .block_records
-                    .iter()
-                    .find(|record| record.name.eq_ignore_ascii_case(name))
-            })
-            .filter(|record| !record.entity_handles.is_empty());
-        if let Some(record) = baked {
-            // The block's contents are already in world space and its base
-            // point is the origin, so the instance that carries them is the
-            // identity — it exists only to reuse the graph's ByBlock / layer-0
-            // colour resolution and its handling of anything nested inside.
-            let mut insert = acadrust::entities::Insert::new(
-                record.name.clone(),
-                acadrust::types::Vector3::ZERO,
-            );
-            insert.common = dim.base().common.clone();
-
-            let depths = rustc_hash::FxHashMap::default();
-            let graph = crate::scene::render_graph::RenderSceneGraph::new(
+    if matches!(e, EntityType::Dimension(_)) {
+        if let Some(owned) = crate::scene::render_graph::owned_block_insert(document, e)
+            .filter(|owned| owned.render_picture)
+        {
+            let mut wires = expand_block_object(
                 document,
-                None,
-                annotation_scale_handle,
-                true,
-                &depths,
-            );
-            let mut wires = Vec::new();
-            graph.walk_insert(
-                &insert,
+                &owned.insert,
                 h,
-                |sub, context| {
-                    // Direct POINTs are dimension definition markers.
-                    context.insert_path.len() != 1 || !matches!(sub, EntityType::Point(_))
+                sel,
+                active_viewport,
+                bg_color,
+                anno_scale,
+                annotation_scale_handle,
+                block_cache,
+                view_aabb,
+                world_per_pixel,
+                pslt_factor,
+                BlockObjectOptions {
+                    suppress_root_points: owned.suppress_root_points,
+                    ..BlockObjectOptions::default()
                 },
-                |sub, context| {
-                    let has_book_color = view::render::has_resolved_book_color(document, sub);
-                    let color_byblock =
-                        !has_book_color && sub.common().color == acadrust::types::Color::ByBlock;
-                    let color_layer0 = !has_book_color
-                        && view::render::is_effective_layer_zero(&sub.common().layer)
-                        && sub.common().color == acadrust::types::Color::ByLayer;
-                    let contrast_bg = convert::tessellate::text_contrast_background(sub, bg_color);
-                    let sub_color = view::render::adapt_to_bg(
-                        view::render::render_style_for_viewport(
-                            document,
-                            sub,
-                            active_viewport,
-                        )
-                        .0,
-                        contrast_bg,
-                    );
-                    let style = context.style_for(document, sub);
-                    let resolved_color = view::render::adapt_to_bg(style.0, contrast_bg);
-                    let mut placed = sub.clone();
-                    placed.apply_transform(&context.transform);
-                    let sub_wires = tessellate_entity(
-                        document,
-                        selected,
-                        active_viewport,
-                        bg_color,
-                        anno_scale,
-                        annotation_scale_handle,
-                        &placed,
-                        block_cache,
-                        view_aabb,
-                        world_per_pixel,
-                        paper_space,
-                    );
-                    for mut wire in sub_wires {
-                        // Every wire answers to the dimension, so a pick selects
-                        // the dimension rather than one of its pieces.
-                        wire.name = h.value().to_string();
-                        if sel {
-                            wire.selected = true;
-                            wire.color = WireModel::SELECTED;
-                        } else if (color_byblock || color_layer0) && wire.color == sub_color {
-                            wire.color = resolved_color;
-                            wire.aci = style.4;
-                        }
-                        wires.push(wire);
-                    }
-                },
-            );
+            )
+            .wires;
             if !wires.is_empty() {
                 let aabb = entity_aabb(e);
                 for wire in &mut wires {
-                    // As below: only stroke / fill wires take the whole-dimension
-                    // box. An SDF-text wire keeps its own tight glyph box so the
-                    // text pick area hugs the text.
                     if !wire.points.is_empty() || !wire.fill_tris.is_empty() {
                         set_wire_aabb(wire, aabb);
                     }
@@ -927,6 +1026,10 @@ fn tessellate_entity_inner(
             entity_color,
             line_weight_px,
             anno_scale,
+            active_viewport,
+            annotation_scale_handle,
+            block_cache,
+            view_aabb,
             world_per_pixel,
             bg_color,
         );
@@ -951,92 +1054,31 @@ fn tessellate_entity_inner(
     // When the block exists we render it directly. Same pattern as
     // Dimension's `block_name`.
     if let EntityType::Table(table) = e {
-        if let Some(record) = table.block_record_handle.and_then(|handle| {
-            document
-                .block_records
-                .iter()
-                .find(|record| record.handle == handle)
-        }) {
-            if !record.entity_handles.is_empty() {
-                let mut insert =
-                    acadrust::entities::Insert::new(
-                        record.name.clone(),
-                        table.insertion_point,
-                    );
-                insert.rotation = table
-                    .horizontal_direction
-                    .y
-                    .atan2(table.horizontal_direction.x);
-                insert.common = table.common.clone();
-
-                let depths = rustc_hash::FxHashMap::default();
-                let graph = crate::scene::render_graph::RenderSceneGraph::new(
-                    document,
-                    None,
-                    annotation_scale_handle,
-                    true,
-                    &depths,
-                );
-                let mut wires = Vec::new();
-                graph.walk_insert(
-                    &insert,
-                    h,
-                    |_, _| true,
-                    |sub, context| {
-                        let has_book_color =
-                            view::render::has_resolved_book_color(document, sub);
-                        let color_byblock = !has_book_color
-                            && sub.common().color
-                                == acadrust::types::Color::ByBlock;
-                        let color_layer0 = !has_book_color
-                            && view::render::is_effective_layer_zero(
-                                &sub.common().layer,
-                            )
-                            && sub.common().color
-                                == acadrust::types::Color::ByLayer;
-                        let style = context.style_for(document, sub);
-                        let mut placed = sub.clone();
-                        placed.apply_transform(&context.transform);
-                        let sub_wires = tessellate_entity(
-                            document,
-                            selected,
-                            active_viewport,
-                            bg_color,
-                            anno_scale,
-                            annotation_scale_handle,
-                            &placed,
-                            block_cache,
-                            view_aabb,
-                            world_per_pixel,
-                            paper_space,
-                        );
-                        for mut wire in sub_wires {
-                            wire.name = h.value().to_string();
-                            if color_byblock {
-                                wire.color = if sel {
-                                    WireModel::SELECTED
-                                } else {
-                                    view::render::adapt_to_bg(style.0, bg_color)
-                                };
-                                wire.aci = style.4;
-                            } else if color_layer0 && !sel {
-                                wire.color =
-                                    view::render::adapt_to_bg(style.0, bg_color);
-                                wire.aci = style.4;
-                            }
-                            wires.push(wire);
-                        }
-                    },
-                );
-                if !wires.is_empty() {
-                    let aabb = entity_aabb(e);
-                    for wire in &mut wires {
-                        if !wire.points.is_empty() || !wire.fill_tris.is_empty() {
-                            set_wire_aabb(wire, aabb);
-                        }
+        if let Some(owned) = crate::scene::render_graph::owned_block_insert(document, e) {
+            let mut wires = expand_block_object(
+                document,
+                &owned.insert,
+                h,
+                sel,
+                active_viewport,
+                bg_color,
+                anno_scale,
+                annotation_scale_handle,
+                block_cache,
+                view_aabb,
+                world_per_pixel,
+                pslt_factor,
+                BlockObjectOptions::default(),
+            )
+            .wires;
+            if !wires.is_empty() {
+                let aabb = entity_aabb(e);
+                for wire in &mut wires {
+                    if !wire.points.is_empty() || !wire.fill_tris.is_empty() {
+                        set_wire_aabb(wire, aabb);
                     }
-                    return wires;
                 }
+                return wires;
             }
         }
 
@@ -1079,34 +1121,6 @@ fn tessellate_entity_inner(
     }
 
     if let EntityType::Insert(ins) = e {
-        // Resolve the INSERT's own style so ByBlock sub-entities can inherit it.
-        let (ins_color, ins_pat_len, ins_pat, ins_lw_px, ins_aci) =
-            view::render::render_style_for_viewport(document, e, active_viewport);
-        let ins_color = view::render::adapt_to_bg(ins_color, bg_color);
-        // Resolve the INSERT's *layer* style — the layer-0 inheritance target
-        // for sub-entities on layer "0" with ByLayer properties (#221).
-        let ins_layer = {
-            let mut s = view::render::layer_render_style_viewport(
-                document,
-                &ins.common.layer,
-                active_viewport,
-            );
-            s.color = view::render::adapt_to_bg(s.color, bg_color);
-            s
-        };
-        let ins_layer_aci = document
-            .layers
-            .get(&ins.common.layer)
-            .and_then(|layer| match &layer.color {
-                acadrust::types::Color::Index(index) => Some(*index),
-                _ => None,
-            })
-            .unwrap_or(0);
-        let ins_layer_plottable = document
-            .layers
-            .get(&ins.common.layer)
-            .map(|layer| layer.is_plottable)
-            .unwrap_or(true);
         let ip = glam::Vec3::new(
             (ins.insert_point.x) as f32,
             (ins.insert_point.y) as f32,
@@ -1146,83 +1160,27 @@ fn tessellate_entity_inner(
             fill_tris_low: Vec::new(),
         };
 
-        let fallback_depths = rustc_hash::FxHashMap::default();
-        let fallback_cache;
-        let cache = match block_cache {
-            Some(cache) if cache.defn(&ins.block_name).is_some() => cache,
-            _ => {
-                fallback_cache = cache::block_cache::BlockCache::build_for_block(
-                    document,
-                    &ins.block_name,
-                    anno_scale,
-                    annotation_scale_handle,
-                    true,
-                    bg_color,
-                    active_viewport,
-                    &fallback_depths,
-                );
-                &fallback_cache
-            }
-        };
-        let is_xref = document
-            .block_records
-            .get(&ins.block_name)
-            .map(|record| record.flags.is_xref || record.flags.is_xref_overlay)
-            .unwrap_or(false);
-        let mut wires = cache::block_cache::expand_insert(
-            cache,
+        let expanded = expand_block_object(
+            document,
             ins,
             h,
-            ins_color,
-            ins_aci,
-            ins_pat_len,
-            ins_pat,
-            ins_lw_px,
-            ins_layer,
-            ins_layer_aci,
-            ins_layer_plottable,
             sel,
-            pslt_factor,
-            view_aabb,
-            world_per_pixel,
-            is_xref,
+            active_viewport,
             bg_color,
             anno_scale,
-        )
-        .unwrap_or_default();
-
-        if let Some(filter) = pick::xclip::insert_spatial_filter(document, ins) {
-            let transform = crate::scene::render_graph::insert_transform(document, ins);
-            let polygon =
-                pick::xclip::world_clip_polygon_for_transform(filter, &transform);
-            pick::xclip::clip_wires(&mut wires, &polygon);
-            for wire in &mut wires {
-                if let Some(mut instance) = wire.render_instance {
-                    instance.source_id = cache.clip_source_id(
-                        instance.source_id,
-                        &polygon,
-                        instance.translation,
-                    );
-                    wire.render_instance = Some(instance);
-                }
-            }
-            let frame_mode = crate::scene::frame::mode(
-                document,
-                crate::scene::frame::FrameKind::Xclip,
-            );
-            if polygon.len() >= 3 {
-                let mut frame = pick::xclip::frame_wire(
-                    &polygon,
-                    h.value().to_string(),
-                    ins_color,
-                    sel,
-                    ins_lw_px,
-                );
-                frame.display_visible = frame_mode != 0;
-                frame.plot_visible = frame_mode == 1;
-                wires.push(frame);
-            }
-        }
+            annotation_scale_handle,
+            block_cache,
+            view_aabb,
+            world_per_pixel,
+            pslt_factor,
+            BlockObjectOptions {
+                apply_xclip: true,
+                ..BlockObjectOptions::default()
+            },
+        );
+        let style = expanded.style;
+        let is_xref = expanded.is_xref;
+        let mut wires = expanded.wires;
 
         crate::entities::insert::append_insert_attribute_wires(
             &mut wires,
@@ -1230,12 +1188,12 @@ fn tessellate_entity_inner(
             ins,
             h,
             sel,
-            ins_color,
-            ins_pat_len,
-            ins_pat,
-            ins_lw_px,
-            ins_layer,
-            ins_layer_plottable,
+            style.color,
+            style.pattern_length,
+            style.pattern,
+            style.line_weight_px,
+            style.layer,
+            style.layer_plottable,
             bg_color,
             is_xref,
             pslt_factor,

@@ -157,35 +157,6 @@ impl BlockStyle {
         InsertStyleSpec::new(document, insert, viewport).resolve(parent)
     }
 
-    pub fn for_owned(
-        document: &CadDocument,
-        entity: &EntityType,
-        parent: Option<Self>,
-        viewport: Option<Handle>,
-    ) -> Self {
-        let on_layer0 = is_effective_layer_zero(&entity.common().layer);
-        let insert = parent
-            .map(|style| style.resolve(document, entity, viewport))
-            .unwrap_or_else(|| render_style_for_viewport(document, entity, viewport));
-        Self {
-            insert,
-            layer0: if on_layer0 {
-                parent
-                    .map(|style| style.layer0)
-                    .unwrap_or_else(|| layer_render_style_viewport(document, &entity.common().layer, viewport))
-            } else {
-                layer_render_style_viewport(document, &entity.common().layer, viewport)
-            },
-            layer0_aci: if on_layer0 {
-                parent
-                    .map(|style| style.layer0_aci)
-                    .unwrap_or_else(|| layer_aci(document, &entity.common().layer))
-            } else {
-                layer_aci(document, &entity.common().layer)
-            },
-        }
-    }
-
     pub fn resolve(
         self,
         document: &CadDocument,
@@ -528,81 +499,16 @@ impl<'a> RenderSceneGraph<'a> {
         V: FnMut(&EntityType, &RenderContext) -> bool,
         F: FnMut(&EntityType, &RenderContext),
     {
-        match entity {
-            EntityType::Dimension(dimension) => {
-                let block_name = dimension.base().block_name.trim();
-                if block_name.is_empty()
-                    || stack
-                        .iter()
-                        .any(|name| name.eq_ignore_ascii_case(block_name))
-                {
-                    return;
-                }
-                let placement =
-                    Transform::from_translation(dimension.base().insertion_point)
-                        .then(&context.transform);
-                let mut owned = context.clone();
-                owned.transform = placement;
-                if owned.root_handle.is_null() {
-                    owned.root_handle = entity.common().handle;
-                }
-                owned.block_style = Some(BlockStyle::for_owned(
-                    self.document,
-                    entity,
-                    context.block_style,
-                    self.viewport,
-                ));
-                owned.nesting_depth += 1;
-                stack.push(block_name.to_string());
-                self.walk_block(block_name, &owned, visible, leaf, stack);
-                stack.pop();
-            }
-            EntityType::Table(table) => {
-                let Some(record) = table.block_record_handle.and_then(|handle| {
-                    self.document
-                        .block_records
-                        .iter()
-                        .find(|record| record.handle == handle)
-                }) else {
-                    return;
-                };
-                let mut insert = Insert::new(record.name.clone(), table.insertion_point);
-                insert.rotation = table
-                    .horizontal_direction
-                    .y
-                    .atan2(table.horizontal_direction.x);
-                insert.common = table.common.clone();
-                self.walk_insert_instances(&insert, context, visible, leaf);
-            }
-            EntityType::MultiLeader(multileader)
-                if matches!(
-                    multileader.content_type,
-                    acadrust::entities::LeaderContentType::Block
-                ) && multileader.context.has_block_contents =>
-            {
-                let Some(record) = multileader.block_content_handle.and_then(|handle| {
-                    self.document
-                        .block_records
-                        .iter()
-                        .find(|record| record.handle == handle)
-                }) else {
-                    return;
-                };
-                let mut insert = Insert::new(
-                    record.name.clone(),
-                    multileader.context.block_content_location,
-                );
-                insert.common = multileader.common.clone();
-                insert.common.color = multileader.block_content_color.clone();
-                insert.set_x_scale(multileader.block_scale.x);
-                insert.set_y_scale(multileader.block_scale.y);
-                insert.set_z_scale(multileader.block_scale.z);
-                insert.rotation = multileader.block_rotation;
-                insert.normal = multileader.context.block_content_normal;
-                self.walk_insert_instances(&insert, context, visible, leaf);
-            }
-            _ => {}
+        let Some(owned) = owned_block_insert(self.document, entity) else {
+            return;
+        };
+        if stack
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(&owned.insert.block_name))
+        {
+            return;
         }
+        self.walk_insert_instances(&owned.insert, context, visible, leaf);
     }
 
     fn document_visible(&self, entity: &EntityType) -> bool {
@@ -647,6 +553,66 @@ pub fn insert_transform(document: &CadDocument, insert: &Insert) -> Transform {
     let base = block_base_point(document, &insert.block_name);
     Transform::from_translation(Vector3::new(-base.x, -base.y, -base.z))
         .then(&insert.get_transform())
+}
+
+pub struct OwnedBlockInsert {
+    pub insert: Insert,
+    pub suppress_root_points: bool,
+    pub render_picture: bool,
+}
+
+pub fn owned_block_insert(
+    document: &CadDocument,
+    entity: &EntityType,
+) -> Option<OwnedBlockInsert> {
+    let (insert, suppress_root_points, render_picture) = match entity {
+        EntityType::Dimension(dimension) => {
+            let name = dimension.base().block_name.trim();
+            let record = document
+                .block_records
+                .iter()
+                .find(|record| record.name.eq_ignore_ascii_case(name))?;
+            if record.entity_handles.is_empty() {
+                return None;
+            }
+            let mut insert = Insert::new(record.name.clone(), Vector3::ZERO);
+            insert.common = dimension.base().common.clone();
+            (
+                insert,
+                true,
+                !crate::scene::annotative::is_annotative(document, entity),
+            )
+        }
+        EntityType::Table(table) => {
+            let record = table.block_record_handle.and_then(|handle| {
+                document
+                    .block_records
+                    .iter()
+                    .find(|record| record.handle == handle)
+            })?;
+            if record.entity_handles.is_empty() {
+                return None;
+            }
+            let mut insert = Insert::new(record.name.clone(), table.insertion_point);
+            insert.rotation = table
+                .horizontal_direction
+                .y
+                .atan2(table.horizontal_direction.x);
+            insert.common = table.common.clone();
+            (insert, false, true)
+        }
+        EntityType::MultiLeader(multileader) => (
+            crate::entities::multileader::block_content_insert(document, multileader)?,
+            false,
+            true,
+        ),
+        _ => return None,
+    };
+    Some(OwnedBlockInsert {
+        insert,
+        suppress_root_points,
+        render_picture,
+    })
 }
 
 pub fn array_offsets(insert: &Insert) -> Vec<[f64; 3]> {

@@ -631,14 +631,16 @@ mod tests {
             "test needs the welcome tab"
         );
 
-        // ABOUT opens a modal; link commands are checked without launching them.
+        // ABOUT schedules its modal; it must pass the welcome-page gate.
+        let start = app.command_line.history.len();
         let _ = app.update(Message::RibbonToolClick {
             tool_id: "ABOUT".to_string(),
             event: ModuleEvent::Command("ABOUT".to_string()),
         });
-        assert!(
-            app.active_modal == Some(crate::app::ModalKind::About),
-            "ABOUT must open on the welcome page"
+        assert_eq!(
+            app.command_line.history.len(),
+            start,
+            "ABOUT must not be refused on the welcome page"
         );
 
         // …but a tool that does need a drawing is still turned away (#299).

@@ -1671,21 +1671,21 @@ mod tests {
             Some(EntityType::Dimension(d)) => d.base().block_name.clone(),
             _ => panic!("dimension missing"),
         };
-        // The longest baked segment is the diameter line; its endpoints span the
-        // full diameter (length ~= 2*radius = 10) centred on `center`.
-        let diam = baked_segments(&doc, &name)
-            .into_iter()
-            .find(|(a, b)| {
-                let len = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
-                (len - 10.0).abs() < 1e-6
+        // Each suppressible half must join an endpoint to the circle centre.
+        let segments = baked_segments(&doc, &name);
+        let connects = |expected: Vector3| {
+            segments.iter().any(|(a, b)| {
+                let near = |p: &Vector3, q: &Vector3| {
+                    (p.x - q.x).abs() < 1e-6
+                        && (p.y - q.y).abs() < 1e-6
+                        && (p.z - q.z).abs() < 1e-6
+                };
+                (near(a, &expected) && near(b, &center))
+                    || (near(b, &expected) && near(a, &center))
             })
-            .expect("diameter line spanning 2*radius");
-        let mid_x = (diam.0.x + diam.1.x) * 0.5;
-        let mid_y = (diam.0.y + diam.1.y) * 0.5;
-        assert!(
-            (mid_x - center.x).abs() < 1e-6 && (mid_y - center.y).abs() < 1e-6,
-            "diameter line must be centred on the circle centre, mid=({mid_x},{mid_y})"
-        );
+        };
+        assert!(connects(edge), "near diameter half missing");
+        assert!(connects(far), "far diameter half missing");
     }
 
     // A rotated linear dimension uses `rotation` directly (radians). Before the

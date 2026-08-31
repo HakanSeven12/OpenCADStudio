@@ -4,9 +4,14 @@ use acadrust::entities::Solid3D;
 use acadrust::objects::SolidHistoryOperation;
 use acadrust::EntityType;
 use cadkernel::brep::Body;
+use cadkernel::geom2d::{
+    fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine,
+    Tolerance,
+};
 use glam::DVec3;
+use std::sync::{Mutex, OnceLock};
 
-use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};
+use crate::command::{CadCommand, CmdOption, CmdResult, TangentObject, WorkingPlane};
 use crate::scene::model::solid_model;
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
@@ -34,6 +39,116 @@ enum BoxStep {
     Height,
     HeightFirstPoint,
     HeightSecondPoint,
+}
+
+#[derive(Clone, Copy)]
+enum SphereStep {
+    Center,
+    Radius(DVec3),
+    Diameter(DVec3),
+    TwoPointFirst,
+    TwoPointSecond(DVec3),
+    ThreePointFirst,
+    ThreePointSecond(DVec3),
+    ThreePointThird(DVec3, DVec3),
+    TtrFirst,
+    TtrSecond {
+        object: TangentObject,
+        hit: DVec3,
+    },
+    TtrRadius {
+        first: TangentObject,
+        second: TangentObject,
+        first_hit: DVec3,
+        second_hit: DVec3,
+    },
+}
+
+fn sphere_radius_store() -> &'static Mutex<f64> {
+    static VALUE: OnceLock<Mutex<f64>> = OnceLock::new();
+    VALUE.get_or_init(|| Mutex::new(1.0))
+}
+
+fn sphere_radius_default() -> f64 {
+    sphere_radius_store()
+        .lock()
+        .map(|value| *value)
+        .unwrap_or(1.0)
+}
+
+fn remember_sphere_radius(radius: f64) {
+    if radius.is_finite() && radius > 1e-6 {
+        if let Ok(mut value) = sphere_radius_store().lock() {
+            *value = radius;
+        }
+    }
+}
+
+fn sphere_tangent_local(object: TangentObject, plane: WorkingPlane) -> TangentObject {
+    match object {
+        TangentObject::Line { p1, p2 } => TangentObject::Line {
+            p1: plane.to_local(p1),
+            p2: plane.to_local(p2),
+        },
+        TangentObject::Circle { center, radius } => TangentObject::Circle {
+            center: plane.to_local(center),
+            radius,
+        },
+    }
+}
+
+fn sphere_tangent_curve(object: TangentObject) -> KernelCurve {
+    match object {
+        TangentObject::Line { p1, p2 } => KernelCurve::Line(KernelLine {
+            start: [p1.x, p1.y],
+            end: [p2.x, p2.y],
+        }),
+        TangentObject::Circle { center, radius } => KernelCurve::Circle(KernelCircle {
+            centre: [center.x, center.y],
+            radius,
+        }),
+    }
+}
+
+fn sphere_ttr_centers(
+    first: TangentObject,
+    second: TangentObject,
+    radius: f64,
+) -> Vec<DVec3> {
+    fillets_between(
+        &sphere_tangent_curve(first),
+        &sphere_tangent_curve(second),
+        radius,
+        Tolerance::default(),
+    )
+    .into_iter()
+    .map(|fillet| DVec3::new(fillet.centre[0], fillet.centre[1], 0.0))
+    .collect()
+}
+
+fn closest_sphere_center(candidates: &[DVec3], hint: DVec3) -> Option<DVec3> {
+    candidates.iter().copied().min_by(|first, second| {
+        first
+            .distance(hint)
+            .partial_cmp(&second.distance(hint))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
+fn sphere_through_three_points(
+    first: DVec3,
+    second: DVec3,
+    third: DVec3,
+) -> Option<(DVec3, f64)> {
+    let circle = cadkernel::geom2d::arc_through_points(
+        [first.x, first.y],
+        [second.x, second.y],
+        [third.x, third.y],
+    )?;
+    Some((
+        DVec3::new(circle.centre[0], circle.centre[1], first.z),
+        circle.radius,
+    ))
 }
 
 impl Shape {
@@ -85,6 +200,8 @@ pub struct PrimitiveCommand {
     box_angle: f64,
     box_width_sign: f64,
     box_height_anchor: Option<DVec3>,
+    sphere_step: SphereStep,
+    sphere_default_radius: f64,
     plane: WorkingPlane,
 }
 
@@ -102,8 +219,50 @@ impl PrimitiveCommand {
             box_angle: 0.0,
             box_width_sign: 1.0,
             box_height_anchor: None,
+            sphere_step: SphereStep::Center,
+            sphere_default_radius: sphere_radius_default(),
             plane: WorkingPlane::default(),
         }
+    }
+
+    fn commit_sphere(&mut self, center: DVec3, radius: f64) -> CmdResult {
+        if !center.is_finite() || !radius.is_finite() || radius <= 1e-6 {
+            return CmdResult::NeedPoint;
+        }
+        self.pts = vec![center, center + DVec3::X * radius];
+        self.sphere_default_radius = radius;
+        remember_sphere_radius(radius);
+        self.commit(0.0)
+    }
+
+    fn sphere_ttr_result(&mut self, radius: f64) -> CmdResult {
+        let SphereStep::TtrRadius {
+            first,
+            second,
+            first_hit,
+            second_hit,
+        } = self.sphere_step
+        else {
+            return CmdResult::NeedPoint;
+        };
+        let hint = (first_hit + second_hit) * 0.5;
+        let Some(center) = closest_sphere_center(
+            &sphere_ttr_centers(first, second, radius),
+            hint,
+        ) else {
+            return CmdResult::NeedPoint;
+        };
+        self.commit_sphere(center, radius)
+    }
+
+    fn sphere_preview(&self, center: DVec3, radius: f64) -> Option<WireModel> {
+        if !center.is_finite() || !radius.is_finite() || radius <= 1e-6 {
+            return None;
+        }
+        Some(self.place_preview(footprint_wire(
+            Shape::Sphere,
+            &[center, center + DVec3::X * radius],
+        )))
     }
 
     /// Number of footprint points the shape needs before the height step.
@@ -499,6 +658,41 @@ impl CadCommand for PrimitiveCommand {
         self.shape.name()
     }
 
+    fn needs_tangent_pick(&self) -> bool {
+        self.shape == Shape::Sphere
+            && matches!(
+                self.sphere_step,
+                SphereStep::TtrFirst | SphereStep::TtrSecond { .. }
+            )
+    }
+
+    fn on_tangent_point(&mut self, object: TangentObject, hit: DVec3) -> CmdResult {
+        if self.shape != Shape::Sphere {
+            return self.on_point(hit);
+        }
+        let object = sphere_tangent_local(object, self.plane);
+        let hit = self.plane.to_local(hit);
+        match self.sphere_step {
+            SphereStep::TtrFirst => {
+                self.sphere_step = SphereStep::TtrSecond { object, hit };
+                CmdResult::NeedPoint
+            }
+            SphereStep::TtrSecond {
+                object: first,
+                hit: first_hit,
+            } => {
+                self.sphere_step = SphereStep::TtrRadius {
+                    first,
+                    second: object,
+                    first_hit,
+                    second_hit: hit,
+                };
+                CmdResult::NeedPoint
+            }
+            _ => CmdResult::NeedPoint,
+        }
+    }
+
     fn prompt(&self) -> String {
         let n = self.shape.name();
         if self.shape == Shape::Box {
@@ -521,6 +715,49 @@ impl CadCommand for PrimitiveCommand {
             }
             .into_owned();
         }
+        if self.shape == Shape::Sphere {
+            return match self.sphere_step {
+                SphereStep::Center => {
+                    t!("SPHERE  Specify center point or [3P/2P/Ttr]:").into_owned()
+                }
+                SphereStep::Radius(_) => crate::tf!(
+                    "SPHERE  Specify radius or [Diameter] <{:.4}>:",
+                    self.sphere_default_radius
+                )
+                .into_owned(),
+                SphereStep::Diameter(_) => crate::tf!(
+                    "SPHERE  Specify diameter <{:.4}>:",
+                    self.sphere_default_radius * 2.0
+                )
+                .into_owned(),
+                SphereStep::TwoPointFirst => {
+                    t!("SPHERE  Specify first end point of diameter:").into_owned()
+                }
+                SphereStep::TwoPointSecond(_) => {
+                    t!("SPHERE  Specify second end point of diameter:").into_owned()
+                }
+                SphereStep::ThreePointFirst => {
+                    t!("SPHERE  Specify first point on sphere:").into_owned()
+                }
+                SphereStep::ThreePointSecond(_) => {
+                    t!("SPHERE  Specify second point on sphere:").into_owned()
+                }
+                SphereStep::ThreePointThird(_, _) => {
+                    t!("SPHERE  Specify third point on sphere:").into_owned()
+                }
+                SphereStep::TtrFirst => {
+                    t!("SPHERE  Select first tangent object:").into_owned()
+                }
+                SphereStep::TtrSecond { .. } => {
+                    t!("SPHERE  Select second tangent object:").into_owned()
+                }
+                SphereStep::TtrRadius { .. } => crate::tf!(
+                    "SPHERE  Specify radius <{:.4}>:",
+                    self.sphere_default_radius
+                )
+                .into_owned(),
+            };
+        }
         if self.height_step {
             return t!("%{n}  Specify height <Enter for default>:", n = n).into_owned();
         }
@@ -540,6 +777,17 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn options(&self) -> Vec<CmdOption> {
+        if self.shape == Shape::Sphere {
+            return match self.sphere_step {
+                SphereStep::Center => vec![
+                    CmdOption::new("3P", "3P"),
+                    CmdOption::new("2P", "2P"),
+                    CmdOption::new("Ttr", "T"),
+                ],
+                SphereStep::Radius(_) => vec![CmdOption::new(t!("Diameter").as_ref(), "D")],
+                _ => Vec::new(),
+            };
+        }
         if self.shape != Shape::Box {
             return Vec::new();
         }
@@ -555,6 +803,49 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if self.shape == Shape::Sphere {
+            let local = self.plane.to_local(pt);
+            if !local.is_finite() {
+                return CmdResult::NeedPoint;
+            }
+            return match self.sphere_step {
+                SphereStep::Center => {
+                    self.sphere_step = SphereStep::Radius(local);
+                    CmdResult::NeedPoint
+                }
+                SphereStep::Radius(center) => self.commit_sphere(center, center.distance(local)),
+                SphereStep::Diameter(center) => {
+                    self.commit_sphere(center, center.distance(local) * 0.5)
+                }
+                SphereStep::TwoPointFirst => {
+                    self.sphere_step = SphereStep::TwoPointSecond(local);
+                    CmdResult::NeedPoint
+                }
+                SphereStep::TwoPointSecond(first) => {
+                    self.commit_sphere((first + local) * 0.5, first.distance(local) * 0.5)
+                }
+                SphereStep::ThreePointFirst => {
+                    self.sphere_step = SphereStep::ThreePointSecond(local);
+                    CmdResult::NeedPoint
+                }
+                SphereStep::ThreePointSecond(first) => {
+                    self.sphere_step = SphereStep::ThreePointThird(first, local);
+                    CmdResult::NeedPoint
+                }
+                SphereStep::ThreePointThird(first, second) => {
+                    let Some((center, radius)) =
+                        sphere_through_three_points(first, second, local)
+                    else {
+                        return CmdResult::NeedPoint;
+                    };
+                    self.commit_sphere(center, radius)
+                }
+                SphereStep::TtrRadius { second_hit, .. } => {
+                    self.sphere_ttr_result(second_hit.distance(local))
+                }
+                SphereStep::TtrFirst | SphereStep::TtrSecond { .. } => CmdResult::NeedPoint,
+            };
+        }
         if self.shape == Shape::Box {
             let local = self.plane.to_local(pt);
             if !local.is_finite() {
@@ -632,6 +923,20 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.shape == Shape::Sphere {
+            return match self.sphere_step {
+                SphereStep::Radius(center) => {
+                    self.commit_sphere(center, self.sphere_default_radius)
+                }
+                SphereStep::Diameter(center) => {
+                    self.commit_sphere(center, self.sphere_default_radius)
+                }
+                SphereStep::TtrRadius { .. } => {
+                    self.sphere_ttr_result(self.sphere_default_radius)
+                }
+                _ => CmdResult::Cancel,
+            };
+        }
         if self.shape == Shape::Box {
             return CmdResult::Cancel;
         }
@@ -647,6 +952,15 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn wants_text_input(&self) -> bool {
+        if self.shape == Shape::Sphere {
+            return matches!(
+                self.sphere_step,
+                SphereStep::Center
+                    | SphereStep::Radius(_)
+                    | SphereStep::Diameter(_)
+                    | SphereStep::TtrRadius { .. }
+            );
+        }
         if self.shape == Shape::Box {
             matches!(
                 self.box_step,
@@ -663,6 +977,9 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
+        if self.shape == Shape::Sphere {
+            return matches!(self.sphere_step, SphereStep::Center | SphereStep::Radius(_));
+        }
         self.shape == Shape::Box
             && matches!(
                 self.box_step,
@@ -671,6 +988,44 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn on_text_input(&mut self, raw: &str) -> Option<CmdResult> {
+        if self.shape == Shape::Sphere {
+            let token = raw.trim();
+            let upper = token.to_uppercase();
+            return match self.sphere_step {
+                SphereStep::Center if upper == "3P" => {
+                    self.sphere_step = SphereStep::ThreePointFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                SphereStep::Center if upper == "2P" => {
+                    self.sphere_step = SphereStep::TwoPointFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                SphereStep::Center if matches!(upper.as_str(), "T" | "TTR") => {
+                    self.sphere_step = SphereStep::TtrFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                SphereStep::Radius(_) if matches!(upper.as_str(), "D" | "DIAMETER") => {
+                    let SphereStep::Radius(center) = self.sphere_step else {
+                        unreachable!();
+                    };
+                    self.sphere_step = SphereStep::Diameter(center);
+                    Some(CmdResult::NeedPoint)
+                }
+                SphereStep::Radius(center) => {
+                    let radius = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.commit_sphere(center, radius))
+                }
+                SphereStep::Diameter(center) => {
+                    let diameter = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.commit_sphere(center, diameter * 0.5))
+                }
+                SphereStep::TtrRadius { .. } => {
+                    let radius = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.sphere_ttr_result(radius))
+                }
+                _ => None,
+            };
+        }
         if self.shape == Shape::Box {
             let token = raw.trim();
             let upper = token.to_uppercase();
@@ -719,6 +1074,43 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        if self.shape == Shape::Sphere {
+            let local = self.plane.to_local(pt);
+            if !local.is_finite() {
+                return None;
+            }
+            return match self.sphere_step {
+                SphereStep::Radius(center) => self.sphere_preview(center, center.distance(local)),
+                SphereStep::Diameter(center) => {
+                    self.sphere_preview(center, center.distance(local) * 0.5)
+                }
+                SphereStep::TwoPointSecond(first) => {
+                    self.sphere_preview((first + local) * 0.5, first.distance(local) * 0.5)
+                }
+                SphereStep::ThreePointSecond(first) => {
+                    self.sphere_preview((first + local) * 0.5, first.distance(local) * 0.5)
+                }
+                SphereStep::ThreePointThird(first, second) => {
+                    let (center, radius) = sphere_through_three_points(first, second, local)?;
+                    self.sphere_preview(center, radius)
+                }
+                SphereStep::TtrRadius {
+                    first,
+                    second,
+                    first_hit,
+                    second_hit,
+                } => {
+                    let radius = second_hit.distance(local);
+                    let hint = (first_hit + second_hit) * 0.5;
+                    let center = closest_sphere_center(
+                        &sphere_ttr_centers(first, second, radius),
+                        hint,
+                    )?;
+                    self.sphere_preview(center, radius)
+                }
+                _ => None,
+            };
+        }
         if self.pts.is_empty() {
             return None;
         }
@@ -806,6 +1198,23 @@ impl CadCommand for PrimitiveCommand {
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
         use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
 
+        if self.shape == Shape::Sphere {
+            let (anchor, role) = match self.sphere_step {
+                SphereStep::Radius(center) => (center, DynRole::Radius),
+                SphereStep::Diameter(center) => (center, DynRole::Diameter),
+                SphereStep::TtrRadius { second_hit, .. } => {
+                    (second_hit, DynRole::Radius)
+                }
+                _ => return None,
+            };
+            return Some(DynSpec {
+                anchor: DynAnchor::Point(self.plane.to_world(anchor)),
+                fields: vec![DynFieldSpec::new(role)],
+                guide: DynGuide::Radius,
+                ref_point: None,
+            });
+        }
+
         let role = if self.shape == Shape::Box {
             match self.box_step {
                 BoxStep::CubeSize | BoxStep::Length => DynRole::Distance,
@@ -827,6 +1236,17 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        if self.shape == Shape::Sphere {
+            let local = self.plane.to_local(cursor);
+            return match self.sphere_step {
+                SphereStep::Radius(center) => Some(center.distance(local)),
+                SphereStep::Diameter(center) => Some(center.distance(local)),
+                SphereStep::TtrRadius { second_hit, .. } => {
+                    Some(second_hit.distance(local))
+                }
+                _ => None,
+            };
+        }
         if self.shape == Shape::Box {
             let local = self.plane.to_local(cursor);
             if !local.is_finite() {

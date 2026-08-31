@@ -57,7 +57,7 @@ fn history_prop(label: &str, field: &'static str, value: impl ToString) -> Prope
 fn history_flags(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
-) -> Option<(bool, bool)> {
+) -> Option<(bool, bool, i16)> {
     let graph = document.solid_history_graph(handle)?;
     let ObjectType::DynamicBlock(object) = document.objects.get(&graph.root)? else {
         return None;
@@ -65,7 +65,26 @@ fn history_flags(
     let DynamicBlockData::SolidHistory(history) = &object.data else {
         return None;
     };
-    Some((history.record_history, history.show_history))
+    Some((
+        history.record_history,
+        history.show_history,
+        document.header.show_solid_history.clamp(0, 2),
+    ))
+}
+
+fn displayed_history_state(
+    record_history: bool,
+    object_show_history: bool,
+    show_history_mode: i16,
+) -> (bool, bool) {
+    if !record_history {
+        return (false, false);
+    }
+    match show_history_mode {
+        0 => (false, false),
+        2 => (true, false),
+        _ => (object_show_history, true),
+    }
 }
 
 pub fn has_specialized_primitive_properties(
@@ -106,7 +125,10 @@ fn cylinder_properties(
     let rotation = matrix(value.base.transform)
         .map(|matrix| matrix.x_axis.y.atan2(matrix.x_axis.x))
         .unwrap_or(0.0);
-    let (record_history, show_history) = history_flags(document, handle).unwrap_or((false, false));
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(record_history, object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
     let mut geometry = vec![
         Property {
@@ -184,7 +206,7 @@ fn cylinder_properties(
                 Property {
                     label: t!("Show History").into_owned(),
                     field: PROP_SHOW_HISTORY,
-                    value: if record_history {
+                    value: if show_history_editable {
                         PropValue::Choice {
                             selected: show_value.to_string(),
                             options: vec!["No".to_string(), "Yes".to_string()],
@@ -212,7 +234,10 @@ fn box_properties(
     let rotation = matrix(value.base.transform)
         .map(|matrix| matrix.x_axis.y.atan2(matrix.x_axis.x))
         .unwrap_or(0.0);
-    let (record_history, show_history) = history_flags(document, handle).unwrap_or((false, false));
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(record_history, object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
     vec![
         PropSection {
@@ -276,7 +301,7 @@ fn box_properties(
                 Property {
                     label: t!("Show History").into_owned(),
                     field: PROP_SHOW_HISTORY,
-                    value: if record_history {
+                    value: if show_history_editable {
                         PropValue::Choice {
                             selected: show_value.to_string(),
                             options: vec!["No".to_string(), "Yes".to_string()],
@@ -370,6 +395,7 @@ pub fn apply_history_choice(
     field: &str,
     value: &str,
 ) -> bool {
+    let show_history_mode = document.header.show_solid_history.clamp(0, 2);
     let Some(graph) = document.solid_history_graph(handle) else {
         return false;
     };
@@ -393,7 +419,7 @@ pub fn apply_history_choice(
                 history.show_history = false;
             }
         }
-        PROP_SHOW_HISTORY if history.record_history => {
+        PROP_SHOW_HISTORY if history.record_history && show_history_mode == 1 => {
             history.show_history = if value.eq_ignore_ascii_case("Yes") {
                 true
             } else if value.eq_ignore_ascii_case("No") {

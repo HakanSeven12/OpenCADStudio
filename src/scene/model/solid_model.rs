@@ -40,6 +40,16 @@ pub fn cylinder_solid(center: [f64; 3], radius: f64, height: f64) -> Option<Body
     brep::make::cylinder(center, radius, height)
 }
 
+/// Circular or elliptical cylinder standing on the local z = base plane.
+pub fn elliptical_cylinder_solid(
+    center: [f64; 3],
+    major_radius: f64,
+    minor_radius: f64,
+    height: f64,
+) -> Option<Body> {
+    brep::make::elliptical_cylinder(center, major_radius, minor_radius, height)
+}
+
 /// Solid cone standing on the z = base plane, apex `height` above it.
 pub fn cone_solid(center: [f64; 3], radius: f64, height: f64) -> Option<Body> {
     brep::make::cone(center, radius, height)

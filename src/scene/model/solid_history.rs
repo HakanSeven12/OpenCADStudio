@@ -19,6 +19,8 @@ pub const GRIP_RADIUS: usize = 10_004;
 pub const GRIP_OUTER_RADIUS: usize = 10_005;
 pub const GRIP_INNER_RADIUS: usize = 10_006;
 pub const GRIP_SIDES: usize = 10_007;
+pub const GRIP_MAJOR_RADIUS: usize = 10_008;
+pub const GRIP_MINOR_RADIUS: usize = 10_009;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -31,6 +33,9 @@ pub const PROP_LENGTH: &str = "solid_history_length";
 pub const PROP_WIDTH: &str = "solid_history_width";
 pub const PROP_HEIGHT: &str = "solid_history_height";
 pub const PROP_RADIUS: &str = "solid_history_radius";
+pub const PROP_MAJOR_RADIUS: &str = "solid_history_major_radius";
+pub const PROP_MINOR_RADIUS: &str = "solid_history_minor_radius";
+pub const PROP_ELLIPTICAL: &str = "solid_history_elliptical";
 pub const PROP_OUTER_RADIUS: &str = "solid_history_outer_radius";
 pub const PROP_INNER_RADIUS: &str = "solid_history_inner_radius";
 pub const PROP_SIDES: &str = "solid_history_sides";
@@ -63,13 +68,13 @@ fn history_flags(
     Some((history.record_history, history.show_history))
 }
 
-pub fn is_box_primitive(
+pub fn has_specialized_primitive_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
 ) -> bool {
     matches!(
         document.solid_history_operation(handle),
-        Some(SolidHistoryOperation::Box(_))
+        Some(SolidHistoryOperation::Box(_) | SolidHistoryOperation::Cylinder(_))
     )
 }
 
@@ -79,8 +84,118 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
             value.base.transform,
             [value.length * 0.5, value.width * 0.5, 0.0],
         ),
+        SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
         _ => None,
     }
+}
+
+fn cylinder_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryCylinder,
+) -> Vec<PropSection> {
+    let Some(position) = world_point(value.base.transform, [0.0; 3]) else {
+        return Vec::new();
+    };
+    let scale = value
+        .major_radius
+        .abs()
+        .max(value.minor_radius.abs())
+        .max(1.0);
+    let elliptical = (value.major_radius - value.minor_radius).abs() > 1e-9 * scale;
+    let rotation = matrix(value.base.transform)
+        .map(|matrix| matrix.x_axis.y.atan2(matrix.x_axis.x))
+        .unwrap_or(0.0);
+    let (record_history, show_history) = history_flags(document, handle).unwrap_or((false, false));
+    let show_value = if show_history { "Yes" } else { "No" };
+    let mut geometry = vec![
+        Property {
+            label: t!("Solid type").into_owned(),
+            field: "solid_history_type",
+            value: PropValue::ReadOnly(t!("Cylinder").into_owned()),
+        },
+        crate::entities::common::edit_prop(
+            t!("Position X").as_ref(),
+            PROP_POSITION_X,
+            position.x,
+        ),
+        crate::entities::common::edit_prop(
+            t!("Position Y").as_ref(),
+            PROP_POSITION_Y,
+            position.y,
+        ),
+        crate::entities::common::edit_prop(
+            t!("Position Z").as_ref(),
+            PROP_POSITION_Z,
+            position.z,
+        ),
+        Property {
+            label: t!("Elliptical").into_owned(),
+            field: PROP_ELLIPTICAL,
+            value: PropValue::ReadOnly(if elliptical { "Yes" } else { "No" }.to_string()),
+        },
+    ];
+    if elliptical {
+        geometry.extend([
+            history_prop(
+                t!("Major radius").as_ref(),
+                PROP_MAJOR_RADIUS,
+                value.major_radius,
+            ),
+            history_prop(
+                t!("Minor radius").as_ref(),
+                PROP_MINOR_RADIUS,
+                value.minor_radius,
+            ),
+            Property {
+                label: t!("Rotation").into_owned(),
+                field: PROP_ROTATION,
+                value: PropValue::ReadOnly(crate::entities::common::format_direction(rotation)),
+            },
+        ]);
+    } else {
+        geometry.push(history_prop(
+            t!("Radius").as_ref(),
+            PROP_RADIUS,
+            value.major_radius,
+        ));
+    }
+    geometry.push(history_prop(
+        t!("Height").as_ref(),
+        PROP_HEIGHT,
+        value.height,
+    ));
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: geometry,
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::Choice {
+                        selected: if record_history { "Record" } else { "None" }.to_string(),
+                        options: vec!["None".to_string(), "Record".to_string()],
+                    },
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: if record_history {
+                        PropValue::Choice {
+                            selected: show_value.to_string(),
+                            options: vec!["No".to_string(), "Yes".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(show_value.to_string())
+                    },
+                },
+            ],
+        },
+    ]
 }
 
 fn box_properties(
@@ -189,7 +304,10 @@ pub fn primitive_properties(
             history_prop(t!("Width").as_ref(), PROP_WIDTH, value.width),
             history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
         ],
-        SolidHistoryOperation::Cylinder(value) | SolidHistoryOperation::Cone(value) => vec![
+        SolidHistoryOperation::Cylinder(value) => {
+            return cylinder_properties(document, handle, value)
+        }
+        SolidHistoryOperation::Cone(value) => vec![
             history_prop(t!("Radius").as_ref(), PROP_RADIUS, value.major_radius),
             history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
         ],
@@ -230,6 +348,8 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_WIDTH
             | PROP_HEIGHT
             | PROP_RADIUS
+            | PROP_MAJOR_RADIUS
+            | PROP_MINOR_RADIUS
             | PROP_OUTER_RADIUS
             | PROP_INNER_RADIUS
             | PROP_SIDES
@@ -355,6 +475,47 @@ fn apply_box_geometry_property(
     Some(true)
 }
 
+fn apply_cylinder_position_property(
+    value: &mut SolidHistoryCylinder,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    let axis = match field {
+        PROP_POSITION_X => 0,
+        PROP_POSITION_Y => 1,
+        PROP_POSITION_Z => 2,
+        _ => return None,
+    };
+    let target = crate::entities::common::parse_length(text)?;
+    if !target.is_finite() {
+        return Some(false);
+    }
+    let current = matrix(value.base.transform)?;
+    let origin = current.transform_point3(glam::DVec3::ZERO);
+    if !origin.is_finite() || target == origin[axis] {
+        return Some(false);
+    }
+    let mut delta = glam::DVec3::ZERO;
+    delta[axis] = target - origin[axis];
+    value.base.transform = (glam::DMat4::from_translation(delta) * current).to_cols_array();
+    Some(true)
+}
+
+fn canonicalize_cylinder_radii(value: &mut SolidHistoryCylinder) -> bool {
+    if value.minor_radius <= value.major_radius {
+        value.x_radius = value.major_radius;
+        return true;
+    }
+    let Some(current) = matrix(value.base.transform) else {
+        return false;
+    };
+    std::mem::swap(&mut value.major_radius, &mut value.minor_radius);
+    value.x_radius = value.major_radius;
+    value.base.transform =
+        (current * glam::DMat4::from_rotation_z(std::f64::consts::FRAC_PI_2)).to_cols_array();
+    true
+}
+
 pub fn apply_primitive_property(
     operation: &mut SolidHistoryOperation,
     field: &str,
@@ -362,6 +523,11 @@ pub fn apply_primitive_property(
 ) -> bool {
     if let SolidHistoryOperation::Box(box_value) = operation {
         if let Some(applied) = apply_box_geometry_property(box_value, field, value) {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Cylinder(cylinder_value) = operation {
+        if let Some(applied) = apply_cylinder_position_property(cylinder_value, field, value) {
             return applied;
         }
     }
@@ -417,7 +583,31 @@ pub fn apply_primitive_property(
             PROP_HEIGHT => value.height = positive().unwrap_or(value.height),
             _ => return false,
         },
-        SolidHistoryOperation::Cylinder(value) | SolidHistoryOperation::Cone(value) => match field {
+        SolidHistoryOperation::Cylinder(value) => match field {
+            PROP_RADIUS => {
+                let Some(radius) = positive() else {
+                    return false;
+                };
+                value.major_radius = radius;
+                value.minor_radius = radius;
+                value.x_radius = radius;
+            }
+            PROP_MAJOR_RADIUS => {
+                value.major_radius = positive().unwrap_or(value.major_radius);
+                if !canonicalize_cylinder_radii(value) {
+                    return false;
+                }
+            }
+            PROP_MINOR_RADIUS => {
+                value.minor_radius = positive().unwrap_or(value.minor_radius);
+                if !canonicalize_cylinder_radii(value) {
+                    return false;
+                }
+            }
+            PROP_HEIGHT => value.height = positive().unwrap_or(value.height),
+            _ => return false,
+        },
+        SolidHistoryOperation::Cone(value) => match field {
             PROP_RADIUS => {
                 let Some(radius) = positive() else {
                     return false;
@@ -676,7 +866,45 @@ pub fn primitive_grips(
                 Some([0.0, 0.0, 1.0]),
             );
         }
-        SolidHistoryOperation::Cylinder(value) | SolidHistoryOperation::Cone(value) => {
+        SolidHistoryOperation::Cylinder(value) => {
+            let scale = value
+                .major_radius
+                .abs()
+                .max(value.minor_radius.abs())
+                .max(1.0);
+            if (value.major_radius - value.minor_radius).abs() > 1e-9 * scale {
+                add(
+                    GRIP_MAJOR_RADIUS,
+                    value.base.transform,
+                    [value.major_radius, 0.0, value.height * 0.5],
+                    GripShape::Square,
+                    None,
+                );
+                add(
+                    GRIP_MINOR_RADIUS,
+                    value.base.transform,
+                    [0.0, value.minor_radius, value.height * 0.5],
+                    GripShape::Square,
+                    None,
+                );
+            } else {
+                add(
+                    GRIP_RADIUS,
+                    value.base.transform,
+                    [value.major_radius, 0.0, value.height * 0.5],
+                    GripShape::Square,
+                    None,
+                );
+            }
+            add(
+                GRIP_HEIGHT,
+                value.base.transform,
+                [0.0, 0.0, value.height],
+                GripShape::Square,
+                Some([0.0, 0.0, 1.0]),
+            );
+        }
+        SolidHistoryOperation::Cone(value) => {
             add(
                 GRIP_RADIUS,
                 value.base.transform,
@@ -825,7 +1053,31 @@ pub fn apply_primitive_grip(
                 _ => return false,
             }
         }
-        SolidHistoryOperation::Cylinder(value) | SolidHistoryOperation::Cone(value) => {
+        SolidHistoryOperation::Cylinder(value) => {
+            match grip_id {
+                GRIP_RADIUS => {
+                    let radius = local.x.hypot(local.y).max(1e-6);
+                    value.major_radius = radius;
+                    value.minor_radius = radius;
+                    value.x_radius = radius;
+                }
+                GRIP_MAJOR_RADIUS => {
+                    value.major_radius = local.x.abs().max(1e-6);
+                    if !canonicalize_cylinder_radii(value) {
+                        return false;
+                    }
+                }
+                GRIP_MINOR_RADIUS => {
+                    value.minor_radius = local.y.abs().max(1e-6);
+                    if !canonicalize_cylinder_radii(value) {
+                        return false;
+                    }
+                }
+                GRIP_HEIGHT => value.height = local.z.max(1e-6),
+                _ => return false,
+            }
+        }
+        SolidHistoryOperation::Cone(value) => {
             match grip_id {
                 GRIP_RADIUS => {
                     let radius = local.x.hypot(local.y).max(1e-6);
@@ -926,6 +1178,23 @@ pub fn cylinder_op(
         major_radius: radius,
         minor_radius: radius,
         x_radius: radius,
+        ..SolidHistoryCylinder::default()
+    })
+}
+
+pub fn elliptical_cylinder_op(
+    transform: [f64; 16],
+    major_radius: f64,
+    minor_radius: f64,
+    height: f64,
+) -> SolidHistoryOperation {
+    SolidHistoryOperation::Cylinder(SolidHistoryCylinder {
+        base: base(transform),
+        operation_major: 1,
+        height,
+        major_radius,
+        minor_radius,
+        x_radius: major_radius,
         ..SolidHistoryCylinder::default()
     })
 }

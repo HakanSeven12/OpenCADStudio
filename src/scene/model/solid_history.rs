@@ -33,6 +33,10 @@ pub const PROP_HEIGHT: &str = "solid_history_height";
 pub const PROP_RADIUS: &str = "solid_history_radius";
 pub const PROP_BASE_RADIUS: &str = "solid_history_base_radius";
 pub const PROP_TOP_RADIUS: &str = "solid_history_top_radius";
+pub const PROP_BASE_MAJOR_RADIUS: &str = "solid_history_base_major_radius";
+pub const PROP_BASE_MINOR_RADIUS: &str = "solid_history_base_minor_radius";
+pub const PROP_TOP_MAJOR_RADIUS: &str = "solid_history_top_major_radius";
+pub const PROP_TOP_MINOR_RADIUS: &str = "solid_history_top_minor_radius";
 pub const PROP_ELLIPTICAL: &str = "solid_history_elliptical";
 pub const PROP_OUTER_RADIUS: &str = "solid_history_outer_radius";
 pub const PROP_INNER_RADIUS: &str = "solid_history_inner_radius";
@@ -111,44 +115,94 @@ fn cone_properties(
         .max(value.base_y_radius.abs())
         .max(1.0);
     let elliptical = (value.base_x_radius - value.base_y_radius).abs() > 1e-9 * scale;
+    let rotation = matrix(value.base.transform)
+        .map(|matrix| matrix.x_axis.y.atan2(matrix.x_axis.x))
+        .unwrap_or(0.0);
+    let top_minor_radius = if value.base_x_radius.abs() > 1e-9 {
+        value.top_radius * value.base_y_radius / value.base_x_radius
+    } else {
+        0.0
+    };
     let (record_history, show_history) = history_flags(document, handle).unwrap_or((false, false));
     let show_value = if show_history { "Yes" } else { "No" };
+    let mut geometry = vec![
+        Property {
+            label: t!("Solid type").into_owned(),
+            field: "solid_history_type",
+            value: PropValue::ReadOnly(t!("Cone").into_owned()),
+        },
+        crate::entities::common::edit_prop(
+            t!("Position X").as_ref(),
+            PROP_POSITION_X,
+            position.x,
+        ),
+        crate::entities::common::edit_prop(
+            t!("Position Y").as_ref(),
+            PROP_POSITION_Y,
+            position.y,
+        ),
+        crate::entities::common::edit_prop(
+            t!("Position Z").as_ref(),
+            PROP_POSITION_Z,
+            position.z,
+        ),
+        Property {
+            label: t!("Elliptical").into_owned(),
+            field: PROP_ELLIPTICAL,
+            value: PropValue::ReadOnly(if elliptical { "Yes" } else { "No" }.to_string()),
+        },
+    ];
+    if elliptical {
+        geometry.extend([
+            history_prop(
+                t!("Base major radius").as_ref(),
+                PROP_BASE_MAJOR_RADIUS,
+                value.base_x_radius,
+            ),
+            history_prop(
+                t!("Base minor radius").as_ref(),
+                PROP_BASE_MINOR_RADIUS,
+                value.base_y_radius,
+            ),
+            history_prop(
+                t!("Top major radius").as_ref(),
+                PROP_TOP_MAJOR_RADIUS,
+                value.top_radius,
+            ),
+            history_prop(
+                t!("Top minor radius").as_ref(),
+                PROP_TOP_MINOR_RADIUS,
+                top_minor_radius,
+            ),
+            Property {
+                label: t!("Rotation").into_owned(),
+                field: PROP_ROTATION,
+                value: PropValue::ReadOnly(crate::entities::common::format_direction(rotation)),
+            },
+        ]);
+    } else {
+        geometry.extend([
+            history_prop(
+                t!("Base radius").as_ref(),
+                PROP_BASE_RADIUS,
+                value.base_x_radius,
+            ),
+            history_prop(
+                t!("Top radius").as_ref(),
+                PROP_TOP_RADIUS,
+                value.top_radius,
+            ),
+        ]);
+    }
+    geometry.push(history_prop(
+        t!("Height").as_ref(),
+        PROP_HEIGHT,
+        value.height,
+    ));
     vec![
         PropSection {
             title: t!("Geometry").into_owned(),
-            props: vec![
-                Property {
-                    label: t!("Solid type").into_owned(),
-                    field: "solid_history_type",
-                    value: PropValue::ReadOnly(t!("Cone").into_owned()),
-                },
-                crate::entities::common::edit_prop(
-                    t!("Position X").as_ref(),
-                    PROP_POSITION_X,
-                    position.x,
-                ),
-                crate::entities::common::edit_prop(
-                    t!("Position Y").as_ref(),
-                    PROP_POSITION_Y,
-                    position.y,
-                ),
-                crate::entities::common::edit_prop(
-                    t!("Position Z").as_ref(),
-                    PROP_POSITION_Z,
-                    position.z,
-                ),
-                Property {
-                    label: t!("Elliptical").into_owned(),
-                    field: PROP_ELLIPTICAL,
-                    value: PropValue::Choice {
-                        selected: if elliptical { "Yes" } else { "No" }.to_string(),
-                        options: vec!["No".to_string(), "Yes".to_string()],
-                    },
-                },
-                history_prop(t!("Base radius").as_ref(), PROP_BASE_RADIUS, value.base_x_radius),
-                history_prop(t!("Top radius").as_ref(), PROP_TOP_RADIUS, value.top_radius),
-                history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
-            ],
+            props: geometry,
         },
         PropSection {
             title: t!("Solid History").into_owned(),
@@ -328,6 +382,10 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_RADIUS
             | PROP_BASE_RADIUS
             | PROP_TOP_RADIUS
+            | PROP_BASE_MAJOR_RADIUS
+            | PROP_BASE_MINOR_RADIUS
+            | PROP_TOP_MAJOR_RADIUS
+            | PROP_TOP_MINOR_RADIUS
             | PROP_OUTER_RADIUS
             | PROP_INNER_RADIUS
             | PROP_SIDES
@@ -336,10 +394,6 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_POSITION_Z
             | PROP_ROTATION
     )
-}
-
-pub fn is_primitive_choice(field: &str) -> bool {
-    field == PROP_ELLIPTICAL
 }
 
 pub fn is_history_choice(field: &str) -> bool {
@@ -497,31 +551,6 @@ pub fn apply_primitive_property(
         if let Some(applied) = apply_cone_position_property(cone_value, field, value) {
             return applied;
         }
-        if field == PROP_ELLIPTICAL {
-            let elliptical = if value.eq_ignore_ascii_case("Yes") {
-                true
-            } else if value.eq_ignore_ascii_case("No") {
-                false
-            } else {
-                return false;
-            };
-            let scale = cone_value
-                .base_x_radius
-                .abs()
-                .max(cone_value.base_y_radius.abs())
-                .max(1.0);
-            let currently_elliptical =
-                (cone_value.base_x_radius - cone_value.base_y_radius).abs() > 1e-9 * scale;
-            if elliptical == currently_elliptical {
-                return false;
-            }
-            cone_value.base_y_radius = if elliptical {
-                cone_value.base_x_radius * 0.5
-            } else {
-                cone_value.base_x_radius
-            };
-            return true;
-        }
     }
     let Some(number) = (if field == PROP_SIDES {
         value.trim().parse::<f64>().ok()
@@ -600,11 +629,29 @@ pub fn apply_primitive_property(
                 value.base_x_radius = radius;
                 value.base_y_radius = radius * ratio;
             }
+            PROP_BASE_MAJOR_RADIUS => {
+                value.base_x_radius = positive().unwrap_or(value.base_x_radius);
+            }
+            PROP_BASE_MINOR_RADIUS => {
+                value.base_y_radius = positive().unwrap_or(value.base_y_radius);
+            }
             PROP_TOP_RADIUS => {
                 if number < 0.0 {
                     return false;
                 }
                 value.top_radius = number;
+            }
+            PROP_TOP_MAJOR_RADIUS => {
+                if number < 0.0 {
+                    return false;
+                }
+                value.top_radius = number;
+            }
+            PROP_TOP_MINOR_RADIUS => {
+                if number < 0.0 || value.base_y_radius.abs() <= 1e-9 {
+                    return false;
+                }
+                value.top_radius = number * value.base_x_radius / value.base_y_radius;
             }
             PROP_HEIGHT => value.height = positive().unwrap_or(value.height),
             _ => return false,
@@ -657,7 +704,12 @@ pub fn apply_primitive_property(
         },
         _ => return false,
     }
-    positive().is_some() || field == PROP_SIDES || field == PROP_TOP_RADIUS
+    positive().is_some()
+        || field == PROP_SIDES
+        || matches!(
+            field,
+            PROP_TOP_RADIUS | PROP_TOP_MAJOR_RADIUS | PROP_TOP_MINOR_RADIUS
+        )
 }
 
 fn matrix(transform: [f64; 16]) -> Option<glam::DMat4> {

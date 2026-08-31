@@ -1940,16 +1940,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
             }
             self.push_undo_snapshot(i, "CHPROP");
 
-            if crate::scene::model::solid_history::is_primitive_choice(field) {
-                for &handle in &handles {
-                    if self.tabs[i].scene.is_layer_locked(handle) {
-                        continue;
-                    }
-                    self.tabs[i]
-                        .scene
-                        .apply_solid_history_property(handle, field, &value);
-                }
-            } else if crate::scene::model::solid_history::is_history_choice(field) {
+            if crate::scene::model::solid_history::is_history_choice(field) {
                 for &handle in &handles {
                     if self.tabs[i].scene.is_layer_locked(handle) {
                         continue;

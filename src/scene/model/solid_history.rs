@@ -75,13 +75,9 @@ fn history_flags(
 }
 
 fn displayed_history_state(
-    record_history: bool,
     object_show_history: bool,
     show_history_mode: i16,
 ) -> (bool, bool) {
-    if !record_history {
-        return (false, false);
-    }
     match show_history_mode {
         0 => (false, false),
         2 => (true, false),
@@ -145,7 +141,7 @@ fn cone_properties(
     let (record_history, object_show_history, show_history_mode) =
         history_flags(document, handle).unwrap_or((false, false, 1));
     let (show_history, show_history_editable) =
-        displayed_history_state(record_history, object_show_history, show_history_mode);
+        displayed_history_state(object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
     let mut geometry = vec![
         Property {
@@ -271,7 +267,7 @@ fn box_properties(
     let (record_history, object_show_history, show_history_mode) =
         history_flags(document, handle).unwrap_or((false, false, 1));
     let (show_history, show_history_editable) =
-        displayed_history_state(record_history, object_show_history, show_history_mode);
+        displayed_history_state(object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
     vec![
         PropSection {
@@ -451,11 +447,8 @@ pub fn apply_history_choice(
             } else {
                 return false;
             };
-            if !history.record_history {
-                history.show_history = false;
-            }
         }
-        PROP_SHOW_HISTORY if history.record_history && show_history_mode == 1 => {
+        PROP_SHOW_HISTORY if show_history_mode == 1 => {
             history.show_history = if value.eq_ignore_ascii_case("Yes") {
                 true
             } else if value.eq_ignore_ascii_case("No") {

@@ -2528,15 +2528,33 @@ fn doc_tab_context_menu(
 ) -> Element<'static, Message> {
     const MENU_W: f32 = 210.0;
 
-    let item = |label: &'static str, msg: Option<Message>| {
-        let mut item = button(text(label).size(12))
-        .style(button::subtle)
-        .padding([4, 12])
-        .width(Fill);
+    let item = |label: &'static str, msg: Option<Message>| -> Element<'static, Message> {
+        let enabled = msg.is_some();
+
+        let content = container(text(label).size(12))
+            .padding([4, 12])
+            .width(Fill)
+            .style(move |theme: &Theme| {
+                let palette = theme.palette();
+
+                container::Style {
+                    text_color: Some(if enabled {
+                        palette.background.base.text
+                    } else {
+                        palette.background.base.text.scale_alpha(0.42)
+                    }),
+                    ..Default::default()
+                }
+            });
+
         if let Some(msg) = msg {
-            item = item.on_press(msg);
+            mouse_area(content)
+                .on_press(msg)
+                .interaction(iced::mouse::Interaction::Pointer)
+                .into()
+        } else {
+            content.into()
         }
-        item
     };
 
     let mut menu = column![

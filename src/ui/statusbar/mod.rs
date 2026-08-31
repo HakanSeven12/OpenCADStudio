@@ -850,21 +850,26 @@ fn osnap_btn<'a>(
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 fn layout_tab_context_menu(name: String) -> Element<'static, Message> {
-    let item = |label: std::borrow::Cow<'static, str>, msg: Message| {
-        button(text(label).size(12))
-            .on_press(msg)
-            .style(button::subtle)
+    let rename = mouse_area(
+        container(text(t!("Rename")).size(12))
             .padding([4, 12])
-            .width(Length::Fill)
-    };
+            .width(Length::Fill),
+    )
+    .on_press(Message::LayoutRenameStart(name.clone()))
+    .interaction(iced::mouse::Interaction::Pointer);
+
+    let delete = mouse_area(
+        container(text(t!("Delete")).size(12))
+            .padding([4, 12])
+            .width(Length::Fill),
+    )
+    .on_press(Message::LayoutDelete(name))
+    .interaction(iced::mouse::Interaction::Pointer);
 
     container(
-        column![
-            item(t!("Rename"), Message::LayoutRenameStart(name.clone())),
-            item(t!("Delete"), Message::LayoutDelete(name)),
-        ]
-        .spacing(0)
-        .width(160),
+        column![rename, delete]
+            .spacing(0)
+            .width(160),
     )
     .style(container::bordered_box)
     .padding([4, 0])

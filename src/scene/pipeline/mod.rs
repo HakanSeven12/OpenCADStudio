@@ -3810,7 +3810,7 @@ impl Pipeline {
                     pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
                     // Plain-mesh triangulation edges.
                     if c.wire_index_count != 0 {
-                        pass.set_vertex_buffer(0, c.vertex_buffer.slice(..));
+                        pass.set_vertex_buffer(0, c.wire_vertex_buffer.slice(..));
                         pass.set_index_buffer(
                             c.wire_index_buffer.slice(..),
                             wgpu::IndexFormat::Uint32,
@@ -3847,7 +3847,7 @@ impl Pipeline {
                         );
                         pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
                         if c.wire_index_count != 0 {
-                            pass.set_vertex_buffer(0, c.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(0, c.wire_vertex_buffer.slice(..));
                             pass.set_index_buffer(
                                 c.wire_index_buffer.slice(..),
                                 wgpu::IndexFormat::Uint32,
@@ -4003,7 +4003,7 @@ impl Pipeline {
                         );
                         pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
                         if c.wire_index_count != 0 {
-                            pass.set_vertex_buffer(0, c.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(0, c.wire_vertex_buffer.slice(..));
                             pass.set_index_buffer(
                                 c.wire_index_buffer.slice(..),
                                 wgpu::IndexFormat::Uint32,

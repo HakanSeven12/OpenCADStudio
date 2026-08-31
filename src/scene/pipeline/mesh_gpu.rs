@@ -343,8 +343,9 @@ pub struct MeshBatchChunk {
     /// erase — the geometry behind them.
     pub transp_index_buffer: wgpu::Buffer,
     pub transp_index_count: u32,
-    /// Triangle-edge line list (into `vertex_buffer`) for plain meshes that
-    /// carry no B-rep edges — the tessellation wireframe.
+    /// Triangle-edge line list for plain meshes that carry no B-rep edges.
+    /// The dedicated vertex buffer matches the edge pipeline layout.
+    pub wire_vertex_buffer: wgpu::Buffer,
     pub wire_index_buffer: wgpu::Buffer,
     pub wire_index_count: u32,
     /// B-rep feature edges of ACIS solids, as a standalone LineList vertex
@@ -478,6 +479,18 @@ fn make_chunk(
     } else {
         instances
     };
+    let wire_vertices: Vec<MeshEdgeVertex> = if wire_indices.is_empty() {
+        Vec::new()
+    } else {
+        verts
+            .iter()
+            .map(|vertex| MeshEdgeVertex {
+                position: vertex.position,
+                color: face_color,
+                position_low: vertex.position_low,
+            })
+            .collect()
+    };
     MeshBatchChunk {
         vertex_buffer: vertex_buffer_override.unwrap_or_else(|| {
             if compact_vertices {
@@ -491,6 +504,7 @@ fn make_chunk(
         index_count: indices.len() as u32,
         transp_index_buffer: mk_index(transp_indices, "mesh.batch.transp_ibuf"),
         transp_index_count: transp_indices.len() as u32,
+        wire_vertex_buffer: mk_edge_vertex(&wire_vertices, "mesh.batch.wire_vbuf"),
         wire_index_buffer: mk_index(wire_indices, "mesh.batch.wire_ibuf"),
         wire_index_count: wire_indices.len() as u32,
         edge_vertex_buffer: edge_buffer_override
@@ -1204,7 +1218,8 @@ fn build_instanced_chunk(
             uv_normal: uvs[6],
         }
     };
-    let verts: Vec<_> = if shared_vertex_buffer.is_none() {
+    let needs_wire_vertices = first.include_edges && source.edge_verts.is_empty();
+    let verts: Vec<_> = if shared_vertex_buffer.is_none() || needs_wire_vertices {
         (0..mesh.verts.len()).map(vertex).collect()
     } else {
         Vec::new()

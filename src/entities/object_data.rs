@@ -151,7 +151,8 @@ fn history_step_id(operation: &SolidHistoryOperation) -> Option<i32> {
         SolidHistoryOperation::Unknown => return None,
         SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => &value.base,
         SolidHistoryOperation::Sphere(value) => &value.base,
-        SolidHistoryOperation::Cylinder(value) | SolidHistoryOperation::Cone(value) => &value.base,
+        SolidHistoryOperation::Cylinder(value) => &value.base,
+        SolidHistoryOperation::Cone(value) => &value.base,
         SolidHistoryOperation::Pyramid(value) => &value.base,
         SolidHistoryOperation::Torus(value) => &value.base,
         SolidHistoryOperation::Boolean(value) => &value.base,
@@ -225,13 +226,21 @@ fn history_operation_text(operation: &SolidHistoryOperation) -> String {
             history_base_text(&value.base),
             value.radius
         ),
-        SolidHistoryOperation::Cylinder(value) | SolidHistoryOperation::Cone(value) => format!(
+        SolidHistoryOperation::Cylinder(value) => format!(
             "{}; height {:.6}; radii {:.6}/{:.6}; x-radius {:.6}",
             history_base_text(&value.base),
             value.height,
             value.major_radius,
             value.minor_radius,
             value.x_radius
+        ),
+        SolidHistoryOperation::Cone(value) => format!(
+            "{}; height {:.6}; base radii {:.6}/{:.6}; top radius {:.6}",
+            history_base_text(&value.base),
+            value.height,
+            value.base_x_radius,
+            value.base_y_radius,
+            value.top_radius
         ),
         SolidHistoryOperation::Pyramid(value) => format!(
             "{}; height {:.6}; sides {}; radii {:.6}/{:.6}",

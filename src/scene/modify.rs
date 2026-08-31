@@ -791,7 +791,11 @@ impl Scene {
         handle: Handle,
         operation: acadrust::objects::SolidHistoryOperation,
     ) -> bool {
-        let box_primitive = matches!(operation, acadrust::objects::SolidHistoryOperation::Box(_));
+        let user_facing_primitive = matches!(
+            operation,
+            acadrust::objects::SolidHistoryOperation::Box(_)
+                | acadrust::objects::SolidHistoryOperation::Cone(_)
+        );
         let Some(graph) = self.document.create_solid_history(handle, operation) else {
             return false;
         };
@@ -799,7 +803,7 @@ impl Scene {
         for node in graph.nodes {
             self.record_undo_object_before(node, None);
         }
-        if box_primitive {
+        if user_facing_primitive {
             let _ = crate::scene::model::solid_history::apply_history_choice(
                 &mut self.document,
                 handle,
@@ -811,7 +815,7 @@ impl Scene {
         true
     }
 
-    fn sync_solid_reference_point(&mut self, handle: Handle) {
+    pub(crate) fn sync_solid_reference_point(&mut self, handle: Handle) {
         let reference = self
             .document
             .solid_history_operation(handle)

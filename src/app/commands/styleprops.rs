@@ -1667,33 +1667,36 @@ impl OpenCADStudio {
                                 None => Ok((format!("SPLINESEGS = {}", h.spline_segments), false)),
                             },
                             "SURFU" => match &value {
-                                Some(v) => v
-                                    .parse::<i16>()
-                                    .map(|x| {
+                                Some(v) => match v.parse::<i16>() {
+                                    Ok(x @ 0..=200) => {
                                         h.surface_u_density = x;
-                                        (format!("SURFU = {x}"), true)
-                                    })
-                                    .map_err(|_| "SETVAR: integer value required.".into()),
+                                        Ok((format!("SURFU = {x}"), true))
+                                    }
+                                    Ok(_) => Err("SETVAR: value must be between 0 and 200.".into()),
+                                    Err(_) => Err("SETVAR: integer value required.".into()),
+                                },
                                 None => Ok((format!("SURFU = {}", h.surface_u_density), false)),
                             },
                             "SURFV" => match &value {
-                                Some(v) => v
-                                    .parse::<i16>()
-                                    .map(|x| {
+                                Some(v) => match v.parse::<i16>() {
+                                    Ok(x @ 0..=200) => {
                                         h.surface_v_density = x;
-                                        (format!("SURFV = {x}"), true)
-                                    })
-                                    .map_err(|_| "SETVAR: integer value required.".into()),
+                                        Ok((format!("SURFV = {x}"), true))
+                                    }
+                                    Ok(_) => Err("SETVAR: value must be between 0 and 200.".into()),
+                                    Err(_) => Err("SETVAR: integer value required.".into()),
+                                },
                                 None => Ok((format!("SURFV = {}", h.surface_v_density), false)),
                             },
                             "SURFTYPE" => match &value {
-                                Some(v) => v
-                                    .parse::<i16>()
-                                    .map(|x| {
+                                Some(v) => match v.parse::<i16>() {
+                                    Ok(x @ (5 | 6 | 8)) => {
                                         h.surface_type = x;
-                                        (format!("SURFTYPE = {x}"), true)
-                                    })
-                                    .map_err(|_| "SETVAR: integer value required.".into()),
+                                        Ok((format!("SURFTYPE = {x}"), true))
+                                    }
+                                    Ok(_) => Err("SETVAR: value must be 5, 6, or 8.".into()),
+                                    Err(_) => Err("SETVAR: integer value required.".into()),
+                                },
                                 None => Ok((format!("SURFTYPE = {}", h.surface_type), false)),
                             },
                             "SHADEDGE" => match &value {

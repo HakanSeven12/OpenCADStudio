@@ -2628,7 +2628,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         } else {
                             raw_val
                         };
-                        if matches!(field, "current_fit_point" | "current_control_point") {
+                        if matches!(
+                            field,
+                            "current_fit_point" | "current_control_point" | "pm_current_vertex"
+                        ) {
                             let count = handles
                                 .iter()
                                 .filter_map(|handle| {
@@ -2644,6 +2647,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         ) => Some(
                                             crate::entities::spline::control_vertex_count(spline),
                                         ),
+                                        (
+                                            "pm_current_vertex",
+                                            acadrust::EntityType::PolygonMesh(mesh),
+                                        ) => Some(mesh.vertices.len()),
                                         _ => None,
                                     }
                                 })

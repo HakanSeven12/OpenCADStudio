@@ -2067,7 +2067,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Polygon - Circumscribed" => Some(("draw", "polygon-circumscribed")),
         "Polygon - Edge" => Some(("draw", "polygon-edge")),
         "Polygon - Inscribed" => Some(("draw", "polygon-inscribed")),
-        "PolygonMesh" => Some(("properties", "polygonmesh")),
+        "Polygon Mesh" => Some(("properties", "polygonmesh")),
         "Polygonal" => Some(("layout", "polygonal")),
         "Polyline" => Some(("common", "polyline")),
         "Polyline broken at vertex." => Some(("command", "polyline-broken-at-vertex")),

@@ -449,24 +449,16 @@ impl PropertyEditable for PolygonMesh {
         let current = crate::scene::view::dispatch::prop_current_vertex()
             .min(vertex_count.saturating_sub(1));
         let vertex = self.vertices.get(current);
-        let display = if vertex_count == 0 {
-            "—".to_string()
-        } else {
-            format!("{} / {}", current + 1, vertex_count)
-        };
-        let smoothed = self.smooth_type != SurfaceSmoothType::NoSmooth;
-        let density_prop = |label: &str, field: &'static str, value: i16| {
-            if smoothed {
-                edit_scalar(label, field, value as f64)
-            } else {
-                ro(label, field, value.to_string())
-            }
-        };
+        let current_vertex = if vertex_count == 0 { 0 } else { current + 1 };
         vec![
             PropSection {
                 title: t!("Geometry").into_owned(),
                 props: vec![
-                    stepper(t!("Current Vertex").as_ref(), "pm_current_vertex", display),
+                    edit_scalar(
+                        t!("Current Vertex").as_ref(),
+                        "pm_current_vertex",
+                        current_vertex as f64,
+                    ),
                     edit(t!("Vertex X").as_ref(),
                         "pm_vx",
                         vertex.map_or(0.0, |vertex| vertex.location.x),
@@ -479,26 +471,34 @@ impl PropertyEditable for PolygonMesh {
                         "pm_vz",
                         vertex.map_or(0.0, |vertex| vertex.location.z),
                     ),
-                    ro(t!("M vertex count").as_ref(), "pm_m", self.m_vertex_count.to_string()),
-                    ro(t!("N vertex count").as_ref(), "pm_n", self.n_vertex_count.to_string()),
                     Property {
                         label: t!("M closed").into_owned(),
                         field: "pm_closed_m",
-                        value: PropValue::BoolToggle {
-                            field: "pm_closed_m",
-                            value: self.is_closed_m(),
+                        value: PropValue::Choice {
+                            selected: if self.is_closed_m() { "Yes" } else { "No" }.to_string(),
+                            options: vec!["No".to_string(), "Yes".to_string()],
                         },
                     },
                     Property {
                         label: t!("N closed").into_owned(),
                         field: "pm_closed_n",
-                        value: PropValue::BoolToggle {
-                            field: "pm_closed_n",
-                            value: self.is_closed_n(),
+                        value: PropValue::Choice {
+                            selected: if self.is_closed_n() { "Yes" } else { "No" }.to_string(),
+                            options: vec!["No".to_string(), "Yes".to_string()],
                         },
                     },
-                    density_prop(t!("M density").as_ref(), "pm_smooth_m", self.m_smooth_density),
-                    density_prop(t!("N density").as_ref(), "pm_smooth_n", self.n_smooth_density),
+                    edit_scalar(
+                        t!("M density").as_ref(),
+                        "pm_smooth_m",
+                        self.m_smooth_density as f64,
+                    ),
+                    edit_scalar(
+                        t!("N density").as_ref(),
+                        "pm_smooth_n",
+                        self.n_smooth_density as f64,
+                    ),
+                    ro(t!("M vertex count").as_ref(), "pm_m", self.m_vertex_count.to_string()),
+                    ro(t!("N vertex count").as_ref(), "pm_n", self.n_vertex_count.to_string()),
                 ],
             },
             PropSection {
@@ -559,26 +559,22 @@ impl PropertyEditable for PolygonMesh {
                 };
                 self.smooth_type = smooth;
                 if self.smooth_type != SurfaceSmoothType::NoSmooth {
-                    if !(2..=256).contains(&self.m_smooth_density) {
+                    if !(2..=200).contains(&self.m_smooth_density) {
                         self.m_smooth_density = 6;
                     }
-                    if !(2..=256).contains(&self.n_smooth_density) {
+                    if !(2..=200).contains(&self.n_smooth_density) {
                         self.n_smooth_density = 6;
                     }
                 }
             }
             "pm_smooth_m" => {
-                if self.smooth_type != SurfaceSmoothType::NoSmooth {
-                    if let Ok(density @ 2..=256) = value.trim().parse::<i16>() {
-                        self.m_smooth_density = density;
-                    }
+                if let Ok(density @ 0..=200) = value.trim().parse::<i16>() {
+                    self.m_smooth_density = density;
                 }
             }
             "pm_smooth_n" => {
-                if self.smooth_type != SurfaceSmoothType::NoSmooth {
-                    if let Ok(density @ 2..=256) = value.trim().parse::<i16>() {
-                        self.n_smooth_density = density;
-                    }
+                if let Ok(density @ 0..=200) = value.trim().parse::<i16>() {
+                    self.n_smooth_density = density;
                 }
             }
             "pm_vx" | "pm_vy" | "pm_vz" => {

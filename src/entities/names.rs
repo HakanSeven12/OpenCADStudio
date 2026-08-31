@@ -33,7 +33,7 @@ pub fn ui_name(e: &EntityType) -> &'static str {
         EntityType::Polyline2D(_) => "Polyline2D",
         EntityType::Polyline3D(_) => "Polyline3D",
         EntityType::PolyfaceMesh(_) => "PolyfaceMesh",
-        EntityType::PolygonMesh(_) => "PolygonMesh",
+        EntityType::PolygonMesh(_) => "Polygon Mesh",
         EntityType::Text(_) => "Text",
         EntityType::MText(_) => "MText",
         EntityType::Dimension(_) => "Dimension",

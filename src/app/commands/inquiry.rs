@@ -253,6 +253,7 @@ impl OpenCADStudio {
                                     is_poly: true,
                                     convertible: false,
                                     mesh_size: None,
+                                    mesh_closed: None,
                                 },
                             )),
                             acadrust::EntityType::Line(_) | acadrust::EntityType::Arc(_) => {
@@ -262,6 +263,7 @@ impl OpenCADStudio {
                                         is_poly: false,
                                         convertible: true,
                                         mesh_size: None,
+                                        mesh_closed: None,
                                     },
                                 ))
                             }
@@ -274,6 +276,7 @@ impl OpenCADStudio {
                                         mesh.m_vertex_count.max(0) as usize,
                                         mesh.n_vertex_count.max(0) as usize,
                                     )),
+                                    mesh_closed: Some((mesh.is_closed_m(), mesh.is_closed_n())),
                                 },
                             )),
                             _ => None,
@@ -284,7 +287,14 @@ impl OpenCADStudio {
                 // the convert prompt) skips the select step.
                 let preselected: Vec<acadrust::Handle> =
                     self.tabs[i].scene.selected.iter().copied().collect();
-                let cmd_obj = PeditCommand::new(info).with_preselection(&preselected);
+                let header = &self.tabs[i].scene.document.header;
+                let cmd_obj = PeditCommand::new(
+                    info,
+                    header.surface_type,
+                    header.surface_u_density,
+                    header.surface_v_density,
+                )
+                .with_preselection(&preselected);
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }

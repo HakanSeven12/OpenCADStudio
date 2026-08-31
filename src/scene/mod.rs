@@ -2746,6 +2746,7 @@ impl Scene {
             self.meshes.remove(&handle);
         }
         self.solid_models.insert(handle, solid);
+        self.sync_solid_reference_point(handle);
         // Only this solid's mesh changed — report just its handle so the mesh /
         // wire caches patch it in rather than rebuilding the whole drawing (and
         // so a bulk register loop stays O(n), not O(n²)).

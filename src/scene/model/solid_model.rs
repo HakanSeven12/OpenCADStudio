@@ -40,9 +40,21 @@ pub fn cylinder_solid(center: [f64; 3], radius: f64, height: f64) -> Option<Body
     brep::make::cylinder(center, radius, height)
 }
 
-/// Solid cone standing on the z = base plane, apex `height` above it.
-pub fn cone_solid(center: [f64; 3], radius: f64, height: f64) -> Option<Body> {
-    brep::make::cone(center, radius, height)
+/// Circular or elliptical cone/frustum standing on the z = base plane.
+pub fn cone_frustum_solid(
+    center: [f64; 3],
+    base_x_radius: f64,
+    base_y_radius: f64,
+    top_radius: f64,
+    height: f64,
+) -> Option<Body> {
+    brep::make::frustum(
+        center,
+        base_x_radius,
+        base_y_radius,
+        top_radius,
+        height,
+    )
 }
 
 /// Solid sphere about `center`.
@@ -452,7 +464,7 @@ mod tests {
         assert!(tri_count(&box_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 12, "box");
         assert!(tri_count(&wedge_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 6, "wedge");
         assert!(tri_count(&cylinder_solid(c, 5.0, 12.0).unwrap()) > 20, "cylinder");
-        assert!(tri_count(&cone_solid(c, 5.0, 12.0).unwrap()) > 10, "cone");
+        assert!(tri_count(&cone_frustum_solid(c, 5.0, 5.0, 0.0, 12.0).unwrap()) > 10, "cone");
         assert!(tri_count(&sphere_solid(c, 5.0).unwrap()) > 50, "sphere");
         assert!(tri_count(&torus_solid(c, 8.0, 2.0).unwrap()) > 50, "torus");
         assert!(tri_count(&pyramid_solid(c, 5.0, 9.0, 6).unwrap()) >= 8, "pyramid");
@@ -469,7 +481,10 @@ mod tests {
         let cases: [(Body, f64); 5] = [
             (box_solid(c, 10.0, 4.0, 6.0).unwrap(), 240.0),
             (cylinder_solid(c, 5.0, 12.0).unwrap(), PI * 25.0 * 12.0),
-            (cone_solid(c, 5.0, 12.0).unwrap(), PI * 25.0 * 12.0 / 3.0),
+            (
+                cone_frustum_solid(c, 5.0, 5.0, 0.0, 12.0).unwrap(),
+                PI * 25.0 * 12.0 / 3.0,
+            ),
             (sphere_solid(c, 5.0).unwrap(), 4.0 / 3.0 * PI * 125.0),
             (torus_solid(c, 8.0, 2.0).unwrap(), 2.0 * PI * PI * 8.0 * 4.0),
         ];

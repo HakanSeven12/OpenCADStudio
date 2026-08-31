@@ -98,7 +98,7 @@ fn plane_distance(a: DVec3, b: DVec3, plane: WorkingPlane) -> f64 {
     d.x.hypot(d.y)
 }
 
-fn tangent_object_local(object: TangentObject, plane: WorkingPlane) -> TangentObject {
+pub(crate) fn tangent_object_local(object: TangentObject, plane: WorkingPlane) -> TangentObject {
     match object {
         TangentObject::Line { p1, p2 } => TangentObject::Line {
             p1: plane.to_local(p1),
@@ -594,7 +594,7 @@ fn solve_quadratic(a: f64, b: f64, c: f64) -> Vec<f64> {
     vec![(-b - sq) / (2.0 * a), (-b + sq) / (2.0 * a)]
 }
 
-fn best_of(candidates: &[DVec3], hint: DVec3) -> Option<DVec3> {
+pub(crate) fn best_of(candidates: &[DVec3], hint: DVec3) -> Option<DVec3> {
     candidates.iter().copied().min_by(|a, b| {
         a.distance(hint)
             .partial_cmp(&b.distance(hint))
@@ -627,7 +627,7 @@ fn tangent_curve(object: TangentObject) -> KernelCurve {
     }
 }
 
-fn ttr_candidates(first: TangentObject, second: TangentObject, radius: f64) -> Vec<DVec3> {
+pub(crate) fn ttr_candidates(first: TangentObject, second: TangentObject, radius: f64) -> Vec<DVec3> {
     let first = tangent_curve(first);
     let second = tangent_curve(second);
     fillets_between(&first, &second, radius, Tolerance::default())

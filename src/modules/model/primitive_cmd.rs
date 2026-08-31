@@ -67,6 +67,57 @@ enum SphereStep {
     },
 }
 
+#[derive(Clone, Copy)]
+enum ConeStep {
+    BaseCenter,
+    BaseRadius,
+    BaseDiameter,
+    ThreePointFirst,
+    ThreePointSecond(DVec3),
+    ThreePointThird(DVec3, DVec3),
+    TwoPointFirst,
+    TwoPointSecond(DVec3),
+    EllipseFirst,
+    EllipseCenter,
+    EllipseCenterFirstAxis(DVec3),
+    EllipseCenterSecondAxis(DVec3, DVec3),
+    EllipseSecond(DVec3),
+    EllipseThird(DVec3, DVec3),
+    TtrFirst,
+    TtrSecond { object: TangentObject, hit: DVec3 },
+    TtrRadius {
+        first: TangentObject,
+        second: TangentObject,
+        first_hit: DVec3,
+        second_hit: DVec3,
+    },
+    Height,
+    HeightAfterTopRadius,
+    HeightFirstPoint,
+    HeightSecondPoint(DVec3),
+    AxisEndpoint,
+    TopRadius,
+}
+
+#[derive(Clone, Copy)]
+struct ConeDefaults {
+    base_x_radius: f64,
+    base_y_radius: f64,
+    top_radius: f64,
+    height: f64,
+}
+
+impl Default for ConeDefaults {
+    fn default() -> Self {
+        Self {
+            base_x_radius: 1.0,
+            base_y_radius: 1.0,
+            top_radius: 0.0,
+            height: 1.0,
+        }
+    }
+}
+
 fn sphere_radius_store() -> &'static Mutex<f64> {
     static VALUE: OnceLock<Mutex<f64>> = OnceLock::new();
     VALUE.get_or_init(|| Mutex::new(1.0))
@@ -154,6 +205,12 @@ fn sphere_through_three_points(
     ))
 }
 
+fn cone_defaults() -> &'static std::sync::Mutex<ConeDefaults> {
+    static DEFAULTS: std::sync::OnceLock<std::sync::Mutex<ConeDefaults>> =
+        std::sync::OnceLock::new();
+    DEFAULTS.get_or_init(|| std::sync::Mutex::new(ConeDefaults::default()))
+}
+
 impl Shape {
     fn from_id(id: &str) -> Option<Shape> {
         Some(match id {
@@ -208,11 +265,21 @@ pub struct PrimitiveCommand {
     box_height_anchor: Option<DVec3>,
     sphere_step: SphereStep,
     sphere_default_radius: f64,
+    cone_step: ConeStep,
+    cone_frame: Option<WorkingPlane>,
+    cone_base_x_radius: f64,
+    cone_base_y_radius: f64,
+    cone_top_radius: f64,
+    cone_defaults: ConeDefaults,
     plane: WorkingPlane,
 }
 
 impl PrimitiveCommand {
     pub fn new(id: &str) -> Self {
+        let remembered = cone_defaults()
+            .lock()
+            .map(|value| *value)
+            .unwrap_or_default();
         Self {
             shape: Shape::from_id(id).unwrap_or(Shape::Box),
             pts: Vec::new(),
@@ -227,6 +294,12 @@ impl PrimitiveCommand {
             box_height_anchor: None,
             sphere_step: SphereStep::Center,
             sphere_default_radius: sphere_radius_default(),
+            cone_step: ConeStep::BaseCenter,
+            cone_frame: None,
+            cone_base_x_radius: remembered.base_x_radius,
+            cone_base_y_radius: remembered.base_y_radius,
+            cone_top_radius: remembered.top_radius,
+            cone_defaults: remembered,
             plane: WorkingPlane::default(),
         }
     }
@@ -269,6 +342,616 @@ impl PrimitiveCommand {
             Shape::Sphere,
             &[center, center + DVec3::X * radius],
         )))
+    }
+
+    fn cone_frame_at(&self, center: DVec3) -> WorkingPlane {
+        WorkingPlane {
+            origin: center,
+            x: self.plane.x,
+            y: self.plane.y,
+            z: self.plane.z,
+        }
+    }
+
+    fn set_cone_base(
+        &mut self,
+        frame: WorkingPlane,
+        base_x_radius: f64,
+        base_y_radius: f64,
+    ) -> bool {
+        if !frame.origin.is_finite()
+            || !frame.x.is_finite()
+            || !frame.y.is_finite()
+            || !frame.z.is_finite()
+            || !base_x_radius.is_finite()
+            || !base_y_radius.is_finite()
+            || base_x_radius < 1e-6
+            || base_y_radius < 1e-6
+        {
+            return false;
+        }
+        self.cone_frame = Some(frame);
+        self.cone_base_x_radius = base_x_radius;
+        self.cone_base_y_radius = base_y_radius;
+        self.cone_step = ConeStep::Height;
+        true
+    }
+
+    fn cone_three_point_frame(a: DVec3, b: DVec3, c: DVec3) -> Option<(WorkingPlane, f64)> {
+        let normal = (b - a).cross(c - a).try_normalize()?;
+        let first_axis = (b - a).try_normalize()?;
+        let second_axis = normal.cross(first_axis).try_normalize()?;
+        let plane = WorkingPlane::new(a, first_axis, second_axis);
+        let local_b = plane.to_local(b);
+        let local_c = plane.to_local(c);
+        let circle = cadkernel::geom2d::arc_through_points(
+            [0.0, 0.0],
+            [local_b.x, local_b.y],
+            [local_c.x, local_c.y],
+        )?;
+        let center = plane.to_world(DVec3::new(circle.centre[0], circle.centre[1], 0.0));
+        let x = (a - center).try_normalize()?;
+        let y = normal.cross(x).try_normalize()?;
+        Some((WorkingPlane::new(center, x, y), circle.radius))
+    }
+
+    fn cone_axis_frame(&self, axis: DVec3) -> Option<(WorkingPlane, f64)> {
+        let current = self.cone_frame?;
+        let height = axis.length();
+        if !height.is_finite() || height < 1e-6 {
+            return None;
+        }
+        let z = axis / height;
+        let mut x = current.x - z * current.x.dot(z);
+        if x.length_squared() < 1e-12 {
+            x = current.y - z * current.y.dot(z);
+        }
+        let x = x.try_normalize()?;
+        let y = z.cross(x).try_normalize()?;
+        Some((WorkingPlane::new(current.origin, x, y), height))
+    }
+
+    fn cone_history_transform(frame: WorkingPlane) -> [f64; 16] {
+        glam::DMat4::from_cols(
+            frame.x.extend(0.0),
+            frame.y.extend(0.0),
+            frame.z.extend(0.0),
+            frame.origin.extend(1.0),
+        )
+        .to_cols_array()
+    }
+
+    fn build_cone(&self, axis: DVec3) -> Option<(Body, SolidHistoryOperation, f64)> {
+        let (frame, height) = self.cone_axis_frame(axis)?;
+        let local = solid_model::cone_frustum_solid(
+            [0.0; 3],
+            self.cone_base_x_radius,
+            self.cone_base_y_radius,
+            self.cone_top_radius,
+            height,
+        )?;
+        let placed = solid_model::placed(
+            &local,
+            frame.x.to_array(),
+            frame.y.to_array(),
+            frame.z.to_array(),
+            frame.origin.to_array(),
+        )?;
+        Some((
+            placed,
+            crate::scene::model::solid_history::cone_op(
+                Self::cone_history_transform(frame),
+                self.cone_base_x_radius,
+                self.cone_base_y_radius,
+                self.cone_top_radius,
+                height,
+            ),
+            height,
+        ))
+    }
+
+    fn commit_cone_axis(&self, axis: DVec3) -> CmdResult {
+        let Some((solid, history, height)) = self.build_cone(axis) else {
+            return CmdResult::NeedPoint;
+        };
+        if let Ok(mut defaults) = cone_defaults().lock() {
+            *defaults = ConeDefaults {
+                base_x_radius: self.cone_base_x_radius,
+                base_y_radius: self.cone_base_y_radius,
+                top_radius: self.cone_top_radius,
+                height,
+            };
+        }
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid) else {
+            return CmdResult::Cancel;
+        };
+        let mut entity = Solid3D::new();
+        entity.set_sat_document(&document);
+        entity.wires = solid_model::edge_wires(&solid);
+        CmdResult::CommitSolid {
+            entity: EntityType::Solid3D(entity),
+            solid: Box::new(solid),
+            history,
+        }
+    }
+
+    fn commit_cone_height(&self, height: f64) -> CmdResult {
+        let Some(frame) = self.cone_frame else {
+            return CmdResult::NeedPoint;
+        };
+        if !height.is_finite() || height.abs() < 1e-6 {
+            return CmdResult::NeedPoint;
+        }
+        self.commit_cone_axis(frame.z * height)
+    }
+
+    fn cone_height_at(&self, point: DVec3) -> Option<f64> {
+        let frame = self.cone_frame?;
+        Some((point - frame.origin).dot(frame.z))
+    }
+
+    fn cone_ttr_center(&self, radius: f64) -> Option<DVec3> {
+        let ConeStep::TtrRadius {
+            first,
+            second,
+            first_hit,
+            second_hit,
+        } = self.cone_step
+        else {
+            return None;
+        };
+        let candidates = crate::modules::draw::draw::circle::ttr_candidates(first, second, radius);
+        let local = crate::modules::draw::draw::circle::best_of(
+            &candidates,
+            (first_hit + second_hit) * 0.5,
+        )?;
+        Some(self.plane.to_world(local))
+    }
+
+    fn cone_preview(&self, axis: DVec3) -> Option<WireModel> {
+        let (frame, height) = self.cone_axis_frame(axis)?;
+        let top = frame.origin + frame.z * height;
+        let top_y = if self.cone_top_radius > 0.0 {
+            self.cone_top_radius * self.cone_base_y_radius / self.cone_base_x_radius
+        } else {
+            0.0
+        };
+        let mut points = Vec::new();
+        push_ellipse_world(
+            &mut points,
+            frame.origin,
+            frame.x,
+            frame.y,
+            self.cone_base_x_radius,
+            self.cone_base_y_radius,
+        );
+        if self.cone_top_radius > 1e-9 {
+            push_ellipse_world(
+                &mut points,
+                top,
+                frame.x,
+                frame.y,
+                self.cone_top_radius,
+                top_y,
+            );
+        }
+        for index in 0..4 {
+            let angle = index as f64 * std::f64::consts::FRAC_PI_2;
+            let base = frame.origin
+                + frame.x * (self.cone_base_x_radius * angle.cos())
+                + frame.y * (self.cone_base_y_radius * angle.sin());
+            let upper = if self.cone_top_radius > 1e-9 {
+                top + frame.x * (self.cone_top_radius * angle.cos())
+                    + frame.y * (top_y * angle.sin())
+            } else {
+                top
+            };
+            push_segment(&mut points, base, upper);
+        }
+        Some(wire("primitive_height_preview", points))
+    }
+
+    fn cone_base_preview(&self, frame: WorkingPlane, x_radius: f64, y_radius: f64) -> WireModel {
+        let mut points = Vec::new();
+        push_ellipse_world(
+            &mut points,
+            frame.origin,
+            frame.x,
+            frame.y,
+            x_radius.max(1e-9),
+            y_radius.max(1e-9),
+        );
+        wire("primitive_preview", points)
+    }
+
+    fn cone_prompt(&self) -> String {
+        match self.cone_step {
+            ConeStep::BaseCenter =>
+                t!("CONE  Specify center point of base or [3P/2P/Ttr/Elliptical]:").into_owned(),
+            ConeStep::BaseRadius => crate::tf!(
+                "CONE  Specify base radius or [Diameter] <{:.4}>:",
+                self.cone_defaults.base_x_radius
+            ).into_owned(),
+            ConeStep::BaseDiameter => crate::tf!(
+                "CONE  Specify base diameter <{:.4}>:",
+                self.cone_defaults.base_x_radius * 2.0
+            ).into_owned(),
+            ConeStep::ThreePointFirst => t!("CONE  Specify first point on base:").into_owned(),
+            ConeStep::ThreePointSecond(_) => t!("CONE  Specify second point on base:").into_owned(),
+            ConeStep::ThreePointThird(_, _) => t!("CONE  Specify third point on base:").into_owned(),
+            ConeStep::TwoPointFirst => t!("CONE  Specify first endpoint of base diameter:").into_owned(),
+            ConeStep::TwoPointSecond(_) => t!("CONE  Specify second endpoint of base diameter:").into_owned(),
+            ConeStep::EllipseFirst =>
+                t!("CONE  Specify endpoint of first axis or [Center]:").into_owned(),
+            ConeStep::EllipseCenter => t!("CONE  Specify center point:").into_owned(),
+            ConeStep::EllipseCenterFirstAxis(_) => crate::tf!(
+                "CONE  Specify distance to first axis <{:.4}>:",
+                self.cone_defaults.base_x_radius
+            )
+            .into_owned(),
+            ConeStep::EllipseCenterSecondAxis(_, _) =>
+                t!("CONE  Specify endpoint of second axis:").into_owned(),
+            ConeStep::EllipseSecond(_) => t!("CONE  Specify second endpoint of ellipse axis:").into_owned(),
+            ConeStep::EllipseThird(_, _) => t!("CONE  Specify distance to other ellipse axis:").into_owned(),
+            ConeStep::TtrFirst => t!("CONE  Select first tangent object:").into_owned(),
+            ConeStep::TtrSecond { .. } => t!("CONE  Select second tangent object:").into_owned(),
+            ConeStep::TtrRadius { .. } => crate::tf!(
+                "CONE  Specify base radius <{:.4}>:",
+                self.cone_defaults.base_x_radius
+            ).into_owned(),
+            ConeStep::Height => crate::tf!(
+                "CONE  Specify height or [2Point/Axis endpoint/Top radius] <{:.4}>:",
+                self.cone_defaults.height
+            ).into_owned(),
+            ConeStep::HeightAfterTopRadius => crate::tf!(
+                "CONE  Specify height or [2Point/Axis endpoint] <{:.4}>:",
+                self.cone_defaults.height
+            )
+            .into_owned(),
+            ConeStep::HeightFirstPoint => t!("CONE  Specify first point for height:").into_owned(),
+            ConeStep::HeightSecondPoint(_) => t!("CONE  Specify second point for height:").into_owned(),
+            ConeStep::AxisEndpoint => t!("CONE  Specify axis endpoint:").into_owned(),
+            ConeStep::TopRadius => crate::tf!(
+                "CONE  Specify top radius <{:.4}>:",
+                self.cone_defaults.top_radius
+            ).into_owned(),
+        }
+    }
+
+    fn cone_options(&self) -> Vec<CmdOption> {
+        match self.cone_step {
+            ConeStep::BaseCenter => vec![
+                CmdOption::new("3P", "3P"),
+                CmdOption::new("2P", "2P"),
+                CmdOption::new("Ttr", "TTR"),
+                CmdOption::new(t!("Elliptical").as_ref(), "E"),
+            ],
+            ConeStep::BaseRadius => vec![CmdOption::new(t!("Diameter").as_ref(), "D")],
+            ConeStep::EllipseFirst => vec![CmdOption::new(t!("Center").as_ref(), "C")],
+            ConeStep::Height => vec![
+                CmdOption::new("2Point", "2P"),
+                CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
+                CmdOption::new(t!("Top radius").as_ref(), "T"),
+            ],
+            ConeStep::HeightAfterTopRadius => vec![
+                CmdOption::new("2Point", "2P"),
+                CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    fn on_cone_point(&mut self, point: DVec3) -> CmdResult {
+        match self.cone_step {
+            ConeStep::BaseCenter => {
+                self.cone_frame = Some(self.cone_frame_at(point));
+                self.cone_step = ConeStep::BaseRadius;
+                CmdResult::NeedPoint
+            }
+            ConeStep::BaseRadius => {
+                let Some(frame) = self.cone_frame else {
+                    return CmdResult::NeedPoint;
+                };
+                let local = frame.to_local(point);
+                let radius = local.x.hypot(local.y);
+                self.set_cone_base(frame, radius, radius);
+                CmdResult::NeedPoint
+            }
+            ConeStep::BaseDiameter => {
+                let Some(frame) = self.cone_frame else {
+                    return CmdResult::NeedPoint;
+                };
+                let local = frame.to_local(point);
+                let radius = local.x.hypot(local.y) * 0.5;
+                self.set_cone_base(frame, radius, radius);
+                CmdResult::NeedPoint
+            }
+            ConeStep::ThreePointFirst => {
+                self.cone_step = ConeStep::ThreePointSecond(point);
+                CmdResult::NeedPoint
+            }
+            ConeStep::ThreePointSecond(first) => {
+                if point.distance_squared(first) > 1e-12 {
+                    self.cone_step = ConeStep::ThreePointThird(first, point);
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::ThreePointThird(first, second) => {
+                if let Some((frame, radius)) = Self::cone_three_point_frame(first, second, point) {
+                    self.set_cone_base(frame, radius, radius);
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::TwoPointFirst => {
+                self.cone_step = ConeStep::TwoPointSecond(point);
+                CmdResult::NeedPoint
+            }
+            ConeStep::TwoPointSecond(first) => {
+                let a = self.plane.to_local(first);
+                let b = self.plane.to_local(point);
+                let radius = (b - a).truncate().length() * 0.5;
+                let center = self.plane.to_world((a + b) * 0.5);
+                self.set_cone_base(self.cone_frame_at(center), radius, radius);
+                CmdResult::NeedPoint
+            }
+            ConeStep::EllipseFirst => {
+                self.cone_step = ConeStep::EllipseSecond(point);
+                CmdResult::NeedPoint
+            }
+            ConeStep::EllipseCenter => {
+                self.cone_step = ConeStep::EllipseCenterFirstAxis(point);
+                CmdResult::NeedPoint
+            }
+            ConeStep::EllipseCenterFirstAxis(center) => {
+                if point.distance_squared(center) > 1e-12 {
+                    self.cone_step = ConeStep::EllipseCenterSecondAxis(center, point);
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::EllipseCenterSecondAxis(center, first_axis_end) => {
+                let axis = first_axis_end - center;
+                if let Some(x) = axis.try_normalize() {
+                    let y = self.plane.z.cross(x).normalize_or_zero();
+                    let frame = WorkingPlane::new(center, x, y);
+                    let local = frame.to_local(point);
+                    self.set_cone_base(frame, axis.length(), local.y.abs());
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::EllipseSecond(first) => {
+                if point.distance_squared(first) > 1e-12 {
+                    self.cone_step = ConeStep::EllipseThird(first, point);
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::EllipseThird(first, second) => {
+                let a = self.plane.to_local(first);
+                let b = self.plane.to_local(second);
+                let center_local = (a + b) * 0.5;
+                let axis = (b - a).truncate();
+                let x_radius = axis.length() * 0.5;
+                if let Some(x2) = axis.try_normalize() {
+                    let x = self.plane.vector_to_world(DVec3::new(x2.x, x2.y, 0.0));
+                    let y = self.plane.z.cross(x).normalize_or_zero();
+                    let frame = WorkingPlane::new(self.plane.to_world(center_local), x, y);
+                    let local = frame.to_local(point);
+                    self.set_cone_base(frame, x_radius, local.y.abs());
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::TtrRadius { second_hit, .. } => {
+                let local = self.plane.to_local(point);
+                let radius = (local - second_hit).truncate().length();
+                if let Some(center) = self.cone_ttr_center(radius) {
+                    self.set_cone_base(self.cone_frame_at(center), radius, radius);
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::Height | ConeStep::HeightAfterTopRadius => self
+                .cone_height_at(point)
+                .map(|height| self.commit_cone_height(height))
+                .unwrap_or(CmdResult::NeedPoint),
+            ConeStep::HeightFirstPoint => {
+                self.cone_step = ConeStep::HeightSecondPoint(point);
+                CmdResult::NeedPoint
+            }
+            ConeStep::HeightSecondPoint(first) => self.commit_cone_height(first.distance(point)),
+            ConeStep::AxisEndpoint => {
+                let Some(frame) = self.cone_frame else {
+                    return CmdResult::NeedPoint;
+                };
+                self.commit_cone_axis(point - frame.origin)
+            }
+            ConeStep::TopRadius => {
+                let Some(frame) = self.cone_frame else {
+                    return CmdResult::NeedPoint;
+                };
+                let local = frame.to_local(point);
+                let radius = local.x.hypot(local.y);
+                if radius.is_finite() {
+                    self.cone_top_radius = radius;
+                    self.cone_step = ConeStep::HeightAfterTopRadius;
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::TtrFirst | ConeStep::TtrSecond { .. } => CmdResult::NeedPoint,
+        }
+    }
+
+    fn on_cone_tangent(&mut self, object: TangentObject, hit: DVec3) -> CmdResult {
+        let object = crate::modules::draw::draw::circle::tangent_object_local(object, self.plane);
+        let hit = self.plane.to_local(hit);
+        match self.cone_step {
+            ConeStep::TtrFirst => {
+                self.cone_step = ConeStep::TtrSecond { object, hit };
+            }
+            ConeStep::TtrSecond {
+                object: first,
+                hit: first_hit,
+            } => {
+                self.cone_step = ConeStep::TtrRadius {
+                    first,
+                    second: object,
+                    first_hit,
+                    second_hit: hit,
+                };
+            }
+            _ => {}
+        }
+        CmdResult::NeedPoint
+    }
+
+    fn on_cone_text(&mut self, raw: &str) -> Option<CmdResult> {
+        let token = raw.trim();
+        let upper = token.to_uppercase();
+        match self.cone_step {
+            ConeStep::BaseCenter => {
+                self.cone_step = match upper.as_str() {
+                    "3P" => ConeStep::ThreePointFirst,
+                    "2P" => ConeStep::TwoPointFirst,
+                    "T" | "TTR" => ConeStep::TtrFirst,
+                    "E" | "ELLIPTICAL" => ConeStep::EllipseFirst,
+                    _ => return None,
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            ConeStep::BaseRadius if matches!(upper.as_str(), "D" | "DIAMETER") => {
+                self.cone_step = ConeStep::BaseDiameter;
+                return Some(CmdResult::NeedPoint);
+            }
+            ConeStep::EllipseFirst if matches!(upper.as_str(), "C" | "CENTER") => {
+                self.cone_step = ConeStep::EllipseCenter;
+                return Some(CmdResult::NeedPoint);
+            }
+            ConeStep::Height => {
+                self.cone_step = match upper.as_str() {
+                    "2P" | "2POINT" => ConeStep::HeightFirstPoint,
+                    "A" | "AXIS" | "AXIS ENDPOINT" => ConeStep::AxisEndpoint,
+                    "T" | "TOP" | "TOP RADIUS" => ConeStep::TopRadius,
+                    _ => {
+                        let height = crate::entities::common::parse_typed_length(token)?;
+                        return Some(self.commit_cone_height(height));
+                    }
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            ConeStep::HeightAfterTopRadius => {
+                self.cone_step = match upper.as_str() {
+                    "2P" | "2POINT" => ConeStep::HeightFirstPoint,
+                    "A" | "AXIS" | "AXIS ENDPOINT" => ConeStep::AxisEndpoint,
+                    _ => {
+                        let height = crate::entities::common::parse_typed_length(token)?;
+                        return Some(self.commit_cone_height(height));
+                    }
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            _ => {}
+        }
+        let number = crate::entities::common::parse_typed_length(token)?;
+        match self.cone_step {
+            ConeStep::BaseRadius => {
+                let frame = self.cone_frame?;
+                (number > 0.0).then(|| {
+                    self.set_cone_base(frame, number, number);
+                    CmdResult::NeedPoint
+                })
+            }
+            ConeStep::BaseDiameter => {
+                let frame = self.cone_frame?;
+                (number > 0.0).then(|| {
+                    self.set_cone_base(frame, number * 0.5, number * 0.5);
+                    CmdResult::NeedPoint
+                })
+            }
+            ConeStep::EllipseCenterFirstAxis(center) => (number > 0.0).then(|| {
+                self.cone_step = ConeStep::EllipseCenterSecondAxis(
+                    center,
+                    center + self.plane.x * number,
+                );
+                CmdResult::NeedPoint
+            }),
+            ConeStep::TtrRadius { .. } => {
+                let center = self.cone_ttr_center(number)?;
+                (number > 0.0).then(|| {
+                    self.set_cone_base(self.cone_frame_at(center), number, number);
+                    CmdResult::NeedPoint
+                })
+            }
+            ConeStep::TopRadius if number >= 0.0 => {
+                self.cone_top_radius = number;
+                self.cone_step = ConeStep::HeightAfterTopRadius;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
+        }
+    }
+
+    fn cone_mouse_move(&self, point: DVec3) -> Option<WireModel> {
+        match self.cone_step {
+            ConeStep::BaseRadius => {
+                let frame = self.cone_frame?;
+                let local = frame.to_local(point);
+                let radius = local.x.hypot(local.y);
+                Some(self.cone_base_preview(frame, radius, radius))
+            }
+            ConeStep::BaseDiameter => {
+                let frame = self.cone_frame?;
+                let local = frame.to_local(point);
+                let radius = local.x.hypot(local.y) * 0.5;
+                Some(self.cone_base_preview(frame, radius, radius))
+            }
+            ConeStep::ThreePointSecond(first) | ConeStep::TwoPointSecond(first) => {
+                let a = self.plane.to_local(first);
+                let b = self.plane.to_local(point);
+                let center = self.plane.to_world((a + b) * 0.5);
+                let radius = (b - a).truncate().length() * 0.5;
+                Some(self.cone_base_preview(self.cone_frame_at(center), radius, radius))
+            }
+            ConeStep::ThreePointThird(first, second) => {
+                let (frame, radius) = Self::cone_three_point_frame(first, second, point)?;
+                Some(self.cone_base_preview(frame, radius, radius))
+            }
+            ConeStep::EllipseThird(first, second) => {
+                let a = self.plane.to_local(first);
+                let b = self.plane.to_local(second);
+                let center_local = (a + b) * 0.5;
+                let axis = (b - a).truncate();
+                let x2 = axis.try_normalize()?;
+                let x = self.plane.vector_to_world(DVec3::new(x2.x, x2.y, 0.0));
+                let y = self.plane.z.cross(x).normalize_or_zero();
+                let frame = WorkingPlane::new(self.plane.to_world(center_local), x, y);
+                let local = frame.to_local(point);
+                Some(self.cone_base_preview(frame, axis.length() * 0.5, local.y.abs()))
+            }
+            ConeStep::EllipseCenterSecondAxis(center, first_axis_end) => {
+                let axis = first_axis_end - center;
+                let x = axis.try_normalize()?;
+                let y = self.plane.z.cross(x).normalize_or_zero();
+                let frame = WorkingPlane::new(center, x, y);
+                let local = frame.to_local(point);
+                Some(self.cone_base_preview(frame, axis.length(), local.y.abs()))
+            }
+            ConeStep::TtrRadius { second_hit, .. } => {
+                let local = self.plane.to_local(point);
+                let radius = (local - second_hit).truncate().length();
+                let center = self.cone_ttr_center(radius)?;
+                Some(self.cone_base_preview(self.cone_frame_at(center), radius, radius))
+            }
+            ConeStep::Height | ConeStep::HeightAfterTopRadius => {
+                let frame = self.cone_frame?;
+                self.cone_preview(frame.z * self.cone_height_at(point)?)
+            }
+            ConeStep::HeightSecondPoint(first) => {
+                let frame = self.cone_frame?;
+                self.cone_preview(frame.z * first.distance(point))
+            }
+            ConeStep::AxisEndpoint => {
+                let frame = self.cone_frame?;
+                self.cone_preview(point - frame.origin)
+            }
+            _ => None,
+        }
     }
 
     /// Number of footprint points the shape needs before the height step.
@@ -565,33 +1248,19 @@ impl PrimitiveCommand {
         let (solid, history) = match self.shape {
             Shape::Box => return self.build_box(height),
             Shape::Wedge => return self.build_wedge(height),
-            Shape::Cylinder | Shape::Cone => {
+            Shape::Cylinder => {
                 let c = self.pts[0];
                 let r = (self.pts[1] - c).length();
                 if r < 1e-6 || height < 1e-6 {
                     return None;
                 }
                 let center = [c.x, c.y, c.z];
-                if self.shape == Shape::Cylinder {
-                    (
-                        solid_model::cylinder_solid(center, r, height),
-                        solid_history::cylinder_op(
-                            self.history_transform(c),
-                            r,
-                            height,
-                        ),
-                    )
-                } else {
-                    (
-                        solid_model::cone_solid(center, r, height),
-                        solid_history::cone_op(
-                            self.history_transform(c),
-                            r,
-                            height,
-                        ),
-                    )
-                }
+                (
+                    solid_model::cylinder_solid(center, r, height),
+                    solid_history::cylinder_op(self.history_transform(c), r, height),
+                )
             }
+            Shape::Cone => return None,
             Shape::Sphere => {
                 let c = self.pts[0];
                 let r = (self.pts[1] - c).length();
@@ -689,6 +1358,13 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
+        if self.shape == Shape::Cone {
+            return matches!(self.cone_step, ConeStep::Height | ConeStep::HeightAfterTopRadius)
+                .then(|| {
+                let frame = self.cone_frame.unwrap_or(self.plane);
+                (frame.origin, frame.z.normalize_or_zero())
+            });
+        }
         let constrained = if self.shape.rectangular() {
             self.box_step == BoxStep::Height
         } else {
@@ -707,14 +1383,22 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn needs_tangent_pick(&self) -> bool {
-        self.shape == Shape::Sphere
+        (self.shape == Shape::Sphere
             && matches!(
                 self.sphere_step,
                 SphereStep::TtrFirst | SphereStep::TtrSecond { .. }
-            )
+            ))
+            || (self.shape == Shape::Cone
+                && matches!(
+                    self.cone_step,
+                    ConeStep::TtrFirst | ConeStep::TtrSecond { .. }
+                ))
     }
 
     fn on_tangent_point(&mut self, object: TangentObject, hit: DVec3) -> CmdResult {
+        if self.shape == Shape::Cone {
+            return self.on_cone_tangent(object, hit);
+        }
         if self.shape != Shape::Sphere {
             return self.on_point(hit);
         }
@@ -743,6 +1427,9 @@ impl CadCommand for PrimitiveCommand {
 
     fn prompt(&self) -> String {
         let n = self.shape.name();
+        if self.shape == Shape::Cone {
+            return self.cone_prompt();
+        }
         if self.shape.rectangular() {
             return match self.box_step {
                 BoxStep::FirstCorner => t!("%{n}  Specify first corner or [Center]:", n = n),
@@ -841,6 +1528,9 @@ impl CadCommand for PrimitiveCommand {
                 _ => Vec::new(),
             };
         }
+        if self.shape == Shape::Cone {
+            return self.cone_options();
+        }
         if !self.shape.rectangular() {
             return Vec::new();
         }
@@ -898,6 +1588,9 @@ impl CadCommand for PrimitiveCommand {
                 }
                 SphereStep::TtrFirst | SphereStep::TtrSecond { .. } => CmdResult::NeedPoint,
             };
+        }
+        if self.shape == Shape::Cone {
+            return self.on_cone_point(pt);
         }
         if self.shape.rectangular() {
             let local = self.plane.to_local(pt);
@@ -1003,6 +1696,45 @@ impl CadCommand for PrimitiveCommand {
                 _ => CmdResult::Cancel,
             };
         }
+        if self.shape == Shape::Cone {
+            return match self.cone_step {
+                ConeStep::BaseRadius | ConeStep::BaseDiameter => {
+                    let Some(frame) = self.cone_frame else {
+                        return CmdResult::Cancel;
+                    };
+                    self.set_cone_base(
+                        frame,
+                        self.cone_defaults.base_x_radius,
+                        self.cone_defaults.base_y_radius,
+                    );
+                    CmdResult::NeedPoint
+                }
+                ConeStep::TtrRadius { .. } => {
+                    let radius = self.cone_defaults.base_x_radius;
+                    let Some(center) = self.cone_ttr_center(radius) else {
+                        return CmdResult::NeedPoint;
+                    };
+                    self.set_cone_base(self.cone_frame_at(center), radius, radius);
+                    CmdResult::NeedPoint
+                }
+                ConeStep::EllipseCenterFirstAxis(center) => {
+                    self.cone_step = ConeStep::EllipseCenterSecondAxis(
+                        center,
+                        center + self.plane.x * self.cone_defaults.base_x_radius,
+                    );
+                    CmdResult::NeedPoint
+                }
+                ConeStep::Height | ConeStep::HeightAfterTopRadius => {
+                    self.commit_cone_height(self.cone_defaults.height)
+                }
+                ConeStep::TopRadius => {
+                    self.cone_top_radius = self.cone_defaults.top_radius;
+                    self.cone_step = ConeStep::HeightAfterTopRadius;
+                    CmdResult::NeedPoint
+                }
+                _ => CmdResult::Cancel,
+            };
+        }
         if self.shape.rectangular() {
             return if self.shape == Shape::Wedge && self.box_step == BoxStep::Height {
                 self.commit(self.default_height())
@@ -1031,6 +1763,20 @@ impl CadCommand for PrimitiveCommand {
                     | SphereStep::TtrRadius { .. }
             );
         }
+        if self.shape == Shape::Cone {
+            return matches!(
+                self.cone_step,
+                ConeStep::BaseCenter
+                    | ConeStep::BaseRadius
+                    | ConeStep::BaseDiameter
+                    | ConeStep::EllipseFirst
+                    | ConeStep::EllipseCenterFirstAxis(_)
+                    | ConeStep::TtrRadius { .. }
+                    | ConeStep::Height
+                    | ConeStep::HeightAfterTopRadius
+                    | ConeStep::TopRadius
+            );
+        }
         if self.shape.rectangular() {
             matches!(
                 self.box_step,
@@ -1049,6 +1795,16 @@ impl CadCommand for PrimitiveCommand {
     fn point_step_accepts_keywords(&self) -> bool {
         if self.shape == Shape::Sphere {
             return matches!(self.sphere_step, SphereStep::Center | SphereStep::Radius(_));
+        }
+        if self.shape == Shape::Cone {
+            return matches!(
+                self.cone_step,
+                ConeStep::BaseCenter
+                    | ConeStep::BaseRadius
+                    | ConeStep::EllipseFirst
+                    | ConeStep::Height
+                    | ConeStep::HeightAfterTopRadius
+            );
         }
         self.shape.rectangular()
             && matches!(
@@ -1095,6 +1851,9 @@ impl CadCommand for PrimitiveCommand {
                 }
                 _ => None,
             };
+        }
+        if self.shape == Shape::Cone {
+            return self.on_cone_text(raw);
         }
         if self.shape.rectangular() {
             let token = raw.trim();
@@ -1180,6 +1939,9 @@ impl CadCommand for PrimitiveCommand {
                 }
                 _ => None,
             };
+        }
+        if self.shape == Shape::Cone {
+            return self.cone_mouse_move(pt);
         }
         if self.pts.is_empty() {
             return None;
@@ -1305,6 +2067,35 @@ impl CadCommand for PrimitiveCommand {
             });
         }
 
+        if self.shape == Shape::Cone {
+            let frame = self.cone_frame.unwrap_or(self.plane);
+            let (anchor, role) = match self.cone_step {
+                ConeStep::BaseRadius | ConeStep::TopRadius => {
+                    (frame.origin, DynRole::Radius)
+                }
+                ConeStep::BaseDiameter => (frame.origin, DynRole::Diameter),
+                ConeStep::TtrRadius { second_hit, .. } => {
+                    (self.plane.to_world(second_hit), DynRole::Radius)
+                }
+                ConeStep::EllipseCenterFirstAxis(center) => (center, DynRole::Distance),
+                ConeStep::Height | ConeStep::HeightAfterTopRadius | ConeStep::AxisEndpoint => {
+                    (frame.origin, DynRole::Height)
+                }
+                ConeStep::HeightSecondPoint(first) => (first, DynRole::Height),
+                _ => return None,
+            };
+            return Some(DynSpec {
+                anchor: DynAnchor::Point(anchor),
+                fields: vec![DynFieldSpec::new(role)],
+                guide: if matches!(role, DynRole::Radius | DynRole::Diameter) {
+                    DynGuide::Radius
+                } else {
+                    DynGuide::None
+                },
+                ref_point: None,
+            });
+        }
+
         let role = if self.shape.rectangular() {
             match self.box_step {
                 BoxStep::CubeSize | BoxStep::Length => DynRole::Distance,
@@ -1334,6 +2125,31 @@ impl CadCommand for PrimitiveCommand {
                 SphereStep::TtrRadius { second_hit, .. } => {
                     Some(second_hit.distance(local))
                 }
+                _ => None,
+            };
+        }
+        if self.shape == Shape::Cone {
+            return match self.cone_step {
+                ConeStep::BaseRadius | ConeStep::TopRadius => {
+                    let frame = self.cone_frame?;
+                    let local = frame.to_local(cursor);
+                    Some(local.x.hypot(local.y))
+                }
+                ConeStep::BaseDiameter => {
+                    let frame = self.cone_frame?;
+                    let local = frame.to_local(cursor);
+                    Some(local.x.hypot(local.y))
+                }
+                ConeStep::TtrRadius { second_hit, .. } => {
+                    let local = self.plane.to_local(cursor);
+                    Some((local - second_hit).truncate().length())
+                }
+                ConeStep::EllipseCenterFirstAxis(center) => Some(center.distance(cursor)),
+                ConeStep::Height | ConeStep::HeightAfterTopRadius => {
+                    self.cone_height_at(cursor).map(f64::abs)
+                }
+                ConeStep::HeightSecondPoint(first) => Some(first.distance(cursor)),
+                ConeStep::AxisEndpoint => self.cone_frame.map(|frame| frame.origin.distance(cursor)),
                 _ => None,
             };
         }
@@ -1487,6 +2303,25 @@ fn push_segment(points: &mut Vec<[f32; 3]>, a: DVec3, b: DVec3) {
 fn push_circle(points: &mut Vec<[f32; 3]>, center: DVec3, radius: f64) {
     push_break(points);
     circle_points(points, center, radius);
+}
+
+fn push_ellipse_world(
+    points: &mut Vec<[f32; 3]>,
+    center: DVec3,
+    x_axis: DVec3,
+    y_axis: DVec3,
+    x_radius: f64,
+    y_radius: f64,
+) {
+    push_break(points);
+    const SEGMENTS: usize = 64;
+    for index in 0..=SEGMENTS {
+        let angle = index as f64 / SEGMENTS as f64 * std::f64::consts::TAU;
+        let point = center
+            + x_axis * (x_radius * angle.cos())
+            + y_axis * (y_radius * angle.sin());
+        points.push(point.as_vec3().to_array());
+    }
 }
 
 fn circle_points(out: &mut Vec<[f32; 3]>, c: DVec3, r: f64) {

@@ -802,7 +802,7 @@ impl Scene {
         true
     }
 
-    fn sync_solid_reference_point(&mut self, handle: Handle) {
+    pub(crate) fn sync_solid_reference_point(&mut self, handle: Handle) {
         let reference = self
             .document
             .solid_history_operation(handle)

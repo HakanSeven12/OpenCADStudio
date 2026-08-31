@@ -306,13 +306,15 @@ fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
         return (base, m, n);
     }
 
-    let degree = match mesh.smooth_type {
+    let (u_degree, v_degree) = match mesh.smooth_type {
         SurfaceSmoothType::NoSmooth => return (base, m, n),
-        SurfaceSmoothType::Quadratic => 2,
-        SurfaceSmoothType::Cubic | SurfaceSmoothType::Bezier => 3,
+        SurfaceSmoothType::Quadratic => (2.min(m.saturating_sub(1)), 2.min(n.saturating_sub(1))),
+        SurfaceSmoothType::Cubic => (3.min(m.saturating_sub(1)), 3.min(n.saturating_sub(1))),
+        // A Bezier surface uses every row/column in its polynomial patch.
+        // Giving it the cubic B-spline degree made both choices render the
+        // same surface even though the stored mesh type was different.
+        SurfaceSmoothType::Bezier => (m.saturating_sub(1), n.saturating_sub(1)),
     };
-    let u_degree = degree.min(m.saturating_sub(1));
-    let v_degree = degree.min(n.saturating_sub(1));
     if u_degree == 0 || v_degree == 0 {
         return (base, m, n);
     }
@@ -329,10 +331,10 @@ fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
 
     let display_m = usize::try_from(mesh.m_smooth_density.max(2))
         .unwrap_or(2)
-        .min(256);
+        .min(200);
     let display_n = usize::try_from(mesh.n_smooth_density.max(2))
         .unwrap_or(2)
-        .min(256);
+        .min(200);
     let parameter = |index: usize, count: usize, closed: bool| {
         if closed {
             index as f64 / count as f64

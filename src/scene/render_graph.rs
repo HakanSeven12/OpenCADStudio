@@ -67,6 +67,8 @@ pub struct InsertStyleSpec {
     own: BlockStyle,
     color_byblock: bool,
     color_bylayer: bool,
+    transparency_byblock: bool,
+    transparency_bylayer: bool,
     linetype_byblock: bool,
     linetype_bylayer: bool,
     lineweight_byblock: bool,
@@ -83,6 +85,8 @@ impl InsertStyleSpec {
             own: BlockStyle::for_entity(document, &entity, viewport),
             color_byblock: !has_book_color && insert.common.color == Color::ByBlock,
             color_bylayer: !has_book_color && insert.common.color == Color::ByLayer,
+            transparency_byblock: insert.common.transparency.is_by_block(),
+            transparency_bylayer: insert.common.transparency.is_by_layer(),
             linetype_byblock: linetype.eq_ignore_ascii_case("byblock"),
             linetype_bylayer: linetype.is_empty() || linetype.eq_ignore_ascii_case("bylayer"),
             lineweight_byblock: matches!(
@@ -101,12 +105,23 @@ impl InsertStyleSpec {
     pub fn resolve(self, parent: BlockStyle) -> BlockStyle {
         let mut insert = self.own.insert;
         if self.color_byblock {
-            insert.0 = parent.insert.0;
+            insert.0[0] = parent.insert.0[0];
+            insert.0[1] = parent.insert.0[1];
+            insert.0[2] = parent.insert.0[2];
             insert.4 = parent.insert.4;
         } else if self.layer0 && self.color_bylayer {
-            insert.0 = parent.layer0.color;
+            insert.0[0] = parent.layer0.color[0];
+            insert.0[1] = parent.layer0.color[1];
+            insert.0[2] = parent.layer0.color[2];
             insert.4 = parent.layer0_aci;
         }
+        insert.0[3] = if self.transparency_byblock {
+            parent.insert.0[3]
+        } else if self.layer0 && self.transparency_bylayer {
+            parent.layer0.color[3]
+        } else {
+            insert.0[3]
+        };
         if self.linetype_byblock {
             insert.1 = parent.insert.1;
             insert.2 = parent.insert.2;

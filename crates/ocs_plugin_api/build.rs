@@ -123,6 +123,10 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
     let _ = tracer.trace_value(samples, &acadrust::LineWeight::Default);
     let _ = tracer.trace_value(samples, &acadrust::LineWeight::Value(0));
 
+    let _ = tracer.trace_value(samples, &acadrust::Transparency::BY_LAYER);
+    let _ = tracer.trace_value(samples, &acadrust::Transparency::BY_BLOCK);
+    let _ = tracer.trace_value(samples, &acadrust::Transparency::OPAQUE);
+
     let _ = tracer.trace_value(samples, &acadrust::entities::SmoothSurfaceType::None);
     let _ = tracer.trace_value(
         samples,

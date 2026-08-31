@@ -88,6 +88,7 @@ pub struct LocalWire {
     /// `points.is_empty() && !fill_tris.is_empty()`.
     pub is_fill_only: bool,
     pub color_is_byblock: bool,
+    pub transparency_is_byblock: bool,
     pub lt_is_byblock: bool,
     pub lw_is_byblock: bool,
     /// Set when this child sits on layer "0" and the matching property is
@@ -710,7 +711,8 @@ fn tessellate_sub_local(
         .unwrap_or(true);
     let color_l0 =
         !has_book_color && on_l0 && sub.common().color == AcadColor::ByLayer;
-    let transparency_l0 = on_l0 && sub.common().transparency.alpha() == 0;
+    let transparency_is_byblock = sub.common().transparency.is_by_block();
+    let transparency_l0 = on_l0 && sub.common().transparency.is_by_layer();
     let lt_l0 = on_l0 && {
         let lt = &sub.common().linetype;
         lt.is_empty() || lt.eq_ignore_ascii_case("bylayer")
@@ -846,10 +848,11 @@ fn tessellate_sub_local(
             hide_unselected: frame_mode == Some(0),
             is_fill_only,
             color_is_byblock: color_is_byblock && wire_on_base_color,
+            transparency_is_byblock,
             lt_is_byblock,
             lw_is_byblock,
             color_l0: color_l0 && wire_on_base_color,
-            transparency_l0: transparency_l0 && wire_on_base_color,
+            transparency_l0,
             lt_l0,
             lw_l0,
             aabb_local,
@@ -1990,24 +1993,28 @@ fn expand_defn(
 /// layer-0 rule → insert-layer colour, else the cached colour; finally xref
 /// fade. Shared by the stroke, fill, and greeked-text emit paths.
 fn resolve_wire_color(lw: &LocalWire, ctx: &ExpandCtx) -> [f32; 4] {
-    let c = if ctx.selected {
+    let mut color = if ctx.selected {
         WireModel::SELECTED
     } else if lw.color_is_byblock {
         ctx.ins_color
     } else if lw.color_l0 {
-        let alpha = if lw.transparency_l0 {
+        ctx.l0.color
+    } else {
+        lw.color
+    };
+    if !ctx.selected {
+        color[3] = if lw.transparency_is_byblock {
+            ctx.ins_color[3]
+        } else if lw.transparency_l0 {
             ctx.l0.color[3]
         } else {
             lw.color[3]
         };
-        [ctx.l0.color[0], ctx.l0.color[1], ctx.l0.color[2], alpha]
-    } else {
-        lw.color
-    };
+    }
     if ctx.is_xref && !ctx.selected {
-        fade_toward_bg(c, ctx.bg_color)
+        fade_toward_bg(color, ctx.bg_color)
     } else {
-        c
+        color
     }
 }
 
@@ -2592,7 +2599,7 @@ fn emit_wire(
             pos: [hx, hy, hz],
             pos_low: [lx, ly, lz],
             uv: tv.uv,
-            color: [rgb[0], rgb[1], rgb[2], tv.color[3]],
+            color: [rgb[0], rgb[1], rgb[2], final_color[3]],
             draw_depth: tv.draw_depth,
         });
     }

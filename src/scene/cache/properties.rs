@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use acadrust::{EntityType, Handle, Transparency};
 use crate::t;
 
 use crate::scene::model::object::{PropSection, PropValue, Property};
@@ -10,15 +10,12 @@ pub fn general_section(entity: &EntityType) -> PropSection {
     } else {
         common.linetype.clone()
     };
-    // Alpha 0 is ByLayer, Alpha 1 is ByBlock; show them by name and fall back
-    // to a rounded percentage for explicit values.
-    let transp_display = match common.transparency.alpha() {
-        0 => "ByLayer".to_string(),
-        1 => "ByBlock".to_string(),
-        alpha => format!(
-            "{}",
-            (alpha as f64 / 255.0 * 100.0).round() as u32
-        ),
+    let transp_display = match common.transparency {
+        Transparency::ByLayer => "ByLayer".to_string(),
+        Transparency::ByBlock => "ByBlock".to_string(),
+        Transparency::Explicit(alpha) => {
+            ((alpha as f64 / 255.0 * 100.0).round() as u32).to_string()
+        }
     };
 
     // Hyperlink is stored in XDATA under the "PE_URL" application.

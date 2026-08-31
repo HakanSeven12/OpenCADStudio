@@ -2863,7 +2863,7 @@ pub(crate) fn render_style_for_viewport(
             _ => 0,
         };
         let [r, g, b, _] = tess_util::aci_to_rgba(resolved);
-        let transparency = if common.transparency.alpha() == 0 {
+        let transparency = if common.transparency.is_by_layer() {
             viewport_override(
                 document,
                 layer_name,
@@ -3077,18 +3077,21 @@ pub(crate) fn render_style_for_block_sub_viewport(
     let on_l0 = is_effective_layer_zero(&common.layer);
 
     let has_book_color = has_resolved_book_color(document, e);
-    let final_color = if !has_book_color && common.color == AcadColor::ByBlock {
+    let resolved_rgb = if !has_book_color && common.color == AcadColor::ByBlock {
         insert_color
     } else if !has_book_color && on_l0 && common.color == AcadColor::ByLayer {
-        let alpha = if common.transparency.alpha() == 0 {
-            l0.color[3]
-        } else {
-            color[3]
-        };
-        [l0.color[0], l0.color[1], l0.color[2], alpha]
+        l0.color
     } else {
         color
     };
+    let alpha = if common.transparency.is_by_block() {
+        insert_color[3]
+    } else if on_l0 && common.transparency.is_by_layer() {
+        l0.color[3]
+    } else {
+        color[3]
+    };
+    let final_color = [resolved_rgb[0], resolved_rgb[1], resolved_rgb[2], alpha];
 
     let lt_bylayer =
         common.linetype.is_empty() || common.linetype.eq_ignore_ascii_case("bylayer");
@@ -4318,5 +4321,23 @@ mod layer0_inherit_tests {
         let c = resolve(&d, &EntityType::Line(l), walls);
         assert_eq!(&c[..3], &walls[..3], "RGB inherited from the insert layer");
         assert!((c[3] - 0.5).abs() < 0.02, "child's own 50% transparency is kept, got {}", c[3]);
+    }
+
+    #[test]
+    fn byblock_transparency_inherits_insert_alpha() {
+        let d = doc();
+        let mut entity = child("Other", Color::Index(3));
+        entity.common_mut().transparency = Transparency::BY_BLOCK;
+        let color = resolve(&d, &entity, [0.2, 0.4, 0.6, 0.25]);
+        assert_eq!(color[3], 0.25);
+    }
+
+    #[test]
+    fn explicit_opaque_does_not_inherit_alpha() {
+        let d = doc();
+        let mut entity = child("0", Color::ByLayer);
+        entity.common_mut().transparency = Transparency::OPAQUE;
+        let color = resolve(&d, &entity, [0.2, 0.4, 0.6, 0.25]);
+        assert_eq!(color[3], 1.0);
     }
 }

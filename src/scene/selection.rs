@@ -675,11 +675,12 @@ impl Scene {
                 .to_string(),
             ),
             "lineweight" => Some(Self::format_lineweight(entity.common().line_weight)),
-            "transparency" => Some(if entity.common().transparency.alpha() == 0 {
-                "ByLayer".to_string()
-            } else {
-                ((entity.common().transparency.alpha() as f64 / 255.0 * 100.0).round() as u32)
-                    .to_string()
+            "transparency" => Some(match entity.common().transparency {
+                acadrust::types::Transparency::ByLayer => "ByLayer".to_string(),
+                acadrust::types::Transparency::ByBlock => "ByBlock".to_string(),
+                acadrust::types::Transparency::Explicit(alpha) => {
+                    ((alpha as f64 / 255.0 * 100.0).round() as u32).to_string()
+                }
             }),
             "hyperlink" => Some(
                 entity

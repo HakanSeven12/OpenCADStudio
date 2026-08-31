@@ -63,19 +63,19 @@ fn history_flags(
     Some((history.record_history, history.show_history))
 }
 
-pub fn is_box_primitive(
+pub fn is_rectangular_primitive(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
 ) -> bool {
     matches!(
         document.solid_history_operation(handle),
-        Some(SolidHistoryOperation::Box(_))
+        Some(SolidHistoryOperation::Box(_) | SolidHistoryOperation::Wedge(_))
     )
 }
 
 pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3> {
     match operation {
-        SolidHistoryOperation::Box(value) => world_point(
+        SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => world_point(
             value.base.transform,
             [value.length * 0.5, value.width * 0.5, 0.0],
         ),
@@ -83,10 +83,11 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
     }
 }
 
-fn box_properties(
+fn rectangular_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
     value: &SolidHistoryBox,
+    solid_type: &str,
 ) -> Vec<PropSection> {
     let Some(position) = world_point(
         value.base.transform,
@@ -106,7 +107,7 @@ fn box_properties(
                 Property {
                     label: t!("Solid type").into_owned(),
                     field: "solid_history_type",
-                    value: PropValue::ReadOnly(t!("Box").into_owned()),
+                    value: PropValue::ReadOnly(t!(solid_type).into_owned()),
                 },
                 crate::entities::common::edit_prop(
                     t!("Position X").as_ref(),
@@ -183,12 +184,12 @@ pub fn primitive_properties(
         return Vec::new();
     };
     let props = match operation {
-        SolidHistoryOperation::Box(value) => return box_properties(document, handle, value),
-        SolidHistoryOperation::Wedge(value) => vec![
-            history_prop(t!("Length").as_ref(), PROP_LENGTH, value.length),
-            history_prop(t!("Width").as_ref(), PROP_WIDTH, value.width),
-            history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
-        ],
+        SolidHistoryOperation::Box(value) => {
+            return rectangular_properties(document, handle, value, "Box")
+        }
+        SolidHistoryOperation::Wedge(value) => {
+            return rectangular_properties(document, handle, value, "Wedge")
+        }
         SolidHistoryOperation::Cylinder(value) | SolidHistoryOperation::Cone(value) => vec![
             history_prop(t!("Radius").as_ref(), PROP_RADIUS, value.major_radius),
             history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
@@ -287,7 +288,7 @@ pub fn apply_history_choice(
     before != (history.record_history, history.show_history)
 }
 
-fn apply_box_geometry_property(
+fn apply_rectangular_geometry_property(
     value: &mut SolidHistoryBox,
     field: &str,
     text: &str,
@@ -360,8 +361,12 @@ pub fn apply_primitive_property(
     field: &str,
     value: &str,
 ) -> bool {
-    if let SolidHistoryOperation::Box(box_value) = operation {
-        if let Some(applied) = apply_box_geometry_property(box_value, field, value) {
+    if let SolidHistoryOperation::Box(rectangular_value)
+    | SolidHistoryOperation::Wedge(rectangular_value) = operation
+    {
+        if let Some(applied) =
+            apply_rectangular_geometry_property(rectangular_value, field, value)
+        {
             return applied;
         }
     }
@@ -376,7 +381,7 @@ pub fn apply_primitive_property(
         return false;
     }
     let positive = || (number > 0.0).then_some(number);
-    if let SolidHistoryOperation::Box(value) = operation {
+    if let SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) = operation {
         let Some(next) = positive() else {
             return false;
         };
@@ -411,12 +416,6 @@ pub fn apply_primitive_property(
         return true;
     }
     match operation {
-        SolidHistoryOperation::Wedge(value) => match field {
-            PROP_LENGTH => value.length = positive().unwrap_or(value.length),
-            PROP_WIDTH => value.width = positive().unwrap_or(value.width),
-            PROP_HEIGHT => value.height = positive().unwrap_or(value.height),
-            _ => return false,
-        },
         SolidHistoryOperation::Cylinder(value) | SolidHistoryOperation::Cone(value) => match field {
             PROP_RADIUS => {
                 let Some(radius) = positive() else {

@@ -441,14 +441,14 @@ impl OpenCADStudio {
                     let display_entity = dispatch::entity_in_working_plane(contextual.as_ref(), plane);
                     let entity = &display_entity;
                     let group_names = self.tabs[i].scene.group_names_for_entity(handle);
-                    let box_primitive =
-                        crate::scene::model::solid_history::is_box_primitive(
+                    let rectangular_primitive =
+                        crate::scene::model::solid_history::is_rectangular_primitive(
                             &self.tabs[i].scene.document,
                             handle,
                         );
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
-                    if box_primitive {
+                    if rectangular_primitive {
                         sections.retain(|section| {
                             !section.props.iter().any(|property| {
                                 property.field.starts_with("acis_")
@@ -620,7 +620,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !box_primitive && matches!(
+                    if !rectangular_primitive && matches!(
                         entity,
                         acadrust::EntityType::Solid3D(_)
                             | acadrust::EntityType::Region(_)
@@ -694,7 +694,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !box_primitive {
+                    if !rectangular_primitive {
                         sections.extend(crate::entities::object_data::sections(
                             &self.tabs[i].scene.document,
                             &self.tabs[i].scene.object_data_cache,
@@ -2386,7 +2386,7 @@ impl OpenCADStudio {
                     annotation_scale_handle,
                 );
                 let mut entity_grips = dispatch::grips(contextual.as_ref());
-                if crate::scene::model::solid_history::is_box_primitive(
+                if crate::scene::model::solid_history::is_rectangular_primitive(
                     &self.tabs[i].scene.document,
                     handle,
                 ) {

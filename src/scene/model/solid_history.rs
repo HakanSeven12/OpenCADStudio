@@ -31,6 +31,7 @@ pub const PROP_LENGTH: &str = "solid_history_length";
 pub const PROP_WIDTH: &str = "solid_history_width";
 pub const PROP_HEIGHT: &str = "solid_history_height";
 pub const PROP_RADIUS: &str = "solid_history_radius";
+pub const PROP_DIAMETER: &str = "solid_history_diameter";
 pub const PROP_OUTER_RADIUS: &str = "solid_history_outer_radius";
 pub const PROP_INNER_RADIUS: &str = "solid_history_inner_radius";
 pub const PROP_SIDES: &str = "solid_history_sides";
@@ -73,14 +74,92 @@ pub fn is_box_primitive(
     )
 }
 
+pub fn has_specialized_primitive_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> bool {
+    matches!(
+        document.solid_history_operation(handle),
+        Some(SolidHistoryOperation::Box(_) | SolidHistoryOperation::Sphere(_))
+    )
+}
+
 pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3> {
     match operation {
         SolidHistoryOperation::Box(value) => world_point(
             value.base.transform,
             [value.length * 0.5, value.width * 0.5, 0.0],
         ),
+        SolidHistoryOperation::Sphere(value) => {
+            world_point(value.base.transform, [0.0, 0.0, 0.0])
+        }
         _ => None,
     }
+}
+
+fn sphere_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistorySphere,
+) -> Vec<PropSection> {
+    let Some(position) = world_point(value.base.transform, [0.0, 0.0, 0.0]) else {
+        return Vec::new();
+    };
+    let (record_history, show_history) = history_flags(document, handle).unwrap_or((false, false));
+    let history_value = if record_history { "Record" } else { "None" };
+    let show_value = if show_history { "Yes" } else { "No" };
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Solid type").into_owned(),
+                    field: "solid_history_type",
+                    value: PropValue::ReadOnly(t!("Sphere").into_owned()),
+                },
+                crate::entities::common::edit_prop(
+                    t!("Position X").as_ref(),
+                    PROP_POSITION_X,
+                    position.x,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Y").as_ref(),
+                    PROP_POSITION_Y,
+                    position.y,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Z").as_ref(),
+                    PROP_POSITION_Z,
+                    position.z,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Radius").as_ref(),
+                    PROP_RADIUS,
+                    value.radius,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Diameter").as_ref(),
+                    PROP_DIAMETER,
+                    value.radius * 2.0,
+                ),
+            ],
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::ReadOnly(history_value.to_string()),
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: PropValue::ReadOnly(show_value.to_string()),
+                },
+            ],
+        },
+    ]
 }
 
 fn box_properties(
@@ -184,6 +263,9 @@ pub fn primitive_properties(
     };
     let props = match operation {
         SolidHistoryOperation::Box(value) => return box_properties(document, handle, value),
+        SolidHistoryOperation::Sphere(value) => {
+            return sphere_properties(document, handle, value)
+        }
         SolidHistoryOperation::Wedge(value) => vec![
             history_prop(t!("Length").as_ref(), PROP_LENGTH, value.length),
             history_prop(t!("Width").as_ref(), PROP_WIDTH, value.width),
@@ -193,11 +275,6 @@ pub fn primitive_properties(
             history_prop(t!("Radius").as_ref(), PROP_RADIUS, value.major_radius),
             history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
         ],
-        SolidHistoryOperation::Sphere(value) => vec![history_prop(
-            t!("Radius").as_ref(),
-            PROP_RADIUS,
-            value.radius,
-        )],
         SolidHistoryOperation::Torus(value) => vec![
             history_prop(
                 t!("Outer Radius").as_ref(),
@@ -230,6 +307,7 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_WIDTH
             | PROP_HEIGHT
             | PROP_RADIUS
+            | PROP_DIAMETER
             | PROP_OUTER_RADIUS
             | PROP_INNER_RADIUS
             | PROP_SIDES
@@ -355,6 +433,36 @@ fn apply_box_geometry_property(
     Some(true)
 }
 
+fn apply_sphere_geometry_property(
+    value: &mut SolidHistorySphere,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    let axis = match field {
+        PROP_POSITION_X => 0,
+        PROP_POSITION_Y => 1,
+        PROP_POSITION_Z => 2,
+        _ => return None,
+    };
+    let target = crate::entities::common::parse_length(text)?;
+    if !target.is_finite() {
+        return Some(false);
+    }
+    let current = matrix(value.base.transform)?;
+    let center = current.transform_point3(glam::DVec3::ZERO);
+    if !center.is_finite() || (target - center[axis]).abs() <= 1e-12 {
+        return Some(false);
+    }
+    let mut delta = glam::DVec3::ZERO;
+    delta[axis] = target - center[axis];
+    let updated = glam::DMat4::from_translation(delta) * current;
+    if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
+        return Some(false);
+    }
+    value.base.transform = updated.to_cols_array();
+    Some(true)
+}
+
 pub fn apply_primitive_property(
     operation: &mut SolidHistoryOperation,
     field: &str,
@@ -362,6 +470,11 @@ pub fn apply_primitive_property(
 ) -> bool {
     if let SolidHistoryOperation::Box(box_value) = operation {
         if let Some(applied) = apply_box_geometry_property(box_value, field, value) {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Sphere(sphere_value) = operation {
+        if let Some(applied) = apply_sphere_geometry_property(sphere_value, field, value) {
             return applied;
         }
     }
@@ -429,8 +542,19 @@ pub fn apply_primitive_property(
             PROP_HEIGHT => value.height = positive().unwrap_or(value.height),
             _ => return false,
         },
-        SolidHistoryOperation::Sphere(value) if field == PROP_RADIUS => {
-            value.radius = positive().unwrap_or(value.radius);
+        SolidHistoryOperation::Sphere(value) => {
+            let Some(next) = positive() else {
+                return false;
+            };
+            let radius = match field {
+                PROP_RADIUS => next,
+                PROP_DIAMETER => next * 0.5,
+                _ => return false,
+            };
+            if (radius - value.radius).abs() <= 1e-12 {
+                return false;
+            }
+            value.radius = radius;
         }
         SolidHistoryOperation::Torus(value) => {
             let outer = value.major_radius + value.minor_radius;

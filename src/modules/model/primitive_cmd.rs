@@ -47,6 +47,9 @@ enum ConeStep {
     TwoPointFirst,
     TwoPointSecond(DVec3),
     EllipseFirst,
+    EllipseCenter,
+    EllipseCenterFirstAxis(DVec3),
+    EllipseCenterSecondAxis(DVec3, DVec3),
     EllipseSecond(DVec3),
     EllipseThird(DVec3, DVec3),
     TtrFirst,
@@ -58,6 +61,7 @@ enum ConeStep {
         second_hit: DVec3,
     },
     Height,
+    HeightAfterTopRadius,
     HeightFirstPoint,
     HeightSecondPoint(DVec3),
     AxisEndpoint,
@@ -412,7 +416,16 @@ impl PrimitiveCommand {
             ConeStep::ThreePointThird(_, _) => t!("CONE  Specify third point on base:").into_owned(),
             ConeStep::TwoPointFirst => t!("CONE  Specify first endpoint of base diameter:").into_owned(),
             ConeStep::TwoPointSecond(_) => t!("CONE  Specify second endpoint of base diameter:").into_owned(),
-            ConeStep::EllipseFirst => t!("CONE  Specify first endpoint of ellipse axis:").into_owned(),
+            ConeStep::EllipseFirst =>
+                t!("CONE  Specify endpoint of first axis or [Center]:").into_owned(),
+            ConeStep::EllipseCenter => t!("CONE  Specify center point:").into_owned(),
+            ConeStep::EllipseCenterFirstAxis(_) => crate::tf!(
+                "CONE  Specify distance to first axis <{:.4}>:",
+                self.cone_defaults.base_x_radius
+            )
+            .into_owned(),
+            ConeStep::EllipseCenterSecondAxis(_, _) =>
+                t!("CONE  Specify endpoint of second axis:").into_owned(),
             ConeStep::EllipseSecond(_) => t!("CONE  Specify second endpoint of ellipse axis:").into_owned(),
             ConeStep::EllipseThird(_, _) => t!("CONE  Specify distance to other ellipse axis:").into_owned(),
             ConeStep::TtrFirst => t!("CONE  Select first tangent object:").into_owned(),
@@ -425,6 +438,11 @@ impl PrimitiveCommand {
                 "CONE  Specify height or [2Point/Axis endpoint/Top radius] <{:.4}>:",
                 self.cone_defaults.height
             ).into_owned(),
+            ConeStep::HeightAfterTopRadius => crate::tf!(
+                "CONE  Specify height or [2Point/Axis endpoint] <{:.4}>:",
+                self.cone_defaults.height
+            )
+            .into_owned(),
             ConeStep::HeightFirstPoint => t!("CONE  Specify first point for height:").into_owned(),
             ConeStep::HeightSecondPoint(_) => t!("CONE  Specify second point for height:").into_owned(),
             ConeStep::AxisEndpoint => t!("CONE  Specify axis endpoint:").into_owned(),
@@ -444,10 +462,15 @@ impl PrimitiveCommand {
                 CmdOption::new(t!("Elliptical").as_ref(), "E"),
             ],
             ConeStep::BaseRadius => vec![CmdOption::new(t!("Diameter").as_ref(), "D")],
+            ConeStep::EllipseFirst => vec![CmdOption::new(t!("Center").as_ref(), "C")],
             ConeStep::Height => vec![
                 CmdOption::new("2Point", "2P"),
                 CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
                 CmdOption::new(t!("Top radius").as_ref(), "T"),
+            ],
+            ConeStep::HeightAfterTopRadius => vec![
+                CmdOption::new("2Point", "2P"),
+                CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
             ],
             _ => Vec::new(),
         }
@@ -504,6 +527,26 @@ impl PrimitiveCommand {
                 self.cone_step = ConeStep::EllipseSecond(point);
                 CmdResult::NeedPoint
             }
+            ConeStep::EllipseCenter => {
+                self.cone_step = ConeStep::EllipseCenterFirstAxis(point);
+                CmdResult::NeedPoint
+            }
+            ConeStep::EllipseCenterFirstAxis(center) => {
+                if point.distance_squared(center) > 1e-12 {
+                    self.cone_step = ConeStep::EllipseCenterSecondAxis(center, point);
+                }
+                CmdResult::NeedPoint
+            }
+            ConeStep::EllipseCenterSecondAxis(center, first_axis_end) => {
+                let axis = first_axis_end - center;
+                if let Some(x) = axis.try_normalize() {
+                    let y = self.plane.z.cross(x).normalize_or_zero();
+                    let frame = WorkingPlane::new(center, x, y);
+                    let local = frame.to_local(point);
+                    self.set_cone_base(frame, axis.length(), local.y.abs());
+                }
+                CmdResult::NeedPoint
+            }
             ConeStep::EllipseSecond(first) => {
                 if point.distance_squared(first) > 1e-12 {
                     self.cone_step = ConeStep::EllipseThird(first, point);
@@ -533,7 +576,7 @@ impl PrimitiveCommand {
                 }
                 CmdResult::NeedPoint
             }
-            ConeStep::Height => self
+            ConeStep::Height | ConeStep::HeightAfterTopRadius => self
                 .cone_height_at(point)
                 .map(|height| self.commit_cone_height(height))
                 .unwrap_or(CmdResult::NeedPoint),
@@ -556,7 +599,7 @@ impl PrimitiveCommand {
                 let radius = local.x.hypot(local.y);
                 if radius.is_finite() {
                     self.cone_top_radius = radius;
-                    self.cone_step = ConeStep::Height;
+                    self.cone_step = ConeStep::HeightAfterTopRadius;
                 }
                 CmdResult::NeedPoint
             }
@@ -605,11 +648,26 @@ impl PrimitiveCommand {
                 self.cone_step = ConeStep::BaseDiameter;
                 return Some(CmdResult::NeedPoint);
             }
+            ConeStep::EllipseFirst if matches!(upper.as_str(), "C" | "CENTER") => {
+                self.cone_step = ConeStep::EllipseCenter;
+                return Some(CmdResult::NeedPoint);
+            }
             ConeStep::Height => {
                 self.cone_step = match upper.as_str() {
                     "2P" | "2POINT" => ConeStep::HeightFirstPoint,
                     "A" | "AXIS" | "AXIS ENDPOINT" => ConeStep::AxisEndpoint,
                     "T" | "TOP" | "TOP RADIUS" => ConeStep::TopRadius,
+                    _ => {
+                        let height = crate::entities::common::parse_typed_length(token)?;
+                        return Some(self.commit_cone_height(height));
+                    }
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            ConeStep::HeightAfterTopRadius => {
+                self.cone_step = match upper.as_str() {
+                    "2P" | "2POINT" => ConeStep::HeightFirstPoint,
+                    "A" | "AXIS" | "AXIS ENDPOINT" => ConeStep::AxisEndpoint,
                     _ => {
                         let height = crate::entities::common::parse_typed_length(token)?;
                         return Some(self.commit_cone_height(height));
@@ -635,6 +693,13 @@ impl PrimitiveCommand {
                     CmdResult::NeedPoint
                 })
             }
+            ConeStep::EllipseCenterFirstAxis(center) => (number > 0.0).then(|| {
+                self.cone_step = ConeStep::EllipseCenterSecondAxis(
+                    center,
+                    center + self.plane.x * number,
+                );
+                CmdResult::NeedPoint
+            }),
             ConeStep::TtrRadius { .. } => {
                 let center = self.cone_ttr_center(number)?;
                 (number > 0.0).then(|| {
@@ -644,7 +709,7 @@ impl PrimitiveCommand {
             }
             ConeStep::TopRadius if number >= 0.0 => {
                 self.cone_top_radius = number;
-                self.cone_step = ConeStep::Height;
+                self.cone_step = ConeStep::HeightAfterTopRadius;
                 Some(CmdResult::NeedPoint)
             }
             _ => None,
@@ -682,13 +747,21 @@ impl PrimitiveCommand {
                 let local = frame.to_local(point);
                 Some(self.cone_base_preview(frame, axis.length() * 0.5, local.y.abs()))
             }
+            ConeStep::EllipseCenterSecondAxis(center, first_axis_end) => {
+                let axis = first_axis_end - center;
+                let x = axis.try_normalize()?;
+                let y = self.plane.z.cross(x).normalize_or_zero();
+                let frame = WorkingPlane::new(center, x, y);
+                let local = frame.to_local(point);
+                Some(self.cone_base_preview(frame, axis.length(), local.y.abs()))
+            }
             ConeStep::TtrRadius { second_hit, .. } => {
                 let local = self.plane.to_local(point);
                 let radius = (local - second_hit).truncate().length();
                 let center = self.cone_ttr_center(radius)?;
                 Some(self.cone_base_preview(self.cone_frame_at(center), radius, radius))
             }
-            ConeStep::Height => {
+            ConeStep::Height | ConeStep::HeightAfterTopRadius => {
                 let frame = self.cone_frame?;
                 self.cone_preview(frame.z * self.cone_height_at(point)?)
             }
@@ -1067,7 +1140,8 @@ impl CadCommand for PrimitiveCommand {
 
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
         if self.shape == Shape::Cone {
-            return matches!(self.cone_step, ConeStep::Height).then(|| {
+            return matches!(self.cone_step, ConeStep::Height | ConeStep::HeightAfterTopRadius)
+                .then(|| {
                 let frame = self.cone_frame.unwrap_or(self.plane);
                 (frame.origin, frame.z.normalize_or_zero())
             });
@@ -1252,10 +1326,19 @@ impl CadCommand for PrimitiveCommand {
                     self.set_cone_base(self.cone_frame_at(center), radius, radius);
                     CmdResult::NeedPoint
                 }
-                ConeStep::Height => self.commit_cone_height(self.cone_defaults.height),
+                ConeStep::EllipseCenterFirstAxis(center) => {
+                    self.cone_step = ConeStep::EllipseCenterSecondAxis(
+                        center,
+                        center + self.plane.x * self.cone_defaults.base_x_radius,
+                    );
+                    CmdResult::NeedPoint
+                }
+                ConeStep::Height | ConeStep::HeightAfterTopRadius => {
+                    self.commit_cone_height(self.cone_defaults.height)
+                }
                 ConeStep::TopRadius => {
                     self.cone_top_radius = self.cone_defaults.top_radius;
-                    self.cone_step = ConeStep::Height;
+                    self.cone_step = ConeStep::HeightAfterTopRadius;
                     CmdResult::NeedPoint
                 }
                 _ => CmdResult::Cancel,
@@ -1295,8 +1378,11 @@ impl CadCommand for PrimitiveCommand {
                 ConeStep::BaseCenter
                     | ConeStep::BaseRadius
                     | ConeStep::BaseDiameter
+                    | ConeStep::EllipseFirst
+                    | ConeStep::EllipseCenterFirstAxis(_)
                     | ConeStep::TtrRadius { .. }
                     | ConeStep::Height
+                    | ConeStep::HeightAfterTopRadius
                     | ConeStep::TopRadius
             );
         }
@@ -1319,7 +1405,11 @@ impl CadCommand for PrimitiveCommand {
         if self.shape == Shape::Cone {
             return matches!(
                 self.cone_step,
-                ConeStep::BaseCenter | ConeStep::BaseRadius | ConeStep::Height
+                ConeStep::BaseCenter
+                    | ConeStep::BaseRadius
+                    | ConeStep::EllipseFirst
+                    | ConeStep::Height
+                    | ConeStep::HeightAfterTopRadius
             );
         }
         self.shape == Shape::Box
@@ -1477,8 +1567,12 @@ impl CadCommand for PrimitiveCommand {
                 ConeStep::BaseRadius | ConeStep::TtrRadius { .. } | ConeStep::TopRadius => {
                     DynRole::Radius
                 }
+                ConeStep::EllipseCenterFirstAxis(_) => DynRole::Distance,
                 ConeStep::BaseDiameter => DynRole::Diameter,
-                ConeStep::Height | ConeStep::HeightSecondPoint(_) | ConeStep::AxisEndpoint => {
+                ConeStep::Height
+                | ConeStep::HeightAfterTopRadius
+                | ConeStep::HeightSecondPoint(_)
+                | ConeStep::AxisEndpoint => {
                     DynRole::Height
                 }
                 _ => return None,
@@ -1532,7 +1626,10 @@ impl CadCommand for PrimitiveCommand {
                     let local = self.plane.to_local(cursor);
                     Some((local - second_hit).truncate().length())
                 }
-                ConeStep::Height => self.cone_height_at(cursor).map(f64::abs),
+                ConeStep::EllipseCenterFirstAxis(center) => Some(center.distance(cursor)),
+                ConeStep::Height | ConeStep::HeightAfterTopRadius => {
+                    self.cone_height_at(cursor).map(f64::abs)
+                }
                 ConeStep::HeightSecondPoint(first) => Some(first.distance(cursor)),
                 ConeStep::AxisEndpoint => self.cone_frame.map(|frame| frame.origin.distance(cursor)),
                 _ => None,

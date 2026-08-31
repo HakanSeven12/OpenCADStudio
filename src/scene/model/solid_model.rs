@@ -45,6 +45,23 @@ pub fn cone_solid(center: [f64; 3], radius: f64, height: f64) -> Option<Body> {
     brep::make::cone(center, radius, height)
 }
 
+/// Circular or elliptical cone/frustum standing on the z = base plane.
+pub fn cone_frustum_solid(
+    center: [f64; 3],
+    base_x_radius: f64,
+    base_y_radius: f64,
+    top_radius: f64,
+    height: f64,
+) -> Option<Body> {
+    brep::make::frustum(
+        center,
+        base_x_radius,
+        base_y_radius,
+        top_radius,
+        height,
+    )
+}
+
 /// Solid sphere about `center`.
 pub fn sphere_solid(center: [f64; 3], radius: f64) -> Option<Body> {
     brep::make::sphere(center, radius)

@@ -957,7 +957,13 @@ impl OpenCADStudio {
             }
 
             // ── Model commands (3D primitives) ─────────────────────────────
-            "BOX" | "WEDGE" | "CYLINDER" | "CONE" | "SPHERE" | "PYRAMID" | "PYR"
+            "CYLINDER" => {
+                use crate::modules::model::cylinder_cmd::CylinderCommand;
+                let new_cmd = CylinderCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+            "BOX" | "WEDGE" | "CONE" | "SPHERE" | "PYRAMID" | "PYR"
             | "TORUS" => {
                 use crate::modules::model::primitive_cmd::PrimitiveCommand;
                 let new_cmd = PrimitiveCommand::new(cmd);

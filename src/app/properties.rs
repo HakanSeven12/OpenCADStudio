@@ -2399,7 +2399,7 @@ impl OpenCADStudio {
                     annotation_scale_handle,
                 );
                 let mut entity_grips = dispatch::grips(contextual.as_ref());
-                if crate::scene::model::solid_history::is_rectangular_primitive(
+                if crate::scene::model::solid_history::has_specialized_primitive_properties(
                     &self.tabs[i].scene.document,
                     handle,
                 ) {

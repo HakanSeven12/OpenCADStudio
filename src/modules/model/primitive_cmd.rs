@@ -10,11 +10,14 @@ use cadkernel::geom2d::{
 };
 use glam::DVec3;
 use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, TangentObject, WorkingPlane};
 use crate::scene::model::solid_model;
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
+
+static LAST_WEDGE_HEIGHT: AtomicU64 = AtomicU64::new(0);
 
 /// Which primitive a `PrimitiveCommand` builds.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -178,7 +181,10 @@ impl Shape {
     /// True for footprints picked as a centre + radius (round shapes); false
     /// for corner-to-corner footprints (box/wedge).
     fn radial(self) -> bool {
-        !matches!(self, Shape::Box | Shape::Wedge)
+        !self.rectangular()
+    }
+    fn rectangular(self) -> bool {
+        matches!(self, Shape::Box | Shape::Wedge)
     }
     /// Whether a height value is collected after the footprint.
     fn needs_height(self) -> bool {
@@ -275,19 +281,33 @@ impl PrimitiveCommand {
 
     /// A reasonable default height when the user just presses Enter.
     fn default_height(&self) -> f64 {
-        match self.shape {
-            Shape::Box | Shape::Wedge => {
-                let d = self.pts[1] - self.pts[0];
-                d.x.abs().max(d.y.abs())
+        if self.shape == Shape::Wedge {
+            let bits = LAST_WEDGE_HEIGHT.load(Ordering::Relaxed);
+            if bits != 0 {
+                let height = f64::from_bits(bits);
+                if height.is_finite() && height >= 1e-6 {
+                    return height;
+                }
             }
-            _ => (self.pts[1] - self.pts[0]).length(),
         }
-        .max(1.0)
+        let height = match self.shape {
+            Shape::Box | Shape::Wedge => match (self.box_length, self.box_width) {
+                (Some(length), Some(width)) => length.max(width),
+                _ if self.pts.len() >= 2 => {
+                    let d = self.pts[1] - self.pts[0];
+                    d.x.abs().max(d.y.abs())
+                }
+                _ => 1.0,
+            },
+            _ if self.pts.len() >= 2 => (self.pts[1] - self.pts[0]).length(),
+            _ => 1.0,
+        };
+        height.max(1.0)
     }
 
     fn cursor_height(&self, point: DVec3) -> f64 {
         let height = self.plane.to_local(point).z - self.pts[0].z;
-        if self.shape == Shape::Box {
+        if self.shape.rectangular() {
             height
         } else {
             height.max(1e-6)
@@ -427,19 +447,24 @@ impl PrimitiveCommand {
         true
     }
 
-    fn set_box_cube(&mut self, size: f64) -> Option<CmdResult> {
+    fn set_box_cube(&mut self, size: f64, angle: f64) -> Option<CmdResult> {
         let size = size.abs();
-        if !size.is_finite() || size < 1e-6 {
+        if !size.is_finite() || !angle.is_finite() || size < 1e-6 {
             return None;
         }
+        let (sin, cos) = angle.sin_cos();
+        let x_axis = DVec3::new(cos, sin, 0.0);
+        let y_axis = DVec3::new(-sin, cos, 0.0);
         let origin = if self.box_centered {
-            self.pts[0] - DVec3::new(size * 0.5, size * 0.5, 0.0)
+            self.pts[0] - x_axis * size * 0.5 - y_axis * size * 0.5
         } else {
             self.pts[0]
         };
         self.box_origin = Some(origin);
         self.box_length = Some(size);
         self.box_width = Some(size);
+        self.box_angle = angle;
+        self.box_width_sign = 1.0;
         Some(self.commit(size))
     }
 
@@ -478,22 +503,59 @@ impl PrimitiveCommand {
         true
     }
 
-    fn box_preview(&self, height: f64) -> Option<WireModel> {
+    fn rectangular_preview(&self, height: f64) -> Option<WireModel> {
         let (origin, x_axis, y_axis, length, width, height) = self.box_spec(height)?;
-        let base = [
-            origin,
-            origin + x_axis * length,
-            origin + x_axis * length + y_axis * width,
-            origin + y_axis * width,
-        ];
-        let top = base.map(|point| point + DVec3::Z * height);
         let mut points = Vec::new();
-        push_loop(&mut points, &base);
-        push_loop(&mut points, &top);
-        for index in 0..4 {
-            push_segment(&mut points, base[index], top[index]);
+        if self.shape == Shape::Wedge {
+            let near = [
+                origin,
+                origin + x_axis * length,
+                origin + DVec3::Z * height,
+            ];
+            let far = near.map(|point| point + y_axis * width);
+            push_loop(&mut points, &near);
+            push_loop(&mut points, &far);
+            for index in 0..3 {
+                push_segment(&mut points, near[index], far[index]);
+            }
+        } else {
+            let base = [
+                origin,
+                origin + x_axis * length,
+                origin + x_axis * length + y_axis * width,
+                origin + y_axis * width,
+            ];
+            let top = base.map(|point| point + DVec3::Z * height);
+            push_loop(&mut points, &base);
+            push_loop(&mut points, &top);
+            for index in 0..4 {
+                push_segment(&mut points, base[index], top[index]);
+            }
         }
         Some(self.place_preview(wire("primitive_height_preview", points)))
+    }
+
+    fn build_wedge(&self, height: f64) -> Option<(Body, SolidHistoryOperation)> {
+        use crate::scene::model::solid_history;
+
+        let (origin, x_axis, y_axis, length, width, height) = self.box_spec(height)?;
+        let base = solid_model::wedge_solid([0.0; 3], length, width, height)?;
+        let placed = solid_model::placed(
+            &base,
+            x_axis.to_array(),
+            y_axis.to_array(),
+            DVec3::Z.to_array(),
+            origin.to_array(),
+        )?;
+        Some((
+            placed,
+            solid_history::wedge_op(
+                self.history_transform_axes(origin, x_axis, y_axis),
+                length,
+                width,
+                height,
+            ),
+        ))
     }
 
     /// Build the persistent kernel body and its history node.
@@ -502,24 +564,7 @@ impl PrimitiveCommand {
 
         let (solid, history) = match self.shape {
             Shape::Box => return self.build_box(height),
-            Shape::Wedge => {
-                let (a, b) = (self.pts[0], self.pts[1]);
-                let length = (b.x - a.x).abs();
-                let width = (b.y - a.y).abs();
-                if length < 1e-6 || width < 1e-6 || height < 1e-6 {
-                    return None;
-                }
-                let origin = [a.x.min(b.x), a.y.min(b.y), a.z];
-                (
-                    solid_model::wedge_solid(origin, length, width, height),
-                    solid_history::wedge_op(
-                        self.history_transform(DVec3::from_array(origin)),
-                        length,
-                        width,
-                        height,
-                    ),
-                )
-            }
+            Shape::Wedge => return self.build_wedge(height),
             Shape::Cylinder | Shape::Cone => {
                 let c = self.pts[0];
                 let r = (self.pts[1] - c).length();
@@ -599,6 +644,9 @@ impl PrimitiveCommand {
     fn commit(&self, height: f64) -> CmdResult {
         match self.build(height) {
             Some((solid, history)) => {
+                if self.shape == Shape::Wedge {
+                    LAST_WEDGE_HEIGHT.store(height.abs().to_bits(), Ordering::Relaxed);
+                }
                 // Place the local body on the working plane.
                 let placed = solid_model::placed(
                     &solid,
@@ -641,7 +689,7 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
-        let constrained = if self.shape == Shape::Box {
+        let constrained = if self.shape.rectangular() {
             self.box_step == BoxStep::Height
         } else {
             self.height_step
@@ -695,7 +743,7 @@ impl CadCommand for PrimitiveCommand {
 
     fn prompt(&self) -> String {
         let n = self.shape.name();
-        if self.shape == Shape::Box {
+        if self.shape.rectangular() {
             return match self.box_step {
                 BoxStep::FirstCorner => t!("%{n}  Specify first corner or [Center]:", n = n),
                 BoxStep::CenterPoint => t!("%{n}  Specify center point:", n = n),
@@ -705,6 +753,11 @@ impl CadCommand for PrimitiveCommand {
                 BoxStep::CubeSize => t!("%{n}  Specify cube length:", n = n),
                 BoxStep::Length => t!("%{n}  Specify length:", n = n),
                 BoxStep::Width => t!("%{n}  Specify width:", n = n),
+                BoxStep::Height if self.shape == Shape::Wedge => t!(
+                    "%{n}  Specify height or [2Point] <%{height}>:",
+                    n = n,
+                    height = format!("{:.4}", self.default_height())
+                ),
                 BoxStep::Height => t!("%{n}  Specify height or [2Point]:", n = n),
                 BoxStep::HeightFirstPoint => {
                     t!("%{n}  Specify first point for height:", n = n)
@@ -788,7 +841,7 @@ impl CadCommand for PrimitiveCommand {
                 _ => Vec::new(),
             };
         }
-        if self.shape != Shape::Box {
+        if !self.shape.rectangular() {
             return Vec::new();
         }
         match self.box_step {
@@ -846,7 +899,7 @@ impl CadCommand for PrimitiveCommand {
                 SphereStep::TtrFirst | SphereStep::TtrSecond { .. } => CmdResult::NeedPoint,
             };
         }
-        if self.shape == Shape::Box {
+        if self.shape.rectangular() {
             let local = self.plane.to_local(pt);
             if !local.is_finite() {
                 return CmdResult::NeedPoint;
@@ -858,12 +911,25 @@ impl CadCommand for PrimitiveCommand {
                     CmdResult::NeedPoint
                 }
                 BoxStep::OppositeCorner => {
-                    self.set_box_corner_footprint(local);
-                    CmdResult::NeedPoint
+                    let height = local.z - self.pts[0].z;
+                    if !self.set_box_corner_footprint(local) {
+                        CmdResult::NeedPoint
+                    } else if self.shape == Shape::Wedge && height.abs() >= 1e-6 {
+                        self.commit(height)
+                    } else {
+                        CmdResult::NeedPoint
+                    }
                 }
-                BoxStep::CubeSize => self
-                    .set_box_cube((local - self.pts[0]).length())
-                    .unwrap_or(CmdResult::NeedPoint),
+                BoxStep::CubeSize => {
+                    let delta = local - self.pts[0];
+                    let (size, angle) = if self.shape == Shape::Wedge {
+                        (delta.x.hypot(delta.y), delta.y.atan2(delta.x))
+                    } else {
+                        (delta.length(), 0.0)
+                    };
+                    self.set_box_cube(size, angle)
+                    .unwrap_or(CmdResult::NeedPoint)
+                }
                 BoxStep::Length => {
                     let delta = local - self.pts[0];
                     if !self.set_box_length(delta.x.hypot(delta.y), delta.y.atan2(delta.x)) {
@@ -937,8 +1003,12 @@ impl CadCommand for PrimitiveCommand {
                 _ => CmdResult::Cancel,
             };
         }
-        if self.shape == Shape::Box {
-            return CmdResult::Cancel;
+        if self.shape.rectangular() {
+            return if self.shape == Shape::Wedge && self.box_step == BoxStep::Height {
+                self.commit(self.default_height())
+            } else {
+                CmdResult::Cancel
+            };
         }
         if self.height_step {
             let h = self.default_height();
@@ -961,7 +1031,7 @@ impl CadCommand for PrimitiveCommand {
                     | SphereStep::TtrRadius { .. }
             );
         }
-        if self.shape == Shape::Box {
+        if self.shape.rectangular() {
             matches!(
                 self.box_step,
                 BoxStep::FirstCorner
@@ -980,7 +1050,7 @@ impl CadCommand for PrimitiveCommand {
         if self.shape == Shape::Sphere {
             return matches!(self.sphere_step, SphereStep::Center | SphereStep::Radius(_));
         }
-        self.shape == Shape::Box
+        self.shape.rectangular()
             && matches!(
                 self.box_step,
                 BoxStep::FirstCorner | BoxStep::OppositeCorner | BoxStep::Height
@@ -1026,7 +1096,7 @@ impl CadCommand for PrimitiveCommand {
                 _ => None,
             };
         }
-        if self.shape == Shape::Box {
+        if self.shape.rectangular() {
             let token = raw.trim();
             let upper = token.to_uppercase();
             return match self.box_step {
@@ -1048,7 +1118,7 @@ impl CadCommand for PrimitiveCommand {
                     Some(CmdResult::NeedPoint)
                 }
                 BoxStep::CubeSize => crate::entities::common::parse_typed_length(token)
-                    .and_then(|value| self.set_box_cube(value)),
+                    .and_then(|value| self.set_box_cube(value, 0.0)),
                 BoxStep::Length => {
                     let value = crate::entities::common::parse_typed_length(token)?;
                     self.set_box_length(value, 0.0)
@@ -1114,7 +1184,7 @@ impl CadCommand for PrimitiveCommand {
         if self.pts.is_empty() {
             return None;
         }
-        if self.shape == Shape::Box {
+        if self.shape.rectangular() {
             let local = self.plane.to_local(pt);
             if !local.is_finite() {
                 return None;
@@ -1142,18 +1212,38 @@ impl CadCommand for PrimitiveCommand {
                     Some(self.place_preview(footprint_wire(Shape::Box, &points)))
                 }
                 BoxStep::CubeSize => {
-                    let size = (local - self.pts[0]).length().max(1e-6);
-                    let mut preview = PrimitiveCommand::new("BOX");
+                    let delta = local - self.pts[0];
+                    let size = if self.shape == Shape::Wedge {
+                        delta.x.hypot(delta.y)
+                    } else {
+                        delta.length()
+                    }
+                    .max(1e-6);
+                    let mut preview = PrimitiveCommand::new(self.shape.name());
                     preview.plane = self.plane;
                     preview.pts = self.pts.clone();
-                    preview.box_origin = Some(if self.box_centered {
-                        self.pts[0] - DVec3::new(size * 0.5, size * 0.5, 0.0)
-                    } else {
-                        self.pts[0]
-                    });
                     preview.box_length = Some(size);
                     preview.box_width = Some(size);
-                    preview.box_preview(size)
+                    preview.box_width_sign = 1.0;
+                    if self.shape == Shape::Wedge {
+                        preview.box_origin = Some(self.pts[0]);
+                        preview.box_angle = delta.y.atan2(delta.x);
+                    } else {
+                        preview.box_origin = Some(if self.box_centered {
+                            self.pts[0] - DVec3::new(size * 0.5, size * 0.5, 0.0)
+                        } else {
+                            self.pts[0]
+                        });
+                    }
+                    if self.shape == Shape::Wedge && self.box_centered {
+                        let (sin, cos) = preview.box_angle.sin_cos();
+                        let x_axis = DVec3::new(cos, sin, 0.0);
+                        let y_axis = DVec3::new(-sin, cos, 0.0);
+                        preview.box_origin = Some(
+                            self.pts[0] - x_axis * size * 0.5 - y_axis * size * 0.5,
+                        );
+                    }
+                    preview.rectangular_preview(size)
                 }
                 BoxStep::Length => Some(self.place_preview(wire(
                     "primitive_preview",
@@ -1163,7 +1253,7 @@ impl CadCommand for PrimitiveCommand {
                     let delta = local - self.pts[0];
                     let normal = DVec3::new(-self.box_angle.sin(), self.box_angle.cos(), 0.0);
                     let signed = delta.dot(normal);
-                    let mut preview = PrimitiveCommand::new("BOX");
+                    let mut preview = PrimitiveCommand::new(self.shape.name());
                     preview.plane = self.plane;
                     preview.pts = self.pts.clone();
                     preview.box_origin = self.box_origin;
@@ -1171,9 +1261,9 @@ impl CadCommand for PrimitiveCommand {
                     preview.box_width = Some(signed.abs().max(1e-6));
                     preview.box_angle = self.box_angle;
                     preview.box_width_sign = if signed < 0.0 { -1.0 } else { 1.0 };
-                    preview.box_preview(1e-6)
+                    preview.rectangular_preview(1e-6)
                 }
-                BoxStep::Height => self.box_preview(self.cursor_height(pt)),
+                BoxStep::Height => self.rectangular_preview(self.cursor_height(pt)),
                 BoxStep::HeightSecondPoint => self.box_height_anchor.map(|first| {
                     self.place_preview(wire(
                         "primitive_preview",
@@ -1215,7 +1305,7 @@ impl CadCommand for PrimitiveCommand {
             });
         }
 
-        let role = if self.shape == Shape::Box {
+        let role = if self.shape.rectangular() {
             match self.box_step {
                 BoxStep::CubeSize | BoxStep::Length => DynRole::Distance,
                 BoxStep::Width => DynRole::Width,
@@ -1247,13 +1337,20 @@ impl CadCommand for PrimitiveCommand {
                 _ => None,
             };
         }
-        if self.shape == Shape::Box {
+        if self.shape.rectangular() {
             let local = self.plane.to_local(cursor);
             if !local.is_finite() {
                 return None;
             }
             return match self.box_step {
-                BoxStep::CubeSize | BoxStep::Length => Some((local - self.pts[0]).length()),
+                BoxStep::CubeSize | BoxStep::Length => {
+                    let delta = local - self.pts[0];
+                    Some(if self.shape == Shape::Wedge {
+                        delta.x.hypot(delta.y)
+                    } else {
+                        delta.length()
+                    })
+                }
                 BoxStep::Width => {
                     let normal = DVec3::new(-self.box_angle.sin(), self.box_angle.cos(), 0.0);
                     Some((local - self.pts[0]).dot(normal).abs())

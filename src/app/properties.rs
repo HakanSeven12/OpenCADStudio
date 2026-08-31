@@ -441,14 +441,14 @@ impl OpenCADStudio {
                     let display_entity = dispatch::entity_in_working_plane(contextual.as_ref(), plane);
                     let entity = &display_entity;
                     let group_names = self.tabs[i].scene.group_names_for_entity(handle);
-                    let box_primitive =
-                        crate::scene::model::solid_history::is_box_primitive(
+                    let specialized_primitive =
+                        crate::scene::model::solid_history::has_specialized_primitive_properties(
                             &self.tabs[i].scene.document,
                             handle,
                         );
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
-                    if box_primitive {
+                    if specialized_primitive {
                         sections.retain(|section| {
                             !section.props.iter().any(|property| {
                                 property.field.starts_with("acis_")
@@ -620,7 +620,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !box_primitive && matches!(
+                    if !specialized_primitive && matches!(
                         entity,
                         acadrust::EntityType::Solid3D(_)
                             | acadrust::EntityType::Region(_)
@@ -694,7 +694,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !box_primitive {
+                    if !specialized_primitive {
                         sections.extend(crate::entities::object_data::sections(
                             &self.tabs[i].scene.document,
                             &self.tabs[i].scene.object_data_cache,
@@ -2146,6 +2146,19 @@ impl OpenCADStudio {
                         .map(|(handle, entity)| (*handle, entity))
                         .collect();
                     let mut sections = aggregate_sections(&local_refs, &text_style_names);
+                    if local_refs.iter().all(|(handle, _)| {
+                        crate::scene::model::solid_history::has_specialized_primitive_properties(
+                            &self.tabs[i].scene.document,
+                            *handle,
+                        )
+                    }) {
+                        sections.retain(|section| {
+                            !section.props.iter().any(|property| {
+                                property.field.starts_with("acis_")
+                                    || property.field.starts_with("s3d_")
+                            })
+                        });
+                    }
                     sections.extend(aggregate_solid_history_sections(
                         &self.tabs[i].scene.document,
                         &local_refs.iter().map(|(handle, _)| *handle).collect::<Vec<_>>(),

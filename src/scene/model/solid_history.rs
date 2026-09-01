@@ -2,7 +2,7 @@ use acadrust::entities::Solid3D;
 use acadrust::objects::{
     DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
     SolidHistoryCylinder, SolidHistoryNodeBase, SolidHistoryOperation,
-    SolidHistoryPyramid, SolidHistorySphere, SolidHistoryTorus,
+    SolidHistoryPyramid, SolidHistorySphere, SolidHistorySweep, SolidHistoryTorus,
 };
 use cadkernel::brep::Body;
 
@@ -22,6 +22,7 @@ pub const GRIP_SIDES: usize = 10_007;
 pub const GRIP_MAJOR_RADIUS: usize = 10_008;
 pub const GRIP_MINOR_RADIUS: usize = 10_009;
 pub const GRIP_TOP_RADIUS: usize = 10_010;
+pub const GRIP_POSITION: usize = 10_011;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -103,6 +104,7 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Cylinder(_)
                 | SolidHistoryOperation::Torus(_)
                 | SolidHistoryOperation::Pyramid(_)
+                | SolidHistoryOperation::Sweep(_)
         )
     )
 }
@@ -118,10 +120,83 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         }
         SolidHistoryOperation::Cone(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
+        SolidHistoryOperation::Sweep(value) => world_point(
+            value.base.transform,
+            [
+                value.reference_point.x,
+                value.reference_point.y,
+                value.reference_point.z,
+            ],
+        ),
         SolidHistoryOperation::Torus(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Pyramid(value) => world_point(value.base.transform, [0.0; 3]),
         _ => None,
     }
+}
+
+fn sweep_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistorySweep,
+) -> Vec<PropSection> {
+    let Some(position) = world_point(
+        value.base.transform,
+        [
+            value.reference_point.x,
+            value.reference_point.y,
+            value.reference_point.z,
+        ],
+    ) else {
+        return Vec::new();
+    };
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, _) = displayed_history_state(object_show_history, show_history_mode);
+    let show_value = if show_history { "Yes" } else { "No" };
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Solid type").into_owned(),
+                    field: "solid_history_type",
+                    value: PropValue::ReadOnly(t!("Sweep").into_owned()),
+                },
+                crate::entities::common::edit_prop(
+                    t!("Position X").as_ref(),
+                    PROP_POSITION_X,
+                    position.x,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Y").as_ref(),
+                    PROP_POSITION_Y,
+                    position.y,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Z").as_ref(),
+                    PROP_POSITION_Z,
+                    position.z,
+                ),
+            ],
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::ReadOnly(
+                        if record_history { "Record" } else { "None" }.to_string(),
+                    ),
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: PropValue::ReadOnly(show_value.to_string()),
+                },
+            ],
+        },
+    ]
 }
 
 fn torus_properties(
@@ -757,6 +832,7 @@ pub fn primitive_properties(
         SolidHistoryOperation::Cylinder(value) => cylinder_properties(document, handle, value),
         SolidHistoryOperation::Pyramid(value) => pyramid_properties(document, handle, value),
         SolidHistoryOperation::Torus(value) => torus_properties(document, handle, value),
+        SolidHistoryOperation::Sweep(value) => sweep_properties(document, handle, value),
         _ => Vec::new(),
     }
 }
@@ -991,6 +1067,40 @@ fn apply_cylinder_position_property(
     Some(true)
 }
 
+fn apply_sweep_position_property(
+    value: &mut SolidHistorySweep,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    let axis = match field {
+        PROP_POSITION_X => 0,
+        PROP_POSITION_Y => 1,
+        PROP_POSITION_Z => 2,
+        _ => return None,
+    };
+    let target = crate::entities::common::parse_length(text)?;
+    if !target.is_finite() {
+        return Some(false);
+    }
+    let current = matrix(value.base.transform)?;
+    let reference = current.transform_point3(glam::DVec3::new(
+        value.reference_point.x,
+        value.reference_point.y,
+        value.reference_point.z,
+    ));
+    if !reference.is_finite() || (target - reference[axis]).abs() <= 1e-12 {
+        return Some(false);
+    }
+    let mut delta = glam::DVec3::ZERO;
+    delta[axis] = target - reference[axis];
+    let updated = glam::DMat4::from_translation(delta) * current;
+    if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
+        return Some(false);
+    }
+    value.base.transform = updated.to_cols_array();
+    Some(true)
+}
+
 fn apply_torus_position_property(
     value: &mut SolidHistoryTorus,
     field: &str,
@@ -1176,6 +1286,11 @@ pub fn apply_primitive_property(
     }
     if let SolidHistoryOperation::Cylinder(cylinder_value) = operation {
         if let Some(applied) = apply_cylinder_position_property(cylinder_value, field, value) {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Sweep(sweep_value) = operation {
+        if let Some(applied) = apply_sweep_position_property(sweep_value, field, value) {
             return applied;
         }
     }
@@ -1679,6 +1794,17 @@ pub fn primitive_grips(
                 None,
             );
         }
+        SolidHistoryOperation::Sweep(value) => add(
+            GRIP_POSITION,
+            value.base.transform,
+            [
+                value.reference_point.x,
+                value.reference_point.y,
+                value.reference_point.z,
+            ],
+            GripShape::Square,
+            None,
+        ),
         _ => {}
     }
     grips
@@ -1822,6 +1948,22 @@ pub fn apply_primitive_grip(
             }
             _ => return false,
         },
+        SolidHistoryOperation::Sweep(value) if grip_id == GRIP_POSITION => {
+            let Some(current) = matrix(value.base.transform) else {
+                return false;
+            };
+            let reference = current.transform_point3(glam::DVec3::new(
+                value.reference_point.x,
+                value.reference_point.y,
+                value.reference_point.z,
+            ));
+            let delta = world - reference;
+            if !delta.is_finite() || delta.length_squared() <= 1e-24 {
+                return false;
+            }
+            value.base.transform =
+                (glam::DMat4::from_translation(delta) * current).to_cols_array();
+        }
         _ => return false,
     }
     true

@@ -219,6 +219,7 @@ impl CylinderCommand {
             entity: EntityType::Solid3D(entity),
             solid: Box::new(solid),
             history,
+            erase_source: None,
         }
     }
 

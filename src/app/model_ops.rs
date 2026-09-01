@@ -468,55 +468,6 @@ impl super::OpenCADStudio {
         Task::none()
     }
 
-    /// POLYSOLID — build a wall solid around an exact polyline offset.
-    pub(super) fn solid_polysolid(&mut self, width: f64, height: f64) -> Task<Message> {
-        let i = self.active_tab;
-        let found: Option<(Handle, EntityType)> = self.tabs[i]
-            .scene
-            .selected_entities()
-            .iter()
-            .filter(|(h, _)| !self.tabs[i].scene.is_layer_locked(*h))
-            .find_map(|(h, e)| match e {
-                EntityType::LwPolyline(_) => Some((*h, (*e).clone())),
-                _ => None,
-            });
-        let Some((handle, entity)) = found else {
-            self.command_line
-                .push_error(crate::t!("POLYSOLID: select a polyline first.").as_ref());
-            return Task::none();
-        };
-        let Some(result) = crate::scene::model::sweep_model::polysolid(&entity, width, height)
-        else {
-            self.command_line
-                .push_error(crate::t!("POLYSOLID: the kernel could not offset the polyline.").as_ref());
-            return Task::none();
-        };
-        if crate::scene::convert::acis_export::solid_to_sat(&result).is_none() {
-            self.command_line
-                .push_error(crate::t!("POLYSOLID: the result could not be encoded as ACIS.").as_ref());
-            return Task::none();
-        }
-        self.push_undo_snapshot(i, "POLYSOLID");
-        self.tabs[i].scene.erase_entities(&[handle]);
-        let mut s3d = Solid3D::new();
-        s3d.wires = solid_model::edge_wires(&result);
-        let history = solid_history::brep_op(&result);
-        let h = self.add_solid_model(EntityType::Solid3D(s3d), result, history);
-        self.tabs[i].scene.deselect_all();
-        if !h.is_null() {
-            self.tabs[i].scene.select_entity(h, false);
-        }
-        if !h.is_null() {
-            self.tabs[i].dirty = true;
-            self.refresh_properties();
-            self.command_line.push_output(
-                crate::tf!("POLYSOLID: created a wall solid (width {width}, height {height}).")
-                    .as_ref(),
-            );
-        }
-        Task::none()
-    }
-
     /// 3DMIRROR — add a mirrored copy of the one selected solid across the plane
     /// perpendicular to the X/Y/Z axis (0/1/2) through its centre, keeping the
     /// original. A reflection loses handedness, so the kernel reverses every

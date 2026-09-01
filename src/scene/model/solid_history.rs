@@ -384,6 +384,16 @@ fn pyramid_display_radius(value: &SolidHistoryPyramid, radius: f64) -> f64 {
     }
 }
 
+fn pyramid_display_rotation(value: &SolidHistoryPyramid) -> Option<f64> {
+    let vertex_rotation = matrix(value.base.transform)
+        .map(|matrix| matrix.x_axis.y.atan2(matrix.x_axis.x))?;
+    if pyramid_is_inscribed(value) {
+        Some(vertex_rotation)
+    } else {
+        Some(vertex_rotation + std::f64::consts::PI / value.sides.clamp(3, 32) as f64)
+    }
+}
+
 fn pyramid_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
@@ -392,9 +402,7 @@ fn pyramid_properties(
     let Some(position) = world_point(value.base.transform, [0.0; 3]) else {
         return Vec::new();
     };
-    let rotation = matrix(value.base.transform)
-        .map(|matrix| matrix.x_axis.y.atan2(matrix.x_axis.x))
-        .unwrap_or(0.0);
+    let rotation = pyramid_display_rotation(value).unwrap_or(0.0);
     let (record_history, object_show_history, show_history_mode) =
         history_flags(document, handle).unwrap_or((false, false, 1));
     let (show_history, show_history_editable) =
@@ -998,7 +1006,12 @@ fn apply_pyramid_geometry_property(
             return Some(false);
         }
         let current_angle = projected.y.atan2(projected.x);
-        let delta = (target - current_angle + std::f64::consts::PI)
+        let target_vertex_angle = if pyramid_is_inscribed(value) {
+            target
+        } else {
+            target - std::f64::consts::PI / value.sides.clamp(3, 32) as f64
+        };
+        let delta = (target_vertex_angle - current_angle + std::f64::consts::PI)
             .rem_euclid(std::f64::consts::TAU)
             - std::f64::consts::PI;
         if delta.abs() <= 1e-12 {

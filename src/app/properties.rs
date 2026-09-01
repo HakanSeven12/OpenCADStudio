@@ -2074,6 +2074,9 @@ impl OpenCADStudio {
                             });
                         }
                     }
+                    if specialized_primitive {
+                        retain_specialized_primitive_sections(&mut sections);
+                    }
                     let title = match entity {
                         acadrust::EntityType::Insert(ins) => {
                             let is_xref = self.tabs[i]
@@ -3045,6 +3048,30 @@ fn aggregate_solid_history_sections(
         merged = merge_sections(&merged, &next);
     }
     merged
+}
+
+fn retain_specialized_primitive_sections(
+    sections: &mut Vec<crate::scene::model::object::PropSection>,
+) {
+    sections.iter_mut().for_each(|section| {
+        section.props.retain(|property| {
+            matches!(
+                property.field,
+                "color"
+                    | "layer"
+                    | "linetype"
+                    | "linetype_scale"
+                    | "plot_style"
+                    | "lineweight"
+                    | "transparency"
+                    | "hyperlink"
+                    | "material"
+                    | "solid_history_type"
+            ) || crate::scene::model::solid_history::is_primitive_property(property.field)
+                || crate::scene::model::solid_history::is_history_choice(property.field)
+        });
+    });
+    sections.retain(|section| !section.props.is_empty());
 }
 
 fn merge_sections(

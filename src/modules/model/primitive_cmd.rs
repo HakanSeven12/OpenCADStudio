@@ -1058,6 +1058,17 @@ impl PrimitiveCommand {
         }
     }
 
+    fn set_pyramid_type(&mut self, kind: PyramidType) {
+        let displayed_top = pyramid_circumradius_to_display(
+            self.pyramid_top_radius,
+            self.pyramid_type,
+            self.pyramid_sides,
+        );
+        self.pyramid_type = kind;
+        self.pyramid_top_radius =
+            pyramid_display_to_circumradius(displayed_top, kind, self.pyramid_sides);
+    }
+
     fn pyramid_set_base_from_point(&mut self, point: DVec3) -> bool {
         let Some(frame) = self.pyramid_frame else {
             return false;
@@ -1410,11 +1421,11 @@ impl PrimitiveCommand {
                 return Some(CmdResult::NeedPoint);
             }
             PyramidStep::BaseRadius if matches!(upper.as_str(), "I" | "INSCRIBED") => {
-                self.pyramid_type = PyramidType::Inscribed;
+                self.set_pyramid_type(PyramidType::Inscribed);
                 return Some(CmdResult::NeedPoint);
             }
             PyramidStep::BaseRadius if matches!(upper.as_str(), "C" | "CIRCUMSCRIBED") => {
-                self.pyramid_type = PyramidType::Circumscribed;
+                self.set_pyramid_type(PyramidType::Circumscribed);
                 return Some(CmdResult::NeedPoint);
             }
             PyramidStep::Height => {
@@ -1445,7 +1456,17 @@ impl PrimitiveCommand {
                 if !(3..=32).contains(&sides) {
                     return None;
                 }
+                let displayed_top = pyramid_circumradius_to_display(
+                    self.pyramid_top_radius,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                );
                 self.pyramid_sides = sides;
+                self.pyramid_top_radius = pyramid_display_to_circumradius(
+                    displayed_top,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                );
                 self.pyramid_defaults.sides = sides;
                 self.pyramid_step = PyramidStep::BaseCenter;
                 return Some(CmdResult::NeedPoint);

@@ -983,11 +983,11 @@ fn apply_pyramid_geometry_property(
         } else {
             value.top_radius * factor
         };
-        value.radius = if next_inscribed { base_display } else { base_display / factor };
-        value.top_radius = if next_inscribed { top_display } else { top_display / factor };
         let Some(current) = matrix(value.base.transform) else {
             return Some(false);
         };
+        value.radius = if next_inscribed { base_display } else { base_display / factor };
+        value.top_radius = if next_inscribed { top_display } else { top_display / factor };
         let half = std::f64::consts::PI / value.sides.clamp(3, 32) as f64;
         let delta = if next_inscribed { half } else { -half };
         value.base.transform =
@@ -1047,6 +1047,27 @@ fn apply_pyramid_geometry_property(
     }
     value.base.transform = updated.to_cols_array();
     Some(true)
+}
+
+fn set_pyramid_sides(value: &mut SolidHistoryPyramid, sides: i32) -> bool {
+    if !(3..=32).contains(&sides) || sides == value.sides {
+        return false;
+    }
+    if !pyramid_is_inscribed(value) {
+        let Some(current) = matrix(value.base.transform) else {
+            return false;
+        };
+        let old_factor = pyramid_apothem_factor(value.sides);
+        let new_factor = pyramid_apothem_factor(sides);
+        value.radius = value.radius * old_factor / new_factor;
+        value.top_radius = value.top_radius * old_factor / new_factor;
+        let old_half = std::f64::consts::PI / value.sides.clamp(3, 32) as f64;
+        let new_half = std::f64::consts::PI / sides as f64;
+        value.base.transform =
+            (current * glam::DMat4::from_rotation_z(old_half - new_half)).to_cols_array();
+    }
+    value.sides = sides;
+    true
 }
 
 pub fn apply_primitive_property(
@@ -1261,28 +1282,7 @@ pub fn apply_primitive_property(
                 if (number - rounded).abs() > 1e-9 {
                     return false;
                 }
-                let sides = rounded as i32;
-                if !(3..=32).contains(&sides) {
-                    return false;
-                }
-                if sides == value.sides {
-                    return false;
-                }
-                if !pyramid_is_inscribed(value) {
-                    let old_factor = pyramid_apothem_factor(value.sides);
-                    let new_factor = pyramid_apothem_factor(sides);
-                    value.radius = value.radius * old_factor / new_factor;
-                    value.top_radius = value.top_radius * old_factor / new_factor;
-                    let Some(current) = matrix(value.base.transform) else {
-                        return false;
-                    };
-                    let old_half = std::f64::consts::PI / value.sides.clamp(3, 32) as f64;
-                    let new_half = std::f64::consts::PI / sides as f64;
-                    value.base.transform = (current
-                        * glam::DMat4::from_rotation_z(old_half - new_half))
-                    .to_cols_array();
-                }
-                value.sides = sides;
+                return set_pyramid_sides(value, rounded as i32);
             }
             _ => return false,
         },
@@ -1756,8 +1756,10 @@ pub fn apply_primitive_grip(
             GRIP_HEIGHT => value.height = local.z.max(1e-6),
             GRIP_SIDES => {
                 let angle = local.y.atan2(local.x).rem_euclid(std::f64::consts::TAU);
-                value.sides = (angle.to_degrees() / 5.0).round() as i32;
-                value.sides = value.sides.clamp(3, 32);
+                let sides = ((angle.to_degrees() / 5.0).round() as i32).clamp(3, 32);
+                if !set_pyramid_sides(value, sides) {
+                    return false;
+                }
             }
             _ => return false,
         },

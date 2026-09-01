@@ -343,11 +343,11 @@ pub struct MeshBatchChunk {
     /// erase — the geometry behind them.
     pub transp_index_buffer: wgpu::Buffer,
     pub transp_index_count: u32,
-    /// Triangle-edge line list for plain meshes that carry no B-rep edges.
-    /// The dedicated vertex buffer matches the edge pipeline layout.
+    /// Expanded triangle-edge line list for plain meshes that carry no B-rep
+    /// edges. Keeping the edge endpoints together avoids coupling this buffer
+    /// to the surface mesh's indexing and vertex representation.
     pub wire_vertex_buffer: wgpu::Buffer,
-    pub wire_index_buffer: wgpu::Buffer,
-    pub wire_index_count: u32,
+    pub wire_vertex_count: u32,
     /// B-rep feature edges of ACIS solids, as a standalone LineList vertex
     /// buffer (pairs of endpoints), drawn non-indexed. Empty for plain meshes.
     pub edge_vertex_buffer: wgpu::Buffer,
@@ -438,7 +438,7 @@ fn make_chunk(
         queue.write_buffer(&buffer, 0, bytemuck::cast_slice(data));
         buffer
     };
-    let compact_vertices = !material_has_textures(material) && wire_indices.is_empty();
+    let compact_vertices = !material_has_textures(material);
     let mk_plain_vertex = |data: &[MeshVertex]| {
         if data.is_empty() {
             return stubs.vertex.clone();
@@ -479,18 +479,22 @@ fn make_chunk(
     } else {
         instances
     };
-    let wire_vertices: Vec<MeshEdgeVertex> = if wire_indices.is_empty() {
-        Vec::new()
-    } else {
-        verts
-            .iter()
-            .map(|vertex| MeshEdgeVertex {
+    let mut wire_vertices = Vec::with_capacity(wire_indices.len());
+    for line in wire_indices.chunks_exact(2) {
+        let (Some(start), Some(end)) = (
+            verts.get(line[0] as usize),
+            verts.get(line[1] as usize),
+        ) else {
+            continue;
+        };
+        for vertex in [start, end] {
+            wire_vertices.push(MeshEdgeVertex {
                 position: vertex.position,
                 color: face_color,
                 position_low: vertex.position_low,
-            })
-            .collect()
-    };
+            });
+        }
+    }
     MeshBatchChunk {
         vertex_buffer: vertex_buffer_override.unwrap_or_else(|| {
             if compact_vertices {
@@ -505,8 +509,7 @@ fn make_chunk(
         transp_index_buffer: mk_index(transp_indices, "mesh.batch.transp_ibuf"),
         transp_index_count: transp_indices.len() as u32,
         wire_vertex_buffer: mk_edge_vertex(&wire_vertices, "mesh.batch.wire_vbuf"),
-        wire_index_buffer: mk_index(wire_indices, "mesh.batch.wire_ibuf"),
-        wire_index_count: wire_indices.len() as u32,
+        wire_vertex_count: wire_vertices.len() as u32,
         edge_vertex_buffer: edge_buffer_override
             .unwrap_or_else(|| mk_edge_vertex(edge_verts, "mesh.batch.edge_vbuf")),
         edge_vertex_count: edge_verts.len() as u32,
@@ -1169,8 +1172,7 @@ fn build_instanced_chunk(
     let material = first.material;
     let color = first.color;
     let source_handle = source.handle.value();
-    let compact_vertices = !material_has_textures(material)
-        && (!first.include_edges || !source.edge_verts.is_empty());
+    let compact_vertices = !material_has_textures(material);
     let material_identity = if material_has_textures(material) {
         material.map_or(0, |material| {
             material
@@ -1582,7 +1584,10 @@ pub fn build_mesh_batch_filtered(
     let budget = hard_budget.min(32 * 1024 * 1024);
     let vsize = std::mem::size_of::<MeshVertex>();
     let max_verts = (budget / vsize).max(3);
-    let max_tris = (budget / (6 * 4)).max(1); // wire-index buffer: 6 u32 per tri
+    // A triangle contributes three line segments (six standalone edge
+    // vertices). Bound chunks by the largest buffer produced for wire meshes.
+    let max_tris =
+        (budget / (6 * std::mem::size_of::<MeshEdgeVertex>())).max(1);
     let stubs = MeshBatchStubs::new(device);
 
     let mut chunks = Vec::new();
@@ -1796,18 +1801,27 @@ pub fn build_mesh_batch_filtered(
                 .len()
                 .saturating_mul(std::mem::size_of::<MeshVertex>())
                 <= hard_budget
-            && part.indices.len().saturating_mul(2 * std::mem::size_of::<u32>())
+            && part.indices.len().saturating_mul(std::mem::size_of::<u32>())
                 <= hard_budget
             && part
                 .set
                 .instance_source
                 .as_ref()
                 .is_some_and(|source| {
-                    source
+                    let feature_edges_fit = source
                         .edge_verts
                         .len()
                         .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
-                        <= hard_budget
+                        <= hard_budget;
+                    let triangle_edges_fit = !part.include_edges
+                        || !source.edge_verts.is_empty()
+                        || part
+                            .indices
+                            .len()
+                            .saturating_mul(2)
+                            .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
+                            <= hard_budget;
+                    feature_edges_fit && triangle_edges_fit
                 })
             && part
                 .indices
@@ -2152,8 +2166,8 @@ pub fn build_mesh_batch_filtered(
             continue;
         }
 
-        // Flush when adding this mesh would overflow either the vertex buffer
-        // or the wire-index buffer.
+        // Flush when adding this mesh would overflow either the surface vertex
+        // buffer or the expanded wire-vertex buffer.
         if !verts.is_empty()
             && (verts.len() + mesh.verts.len() > max_verts
                 || wire_indices.len() / 6 + mesh_tris > max_tris)

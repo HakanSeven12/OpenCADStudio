@@ -59,6 +59,7 @@ fn expand_block_mtext(
         &Default::default(),
     );
     expand_insert(
+        &doc,
         &cache,
         &ins,
         Handle::new(999),
@@ -86,6 +87,8 @@ fn expand_block_mtext(
         // Annotation scale: 1.0 = no annotative scaling, matching the
         // `BlockCache::build(&doc, 1.0, ...)` call above.
         1.0,
+        OpenCADStudio::scene::BlockScalePolicy::FromInsert,
+        false,
     )
     .expect("block defn is cached")
 }

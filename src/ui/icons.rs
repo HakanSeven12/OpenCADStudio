@@ -531,6 +531,17 @@ pub fn themed_success<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a,
         .into()
 }
 
+/// Render an icon with the foreground chosen for a success-coloured surface.
+pub fn themed_success_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    svg(themed_handle(bytes))
+        .width(size)
+        .height(size)
+        .style(|theme: &Theme, _| svg::Style {
+            color: Some(theme.palette().success.base.text),
+        })
+        .into()
+}
+
 /// Render a warning-state chrome icon from the active Iced theme.
 pub fn themed_warning<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     svg(themed_handle(bytes))

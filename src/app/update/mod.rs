@@ -199,7 +199,13 @@ impl OpenCADStudio {
             // Closing (✕) discards edits made since the last Apply — matching the
             // style editors. Committing happens only through the Apply button.
             Some(Aliases) => self.alias_editor_rows.clear(),
-            Some(Shortcuts) => self.shortcut_editor_rows.clear(),
+            Some(Shortcuts) => {
+                self.shortcut_editor_rows.clear();
+                self.shortcut_capture_row = None;
+                self.shortcut_pending_add = false;
+                self.shortcut_reset_confirm = false;
+                self.shortcut_close_confirm = false;
+            }
             Some(LayerStateEditor) => {
                 self.layer_state_edit_draft = None;
                 self.layer_state_edit_filter.clear();
@@ -5564,11 +5570,29 @@ impl OpenCADStudio {
                     .collect();
                 rows.sort_by(|a, b| a.0.cmp(&b.0));
                 self.shortcut_editor_rows = rows;
+                self.shortcut_capture_row = None;
+                self.shortcut_pending_add = false;
+                self.shortcut_reset_confirm = false;
+                self.shortcut_close_confirm = false;
                 self.active_modal = Some(super::ModalKind::Shortcuts);
                 Task::none()
             }
             Message::ShortcutsPanelClose => {
+                if !self.shortcut_close_confirm && self.shortcut_editor_dirty() {
+                    self.shortcut_close_confirm = true;
+                    return Task::none();
+                }
+                self.shortcut_close_confirm = false;
                 self.close_active_modal();
+                Task::none()
+            }
+            Message::ShortcutEditorCloseDiscard => {
+                self.shortcut_close_confirm = false;
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ShortcutEditorCloseKeep => {
+                self.shortcut_close_confirm = false;
                 Task::none()
             }
             Message::ShortcutEditorInput { idx, field, value } => {
@@ -5579,21 +5603,96 @@ impl OpenCADStudio {
                         ShortcutField::Command => row.1 = value.to_uppercase(),
                     }
                 }
+                // Typing never finishes the addition — only the draft row's
+                // check button does, so no half-visible "ghost" row appears.
                 Task::none()
             }
             Message::ShortcutEditorAdd => {
-                self.shortcut_editor_rows
-                    .push((String::new(), String::new()));
+                if self.shortcut_pending_add {
+                    // One draft at a time: re-arm its Key cell instead.
+                    self.shortcut_capture_row = Some(0);
+                } else {
+                    // The draft row goes to the top of the list so it is
+                    // visible without scrolling, with its Key cell armed.
+                    self.shortcut_editor_rows
+                        .insert(0, (String::new(), String::new()));
+                    self.shortcut_pending_add = true;
+                    self.shortcut_capture_row = Some(0);
+                }
+                Task::none()
+            }
+            Message::ShortcutCaptureStart(idx) => {
+                // Clicking the armed cell again cancels capture.
+                self.shortcut_capture_row = match self.shortcut_capture_row {
+                    Some(armed) if armed == idx => None,
+                    _ => Some(idx),
+                };
+                Task::none()
+            }
+            Message::ShortcutCaptureKey(raw) => {
+                if let Some(idx) = self.shortcut_capture_row.take() {
+                    let key = crate::app::shortcuts::normalize_key(&raw);
+                    if !key.is_empty() && self.shortcut_editor_rows.get_mut(idx).is_some() {
+                        self.shortcut_editor_rows[idx].0 = key;
+                    }
+                }
+                Task::none()
+            }
+            Message::ShortcutCaptureClear => {
+                self.shortcut_capture_row = None;
+                Task::none()
+            }
+            Message::ShortcutCaptureCancel => {
+                // Esc backs out of capture and abandons an unfinished draft.
+                self.shortcut_capture_row = None;
+                if self.shortcut_pending_add {
+                    self.shortcut_editor_rows.remove(0);
+                    self.shortcut_pending_add = false;
+                }
                 Task::none()
             }
             Message::ShortcutEditorRemove(idx) => {
                 if idx < self.shortcut_editor_rows.len() {
                     self.shortcut_editor_rows.remove(idx);
                 }
+                if idx == 0 {
+                    // Removing the draft row is the ✕ cancel path.
+                    self.shortcut_pending_add = false;
+                }
+                // Armed indices shift when a row above them disappears.
+                self.shortcut_capture_row = match self.shortcut_capture_row {
+                    Some(armed) if armed == idx => None,
+                    Some(armed) if armed > idx => Some(armed - 1),
+                    other => other,
+                };
                 Task::none()
             }
             Message::ShortcutEditorApply => {
-                self.apply_shortcut_editor_rows();
+                self.finish_shortcut_editor();
+                Task::none()
+            }
+            Message::ShortcutEditorApplyExit => {
+                self.finish_shortcut_editor();
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ShortcutEditorDraftAccept => {
+                // The check button: finish the addition (keep the row in the
+                // working table) without applying it. Only complete drafts
+                // can be accepted — the button is disabled otherwise.
+                self.finish_pending_add();
+                Task::none()
+            }
+            Message::ShortcutEditorResetAsk => {
+                self.shortcut_reset_confirm = true;
+                Task::none()
+            }
+            Message::ShortcutEditorResetDeny => {
+                self.shortcut_reset_confirm = false;
+                Task::none()
+            }
+            Message::ShortcutEditorResetConfirm => {
+                self.reset_shortcuts_to_defaults();
                 self.command_line.push_info(
                     crate::tf!("{} shortcut(s) applied.", self.shortcut_bindings.len()).as_ref(),
                 );
@@ -5793,6 +5892,17 @@ impl OpenCADStudio {
                 if self.active_modal == Some(super::ModalKind::RecoveryPrompt) {
                     return self.update(Message::RecoveryDecline);
                 }
+                // Closing the shortcut editor with un-applied rows needs an
+                // explicit discard; a second close attempt (or the overlay's
+                // Discard button) goes through.
+                if self.active_modal == Some(super::ModalKind::Shortcuts)
+                    && !self.shortcut_close_confirm
+                    && self.shortcut_editor_dirty()
+                {
+                    self.shortcut_close_confirm = true;
+                    return Task::none();
+                }
+                self.shortcut_close_confirm = false;
                 let resume_open_queue = self.active_modal == Some(super::ModalKind::Recovery);
                 self.close_active_modal();
                 if resume_open_queue {

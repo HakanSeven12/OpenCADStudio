@@ -181,29 +181,7 @@ fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
         EntityType::Circle(value) => Some(EmbeddedEntity::Circle(value.clone())),
         EntityType::Ellipse(value) => Some(EmbeddedEntity::Ellipse(value.clone())),
         EntityType::LwPolyline(value) => Some(EmbeddedEntity::LwPolyline(value.clone())),
-        EntityType::Spline(_) => {
-            let planar = entity_curve(entity)?;
-            let samples = planar.curve.tessellate_within(1e-4);
-            if samples.len() < 2 {
-                return None;
-            }
-            let mut path = LwPolyline::new();
-            path.vertices = samples
-                .into_iter()
-                .map(|point| LwVertex::new(Vector2::new(point[0], point[1])))
-                .collect();
-            path.is_closed = planar.curve.is_closed();
-            let plane = crate::command::WorkingPlane::new(
-                glam::DVec3::from_array(planar.plane.origin),
-                glam::DVec3::from_array(planar.plane.x_axis),
-                glam::DVec3::from_array(planar.plane.y_axis),
-            );
-            let EntityType::LwPolyline(path) = plane.place_entity(EntityType::LwPolyline(path))
-            else {
-                return None;
-            };
-            Some(EmbeddedEntity::LwPolyline(path))
-        }
+        EntityType::Spline(value) => Some(EmbeddedEntity::Spline(value.clone())),
         _ => None,
     }
 }
@@ -231,7 +209,7 @@ pub fn polysolid(
         + Vec3::from(planar.plane.y_axis) * tangent_local.y)
         .normalize()?;
     let normal = Vec3::from(planar.plane.normal()?).normalize()?;
-    let side = tangent.cross(normal).normalize()?;
+    let side = normal.cross(tangent).normalize()?;
     let offset = match justification {
         PolysolidJustification::Left => 0.0,
         PolysolidJustification::Center => -width * 0.5,

@@ -1183,7 +1183,7 @@ impl Scene {
     fn layer_plottable_in_context(
         &self,
         entity: &EntityType,
-        context: &crate::scene::render_graph::RenderContext,
+        context: &crate::scene::render_graph::InstanceContext,
     ) -> bool {
         let common = entity.common();
         let layer = if crate::scene::view::render::is_effective_layer_zero(&common.layer) {

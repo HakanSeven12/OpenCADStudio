@@ -82,6 +82,17 @@ pub fn pyramid_solid(center: [f64; 3], radius: f64, height: f64, sides: usize) -
     brep::make::pyramid(center, radius, height, sides)
 }
 
+/// Solid pyramid or polygonal frustum on a regular polygon of `sides` corners.
+pub fn pyramid_frustum_solid(
+    center: [f64; 3],
+    base_radius: f64,
+    top_radius: f64,
+    height: f64,
+    sides: usize,
+) -> Option<Body> {
+    brep::make::pyramid_frustum(center, base_radius, top_radius, height, sides)
+}
+
 // ── Placement ───────────────────────────────────────────────────────────────
 
 /// Moves a body by a rigid transform, given as three axes and an origin.

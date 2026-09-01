@@ -141,7 +141,113 @@ fn is_named_key(key: &str) -> bool {
     })
 }
 
+/// Input actions `run_shortcut` resolves directly instead of routing through
+/// the command dispatcher — valid shortcut commands that never appear in the
+/// command registry. Used to validate the shortcut editor's command column.
+pub(super) const INPUT_ACTIONS: &[&str] = &[
+    "FINALIZE",
+    "COMMANDSPACE",
+    "CANCEL",
+    "DELETESELECTED",
+    "BACKSPACE",
+    "DYNTAB",
+    "HISTORYPREV",
+    "HISTORYNEXT",
+    "CARETLEFT",
+    "CARETRIGHT",
+    "COMMANDHISTORY",
+    "TOGGLEOSNAP",
+    "OTRACK",
+    "DYNINPUT",
+    "SELECTALL",
+    "PASTECLIP",
+];
+
 impl OpenCADStudio {
+    /// Commit the working rows to the live bindings, discarding an
+    /// unfinished draft and reporting duplicates. Shared by Apply and
+    /// Apply-and-Exit.
+    pub(super) fn finish_shortcut_editor(&mut self) {
+        // An add must end in a complete shortcut or a cancellation;
+        // applying with a half-filled draft discards the draft.
+        if self.shortcut_pending_add {
+            self.shortcut_editor_rows.remove(0);
+            self.shortcut_pending_add = false;
+            self.command_line
+                .push_error(crate::tf!("Incomplete shortcut row discarded.").as_ref());
+        }
+        self.shortcut_capture_row = None;
+        // Rows normalizing to the same key silently overwrite each other in
+        // the binding map — surface the conflict instead.
+        let mut seen = rustc_hash::FxHashSet::default();
+        let mut duplicates = Vec::new();
+        for (key, _) in &self.shortcut_editor_rows {
+            let key = normalize_key(key);
+            if key.is_empty() {
+                continue;
+            }
+            if !seen.insert(key.clone()) {
+                duplicates.push(key);
+            }
+        }
+        if !duplicates.is_empty() {
+            self.command_line.push_error(
+                crate::tf!(
+                    "Duplicate shortcut(s) ignored on Apply: {}",
+                    duplicates.join(", ")
+                )
+                .as_ref(),
+            );
+        }
+        self.apply_shortcut_editor_rows();
+        self.command_line.push_info(
+            crate::tf!("{} shortcut(s) applied.", self.shortcut_bindings.len()).as_ref(),
+        );
+    }
+
+    /// Reset the working rows and live bindings to the shipped defaults.
+    pub(super) fn reset_shortcuts_to_defaults(&mut self) {
+        let mut rows: Vec<(String, String)> = default_bindings()
+            .into_iter()
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        self.shortcut_editor_rows = rows;
+        self.shortcut_pending_add = false;
+        self.shortcut_capture_row = None;
+        self.shortcut_reset_confirm = false;
+        self.apply_shortcut_editor_rows();
+    }
+
+    /// True when the working rows differ from the live bindings — the editor
+    /// has un-applied changes a close would discard.
+    pub(super) fn shortcut_editor_dirty(&self) -> bool {
+        let rows: FxHashMap<String, String> = self
+            .shortcut_editor_rows
+            .iter()
+            .filter_map(|(key, action)| {
+                let key = normalize_key(key);
+                let action = action.trim().to_uppercase();
+                (!key.is_empty() && !action.is_empty()).then_some((key, action))
+            })
+            .collect();
+        rows != self.shortcut_bindings
+    }
+
+    /// A pending add finishes successfully once its draft row (row 0) has
+    /// both a key and a command; it then becomes a regular row of the table.
+    /// Called after each edit while a draft is pending.
+    pub(super) fn finish_pending_add(&mut self) {
+        if !self.shortcut_pending_add {
+            return;
+        }
+        if let Some((key, command)) = self.shortcut_editor_rows.first() {
+            if !key.trim().is_empty() && !command.trim().is_empty() {
+                self.shortcut_pending_add = false;
+                self.shortcut_capture_row = None;
+            }
+        }
+    }
+
     pub(super) fn apply_shortcut_editor_rows(&mut self) {
         let bindings: FxHashMap<String, String> = self
             .shortcut_editor_rows

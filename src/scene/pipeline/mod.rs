@@ -3750,7 +3750,7 @@ impl Pipeline {
             // Four draw paths share this pass:
             //  - Solid:           `mesh_pipeline` + triangle index buf.
             //  - Wireframe:       `mesh_wireframe_pipeline` + the
-            //                     pre-built `wire_index_buffer`.
+            //                     pre-built expanded wire vertex buffer.
             //  - HiddenLine:      depth prepass (`mesh_depth_pipeline`,
             //                     writes Z, no colour) → wire overlay.
             //  - Solid+Edges:     `mesh_pipeline` shaded fill → wire
@@ -3809,17 +3809,9 @@ impl Pipeline {
                     );
                     pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
                     // Plain-mesh triangulation edges.
-                    if c.wire_index_count != 0 {
+                    if c.wire_vertex_count != 0 {
                         pass.set_vertex_buffer(0, c.wire_vertex_buffer.slice(..));
-                        pass.set_index_buffer(
-                            c.wire_index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint32,
-                        );
-                        pass.draw_indexed(
-                            0..c.wire_index_count,
-                            0,
-                            0..c.instance_count,
-                        );
+                        pass.draw(0..c.wire_vertex_count, 0..c.instance_count);
                     }
                     // ACIS solid B-rep feature edges (LineList, non-indexed).
                     if c.edge_vertex_count != 0 {
@@ -3846,17 +3838,9 @@ impl Pipeline {
                             &[],
                         );
                         pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
-                        if c.wire_index_count != 0 {
+                        if c.wire_vertex_count != 0 {
                             pass.set_vertex_buffer(0, c.wire_vertex_buffer.slice(..));
-                            pass.set_index_buffer(
-                                c.wire_index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            pass.draw_indexed(
-                                0..c.wire_index_count,
-                                0,
-                                0..c.instance_count,
-                            );
+                            pass.draw(0..c.wire_vertex_count, 0..c.instance_count);
                         }
                         if c.edge_vertex_count != 0 {
                             pass.set_vertex_buffer(0, c.edge_vertex_buffer.slice(..));
@@ -4002,17 +3986,9 @@ impl Pipeline {
                             &[],
                         );
                         pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
-                        if c.wire_index_count != 0 {
+                        if c.wire_vertex_count != 0 {
                             pass.set_vertex_buffer(0, c.wire_vertex_buffer.slice(..));
-                            pass.set_index_buffer(
-                                c.wire_index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            pass.draw_indexed(
-                                0..c.wire_index_count,
-                                0,
-                                0..c.instance_count,
-                            );
+                            pass.draw(0..c.wire_vertex_count, 0..c.instance_count);
                         }
                         if c.edge_vertex_count != 0 {
                             pass.set_vertex_buffer(0, c.edge_vertex_buffer.slice(..));

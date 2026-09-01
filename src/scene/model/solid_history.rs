@@ -51,6 +51,9 @@ pub const PROP_POSITION_X: &str = "solid_history_position_x";
 pub const PROP_POSITION_Y: &str = "solid_history_position_y";
 pub const PROP_POSITION_Z: &str = "solid_history_position_z";
 pub const PROP_ROTATION: &str = "solid_history_rotation";
+pub const PROP_PROFILE_ROTATION: &str = "solid_history_profile_rotation";
+pub const PROP_TWIST_ALONG_PATH: &str = "solid_history_twist_along_path";
+pub const PROP_SCALE_ALONG_PATH: &str = "solid_history_scale_along_path";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
 
@@ -133,14 +136,14 @@ fn sweep_properties(
     handle: acadrust::Handle,
     value: &SolidHistorySweep,
 ) -> Vec<PropSection> {
-    let Some(position) = reference_point(&SolidHistoryOperation::Sweep(value.clone())) else {
-        return Vec::new();
-    };
     let (record_history, object_show_history, show_history_mode) =
         history_flags(document, handle).unwrap_or((false, false, 1));
-    let (show_history, _) =
+    let (show_history, show_history_editable) =
         displayed_history_state(object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
+    let length = sweep_path_length(value)
+        .map(crate::entities::common::format_length)
+        .unwrap_or_default();
     vec![
         PropSection {
             title: t!("Geometry").into_owned(),
@@ -150,21 +153,37 @@ fn sweep_properties(
                     field: "solid_history_type",
                     value: PropValue::ReadOnly(t!("Sweep").into_owned()),
                 },
-                crate::entities::common::edit_prop(
-                    t!("Position X").as_ref(),
-                    PROP_POSITION_X,
-                    position.x,
-                ),
-                crate::entities::common::edit_prop(
-                    t!("Position Y").as_ref(),
-                    PROP_POSITION_Y,
-                    position.y,
-                ),
-                crate::entities::common::edit_prop(
-                    t!("Position Z").as_ref(),
-                    PROP_POSITION_Z,
-                    position.z,
-                ),
+                Property {
+                    label: t!("Profile rotation").into_owned(),
+                    field: PROP_PROFILE_ROTATION,
+                    value: PropValue::EditText(
+                        crate::entities::common::format_direction(value.align_angle),
+                    ),
+                },
+                Property {
+                    label: t!("Bank").into_owned(),
+                    field: "solid_history_bank",
+                    value: PropValue::ReadOnly(
+                        if value.bank { "Yes" } else { "No" }.to_string(),
+                    ),
+                },
+                Property {
+                    label: t!("Twist along path").into_owned(),
+                    field: PROP_TWIST_ALONG_PATH,
+                    value: PropValue::EditText(
+                        crate::entities::common::format_angle(value.twist_angle),
+                    ),
+                },
+                Property {
+                    label: t!("Scale along path").into_owned(),
+                    field: PROP_SCALE_ALONG_PATH,
+                    value: PropValue::EditText(value.scale_factor.to_string()),
+                },
+                Property {
+                    label: t!("Length").into_owned(),
+                    field: "solid_history_sweep_length",
+                    value: PropValue::ReadOnly(length),
+                },
             ],
         },
         PropSection {
@@ -173,18 +192,57 @@ fn sweep_properties(
                 Property {
                     label: t!("History").into_owned(),
                     field: PROP_HISTORY,
-                    value: PropValue::ReadOnly(
-                        if record_history { "Record" } else { "None" }.to_string(),
-                    ),
+                    value: PropValue::Choice {
+                        selected: if record_history { "Record" } else { "None" }.to_string(),
+                        options: vec!["None".to_string(), "Record".to_string()],
+                    },
                 },
                 Property {
                     label: t!("Show History").into_owned(),
                     field: PROP_SHOW_HISTORY,
-                    value: PropValue::ReadOnly(show_value.to_string()),
+                    value: if show_history_editable {
+                        PropValue::Choice {
+                            selected: show_value.to_string(),
+                            options: vec!["No".to_string(), "Yes".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(show_value.to_string())
+                    },
                 },
             ],
         },
     ]
+}
+
+fn sweep_path_length(value: &SolidHistorySweep) -> Option<f64> {
+    use acadrust::entities::EmbeddedEntity;
+    use acadrust::EntityType;
+
+    let entity = match value.path_entity.as_ref()? {
+        EmbeddedEntity::Line(value) => EntityType::Line(value.clone()),
+        EmbeddedEntity::Arc(value) => EntityType::Arc(value.clone()),
+        EmbeddedEntity::Circle(value) => EntityType::Circle(value.clone()),
+        EmbeddedEntity::Ellipse(value) => EntityType::Ellipse(value.clone()),
+        EmbeddedEntity::Spline(value) => EntityType::Spline(value.clone()),
+        EmbeddedEntity::LwPolyline(value) => EntityType::LwPolyline(value.clone()),
+        _ => return None,
+    };
+    let curve = crate::entities::curve::entity_curve(&entity)?;
+    let transform = matrix(value.path_entity_transform)?;
+    let x_scale = transform
+        .transform_vector3(glam::DVec3::from_array(curve.plane.x_axis))
+        .length();
+    let y_scale = transform
+        .transform_vector3(glam::DVec3::from_array(curve.plane.y_axis))
+        .length();
+    if !x_scale.is_finite()
+        || !y_scale.is_finite()
+        || (x_scale - y_scale).abs() > 1e-9 * x_scale.max(y_scale).max(1.0)
+    {
+        return None;
+    }
+    let length = curve.curve.length() * (x_scale + y_scale) * 0.5;
+    (length.is_finite() && length >= 0.0).then_some(length)
 }
 
 fn cone_properties(
@@ -678,6 +736,9 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_POSITION_Y
             | PROP_POSITION_Z
             | PROP_ROTATION
+            | PROP_PROFILE_ROTATION
+            | PROP_TWIST_ALONG_PATH
+            | PROP_SCALE_ALONG_PATH
     )
 }
 
@@ -884,38 +945,41 @@ fn apply_cylinder_position_property(
     Some(true)
 }
 
-fn apply_sweep_position_property(
+fn apply_sweep_geometry_property(
     value: &mut SolidHistorySweep,
     field: &str,
     text: &str,
 ) -> Option<bool> {
-    let axis = match field {
-        PROP_POSITION_X => 0,
-        PROP_POSITION_Y => 1,
-        PROP_POSITION_Z => 2,
-        _ => return None,
-    };
-    let target = crate::entities::common::parse_length(text)?;
-    if !target.is_finite() {
-        return Some(false);
+    match field {
+        PROP_PROFILE_ROTATION => {
+            let target = crate::entities::common::parse_direction(text)?;
+            if !target.is_finite() || (target - value.align_angle).abs() <= 1e-12 {
+                return Some(false);
+            }
+            value.align_angle = target;
+            Some(true)
+        }
+        PROP_TWIST_ALONG_PATH => {
+            let target = crate::entities::common::parse_angle(text)?;
+            if !target.is_finite() || (target - value.twist_angle).abs() <= 1e-12 {
+                return Some(false);
+            }
+            value.twist_angle = target;
+            Some(true)
+        }
+        PROP_SCALE_ALONG_PATH => {
+            let target = text.trim().replace(',', ".").parse::<f64>().ok()?;
+            if !target.is_finite()
+                || target <= 1e-9
+                || (target - value.scale_factor).abs() <= 1e-12
+            {
+                return Some(false);
+            }
+            value.scale_factor = target;
+            Some(true)
+        }
+        _ => None,
     }
-    let current = matrix(value.base.transform)?;
-    let reference = current.transform_point3(glam::DVec3::new(
-        value.reference_point.x,
-        value.reference_point.y,
-        value.reference_point.z,
-    ));
-    if !reference.is_finite() || (target - reference[axis]).abs() <= 1e-12 {
-        return Some(false);
-    }
-    let mut delta = glam::DVec3::ZERO;
-    delta[axis] = target - reference[axis];
-    let updated = glam::DMat4::from_translation(delta) * current;
-    if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
-        return Some(false);
-    }
-    value.base.transform = updated.to_cols_array();
-    Some(true)
 }
 
 fn canonicalize_cylinder_radii(value: &mut SolidHistoryCylinder) -> bool {
@@ -963,7 +1027,7 @@ pub fn apply_primitive_property(
         }
     }
     if let SolidHistoryOperation::Sweep(sweep_value) = operation {
-        if let Some(applied) = apply_sweep_position_property(sweep_value, field, value) {
+        if let Some(applied) = apply_sweep_geometry_property(sweep_value, field, value) {
             return applied;
         }
     }

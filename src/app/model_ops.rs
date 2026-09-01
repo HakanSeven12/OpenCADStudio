@@ -23,6 +23,7 @@ impl super::OpenCADStudio {
         let EntityType::Solid3D(inner) = &mut entity else {
             return Handle::NULL;
         };
+        inner.common.plotstyle_flags = 2;
         inner.wires = solid_model::edge_wires(&solid);
         let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid)
         else {

@@ -3066,9 +3066,7 @@ fn retain_specialized_primitive_sections(
                     | "transparency"
                     | "hyperlink"
                     | "material"
-                    | "solid_history_type"
-            ) || crate::scene::model::solid_history::is_primitive_property(property.field)
-                || crate::scene::model::solid_history::is_history_choice(property.field)
+            ) || crate::scene::model::solid_history::is_specialized_property(property.field)
         });
     });
     sections.retain(|section| !section.props.is_empty());

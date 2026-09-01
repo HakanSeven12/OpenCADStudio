@@ -99,6 +99,48 @@ enum ConeStep {
     TopRadius,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PyramidType {
+    Circumscribed,
+    Inscribed,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PyramidStep {
+    BaseCenter,
+    Sides,
+    EdgeFirst,
+    EdgeSecond,
+    BaseRadius,
+    Height,
+    HeightAfterTopRadius,
+    HeightFirstPoint,
+    HeightSecondPoint,
+    AxisEndpoint,
+    TopRadius,
+}
+
+#[derive(Clone, Copy)]
+struct PyramidDefaults {
+    displayed_base_radius: f64,
+    displayed_top_radius: f64,
+    height: f64,
+    sides: usize,
+    kind: PyramidType,
+}
+
+impl Default for PyramidDefaults {
+    fn default() -> Self {
+        Self {
+            displayed_base_radius: 1.0,
+            displayed_top_radius: 0.0,
+            height: 1.0,
+            sides: 4,
+            kind: PyramidType::Circumscribed,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ConeDefaults {
     base_x_radius: f64,
@@ -211,6 +253,29 @@ fn cone_defaults() -> &'static std::sync::Mutex<ConeDefaults> {
     DEFAULTS.get_or_init(|| std::sync::Mutex::new(ConeDefaults::default()))
 }
 
+fn pyramid_defaults() -> &'static Mutex<PyramidDefaults> {
+    static DEFAULTS: OnceLock<Mutex<PyramidDefaults>> = OnceLock::new();
+    DEFAULTS.get_or_init(|| Mutex::new(PyramidDefaults::default()))
+}
+
+fn pyramid_apothem_factor(sides: usize) -> f64 {
+    (std::f64::consts::PI / sides.max(3) as f64).cos()
+}
+
+fn pyramid_display_to_circumradius(value: f64, kind: PyramidType, sides: usize) -> f64 {
+    match kind {
+        PyramidType::Circumscribed => value / pyramid_apothem_factor(sides),
+        PyramidType::Inscribed => value,
+    }
+}
+
+fn pyramid_circumradius_to_display(value: f64, kind: PyramidType, sides: usize) -> f64 {
+    match kind {
+        PyramidType::Circumscribed => value * pyramid_apothem_factor(sides),
+        PyramidType::Inscribed => value,
+    }
+}
+
 impl Shape {
     fn from_id(id: &str) -> Option<Shape> {
         Some(match id {
@@ -271,12 +336,25 @@ pub struct PrimitiveCommand {
     cone_base_y_radius: f64,
     cone_top_radius: f64,
     cone_defaults: ConeDefaults,
+    pyramid_step: PyramidStep,
+    pyramid_frame: Option<WorkingPlane>,
+    pyramid_edge_first: Option<DVec3>,
+    pyramid_height_first: Option<DVec3>,
+    pyramid_base_radius: f64,
+    pyramid_top_radius: f64,
+    pyramid_sides: usize,
+    pyramid_type: PyramidType,
+    pyramid_defaults: PyramidDefaults,
     plane: WorkingPlane,
 }
 
 impl PrimitiveCommand {
     pub fn new(id: &str) -> Self {
         let remembered = cone_defaults()
+            .lock()
+            .map(|value| *value)
+            .unwrap_or_default();
+        let pyramid_remembered = pyramid_defaults()
             .lock()
             .map(|value| *value)
             .unwrap_or_default();
@@ -300,6 +378,23 @@ impl PrimitiveCommand {
             cone_base_y_radius: remembered.base_y_radius,
             cone_top_radius: remembered.top_radius,
             cone_defaults: remembered,
+            pyramid_step: PyramidStep::BaseCenter,
+            pyramid_frame: None,
+            pyramid_edge_first: None,
+            pyramid_height_first: None,
+            pyramid_base_radius: pyramid_display_to_circumradius(
+                pyramid_remembered.displayed_base_radius,
+                pyramid_remembered.kind,
+                pyramid_remembered.sides,
+            ),
+            pyramid_top_radius: pyramid_display_to_circumradius(
+                pyramid_remembered.displayed_top_radius,
+                pyramid_remembered.kind,
+                pyramid_remembered.sides,
+            ),
+            pyramid_sides: pyramid_remembered.sides,
+            pyramid_type: pyramid_remembered.kind,
+            pyramid_defaults: pyramid_remembered,
             plane: WorkingPlane::default(),
         }
     }
@@ -954,6 +1049,502 @@ impl PrimitiveCommand {
         }
     }
 
+    fn pyramid_frame_at(&self, center: DVec3) -> WorkingPlane {
+        WorkingPlane {
+            origin: center,
+            x: self.plane.x,
+            y: self.plane.y,
+            z: self.plane.z,
+        }
+    }
+
+    fn set_pyramid_type(&mut self, kind: PyramidType) {
+        let displayed_top = pyramid_circumradius_to_display(
+            self.pyramid_top_radius,
+            self.pyramid_type,
+            self.pyramid_sides,
+        );
+        self.pyramid_type = kind;
+        self.pyramid_top_radius =
+            pyramid_display_to_circumradius(displayed_top, kind, self.pyramid_sides);
+    }
+
+    fn pyramid_set_base_from_point(&mut self, point: DVec3) -> bool {
+        let Some(frame) = self.pyramid_frame else {
+            return false;
+        };
+        let delta = point - frame.origin;
+        let planar = delta - frame.z * delta.dot(frame.z);
+        let displayed_radius = planar.length();
+        let Some(direction) = planar.try_normalize() else {
+            return false;
+        };
+        if !displayed_radius.is_finite() || displayed_radius < 1e-6 {
+            return false;
+        }
+        let x = match self.pyramid_type {
+            PyramidType::Inscribed => direction,
+            PyramidType::Circumscribed => {
+                let half = std::f64::consts::PI / self.pyramid_sides as f64;
+                direction * half.cos() - frame.z.cross(direction) * half.sin()
+            }
+        };
+        let Some(x) = x.try_normalize() else {
+            return false;
+        };
+        let Some(y) = frame.z.cross(x).try_normalize() else {
+            return false;
+        };
+        self.pyramid_frame = Some(WorkingPlane::new(frame.origin, x, y));
+        self.pyramid_base_radius = pyramid_display_to_circumradius(
+            displayed_radius,
+            self.pyramid_type,
+            self.pyramid_sides,
+        );
+        self.pyramid_step = PyramidStep::Height;
+        true
+    }
+
+    fn pyramid_set_base_from_edge(&mut self, first: DVec3, second: DVec3) -> bool {
+        let delta = second - first;
+        let planar = delta - self.plane.z * delta.dot(self.plane.z);
+        let length = planar.length();
+        let Some(edge) = planar.try_normalize() else {
+            return false;
+        };
+        if !length.is_finite() || length < 1e-6 {
+            return false;
+        }
+        let radius = length
+            / (2.0 * (std::f64::consts::PI / self.pyramid_sides as f64).sin());
+        let apothem = radius * pyramid_apothem_factor(self.pyramid_sides);
+        let center = (first + second) * 0.5 + self.plane.z.cross(edge) * apothem;
+        let Some(x) = (first - center).try_normalize() else {
+            return false;
+        };
+        let Some(y) = self.plane.z.cross(x).try_normalize() else {
+            return false;
+        };
+        self.pyramid_frame = Some(WorkingPlane::new(center, x, y));
+        self.pyramid_base_radius = radius;
+        self.pyramid_step = PyramidStep::Height;
+        true
+    }
+
+    fn pyramid_axis_frame(&self, axis: DVec3) -> Option<(WorkingPlane, f64)> {
+        let current = self.pyramid_frame?;
+        let height = axis.length();
+        if !height.is_finite() || height < 1e-6 {
+            return None;
+        }
+        let z = axis / height;
+        let mut x = current.x - z * current.x.dot(z);
+        if x.length_squared() < 1e-12 {
+            x = current.y - z * current.y.dot(z);
+        }
+        let x = x.try_normalize()?;
+        let y = z.cross(x).try_normalize()?;
+        Some((WorkingPlane::new(current.origin, x, y), height))
+    }
+
+    fn pyramid_history_transform(frame: WorkingPlane) -> [f64; 16] {
+        glam::DMat4::from_cols(
+            frame.x.extend(0.0),
+            frame.y.extend(0.0),
+            frame.z.extend(0.0),
+            frame.origin.extend(1.0),
+        )
+        .to_cols_array()
+    }
+
+    fn build_pyramid(&self, axis: DVec3) -> Option<(Body, SolidHistoryOperation, f64)> {
+        let (frame, height) = self.pyramid_axis_frame(axis)?;
+        let local = solid_model::pyramid_frustum_solid(
+            [0.0; 3],
+            self.pyramid_base_radius,
+            self.pyramid_top_radius,
+            height,
+            self.pyramid_sides,
+        )?;
+        let placed = solid_model::placed(
+            &local,
+            frame.x.to_array(),
+            frame.y.to_array(),
+            frame.z.to_array(),
+            frame.origin.to_array(),
+        )?;
+        Some((
+            placed,
+            crate::scene::model::solid_history::pyramid_op(
+                Self::pyramid_history_transform(frame),
+                self.pyramid_base_radius,
+                self.pyramid_top_radius,
+                height,
+                self.pyramid_sides,
+                self.pyramid_type == PyramidType::Inscribed,
+            ),
+            height,
+        ))
+    }
+
+    fn commit_pyramid_axis(&self, axis: DVec3) -> CmdResult {
+        let Some((solid, history, height)) = self.build_pyramid(axis) else {
+            return CmdResult::NeedPoint;
+        };
+        if let Ok(mut defaults) = pyramid_defaults().lock() {
+            *defaults = PyramidDefaults {
+                displayed_base_radius: pyramid_circumradius_to_display(
+                    self.pyramid_base_radius,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                ),
+                displayed_top_radius: pyramid_circumradius_to_display(
+                    self.pyramid_top_radius,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                ),
+                height,
+                sides: self.pyramid_sides,
+                kind: self.pyramid_type,
+            };
+        }
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid) else {
+            return CmdResult::Cancel;
+        };
+        let mut entity = Solid3D::new();
+        entity.set_sat_document(&document);
+        entity.wires = solid_model::edge_wires(&solid);
+        CmdResult::CommitSolid {
+            entity: EntityType::Solid3D(entity),
+            solid: Box::new(solid),
+            history,
+        }
+    }
+
+    fn commit_pyramid_height(&self, height: f64) -> CmdResult {
+        let Some(frame) = self.pyramid_frame else {
+            return CmdResult::NeedPoint;
+        };
+        if !height.is_finite() || height.abs() < 1e-6 {
+            return CmdResult::NeedPoint;
+        }
+        self.commit_pyramid_axis(frame.z * height)
+    }
+
+    fn pyramid_height_at(&self, point: DVec3) -> Option<f64> {
+        let frame = self.pyramid_frame?;
+        Some((point - frame.origin).dot(frame.z))
+    }
+
+    fn pyramid_polygon(frame: WorkingPlane, radius: f64, sides: usize, z: f64) -> Vec<DVec3> {
+        (0..sides)
+            .map(|index| {
+                let angle = std::f64::consts::TAU * index as f64 / sides as f64;
+                frame.origin
+                    + frame.x * (radius * angle.cos())
+                    + frame.y * (radius * angle.sin())
+                    + frame.z * z
+            })
+            .collect()
+    }
+
+    fn pyramid_preview(&self, axis: DVec3) -> Option<WireModel> {
+        let (frame, height) = self.pyramid_axis_frame(axis)?;
+        let base = Self::pyramid_polygon(frame, self.pyramid_base_radius, self.pyramid_sides, 0.0);
+        let top = Self::pyramid_polygon(frame, self.pyramid_top_radius, self.pyramid_sides, height);
+        let apex = frame.origin + frame.z * height;
+        let mut points = Vec::new();
+        push_path_loop(&mut points, &base);
+        if self.pyramid_top_radius > 1e-9 {
+            push_path_loop(&mut points, &top);
+        }
+        for index in 0..self.pyramid_sides {
+            push_segment(
+                &mut points,
+                base[index],
+                if self.pyramid_top_radius > 1e-9 { top[index] } else { apex },
+            );
+        }
+        Some(wire("primitive_height_preview", points))
+    }
+
+    fn pyramid_base_preview(&self, frame: WorkingPlane, displayed_radius: f64) -> Option<WireModel> {
+        if !displayed_radius.is_finite() || displayed_radius < 1e-9 {
+            return None;
+        }
+        let radius = pyramid_display_to_circumradius(
+            displayed_radius,
+            self.pyramid_type,
+            self.pyramid_sides,
+        );
+        let points = Self::pyramid_polygon(frame, radius, self.pyramid_sides, 0.0);
+        let mut wire_points = Vec::new();
+        push_path_loop(&mut wire_points, &points);
+        Some(wire("primitive_preview", wire_points))
+    }
+
+    fn pyramid_prompt(&self) -> String {
+        let base_default = self.pyramid_defaults.displayed_base_radius;
+        let top_default = self.pyramid_defaults.displayed_top_radius;
+        match self.pyramid_step {
+            PyramidStep::BaseCenter => crate::tf!(
+                "PYRAMID  Specify center point of base or [Edge/Sides]:"
+            ).into_owned(),
+            PyramidStep::Sides => crate::tf!(
+                "PYRAMID  Enter number of sides <{}>:",
+                self.pyramid_sides
+            ).into_owned(),
+            PyramidStep::EdgeFirst => t!("PYRAMID  Specify first endpoint of edge:").into_owned(),
+            PyramidStep::EdgeSecond => t!("PYRAMID  Specify second endpoint of edge:").into_owned(),
+            PyramidStep::BaseRadius => match self.pyramid_type {
+                PyramidType::Circumscribed => crate::tf!(
+                    "PYRAMID  Specify base radius or [Inscribed] <{:.4}>:",
+                    base_default
+                ).into_owned(),
+                PyramidType::Inscribed => crate::tf!(
+                    "PYRAMID  Specify base radius or [Circumscribed] <{:.4}>:",
+                    base_default
+                ).into_owned(),
+            },
+            PyramidStep::Height => crate::tf!(
+                "PYRAMID  Specify height or [2Point/Axis endpoint/Top radius] <{:.4}>:",
+                self.pyramid_defaults.height
+            ).into_owned(),
+            PyramidStep::HeightAfterTopRadius => crate::tf!(
+                "PYRAMID  Specify height or [2Point/Axis endpoint] <{:.4}>:",
+                self.pyramid_defaults.height
+            ).into_owned(),
+            PyramidStep::HeightFirstPoint => t!("PYRAMID  Specify first point for height:").into_owned(),
+            PyramidStep::HeightSecondPoint => t!("PYRAMID  Specify second point for height:").into_owned(),
+            PyramidStep::AxisEndpoint => t!("PYRAMID  Specify axis endpoint:").into_owned(),
+            PyramidStep::TopRadius => crate::tf!(
+                "PYRAMID  Specify top radius <{:.4}>:",
+                top_default
+            ).into_owned(),
+        }
+    }
+
+    fn pyramid_options(&self) -> Vec<CmdOption> {
+        match self.pyramid_step {
+            PyramidStep::BaseCenter => vec![
+                CmdOption::new(t!("Edge").as_ref(), "E"),
+                CmdOption::new(t!("Sides").as_ref(), "S"),
+            ],
+            PyramidStep::BaseRadius => vec![match self.pyramid_type {
+                PyramidType::Circumscribed => CmdOption::new(t!("Inscribed").as_ref(), "I"),
+                PyramidType::Inscribed => CmdOption::new(t!("Circumscribed").as_ref(), "C"),
+            }],
+            PyramidStep::Height => vec![
+                CmdOption::new("2Point", "2P"),
+                CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
+                CmdOption::new(t!("Top radius").as_ref(), "T"),
+            ],
+            PyramidStep::HeightAfterTopRadius => vec![
+                CmdOption::new("2Point", "2P"),
+                CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    fn on_pyramid_point(&mut self, point: DVec3) -> CmdResult {
+        match self.pyramid_step {
+            PyramidStep::BaseCenter => {
+                self.pyramid_frame = Some(self.pyramid_frame_at(point));
+                self.pyramid_step = PyramidStep::BaseRadius;
+                CmdResult::NeedPoint
+            }
+            PyramidStep::EdgeFirst => {
+                self.pyramid_edge_first = Some(point);
+                self.pyramid_step = PyramidStep::EdgeSecond;
+                CmdResult::NeedPoint
+            }
+            PyramidStep::EdgeSecond => {
+                if let Some(first) = self.pyramid_edge_first {
+                    self.pyramid_set_base_from_edge(first, point);
+                }
+                CmdResult::NeedPoint
+            }
+            PyramidStep::BaseRadius => {
+                self.pyramid_set_base_from_point(point);
+                CmdResult::NeedPoint
+            }
+            PyramidStep::Height | PyramidStep::HeightAfterTopRadius => self
+                .pyramid_height_at(point)
+                .map(|height| self.commit_pyramid_height(height))
+                .unwrap_or(CmdResult::NeedPoint),
+            PyramidStep::HeightFirstPoint => {
+                self.pyramid_height_first = Some(point);
+                self.pyramid_step = PyramidStep::HeightSecondPoint;
+                CmdResult::NeedPoint
+            }
+            PyramidStep::HeightSecondPoint => self
+                .pyramid_height_first
+                .map(|first| self.commit_pyramid_height(first.distance(point)))
+                .unwrap_or(CmdResult::NeedPoint),
+            PyramidStep::AxisEndpoint => {
+                let Some(frame) = self.pyramid_frame else {
+                    return CmdResult::NeedPoint;
+                };
+                self.commit_pyramid_axis(point - frame.origin)
+            }
+            PyramidStep::TopRadius => {
+                let Some(frame) = self.pyramid_frame else {
+                    return CmdResult::NeedPoint;
+                };
+                let delta = point - frame.origin;
+                let displayed = (delta - frame.z * delta.dot(frame.z)).length();
+                if displayed.is_finite() {
+                    self.pyramid_top_radius = pyramid_display_to_circumradius(
+                        displayed,
+                        self.pyramid_type,
+                        self.pyramid_sides,
+                    );
+                    self.pyramid_step = PyramidStep::HeightAfterTopRadius;
+                }
+                CmdResult::NeedPoint
+            }
+            PyramidStep::Sides => CmdResult::NeedPoint,
+        }
+    }
+
+    fn on_pyramid_text(&mut self, raw: &str) -> Option<CmdResult> {
+        let token = raw.trim();
+        let upper = token.to_uppercase();
+        match self.pyramid_step {
+            PyramidStep::BaseCenter => {
+                self.pyramid_step = match upper.as_str() {
+                    "E" | "EDGE" => PyramidStep::EdgeFirst,
+                    "S" | "SIDES" => PyramidStep::Sides,
+                    _ => return None,
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::BaseRadius if matches!(upper.as_str(), "I" | "INSCRIBED") => {
+                self.set_pyramid_type(PyramidType::Inscribed);
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::BaseRadius if matches!(upper.as_str(), "C" | "CIRCUMSCRIBED") => {
+                self.set_pyramid_type(PyramidType::Circumscribed);
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::Height => {
+                self.pyramid_step = match upper.as_str() {
+                    "2P" | "2POINT" => PyramidStep::HeightFirstPoint,
+                    "A" | "AXIS" | "AXIS ENDPOINT" => PyramidStep::AxisEndpoint,
+                    "T" | "TOP" | "TOP RADIUS" => PyramidStep::TopRadius,
+                    _ => {
+                        let height = crate::entities::common::parse_typed_length(token)?;
+                        return Some(self.commit_pyramid_height(height));
+                    }
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::HeightAfterTopRadius => {
+                self.pyramid_step = match upper.as_str() {
+                    "2P" | "2POINT" => PyramidStep::HeightFirstPoint,
+                    "A" | "AXIS" | "AXIS ENDPOINT" => PyramidStep::AxisEndpoint,
+                    _ => {
+                        let height = crate::entities::common::parse_typed_length(token)?;
+                        return Some(self.commit_pyramid_height(height));
+                    }
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::Sides => {
+                let sides = token.parse::<usize>().ok()?;
+                if !(3..=32).contains(&sides) {
+                    return None;
+                }
+                let displayed_top = pyramid_circumradius_to_display(
+                    self.pyramid_top_radius,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                );
+                self.pyramid_sides = sides;
+                self.pyramid_top_radius = pyramid_display_to_circumradius(
+                    displayed_top,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                );
+                self.pyramid_defaults.sides = sides;
+                self.pyramid_step = PyramidStep::BaseCenter;
+                return Some(CmdResult::NeedPoint);
+            }
+            _ => {}
+        }
+        let number = crate::entities::common::parse_typed_length(token)?;
+        match self.pyramid_step {
+            PyramidStep::BaseRadius if number > 0.0 => {
+                let frame = self.pyramid_frame?;
+                self.pyramid_set_base_from_point(frame.origin + frame.x * number)
+                    .then_some(CmdResult::NeedPoint)
+            }
+            PyramidStep::TopRadius if number >= 0.0 => {
+                self.pyramid_top_radius = pyramid_display_to_circumradius(
+                    number,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                );
+                self.pyramid_step = PyramidStep::HeightAfterTopRadius;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
+        }
+    }
+
+    fn pyramid_mouse_move(&self, point: DVec3) -> Option<WireModel> {
+        match self.pyramid_step {
+            PyramidStep::EdgeSecond => {
+                let first = self.pyramid_edge_first?;
+                let mut preview = PrimitiveCommand::new("PYRAMID");
+                preview.plane = self.plane;
+                preview.pyramid_sides = self.pyramid_sides;
+                preview.pyramid_type = self.pyramid_type;
+                preview.pyramid_set_base_from_edge(first, point);
+                let frame = preview.pyramid_frame?;
+                preview.pyramid_base_preview(
+                    frame,
+                    pyramid_circumradius_to_display(
+                        preview.pyramid_base_radius,
+                        preview.pyramid_type,
+                        preview.pyramid_sides,
+                    ),
+                )
+            }
+            PyramidStep::BaseRadius => {
+                let frame = self.pyramid_frame?;
+                let delta = point - frame.origin;
+                let planar = delta - frame.z * delta.dot(frame.z);
+                let displayed = planar.length();
+                let direction = planar.try_normalize()?;
+                let x = match self.pyramid_type {
+                    PyramidType::Inscribed => direction,
+                    PyramidType::Circumscribed => {
+                        let half = std::f64::consts::PI / self.pyramid_sides as f64;
+                        direction * half.cos() - frame.z.cross(direction) * half.sin()
+                    }
+                }
+                .try_normalize()?;
+                let y = frame.z.cross(x).try_normalize()?;
+                self.pyramid_base_preview(WorkingPlane::new(frame.origin, x, y), displayed)
+            }
+            PyramidStep::Height | PyramidStep::HeightAfterTopRadius => {
+                let frame = self.pyramid_frame?;
+                self.pyramid_preview(frame.z * self.pyramid_height_at(point)?)
+            }
+            PyramidStep::HeightSecondPoint => {
+                let frame = self.pyramid_frame?;
+                self.pyramid_preview(frame.z * self.pyramid_height_first?.distance(point))
+            }
+            PyramidStep::AxisEndpoint => {
+                let frame = self.pyramid_frame?;
+                self.pyramid_preview(point - frame.origin)
+            }
+            _ => None,
+        }
+    }
+
     /// Number of footprint points the shape needs before the height step.
     fn footprint_pts(&self) -> usize {
         match self.shape {
@@ -1273,17 +1864,7 @@ impl PrimitiveCommand {
                     solid_history::sphere_op(self.history_transform(c), r),
                 )
             }
-            Shape::Pyramid => {
-                let c = self.pts[0];
-                let r = (self.pts[1] - c).length();
-                if r < 1e-6 || height < 1e-6 {
-                    return None;
-                }
-                (
-                    solid_model::pyramid_solid([c.x, c.y, c.z], r, height, 4),
-                    solid_history::pyramid_op(self.history_transform(c), r, height, 4),
-                )
-            }
+            Shape::Pyramid => return None,
             Shape::Torus => {
                 let c = self.pts[0];
                 let first = (self.pts[1] - c).length();
@@ -1365,6 +1946,17 @@ impl CadCommand for PrimitiveCommand {
                 (frame.origin, frame.z.normalize_or_zero())
             });
         }
+
+        if self.shape == Shape::Pyramid {
+            return matches!(
+                self.pyramid_step,
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius
+            )
+            .then(|| {
+                let frame = self.pyramid_frame.unwrap_or(self.plane);
+                (frame.origin, frame.z.normalize_or_zero())
+            });
+        }
         let constrained = if self.shape.rectangular() {
             self.box_step == BoxStep::Height
         } else {
@@ -1429,6 +2021,9 @@ impl CadCommand for PrimitiveCommand {
         let n = self.shape.name();
         if self.shape == Shape::Cone {
             return self.cone_prompt();
+        }
+        if self.shape == Shape::Pyramid {
+            return self.pyramid_prompt();
         }
         if self.shape.rectangular() {
             return match self.box_step {
@@ -1531,6 +2126,9 @@ impl CadCommand for PrimitiveCommand {
         if self.shape == Shape::Cone {
             return self.cone_options();
         }
+        if self.shape == Shape::Pyramid {
+            return self.pyramid_options();
+        }
         if !self.shape.rectangular() {
             return Vec::new();
         }
@@ -1591,6 +2189,9 @@ impl CadCommand for PrimitiveCommand {
         }
         if self.shape == Shape::Cone {
             return self.on_cone_point(pt);
+        }
+        if self.shape == Shape::Pyramid {
+            return self.on_pyramid_point(pt);
         }
         if self.shape.rectangular() {
             let local = self.plane.to_local(pt);
@@ -1735,6 +2336,35 @@ impl CadCommand for PrimitiveCommand {
                 _ => CmdResult::Cancel,
             };
         }
+        if self.shape == Shape::Pyramid {
+            return match self.pyramid_step {
+                PyramidStep::Sides => {
+                    self.pyramid_step = PyramidStep::BaseCenter;
+                    CmdResult::NeedPoint
+                }
+                PyramidStep::BaseRadius => {
+                    let displayed = self.pyramid_defaults.displayed_base_radius;
+                    let Some(frame) = self.pyramid_frame else {
+                        return CmdResult::Cancel;
+                    };
+                    self.pyramid_set_base_from_point(frame.origin + frame.x * displayed);
+                    CmdResult::NeedPoint
+                }
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius => {
+                    self.commit_pyramid_height(self.pyramid_defaults.height)
+                }
+                PyramidStep::TopRadius => {
+                    self.pyramid_top_radius = pyramid_display_to_circumradius(
+                        self.pyramid_defaults.displayed_top_radius,
+                        self.pyramid_type,
+                        self.pyramid_sides,
+                    );
+                    self.pyramid_step = PyramidStep::HeightAfterTopRadius;
+                    CmdResult::NeedPoint
+                }
+                _ => CmdResult::Cancel,
+            };
+        }
         if self.shape.rectangular() {
             return if self.shape == Shape::Wedge && self.box_step == BoxStep::Height {
                 self.commit(self.default_height())
@@ -1777,6 +2407,17 @@ impl CadCommand for PrimitiveCommand {
                     | ConeStep::TopRadius
             );
         }
+        if self.shape == Shape::Pyramid {
+            return matches!(
+                self.pyramid_step,
+                PyramidStep::BaseCenter
+                    | PyramidStep::Sides
+                    | PyramidStep::BaseRadius
+                    | PyramidStep::Height
+                    | PyramidStep::HeightAfterTopRadius
+                    | PyramidStep::TopRadius
+            );
+        }
         if self.shape.rectangular() {
             matches!(
                 self.box_step,
@@ -1804,6 +2445,15 @@ impl CadCommand for PrimitiveCommand {
                     | ConeStep::EllipseFirst
                     | ConeStep::Height
                     | ConeStep::HeightAfterTopRadius
+            );
+        }
+        if self.shape == Shape::Pyramid {
+            return matches!(
+                self.pyramid_step,
+                PyramidStep::BaseCenter
+                    | PyramidStep::BaseRadius
+                    | PyramidStep::Height
+                    | PyramidStep::HeightAfterTopRadius
             );
         }
         self.shape.rectangular()
@@ -1854,6 +2504,9 @@ impl CadCommand for PrimitiveCommand {
         }
         if self.shape == Shape::Cone {
             return self.on_cone_text(raw);
+        }
+        if self.shape == Shape::Pyramid {
+            return self.on_pyramid_text(raw);
         }
         if self.shape.rectangular() {
             let token = raw.trim();
@@ -1942,6 +2595,9 @@ impl CadCommand for PrimitiveCommand {
         }
         if self.shape == Shape::Cone {
             return self.cone_mouse_move(pt);
+        }
+        if self.shape == Shape::Pyramid {
+            return self.pyramid_mouse_move(pt);
         }
         if self.pts.is_empty() {
             return None;
@@ -2096,6 +2752,32 @@ impl CadCommand for PrimitiveCommand {
             });
         }
 
+        if self.shape == Shape::Pyramid {
+            let frame = self.pyramid_frame.unwrap_or(self.plane);
+            let (anchor, role) = match self.pyramid_step {
+                PyramidStep::BaseRadius | PyramidStep::TopRadius => {
+                    (frame.origin, DynRole::Radius)
+                }
+                PyramidStep::Height
+                | PyramidStep::HeightAfterTopRadius
+                | PyramidStep::AxisEndpoint => (frame.origin, DynRole::Height),
+                PyramidStep::HeightSecondPoint => {
+                    (self.pyramid_height_first?, DynRole::Height)
+                }
+                _ => return None,
+            };
+            return Some(DynSpec {
+                anchor: DynAnchor::Point(anchor),
+                fields: vec![DynFieldSpec::new(role)],
+                guide: if role == DynRole::Radius {
+                    DynGuide::Radius
+                } else {
+                    DynGuide::None
+                },
+                ref_point: None,
+            });
+        }
+
         let role = if self.shape.rectangular() {
             match self.box_step {
                 BoxStep::CubeSize | BoxStep::Length => DynRole::Distance,
@@ -2150,6 +2832,25 @@ impl CadCommand for PrimitiveCommand {
                 }
                 ConeStep::HeightSecondPoint(first) => Some(first.distance(cursor)),
                 ConeStep::AxisEndpoint => self.cone_frame.map(|frame| frame.origin.distance(cursor)),
+                _ => None,
+            };
+        }
+        if self.shape == Shape::Pyramid {
+            return match self.pyramid_step {
+                PyramidStep::BaseRadius | PyramidStep::TopRadius => {
+                    let frame = self.pyramid_frame?;
+                    let delta = cursor - frame.origin;
+                    Some((delta - frame.z * delta.dot(frame.z)).length())
+                }
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius => {
+                    self.pyramid_height_at(cursor).map(f64::abs)
+                }
+                PyramidStep::HeightSecondPoint => {
+                    Some(self.pyramid_height_first?.distance(cursor))
+                }
+                PyramidStep::AxisEndpoint => {
+                    self.pyramid_frame.map(|frame| frame.origin.distance(cursor))
+                }
                 _ => None,
             };
         }
@@ -2291,6 +2992,14 @@ fn push_break(points: &mut Vec<[f32; 3]>) {
 }
 
 fn push_loop<const N: usize>(points: &mut Vec<[f32; 3]>, path: &[DVec3; N]) {
+    push_break(points);
+    points.extend(path.iter().chain(path.first()).map(|point| point.as_vec3().to_array()));
+}
+
+fn push_path_loop(points: &mut Vec<[f32; 3]>, path: &[DVec3]) {
+    if path.is_empty() {
+        return;
+    }
     push_break(points);
     points.extend(path.iter().chain(path.first()).map(|point| point.as_vec3().to_array()));
 }

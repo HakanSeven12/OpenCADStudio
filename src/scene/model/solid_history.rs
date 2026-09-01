@@ -99,6 +99,7 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Sphere(_)
                 | SolidHistoryOperation::Cone(_)
                 | SolidHistoryOperation::Cylinder(_)
+                | SolidHistoryOperation::Torus(_)
         )
     )
 }
@@ -114,8 +115,78 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         }
         SolidHistoryOperation::Cone(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
+        SolidHistoryOperation::Torus(value) => world_point(value.base.transform, [0.0; 3]),
         _ => None,
     }
+}
+
+fn torus_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryTorus,
+) -> Vec<PropSection> {
+    let Some(position) = world_point(value.base.transform, [0.0; 3]) else {
+        return Vec::new();
+    };
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, _) = displayed_history_state(object_show_history, show_history_mode);
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Solid type").into_owned(),
+                    field: "solid_history_type",
+                    value: PropValue::ReadOnly(t!("Torus").into_owned()),
+                },
+                crate::entities::common::edit_prop(
+                    t!("Position X").as_ref(),
+                    PROP_POSITION_X,
+                    position.x,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Y").as_ref(),
+                    PROP_POSITION_Y,
+                    position.y,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Z").as_ref(),
+                    PROP_POSITION_Z,
+                    position.z,
+                ),
+                history_prop(
+                    t!("Torus radius").as_ref(),
+                    PROP_MAJOR_RADIUS,
+                    value.major_radius,
+                ),
+                history_prop(
+                    t!("Tube radius").as_ref(),
+                    PROP_MINOR_RADIUS,
+                    value.minor_radius,
+                ),
+            ],
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::ReadOnly(
+                        if record_history { "Record" } else { "None" }.to_string(),
+                    ),
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: PropValue::ReadOnly(
+                        if show_history { "Yes" } else { "No" }.to_string(),
+                    ),
+                },
+            ],
+        },
+    ]
 }
 
 fn cone_properties(
@@ -558,18 +629,9 @@ pub fn primitive_properties(
         SolidHistoryOperation::Cylinder(value) => {
             return cylinder_properties(document, handle, value)
         }
-        SolidHistoryOperation::Torus(value) => vec![
-            history_prop(
-                t!("Outer Radius").as_ref(),
-                PROP_OUTER_RADIUS,
-                value.major_radius + value.minor_radius,
-            ),
-            history_prop(
-                t!("Inner Radius").as_ref(),
-                PROP_INNER_RADIUS,
-                (value.major_radius - value.minor_radius).max(0.0),
-            ),
-        ],
+        SolidHistoryOperation::Torus(value) => {
+            return torus_properties(document, handle, value)
+        }
         SolidHistoryOperation::Pyramid(value) => vec![
             history_prop(t!("Radius").as_ref(), PROP_RADIUS, value.radius),
             history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
@@ -812,6 +874,36 @@ fn apply_cylinder_position_property(
     Some(true)
 }
 
+fn apply_torus_position_property(
+    value: &mut SolidHistoryTorus,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    let axis = match field {
+        PROP_POSITION_X => 0,
+        PROP_POSITION_Y => 1,
+        PROP_POSITION_Z => 2,
+        _ => return None,
+    };
+    let target = crate::entities::common::parse_length(text)?;
+    if !target.is_finite() {
+        return Some(false);
+    }
+    let current = matrix(value.base.transform)?;
+    let origin = current.transform_point3(glam::DVec3::ZERO);
+    if !origin.is_finite() || (target - origin[axis]).abs() <= 1e-12 {
+        return Some(false);
+    }
+    let mut delta = glam::DVec3::ZERO;
+    delta[axis] = target - origin[axis];
+    let updated = glam::DMat4::from_translation(delta) * current;
+    if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
+        return Some(false);
+    }
+    value.base.transform = updated.to_cols_array();
+    Some(true)
+}
+
 fn canonicalize_cylinder_radii(value: &mut SolidHistoryCylinder) -> bool {
     if value.minor_radius <= value.major_radius {
         value.x_radius = value.major_radius;
@@ -853,6 +945,11 @@ pub fn apply_primitive_property(
     }
     if let SolidHistoryOperation::Cylinder(cylinder_value) = operation {
         if let Some(applied) = apply_cylinder_position_property(cylinder_value, field, value) {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Torus(torus_value) = operation {
+        if let Some(applied) = apply_torus_position_property(torus_value, field, value) {
             return applied;
         }
     }
@@ -980,33 +1077,27 @@ pub fn apply_primitive_property(
             }
             value.radius = radius;
         }
-        SolidHistoryOperation::Torus(value) => {
-            let outer = value.major_radius + value.minor_radius;
-            let inner = (value.major_radius - value.minor_radius).max(0.0);
-            match field {
-                PROP_OUTER_RADIUS => {
-                    let Some(next_outer) = positive() else {
-                        return false;
-                    };
-                    if next_outer <= inner {
-                        return false;
-                    }
-                    value.major_radius = (next_outer + inner) * 0.5;
-                    value.minor_radius = (next_outer - inner) * 0.5;
+        SolidHistoryOperation::Torus(value) => match field {
+            PROP_MAJOR_RADIUS => {
+                let Some(radius) = positive() else {
+                    return false;
+                };
+                if (radius - value.major_radius).abs() <= 1e-12 {
+                    return false;
                 }
-                PROP_INNER_RADIUS => {
-                    let Some(next_inner) = positive() else {
-                        return false;
-                    };
-                    if next_inner >= outer {
-                        return false;
-                    }
-                    value.major_radius = (outer + next_inner) * 0.5;
-                    value.minor_radius = (outer - next_inner) * 0.5;
-                }
-                _ => return false,
+                value.major_radius = radius;
             }
-        }
+            PROP_MINOR_RADIUS => {
+                let Some(radius) = positive() else {
+                    return false;
+                };
+                if (radius - value.minor_radius).abs() <= 1e-12 {
+                    return false;
+                }
+                value.minor_radius = radius;
+            }
+            _ => return false,
+        },
         SolidHistoryOperation::Pyramid(value) => match field {
             PROP_RADIUS => value.radius = positive().unwrap_or(value.radius),
             PROP_HEIGHT => value.height = positive().unwrap_or(value.height),

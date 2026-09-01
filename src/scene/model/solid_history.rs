@@ -165,7 +165,7 @@ fn sweep_properties(
                     label: t!("Profile rotation").into_owned(),
                     field: PROP_PROFILE_ROTATION,
                     value: PropValue::EditText(
-                        crate::entities::common::format_direction(value.align_angle),
+                        crate::entities::common::format_angle(value.align_angle),
                     ),
                 },
                 Property {
@@ -236,20 +236,22 @@ fn sweep_path_length(value: &SolidHistorySweep) -> Option<f64> {
         _ => return None,
     };
     let curve = crate::entities::curve::entity_curve(&entity)?;
-    let transform = matrix(value.path_entity_transform)?;
-    let x_scale = transform
-        .transform_vector3(glam::DVec3::from_array(curve.plane.x_axis))
-        .length();
-    let y_scale = transform
-        .transform_vector3(glam::DVec3::from_array(curve.plane.y_axis))
-        .length();
-    if !x_scale.is_finite()
-        || !y_scale.is_finite()
-        || (x_scale - y_scale).abs() > 1e-9 * x_scale.max(y_scale).max(1.0)
+    let transform = value.path_entity_transform;
+    if transform.iter().any(|value| !value.is_finite())
+        || transform[3].abs() > 1e-9
+        || transform[7].abs() > 1e-9
+        || transform[11].abs() > 1e-9
+        || (transform[15] - 1.0).abs() > 1e-9
     {
         return None;
     }
-    let length = curve.curve.length() * (x_scale + y_scale) * 0.5;
+    let placement = cadkernel::brep::Placement {
+        x_axis: [transform[0], transform[1], transform[2]],
+        y_axis: [transform[4], transform[5], transform[6]],
+        z_axis: [transform[8], transform[9], transform[10]],
+        origin: [transform[12], transform[13], transform[14]],
+    };
+    let length = curve.curve.length() * placement.scale()?;
     (length.is_finite() && length >= 0.0).then_some(length)
 }
 
@@ -1137,7 +1139,7 @@ fn apply_sweep_geometry_property(
 ) -> Option<bool> {
     match field {
         PROP_PROFILE_ROTATION => {
-            let target = crate::entities::common::parse_direction(text)?;
+            let target = crate::entities::common::parse_angle(text)?;
             if !target.is_finite() || (target - value.align_angle).abs() <= 1e-12 {
                 return Some(false);
             }

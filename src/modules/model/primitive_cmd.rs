@@ -68,6 +68,61 @@ enum SphereStep {
 }
 
 #[derive(Clone, Copy)]
+enum TorusStep {
+    Center,
+    Radius(DVec3),
+    Diameter(DVec3),
+    TwoPointFirst,
+    TwoPointSecond(DVec3),
+    ThreePointFirst,
+    ThreePointSecond(DVec3),
+    ThreePointThird(DVec3, DVec3),
+    TtrFirst,
+    TtrSecond {
+        object: TangentObject,
+        hit: DVec3,
+    },
+    TtrRadius {
+        first: TangentObject,
+        second: TangentObject,
+        first_hit: DVec3,
+        second_hit: DVec3,
+    },
+    TubeRadius {
+        center: DVec3,
+        major_radius: f64,
+    },
+    TubeDiameter {
+        center: DVec3,
+        major_radius: f64,
+    },
+    TubeTwoPointFirst {
+        center: DVec3,
+        major_radius: f64,
+    },
+    TubeTwoPointSecond {
+        center: DVec3,
+        major_radius: f64,
+        first: DVec3,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct TorusDefaults {
+    major_radius: f64,
+    minor_radius: f64,
+}
+
+impl Default for TorusDefaults {
+    fn default() -> Self {
+        Self {
+            major_radius: 100.0,
+            minor_radius: 25.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 enum ConeStep {
     BaseCenter,
     BaseRadius,
@@ -134,6 +189,33 @@ fn remember_sphere_radius(radius: f64) {
     if radius.is_finite() && radius > 1e-6 {
         if let Ok(mut value) = sphere_radius_store().lock() {
             *value = radius;
+        }
+    }
+}
+
+fn torus_defaults_store() -> &'static Mutex<TorusDefaults> {
+    static VALUE: OnceLock<Mutex<TorusDefaults>> = OnceLock::new();
+    VALUE.get_or_init(|| Mutex::new(TorusDefaults::default()))
+}
+
+fn torus_defaults() -> TorusDefaults {
+    torus_defaults_store()
+        .lock()
+        .map(|value| *value)
+        .unwrap_or_default()
+}
+
+fn remember_torus_defaults(major_radius: f64, minor_radius: f64) {
+    if major_radius.is_finite()
+        && minor_radius.is_finite()
+        && major_radius > 1e-6
+        && minor_radius > 1e-6
+    {
+        if let Ok(mut value) = torus_defaults_store().lock() {
+            *value = TorusDefaults {
+                major_radius,
+                minor_radius,
+            };
         }
     }
 }
@@ -265,6 +347,8 @@ pub struct PrimitiveCommand {
     box_height_anchor: Option<DVec3>,
     sphere_step: SphereStep,
     sphere_default_radius: f64,
+    torus_step: TorusStep,
+    torus_defaults: TorusDefaults,
     cone_step: ConeStep,
     cone_frame: Option<WorkingPlane>,
     cone_base_x_radius: f64,
@@ -294,6 +378,8 @@ impl PrimitiveCommand {
             box_height_anchor: None,
             sphere_step: SphereStep::Center,
             sphere_default_radius: sphere_radius_default(),
+            torus_step: TorusStep::Center,
+            torus_defaults: torus_defaults(),
             cone_step: ConeStep::BaseCenter,
             cone_frame: None,
             cone_base_x_radius: remembered.base_x_radius,
@@ -342,6 +428,81 @@ impl PrimitiveCommand {
             Shape::Sphere,
             &[center, center + DVec3::X * radius],
         )))
+    }
+
+    fn set_torus_major_radius(&mut self, center: DVec3, major_radius: f64) -> CmdResult {
+        if !center.is_finite() || !major_radius.is_finite() || major_radius <= 1e-6 {
+            return CmdResult::NeedPoint;
+        }
+        self.torus_step = TorusStep::TubeRadius {
+            center,
+            major_radius,
+        };
+        CmdResult::NeedPoint
+    }
+
+    fn commit_torus(
+        &mut self,
+        center: DVec3,
+        major_radius: f64,
+        minor_radius: f64,
+    ) -> CmdResult {
+        if !center.is_finite()
+            || !major_radius.is_finite()
+            || !minor_radius.is_finite()
+            || major_radius <= 1e-6
+            || minor_radius <= 1e-6
+        {
+            return CmdResult::NeedPoint;
+        }
+        self.pts = vec![
+            center,
+            center + DVec3::X * major_radius,
+            center + DVec3::X * minor_radius,
+        ];
+        self.torus_defaults = TorusDefaults {
+            major_radius,
+            minor_radius,
+        };
+        remember_torus_defaults(major_radius, minor_radius);
+        self.commit(0.0)
+    }
+
+    fn torus_ttr_result(&mut self, radius: f64) -> CmdResult {
+        let TorusStep::TtrRadius {
+            first,
+            second,
+            first_hit,
+            second_hit,
+        } = self.torus_step
+        else {
+            return CmdResult::NeedPoint;
+        };
+        let hint = (first_hit + second_hit) * 0.5;
+        let Some(center) = closest_sphere_center(
+            &sphere_ttr_centers(first, second, radius),
+            hint,
+        ) else {
+            return CmdResult::NeedPoint;
+        };
+        self.set_torus_major_radius(center, radius)
+    }
+
+    fn torus_preview(
+        &self,
+        center: DVec3,
+        major_radius: f64,
+        minor_radius: f64,
+    ) -> Option<WireModel> {
+        if !center.is_finite()
+            || !major_radius.is_finite()
+            || !minor_radius.is_finite()
+            || major_radius <= 1e-6
+            || minor_radius <= 1e-6
+        {
+            return None;
+        }
+        Some(self.place_preview(torus_wire(center, major_radius, minor_radius)))
     }
 
     fn cone_frame_at(&self, center: DVec3) -> WorkingPlane {
@@ -1286,15 +1447,11 @@ impl PrimitiveCommand {
             }
             Shape::Torus => {
                 let c = self.pts[0];
-                let first = (self.pts[1] - c).length();
-                let second = (self.pts[2] - c).length();
-                let outer = first.max(second);
-                let inner = first.min(second);
-                if inner < 1e-6 || outer - inner < 1e-6 {
+                let major = (self.pts[1] - c).length();
+                let minor = (self.pts[2] - c).length();
+                if major < 1e-6 || minor < 1e-6 {
                     return None;
                 }
-                let major = (outer + inner) * 0.5;
-                let minor = (outer - inner) * 0.5;
                 let center = [c.x, c.y, c.z];
                 (
                     solid_model::torus_solid(center, major, minor),
@@ -1393,11 +1550,39 @@ impl CadCommand for PrimitiveCommand {
                     self.cone_step,
                     ConeStep::TtrFirst | ConeStep::TtrSecond { .. }
                 ))
+            || (self.shape == Shape::Torus
+                && matches!(
+                    self.torus_step,
+                    TorusStep::TtrFirst | TorusStep::TtrSecond { .. }
+                ))
     }
 
     fn on_tangent_point(&mut self, object: TangentObject, hit: DVec3) -> CmdResult {
         if self.shape == Shape::Cone {
             return self.on_cone_tangent(object, hit);
+        }
+        if self.shape == Shape::Torus {
+            let object = sphere_tangent_local(object, self.plane);
+            let hit = self.plane.to_local(hit);
+            return match self.torus_step {
+                TorusStep::TtrFirst => {
+                    self.torus_step = TorusStep::TtrSecond { object, hit };
+                    CmdResult::NeedPoint
+                }
+                TorusStep::TtrSecond {
+                    object: first,
+                    hit: first_hit,
+                } => {
+                    self.torus_step = TorusStep::TtrRadius {
+                        first,
+                        second: object,
+                        first_hit,
+                        second_hit: hit,
+                    };
+                    CmdResult::NeedPoint
+                }
+                _ => CmdResult::NeedPoint,
+            };
         }
         if self.shape != Shape::Sphere {
             return self.on_point(hit);
@@ -1498,13 +1683,69 @@ impl CadCommand for PrimitiveCommand {
                 .into_owned(),
             };
         }
+        if self.shape == Shape::Torus {
+            return match self.torus_step {
+                TorusStep::Center => {
+                    t!("TORUS  Specify center point or [3P/2P/Ttr]:").into_owned()
+                }
+                TorusStep::Radius(_) => crate::tf!(
+                    "TORUS  Specify radius or [Diameter] <{:.4}>:",
+                    self.torus_defaults.major_radius
+                )
+                .into_owned(),
+                TorusStep::Diameter(_) => crate::tf!(
+                    "TORUS  Specify diameter <{:.4}>:",
+                    self.torus_defaults.major_radius * 2.0
+                )
+                .into_owned(),
+                TorusStep::TwoPointFirst => {
+                    t!("TORUS  Specify first end point of diameter:").into_owned()
+                }
+                TorusStep::TwoPointSecond(_) => {
+                    t!("TORUS  Specify second end point of diameter:").into_owned()
+                }
+                TorusStep::ThreePointFirst => {
+                    t!("TORUS  Specify first point on torus:").into_owned()
+                }
+                TorusStep::ThreePointSecond(_) => {
+                    t!("TORUS  Specify second point on torus:").into_owned()
+                }
+                TorusStep::ThreePointThird(_, _) => {
+                    t!("TORUS  Specify third point on torus:").into_owned()
+                }
+                TorusStep::TtrFirst => {
+                    t!("TORUS  Select first tangent object:").into_owned()
+                }
+                TorusStep::TtrSecond { .. } => {
+                    t!("TORUS  Select second tangent object:").into_owned()
+                }
+                TorusStep::TtrRadius { .. } => crate::tf!(
+                    "TORUS  Specify radius <{:.4}>:",
+                    self.torus_defaults.major_radius
+                )
+                .into_owned(),
+                TorusStep::TubeRadius { .. } => crate::tf!(
+                    "TORUS  Specify tube radius or [2Point/Diameter] <{:.4}>:",
+                    self.torus_defaults.minor_radius
+                )
+                .into_owned(),
+                TorusStep::TubeDiameter { .. } => crate::tf!(
+                    "TORUS  Specify tube diameter <{:.4}>:",
+                    self.torus_defaults.minor_radius * 2.0
+                )
+                .into_owned(),
+                TorusStep::TubeTwoPointFirst { .. } => {
+                    t!("TORUS  Specify first end point of tube diameter:").into_owned()
+                }
+                TorusStep::TubeTwoPointSecond { .. } => {
+                    t!("TORUS  Specify second end point of tube diameter:").into_owned()
+                }
+            };
+        }
         if self.height_step {
             return t!("%{n}  Specify height <Enter for default>:", n = n).into_owned();
         }
         match (self.shape, self.pts.len()) {
-            (Shape::Torus, 0) => t!("%{n}  Specify center point:", n = n).into_owned(),
-            (Shape::Torus, 1) => t!("%{n}  Specify outer radius:", n = n).into_owned(),
-            (Shape::Torus, _) => t!("%{n}  Specify inner radius:", n = n).into_owned(),
             (shape, 0) if shape.radial() => {
                 t!("%{n}  Specify center point:", n = n).into_owned()
             }
@@ -1525,6 +1766,23 @@ impl CadCommand for PrimitiveCommand {
                     CmdOption::new("Ttr", "T"),
                 ],
                 SphereStep::Radius(_) => vec![CmdOption::new(t!("Diameter").as_ref(), "D")],
+                _ => Vec::new(),
+            };
+        }
+        if self.shape == Shape::Torus {
+            return match self.torus_step {
+                TorusStep::Center => vec![
+                    CmdOption::new("3P", "3P"),
+                    CmdOption::new("2P", "2P"),
+                    CmdOption::new("Ttr", "T"),
+                ],
+                TorusStep::Radius(_) => {
+                    vec![CmdOption::new(t!("Diameter").as_ref(), "D")]
+                }
+                TorusStep::TubeRadius { .. } => vec![
+                    CmdOption::new(t!("2Point").as_ref(), "2P"),
+                    CmdOption::new(t!("Diameter").as_ref(), "D"),
+                ],
                 _ => Vec::new(),
             };
         }
@@ -1587,6 +1845,76 @@ impl CadCommand for PrimitiveCommand {
                     self.sphere_ttr_result(second_hit.distance(local))
                 }
                 SphereStep::TtrFirst | SphereStep::TtrSecond { .. } => CmdResult::NeedPoint,
+            };
+        }
+        if self.shape == Shape::Torus {
+            let local = self.plane.to_local(pt);
+            if !local.is_finite() {
+                return CmdResult::NeedPoint;
+            }
+            return match self.torus_step {
+                TorusStep::Center => {
+                    self.torus_step = TorusStep::Radius(local);
+                    CmdResult::NeedPoint
+                }
+                TorusStep::Radius(center) => {
+                    self.set_torus_major_radius(center, center.distance(local))
+                }
+                TorusStep::Diameter(center) => {
+                    self.set_torus_major_radius(center, center.distance(local) * 0.5)
+                }
+                TorusStep::TwoPointFirst => {
+                    self.torus_step = TorusStep::TwoPointSecond(local);
+                    CmdResult::NeedPoint
+                }
+                TorusStep::TwoPointSecond(first) => self.set_torus_major_radius(
+                    (first + local) * 0.5,
+                    first.distance(local) * 0.5,
+                ),
+                TorusStep::ThreePointFirst => {
+                    self.torus_step = TorusStep::ThreePointSecond(local);
+                    CmdResult::NeedPoint
+                }
+                TorusStep::ThreePointSecond(first) => {
+                    self.torus_step = TorusStep::ThreePointThird(first, local);
+                    CmdResult::NeedPoint
+                }
+                TorusStep::ThreePointThird(first, second) => {
+                    let Some((center, radius)) =
+                        sphere_through_three_points(first, second, local)
+                    else {
+                        return CmdResult::NeedPoint;
+                    };
+                    self.set_torus_major_radius(center, radius)
+                }
+                TorusStep::TtrRadius { second_hit, .. } => {
+                    self.torus_ttr_result(second_hit.distance(local))
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } => self.commit_torus(center, major_radius, center.distance(local)),
+                TorusStep::TubeDiameter {
+                    center,
+                    major_radius,
+                } => self.commit_torus(center, major_radius, center.distance(local) * 0.5),
+                TorusStep::TubeTwoPointFirst {
+                    center,
+                    major_radius,
+                } => {
+                    self.torus_step = TorusStep::TubeTwoPointSecond {
+                        center,
+                        major_radius,
+                        first: local,
+                    };
+                    CmdResult::NeedPoint
+                }
+                TorusStep::TubeTwoPointSecond {
+                    center,
+                    major_radius,
+                    first,
+                } => self.commit_torus(center, major_radius, first.distance(local) * 0.5),
+                TorusStep::TtrFirst | TorusStep::TtrSecond { .. } => CmdResult::NeedPoint,
             };
         }
         if self.shape == Shape::Cone {
@@ -1696,6 +2024,25 @@ impl CadCommand for PrimitiveCommand {
                 _ => CmdResult::Cancel,
             };
         }
+        if self.shape == Shape::Torus {
+            return match self.torus_step {
+                TorusStep::Radius(center) | TorusStep::Diameter(center) => {
+                    self.set_torus_major_radius(center, self.torus_defaults.major_radius)
+                }
+                TorusStep::TtrRadius { .. } => {
+                    self.torus_ttr_result(self.torus_defaults.major_radius)
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                }
+                | TorusStep::TubeDiameter {
+                    center,
+                    major_radius,
+                } => self.commit_torus(center, major_radius, self.torus_defaults.minor_radius),
+                _ => CmdResult::Cancel,
+            };
+        }
         if self.shape == Shape::Cone {
             return match self.cone_step {
                 ConeStep::BaseRadius | ConeStep::BaseDiameter => {
@@ -1763,6 +2110,17 @@ impl CadCommand for PrimitiveCommand {
                     | SphereStep::TtrRadius { .. }
             );
         }
+        if self.shape == Shape::Torus {
+            return matches!(
+                self.torus_step,
+                TorusStep::Center
+                    | TorusStep::Radius(_)
+                    | TorusStep::Diameter(_)
+                    | TorusStep::TtrRadius { .. }
+                    | TorusStep::TubeRadius { .. }
+                    | TorusStep::TubeDiameter { .. }
+            );
+        }
         if self.shape == Shape::Cone {
             return matches!(
                 self.cone_step,
@@ -1795,6 +2153,12 @@ impl CadCommand for PrimitiveCommand {
     fn point_step_accepts_keywords(&self) -> bool {
         if self.shape == Shape::Sphere {
             return matches!(self.sphere_step, SphereStep::Center | SphereStep::Radius(_));
+        }
+        if self.shape == Shape::Torus {
+            return matches!(
+                self.torus_step,
+                TorusStep::Center | TorusStep::Radius(_) | TorusStep::TubeRadius { .. }
+            );
         }
         if self.shape == Shape::Cone {
             return matches!(
@@ -1852,6 +2216,75 @@ impl CadCommand for PrimitiveCommand {
                 _ => None,
             };
         }
+        if self.shape == Shape::Torus {
+            let token = raw.trim();
+            let upper = token.to_uppercase();
+            return match self.torus_step {
+                TorusStep::Center if upper == "3P" => {
+                    self.torus_step = TorusStep::ThreePointFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::Center if upper == "2P" => {
+                    self.torus_step = TorusStep::TwoPointFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::Center if matches!(upper.as_str(), "T" | "TTR") => {
+                    self.torus_step = TorusStep::TtrFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::Radius(center) if matches!(upper.as_str(), "D" | "DIAMETER") => {
+                    self.torus_step = TorusStep::Diameter(center);
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::Radius(center) => {
+                    let radius = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.set_torus_major_radius(center, radius))
+                }
+                TorusStep::Diameter(center) => {
+                    let diameter = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.set_torus_major_radius(center, diameter * 0.5))
+                }
+                TorusStep::TtrRadius { .. } => {
+                    let radius = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.torus_ttr_result(radius))
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } if matches!(upper.as_str(), "2P" | "2POINT") => {
+                    self.torus_step = TorusStep::TubeTwoPointFirst {
+                        center,
+                        major_radius,
+                    };
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } if matches!(upper.as_str(), "D" | "DIAMETER") => {
+                    self.torus_step = TorusStep::TubeDiameter {
+                        center,
+                        major_radius,
+                    };
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } => {
+                    let radius = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.commit_torus(center, major_radius, radius))
+                }
+                TorusStep::TubeDiameter {
+                    center,
+                    major_radius,
+                } => {
+                    let diameter = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.commit_torus(center, major_radius, diameter * 0.5))
+                }
+                _ => None,
+            };
+        }
         if self.shape == Shape::Cone {
             return self.on_cone_text(raw);
         }
@@ -1903,6 +2336,63 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        if self.shape == Shape::Torus {
+            let local = self.plane.to_local(pt);
+            if !local.is_finite() {
+                return None;
+            }
+            return match self.torus_step {
+                TorusStep::Radius(center) => self.torus_preview(
+                    center,
+                    center.distance(local),
+                    self.torus_defaults.minor_radius,
+                ),
+                TorusStep::Diameter(center) => self.torus_preview(
+                    center,
+                    center.distance(local) * 0.5,
+                    self.torus_defaults.minor_radius,
+                ),
+                TorusStep::TwoPointSecond(first) | TorusStep::ThreePointSecond(first) => {
+                    self.torus_preview(
+                        (first + local) * 0.5,
+                        first.distance(local) * 0.5,
+                        self.torus_defaults.minor_radius,
+                    )
+                }
+                TorusStep::ThreePointThird(first, second) => {
+                    let (center, radius) = sphere_through_three_points(first, second, local)?;
+                    self.torus_preview(center, radius, self.torus_defaults.minor_radius)
+                }
+                TorusStep::TtrRadius {
+                    first,
+                    second,
+                    first_hit,
+                    second_hit,
+                } => {
+                    let radius = second_hit.distance(local);
+                    let hint = (first_hit + second_hit) * 0.5;
+                    let center = closest_sphere_center(
+                        &sphere_ttr_centers(first, second, radius),
+                        hint,
+                    )?;
+                    self.torus_preview(center, radius, self.torus_defaults.minor_radius)
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } => self.torus_preview(center, major_radius, center.distance(local)),
+                TorusStep::TubeDiameter {
+                    center,
+                    major_radius,
+                } => self.torus_preview(center, major_radius, center.distance(local) * 0.5),
+                TorusStep::TubeTwoPointSecond {
+                    center,
+                    major_radius,
+                    first,
+                } => self.torus_preview(center, major_radius, first.distance(local) * 0.5),
+                _ => None,
+            };
+        }
         if self.shape == Shape::Sphere {
             let local = self.plane.to_local(pt);
             if !local.is_finite() {
@@ -2050,6 +2540,25 @@ impl CadCommand for PrimitiveCommand {
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
         use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
 
+        if self.shape == Shape::Torus {
+            let (anchor, role) = match self.torus_step {
+                TorusStep::Radius(center) => (center, DynRole::Radius),
+                TorusStep::Diameter(center) => (center, DynRole::Diameter),
+                TorusStep::TtrRadius { second_hit, .. } => {
+                    (second_hit, DynRole::Radius)
+                }
+                TorusStep::TubeRadius { center, .. } => (center, DynRole::Radius),
+                TorusStep::TubeDiameter { center, .. } => (center, DynRole::Diameter),
+                _ => return None,
+            };
+            return Some(DynSpec {
+                anchor: DynAnchor::Point(self.plane.to_world(anchor)),
+                fields: vec![DynFieldSpec::new(role)],
+                guide: DynGuide::Radius,
+                ref_point: None,
+            });
+        }
+
         if self.shape == Shape::Sphere {
             let (anchor, role) = match self.sphere_step {
                 SphereStep::Radius(center) => (center, DynRole::Radius),
@@ -2117,6 +2626,21 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        if self.shape == Shape::Torus {
+            let local = self.plane.to_local(cursor);
+            return match self.torus_step {
+                TorusStep::Radius(center) | TorusStep::TubeRadius { center, .. } => {
+                    Some(center.distance(local))
+                }
+                TorusStep::Diameter(center) | TorusStep::TubeDiameter { center, .. } => {
+                    Some(center.distance(local))
+                }
+                TorusStep::TtrRadius { second_hit, .. } => {
+                    Some(second_hit.distance(local))
+                }
+                _ => None,
+            };
+        }
         if self.shape == Shape::Sphere {
             let local = self.plane.to_local(cursor);
             return match self.sphere_step {
@@ -2180,6 +2704,48 @@ impl CadCommand for PrimitiveCommand {
 }
 
 // ── Footprint preview ───────────────────────────────────────────────────────
+
+fn torus_wire(center: DVec3, major_radius: f64, minor_radius: f64) -> WireModel {
+    let mut points = Vec::new();
+    let profile_limit = if minor_radius > major_radius {
+        std::f64::consts::PI - (major_radius / minor_radius).acos()
+    } else {
+        std::f64::consts::PI
+    };
+
+    for fraction in [-0.75_f64, -0.5, 0.0, 0.5, 0.75] {
+        let angle = profile_limit * fraction;
+        let ring_radius = major_radius + minor_radius * angle.cos();
+        if ring_radius <= 1e-9 {
+            continue;
+        }
+        if !points.is_empty() {
+            points.push([f32::NAN; 3]);
+        }
+        circle_points(
+            &mut points,
+            center + DVec3::Z * (minor_radius * angle.sin()),
+            ring_radius,
+        );
+    }
+
+    for meridian in 0..12 {
+        points.push([f32::NAN; 3]);
+        let around = meridian as f64 * std::f64::consts::TAU / 12.0;
+        for sample in 0..=32 {
+            let profile = -profile_limit + 2.0 * profile_limit * sample as f64 / 32.0;
+            let radial = (major_radius + minor_radius * profile.cos()).max(0.0);
+            let point = center
+                + DVec3::new(
+                    radial * around.cos(),
+                    radial * around.sin(),
+                    minor_radius * profile.sin(),
+                );
+            points.push(point.as_vec3().to_array());
+        }
+    }
+    wire("torus_preview", points)
+}
 
 fn footprint_wire(shape: Shape, pts: &[DVec3]) -> WireModel {
     let mut points: Vec<[f32; 3]> = Vec::new();

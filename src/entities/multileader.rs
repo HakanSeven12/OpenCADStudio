@@ -1750,6 +1750,8 @@ pub(crate) fn block_content_insert(
     insert.normal = ml.context.block_content_normal;
     insert.common = ml.common.clone();
     insert.common.color = ml.block_content_color.clone();
+    insert.common.color_name = None;
+    insert.common.color_book_handle = None;
     Some(insert)
 }
 

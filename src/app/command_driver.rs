@@ -2466,6 +2466,7 @@ impl OpenCADStudio {
                                 dst_common.linetype_handle = common.linetype_handle;
                                 dst_common.linetype_scale = common.linetype_scale;
                                 dst_common.transparency = common.transparency.clone();
+                                dst_common.color_name = common.color_name.clone();
                                 dst_common.color_book_handle = common.color_book_handle;
                                 dst_common.full_visual_style_handle =
                                     common.full_visual_style_handle;

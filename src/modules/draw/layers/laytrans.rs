@@ -215,6 +215,8 @@ pub fn merge_layer(scene: &mut Scene, from: &str, to: &str, force_bylayer: bool)
         common.layer = to.to_string();
         if force_bylayer {
             common.color = acadrust::Color::ByLayer;
+            common.color_name = None;
+            common.color_book_handle = None;
             common.linetype = String::new();
             common.linetype_handle = None;
             common.line_weight = acadrust::LineWeight::ByLayer;

@@ -128,6 +128,8 @@ impl OpenCADStudio {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(&layer_name)
                             {
                                 l.color = acadrust::types::Color::from_index(idx);
+                                l.color_name = None;
+                                l.book_name = None;
                                 self.push_undo_snapshot(i, "LAYER COLOR");
                                 self.tabs[i].dirty = true;
                                 // By-layer colour is baked into every wire on

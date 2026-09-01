@@ -568,7 +568,8 @@ impl Scene {
                                     }
                                     QSelectValueEditor::Choice(values)
                                 }
-                                PropValue::ColorChoice(_) => QSelectValueEditor::Choice(vec![
+                                PropValue::ColorChoice(_)
+                                | PropValue::NamedColorChoice { .. } => QSelectValueEditor::Choice(vec![
                                     "ByLayer".into(),
                                     "ByBlock".into(),
                                 ]),
@@ -659,7 +660,13 @@ impl Scene {
         match field {
             "handle" => Some(entity.common().handle.value().to_string()),
             "layer" => Some(entity.common().layer.clone()),
-            "color" => Some(Self::format_color(entity.common().color)),
+            "color" => Some(
+                entity
+                    .common()
+                    .color_name
+                    .clone()
+                    .unwrap_or_else(|| Self::format_color(entity.common().color)),
+            ),
             "linetype" => Some(if entity.common().linetype.is_empty() {
                 "ByLayer".to_string()
             } else {
@@ -732,6 +739,7 @@ impl Scene {
                     PropValue::Choice { selected, .. } => selected,
                     PropValue::EditChoice { value, .. } => value,
                     PropValue::ColorChoice(c) => Self::format_color(c),
+                    PropValue::NamedColorChoice { name, .. } => name,
                     PropValue::LwChoice(lw)
                     | PropValue::FieldLwChoice { value: lw, .. } => {
                         Self::format_lineweight(lw)

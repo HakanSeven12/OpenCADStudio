@@ -616,6 +616,8 @@ impl OpenCADStudio {
                                         }
                                         "COLOR" => {
                                             common.color = color_val.unwrap();
+                                            common.color_name = None;
+                                            common.color_book_handle = None;
                                             changed += 1;
                                         }
                                         "TRANSPARENCY" => {
@@ -661,6 +663,8 @@ impl OpenCADStudio {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
                             let common = entity.common_mut();
                             common.color = acadrust::types::Color::ByLayer;
+                            common.color_name = None;
+                            common.color_book_handle = None;
                             common.linetype = "ByLayer".to_string();
                             common.line_weight = acadrust::types::LineWeight::ByLayer;
                             changed += 1;

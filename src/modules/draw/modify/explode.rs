@@ -714,6 +714,8 @@ fn dim_common(base: &acadrust::entities::EntityCommon, clr: i16, lw: i16) -> aca
     c.handle = Handle::NULL;
     if clr != 0 && clr != 256 {
         c.color = acadrust::types::Color::from_index(clr);
+        c.color_name = None;
+        c.color_book_handle = None;
     }
     if lw >= 0 {
         c.line_weight = acadrust::types::LineWeight::from_value(lw);
@@ -1223,6 +1225,8 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
         // Apply the text colour / lineweight (DIMCLRT) onto the entity.
         let tc = dim_common(&base.common, met.dimclrt, -2);
         tent.common_mut().color = tc.color;
+        tent.common_mut().color_name = tc.color_name;
+        tent.common_mut().color_book_handle = tc.color_book_handle;
         tent.common_mut().line_weight = tc.line_weight;
         result.push(tent);
     }

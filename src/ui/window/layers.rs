@@ -90,6 +90,8 @@ pub struct Layer {
     pub locked: bool,
     pub plottable: bool,
     pub color: AcadColor,
+    pub color_name: Option<String>,
+    pub book_name: Option<String>,
     pub linetype: String,
     pub lineweight: LineWeight,
     pub transparency: i32,
@@ -106,6 +108,8 @@ impl Layer {
             locked: false,
             plottable: true,
             color,
+            color_name: None,
+            book_name: None,
             linetype: "Continuous".to_string(),
             lineweight: LineWeight::Default,
             transparency: 0,
@@ -220,6 +224,8 @@ impl LayerPanel {
                     locked: l.flags.locked,
                     plottable: l.is_plottable,
                     color: l.color,
+                    color_name: l.color_name.clone(),
+                    book_name: l.book_name.clone(),
                     linetype: if l.line_type.is_empty() {
                         "Continuous".to_string()
                     } else {
@@ -808,8 +814,9 @@ fn layer_row<'a>(
     // Color cell — looks like a combo_box input; click opens swatch dropdown below row.
     // Shared colour selector. Layers carry a concrete colour (no ByLayer /
     // ByBlock); true colours stay RGB instead of being collapsed to ACI 7.
-    let color_cell: Element<'_, Message> = container(crate::ui::color_select::color_selector(
+    let color_cell: Element<'_, Message> = container(crate::ui::color_select::color_selector_with_name(
         layer.color,
+        layer.color_name.as_deref(),
         color_picker_open,
         crate::ui::color_select::ColorExtras {
             by_layer: false,

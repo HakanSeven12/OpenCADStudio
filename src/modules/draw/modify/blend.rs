@@ -260,6 +260,8 @@ fn blend_common(source: &EntityCommon) -> EntityCommon {
     let mut common = EntityCommon::new();
     common.layer = source.layer.clone();
     common.color = source.color;
+    common.color_name = source.color_name.clone();
+    common.color_book_handle = source.color_book_handle;
     common.line_weight = source.line_weight;
     common.linetype = source.linetype.clone();
     common.linetype_handle = source.linetype_handle;

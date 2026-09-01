@@ -125,8 +125,30 @@ pub fn color_selector<'a>(
     on_toggle: Message,
     on_more: Message,
 ) -> Element<'a, Message> {
+    color_selector_with_name(
+        current,
+        None,
+        open,
+        extras,
+        on_select,
+        on_toggle,
+        on_more,
+    )
+}
+
+pub fn color_selector_with_name<'a>(
+    current: AcadColor,
+    display_name: Option<&'a str>,
+    open: bool,
+    extras: ColorExtras,
+    on_select: impl Fn(AcadColor) -> Message + 'a,
+    on_toggle: Message,
+    on_more: Message,
+) -> Element<'a, Message> {
     let (cur_bg, _) = acad_color_display(current);
-    let cur_name = color_display_name(current);
+    let cur_name = display_name
+        .map(str::to_string)
+        .unwrap_or_else(|| color_display_name(current));
     let on_dismiss = on_toggle.clone();
 
     // Closed button: current swatch + name + caret.

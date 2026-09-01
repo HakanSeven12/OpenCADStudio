@@ -17,6 +17,18 @@ pub fn general_section(entity: &EntityType) -> PropSection {
             ((alpha as f64 / 255.0 * 100.0).round() as u32).to_string()
         }
     };
+    let color_value = common.color_name.as_deref().map_or_else(
+        || PropValue::ColorChoice(common.color),
+        |identity| PropValue::NamedColorChoice {
+            color: common.color,
+            name: identity
+                .split_once('$')
+                .map(|(_, color_name)| color_name)
+                .filter(|color_name| !color_name.is_empty())
+                .unwrap_or(identity)
+                .to_string(),
+        },
+    );
 
     // Hyperlink is stored in XDATA under the "PE_URL" application.
     let hyperlink = common
@@ -36,7 +48,7 @@ pub fn general_section(entity: &EntityType) -> PropSection {
             Property {
                 label: t!("Color").into_owned(),
                 field: "color",
-                value: PropValue::ColorChoice(common.color),
+                value: color_value,
             },
             Property {
                 label: t!("Layer").into_owned(),

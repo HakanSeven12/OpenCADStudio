@@ -2633,11 +2633,15 @@ impl OpenCADStudio {
                     for name in &names {
                         if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
                             dl.color = color;
+                            dl.color_name = None;
+                            dl.book_name = None;
                         }
                     }
                     for pl in self.tabs[i].layers.layers.iter_mut() {
                         if names.contains(&pl.name) {
                             pl.color = color;
+                            pl.color_name = None;
+                            pl.book_name = None;
                         }
                     }
                     self.tabs[i].dirty = true;

@@ -296,7 +296,9 @@ pub fn toggle_invisible(entity: &mut EntityType) {
 
 pub fn apply_color(entity: &mut EntityType, color: AcadColor) {
     entity.as_entity_mut().set_color(color);
-    entity.common_mut().color_book_handle = None;
+    let common = entity.common_mut();
+    common.color_name = None;
+    common.color_book_handle = None;
 }
 
 pub fn apply_line_weight(entity: &mut EntityType, lw: LineWeight) {

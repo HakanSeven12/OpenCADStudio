@@ -3226,6 +3226,8 @@ fn apply_attr_row(a: &mut acadrust::entities::AttributeEntity, row: &AttrRow) ->
     }
     if a.common.color != row.color {
         a.common.color = row.color;
+        a.common.color_name = None;
+        a.common.color_book_handle = None;
         ch = true;
     }
     if a.common.linetype != row.linetype {

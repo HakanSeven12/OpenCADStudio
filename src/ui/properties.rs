@@ -776,7 +776,12 @@ impl PropertiesPanel {
         label: &'a str,
     ) -> Element<'a, Message> {
         match &prop.value {
-            PropValue::ColorChoice(color) => self.render_color_row(label, prop.field, *color),
+            PropValue::ColorChoice(color) => {
+                self.render_color_row(label, prop.field, *color, None)
+            }
+            PropValue::NamedColorChoice { color, name } => {
+                self.render_color_row(label, prop.field, *color, Some(name))
+            }
             PropValue::ColorVaries => self.render_color_varies_row(label),
             PropValue::LayerChoice(layer) => self.render_layer_row(label, layer),
             PropValue::LwChoice(lw) => self.render_lw_row(label, *lw),
@@ -848,6 +853,7 @@ impl PropertiesPanel {
         label: &'a str,
         field: &'static str,
         color: AcadColor,
+        display_name: Option<&'a str>,
     ) -> Element<'a, Message> {
         // MTEXT background colour uses its own picker state + messages so it
         // routes to `background_color`, not the entity's main colour.
@@ -929,8 +935,9 @@ impl PropertiesPanel {
             );
             return prop_row_widget(label, selector);
         }
-        let selector = crate::ui::color_select::color_selector(
+        let selector = crate::ui::color_select::color_selector_with_name(
             color,
+            display_name,
             self.color_picker_open,
             crate::ui::color_select::ColorExtras {
                 by_layer: true,

@@ -509,37 +509,59 @@ impl OpenCADStudio {
                     {
                         let doc = &self.tabs[i].scene.document;
                         let common = entity.common();
-                        if let Some(acadrust::objects::ObjectType::BookColor(book)) = common
+                        let named_color = common
                             .color_book_handle
                             .filter(|handle| handle.is_valid())
                             .and_then(|handle| doc.objects.get(&handle))
-                        {
+                            .and_then(|object| match object {
+                                acadrust::objects::ObjectType::BookColor(book) => Some((
+                                    book.color,
+                                    book.book_name.clone(),
+                                    book.color_name.clone(),
+                                )),
+                                _ => None,
+                            })
+                            .or_else(|| {
+                                let identity = common.color_name.as_deref()?;
+                                let (book_name, color_name) = identity
+                                    .split_once('$')
+                                    .map(|(book, color)| (book.to_string(), color.to_string()))
+                                    .unwrap_or_else(|| (String::new(), identity.to_string()));
+                                Some((common.color, book_name, color_name))
+                            });
+                        if let Some((color, book_name, color_name)) = named_color {
                             for section in sections.iter_mut() {
                                 if let Some(row) =
                                     section.props.iter_mut().find(|row| row.field == "color")
                                 {
-                                    row.value =
-                                        crate::scene::model::object::PropValue::ColorChoice(
-                                            book.color,
-                                        );
+                                    row.value = crate::scene::model::object::PropValue::NamedColorChoice {
+                                        color,
+                                        name: color_name.clone(),
+                                    };
                                 }
                             }
                             use crate::entities::common::ro_prop;
+                            let mut props = Vec::new();
+                            if !book_name.is_empty() {
+                                props.push(ro_prop(
+                                    t!("Book").as_ref(),
+                                    "book_color_book",
+                                    book_name,
+                                ));
+                            }
+                            props.push(ro_prop(
+                                t!("Color Name").as_ref(),
+                                "book_color_name",
+                                color_name,
+                            ));
+                            props.push(ro_prop(
+                                t!("Color").as_ref(),
+                                "book_color_value",
+                                format!("{:?}", color),
+                            ));
                             sections.push(crate::scene::model::object::PropSection {
                                 title: t!("Color Book").into_owned(),
-                                props: vec![
-                                    ro_prop(t!("Book").as_ref(), "book_color_book", book.book_name.clone()),
-                                    ro_prop(
-                                        t!("Color Name").as_ref(),
-                                        "book_color_name",
-                                        book.color_name.clone(),
-                                    ),
-                                    ro_prop(
-                                        t!("Color").as_ref(),
-                                        "book_color_value",
-                                        format!("{:?}", book.color),
-                                    ),
-                                ],
+                                props,
                             });
                         }
 
@@ -2916,6 +2938,7 @@ fn make_sections_read_only(
                 acadrust::types::Color::Index(index) => index.to_string(),
                 acadrust::types::Color::Rgb { r, g, b } => format!("{r},{g},{b}"),
             },
+            PropValue::NamedColorChoice { name, .. } => name.clone(),
             PropValue::ColorVaries
             | PropValue::LwVaries
             | PropValue::FieldLwVaries { .. } => VARIES_LABEL.to_string(),
@@ -3075,6 +3098,9 @@ fn merge_prop_value(
             PropValue::LayerChoice(VARIES_LABEL.into())
         }
         (PropValue::ColorChoice(_), PropValue::ColorChoice(_))
+        | (PropValue::NamedColorChoice { .. }, PropValue::NamedColorChoice { .. })
+        | (PropValue::ColorChoice(_), PropValue::NamedColorChoice { .. })
+        | (PropValue::NamedColorChoice { .. }, PropValue::ColorChoice(_))
         | (PropValue::ColorVaries, _)
         | (_, PropValue::ColorVaries) => PropValue::ColorVaries,
         (PropValue::LwChoice(_), PropValue::LwChoice(_))
@@ -3261,6 +3287,9 @@ fn update_row_color(
         };
         match &mut row.value {
             PropValue::ColorChoice(current) => *current = color,
+            PropValue::NamedColorChoice { .. } => {
+                row.value = PropValue::ColorChoice(color)
+            }
             PropValue::ReadOnly(current) => *current = label,
             PropValue::ReadOnlyWithTooltip { value: current, .. } => *current = label,
             _ => {}

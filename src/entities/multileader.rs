@@ -2129,7 +2129,10 @@ impl MultiLeaderTess for MultiLeader {
                     view_aabb,
                     world_per_pixel,
                     1.0,
-                    crate::scene::convert::tess::BlockObjectOptions::default(),
+                    crate::scene::convert::tess::BlockObjectOptions {
+                        scale_policy: block_use.scale_policy,
+                        ..crate::scene::convert::tess::BlockObjectOptions::default()
+                    },
                 )
                 .wires,
             );

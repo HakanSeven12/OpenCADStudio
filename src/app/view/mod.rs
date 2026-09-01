@@ -118,6 +118,36 @@ fn hatch_pattern_key_event(
     }
 }
 
+fn shortcut_capture_key_event(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: window::Id,
+) -> Option<Message> {
+    let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+        return None;
+    };
+    // Ignore bare modifier presses so holding Ctrl+Shift before the final
+    // key doesn't end the capture early.
+    if let keyboard::Key::Named(named) = &key {
+        if matches!(
+            named,
+            keyboard::key::Named::Control
+                | keyboard::key::Named::Shift
+                | keyboard::key::Named::Alt
+                | keyboard::key::Named::Super
+                | keyboard::key::Named::Meta
+        ) {
+            return None;
+        }
+    }
+    // Esc backs out of capture (and abandons an unfinished draft row) —
+    // binding the ESCAPE key itself is still possible via SHORTCUTS SET.
+    if matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape)) {
+        return Some(Message::ShortcutCaptureCancel);
+    }
+    shortcut_key_name(&key, modifiers).map(Message::ShortcutCaptureKey)
+}
+
 fn shortcut_key_name(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Option<String> {
     let key = match key {
         keyboard::Key::Character(value) if !value.is_empty() => value.to_uppercase(),
@@ -2198,19 +2228,12 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
-        iced::Subscription::batch([
-            frames,
-            history_tick,
-            grip_dwell,
-            hover_dwell,
-            nav_settle,
-            thumbnail_capture,
-            caret_blink,
-            web_fonts,
-            autosave,
-            plugin_drain,
-            single_instance,
-            hatch_pattern_keys,
+        // While a shortcut-editor Key cell is armed for capture, a dedicated
+        // listener records the pressed combination and swallows every other
+        // key so captured shortcuts do not run in the drawing.
+        let keyboard_events = if self.shortcut_capture_row.is_some() {
+            event::listen_with(shortcut_capture_key_event)
+        } else {
             event::listen_with(|ev, status, win_id| {
                 use iced::event::Status;
                 match ev {
@@ -2340,7 +2363,22 @@ impl OpenCADStudio {
                     }
                     _ => None,
                 }
-            }),
+            })
+        };
+        iced::Subscription::batch([
+            frames,
+            history_tick,
+            grip_dwell,
+            hover_dwell,
+            nav_settle,
+            thumbnail_capture,
+            caret_blink,
+            web_fonts,
+            autosave,
+            plugin_drain,
+            single_instance,
+            hatch_pattern_keys,
+            keyboard_events,
         ])
     }
 

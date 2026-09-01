@@ -189,16 +189,19 @@ pub(crate) fn insert_attribute_entities(
     document: &acadrust::CadDocument,
     insert: &acadrust::entities::Insert,
     annotation_scale: f32,
+    scale_policy: crate::scene::BlockScalePolicy,
 ) -> Vec<EntityType> {
     let visibility = document.header.attribute_visibility;
     if visibility == 0 || insert.attributes.is_empty() {
         return Vec::new();
     }
-    let block_scale = if insert
-        .common
-        .extended_data
-        .get_record("AcAnnotativeData")
-        .is_some()
+    let block_scale = if scale_policy
+        == crate::scene::BlockScalePolicy::FromInsert
+        && insert
+            .common
+            .extended_data
+            .get_record("AcAnnotativeData")
+            .is_some()
     {
         annotation_scale as f64
     } else {
@@ -253,59 +256,75 @@ pub(crate) fn append_insert_attribute_wires(
     pslt_factor: f32,
     anno_scale: f32,
 ) {
-    for attr_entity in insert_attribute_entities(document, ins, anno_scale) {
-        let attr = attr_entity.common();
-        let (sub_color, sub_plen, sub_pat, sub_lw_px, sub_aci) = render::render_style_for_block_sub(
+    let attributes = insert_attribute_entities(
+        document,
+        ins,
+        anno_scale,
+        crate::scene::BlockScalePolicy::FromInsert,
+    );
+    for offset in crate::scene::render_graph::array_offsets(ins) {
+        let delta = crate::scene::render_graph::insert_instance_translation_delta(
             document,
-            &attr_entity,
-            ins_color,
-            ins_pat_len,
-            ins_pat,
-            ins_lw_px,
-            ins_layer,
+            ins,
+            offset,
+            anno_scale,
+            crate::scene::BlockScalePolicy::FromInsert,
         );
-        let sub_color = render::adapt_to_bg(sub_color, bg_color);
-        let sub_color = if is_xref && !sel {
-            block_cache::fade_toward_bg(sub_color, bg_color)
-        } else {
-            sub_color
-        };
-        let attr_plottable = if render::is_effective_layer_zero(&attr.layer) {
-            ins_layer_plottable
-        } else {
-            document
-                .layers
-                .get(&attr.layer)
-                .map(|layer| layer.is_plottable)
-                .unwrap_or(true)
-        };
-        let attr_plottable = ins_layer_plottable && attr_plottable;
-        let sub_aabb = crate::scene::entity_aabb(&attr_entity);
-        let mut attr_wires = tessellate::tessellate(
-            document,
-            insert_handle,
-            &attr_entity,
-            sel,
-            sub_color,
-            sub_plen * pslt_factor,
-            sub_pat.map(|v| v * pslt_factor),
-            sub_lw_px,
-            // Neutral: the attribute is already scaled as part of the block unit
-            // above, so the text path must not scale it a second time.
-            1.0,
-            None,
-            None,
-            bg_color,
-            false,
-        );
-        // Use the INSERT's handle so selection / picking groups attribute
-        // text with the parent insert instead of treating it as a stray text.
-        for w in &mut attr_wires {
-            w.name = insert_handle.value().to_string();
-            w.aci = sub_aci;
-            w.aabb = sub_aabb;
-            w.plot_visible &= attr_plottable;
+        for source in &attributes {
+            let mut attr_entity = source.clone();
+            if delta != Vector3::ZERO {
+                attr_entity.apply_transform(&Transform::from_translation(delta));
+            }
+            let attr = attr_entity.common();
+            let (sub_color, sub_plen, sub_pat, sub_lw_px, sub_aci) =
+                render::render_style_for_block_sub(
+                    document,
+                    &attr_entity,
+                    ins_color,
+                    ins_pat_len,
+                    ins_pat,
+                    ins_lw_px,
+                    ins_layer,
+                );
+            let sub_color = render::adapt_to_bg(sub_color, bg_color);
+            let sub_color = if is_xref && !sel {
+                block_cache::fade_toward_bg(sub_color, bg_color)
+            } else {
+                sub_color
+            };
+            let attr_plottable = if render::is_effective_layer_zero(&attr.layer) {
+                ins_layer_plottable
+            } else {
+                document
+                    .layers
+                    .get(&attr.layer)
+                    .map(|layer| layer.is_plottable)
+                    .unwrap_or(true)
+            };
+            let attr_plottable = ins_layer_plottable && attr_plottable;
+            let sub_aabb = crate::scene::entity_aabb(&attr_entity);
+            let mut attr_wires = tessellate::tessellate(
+                document,
+                insert_handle,
+                &attr_entity,
+                sel,
+                sub_color,
+                sub_plen * pslt_factor,
+                sub_pat.map(|v| v * pslt_factor),
+                sub_lw_px,
+                1.0,
+                None,
+                None,
+                bg_color,
+                false,
+            );
+            for w in &mut attr_wires {
+                w.name = insert_handle.value().to_string();
+                w.aci = sub_aci;
+                w.aabb = sub_aabb;
+                w.plot_visible &= attr_plottable;
+            }
+            wires.extend(attr_wires);
         }
-        wires.extend(attr_wires);
     }
 }

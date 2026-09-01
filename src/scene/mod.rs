@@ -17,6 +17,13 @@ pub(crate) mod render_graph;
 pub mod text;
 pub mod view;
 
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub enum BlockScalePolicy {
+    #[default]
+    FromInsert,
+    Applied,
+}
+
 // Topic submodules split out of this root (each contributes `impl Scene`
 // blocks and/or free functions). Pure text-move from the original mod.rs.
 mod boundary;
@@ -66,6 +73,13 @@ struct DependencyTargets {
     touches_block_definition: bool,
 }
 
+#[derive(Clone, Copy)]
+enum DependencyKind {
+    Layer,
+    TextStyle,
+    DimStyle,
+}
+
 #[derive(Default)]
 struct SceneDependencyIndex {
     layers: HashMap<String, DependencyTargets>,
@@ -75,6 +89,7 @@ struct SceneDependencyIndex {
     points: DependencyTargets,
     text_geometry: DependencyTargets,
     annotation_geometry: DependencyTargets,
+    signatures: HashMap<Handle, u64>,
 }
 
 fn hatch_interaction_aabb(hatch: &model::hatch_model::HatchModel) -> Option<[f64; 4]> {
@@ -164,6 +179,7 @@ use glam;
 use iced::time::Duration;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::cell::RefCell;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -2429,11 +2445,7 @@ impl Scene {
             }
         }
         if !changes.is_empty() {
-            // A Modified delta can change layer/style/block references as well
-            // as coordinates. Rebuild the reverse dependency map lazily on its
-            // next use so later targeted global-property updates never follow
-            // stale ownership.
-            self.invalidate_dependency_index();
+            self.refresh_dependency_index_for_changes(&changes);
         }
         let cached_light_changed = self.lighting_cache.borrow().values().any(|lights| {
             changes
@@ -2533,6 +2545,7 @@ impl Scene {
         // Structural change — drop both per-entity tessellation memos.
         self.tess_memo.borrow_mut().clear();
         self.resident_tess_memo.borrow_mut().clear();
+        self.invalidate_dependency_index();
         // Can't name the changed handles → force every journal consumer to rebuild.
         self.push_geometry_delta(epoch, Vec::new(), true);
     }
@@ -2616,6 +2629,7 @@ impl Scene {
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.lighting_cache.borrow_mut().clear();
+        self.invalidate_dependency_index();
         self.push_geometry_delta(epoch, Vec::new(), true);
     }
 
@@ -7132,8 +7146,8 @@ impl Scene {
                 ) {
                     continue;
                 }
-                graph.walk_insert(
-                    &block_use.insert,
+                graph.walk_block_use(
+                    &block_use,
                     common.handle,
                     |_, _| true,
                     |entity, context| {
@@ -7387,7 +7401,10 @@ impl Scene {
         let changed_live: Vec<Handle> = changes
             .iter()
             .filter_map(|(handle, kind)| {
-                (!matches!(kind, ChangeKind::Removed)).then_some(*handle)
+                (!matches!(kind, ChangeKind::Removed)
+                    && !self.entity_temporarily_hidden(*handle)
+                    && self.document.get_entity(*handle).is_some())
+                .then_some(*handle)
             })
             .collect();
         let wires = Arc::new(self.wire_models_for(&changed_live));
@@ -8847,6 +8864,113 @@ impl Scene {
         })
     }
 
+    fn entity_dependency_signature(&self, entity: &EntityType) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let common = entity.common();
+        common.handle.hash(&mut hasher);
+        common.owner_handle.hash(&mut hasher);
+        normalize_name(&common.layer).hash(&mut hasher);
+
+        let category = match entity {
+            EntityType::Point(_) => 1_u8,
+            EntityType::Text(_)
+            | EntityType::MText(_)
+            | EntityType::AttributeDefinition(_)
+            | EntityType::AttributeEntity(_)
+            | EntityType::Dimension(_)
+            | EntityType::Leader(_)
+            | EntityType::Tolerance(_)
+            | EntityType::MultiLeader(_)
+            | EntityType::Table(_)
+            | EntityType::Shape(_) => 2,
+            EntityType::Hatch(_) => 3,
+            EntityType::Insert(insert) if !insert.attributes.is_empty() => 4,
+            _ => 0,
+        };
+        category.hash(&mut hasher);
+        crate::scene::annotative::is_annotative(&self.document, entity).hash(&mut hasher);
+
+        for block_use in render_graph::entity_block_uses(&self.document, entity, 1.0) {
+            block_use.block.hash(&mut hasher);
+            normalize_name(&block_use.insert.block_name).hash(&mut hasher);
+            block_use.role.hash(&mut hasher);
+            block_use.scale_policy.hash(&mut hasher);
+            block_use.active.hash(&mut hasher);
+        }
+
+        match entity {
+            EntityType::Text(text) => normalize_name(&text.style).hash(&mut hasher),
+            EntityType::MText(text) => normalize_name(&text.style).hash(&mut hasher),
+            EntityType::AttributeDefinition(attribute) => {
+                normalize_name(&attribute.text_style).hash(&mut hasher)
+            }
+            EntityType::AttributeEntity(attribute) => {
+                normalize_name(&attribute.text_style).hash(&mut hasher)
+            }
+            EntityType::Insert(insert) => {
+                for attribute in &insert.attributes {
+                    normalize_name(&attribute.common.layer).hash(&mut hasher);
+                    normalize_name(&attribute.text_style).hash(&mut hasher);
+                }
+            }
+            EntityType::Dimension(dimension) => {
+                normalize_name(&dimension.base().style_name).hash(&mut hasher)
+            }
+            EntityType::Leader(leader) => {
+                normalize_name(&leader.dimension_style).hash(&mut hasher)
+            }
+            EntityType::Tolerance(tolerance) => {
+                normalize_name(&tolerance.dimension_style_name).hash(&mut hasher)
+            }
+            EntityType::Table(table) => {
+                table.table_style_handle.hash(&mut hasher);
+                for row in &table.rows {
+                    row.style
+                        .as_ref()
+                        .and_then(|style| style.text_style_handle)
+                        .hash(&mut hasher);
+                    for cell in &row.cells {
+                        cell.style
+                            .as_ref()
+                            .and_then(|style| style.text_style_handle)
+                            .hash(&mut hasher);
+                        for content in &cell.contents {
+                            content.text_style_handle.hash(&mut hasher);
+                        }
+                    }
+                }
+            }
+            EntityType::MultiLeader(leader) => {
+                leader.style_handle.hash(&mut hasher);
+                leader.text_style_handle.hash(&mut hasher);
+                leader.context.text_style_handle.hash(&mut hasher);
+            }
+            EntityType::MLine(line) => line.style_handle.hash(&mut hasher),
+            _ => {}
+        }
+        hasher.finish()
+    }
+
+    fn refresh_dependency_index_for_changes(&self, changes: &[(Handle, ChangeKind)]) {
+        let mut cache = self.dependency_index_cache.borrow_mut();
+        let Some(index) = cache.as_ref() else {
+            return;
+        };
+        let unchanged = changes.iter().all(|(handle, kind)| {
+            if !matches!(kind, ChangeKind::Modified) {
+                return false;
+            }
+            let Some(entity) = self.document.get_entity(*handle) else {
+                return false;
+            };
+            index.signatures.get(handle).copied()
+                == Some(self.entity_dependency_signature(entity))
+        });
+        if !unchanged {
+            cache.take();
+        }
+    }
+
     fn rebuild_dependency_index(&self) -> SceneDependencyIndex {
         let layout_blocks: HashSet<Handle> = self
             .document
@@ -8928,6 +9052,9 @@ impl Scene {
         let mut index = SceneDependencyIndex::default();
         for entity in self.document.entities() {
             let common = entity.common();
+            index
+                .signatures
+                .insert(common.handle, self.entity_dependency_signature(entity));
             let owner = if common.owner_handle.is_null() {
                 membership
                     .get(&common.handle)
@@ -9102,17 +9229,20 @@ impl Scene {
         index
     }
 
-    fn dependency_targets(&self, kind: &str, names: &[String]) -> DependencyTargets {
+    fn dependency_targets(
+        &self,
+        kind: DependencyKind,
+        names: &[String],
+    ) -> DependencyTargets {
         if self.dependency_index_cache.borrow().is_none() {
             *self.dependency_index_cache.borrow_mut() = Some(self.rebuild_dependency_index());
         }
         let cache = self.dependency_index_cache.borrow();
         let index = cache.as_ref().unwrap();
         let map = match kind {
-            "layer" => &index.layers,
-            "text" => &index.text_styles,
-            "dim" => &index.dim_styles,
-            _ => unreachable!(),
+            DependencyKind::Layer => &index.layers,
+            DependencyKind::TextStyle => &index.text_styles,
+            DependencyKind::DimStyle => &index.dim_styles,
         };
         let mut combined = DependencyTargets::default();
         for name in names {
@@ -9148,7 +9278,7 @@ impl Scene {
     }
 
     pub fn invalidate_layer_dependencies(&mut self, names: &[String]) {
-        let targets = self.dependency_targets("layer", names);
+        let targets = self.dependency_targets(DependencyKind::Layer, names);
         self.invalidate_dependency_targets(targets);
     }
 
@@ -9157,7 +9287,7 @@ impl Scene {
     }
 
     pub fn invalidate_text_style_dependencies_many(&mut self, names: &[String]) {
-        let targets = self.dependency_targets("text", names);
+        let targets = self.dependency_targets(DependencyKind::TextStyle, names);
         self.invalidate_dependency_targets(targets);
     }
 
@@ -9166,7 +9296,7 @@ impl Scene {
     }
 
     pub fn invalidate_dim_style_dependencies_many(&mut self, names: &[String]) {
-        let targets = self.dependency_targets("dim", names);
+        let targets = self.dependency_targets(DependencyKind::DimStyle, names);
         self.invalidate_dependency_targets(targets);
     }
 

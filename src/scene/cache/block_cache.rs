@@ -140,12 +140,16 @@ pub enum LocalSub {
     Nested(NestedRef),
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BlockMetrics {
+    pub aabb_local: [f32; 4],
+    pub has_point_marker: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct BlockDefn {
     pub subs: Vec<LocalSub>,
-    pub has_point_marker: bool,
-    /// Union of direct and nested geometry in definition coordinates.
-    pub aabb_local: [f32; 4],
+    pub metrics: BlockMetrics,
     /// Raw entity count of the source block record (`entity_handles.len()`).
     /// Divisor for nested depth composition: a nested insert's children get a
     /// sub-range of `parent_scale / (child_count + 1)`, shared with the scene
@@ -247,8 +251,8 @@ impl BlockCache {
         // by-name references (`LocalSub::Nested`), never expanded here, so a
         // block's build never depends on another block's defn. That makes the
         // builds embarrassingly parallel over the read-only `doc` — no
-        // topological ordering required. `compute_block_aabbs` stays a serial
-        // post-pass (it resolves nested references and is comparatively cheap).
+        // topological ordering required. Metrics are resolved after all
+        // definitions exist.
         cache.defns = referenced
             .par_iter()
             .map(|name| {
@@ -267,7 +271,7 @@ impl BlockCache {
                 )
             })
             .collect();
-        cache.compute_block_aabbs(&referenced);
+        cache.compute_block_metrics(&referenced);
         cache
     }
 
@@ -304,106 +308,73 @@ impl BlockCache {
                 )
             })
             .collect();
-        cache.compute_block_aabbs(&referenced);
+        cache.compute_block_metrics(&referenced);
         cache
     }
 
-    /// Compute and store the `aabb_local` for every cached defn. Direct wires
-    /// contribute their own aabb_local; nested INSERT references look up the
-    /// nested defn (already cached) and transform its aabb_local by the
-    /// nested Insert's transform before unioning.
-    ///
-    /// Run as a post-pass so it doesn't matter which order build_defn was
-    /// called in. Cycle guard: a self-referential block keeps an empty AABB
-    /// (will fail every frustum test → not emitted, which is correct).
-    fn compute_block_aabbs(&mut self, names: &[String]) {
+    /// Resolve recursive bounds and point-marker presence.
+    fn compute_block_metrics(&mut self, names: &[String]) {
         use crate::par::prelude::*;
-        // Phase 1 (parallel, read-only): each defn's union AABB is resolved
-        // by `defn_aabb_recursive`, which only *reads* `self.defns` (the map
-        // is fully built by now). There's no memoization, so a defn shared by
-        // many parents is re-walked per parent — real work on block-heavy
-        // drawings — and the per-name walks are independent, so they fan out.
+        // Definitions are complete, so each recursive read can run independently.
         let this: &Self = self;
-        let resolved: Vec<(&String, [f32; 4], bool)> = names
+        let resolved: Vec<(&String, BlockMetrics)> = names
             .par_iter()
             .map(|name| {
                 let mut visited: Vec<String> = Vec::new();
-                let aabb = this.defn_aabb_recursive(name, &mut visited);
-                visited.clear();
-                let has_marker = this.defn_has_point_marker_recursive(name, &mut visited);
-                (name, aabb, has_marker)
+                (name, this.defn_metrics_recursive(name, &mut visited))
             })
             .collect();
-        // Phase 2 (serial): store the AABB back into each defn.
-        for (name, aabb, has_marker) in resolved {
+        for (name, metrics) in resolved {
             if let Some(defn_arc) = self.defns.get_mut(name) {
                 let mut defn = (**defn_arc).clone();
-                defn.aabb_local = aabb;
-                defn.has_point_marker = has_marker;
+                defn.metrics = metrics;
                 *defn_arc = Arc::new(defn);
             }
         }
     }
 
-    fn defn_has_point_marker_recursive(
+    fn defn_metrics_recursive(
         &self,
         block_name: &str,
         visited: &mut Vec<String>,
-    ) -> bool {
+    ) -> BlockMetrics {
         if visited.iter().any(|name| name == block_name) {
-            return false;
+            return BlockMetrics::default();
         }
         let Some(defn) = self.defns.get(block_name) else {
-            return false;
+            return BlockMetrics::default();
         };
         visited.push(block_name.to_string());
-        let found = defn.subs.iter().any(|sub| match sub {
-            LocalSub::Wire(wire) => wire.point_marker.is_some(),
-            LocalSub::Nested(insert) => {
-                insert
-                    .attachments
-                    .iter()
-                    .any(|wire| wire.point_marker.is_some())
-                    || self.defn_has_point_marker_recursive(&insert.block_name, visited)
-            }
-        });
-        visited.pop();
-        found
-    }
-
-    /// Returns the union AABB for `block_name`'s defn, expressed in **that
-    /// defn's offset frame** (so its caller can store it in
-    /// `BlockDefn.aabb_local` without a coordinate-frame mismatch).
-    ///
-    /// LocalWire contributions are already in the parent defn's offset
-    /// frame. Nested-INSERT contributions live in the *child* defn's offset
-    /// frame, so we re-add `child.local_offset` (f64), apply the nested
-    /// Insert's transform to get parent-native coordinates, then subtract
-    /// `parent.local_offset` to land back in the parent's offset frame.
-    fn defn_aabb_recursive(&self, block_name: &str, visited: &mut Vec<String>) -> [f32; 4] {
-        if visited.iter().any(|n| n == block_name) {
-            return [0.0, 0.0, 0.0, 0.0];
-        }
-        let Some(defn) = self.defns.get(block_name) else {
-            return [0.0, 0.0, 0.0, 0.0];
-        };
-        visited.push(block_name.to_string());
-        let mut acc = [0.0_f32, 0.0, 0.0, 0.0];
+        let mut metrics = BlockMetrics::default();
         for sub in &defn.subs {
-            let aabb = match sub {
-                LocalSub::Wire(lw) => lw.aabb_local,
-                LocalSub::Nested(nref) => {
-                    let nested = self.defn_aabb_recursive(&nref.block_name, visited);
-                    nref.attachments.iter().fold(
-                        transform_aabb_xy(nested, &nref.xform),
-                        |aabb, wire| aabb_union(aabb, wire.aabb_local),
-                    )
+            match sub {
+                LocalSub::Wire(wire) => {
+                    metrics.aabb_local = aabb_union(metrics.aabb_local, wire.aabb_local);
+                    metrics.has_point_marker |= wire.point_marker.is_some();
                 }
-            };
-            acc = aabb_union(acc, aabb);
+                LocalSub::Nested(nref) => {
+                    let nested = self.defn_metrics_recursive(&nref.block_name, visited);
+                    metrics.has_point_marker |= nested.has_point_marker;
+                    for offset in &nref.instance_offsets {
+                        let transform = nested_instance_transform(nref, *offset);
+                        metrics.aabb_local = aabb_union(
+                            metrics.aabb_local,
+                            transform_aabb_xy(nested.aabb_local, &transform),
+                        );
+                        let attachment_transform = nested_attachment_transform(nref, *offset);
+                        for wire in &nref.attachments {
+                            metrics.aabb_local = aabb_union(
+                                metrics.aabb_local,
+                                transform_aabb_xy(wire.aabb_local, &attachment_transform),
+                            );
+                            metrics.has_point_marker |= wire.point_marker.is_some();
+                        }
+                    }
+                }
+            }
         }
         visited.pop();
-        acc
+        metrics
     }
 }
 
@@ -479,6 +450,21 @@ fn layer_hidden(doc: &CadDocument, layer: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn nested_instance_transform(nref: &NestedRef, offset: [f64; 3]) -> Transform {
+    if offset == [0.0; 3] {
+        nref.xform.clone()
+    } else {
+        Transform::from_translation(Vector3::new(offset[0], offset[1], offset[2]))
+            .then(&nref.xform)
+    }
+}
+
+fn nested_attachment_transform(nref: &NestedRef, offset: [f64; 3]) -> Transform {
+    let base = nref.xform.apply(Vector3::ZERO);
+    let instance = nested_instance_transform(nref, offset).apply(Vector3::ZERO);
+    Transform::from_translation(instance - base)
+}
+
 fn build_defn(
     doc: &CadDocument,
     block_name: &str,
@@ -549,6 +535,7 @@ fn build_defn(
         for block_use in &block_uses {
             let mut nested = build_nested_ref(
                 &block_use.insert,
+                block_use.scale_policy,
                 doc,
                 anno_scale,
                 bg_color,
@@ -597,14 +584,14 @@ fn build_defn(
     }
     BlockDefn {
         subs,
-        has_point_marker: false,
-        aabb_local: [0.0; 4],
+        metrics: BlockMetrics::default(),
         child_count: br.entity_handles.len(),
     }
 }
 
 fn build_nested_ref(
     nested_ins: &acadrust::entities::Insert,
+    scale_policy: crate::scene::BlockScalePolicy,
     doc: &CadDocument,
     anno_scale: f32,
     bg_color: [f32; 4],
@@ -614,10 +601,11 @@ fn build_nested_ref(
     // Bake the XCLIP boundary (parent-defn-local) so the nested insert keeps
     // its clip when the parent block is expanded — the spatial filter object
     // isn't reachable at expand time.
-    let xform = crate::scene::render_graph::insert_transform_at_scale(
+    let xform = crate::scene::render_graph::insert_transform_with_policy(
         doc,
         nested_ins,
         anno_scale,
+        scale_policy,
     );
     let clip_poly = crate::scene::pick::xclip::insert_spatial_filter(doc, nested_ins)
         .map(|filter| {
@@ -635,6 +623,7 @@ fn build_nested_ref(
         doc,
         nested_ins,
         anno_scale,
+        scale_policy,
     )
         .into_iter()
         .flat_map(|attribute| {
@@ -977,12 +966,18 @@ pub fn expand_insert(
     // Current annotation scale. An annotative block scales as one uniform unit
     // about its insertion point; a non-annotative block is unaffected.
     anno_scale: f32,
+    scale_policy: crate::scene::BlockScalePolicy,
     // Dimension picture blocks store definition POINTs at their root. They are
     // metadata, not visible geometry; nested POINTs remain regular block data.
     suppress_root_points: bool,
 ) -> Option<Vec<WireModel>> {
     let defn = cache.defn(&ins.block_name)?;
-    let xform = crate::scene::render_graph::insert_transform_at_scale(doc, ins, anno_scale);
+    let xform = crate::scene::render_graph::insert_transform_with_policy(
+        doc,
+        ins,
+        anno_scale,
+        scale_policy,
+    );
     let name = ins_handle.value().to_string();
     let prototype_key = if !ins.is_array()
         && cache.prototype_blocks.contains(&ins.block_name)
@@ -1042,10 +1037,22 @@ pub fn expand_insert(
     let mut batches = Batches::default();
     let mut visited: Vec<String> = Vec::with_capacity(8);
 
-    // `defn.aabb_local` is in the defn's offset frame — re-add
-    // `defn.local_offset` (f64) before transforming so the world AABB is
-    // accurate for distant content.
-    let insert_world = transform_aabb_xy(defn.aabb_local, &xform);
+    let offsets = crate::scene::render_graph::array_offsets(ins);
+    let cell_xform = |offset: &[f64; 3]| {
+        crate::scene::render_graph::insert_instance_transform(
+            doc,
+            ins,
+            *offset,
+            anno_scale,
+            scale_policy,
+        )
+    };
+    let insert_world = offsets.iter().fold([0.0_f32; 4], |aabb, offset| {
+        aabb_union(
+            aabb,
+            transform_aabb_xy(defn.metrics.aabb_local, &cell_xform(offset)),
+        )
+    });
     let insert_local = [
         insert_world[0] as f32,
         insert_world[1] as f32,
@@ -1062,7 +1069,7 @@ pub fn expand_insert(
     // Whole-Insert pixel-size LOD: if the entire Insert footprint projects
     // to sub-pixel size, skip it entirely.
     if let Some(wpp) = world_per_pixel {
-        if !defn.has_point_marker && aabb_pixel_size(insert_local, wpp) < MIN_PIXEL_SIZE {
+        if !defn.metrics.has_point_marker && aabb_pixel_size(insert_local, wpp) < MIN_PIXEL_SIZE {
             return Some(vec![]);
         }
     }
@@ -1085,16 +1092,7 @@ pub fn expand_insert(
         is_xref,
         bg_color,
     };
-    let offsets = crate::scene::render_graph::array_offsets(ins);
     if offsets.len() > 1 {
-        let cell_xform = |offset: &[f64; 3]| {
-            if offset == &[0.0; 3] {
-                xform.clone()
-            } else {
-                Transform::from_translation(Vector3::new(offset[0], offset[1], offset[2]))
-                    .then(&xform)
-            }
-        };
         let first_xform = cell_xform(&offsets[0]);
         let first_translation = transform_translation(&first_xform);
         let mut first_batches = Batches::default();
@@ -1135,14 +1133,7 @@ pub fn expand_insert(
     }
 
     for offset in &offsets {
-        let base_xform = if offset == &[0.0; 3] {
-            xform.clone()
-        } else {
-            let translation = Transform::from_translation(Vector3::new(
-                offset[0], offset[1], offset[2],
-            ));
-            translation.then(&xform)
-        };
+        let base_xform = cell_xform(offset);
         expand_defn(
             defn,
             &base_xform,
@@ -1816,8 +1807,18 @@ fn expand_defn(
                     is_xref: ctx.is_xref,
                     bg_color: ctx.bg_color,
                 };
-                for attachment in &nref.attachments {
-                    emit_wire(attachment, accum_xform, &inner_ctx, out, d_range);
+                for offset in &nref.instance_offsets {
+                    let attachment_transform = nested_attachment_transform(nref, *offset)
+                        .then(accum_xform);
+                    for attachment in &nref.attachments {
+                        emit_wire(
+                            attachment,
+                            &attachment_transform,
+                            &inner_ctx,
+                            out,
+                            d_range,
+                        );
+                    }
                 }
                 if visited.iter().any(|n| n == &nref.block_name) {
                     continue;
@@ -1825,8 +1826,17 @@ fn expand_defn(
                 let Some(nested_defn) = ctx.cache.defn(&nref.block_name) else {
                     continue;
                 };
-                let composed = nref.xform.then(accum_xform);
-                let world = transform_aabb_xy(nested_defn.aabb_local, &composed);
+                let world = nref.instance_offsets.iter().fold(
+                    [0.0_f32; 4],
+                    |aabb, offset| {
+                        let composed = nested_instance_transform(nref, *offset)
+                            .then(accum_xform);
+                        aabb_union(
+                            aabb,
+                            transform_aabb_xy(nested_defn.metrics.aabb_local, &composed),
+                        )
+                    },
+                );
                 let local = [
                     world[0] as f32,
                     world[1] as f32,
@@ -1851,15 +1861,7 @@ fn expand_defn(
                     d_range.1 / (nested_defn.child_count.max(1) as f32 + 1.0),
                 );
                 let composed_for = |offset: &[f64; 3]| {
-                    if offset == &[0.0; 3] {
-                        nref.xform.then(accum_xform)
-                    } else {
-                        Transform::from_translation(Vector3::new(
-                            offset[0], offset[1], offset[2],
-                        ))
-                        .then(&nref.xform)
-                        .then(accum_xform)
-                    }
+                    nested_instance_transform(nref, *offset).then(accum_xform)
                 };
                 if let Some(cp) = &nref.clip_poly {
                     let base_composed = nref.xform.then(accum_xform);

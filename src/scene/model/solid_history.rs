@@ -21,6 +21,7 @@ pub const GRIP_INNER_RADIUS: usize = 10_006;
 pub const GRIP_SIDES: usize = 10_007;
 pub const GRIP_MAJOR_RADIUS: usize = 10_008;
 pub const GRIP_MINOR_RADIUS: usize = 10_009;
+pub const GRIP_TOP_RADIUS: usize = 10_010;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -50,6 +51,7 @@ pub const PROP_POSITION_X: &str = "solid_history_position_x";
 pub const PROP_POSITION_Y: &str = "solid_history_position_y";
 pub const PROP_POSITION_Z: &str = "solid_history_position_z";
 pub const PROP_ROTATION: &str = "solid_history_rotation";
+pub const PROP_PYRAMID_TYPE: &str = "solid_history_pyramid_type";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
 
@@ -100,6 +102,7 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Cone(_)
                 | SolidHistoryOperation::Cylinder(_)
                 | SolidHistoryOperation::Torus(_)
+                | SolidHistoryOperation::Pyramid(_)
         )
     )
 }
@@ -116,6 +119,7 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         SolidHistoryOperation::Cone(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Torus(value) => world_point(value.base.transform, [0.0; 3]),
+        SolidHistoryOperation::Pyramid(value) => world_point(value.base.transform, [0.0; 3]),
         _ => None,
     }
 }
@@ -435,6 +439,132 @@ fn cylinder_properties(
     ]
 }
 
+fn pyramid_is_inscribed(value: &SolidHistoryPyramid) -> bool {
+    value.operation_minor == -1
+}
+
+fn pyramid_apothem_factor(sides: i32) -> f64 {
+    (std::f64::consts::PI / sides.clamp(3, 32) as f64).cos()
+}
+
+fn pyramid_display_radius(value: &SolidHistoryPyramid, radius: f64) -> f64 {
+    if pyramid_is_inscribed(value) {
+        radius
+    } else {
+        radius * pyramid_apothem_factor(value.sides)
+    }
+}
+
+fn pyramid_display_rotation(value: &SolidHistoryPyramid) -> Option<f64> {
+    let vertex_rotation = matrix(value.base.transform)
+        .map(|matrix| matrix.x_axis.y.atan2(matrix.x_axis.x))?;
+    if pyramid_is_inscribed(value) {
+        Some(vertex_rotation)
+    } else {
+        Some(vertex_rotation + std::f64::consts::PI / value.sides.clamp(3, 32) as f64)
+    }
+}
+
+fn pyramid_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryPyramid,
+) -> Vec<PropSection> {
+    let Some(position) = world_point(value.base.transform, [0.0; 3]) else {
+        return Vec::new();
+    };
+    let rotation = pyramid_display_rotation(value).unwrap_or(0.0);
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(object_show_history, show_history_mode);
+    let show_value = if show_history { "Yes" } else { "No" };
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Solid type").into_owned(),
+                    field: "solid_history_type",
+                    value: PropValue::ReadOnly(t!("Pyramid").into_owned()),
+                },
+                crate::entities::common::edit_prop(
+                    t!("Position X").as_ref(),
+                    PROP_POSITION_X,
+                    position.x,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Y").as_ref(),
+                    PROP_POSITION_Y,
+                    position.y,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Z").as_ref(),
+                    PROP_POSITION_Z,
+                    position.z,
+                ),
+                Property {
+                    label: t!("Type").into_owned(),
+                    field: PROP_PYRAMID_TYPE,
+                    value: PropValue::Choice {
+                        selected: if pyramid_is_inscribed(value) {
+                            "Inscribed"
+                        } else {
+                            "Circumscribed"
+                        }
+                        .to_string(),
+                        options: vec!["Circumscribed".to_string(), "Inscribed".to_string()],
+                    },
+                },
+                history_prop(
+                    t!("Base radius").as_ref(),
+                    PROP_BASE_RADIUS,
+                    pyramid_display_radius(value, value.radius),
+                ),
+                history_prop(
+                    t!("Top radius").as_ref(),
+                    PROP_TOP_RADIUS,
+                    pyramid_display_radius(value, value.top_radius),
+                ),
+                history_prop(t!("Sides").as_ref(), PROP_SIDES, value.sides),
+                Property {
+                    label: t!("Rotation").into_owned(),
+                    field: PROP_ROTATION,
+                    value: PropValue::EditText(
+                        crate::entities::common::format_direction(rotation),
+                    ),
+                },
+                history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
+            ],
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::Choice {
+                        selected: if record_history { "Record" } else { "None" }.to_string(),
+                        options: vec!["None".to_string(), "Record".to_string()],
+                    },
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: if show_history_editable {
+                        PropValue::Choice {
+                            selected: show_value.to_string(),
+                            options: vec!["No".to_string(), "Yes".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(show_value.to_string())
+                    },
+                },
+            ],
+        },
+    ]
+}
+
 fn sphere_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
@@ -615,34 +745,20 @@ pub fn primitive_properties(
     let Some(operation) = document.solid_history_operation(handle) else {
         return Vec::new();
     };
-    let props = match operation {
+    match operation {
         SolidHistoryOperation::Box(value) => {
-            return rectangular_properties(document, handle, value, "Box")
+            rectangular_properties(document, handle, value, "Box")
         }
         SolidHistoryOperation::Wedge(value) => {
-            return rectangular_properties(document, handle, value, "Wedge")
+            rectangular_properties(document, handle, value, "Wedge")
         }
-        SolidHistoryOperation::Sphere(value) => {
-            return sphere_properties(document, handle, value)
-        }
-        SolidHistoryOperation::Cone(value) => return cone_properties(document, handle, value),
-        SolidHistoryOperation::Cylinder(value) => {
-            return cylinder_properties(document, handle, value)
-        }
-        SolidHistoryOperation::Torus(value) => {
-            return torus_properties(document, handle, value)
-        }
-        SolidHistoryOperation::Pyramid(value) => vec![
-            history_prop(t!("Radius").as_ref(), PROP_RADIUS, value.radius),
-            history_prop(t!("Height").as_ref(), PROP_HEIGHT, value.height),
-            history_prop(t!("Sides").as_ref(), PROP_SIDES, value.sides),
-        ],
-        _ => return Vec::new(),
-    };
-    vec![PropSection {
-        title: t!("Primitive").into_owned(),
-        props,
-    }]
+        SolidHistoryOperation::Sphere(value) => sphere_properties(document, handle, value),
+        SolidHistoryOperation::Cone(value) => cone_properties(document, handle, value),
+        SolidHistoryOperation::Cylinder(value) => cylinder_properties(document, handle, value),
+        SolidHistoryOperation::Pyramid(value) => pyramid_properties(document, handle, value),
+        SolidHistoryOperation::Torus(value) => torus_properties(document, handle, value),
+        _ => Vec::new(),
+    }
 }
 
 pub fn is_primitive_property(field: &str) -> bool {
@@ -668,6 +784,7 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_POSITION_Y
             | PROP_POSITION_Z
             | PROP_ROTATION
+            | PROP_PYRAMID_TYPE
     )
 }
 
@@ -919,6 +1036,120 @@ fn canonicalize_cylinder_radii(value: &mut SolidHistoryCylinder) -> bool {
     true
 }
 
+fn apply_pyramid_geometry_property(
+    value: &mut SolidHistoryPyramid,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    if field == PROP_PYRAMID_TYPE {
+        let next_inscribed = if text.eq_ignore_ascii_case("Inscribed") {
+            true
+        } else if text.eq_ignore_ascii_case("Circumscribed") {
+            false
+        } else {
+            return Some(false);
+        };
+        let old_inscribed = pyramid_is_inscribed(value);
+        if next_inscribed == old_inscribed {
+            return Some(false);
+        }
+        let factor = pyramid_apothem_factor(value.sides);
+        if factor <= 1e-9 {
+            return Some(false);
+        }
+        let base_display = if old_inscribed { value.radius } else { value.radius * factor };
+        let top_display = if old_inscribed {
+            value.top_radius
+        } else {
+            value.top_radius * factor
+        };
+        let Some(current) = matrix(value.base.transform) else {
+            return Some(false);
+        };
+        value.radius = if next_inscribed { base_display } else { base_display / factor };
+        value.top_radius = if next_inscribed { top_display } else { top_display / factor };
+        let half = std::f64::consts::PI / value.sides.clamp(3, 32) as f64;
+        let delta = if next_inscribed { half } else { -half };
+        value.base.transform =
+            (current * glam::DMat4::from_rotation_z(delta)).to_cols_array();
+        value.operation_minor = if next_inscribed { -1 } else { 0 };
+        return Some(true);
+    }
+    if field == PROP_ROTATION {
+        let target = crate::entities::common::parse_direction(text)?;
+        if !target.is_finite() {
+            return Some(false);
+        }
+        let current = matrix(value.base.transform)?;
+        let projected = current.x_axis.truncate();
+        if projected.length_squared() <= 1e-12 {
+            return Some(false);
+        }
+        let current_angle = projected.y.atan2(projected.x);
+        let target_vertex_angle = if pyramid_is_inscribed(value) {
+            target
+        } else {
+            target - std::f64::consts::PI / value.sides.clamp(3, 32) as f64
+        };
+        let delta = (target_vertex_angle - current_angle + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        if delta.abs() <= 1e-12 {
+            return Some(false);
+        }
+        let updated = current * glam::DMat4::from_rotation_z(delta);
+        if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
+            return Some(false);
+        }
+        value.base.transform = updated.to_cols_array();
+        return Some(true);
+    }
+    let axis = match field {
+        PROP_POSITION_X => 0,
+        PROP_POSITION_Y => 1,
+        PROP_POSITION_Z => 2,
+        _ => return None,
+    };
+    let target = crate::entities::common::parse_length(text)?;
+    if !target.is_finite() {
+        return Some(false);
+    }
+    let current = matrix(value.base.transform)?;
+    let origin = current.transform_point3(glam::DVec3::ZERO);
+    if !origin.is_finite() || (target - origin[axis]).abs() <= 1e-12 {
+        return Some(false);
+    }
+    let mut delta = glam::DVec3::ZERO;
+    delta[axis] = target - origin[axis];
+    let updated = glam::DMat4::from_translation(delta) * current;
+    if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
+        return Some(false);
+    }
+    value.base.transform = updated.to_cols_array();
+    Some(true)
+}
+
+fn set_pyramid_sides(value: &mut SolidHistoryPyramid, sides: i32) -> bool {
+    if !(3..=32).contains(&sides) || sides == value.sides {
+        return false;
+    }
+    if !pyramid_is_inscribed(value) {
+        let Some(current) = matrix(value.base.transform) else {
+            return false;
+        };
+        let old_factor = pyramid_apothem_factor(value.sides);
+        let new_factor = pyramid_apothem_factor(sides);
+        value.radius = value.radius * old_factor / new_factor;
+        value.top_radius = value.top_radius * old_factor / new_factor;
+        let old_half = std::f64::consts::PI / value.sides.clamp(3, 32) as f64;
+        let new_half = std::f64::consts::PI / sides as f64;
+        value.base.transform =
+            (current * glam::DMat4::from_rotation_z(old_half - new_half)).to_cols_array();
+    }
+    value.sides = sides;
+    true
+}
+
 pub fn apply_primitive_property(
     operation: &mut SolidHistoryOperation,
     field: &str,
@@ -950,6 +1181,11 @@ pub fn apply_primitive_property(
     }
     if let SolidHistoryOperation::Torus(torus_value) = operation {
         if let Some(applied) = apply_torus_position_property(torus_value, field, value) {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Pyramid(pyramid_value) = operation {
+        if let Some(applied) = apply_pyramid_geometry_property(pyramid_value, field, value) {
             return applied;
         }
     }
@@ -1099,18 +1335,33 @@ pub fn apply_primitive_property(
             _ => return false,
         },
         SolidHistoryOperation::Pyramid(value) => match field {
-            PROP_RADIUS => value.radius = positive().unwrap_or(value.radius),
+            PROP_BASE_RADIUS => {
+                let Some(displayed) = positive() else {
+                    return false;
+                };
+                value.radius = if pyramid_is_inscribed(value) {
+                    displayed
+                } else {
+                    displayed / pyramid_apothem_factor(value.sides)
+                };
+            }
+            PROP_TOP_RADIUS => {
+                if number < 0.0 {
+                    return false;
+                }
+                value.top_radius = if pyramid_is_inscribed(value) {
+                    number
+                } else {
+                    number / pyramid_apothem_factor(value.sides)
+                };
+            }
             PROP_HEIGHT => value.height = positive().unwrap_or(value.height),
             PROP_SIDES => {
                 let rounded = number.round();
                 if (number - rounded).abs() > 1e-9 {
                     return false;
                 }
-                let sides = rounded as i32;
-                if !(3..=71).contains(&sides) {
-                    return false;
-                }
-                value.sides = sides;
+                return set_pyramid_sides(value, rounded as i32);
             }
             _ => return false,
         },
@@ -1383,22 +1634,18 @@ pub fn primitive_grips(
         ),
         SolidHistoryOperation::Torus(value) => {
             add(
-                GRIP_OUTER_RADIUS,
+                GRIP_MAJOR_RADIUS,
                 value.base.transform,
-                [value.major_radius + value.minor_radius, 0.0, 0.0],
+                [value.major_radius, 0.0, 0.0],
                 GripShape::Square,
                 None,
             );
             add(
-                GRIP_INNER_RADIUS,
+                GRIP_MINOR_RADIUS,
                 value.base.transform,
-                [
-                    (value.major_radius - value.minor_radius).max(0.0),
-                    0.0,
-                    0.0,
-                ],
+                [value.major_radius, 0.0, value.minor_radius],
                 GripShape::Square,
-                None,
+                Some([0.0, 0.0, 1.0]),
             );
         }
         SolidHistoryOperation::Pyramid(value) => {
@@ -1410,13 +1657,20 @@ pub fn primitive_grips(
                 None,
             );
             add(
+                GRIP_TOP_RADIUS,
+                value.base.transform,
+                [value.top_radius, 0.0, value.height],
+                GripShape::Square,
+                None,
+            );
+            add(
                 GRIP_HEIGHT,
                 value.base.transform,
                 [0.0, 0.0, value.height],
                 GripShape::Square,
                 Some([0.0, 0.0, 1.0]),
             );
-            let angle = (value.sides.clamp(3, 71) as f64 * 5.0).to_radians();
+            let angle = (value.sides.clamp(3, 32) as f64 * 5.0).to_radians();
             add(
                 GRIP_SIDES,
                 value.base.transform,
@@ -1549,33 +1803,22 @@ pub fn apply_primitive_grip(
             value.radius = local.length().max(1e-6);
         }
         SolidHistoryOperation::Torus(value) => match grip_id {
-            GRIP_OUTER_RADIUS => {
-                let outer = local.x.hypot(local.y).max(1e-6);
-                let inner = (value.major_radius - value.minor_radius).max(1e-6);
-                if outer <= inner {
-                    return false;
-                }
-                value.major_radius = (outer + inner) * 0.5;
-                value.minor_radius = (outer - inner) * 0.5;
-            }
-            GRIP_INNER_RADIUS => {
-                let inner = local.x.hypot(local.y).max(1e-6);
-                let outer = value.major_radius + value.minor_radius;
-                if inner >= outer {
-                    return false;
-                }
-                value.major_radius = (outer + inner) * 0.5;
-                value.minor_radius = (outer - inner) * 0.5;
-            }
+            GRIP_MAJOR_RADIUS => value.major_radius = local.x.hypot(local.y).max(1e-6),
+            GRIP_MINOR_RADIUS => value.minor_radius = local.z.abs().max(1e-6),
             _ => return false,
         },
         SolidHistoryOperation::Pyramid(value) => match grip_id {
             GRIP_RADIUS => value.radius = local.x.hypot(local.y).max(1e-6),
+            GRIP_TOP_RADIUS => {
+                value.top_radius = local.x.hypot(local.y).max(0.0);
+            }
             GRIP_HEIGHT => value.height = local.z.max(1e-6),
             GRIP_SIDES => {
                 let angle = local.y.atan2(local.x).rem_euclid(std::f64::consts::TAU);
-                value.sides = (angle.to_degrees() / 5.0).round() as i32;
-                value.sides = value.sides.clamp(3, 71);
+                let sides = ((angle.to_degrees() / 5.0).round() as i32).clamp(3, 32);
+                if !set_pyramid_sides(value, sides) {
+                    return false;
+                }
             }
             _ => return false,
         },
@@ -1699,15 +1942,19 @@ pub fn torus_op(
 pub fn pyramid_op(
     transform: [f64; 16],
     radius: f64,
+    top_radius: f64,
     height: f64,
     sides: usize,
+    inscribed: bool,
 ) -> SolidHistoryOperation {
     SolidHistoryOperation::Pyramid(SolidHistoryPyramid {
         base: base(transform),
         operation_major: 1,
+        operation_minor: if inscribed { -1 } else { 0 },
         height,
         sides: sides as i32,
         radius,
+        top_radius,
         ..SolidHistoryPyramid::default()
     })
 }

@@ -53,8 +53,10 @@ pub const PROP_POSITION_Y: &str = "solid_history_position_y";
 pub const PROP_POSITION_Z: &str = "solid_history_position_z";
 pub const PROP_ROTATION: &str = "solid_history_rotation";
 pub const PROP_PROFILE_ROTATION: &str = "solid_history_profile_rotation";
+pub const PROP_BANK: &str = "solid_history_bank";
 pub const PROP_TWIST_ALONG_PATH: &str = "solid_history_twist_along_path";
 pub const PROP_SCALE_ALONG_PATH: &str = "solid_history_scale_along_path";
+pub const PROP_SWEEP_LENGTH: &str = "solid_history_sweep_length";
 pub const PROP_PYRAMID_TYPE: &str = "solid_history_pyramid_type";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
@@ -168,7 +170,7 @@ fn sweep_properties(
                 },
                 Property {
                     label: t!("Bank").into_owned(),
-                    field: "solid_history_bank",
+                    field: PROP_BANK,
                     value: PropValue::ReadOnly(
                         if value.bank { "Yes" } else { "No" }.to_string(),
                     ),
@@ -187,7 +189,7 @@ fn sweep_properties(
                 },
                 Property {
                     label: t!("Length").into_owned(),
-                    field: "solid_history_sweep_length",
+                    field: PROP_SWEEP_LENGTH,
                     value: PropValue::ReadOnly(length),
                 },
             ],
@@ -921,6 +923,12 @@ pub fn is_primitive_property(field: &str) -> bool {
 
 pub fn is_history_choice(field: &str) -> bool {
     matches!(field, PROP_HISTORY | PROP_SHOW_HISTORY)
+}
+
+pub fn is_specialized_property(field: &str) -> bool {
+    matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH)
+        || is_primitive_property(field)
+        || is_history_choice(field)
 }
 
 pub fn apply_history_choice(

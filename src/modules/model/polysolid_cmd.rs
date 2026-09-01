@@ -107,11 +107,19 @@ impl PolysolidCommand {
     }
 
     fn path_entity(&self, closed: bool) -> Option<EntityType> {
-        if self.vertices.len() < 2 {
+        self.path_entity_from(&self.vertices, &self.bulges, closed)
+    }
+
+    fn path_entity_from(
+        &self,
+        vertices: &[DVec3],
+        bulges: &[f64],
+        closed: bool,
+    ) -> Option<EntityType> {
+        if vertices.len() < 2 {
             return None;
         }
-        let local = self
-            .vertices
+        let local = vertices
             .iter()
             .map(|point| self.plane.to_local(*point))
             .collect::<Vec<_>>();
@@ -121,7 +129,7 @@ impl PolysolidCommand {
             .enumerate()
             .map(|(index, point)| {
                 let mut vertex = LwVertex::new(Vector2::new(point.x, point.y));
-                vertex.bulge = self.bulges.get(index).copied().unwrap_or(0.0);
+                vertex.bulge = bulges.get(index).copied().unwrap_or(0.0);
                 vertex
             })
             .collect();
@@ -273,7 +281,7 @@ impl PolysolidCommand {
             Step::Arc => {
                 let bulge = compute_bulge(
                     start_local.truncate(),
-                    self.last_tangent(),
+                    self.pending_direction.unwrap_or_else(|| self.last_tangent()),
                     cursor_local.truncate(),
                 );
                 arc_sample_points(start_local.as_vec3(), bulge, cursor_local.as_vec3(), 24)
@@ -307,6 +315,61 @@ impl PolysolidCommand {
             false,
         ))
     }
+
+    fn solid_preview(&self, cursor: DVec3) -> Option<Vec<WireModel>> {
+        if !matches!(self.step, Step::Line | Step::Arc | Step::ArcEnd) {
+            return None;
+        }
+        let start = *self.vertices.last()?;
+        if (cursor - start).length_squared() <= 1e-12 {
+            return None;
+        }
+
+        let mut vertices = self.vertices.clone();
+        let mut bulges = self.bulges.clone();
+        let segment_bulge = match self.step {
+            Step::Arc => compute_bulge(
+                self.plane.to_local(start).truncate(),
+                self.pending_direction.unwrap_or_else(|| self.last_tangent()),
+                self.plane.to_local(cursor).truncate(),
+            ),
+            Step::ArcEnd => {
+                self.three_point_bulge(start, self.pending_second?, cursor)
+            }
+            _ => 0.0,
+        };
+        if let Some(last) = bulges.last_mut() {
+            *last = segment_bulge;
+        }
+        vertices.push(cursor);
+        bulges.push(0.0);
+
+        let path = self.path_entity_from(&vertices, &bulges, false)?;
+        let (solid, _) = sweep_model::polysolid(
+            &path,
+            self.width,
+            self.height,
+            self.justification,
+        )?;
+        let previews = solid_model::edge_wires(&solid)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, wire)| {
+                (wire.points.len() >= 2).then(|| {
+                    WireModel::solid_f64(
+                        format!("POLYSOLID_PREVIEW_{index}"),
+                        wire.points
+                            .into_iter()
+                            .map(|point| [point.x, point.y, point.z])
+                            .collect(),
+                        WireModel::CYAN,
+                        false,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        (!previews.is_empty()).then_some(previews)
+    }
 }
 
 impl CadCommand for PolysolidCommand {
@@ -331,8 +394,8 @@ impl CadCommand for PolysolidCommand {
                 },
                 t!("Specify start point or [Object/Height/Width/Justify] <Object>:")
             ),
-            Step::Height => t!("Specify height:").into_owned(),
-            Step::Width => t!("Specify width:").into_owned(),
+            Step::Height => format!("Specify height <{:.4}>:", self.height),
+            Step::Width => format!("Specify width <{:.4}>:", self.width),
             Step::Justify => format!(
                 "Enter justification [Left/Center/Right] <{}>:",
                 match self.justification {
@@ -341,7 +404,7 @@ impl CadCommand for PolysolidCommand {
                     PolysolidJustification::Right => "Right",
                 }
             ),
-            Step::Object => t!("Select path object:").into_owned(),
+            Step::Object => t!("Select object:").into_owned(),
             Step::Line if self.vertices.len() >= 3 => {
                 t!("Specify next point or [Arc/Close/Undo]:").into_owned()
             }
@@ -353,7 +416,9 @@ impl CadCommand for PolysolidCommand {
             Step::Arc => {
                 t!("Specify endpoint of arc or [Direction/Line/Second point/Undo]:").into_owned()
             }
-            Step::ArcDirection => t!("Specify tangent direction for the start point of arc:").into_owned(),
+            Step::ArcDirection => {
+                t!("Specify the tangent direction for the start point of arc:").into_owned()
+            }
             Step::ArcSecond => t!("Specify second point on arc:").into_owned(),
             Step::ArcEnd => t!("Specify end point of arc:").into_owned(),
         }
@@ -444,8 +509,7 @@ impl CadCommand for PolysolidCommand {
                 CmdResult::NeedPoint
             }
             Step::Line | Step::Arc if self.vertices.len() >= 2 => self.finish(false),
-            Step::Justify => {
-                self.justification = PolysolidJustification::Center;
+            Step::Height | Step::Width | Step::Justify => {
                 self.remember();
                 self.step = self.return_step;
                 CmdResult::NeedPoint
@@ -572,5 +636,10 @@ impl CadCommand for PolysolidCommand {
 
     fn on_mouse_move(&mut self, point: DVec3) -> Option<WireModel> {
         self.path_preview(point)
+    }
+
+    fn on_preview_wires(&mut self, point: DVec3) -> Vec<WireModel> {
+        self.solid_preview(point)
+            .unwrap_or_else(|| self.path_preview(point).into_iter().collect())
     }
 }

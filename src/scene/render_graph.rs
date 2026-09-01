@@ -15,6 +15,7 @@ use crate::scene::view::render::{
     has_resolved_book_color, is_effective_layer_zero, layer_render_style_viewport,
     render_style_for_block_sub_viewport, render_style_for_viewport, InheritStyle,
 };
+use crate::scene::BlockScalePolicy;
 
 pub type ResolvedStyle = ([f32; 4], f32, [f32; 8], f32, u8);
 
@@ -216,7 +217,7 @@ fn layer_aci(document: &CadDocument, layer: &str) -> u8 {
 }
 
 #[derive(Clone, Debug)]
-pub struct RenderContext {
+pub struct InstanceContext {
     pub transform: Transform,
     pub root_handle: Handle,
     pub parent_insert: Handle,
@@ -227,9 +228,10 @@ pub struct RenderContext {
     pub depth_scale: f32,
     pub nesting_depth: usize,
     pub viewport: Option<Handle>,
+    pub scale_policy: BlockScalePolicy,
 }
 
-impl RenderContext {
+impl InstanceContext {
     fn direct(depth_base: f32, viewport: Option<Handle>) -> Self {
         Self {
             transform: Transform::identity(),
@@ -242,6 +244,7 @@ impl RenderContext {
             depth_scale: 1.0,
             nesting_depth: 0,
             viewport,
+            scale_policy: BlockScalePolicy::FromInsert,
         }
     }
 
@@ -314,8 +317,8 @@ impl<'a> RenderSceneGraph<'a> {
     /// false for an Insert removes its whole subtree.
     pub fn walk_root<V, F>(&self, root: SceneRoot, mut visible: V, mut leaf: F)
     where
-        V: FnMut(&EntityType, &RenderContext) -> bool,
-        F: FnMut(&EntityType, &RenderContext),
+        V: FnMut(&EntityType, &InstanceContext) -> bool,
+        F: FnMut(&EntityType, &InstanceContext),
     {
         let block = root.content_block();
         let viewport = match root {
@@ -344,12 +347,18 @@ impl<'a> RenderSceneGraph<'a> {
                 .depths
                 .get(&handle.value())
                 .map_or(0.0, |depth| depth[0]);
-            let context = RenderContext::direct(direct_depth, viewport);
+            let context = InstanceContext::direct(direct_depth, viewport);
             if !self.document_visible(entity) || !visible(entity, &context) {
                 continue;
             }
             if let EntityType::Insert(insert) = entity {
-                self.walk_insert_instances(insert, &context, &mut visible, &mut leaf);
+                self.walk_insert_instances(
+                    insert,
+                    BlockScalePolicy::FromInsert,
+                    &context,
+                    &mut visible,
+                    &mut leaf,
+                );
             } else {
                 leaf(entity, &context);
                 self.walk_owned_content(entity, &context, &mut visible, &mut leaf, &mut Vec::new());
@@ -359,15 +368,36 @@ impl<'a> RenderSceneGraph<'a> {
 
     /// Walk one synthetic or document-owned Insert. Used by entity renderers
     /// whose content is itself a block reference.
-    pub fn walk_insert<V, F>(
+    pub fn walk_block_use<V, F>(
         &self,
-        insert: &Insert,
+        block_use: &BlockUse,
         root_handle: Handle,
         mut visible: V,
         mut leaf: F,
+    )
+    where
+        V: FnMut(&EntityType, &InstanceContext) -> bool,
+        F: FnMut(&EntityType, &InstanceContext),
+    {
+        self.walk_insert_with_policy(
+            &block_use.insert,
+            root_handle,
+            block_use.scale_policy,
+            &mut visible,
+            &mut leaf,
+        );
+    }
+
+    fn walk_insert_with_policy<V, F>(
+        &self,
+        insert: &Insert,
+        root_handle: Handle,
+        scale_policy: BlockScalePolicy,
+        visible: &mut V,
+        leaf: &mut F,
     ) where
-        V: FnMut(&EntityType, &RenderContext) -> bool,
-        F: FnMut(&EntityType, &RenderContext),
+        V: FnMut(&EntityType, &InstanceContext) -> bool,
+        F: FnMut(&EntityType, &InstanceContext),
     {
         let mut root_insert = insert.clone();
         root_insert.common.handle = root_handle;
@@ -376,9 +406,15 @@ impl<'a> RenderSceneGraph<'a> {
             .depths
             .get(&root_handle.value())
             .map_or(0.0, |depth| depth[0]);
-        let context = RenderContext::direct(depth_base, self.viewport);
+        let context = InstanceContext::direct(depth_base, self.viewport);
         if self.document_visible(&entity) && visible(&entity, &context) {
-            self.walk_insert_instances(&root_insert, &context, &mut visible, &mut leaf);
+            self.walk_insert_instances(
+                &root_insert,
+                scale_policy,
+                &context,
+                visible,
+                leaf,
+            );
         }
     }
 
@@ -386,12 +422,13 @@ impl<'a> RenderSceneGraph<'a> {
     fn walk_insert_instances<V, F>(
         &self,
         insert: &Insert,
-        parent: &RenderContext,
+        scale_policy: BlockScalePolicy,
+        parent: &InstanceContext,
         visible: &mut V,
         leaf: &mut F,
     ) where
-        V: FnMut(&EntityType, &RenderContext) -> bool,
-        F: FnMut(&EntityType, &RenderContext),
+        V: FnMut(&EntityType, &InstanceContext) -> bool,
+        F: FnMut(&EntityType, &InstanceContext),
     {
         let insert_entity = EntityType::Insert(insert.clone());
         let block_style = parent
@@ -424,6 +461,7 @@ impl<'a> RenderSceneGraph<'a> {
                 insert,
                 offset,
                 self.annotation_scale,
+                scale_policy,
             );
             let transform = local.then(&parent.transform);
             let mut context = parent.clone();
@@ -435,6 +473,7 @@ impl<'a> RenderSceneGraph<'a> {
             context.depth_base = depth_base;
             context.depth_scale = depth_scale;
             context.nesting_depth += 1;
+            context.scale_policy = scale_policy;
             if let Some(filter) = crate::scene::pick::xclip::insert_spatial_filter(
                 self.document,
                 insert,
@@ -465,13 +504,13 @@ impl<'a> RenderSceneGraph<'a> {
     fn walk_block<V, F>(
         &self,
         block_name: &str,
-        context: &RenderContext,
+        context: &InstanceContext,
         visible: &mut V,
         leaf: &mut F,
         stack: &mut Vec<String>,
     ) where
-        V: FnMut(&EntityType, &RenderContext) -> bool,
-        F: FnMut(&EntityType, &RenderContext),
+        V: FnMut(&EntityType, &InstanceContext) -> bool,
+        F: FnMut(&EntityType, &InstanceContext),
     {
         if context.nesting_depth > 32 {
             return;
@@ -504,7 +543,13 @@ impl<'a> RenderSceneGraph<'a> {
                         continue;
                     }
                     stack.push(nested.block_name.clone());
-                    self.walk_insert_instances(nested, context, visible, leaf);
+                    self.walk_insert_instances(
+                        nested,
+                        BlockScalePolicy::FromInsert,
+                        context,
+                        visible,
+                        leaf,
+                    );
                     stack.pop();
                 }
                 _ => {
@@ -518,13 +563,13 @@ impl<'a> RenderSceneGraph<'a> {
     fn walk_owned_content<V, F>(
         &self,
         entity: &EntityType,
-        context: &RenderContext,
+        context: &InstanceContext,
         visible: &mut V,
         leaf: &mut F,
         stack: &mut Vec<String>,
     ) where
-        V: FnMut(&EntityType, &RenderContext) -> bool,
-        F: FnMut(&EntityType, &RenderContext),
+        V: FnMut(&EntityType, &InstanceContext) -> bool,
+        F: FnMut(&EntityType, &InstanceContext),
     {
         for block_use in entity_render_block_uses(self.document, entity, self.annotation_scale)
             .into_iter()
@@ -537,7 +582,13 @@ impl<'a> RenderSceneGraph<'a> {
                 continue;
             }
             stack.push(block_use.insert.block_name.clone());
-            self.walk_insert_instances(&block_use.insert, context, visible, leaf);
+            self.walk_insert_instances(
+                &block_use.insert,
+                block_use.scale_policy,
+                context,
+                visible,
+                leaf,
+            );
             stack.pop();
         }
     }
@@ -596,8 +647,23 @@ pub fn insert_transform_at_scale(
     insert: &Insert,
     annotation_scale: f32,
 ) -> Transform {
+    insert_transform_with_policy(
+        document,
+        insert,
+        annotation_scale,
+        BlockScalePolicy::FromInsert,
+    )
+}
+
+pub fn insert_transform_with_policy(
+    document: &CadDocument,
+    insert: &Insert,
+    annotation_scale: f32,
+    scale_policy: BlockScalePolicy,
+) -> Transform {
     let mut transform = insert_transform(document, insert);
-    if (annotation_scale - 1.0).abs() > 1.0e-6
+    if scale_policy == BlockScalePolicy::FromInsert
+        && (annotation_scale - 1.0).abs() > 1.0e-6
         && insert
             .common
             .extended_data
@@ -615,7 +681,7 @@ pub fn insert_transform_at_scale(
     transform
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum BlockRole {
     Insert,
     DimensionPicture,
@@ -631,6 +697,7 @@ pub struct BlockUse {
     pub block: Handle,
     pub insert: Insert,
     pub role: BlockRole,
+    pub scale_policy: BlockScalePolicy,
     /// Whether this edge belongs to the active render representation. Inactive
     /// edges remain dependencies so cache invalidation and purge stay complete.
     pub active: bool,
@@ -654,6 +721,7 @@ fn block_use(
     document: &CadDocument,
     mut insert: Insert,
     role: BlockRole,
+    scale_policy: BlockScalePolicy,
     active: bool,
     replaces_host_wire: bool,
     suppress_root_points: bool,
@@ -667,6 +735,7 @@ fn block_use(
         block,
         insert,
         role,
+        scale_policy,
         active,
         replaces_host_wire,
         suppress_root_points,
@@ -687,6 +756,7 @@ pub fn block_use_from_handle(
         document,
         Insert::new(record.name.clone(), insertion),
         role,
+        BlockScalePolicy::Applied,
         true,
         false,
         false,
@@ -727,6 +797,7 @@ fn entity_owned_block_uses(
             document,
             insert.clone(),
             BlockRole::Insert,
+            BlockScalePolicy::FromInsert,
             true,
             true,
             false,
@@ -743,6 +814,7 @@ fn entity_owned_block_uses(
                     document,
                     insert,
                     BlockRole::DimensionPicture,
+                    BlockScalePolicy::FromInsert,
                     picture,
                     picture,
                     true,
@@ -771,6 +843,7 @@ fn entity_owned_block_uses(
                     document,
                     insert,
                     BlockRole::TablePicture,
+                    BlockScalePolicy::FromInsert,
                     true,
                     true,
                     false,
@@ -780,15 +853,12 @@ fn entity_owned_block_uses(
             uses.extend(
                 crate::entities::table::block_cell_inserts(table, document, annotation_scale)
                     .into_iter()
-                    .map(|mut insert| {
-                        insert
-                            .common
-                            .extended_data
-                            .remove_record("AcAnnotativeData");
+                    .map(|insert| {
                         block_use(
                             document,
                             insert,
                             BlockRole::TableCell,
+                            BlockScalePolicy::Applied,
                             cells_active,
                             false,
                             false,
@@ -799,15 +869,12 @@ fn entity_owned_block_uses(
         }
         EntityType::MultiLeader(multileader) => {
             crate::entities::multileader::block_content_insert(document, multileader)
-                .map(|mut insert| {
-                    insert
-                        .common
-                        .extended_data
-                        .remove_record("AcAnnotativeData");
+                .map(|insert| {
                     vec![block_use(
                         document,
                         insert,
                         BlockRole::MultiLeaderContent,
+                        BlockScalePolicy::Applied,
                         true,
                         false,
                         false,
@@ -997,14 +1064,41 @@ pub fn insert_instance_transform(
     insert: &Insert,
     offset: [f64; 3],
     annotation_scale: f32,
+    scale_policy: BlockScalePolicy,
 ) -> Transform {
-    let transform = insert_transform_at_scale(document, insert, annotation_scale);
+    let transform = insert_transform_with_policy(document, insert, annotation_scale, scale_policy);
     if offset == [0.0; 3] {
         transform
     } else {
         Transform::from_translation(Vector3::new(offset[0], offset[1], offset[2]))
             .then(&transform)
     }
+}
+
+pub fn insert_instance_translation_delta(
+    document: &CadDocument,
+    insert: &Insert,
+    offset: [f64; 3],
+    annotation_scale: f32,
+    scale_policy: BlockScalePolicy,
+) -> Vector3 {
+    let base = insert_instance_transform(
+        document,
+        insert,
+        [0.0; 3],
+        annotation_scale,
+        scale_policy,
+    )
+    .apply(Vector3::ZERO);
+    let instance = insert_instance_transform(
+        document,
+        insert,
+        offset,
+        annotation_scale,
+        scale_policy,
+    )
+    .apply(Vector3::ZERO);
+    instance - base
 }
 
 pub fn block_contains_hatch(
@@ -1034,4 +1128,39 @@ pub fn block_contains_hatch(
     });
     memo.insert(key, contains);
     contains
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::xdata::ExtendedDataRecord;
+
+    #[test]
+    fn applied_block_scale_skips_annotative_rescaling() {
+        let document = CadDocument::new();
+        let mut insert = Insert::new("BLOCK", Vector3::new(10.0, 20.0, 0.0));
+        insert
+            .common
+            .extended_data
+            .add_record(ExtendedDataRecord::new("AcAnnotativeData"));
+        let point = Vector3::new(1.0, 0.0, 0.0);
+
+        let from_insert = insert_transform_with_policy(
+            &document,
+            &insert,
+            2.0,
+            BlockScalePolicy::FromInsert,
+        )
+        .apply(point);
+        let applied = insert_transform_with_policy(
+            &document,
+            &insert,
+            2.0,
+            BlockScalePolicy::Applied,
+        )
+        .apply(point);
+
+        assert!((from_insert.x - 12.0).abs() < 1.0e-9);
+        assert!((applied.x - 11.0).abs() < 1.0e-9);
+    }
 }

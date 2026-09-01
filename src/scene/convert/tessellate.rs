@@ -2100,8 +2100,8 @@ fn custom_arrow_from_block(
     let mut lines = Vec::new();
     let mut fill = Vec::new();
     let mut deferred_hatch = false;
-    graph.walk_insert(
-        &block_use.insert,
+    graph.walk_block_use(
+        &block_use,
         record.handle,
         |_, _| true,
         |entity, context| {

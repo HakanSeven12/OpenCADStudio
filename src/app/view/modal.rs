@@ -78,6 +78,68 @@ impl OpenCADStudio {
                 automatic_flow(ex, crate::ui::window::about::view_window)
             }
             super::super::ModalKind::Shortcuts => {
+                // Keys claimed by two rows — the cells turn red and a
+                // persistent warning names the command already using each
+                // key; the last row wins in the binding map on Apply.
+                let mut key_rows: std::collections::BTreeMap<String, Vec<&(String, String)>> =
+                    std::collections::BTreeMap::new();
+                for row in &self.shortcut_editor_rows {
+                    let key = crate::app::shortcuts::normalize_key(&row.0);
+                    if !key.is_empty() {
+                        key_rows.entry(key).or_default().push(row);
+                    }
+                }
+                let duplicate_keys: Vec<String> = key_rows
+                    .iter()
+                    .filter(|(_, rows)| rows.len() > 1)
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                let duplicate_conflicts: Vec<(String, String)> = key_rows
+                    .iter()
+                    .filter(|(_, rows)| rows.len() > 1)
+                    .map(|(key, rows)| {
+                        // Name the established binding: the first row with
+                        // this key that actually has a command.
+                        let command = rows
+                            .iter()
+                            .find(|(_, command)| !command.is_empty())
+                            .map(|(_, command)| command.clone())
+                            .unwrap_or_default();
+                        (key.clone(), command)
+                    })
+                    .collect();
+                let duplicate_set: rustc_hash::FxHashSet<String> =
+                    duplicate_keys.into_iter().collect();
+                // Commands the dispatcher can't run: not a registered
+                // command, plugin command, alias, or input action.
+                let valid: rustc_hash::FxHashSet<String> =
+                    crate::command::all_registered_command_names()
+                        .into_iter()
+                        .map(str::to_uppercase)
+                        .chain(
+                            self.command_line
+                                .dynamic_commands
+                                .iter()
+                                .map(|cmd| cmd.to_uppercase()),
+                        )
+                        .chain(self.command_aliases.keys().cloned())
+                        .chain(
+                            crate::app::shortcuts::INPUT_ACTIONS
+                                .iter()
+                                .map(|action| action.to_string()),
+                        )
+                        .collect();
+                let unknown_commands: Vec<String> = self
+                    .shortcut_editor_rows
+                    .iter()
+                    .filter_map(|(_, command)| {
+                        let command = command.trim();
+                        (!command.is_empty() && !valid.contains(command))
+                            .then(|| command.to_string())
+                    })
+                    .collect();
+                let unknown_set: rustc_hash::FxHashSet<String> =
+                    unknown_commands.into_iter().collect();
                 sized_flow(
                     ex,
                     720,
@@ -85,6 +147,13 @@ impl OpenCADStudio {
                     |flow| {
                         crate::ui::window::shortcuts::view_window(
                             &self.shortcut_editor_rows,
+                            self.shortcut_capture_row,
+                            self.shortcut_pending_add,
+                            self.shortcut_reset_confirm,
+                            &duplicate_set,
+                            &duplicate_conflicts,
+                            &unknown_set,
+                            self.shortcut_close_confirm,
                             flow,
                         )
                     },

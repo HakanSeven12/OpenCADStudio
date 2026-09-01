@@ -68,6 +68,61 @@ enum SphereStep {
 }
 
 #[derive(Clone, Copy)]
+enum TorusStep {
+    Center,
+    Radius(DVec3),
+    Diameter(DVec3),
+    TwoPointFirst,
+    TwoPointSecond(DVec3),
+    ThreePointFirst,
+    ThreePointSecond(DVec3),
+    ThreePointThird(DVec3, DVec3),
+    TtrFirst,
+    TtrSecond {
+        object: TangentObject,
+        hit: DVec3,
+    },
+    TtrRadius {
+        first: TangentObject,
+        second: TangentObject,
+        first_hit: DVec3,
+        second_hit: DVec3,
+    },
+    TubeRadius {
+        center: DVec3,
+        major_radius: f64,
+    },
+    TubeDiameter {
+        center: DVec3,
+        major_radius: f64,
+    },
+    TubeTwoPointFirst {
+        center: DVec3,
+        major_radius: f64,
+    },
+    TubeTwoPointSecond {
+        center: DVec3,
+        major_radius: f64,
+        first: DVec3,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct TorusDefaults {
+    major_radius: f64,
+    minor_radius: f64,
+}
+
+impl Default for TorusDefaults {
+    fn default() -> Self {
+        Self {
+            major_radius: 100.0,
+            minor_radius: 25.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 enum ConeStep {
     BaseCenter,
     BaseRadius,
@@ -97,6 +152,48 @@ enum ConeStep {
     HeightSecondPoint(DVec3),
     AxisEndpoint,
     TopRadius,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PyramidType {
+    Circumscribed,
+    Inscribed,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PyramidStep {
+    BaseCenter,
+    Sides,
+    EdgeFirst,
+    EdgeSecond,
+    BaseRadius,
+    Height,
+    HeightAfterTopRadius,
+    HeightFirstPoint,
+    HeightSecondPoint,
+    AxisEndpoint,
+    TopRadius,
+}
+
+#[derive(Clone, Copy)]
+struct PyramidDefaults {
+    displayed_base_radius: f64,
+    displayed_top_radius: f64,
+    height: f64,
+    sides: usize,
+    kind: PyramidType,
+}
+
+impl Default for PyramidDefaults {
+    fn default() -> Self {
+        Self {
+            displayed_base_radius: 1.0,
+            displayed_top_radius: 0.0,
+            height: 1.0,
+            sides: 4,
+            kind: PyramidType::Circumscribed,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -134,6 +231,33 @@ fn remember_sphere_radius(radius: f64) {
     if radius.is_finite() && radius > 1e-6 {
         if let Ok(mut value) = sphere_radius_store().lock() {
             *value = radius;
+        }
+    }
+}
+
+fn torus_defaults_store() -> &'static Mutex<TorusDefaults> {
+    static VALUE: OnceLock<Mutex<TorusDefaults>> = OnceLock::new();
+    VALUE.get_or_init(|| Mutex::new(TorusDefaults::default()))
+}
+
+fn torus_defaults() -> TorusDefaults {
+    torus_defaults_store()
+        .lock()
+        .map(|value| *value)
+        .unwrap_or_default()
+}
+
+fn remember_torus_defaults(major_radius: f64, minor_radius: f64) {
+    if major_radius.is_finite()
+        && minor_radius.is_finite()
+        && major_radius > 1e-6
+        && minor_radius > 1e-6
+    {
+        if let Ok(mut value) = torus_defaults_store().lock() {
+            *value = TorusDefaults {
+                major_radius,
+                minor_radius,
+            };
         }
     }
 }
@@ -211,6 +335,29 @@ fn cone_defaults() -> &'static std::sync::Mutex<ConeDefaults> {
     DEFAULTS.get_or_init(|| std::sync::Mutex::new(ConeDefaults::default()))
 }
 
+fn pyramid_defaults() -> &'static Mutex<PyramidDefaults> {
+    static DEFAULTS: OnceLock<Mutex<PyramidDefaults>> = OnceLock::new();
+    DEFAULTS.get_or_init(|| Mutex::new(PyramidDefaults::default()))
+}
+
+fn pyramid_apothem_factor(sides: usize) -> f64 {
+    (std::f64::consts::PI / sides.max(3) as f64).cos()
+}
+
+fn pyramid_display_to_circumradius(value: f64, kind: PyramidType, sides: usize) -> f64 {
+    match kind {
+        PyramidType::Circumscribed => value / pyramid_apothem_factor(sides),
+        PyramidType::Inscribed => value,
+    }
+}
+
+fn pyramid_circumradius_to_display(value: f64, kind: PyramidType, sides: usize) -> f64 {
+    match kind {
+        PyramidType::Circumscribed => value * pyramid_apothem_factor(sides),
+        PyramidType::Inscribed => value,
+    }
+}
+
 impl Shape {
     fn from_id(id: &str) -> Option<Shape> {
         Some(match id {
@@ -265,18 +412,33 @@ pub struct PrimitiveCommand {
     box_height_anchor: Option<DVec3>,
     sphere_step: SphereStep,
     sphere_default_radius: f64,
+    torus_step: TorusStep,
+    torus_defaults: TorusDefaults,
     cone_step: ConeStep,
     cone_frame: Option<WorkingPlane>,
     cone_base_x_radius: f64,
     cone_base_y_radius: f64,
     cone_top_radius: f64,
     cone_defaults: ConeDefaults,
+    pyramid_step: PyramidStep,
+    pyramid_frame: Option<WorkingPlane>,
+    pyramid_edge_first: Option<DVec3>,
+    pyramid_height_first: Option<DVec3>,
+    pyramid_base_radius: f64,
+    pyramid_top_radius: f64,
+    pyramid_sides: usize,
+    pyramid_type: PyramidType,
+    pyramid_defaults: PyramidDefaults,
     plane: WorkingPlane,
 }
 
 impl PrimitiveCommand {
     pub fn new(id: &str) -> Self {
         let remembered = cone_defaults()
+            .lock()
+            .map(|value| *value)
+            .unwrap_or_default();
+        let pyramid_remembered = pyramid_defaults()
             .lock()
             .map(|value| *value)
             .unwrap_or_default();
@@ -294,12 +456,31 @@ impl PrimitiveCommand {
             box_height_anchor: None,
             sphere_step: SphereStep::Center,
             sphere_default_radius: sphere_radius_default(),
+            torus_step: TorusStep::Center,
+            torus_defaults: torus_defaults(),
             cone_step: ConeStep::BaseCenter,
             cone_frame: None,
             cone_base_x_radius: remembered.base_x_radius,
             cone_base_y_radius: remembered.base_y_radius,
             cone_top_radius: remembered.top_radius,
             cone_defaults: remembered,
+            pyramid_step: PyramidStep::BaseCenter,
+            pyramid_frame: None,
+            pyramid_edge_first: None,
+            pyramid_height_first: None,
+            pyramid_base_radius: pyramid_display_to_circumradius(
+                pyramid_remembered.displayed_base_radius,
+                pyramid_remembered.kind,
+                pyramid_remembered.sides,
+            ),
+            pyramid_top_radius: pyramid_display_to_circumradius(
+                pyramid_remembered.displayed_top_radius,
+                pyramid_remembered.kind,
+                pyramid_remembered.sides,
+            ),
+            pyramid_sides: pyramid_remembered.sides,
+            pyramid_type: pyramid_remembered.kind,
+            pyramid_defaults: pyramid_remembered,
             plane: WorkingPlane::default(),
         }
     }
@@ -342,6 +523,81 @@ impl PrimitiveCommand {
             Shape::Sphere,
             &[center, center + DVec3::X * radius],
         )))
+    }
+
+    fn set_torus_major_radius(&mut self, center: DVec3, major_radius: f64) -> CmdResult {
+        if !center.is_finite() || !major_radius.is_finite() || major_radius <= 1e-6 {
+            return CmdResult::NeedPoint;
+        }
+        self.torus_step = TorusStep::TubeRadius {
+            center,
+            major_radius,
+        };
+        CmdResult::NeedPoint
+    }
+
+    fn commit_torus(
+        &mut self,
+        center: DVec3,
+        major_radius: f64,
+        minor_radius: f64,
+    ) -> CmdResult {
+        if !center.is_finite()
+            || !major_radius.is_finite()
+            || !minor_radius.is_finite()
+            || major_radius <= 1e-6
+            || minor_radius <= 1e-6
+        {
+            return CmdResult::NeedPoint;
+        }
+        self.pts = vec![
+            center,
+            center + DVec3::X * major_radius,
+            center + DVec3::X * minor_radius,
+        ];
+        self.torus_defaults = TorusDefaults {
+            major_radius,
+            minor_radius,
+        };
+        remember_torus_defaults(major_radius, minor_radius);
+        self.commit(0.0)
+    }
+
+    fn torus_ttr_result(&mut self, radius: f64) -> CmdResult {
+        let TorusStep::TtrRadius {
+            first,
+            second,
+            first_hit,
+            second_hit,
+        } = self.torus_step
+        else {
+            return CmdResult::NeedPoint;
+        };
+        let hint = (first_hit + second_hit) * 0.5;
+        let Some(center) = closest_sphere_center(
+            &sphere_ttr_centers(first, second, radius),
+            hint,
+        ) else {
+            return CmdResult::NeedPoint;
+        };
+        self.set_torus_major_radius(center, radius)
+    }
+
+    fn torus_preview(
+        &self,
+        center: DVec3,
+        major_radius: f64,
+        minor_radius: f64,
+    ) -> Option<WireModel> {
+        if !center.is_finite()
+            || !major_radius.is_finite()
+            || !minor_radius.is_finite()
+            || major_radius <= 1e-6
+            || minor_radius <= 1e-6
+        {
+            return None;
+        }
+        Some(self.place_preview(torus_wire(center, major_radius, minor_radius)))
     }
 
     fn cone_frame_at(&self, center: DVec3) -> WorkingPlane {
@@ -955,6 +1211,503 @@ impl PrimitiveCommand {
         }
     }
 
+    fn pyramid_frame_at(&self, center: DVec3) -> WorkingPlane {
+        WorkingPlane {
+            origin: center,
+            x: self.plane.x,
+            y: self.plane.y,
+            z: self.plane.z,
+        }
+    }
+
+    fn set_pyramid_type(&mut self, kind: PyramidType) {
+        let displayed_top = pyramid_circumradius_to_display(
+            self.pyramid_top_radius,
+            self.pyramid_type,
+            self.pyramid_sides,
+        );
+        self.pyramid_type = kind;
+        self.pyramid_top_radius =
+            pyramid_display_to_circumradius(displayed_top, kind, self.pyramid_sides);
+    }
+
+    fn pyramid_set_base_from_point(&mut self, point: DVec3) -> bool {
+        let Some(frame) = self.pyramid_frame else {
+            return false;
+        };
+        let delta = point - frame.origin;
+        let planar = delta - frame.z * delta.dot(frame.z);
+        let displayed_radius = planar.length();
+        let Some(direction) = planar.try_normalize() else {
+            return false;
+        };
+        if !displayed_radius.is_finite() || displayed_radius < 1e-6 {
+            return false;
+        }
+        let x = match self.pyramid_type {
+            PyramidType::Inscribed => direction,
+            PyramidType::Circumscribed => {
+                let half = std::f64::consts::PI / self.pyramid_sides as f64;
+                direction * half.cos() - frame.z.cross(direction) * half.sin()
+            }
+        };
+        let Some(x) = x.try_normalize() else {
+            return false;
+        };
+        let Some(y) = frame.z.cross(x).try_normalize() else {
+            return false;
+        };
+        self.pyramid_frame = Some(WorkingPlane::new(frame.origin, x, y));
+        self.pyramid_base_radius = pyramid_display_to_circumradius(
+            displayed_radius,
+            self.pyramid_type,
+            self.pyramid_sides,
+        );
+        self.pyramid_step = PyramidStep::Height;
+        true
+    }
+
+    fn pyramid_set_base_from_edge(&mut self, first: DVec3, second: DVec3) -> bool {
+        let delta = second - first;
+        let planar = delta - self.plane.z * delta.dot(self.plane.z);
+        let length = planar.length();
+        let Some(edge) = planar.try_normalize() else {
+            return false;
+        };
+        if !length.is_finite() || length < 1e-6 {
+            return false;
+        }
+        let radius = length
+            / (2.0 * (std::f64::consts::PI / self.pyramid_sides as f64).sin());
+        let apothem = radius * pyramid_apothem_factor(self.pyramid_sides);
+        let center = (first + second) * 0.5 + self.plane.z.cross(edge) * apothem;
+        let Some(x) = (first - center).try_normalize() else {
+            return false;
+        };
+        let Some(y) = self.plane.z.cross(x).try_normalize() else {
+            return false;
+        };
+        self.pyramid_frame = Some(WorkingPlane::new(center, x, y));
+        self.pyramid_base_radius = radius;
+        self.pyramid_step = PyramidStep::Height;
+        true
+    }
+
+    fn pyramid_axis_frame(&self, axis: DVec3) -> Option<(WorkingPlane, f64)> {
+        let current = self.pyramid_frame?;
+        let height = axis.length();
+        if !height.is_finite() || height < 1e-6 {
+            return None;
+        }
+        let z = axis / height;
+        let mut x = current.x - z * current.x.dot(z);
+        if x.length_squared() < 1e-12 {
+            x = current.y - z * current.y.dot(z);
+        }
+        let x = x.try_normalize()?;
+        let y = z.cross(x).try_normalize()?;
+        Some((WorkingPlane::new(current.origin, x, y), height))
+    }
+
+    fn pyramid_history_transform(frame: WorkingPlane) -> [f64; 16] {
+        glam::DMat4::from_cols(
+            frame.x.extend(0.0),
+            frame.y.extend(0.0),
+            frame.z.extend(0.0),
+            frame.origin.extend(1.0),
+        )
+        .to_cols_array()
+    }
+
+    fn build_pyramid(&self, axis: DVec3) -> Option<(Body, SolidHistoryOperation, f64)> {
+        let (frame, height) = self.pyramid_axis_frame(axis)?;
+        let local = solid_model::pyramid_frustum_solid(
+            [0.0; 3],
+            self.pyramid_base_radius,
+            self.pyramid_top_radius,
+            height,
+            self.pyramid_sides,
+        )?;
+        let placed = solid_model::placed(
+            &local,
+            frame.x.to_array(),
+            frame.y.to_array(),
+            frame.z.to_array(),
+            frame.origin.to_array(),
+        )?;
+        Some((
+            placed,
+            crate::scene::model::solid_history::pyramid_op(
+                Self::pyramid_history_transform(frame),
+                self.pyramid_base_radius,
+                self.pyramid_top_radius,
+                height,
+                self.pyramid_sides,
+                self.pyramid_type == PyramidType::Inscribed,
+            ),
+            height,
+        ))
+    }
+
+    fn commit_pyramid_axis(&self, axis: DVec3) -> CmdResult {
+        let Some((solid, history, height)) = self.build_pyramid(axis) else {
+            return CmdResult::NeedPoint;
+        };
+        if let Ok(mut defaults) = pyramid_defaults().lock() {
+            *defaults = PyramidDefaults {
+                displayed_base_radius: pyramid_circumradius_to_display(
+                    self.pyramid_base_radius,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                ),
+                displayed_top_radius: pyramid_circumradius_to_display(
+                    self.pyramid_top_radius,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                ),
+                height,
+                sides: self.pyramid_sides,
+                kind: self.pyramid_type,
+            };
+        }
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid) else {
+            return CmdResult::Cancel;
+        };
+        let mut entity = Solid3D::new();
+        entity.set_sat_document(&document);
+        entity.wires = solid_model::edge_wires(&solid);
+        CmdResult::CommitSolid {
+            entity: EntityType::Solid3D(entity),
+            solid: Box::new(solid),
+            history,
+            erase_source: None,
+        }
+    }
+
+    fn commit_pyramid_height(&self, height: f64) -> CmdResult {
+        let Some(frame) = self.pyramid_frame else {
+            return CmdResult::NeedPoint;
+        };
+        if !height.is_finite() || height.abs() < 1e-6 {
+            return CmdResult::NeedPoint;
+        }
+        self.commit_pyramid_axis(frame.z * height)
+    }
+
+    fn pyramid_height_at(&self, point: DVec3) -> Option<f64> {
+        let frame = self.pyramid_frame?;
+        Some((point - frame.origin).dot(frame.z))
+    }
+
+    fn pyramid_polygon(frame: WorkingPlane, radius: f64, sides: usize, z: f64) -> Vec<DVec3> {
+        (0..sides)
+            .map(|index| {
+                let angle = std::f64::consts::TAU * index as f64 / sides as f64;
+                frame.origin
+                    + frame.x * (radius * angle.cos())
+                    + frame.y * (radius * angle.sin())
+                    + frame.z * z
+            })
+            .collect()
+    }
+
+    fn pyramid_preview(&self, axis: DVec3) -> Option<WireModel> {
+        let (frame, height) = self.pyramid_axis_frame(axis)?;
+        let base = Self::pyramid_polygon(frame, self.pyramid_base_radius, self.pyramid_sides, 0.0);
+        let top = Self::pyramid_polygon(frame, self.pyramid_top_radius, self.pyramid_sides, height);
+        let apex = frame.origin + frame.z * height;
+        let mut points = Vec::new();
+        push_path_loop(&mut points, &base);
+        if self.pyramid_top_radius > 1e-9 {
+            push_path_loop(&mut points, &top);
+        }
+        for index in 0..self.pyramid_sides {
+            push_segment(
+                &mut points,
+                base[index],
+                if self.pyramid_top_radius > 1e-9 { top[index] } else { apex },
+            );
+        }
+        Some(wire("primitive_height_preview", points))
+    }
+
+    fn pyramid_base_preview(&self, frame: WorkingPlane, displayed_radius: f64) -> Option<WireModel> {
+        if !displayed_radius.is_finite() || displayed_radius < 1e-9 {
+            return None;
+        }
+        let radius = pyramid_display_to_circumradius(
+            displayed_radius,
+            self.pyramid_type,
+            self.pyramid_sides,
+        );
+        let points = Self::pyramid_polygon(frame, radius, self.pyramid_sides, 0.0);
+        let mut wire_points = Vec::new();
+        push_path_loop(&mut wire_points, &points);
+        Some(wire("primitive_preview", wire_points))
+    }
+
+    fn pyramid_prompt(&self) -> String {
+        let base_default = self.pyramid_defaults.displayed_base_radius;
+        let top_default = self.pyramid_defaults.displayed_top_radius;
+        match self.pyramid_step {
+            PyramidStep::BaseCenter => crate::tf!(
+                "PYRAMID  Specify center point of base or [Edge/Sides]:"
+            ).into_owned(),
+            PyramidStep::Sides => crate::tf!(
+                "PYRAMID  Enter number of sides <{}>:",
+                self.pyramid_sides
+            ).into_owned(),
+            PyramidStep::EdgeFirst => t!("PYRAMID  Specify first endpoint of edge:").into_owned(),
+            PyramidStep::EdgeSecond => t!("PYRAMID  Specify second endpoint of edge:").into_owned(),
+            PyramidStep::BaseRadius => match self.pyramid_type {
+                PyramidType::Circumscribed => crate::tf!(
+                    "PYRAMID  Specify base radius or [Inscribed] <{:.4}>:",
+                    base_default
+                ).into_owned(),
+                PyramidType::Inscribed => crate::tf!(
+                    "PYRAMID  Specify base radius or [Circumscribed] <{:.4}>:",
+                    base_default
+                ).into_owned(),
+            },
+            PyramidStep::Height => crate::tf!(
+                "PYRAMID  Specify height or [2Point/Axis endpoint/Top radius] <{:.4}>:",
+                self.pyramid_defaults.height
+            ).into_owned(),
+            PyramidStep::HeightAfterTopRadius => crate::tf!(
+                "PYRAMID  Specify height or [2Point/Axis endpoint] <{:.4}>:",
+                self.pyramid_defaults.height
+            ).into_owned(),
+            PyramidStep::HeightFirstPoint => t!("PYRAMID  Specify first point for height:").into_owned(),
+            PyramidStep::HeightSecondPoint => t!("PYRAMID  Specify second point for height:").into_owned(),
+            PyramidStep::AxisEndpoint => t!("PYRAMID  Specify axis endpoint:").into_owned(),
+            PyramidStep::TopRadius => crate::tf!(
+                "PYRAMID  Specify top radius <{:.4}>:",
+                top_default
+            ).into_owned(),
+        }
+    }
+
+    fn pyramid_options(&self) -> Vec<CmdOption> {
+        match self.pyramid_step {
+            PyramidStep::BaseCenter => vec![
+                CmdOption::new(t!("Edge").as_ref(), "E"),
+                CmdOption::new(t!("Sides").as_ref(), "S"),
+            ],
+            PyramidStep::BaseRadius => vec![match self.pyramid_type {
+                PyramidType::Circumscribed => CmdOption::new(t!("Inscribed").as_ref(), "I"),
+                PyramidType::Inscribed => CmdOption::new(t!("Circumscribed").as_ref(), "C"),
+            }],
+            PyramidStep::Height => vec![
+                CmdOption::new("2Point", "2P"),
+                CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
+                CmdOption::new(t!("Top radius").as_ref(), "T"),
+            ],
+            PyramidStep::HeightAfterTopRadius => vec![
+                CmdOption::new("2Point", "2P"),
+                CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    fn on_pyramid_point(&mut self, point: DVec3) -> CmdResult {
+        match self.pyramid_step {
+            PyramidStep::BaseCenter => {
+                self.pyramid_frame = Some(self.pyramid_frame_at(point));
+                self.pyramid_step = PyramidStep::BaseRadius;
+                CmdResult::NeedPoint
+            }
+            PyramidStep::EdgeFirst => {
+                self.pyramid_edge_first = Some(point);
+                self.pyramid_step = PyramidStep::EdgeSecond;
+                CmdResult::NeedPoint
+            }
+            PyramidStep::EdgeSecond => {
+                if let Some(first) = self.pyramid_edge_first {
+                    self.pyramid_set_base_from_edge(first, point);
+                }
+                CmdResult::NeedPoint
+            }
+            PyramidStep::BaseRadius => {
+                self.pyramid_set_base_from_point(point);
+                CmdResult::NeedPoint
+            }
+            PyramidStep::Height | PyramidStep::HeightAfterTopRadius => self
+                .pyramid_height_at(point)
+                .map(|height| self.commit_pyramid_height(height))
+                .unwrap_or(CmdResult::NeedPoint),
+            PyramidStep::HeightFirstPoint => {
+                self.pyramid_height_first = Some(point);
+                self.pyramid_step = PyramidStep::HeightSecondPoint;
+                CmdResult::NeedPoint
+            }
+            PyramidStep::HeightSecondPoint => self
+                .pyramid_height_first
+                .map(|first| self.commit_pyramid_height(first.distance(point)))
+                .unwrap_or(CmdResult::NeedPoint),
+            PyramidStep::AxisEndpoint => {
+                let Some(frame) = self.pyramid_frame else {
+                    return CmdResult::NeedPoint;
+                };
+                self.commit_pyramid_axis(point - frame.origin)
+            }
+            PyramidStep::TopRadius => {
+                let Some(frame) = self.pyramid_frame else {
+                    return CmdResult::NeedPoint;
+                };
+                let delta = point - frame.origin;
+                let displayed = (delta - frame.z * delta.dot(frame.z)).length();
+                if displayed.is_finite() {
+                    self.pyramid_top_radius = pyramid_display_to_circumradius(
+                        displayed,
+                        self.pyramid_type,
+                        self.pyramid_sides,
+                    );
+                    self.pyramid_step = PyramidStep::HeightAfterTopRadius;
+                }
+                CmdResult::NeedPoint
+            }
+            PyramidStep::Sides => CmdResult::NeedPoint,
+        }
+    }
+
+    fn on_pyramid_text(&mut self, raw: &str) -> Option<CmdResult> {
+        let token = raw.trim();
+        let upper = token.to_uppercase();
+        match self.pyramid_step {
+            PyramidStep::BaseCenter => {
+                self.pyramid_step = match upper.as_str() {
+                    "E" | "EDGE" => PyramidStep::EdgeFirst,
+                    "S" | "SIDES" => PyramidStep::Sides,
+                    _ => return None,
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::BaseRadius if matches!(upper.as_str(), "I" | "INSCRIBED") => {
+                self.set_pyramid_type(PyramidType::Inscribed);
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::BaseRadius if matches!(upper.as_str(), "C" | "CIRCUMSCRIBED") => {
+                self.set_pyramid_type(PyramidType::Circumscribed);
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::Height => {
+                self.pyramid_step = match upper.as_str() {
+                    "2P" | "2POINT" => PyramidStep::HeightFirstPoint,
+                    "A" | "AXIS" | "AXIS ENDPOINT" => PyramidStep::AxisEndpoint,
+                    "T" | "TOP" | "TOP RADIUS" => PyramidStep::TopRadius,
+                    _ => {
+                        let height = crate::entities::common::parse_typed_length(token)?;
+                        return Some(self.commit_pyramid_height(height));
+                    }
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::HeightAfterTopRadius => {
+                self.pyramid_step = match upper.as_str() {
+                    "2P" | "2POINT" => PyramidStep::HeightFirstPoint,
+                    "A" | "AXIS" | "AXIS ENDPOINT" => PyramidStep::AxisEndpoint,
+                    _ => {
+                        let height = crate::entities::common::parse_typed_length(token)?;
+                        return Some(self.commit_pyramid_height(height));
+                    }
+                };
+                return Some(CmdResult::NeedPoint);
+            }
+            PyramidStep::Sides => {
+                let sides = token.parse::<usize>().ok()?;
+                if !(3..=32).contains(&sides) {
+                    return None;
+                }
+                let displayed_top = pyramid_circumradius_to_display(
+                    self.pyramid_top_radius,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                );
+                self.pyramid_sides = sides;
+                self.pyramid_top_radius = pyramid_display_to_circumradius(
+                    displayed_top,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                );
+                self.pyramid_defaults.sides = sides;
+                self.pyramid_step = PyramidStep::BaseCenter;
+                return Some(CmdResult::NeedPoint);
+            }
+            _ => {}
+        }
+        let number = crate::entities::common::parse_typed_length(token)?;
+        match self.pyramid_step {
+            PyramidStep::BaseRadius if number > 0.0 => {
+                let frame = self.pyramid_frame?;
+                self.pyramid_set_base_from_point(frame.origin + frame.x * number)
+                    .then_some(CmdResult::NeedPoint)
+            }
+            PyramidStep::TopRadius if number >= 0.0 => {
+                self.pyramid_top_radius = pyramid_display_to_circumradius(
+                    number,
+                    self.pyramid_type,
+                    self.pyramid_sides,
+                );
+                self.pyramid_step = PyramidStep::HeightAfterTopRadius;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
+        }
+    }
+
+    fn pyramid_mouse_move(&self, point: DVec3) -> Option<WireModel> {
+        match self.pyramid_step {
+            PyramidStep::EdgeSecond => {
+                let first = self.pyramid_edge_first?;
+                let mut preview = PrimitiveCommand::new("PYRAMID");
+                preview.plane = self.plane;
+                preview.pyramid_sides = self.pyramid_sides;
+                preview.pyramid_type = self.pyramid_type;
+                preview.pyramid_set_base_from_edge(first, point);
+                let frame = preview.pyramid_frame?;
+                preview.pyramid_base_preview(
+                    frame,
+                    pyramid_circumradius_to_display(
+                        preview.pyramid_base_radius,
+                        preview.pyramid_type,
+                        preview.pyramid_sides,
+                    ),
+                )
+            }
+            PyramidStep::BaseRadius => {
+                let frame = self.pyramid_frame?;
+                let delta = point - frame.origin;
+                let planar = delta - frame.z * delta.dot(frame.z);
+                let displayed = planar.length();
+                let direction = planar.try_normalize()?;
+                let x = match self.pyramid_type {
+                    PyramidType::Inscribed => direction,
+                    PyramidType::Circumscribed => {
+                        let half = std::f64::consts::PI / self.pyramid_sides as f64;
+                        direction * half.cos() - frame.z.cross(direction) * half.sin()
+                    }
+                }
+                .try_normalize()?;
+                let y = frame.z.cross(x).try_normalize()?;
+                self.pyramid_base_preview(WorkingPlane::new(frame.origin, x, y), displayed)
+            }
+            PyramidStep::Height | PyramidStep::HeightAfterTopRadius => {
+                let frame = self.pyramid_frame?;
+                self.pyramid_preview(frame.z * self.pyramid_height_at(point)?)
+            }
+            PyramidStep::HeightSecondPoint => {
+                let frame = self.pyramid_frame?;
+                self.pyramid_preview(frame.z * self.pyramid_height_first?.distance(point))
+            }
+            PyramidStep::AxisEndpoint => {
+                let frame = self.pyramid_frame?;
+                self.pyramid_preview(point - frame.origin)
+            }
+            _ => None,
+        }
+    }
+
     /// Number of footprint points the shape needs before the height step.
     fn footprint_pts(&self) -> usize {
         match self.shape {
@@ -1274,28 +2027,14 @@ impl PrimitiveCommand {
                     solid_history::sphere_op(self.history_transform(c), r),
                 )
             }
-            Shape::Pyramid => {
-                let c = self.pts[0];
-                let r = (self.pts[1] - c).length();
-                if r < 1e-6 || height < 1e-6 {
-                    return None;
-                }
-                (
-                    solid_model::pyramid_solid([c.x, c.y, c.z], r, height, 4),
-                    solid_history::pyramid_op(self.history_transform(c), r, height, 4),
-                )
-            }
+            Shape::Pyramid => return None,
             Shape::Torus => {
                 let c = self.pts[0];
-                let first = (self.pts[1] - c).length();
-                let second = (self.pts[2] - c).length();
-                let outer = first.max(second);
-                let inner = first.min(second);
-                if inner < 1e-6 || outer - inner < 1e-6 {
+                let major = (self.pts[1] - c).length();
+                let minor = (self.pts[2] - c).length();
+                if major < 1e-6 || minor < 1e-6 {
                     return None;
                 }
-                let major = (outer + inner) * 0.5;
-                let minor = (outer - inner) * 0.5;
                 let center = [c.x, c.y, c.z];
                 (
                     solid_model::torus_solid(center, major, minor),
@@ -1367,6 +2106,17 @@ impl CadCommand for PrimitiveCommand {
                 (frame.origin, frame.z.normalize_or_zero())
             });
         }
+
+        if self.shape == Shape::Pyramid {
+            return matches!(
+                self.pyramid_step,
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius
+            )
+            .then(|| {
+                let frame = self.pyramid_frame.unwrap_or(self.plane);
+                (frame.origin, frame.z.normalize_or_zero())
+            });
+        }
         let constrained = if self.shape.rectangular() {
             self.box_step == BoxStep::Height
         } else {
@@ -1395,11 +2145,39 @@ impl CadCommand for PrimitiveCommand {
                     self.cone_step,
                     ConeStep::TtrFirst | ConeStep::TtrSecond { .. }
                 ))
+            || (self.shape == Shape::Torus
+                && matches!(
+                    self.torus_step,
+                    TorusStep::TtrFirst | TorusStep::TtrSecond { .. }
+                ))
     }
 
     fn on_tangent_point(&mut self, object: TangentObject, hit: DVec3) -> CmdResult {
         if self.shape == Shape::Cone {
             return self.on_cone_tangent(object, hit);
+        }
+        if self.shape == Shape::Torus {
+            let object = sphere_tangent_local(object, self.plane);
+            let hit = self.plane.to_local(hit);
+            return match self.torus_step {
+                TorusStep::TtrFirst => {
+                    self.torus_step = TorusStep::TtrSecond { object, hit };
+                    CmdResult::NeedPoint
+                }
+                TorusStep::TtrSecond {
+                    object: first,
+                    hit: first_hit,
+                } => {
+                    self.torus_step = TorusStep::TtrRadius {
+                        first,
+                        second: object,
+                        first_hit,
+                        second_hit: hit,
+                    };
+                    CmdResult::NeedPoint
+                }
+                _ => CmdResult::NeedPoint,
+            };
         }
         if self.shape != Shape::Sphere {
             return self.on_point(hit);
@@ -1431,6 +2209,9 @@ impl CadCommand for PrimitiveCommand {
         let n = self.shape.name();
         if self.shape == Shape::Cone {
             return self.cone_prompt();
+        }
+        if self.shape == Shape::Pyramid {
+            return self.pyramid_prompt();
         }
         if self.shape.rectangular() {
             return match self.box_step {
@@ -1500,13 +2281,69 @@ impl CadCommand for PrimitiveCommand {
                 .into_owned(),
             };
         }
+        if self.shape == Shape::Torus {
+            return match self.torus_step {
+                TorusStep::Center => {
+                    t!("TORUS  Specify center point or [3P/2P/Ttr]:").into_owned()
+                }
+                TorusStep::Radius(_) => crate::tf!(
+                    "TORUS  Specify radius or [Diameter] <{:.4}>:",
+                    self.torus_defaults.major_radius
+                )
+                .into_owned(),
+                TorusStep::Diameter(_) => crate::tf!(
+                    "TORUS  Specify diameter <{:.4}>:",
+                    self.torus_defaults.major_radius * 2.0
+                )
+                .into_owned(),
+                TorusStep::TwoPointFirst => {
+                    t!("TORUS  Specify first end point of diameter:").into_owned()
+                }
+                TorusStep::TwoPointSecond(_) => {
+                    t!("TORUS  Specify second end point of diameter:").into_owned()
+                }
+                TorusStep::ThreePointFirst => {
+                    t!("TORUS  Specify first point on torus:").into_owned()
+                }
+                TorusStep::ThreePointSecond(_) => {
+                    t!("TORUS  Specify second point on torus:").into_owned()
+                }
+                TorusStep::ThreePointThird(_, _) => {
+                    t!("TORUS  Specify third point on torus:").into_owned()
+                }
+                TorusStep::TtrFirst => {
+                    t!("TORUS  Select first tangent object:").into_owned()
+                }
+                TorusStep::TtrSecond { .. } => {
+                    t!("TORUS  Select second tangent object:").into_owned()
+                }
+                TorusStep::TtrRadius { .. } => crate::tf!(
+                    "TORUS  Specify radius <{:.4}>:",
+                    self.torus_defaults.major_radius
+                )
+                .into_owned(),
+                TorusStep::TubeRadius { .. } => crate::tf!(
+                    "TORUS  Specify tube radius or [2Point/Diameter] <{:.4}>:",
+                    self.torus_defaults.minor_radius
+                )
+                .into_owned(),
+                TorusStep::TubeDiameter { .. } => crate::tf!(
+                    "TORUS  Specify tube diameter <{:.4}>:",
+                    self.torus_defaults.minor_radius * 2.0
+                )
+                .into_owned(),
+                TorusStep::TubeTwoPointFirst { .. } => {
+                    t!("TORUS  Specify first end point of tube diameter:").into_owned()
+                }
+                TorusStep::TubeTwoPointSecond { .. } => {
+                    t!("TORUS  Specify second end point of tube diameter:").into_owned()
+                }
+            };
+        }
         if self.height_step {
             return t!("%{n}  Specify height <Enter for default>:", n = n).into_owned();
         }
         match (self.shape, self.pts.len()) {
-            (Shape::Torus, 0) => t!("%{n}  Specify center point:", n = n).into_owned(),
-            (Shape::Torus, 1) => t!("%{n}  Specify outer radius:", n = n).into_owned(),
-            (Shape::Torus, _) => t!("%{n}  Specify inner radius:", n = n).into_owned(),
             (shape, 0) if shape.radial() => {
                 t!("%{n}  Specify center point:", n = n).into_owned()
             }
@@ -1530,8 +2367,28 @@ impl CadCommand for PrimitiveCommand {
                 _ => Vec::new(),
             };
         }
+        if self.shape == Shape::Torus {
+            return match self.torus_step {
+                TorusStep::Center => vec![
+                    CmdOption::new("3P", "3P"),
+                    CmdOption::new("2P", "2P"),
+                    CmdOption::new("Ttr", "T"),
+                ],
+                TorusStep::Radius(_) => {
+                    vec![CmdOption::new(t!("Diameter").as_ref(), "D")]
+                }
+                TorusStep::TubeRadius { .. } => vec![
+                    CmdOption::new(t!("2Point").as_ref(), "2P"),
+                    CmdOption::new(t!("Diameter").as_ref(), "D"),
+                ],
+                _ => Vec::new(),
+            };
+        }
         if self.shape == Shape::Cone {
             return self.cone_options();
+        }
+        if self.shape == Shape::Pyramid {
+            return self.pyramid_options();
         }
         if !self.shape.rectangular() {
             return Vec::new();
@@ -1591,8 +2448,81 @@ impl CadCommand for PrimitiveCommand {
                 SphereStep::TtrFirst | SphereStep::TtrSecond { .. } => CmdResult::NeedPoint,
             };
         }
+        if self.shape == Shape::Torus {
+            let local = self.plane.to_local(pt);
+            if !local.is_finite() {
+                return CmdResult::NeedPoint;
+            }
+            return match self.torus_step {
+                TorusStep::Center => {
+                    self.torus_step = TorusStep::Radius(local);
+                    CmdResult::NeedPoint
+                }
+                TorusStep::Radius(center) => {
+                    self.set_torus_major_radius(center, center.distance(local))
+                }
+                TorusStep::Diameter(center) => {
+                    self.set_torus_major_radius(center, center.distance(local) * 0.5)
+                }
+                TorusStep::TwoPointFirst => {
+                    self.torus_step = TorusStep::TwoPointSecond(local);
+                    CmdResult::NeedPoint
+                }
+                TorusStep::TwoPointSecond(first) => self.set_torus_major_radius(
+                    (first + local) * 0.5,
+                    first.distance(local) * 0.5,
+                ),
+                TorusStep::ThreePointFirst => {
+                    self.torus_step = TorusStep::ThreePointSecond(local);
+                    CmdResult::NeedPoint
+                }
+                TorusStep::ThreePointSecond(first) => {
+                    self.torus_step = TorusStep::ThreePointThird(first, local);
+                    CmdResult::NeedPoint
+                }
+                TorusStep::ThreePointThird(first, second) => {
+                    let Some((center, radius)) =
+                        sphere_through_three_points(first, second, local)
+                    else {
+                        return CmdResult::NeedPoint;
+                    };
+                    self.set_torus_major_radius(center, radius)
+                }
+                TorusStep::TtrRadius { second_hit, .. } => {
+                    self.torus_ttr_result(second_hit.distance(local))
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } => self.commit_torus(center, major_radius, center.distance(local)),
+                TorusStep::TubeDiameter {
+                    center,
+                    major_radius,
+                } => self.commit_torus(center, major_radius, center.distance(local) * 0.5),
+                TorusStep::TubeTwoPointFirst {
+                    center,
+                    major_radius,
+                } => {
+                    self.torus_step = TorusStep::TubeTwoPointSecond {
+                        center,
+                        major_radius,
+                        first: local,
+                    };
+                    CmdResult::NeedPoint
+                }
+                TorusStep::TubeTwoPointSecond {
+                    center,
+                    major_radius,
+                    first,
+                } => self.commit_torus(center, major_radius, first.distance(local) * 0.5),
+                TorusStep::TtrFirst | TorusStep::TtrSecond { .. } => CmdResult::NeedPoint,
+            };
+        }
         if self.shape == Shape::Cone {
             return self.on_cone_point(pt);
+        }
+        if self.shape == Shape::Pyramid {
+            return self.on_pyramid_point(pt);
         }
         if self.shape.rectangular() {
             let local = self.plane.to_local(pt);
@@ -1698,6 +2628,25 @@ impl CadCommand for PrimitiveCommand {
                 _ => CmdResult::Cancel,
             };
         }
+        if self.shape == Shape::Torus {
+            return match self.torus_step {
+                TorusStep::Radius(center) | TorusStep::Diameter(center) => {
+                    self.set_torus_major_radius(center, self.torus_defaults.major_radius)
+                }
+                TorusStep::TtrRadius { .. } => {
+                    self.torus_ttr_result(self.torus_defaults.major_radius)
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                }
+                | TorusStep::TubeDiameter {
+                    center,
+                    major_radius,
+                } => self.commit_torus(center, major_radius, self.torus_defaults.minor_radius),
+                _ => CmdResult::Cancel,
+            };
+        }
         if self.shape == Shape::Cone {
             return match self.cone_step {
                 ConeStep::BaseRadius | ConeStep::BaseDiameter => {
@@ -1737,6 +2686,35 @@ impl CadCommand for PrimitiveCommand {
                 _ => CmdResult::Cancel,
             };
         }
+        if self.shape == Shape::Pyramid {
+            return match self.pyramid_step {
+                PyramidStep::Sides => {
+                    self.pyramid_step = PyramidStep::BaseCenter;
+                    CmdResult::NeedPoint
+                }
+                PyramidStep::BaseRadius => {
+                    let displayed = self.pyramid_defaults.displayed_base_radius;
+                    let Some(frame) = self.pyramid_frame else {
+                        return CmdResult::Cancel;
+                    };
+                    self.pyramid_set_base_from_point(frame.origin + frame.x * displayed);
+                    CmdResult::NeedPoint
+                }
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius => {
+                    self.commit_pyramid_height(self.pyramid_defaults.height)
+                }
+                PyramidStep::TopRadius => {
+                    self.pyramid_top_radius = pyramid_display_to_circumradius(
+                        self.pyramid_defaults.displayed_top_radius,
+                        self.pyramid_type,
+                        self.pyramid_sides,
+                    );
+                    self.pyramid_step = PyramidStep::HeightAfterTopRadius;
+                    CmdResult::NeedPoint
+                }
+                _ => CmdResult::Cancel,
+            };
+        }
         if self.shape.rectangular() {
             return if self.shape == Shape::Wedge && self.box_step == BoxStep::Height {
                 self.commit(self.default_height())
@@ -1765,6 +2743,17 @@ impl CadCommand for PrimitiveCommand {
                     | SphereStep::TtrRadius { .. }
             );
         }
+        if self.shape == Shape::Torus {
+            return matches!(
+                self.torus_step,
+                TorusStep::Center
+                    | TorusStep::Radius(_)
+                    | TorusStep::Diameter(_)
+                    | TorusStep::TtrRadius { .. }
+                    | TorusStep::TubeRadius { .. }
+                    | TorusStep::TubeDiameter { .. }
+            );
+        }
         if self.shape == Shape::Cone {
             return matches!(
                 self.cone_step,
@@ -1777,6 +2766,17 @@ impl CadCommand for PrimitiveCommand {
                     | ConeStep::Height
                     | ConeStep::HeightAfterTopRadius
                     | ConeStep::TopRadius
+            );
+        }
+        if self.shape == Shape::Pyramid {
+            return matches!(
+                self.pyramid_step,
+                PyramidStep::BaseCenter
+                    | PyramidStep::Sides
+                    | PyramidStep::BaseRadius
+                    | PyramidStep::Height
+                    | PyramidStep::HeightAfterTopRadius
+                    | PyramidStep::TopRadius
             );
         }
         if self.shape.rectangular() {
@@ -1798,6 +2798,12 @@ impl CadCommand for PrimitiveCommand {
         if self.shape == Shape::Sphere {
             return matches!(self.sphere_step, SphereStep::Center | SphereStep::Radius(_));
         }
+        if self.shape == Shape::Torus {
+            return matches!(
+                self.torus_step,
+                TorusStep::Center | TorusStep::Radius(_) | TorusStep::TubeRadius { .. }
+            );
+        }
         if self.shape == Shape::Cone {
             return matches!(
                 self.cone_step,
@@ -1806,6 +2812,15 @@ impl CadCommand for PrimitiveCommand {
                     | ConeStep::EllipseFirst
                     | ConeStep::Height
                     | ConeStep::HeightAfterTopRadius
+            );
+        }
+        if self.shape == Shape::Pyramid {
+            return matches!(
+                self.pyramid_step,
+                PyramidStep::BaseCenter
+                    | PyramidStep::BaseRadius
+                    | PyramidStep::Height
+                    | PyramidStep::HeightAfterTopRadius
             );
         }
         self.shape.rectangular()
@@ -1854,8 +2869,80 @@ impl CadCommand for PrimitiveCommand {
                 _ => None,
             };
         }
+        if self.shape == Shape::Torus {
+            let token = raw.trim();
+            let upper = token.to_uppercase();
+            return match self.torus_step {
+                TorusStep::Center if upper == "3P" => {
+                    self.torus_step = TorusStep::ThreePointFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::Center if upper == "2P" => {
+                    self.torus_step = TorusStep::TwoPointFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::Center if matches!(upper.as_str(), "T" | "TTR") => {
+                    self.torus_step = TorusStep::TtrFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::Radius(center) if matches!(upper.as_str(), "D" | "DIAMETER") => {
+                    self.torus_step = TorusStep::Diameter(center);
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::Radius(center) => {
+                    let radius = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.set_torus_major_radius(center, radius))
+                }
+                TorusStep::Diameter(center) => {
+                    let diameter = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.set_torus_major_radius(center, diameter * 0.5))
+                }
+                TorusStep::TtrRadius { .. } => {
+                    let radius = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.torus_ttr_result(radius))
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } if matches!(upper.as_str(), "2P" | "2POINT") => {
+                    self.torus_step = TorusStep::TubeTwoPointFirst {
+                        center,
+                        major_radius,
+                    };
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } if matches!(upper.as_str(), "D" | "DIAMETER") => {
+                    self.torus_step = TorusStep::TubeDiameter {
+                        center,
+                        major_radius,
+                    };
+                    Some(CmdResult::NeedPoint)
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } => {
+                    let radius = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.commit_torus(center, major_radius, radius))
+                }
+                TorusStep::TubeDiameter {
+                    center,
+                    major_radius,
+                } => {
+                    let diameter = crate::entities::common::parse_typed_length(token)?;
+                    Some(self.commit_torus(center, major_radius, diameter * 0.5))
+                }
+                _ => None,
+            };
+        }
         if self.shape == Shape::Cone {
             return self.on_cone_text(raw);
+        }
+        if self.shape == Shape::Pyramid {
+            return self.on_pyramid_text(raw);
         }
         if self.shape.rectangular() {
             let token = raw.trim();
@@ -1905,6 +2992,63 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        if self.shape == Shape::Torus {
+            let local = self.plane.to_local(pt);
+            if !local.is_finite() {
+                return None;
+            }
+            return match self.torus_step {
+                TorusStep::Radius(center) => self.torus_preview(
+                    center,
+                    center.distance(local),
+                    self.torus_defaults.minor_radius,
+                ),
+                TorusStep::Diameter(center) => self.torus_preview(
+                    center,
+                    center.distance(local) * 0.5,
+                    self.torus_defaults.minor_radius,
+                ),
+                TorusStep::TwoPointSecond(first) | TorusStep::ThreePointSecond(first) => {
+                    self.torus_preview(
+                        (first + local) * 0.5,
+                        first.distance(local) * 0.5,
+                        self.torus_defaults.minor_radius,
+                    )
+                }
+                TorusStep::ThreePointThird(first, second) => {
+                    let (center, radius) = sphere_through_three_points(first, second, local)?;
+                    self.torus_preview(center, radius, self.torus_defaults.minor_radius)
+                }
+                TorusStep::TtrRadius {
+                    first,
+                    second,
+                    first_hit,
+                    second_hit,
+                } => {
+                    let radius = second_hit.distance(local);
+                    let hint = (first_hit + second_hit) * 0.5;
+                    let center = closest_sphere_center(
+                        &sphere_ttr_centers(first, second, radius),
+                        hint,
+                    )?;
+                    self.torus_preview(center, radius, self.torus_defaults.minor_radius)
+                }
+                TorusStep::TubeRadius {
+                    center,
+                    major_radius,
+                } => self.torus_preview(center, major_radius, center.distance(local)),
+                TorusStep::TubeDiameter {
+                    center,
+                    major_radius,
+                } => self.torus_preview(center, major_radius, center.distance(local) * 0.5),
+                TorusStep::TubeTwoPointSecond {
+                    center,
+                    major_radius,
+                    first,
+                } => self.torus_preview(center, major_radius, first.distance(local) * 0.5),
+                _ => None,
+            };
+        }
         if self.shape == Shape::Sphere {
             let local = self.plane.to_local(pt);
             if !local.is_finite() {
@@ -1944,6 +3088,9 @@ impl CadCommand for PrimitiveCommand {
         }
         if self.shape == Shape::Cone {
             return self.cone_mouse_move(pt);
+        }
+        if self.shape == Shape::Pyramid {
+            return self.pyramid_mouse_move(pt);
         }
         if self.pts.is_empty() {
             return None;
@@ -2052,6 +3199,25 @@ impl CadCommand for PrimitiveCommand {
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
         use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
 
+        if self.shape == Shape::Torus {
+            let (anchor, role) = match self.torus_step {
+                TorusStep::Radius(center) => (center, DynRole::Radius),
+                TorusStep::Diameter(center) => (center, DynRole::Diameter),
+                TorusStep::TtrRadius { second_hit, .. } => {
+                    (second_hit, DynRole::Radius)
+                }
+                TorusStep::TubeRadius { center, .. } => (center, DynRole::Radius),
+                TorusStep::TubeDiameter { center, .. } => (center, DynRole::Diameter),
+                _ => return None,
+            };
+            return Some(DynSpec {
+                anchor: DynAnchor::Point(self.plane.to_world(anchor)),
+                fields: vec![DynFieldSpec::new(role)],
+                guide: DynGuide::Radius,
+                ref_point: None,
+            });
+        }
+
         if self.shape == Shape::Sphere {
             let (anchor, role) = match self.sphere_step {
                 SphereStep::Radius(center) => (center, DynRole::Radius),
@@ -2098,6 +3264,32 @@ impl CadCommand for PrimitiveCommand {
             });
         }
 
+        if self.shape == Shape::Pyramid {
+            let frame = self.pyramid_frame.unwrap_or(self.plane);
+            let (anchor, role) = match self.pyramid_step {
+                PyramidStep::BaseRadius | PyramidStep::TopRadius => {
+                    (frame.origin, DynRole::Radius)
+                }
+                PyramidStep::Height
+                | PyramidStep::HeightAfterTopRadius
+                | PyramidStep::AxisEndpoint => (frame.origin, DynRole::Height),
+                PyramidStep::HeightSecondPoint => {
+                    (self.pyramid_height_first?, DynRole::Height)
+                }
+                _ => return None,
+            };
+            return Some(DynSpec {
+                anchor: DynAnchor::Point(anchor),
+                fields: vec![DynFieldSpec::new(role)],
+                guide: if role == DynRole::Radius {
+                    DynGuide::Radius
+                } else {
+                    DynGuide::None
+                },
+                ref_point: None,
+            });
+        }
+
         let role = if self.shape.rectangular() {
             match self.box_step {
                 BoxStep::CubeSize | BoxStep::Length => DynRole::Distance,
@@ -2119,6 +3311,21 @@ impl CadCommand for PrimitiveCommand {
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        if self.shape == Shape::Torus {
+            let local = self.plane.to_local(cursor);
+            return match self.torus_step {
+                TorusStep::Radius(center) | TorusStep::TubeRadius { center, .. } => {
+                    Some(center.distance(local))
+                }
+                TorusStep::Diameter(center) | TorusStep::TubeDiameter { center, .. } => {
+                    Some(center.distance(local))
+                }
+                TorusStep::TtrRadius { second_hit, .. } => {
+                    Some(second_hit.distance(local))
+                }
+                _ => None,
+            };
+        }
         if self.shape == Shape::Sphere {
             let local = self.plane.to_local(cursor);
             return match self.sphere_step {
@@ -2155,6 +3362,25 @@ impl CadCommand for PrimitiveCommand {
                 _ => None,
             };
         }
+        if self.shape == Shape::Pyramid {
+            return match self.pyramid_step {
+                PyramidStep::BaseRadius | PyramidStep::TopRadius => {
+                    let frame = self.pyramid_frame?;
+                    let delta = cursor - frame.origin;
+                    Some((delta - frame.z * delta.dot(frame.z)).length())
+                }
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius => {
+                    self.pyramid_height_at(cursor).map(f64::abs)
+                }
+                PyramidStep::HeightSecondPoint => {
+                    Some(self.pyramid_height_first?.distance(cursor))
+                }
+                PyramidStep::AxisEndpoint => {
+                    self.pyramid_frame.map(|frame| frame.origin.distance(cursor))
+                }
+                _ => None,
+            };
+        }
         if self.shape.rectangular() {
             let local = self.plane.to_local(cursor);
             if !local.is_finite() {
@@ -2182,6 +3408,48 @@ impl CadCommand for PrimitiveCommand {
 }
 
 // ── Footprint preview ───────────────────────────────────────────────────────
+
+fn torus_wire(center: DVec3, major_radius: f64, minor_radius: f64) -> WireModel {
+    let mut points = Vec::new();
+    let profile_limit = if minor_radius > major_radius {
+        std::f64::consts::PI - (major_radius / minor_radius).acos()
+    } else {
+        std::f64::consts::PI
+    };
+
+    for fraction in [-0.75_f64, -0.5, 0.0, 0.5, 0.75] {
+        let angle = profile_limit * fraction;
+        let ring_radius = major_radius + minor_radius * angle.cos();
+        if ring_radius <= 1e-9 {
+            continue;
+        }
+        if !points.is_empty() {
+            points.push([f32::NAN; 3]);
+        }
+        circle_points(
+            &mut points,
+            center + DVec3::Z * (minor_radius * angle.sin()),
+            ring_radius,
+        );
+    }
+
+    for meridian in 0..12 {
+        points.push([f32::NAN; 3]);
+        let around = meridian as f64 * std::f64::consts::TAU / 12.0;
+        for sample in 0..=32 {
+            let profile = -profile_limit + 2.0 * profile_limit * sample as f64 / 32.0;
+            let radial = (major_radius + minor_radius * profile.cos()).max(0.0);
+            let point = center
+                + DVec3::new(
+                    radial * around.cos(),
+                    radial * around.sin(),
+                    minor_radius * profile.sin(),
+                );
+            points.push(point.as_vec3().to_array());
+        }
+    }
+    wire("torus_preview", points)
+}
 
 fn footprint_wire(shape: Shape, pts: &[DVec3]) -> WireModel {
     let mut points: Vec<[f32; 3]> = Vec::new();
@@ -2293,6 +3561,14 @@ fn push_break(points: &mut Vec<[f32; 3]>) {
 }
 
 fn push_loop<const N: usize>(points: &mut Vec<[f32; 3]>, path: &[DVec3; N]) {
+    push_break(points);
+    points.extend(path.iter().chain(path.first()).map(|point| point.as_vec3().to_array()));
+}
+
+fn push_path_loop(points: &mut Vec<[f32; 3]>, path: &[DVec3]) {
+    if path.is_empty() {
+        return;
+    }
     push_break(points);
     points.extend(path.iter().chain(path.first()).map(|point| point.as_vec3().to_array()));
 }

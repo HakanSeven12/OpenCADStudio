@@ -144,8 +144,8 @@ pub fn symbol_radius(doc: &CadDocument, block: Handle, scale: f64) -> f64 {
     ) else {
         return 0.0;
     };
-    graph.walk_insert(
-        &block_use.insert,
+    graph.walk_block_use(
+        &block_use,
         block,
         |_, _| true,
         |entity, context| {
@@ -322,16 +322,15 @@ pub fn place_block_wires(
     ) else {
         return Vec::new();
     };
-    let insert = &mut block_use.insert;
-    insert.set_x_scale(s);
-    insert.set_y_scale(s);
-    insert.set_z_scale(s);
+    block_use.insert.set_x_scale(s);
+    block_use.insert.set_y_scale(s);
+    block_use.insert.set_z_scale(s);
     let depths = rustc_hash::FxHashMap::default();
     let graph = crate::scene::render_graph::RenderSceneGraph::new(doc, None, None, true, &depths)
         .with_annotation_scale(anno_scale);
     let mut out = Vec::new();
-    graph.walk_insert(
-        insert,
+    graph.walk_block_use(
+        &block_use,
         block,
         |_, _| true,
         |entity, context| {

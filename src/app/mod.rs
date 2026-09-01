@@ -960,6 +960,20 @@ pub(super) struct OpenCADStudio {
     shortcut_bindings: rustc_hash::FxHashMap<String, String>,
     /// Working rows shown by the shortcut editor until Apply is pressed.
     shortcut_editor_rows: Vec<(String, String)>,
+    /// Row whose Key cell is armed for capture: the next key combination
+    /// pressed anywhere fills that row's key. While set, the keyboard
+    /// subscription swallows every key so captured shortcuts do not run in
+    /// the drawing.
+    shortcut_capture_row: Option<usize>,
+    /// True while a freshly added (top) row is an unfinished draft: it exists
+    /// only until its key and command are filled (success) or it is cancelled
+    /// (Esc / ✕ / dialog close), so the list never keeps an empty row.
+    shortcut_pending_add: bool,
+    /// True while the "Reset to default" confirmation is showing.
+    shortcut_reset_confirm: bool,
+    /// True while the "unsaved changes will be discarded" confirmation
+    /// overlays the editor: the user tried to close with un-applied rows.
+    shortcut_close_confirm: bool,
 
     // ── Command Aliases ───────────────────────────────────────────────────
     /// Command-line aliases: uppercase abbreviation → uppercase command
@@ -2552,6 +2566,28 @@ pub enum Message {
     ShortcutEditorAdd,
     ShortcutEditorRemove(usize),
     ShortcutEditorApply,
+    /// Apply the working rows and close the dialog.
+    ShortcutEditorApplyExit,
+    /// The check button on a draft row: finish the addition without applying.
+    ShortcutEditorDraftAccept,
+    /// Show the "Reset to default" confirmation.
+    ShortcutEditorResetAsk,
+    /// Reset bindings and rows to the shipped defaults.
+    ShortcutEditorResetConfirm,
+    /// Hide the reset confirmation without resetting.
+    ShortcutEditorResetDeny,
+    /// Discard un-applied rows and close the editor.
+    ShortcutEditorCloseDiscard,
+    /// Keep editing: hide the discard confirmation.
+    ShortcutEditorCloseKeep,
+    /// The user clicked a row's Key cell: arm capture for that row.
+    ShortcutCaptureStart(usize),
+    /// A key combination was pressed while a row's Key cell was armed.
+    ShortcutCaptureKey(String),
+    /// Disarm capture without filling the row.
+    ShortcutCaptureClear,
+    /// Cancel capture (Esc): also discards an unfinished draft row.
+    ShortcutCaptureCancel,
     /// Canonical key emitted by the global keyboard subscription.
     ShortcutPressed(String),
     // ── Command Alias Editor (ALIASEDIT) ────────────────────────────────
@@ -3414,6 +3450,10 @@ impl OpenCADStudio {
             // Keyboard shortcuts
             shortcut_bindings: rustc_hash::FxHashMap::default(),
             shortcut_editor_rows: Vec::new(),
+            shortcut_capture_row: None,
+            shortcut_pending_add: false,
+            shortcut_reset_confirm: false,
+            shortcut_close_confirm: false,
             // Command aliases (populated from ocad.pgp just after construction)
             command_aliases: rustc_hash::FxHashMap::default(),
             alias_editor_rows: Vec::new(),

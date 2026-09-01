@@ -107,10 +107,11 @@ fn block_entity_transform(
                 visited,
                 annotation_scale,
             )?;
-            Some(inner.then(&crate::scene::render_graph::insert_transform_at_scale(
+            Some(inner.then(&crate::scene::render_graph::insert_transform_with_policy(
                 document,
                 &block_use.insert,
                 annotation_scale,
+                block_use.scale_policy,
             )))
         })
     });

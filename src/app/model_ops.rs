@@ -651,8 +651,10 @@ impl super::OpenCADStudio {
         let history = solid_history::pyramid_op(
             glam::DMat4::IDENTITY.to_cols_array(),
             radius,
+            0.0,
             height,
             n,
+            true,
         );
         let handle = self.add_solid_model(entity, solid, history);
         self.tabs[i].scene.deselect_all();

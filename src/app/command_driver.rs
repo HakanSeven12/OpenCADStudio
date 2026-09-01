@@ -1636,11 +1636,24 @@ impl OpenCADStudio {
                 entity,
                 solid,
                 history,
+                erase_source,
             } => {
                 let label = self.history_label_from_active_cmd(i, "SOLID");
-                let pending = self.begin_undo(i, label, 1, true);
+                let erase_source = erase_source.filter(|handle| {
+                    self.tabs[i].scene.document.header.delete_objects
+                        && !self.tabs[i].scene.is_layer_locked(*handle)
+                });
+                let pending = self.begin_undo(
+                    i,
+                    label,
+                    1 + usize::from(erase_source.is_some()),
+                    true,
+                );
                 let handle = self.add_solid_model(entity, *solid, history);
                 if !handle.is_null() {
+                    if let Some(source) = erase_source {
+                        self.tabs[i].scene.erase_entities(&[source]);
+                    }
                     self.tabs[i].dirty = true;
                     if let Some(pd) = pending {
                         self.commit_undo_delta(i, pd);

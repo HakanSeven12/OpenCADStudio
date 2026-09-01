@@ -1,8 +1,13 @@
 // Exact profile sweeps stored as kernel B-reps and ACIS.
 
 use cadkernel::brep::{self, Body};
-use cadkernel::geom2d::{offset_polyline, Arc, Curve, EllipseArc, Line, Polyline};
+use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use cadkernel::space::{PlanarCurve, Plane, Vec3};
+use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex};
+use acadrust::objects::{
+    SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep,
+};
+use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;
 
 use crate::entities::curve::entity_curve;
@@ -162,88 +167,109 @@ pub fn lofted(profiles: &[EntityType]) -> Option<Body> {
     brep::loft(&sections)
 }
 
-/// Builds an exact wall solid around a polyline centreline.
-pub fn polysolid(entity: &EntityType, width: f64, height: f64) -> Option<Body> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolysolidJustification {
+    Left,
+    Center,
+    Right,
+}
+
+fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
+    match entity {
+        EntityType::Line(value) => Some(EmbeddedEntity::Line(value.clone())),
+        EntityType::Arc(value) => Some(EmbeddedEntity::Arc(value.clone())),
+        EntityType::Circle(value) => Some(EmbeddedEntity::Circle(value.clone())),
+        EntityType::Ellipse(value) => Some(EmbeddedEntity::Ellipse(value.clone())),
+        EntityType::LwPolyline(value) => Some(EmbeddedEntity::LwPolyline(value.clone())),
+        EntityType::Spline(_) => {
+            let planar = entity_curve(entity)?;
+            let samples = planar.curve.tessellate_within(1e-4);
+            if samples.len() < 2 {
+                return None;
+            }
+            let mut path = LwPolyline::new();
+            path.vertices = samples
+                .into_iter()
+                .map(|point| LwVertex::new(Vector2::new(point[0], point[1])))
+                .collect();
+            path.is_closed = planar.curve.is_closed();
+            let plane = crate::command::WorkingPlane::new(
+                glam::DVec3::from_array(planar.plane.origin),
+                glam::DVec3::from_array(planar.plane.x_axis),
+                glam::DVec3::from_array(planar.plane.y_axis),
+            );
+            let EntityType::LwPolyline(path) = plane.place_entity(EntityType::LwPolyline(path))
+            else {
+                return None;
+            };
+            Some(EmbeddedEntity::LwPolyline(path))
+        }
+        _ => None,
+    }
+}
+
+/// Builds a history-backed wall solid along a supported planar curve.
+pub fn polysolid(
+    entity: &EntityType,
+    width: f64,
+    height: f64,
+    justification: PolysolidJustification,
+) -> Option<(Body, SolidHistoryOperation)> {
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height.abs() <= 1e-12 {
         return None;
     }
     let planar = entity_curve(entity)?;
-    let Curve::Polyline(source) = planar.curve else {
+    let start_local = planar.curve.point_at(0.0);
+    let tangent_local = Vec3::from([
+        planar.curve.tangent_at(0.0)[0],
+        planar.curve.tangent_at(0.0)[1],
+        0.0,
+    ])
+    .normalize()?;
+    let start = Vec3::from(planar.plane.point_at(start_local));
+    let tangent = (Vec3::from(planar.plane.x_axis) * tangent_local.x
+        + Vec3::from(planar.plane.y_axis) * tangent_local.y)
+        .normalize()?;
+    let normal = Vec3::from(planar.plane.normal()?).normalize()?;
+    let side = tangent.cross(normal).normalize()?;
+    let offset = match justification {
+        PolysolidJustification::Left => 0.0,
+        PolysolidJustification::Center => -width * 0.5,
+        PolysolidJustification::Right => -width,
+    };
+    let profile_origin = start + side * offset;
+    let profile_plane = crate::command::WorkingPlane::new(
+        glam::DVec3::from_array(profile_origin.to_array()),
+        glam::DVec3::from_array(side.to_array()),
+        glam::DVec3::from_array(normal.to_array()),
+    );
+    let mut profile = LwPolyline::new();
+    profile.vertices = [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]]
+        .into_iter()
+        .map(|point| LwVertex::new(Vector2::new(point[0], point[1])))
+        .collect();
+    profile.is_closed = true;
+    let EntityType::LwPolyline(profile) =
+        profile_plane.place_entity(EntityType::LwPolyline(profile))
+    else {
         return None;
     };
-    let (left_pick, right_pick) = offset_picks(&source, width)?;
-    let mut left = offset_polyline(&source, width * 0.5, left_pick);
-    let mut right = offset_polyline(&source, width * 0.5, right_pick);
-    if left.len() != 1 || right.len() != 1 {
-        return None;
-    }
-    let left = left.remove(0);
-    let right = right.remove(0);
-    let normal = Vec3::from(planar.plane.normal()?);
-    let direction = (normal * height).to_array();
-
-    if source.closed {
-        if !left.closed || !right.closed {
-            return None;
-        }
-        let mut profiles = [left, right]
-            .into_iter()
-            .map(|polyline| {
-                let area = Curve::Polyline(polyline.clone()).enclosed_area().abs();
-                (area, Curve::Polyline(polyline).segments())
-            })
-            .collect::<Vec<_>>();
-        profiles.sort_by(|first, second| second.0.total_cmp(&first.0));
-        if profiles[0].0 <= profiles[1].0 || profiles[1].0 <= 1e-12 {
-            return None;
-        }
-        return brep::extrude_region(
-            planar.plane,
-            &[profiles.remove(0).1, profiles.remove(0).1],
-            direction,
-        );
-    }
-
-    if left.closed || right.closed {
-        return None;
-    }
-    let left_start = left.vertices.first()?.position;
-    let left_end = left.vertices.last()?.position;
-    let right_start = right.vertices.first()?.position;
-    let right_end = right.vertices.last()?.position;
-    let mut outline = Curve::Polyline(left).segments();
-    outline.push(Curve::Line(Line {
-        start: left_end,
-        end: right_end,
-    }));
-    let mut back = Curve::Polyline(right).segments();
-    back.reverse();
-    outline.extend(back);
-    outline.push(Curve::Line(Line {
-        start: right_start,
-        end: left_start,
-    }));
-    brep::extrude(planar.plane, &outline, direction)
-}
-
-fn offset_picks(polyline: &Polyline, width: f64) -> Option<([f64; 2], [f64; 2])> {
-    let start = polyline.vertices.first()?.position;
-    let next = polyline.vertices.get(1)?.position;
-    let along = if let Some(arc) = polyline.segment_arc(0) {
-        let near = arc.sample(1e-6);
-        [near[0] - start[0], near[1] - start[1]]
-    } else {
-        [next[0] - start[0], next[1] - start[1]]
-    };
-    let length = along[0].hypot(along[1]);
-    if length <= 1e-12 {
-        return None;
-    }
-    let side = [-along[1] / length * width, along[0] / length * width];
-    Some((
-        [start[0] + side[0], start[1] + side[1]],
-        [start[0] - side[0], start[1] - side[1]],
-    ))
+    let mut base = SolidHistoryNodeBase::new(1);
+    base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    let operation = SolidHistoryOperation::Sweep(SolidHistorySweep {
+        base,
+        operation_major: 1,
+        direction: Vector3::new(normal.x * height, normal.y * height, normal.z * height),
+        sweep_entity: Some(EmbeddedEntity::LwPolyline(profile)),
+        path_entity: Some(embedded_path(entity)?),
+        scale_factor: 1.0,
+        sweep_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
+        path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
+        reference_point: Vector3::new(start.x, start.y, start.z),
+        ..SolidHistorySweep::default()
+    });
+    let body = cadkernel::acis::rebuild_body(&operation).ok()?;
+    Some((body, operation))
 }
 
 fn circular_loft(profiles: &[EntityType]) -> Option<Body> {

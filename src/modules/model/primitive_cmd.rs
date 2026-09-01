@@ -472,6 +472,7 @@ impl PrimitiveCommand {
             entity: EntityType::Solid3D(entity),
             solid: Box::new(solid),
             history,
+            erase_source: None,
         }
     }
 
@@ -1342,6 +1343,7 @@ impl PrimitiveCommand {
                             entity: EntityType::Solid3D(entity),
                             solid: Box::new(placed),
                             history,
+                            erase_source: None,
                         }
                     }
                     None => CmdResult::Cancel,

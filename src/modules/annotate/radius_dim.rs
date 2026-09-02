@@ -3,7 +3,7 @@ use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 
 use crate::command::{
-    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, WorkingPlane,
+    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, InputKind, WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
@@ -134,16 +134,16 @@ impl CadCommand for RadiusDimensionCommand {
         CmdResult::Cancel
     }
 
-    fn wants_text_input(&self) -> bool {
-        true
+    fn input_kind(&self) -> InputKind {
+        if self.awaiting_text {
+            InputKind::FreeText
+        } else {
+            InputKind::SingleToken
+        }
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
         !self.awaiting_text && !self.awaiting_angle
-    }
-
-    fn wants_text_with_spaces(&self) -> bool {
-        self.awaiting_text
     }
 
     fn options(&self) -> Vec<CmdOption> {

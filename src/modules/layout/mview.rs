@@ -6,7 +6,7 @@ use acadrust::types::{Vector2, Vector3};
 use acadrust::{EntityType, Handle};
 use crate::t;
 
-use crate::command::{CadCommand, CmdOption, CmdResult};
+use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::modules::draw::draw::polyline::{
     arc_sample_points, compute_bulge, seg_exit_tangent, update_tangent_after_arc,
 };
@@ -464,14 +464,16 @@ impl CadCommand for MviewCommand {
         }
     }
 
-    fn wants_text_input(&self) -> bool {
-        self.step == Step::RectangleFirst
-            || self.step == Step::ChooseView
+    fn input_kind(&self) -> InputKind {
+        if self.step == Step::ChooseView {
+            InputKind::FreeText
+        } else if self.step == Step::RectangleFirst
             || (self.step == Step::Polygon && !self.polygon.is_empty())
-    }
-
-    fn wants_text_with_spaces(&self) -> bool {
-        self.step == Step::ChooseView
+        {
+            InputKind::SingleToken
+        } else {
+            InputKind::Point
+        }
     }
 
     fn point_step_accepts_keywords(&self) -> bool {

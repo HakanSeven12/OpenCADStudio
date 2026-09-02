@@ -1,5 +1,5 @@
 use acadrust::entities::acis::{SabReader, SatBody, SatDocument};
-use acadrust::entities::{Body, Region, Solid3D};
+use acadrust::entities::{Body, Region, Solid3D, Surface};
 use cadkernel::brep::{self, Body as KernelBody};
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
@@ -156,10 +156,18 @@ fn parse_acis(
 }
 
 pub fn kernel_body(solid: &Solid3D) -> Option<KernelBody> {
+    kernel_acis_body(&solid.acis_data)
+}
+
+pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
+    kernel_acis_body(&surface.acis_data)
+}
+
+fn kernel_acis_body(acis: &acadrust::entities::AcisData) -> Option<KernelBody> {
     let sat = parse_acis(
-        || solid.parse_sat(),
-        solid.acis_data.is_binary,
-        &solid.acis_data.sab_data,
+        || acis.parse(),
+        acis.is_binary,
+        &acis.sab_data,
     )?;
     let (mut bodies, loss) = cadkernel::acis::lift(&sat);
     if !loss.is_empty() || bodies.len() != 1 {

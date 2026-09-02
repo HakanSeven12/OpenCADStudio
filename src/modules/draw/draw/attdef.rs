@@ -12,7 +12,7 @@ use acadrust::EntityType;
 use glam::DVec3;
 use crate::t;
 
-use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::scene::model::wire_model::WireModel;
 
 enum Step {
@@ -88,14 +88,12 @@ impl CadCommand for AttdefCommand {
         }
     }
 
-    fn wants_text_input(&self) -> bool {
-        !matches!(self.step, Step::Insertion { .. })
-    }
-
-    fn wants_text_with_spaces(&self) -> bool {
-        // Tag must be a single token (so disallow spaces there); the
-        // Prompt and Default value steps are free-form text.
-        matches!(self.step, Step::Prompt { .. } | Step::Default { .. })
+    fn input_kind(&self) -> InputKind {
+        match self.step {
+            Step::Insertion { .. } => InputKind::Point,
+            Step::Tag => InputKind::SingleToken,
+            Step::Prompt { .. } | Step::Default { .. } => InputKind::FreeText,
+        }
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {

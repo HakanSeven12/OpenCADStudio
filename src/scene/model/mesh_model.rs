@@ -274,6 +274,16 @@ impl MeshLodSet {
             .map_or(self.lods.as_slice(), |source| source.lods.as_slice())
     }
 
+    pub fn geometry_edges(&self) -> (&[[f32; 3]], &[[f32; 3]]) {
+        self.instance_source.as_ref().map_or(
+            (self.edge_verts.as_slice(), self.edge_verts_low.as_slice()),
+            |source| (
+                source.edge_verts.as_slice(),
+                source.edge_verts_low.as_slice(),
+            ),
+        )
+    }
+
     pub fn entity_handle(&self) -> Option<acadrust::Handle> {
         self.instance_handle.or_else(|| {
             self.lods

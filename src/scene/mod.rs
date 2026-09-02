@@ -2725,12 +2725,21 @@ impl Scene {
         if let Some((mut set, wires, center)) =
             crate::scene::model::solid_model::display_from_solid(&solid, color)
         {
-            if let Some(EntityType::Solid3D(entity)) = self.document.get_entity_mut(handle) {
-                entity.point_of_reference = acadrust::types::Vector3::new(
-                    center[0], center[1], center[2],
-                );
-                entity.wires = wires;
-                entity.silhouettes.clear();
+            if let Some(entity) = self.document.get_entity_mut(handle) {
+                let reference = acadrust::types::Vector3::new(center[0], center[1], center[2]);
+                match entity {
+                    EntityType::Solid3D(entity) => {
+                        entity.point_of_reference = reference;
+                        entity.wires = wires;
+                        entity.silhouettes.clear();
+                    }
+                    EntityType::Surface(entity) => {
+                        entity.point_of_reference = reference;
+                        entity.wires = wires;
+                        entity.silhouettes.clear();
+                    }
+                    _ => {}
+                }
             }
             let name = handle.value().to_string();
             for mesh in &mut set.lods {
@@ -8203,6 +8212,60 @@ impl Scene {
             bounds,
             candidate_handles,
             false,
+        )
+    }
+
+    /// Normal object selection for shaded 3D bodies is edge based. This keeps
+    /// the broad face interior available to modelling commands without making
+    /// it part of ordinary object picking.
+    pub fn solid_edge_click_hit(
+        &self,
+        cursor: iced::Point,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        candidate_handles: Option<&HashSet<Handle>>,
+        tolerance_px: f32,
+    ) -> Option<Handle> {
+        let meshes = self.interaction_meshes_arc();
+        pick::hit_test::mesh_edge_click_hit(
+            cursor,
+            meshes.iter().filter_map(|set| {
+                let handle = set.entity_handle()?;
+                if candidate_handles.is_some_and(|handles| !handles.contains(&handle)) {
+                    return None;
+                }
+                let (edges, edges_low) = set.geometry_edges();
+                (!edges.is_empty()).then_some((
+                    handle,
+                    edges,
+                    edges_low,
+                    set.instance_transform,
+                ))
+            }),
+            view_rot,
+            eye,
+            bounds,
+            tolerance_px,
+        )
+    }
+
+    pub fn solid_edge_hover_hit(
+        &self,
+        cursor: iced::Point,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        candidate_handles: Option<&HashSet<Handle>>,
+        tolerance_px: f32,
+    ) -> Option<Handle> {
+        self.solid_edge_click_hit(
+            cursor,
+            view_rot,
+            eye,
+            bounds,
+            candidate_handles,
+            tolerance_px,
         )
     }
 

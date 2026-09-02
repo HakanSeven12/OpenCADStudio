@@ -7,7 +7,7 @@ pub use automation::{export_headless, serve};
 mod command_driver;
 pub(crate) mod commands;
 mod document;
-mod expr_eval;
+pub(crate) mod expr_eval;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
@@ -321,6 +321,21 @@ pub enum StartSection {
     Welcome,
     Discussions,
     Supporters,
+}
+
+/// What the Space / Enter keys currently mean at the command line. One
+/// decision point (`OpenCADStudio::text_entry_mode`) for every keyboard
+/// route that used to re-derive the answer from editor state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum TextEntryMode {
+    /// Normal command line: Space submits, Enter finalises.
+    Command,
+    /// MText preview pane: every key is literal content, Enter is a line break.
+    MTextPreview,
+    /// Free-form text prompt (table cell content, TEXT / MTEXT bodies):
+    /// Space is literal, typed case is preserved, Enter finishes the edit,
+    /// Shift+Enter inserts a line break.
+    FreeText,
 }
 
 pub(super) struct OpenCADStudio {

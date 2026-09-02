@@ -3,7 +3,7 @@
 use cadkernel::brep::{self, Body};
 use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use cadkernel::space::{PlanarCurve, Plane, Vec3};
-use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex};
+use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
 use acadrust::objects::{
     SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep,
 };
@@ -28,28 +28,183 @@ pub struct Profile {
 /// is handed over as the arcs it is made of rather than as one curve with
 /// nowhere for the sweep to start.
 pub fn profile_of(entity: &EntityType) -> Option<Profile> {
-    let planar: PlanarCurve = entity_curve(entity)?;
+    let planar = entity_curve(entity).or_else(|| planar_polygon_entity(entity))?;
     if !planar.curve.is_closed() {
         return None;
     }
-    let pieces = match &planar.curve {
-        Curve::Polyline(_) => planar.curve.segments(),
-        Curve::Circle(circle) => quarters(circle.centre, circle.radius),
-        Curve::Arc(arc) => split_arc(*arc),
-        Curve::Ellipse(arc) => split_ellipse(*arc),
-        Curve::Nurbs(curve) => (0..4)
-            .map(|part| {
-                curve
-                    .trimmed(part as f64 / 4.0, (part + 1) as f64 / 4.0)
-                    .map(Curve::Nurbs)
-            })
-            .collect::<Option<Vec<_>>>()?,
-        _ => return None,
-    };
+    let pieces = profile_pieces(&planar.curve, true)?;
     (pieces.len() >= 3).then_some(Profile {
         plane: planar.plane,
         pieces,
     })
+}
+
+/// An entity-level planar curve suitable for either a solid profile or an
+/// open surface profile.
+pub fn extrusion_profile_of(entity: &EntityType) -> Option<(Profile, bool)> {
+    let planar = entity_curve(entity).or_else(|| planar_polygon_entity(entity))?;
+    let closed = planar.curve.is_closed();
+    let pieces = profile_pieces(&planar.curve, closed)?;
+    (!pieces.is_empty()).then_some((
+        Profile {
+            plane: planar.plane,
+            pieces,
+        },
+        closed,
+    ))
+}
+
+fn profile_pieces(curve: &Curve, closed: bool) -> Option<Vec<Curve>> {
+    let pieces = match curve {
+        Curve::Polyline(_) => curve.segments(),
+        Curve::Circle(circle) => quarters(circle.centre, circle.radius),
+        Curve::Arc(arc) if closed => split_arc(*arc),
+        Curve::Arc(arc) => vec![Curve::Arc(*arc)],
+        Curve::Ellipse(arc) if closed => split_ellipse(*arc),
+        Curve::Ellipse(arc) => vec![Curve::Ellipse(*arc)],
+        Curve::Line(line) => vec![Curve::Line(*line)],
+        Curve::Nurbs(nurbs) if closed => (0..4)
+            .map(|part| {
+                nurbs
+                    .trimmed(part as f64 / 4.0, (part + 1) as f64 / 4.0)
+                    .map(Curve::Nurbs)
+            })
+            .collect::<Option<Vec<_>>>()?,
+        Curve::Nurbs(nurbs) => vec![Curve::Nurbs(nurbs.clone())],
+        _ => return None,
+    };
+    Some(pieces)
+}
+
+fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
+    let (points, closed) = match entity {
+        EntityType::Polyline3D(value) => (
+            value
+                .vertices
+                .iter()
+                .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
+                .collect::<Vec<_>>(),
+            value.is_closed(),
+        ),
+        EntityType::Face3D(value) => (
+            value
+                .corners()
+                .into_iter()
+                .map(|point| [point.x, point.y, point.z])
+                .collect::<Vec<_>>(),
+            true,
+        ),
+        EntityType::Solid(value) => (
+            value
+                .boundary_corners()
+                .into_iter()
+                .map(|point| [point.x, point.y, point.z])
+                .collect::<Vec<_>>(),
+            true,
+        ),
+        EntityType::Region(value) => (
+            value
+                .wires
+                .first()?
+                .points
+                .iter()
+                .map(|point| [point.x, point.y, point.z])
+                .collect::<Vec<_>>(),
+            true,
+        ),
+        _ => return None,
+    };
+    let mut points = points;
+    if closed && points.len() > 2 && points.first() == points.last() {
+        points.pop();
+    }
+    if points.len() < if closed { 3 } else { 2 } {
+        return None;
+    }
+    let origin = Vec3::from(points[0]);
+    let first = Vec3::from(points[1]) - origin;
+    let normal = points[2..]
+        .iter()
+        .find_map(|point| first.cross(Vec3::from(*point) - origin).normalize())
+        .or_else(|| {
+            (!closed).then(|| first.cross(Vec3::Z).normalize().unwrap_or(Vec3::Y))
+        })?;
+    let plane = Plane::orthonormal(points[0], first.to_array(), normal.to_array())?;
+    let scale = points
+        .iter()
+        .flatten()
+        .map(|value| value.abs())
+        .fold(1.0_f64, f64::max);
+    if points
+        .iter()
+        .any(|point| !plane.contains(*point, scale * 1e-9))
+    {
+        return None;
+    }
+    let vertices = points
+        .iter()
+        .map(|point| {
+            plane.project(*point).map(|position| cadkernel::geom2d::PolylineVertex {
+                position,
+                bulge: 0.0,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(PlanarCurve::new(
+        plane,
+        Curve::Polyline(cadkernel::geom2d::Polyline { vertices, closed }),
+    ))
+}
+
+fn region_profiles(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>)> {
+    let EntityType::Region(region) = entity else {
+        return None;
+    };
+    let plane = planar_polygon_entity(entity)?.plane;
+    let mut profiles = Vec::with_capacity(region.wires.len());
+    for wire in &region.wires {
+        let mut points = wire
+            .points
+            .iter()
+            .map(|point| [point.x, point.y, point.z])
+            .collect::<Vec<_>>();
+        if points.len() > 2 && points.first() == points.last() {
+            points.pop();
+        }
+        if points.len() < 3 {
+            return None;
+        }
+        let scale = points
+            .iter()
+            .flatten()
+            .map(|value| value.abs())
+            .fold(1.0_f64, f64::max);
+        if points
+            .iter()
+            .any(|point| !plane.contains(*point, scale * 1e-9))
+        {
+            return None;
+        }
+        let vertices = points
+            .iter()
+            .map(|point| {
+                plane
+                    .project(*point)
+                    .map(|position| cadkernel::geom2d::PolylineVertex {
+                        position,
+                        bulge: 0.0,
+                    })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        profiles.push(
+            Curve::Polyline(cadkernel::geom2d::Polyline {
+                vertices,
+                closed: true,
+            })
+            .segments(),
+        );
+    }
+    (!profiles.is_empty()).then_some((plane, profiles))
 }
 
 /// A circle as four arcs.
@@ -103,10 +258,112 @@ fn split_ellipse(arc: EllipseArc) -> Vec<Curve> {
 pub fn extruded(entity: &EntityType, height: f64) -> Option<Body> {
     let profile = profile_of(entity)?;
     let normal = profile.plane.normal()?;
-    brep::extrude(
+    extruded_direction(
+        entity,
+        [normal[0] * height, normal[1] * height, normal[2] * height],
+        0.0,
+    )
+}
+
+pub fn extruded_direction(
+    entity: &EntityType,
+    direction: [f64; 3],
+    taper_angle: f64,
+) -> Option<Body> {
+    if let Some((plane, profiles)) =
+        region_profiles(entity).filter(|(_, profiles)| profiles.len() > 1)
+    {
+        if taper_angle.abs() > 1e-12 {
+            return None;
+        }
+        return brep::extrude_region(plane, &profiles, direction);
+    }
+    let profile = profile_of(entity)?;
+    brep::extrude_tapered(profile.plane, &profile.pieces, direction, taper_angle)
+}
+
+pub fn extruded_surface(
+    entity: &EntityType,
+    direction: [f64; 3],
+    taper_angle: f64,
+) -> Option<Body> {
+    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+        return None;
+    }
+    let (profile, _) = extrusion_profile_of(entity)?;
+    brep::extrude_surface_tapered(
         profile.plane,
         &profile.pieces,
-        [normal[0] * height, normal[1] * height, normal[2] * height],
+        direction,
+        taper_angle,
+    )
+}
+
+pub fn extruded_along_path(
+    entity: &EntityType,
+    path: &EntityType,
+    taper_angle: f64,
+) -> Option<Body> {
+    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+        if taper_angle.abs() > 1e-12 {
+            return None;
+        }
+        return extruded_direction(entity, straight_path_direction(path)?, 0.0);
+    }
+    let profile = profile_of(entity)?;
+    if let EntityType::Polyline3D(path) = path {
+        let points = path
+            .vertices
+            .iter()
+            .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
+            .collect::<Vec<_>>();
+        if taper_angle.abs() > 1e-12 {
+            if points.len() != 2 {
+                return None;
+            }
+            return brep::extrude_tapered(
+                profile.plane,
+                &profile.pieces,
+                (Vec3::from(points[1]) - Vec3::from(points[0])).to_array(),
+                taper_angle,
+            );
+        }
+        return brep::sweep_along_polyline3d(profile.plane, &profile.pieces, &points);
+    }
+    if taper_angle.abs() <= 1e-12 {
+        return swept(entity, path);
+    }
+    let curve = entity_curve(path)?;
+    let Curve::Line(line) = curve.curve else {
+        return None;
+    };
+    let direction = Vec3::from(curve.plane.point_at(line.end))
+        - Vec3::from(curve.plane.point_at(line.start));
+    brep::extrude_tapered(
+        profile.plane,
+        &profile.pieces,
+        direction.to_array(),
+        taper_angle,
+    )
+}
+
+pub fn straight_path_direction(path: &EntityType) -> Option<[f64; 3]> {
+    if let EntityType::Polyline3D(path) = path {
+        if path.vertices.len() != 2 {
+            return None;
+        }
+        let start = &path.vertices[0].position;
+        let end = &path.vertices[1].position;
+        return Some([end.x - start.x, end.y - start.y, end.z - start.z]);
+    }
+    let curve = entity_curve(path)?;
+    let Curve::Line(line) = curve.curve else {
+        return None;
+    };
+    Some(
+        (Vec3::from(curve.plane.point_at(line.end))
+            - Vec3::from(curve.plane.point_at(line.start)))
+        .to_array(),
     )
 }
 
@@ -142,13 +399,40 @@ pub fn revolved(
 /// SWEEP as an exact B-rep along straight and circular path pieces.
 pub fn swept(profile: &EntityType, path: &EntityType) -> Option<Body> {
     let profile = profile_of(profile)?;
-    let path = entity_curve(path)?;
+    let mut path = entity_curve(path)?;
     let pieces = match &path.curve {
         Curve::Line(line) => vec![Curve::Line(*line)],
         Curve::Arc(arc) => vec![Curve::Arc(*arc)],
+        Curve::Circle(circle) => quarters(circle.centre, circle.radius),
         Curve::Polyline(_) => path.curve.segments(),
+        Curve::Ellipse(_) | Curve::Nurbs(_) => {
+            let scale = path
+                .curve
+                .point_at(0.0)
+                .into_iter()
+                .chain(path.curve.point_at(1.0))
+                .map(f64::abs)
+                .fold(1.0_f64, f64::max);
+            path.curve
+                .tessellate_within(scale * 1e-4)
+                .windows(2)
+                .filter(|pair| pair[0] != pair[1])
+                .map(|pair| Curve::Line(Line {
+                    start: pair[0],
+                    end: pair[1],
+                }))
+                .collect()
+        }
         _ => return None,
     };
+    let profile_center = profile
+        .pieces
+        .iter()
+        .map(|piece| Vec3::from(profile.plane.point_at(piece.point_at(0.0))))
+        .fold(Vec3::ZERO, |sum, point| sum + point)
+        / profile.pieces.len() as f64;
+    let path_start = Vec3::from(path.plane.point_at(path.curve.point_at(0.0)));
+    path.plane.origin = (Vec3::from(path.plane.origin) + profile_center - path_start).to_array();
     brep::sweep_along(profile.plane, &profile.pieces, path.plane, &pieces)
 }
 
@@ -174,7 +458,7 @@ pub enum PolysolidJustification {
     Right,
 }
 
-fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
+pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
     match entity {
         EntityType::Line(value) => Some(EmbeddedEntity::Line(value.clone())),
         EntityType::Arc(value) => Some(EmbeddedEntity::Arc(value.clone())),
@@ -182,24 +466,133 @@ fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
         EntityType::Ellipse(value) => Some(EmbeddedEntity::Ellipse(value.clone())),
         EntityType::LwPolyline(value) => Some(EmbeddedEntity::LwPolyline(value.clone())),
         EntityType::Spline(value) => Some(EmbeddedEntity::Spline(value.clone())),
+        EntityType::Polyline3D(value) if !value.is_closed() && value.vertices.len() >= 2 => {
+            let mut spline = Spline::from_control_points(
+                1,
+                value
+                    .vertices
+                    .iter()
+                    .map(|vertex| vertex.position)
+                    .collect(),
+            );
+            spline.flags.linear = true;
+            spline.flags.planar = false;
+            Some(EmbeddedEntity::Spline(spline))
+        }
         _ => None,
     }
+}
+
+fn embedded_planar_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
+    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+        return None;
+    }
+    if !matches!(entity, EntityType::Polyline3D(_)) {
+        if let Some(embedded) = embedded_path(entity) {
+            return Some((embedded, glam::DMat4::IDENTITY.to_cols_array()));
+        }
+    }
+    let (profile, closed) = extrusion_profile_of(entity)?;
+    let mut polyline = LwPolyline::new();
+    for piece in &profile.pieces {
+        let Curve::Line(line) = piece else {
+            return None;
+        };
+        polyline
+            .vertices
+            .push(LwVertex::new(Vector2::new(line.start[0], line.start[1])));
+    }
+    if !closed {
+        let Curve::Line(last) = profile.pieces.last()? else {
+            return None;
+        };
+        polyline
+            .vertices
+            .push(LwVertex::new(Vector2::new(last.end[0], last.end[1])));
+    }
+    polyline.is_closed = closed;
+    let normal = profile.plane.normal()?;
+    let transform = glam::DMat4::from_cols(
+        glam::DVec4::new(
+            profile.plane.x_axis[0],
+            profile.plane.x_axis[1],
+            profile.plane.x_axis[2],
+            0.0,
+        ),
+        glam::DVec4::new(
+            profile.plane.y_axis[0],
+            profile.plane.y_axis[1],
+            profile.plane.y_axis[2],
+            0.0,
+        ),
+        glam::DVec4::new(normal[0], normal[1], normal[2], 0.0),
+        glam::DVec4::new(
+            profile.plane.origin[0],
+            profile.plane.origin[1],
+            profile.plane.origin[2],
+            1.0,
+        ),
+    )
+    .to_cols_array();
+    Some((EmbeddedEntity::LwPolyline(polyline), transform))
+}
+
+pub fn extrusion_history(
+    profile: &EntityType,
+    path: Option<&EntityType>,
+    direction: [f64; 3],
+    taper_angle: f64,
+    reference_point: [f64; 3],
+) -> Option<SolidHistoryOperation> {
+    let signed_height = Vec3::from(direction).length();
+    let mut base = SolidHistoryNodeBase::new(1);
+    base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    let (sweep_entity, sweep_entity_transform) = embedded_planar_entity(profile)?;
+    let (path_entity, path_entity_transform) = match path {
+        Some(path) => {
+            let (entity, transform) = embedded_planar_entity(path)?;
+            (Some(entity), transform)
+        }
+        None => (None, glam::DMat4::IDENTITY.to_cols_array()),
+    };
+    Some(SolidHistoryOperation::Extrusion(SolidHistorySweep {
+        base,
+        operation_major: 1,
+        direction: Vector3::new(direction[0], direction[1], direction[2]),
+        sweep_entity: Some(sweep_entity),
+        path_entity,
+        draft_angle: taper_angle,
+        start_draft_distance: 0.0,
+        end_draft_distance: signed_height,
+        scale_factor: 1.0,
+        sweep_entity_transform,
+        path_entity_transform,
+        reference_point: Vector3::new(
+            reference_point[0],
+            reference_point[1],
+            reference_point[2],
+        ),
+        ..SolidHistorySweep::default()
+    }))
 }
 
 pub fn sweep_history(
     profile: &EntityType,
     path: &EntityType,
+    taper_angle: f64,
     reference_point: [f64; 3],
 ) -> Option<SolidHistoryOperation> {
     let mut base = SolidHistoryNodeBase::new(1);
     base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    let (sweep_entity, sweep_entity_transform) = embedded_planar_entity(profile)?;
     Some(SolidHistoryOperation::Sweep(SolidHistorySweep {
         base,
         operation_major: 1,
-        sweep_entity: Some(embedded_path(profile)?),
+        sweep_entity: Some(sweep_entity),
         path_entity: Some(embedded_path(path)?),
+        draft_angle: taper_angle,
         scale_factor: 1.0,
-        sweep_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
+        sweep_entity_transform,
         path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
         reference_point: Vector3::new(
             reference_point[0],

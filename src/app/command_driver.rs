@@ -750,6 +750,88 @@ impl OpenCADStudio {
         task
     }
 
+    /// Resolve the cell under `click` on table `handle` (or any table in the drawing
+    /// if `handle` is `Handle::NULL`), arm the cell indicator, and launch the cell
+    /// editor unless the cell's content is locked. Shared by the double-click shortcut
+    /// and the TABLEDIT point pick so both agree on grid coordinates and editor setup.
+    pub(crate) fn begin_table_cell_edit(
+        &mut self,
+        i: usize,
+        handle: acadrust::Handle,
+        click: glam::DVec3,
+    ) -> crate::modules::annotate::table_cmd::TableCellEditStart {
+        use crate::modules::annotate::table_cmd::{table_cell_at, TableCellEditStart};
+        let target = if handle != acadrust::Handle::NULL {
+            self.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .and_then(|entity| match entity {
+                    acadrust::EntityType::Table(table) => Some((handle, table.clone())),
+                    _ => None,
+                })
+        } else {
+            // Find all tables whose grid contains `click`.
+            // Iterating document.entities() visits entities in draw order;
+            // taking the last match selects the table on top if they overlap.
+            let mut matched = None;
+            for entity in self.tabs[i].scene.document.entities() {
+                if let acadrust::EntityType::Table(table) = entity {
+                    let h = table.common.handle;
+                    let style = table.table_style_handle.and_then(|style_handle| {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .objects
+                            .get(&style_handle)
+                            .and_then(|object| match object {
+                                acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                                _ => None,
+                            })
+                    });
+                    if table_cell_at(table, style, click).is_some() {
+                        matched = Some((h, table.clone()));
+                    }
+                }
+            }
+            matched
+        };
+        let Some((handle, table)) = target else {
+            return TableCellEditStart::NoCell;
+        };
+        let style = table.table_style_handle.and_then(|style_handle| {
+            self.tabs[i]
+                .scene
+                .document
+                .objects
+                .get(&style_handle)
+                .and_then(|object| match object {
+                    acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                    _ => None,
+                })
+        });
+        let Some(hit) = table_cell_at(&table, style, click) else {
+            return TableCellEditStart::NoCell;
+        };
+        // Arm the Properties cell indicator whether or not the cell turns
+        // out to be editable (matches the double-click behavior).
+        let index = hit.index(&table);
+        self.tabs[i].properties.prop_vertex = index;
+        self.tabs[i].properties.prop_vertex_indicator_active = true;
+        crate::entities::table::set_prop_current_cell(index);
+        self.refresh_properties();
+        if hit.locked {
+            return TableCellEditStart::LockedCell;
+        }
+        let command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+            handle, &table, hit.row, hit.column,
+        );
+        self.command_line
+            .push_info(&crate::command::CadCommand::prompt(&command));
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        TableCellEditStart::Started
+    }
+
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         match result {
@@ -2392,6 +2474,59 @@ impl OpenCADStudio {
                 self.restore_pre_cmd_tangent();
                 let _ = self.dispatch_command(&cmd);
             }
+            CmdResult::EditTableCell { handle, point } => {
+                // TABLEDIT's pick: end the pick phase and hand (table, point)
+                // to the shared cell-edit launcher. A miss or a locked cell
+                // re-prompts, matching AutoCAD's select-until-valid loop.
+                use crate::modules::annotate::table_cmd::{table_cell_at, TableCellEditStart};
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+
+                if handle == acadrust::Handle::NULL && self.selection_cycling {
+                    let mut candidates = Vec::new();
+                    for entity in self.tabs[i].scene.document.entities() {
+                        if let acadrust::EntityType::Table(table) = entity {
+                            let h = table.common.handle;
+                            let style = table.table_style_handle.and_then(|style_handle| {
+                                self.tabs[i]
+                                    .scene
+                                    .document
+                                    .objects
+                                    .get(&style_handle)
+                                    .and_then(|object| match object {
+                                        acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                                        _ => None,
+                                    })
+                            });
+                            if table_cell_at(table, style, point).is_some() {
+                                candidates.push(h);
+                            }
+                        }
+                    }
+                    if candidates.len() >= 2 {
+                        self.cycle_candidates = Some((self.quick_properties_anchor, candidates));
+                        return Task::none();
+                    }
+                }
+
+                match self.begin_table_cell_edit(i, handle, point) {
+                    TableCellEditStart::Started => {}
+                    TableCellEditStart::LockedCell => {
+                        self.command_line.push_error(
+                            crate::t!("The cell is content locked.").as_ref(),
+                        );
+                        let _ = self.dispatch_command("TABLEDIT");
+                    }
+                    TableCellEditStart::NoCell => {
+                        self.command_line.push_error(
+                            crate::t!("No editable table cell picked.").as_ref(),
+                        );
+                        let _ = self.dispatch_command("TABLEDIT");
+                    }
+                }
+            }
             CmdResult::MatchEntityLayer { dest, src } => {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -3454,42 +3589,178 @@ impl OpenCADStudio {
                 }
             }
             // ── EXTRUDE ────────────────────────────────────────────────────
-            CmdResult::ExtrudeEntity {
-                handle,
-                height,
+            CmdResult::ExtrudeEntities {
+                handles,
+                extent,
+                mode,
+                taper_angle,
                 color: _,
             } => {
-                if self.reject_locked_edit(i, handle) {
+                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                if handles.is_empty()
+                    || handles
+                        .iter()
+                        .any(|handle| self.reject_locked_edit(i, *handle))
+                {
                     self.tabs[i].active_cmd = None;
                     return Task::none();
                 }
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                use crate::command::{ExtrudeExtent, ExtrudeMode};
+                use crate::modules::insert::solid3d_cmds::{
+                    empty_extruded_surface, empty_solid3d,
+                };
                 use crate::scene::model::sweep_model;
-
-                let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
-                if let Some(entity) = entity_opt {
-                    if let Some(solid) = sweep_model::extruded(&entity, height) {
-                        let history = crate::scene::model::solid_history::brep_op(&solid);
-                        let pending = self.begin_undo(i, "EXTRUDE", 1, true);
-                        let created = self.add_solid_model(empty_solid3d(), solid, history);
-                        if !created.is_null() {
-                            self.tabs[i].dirty = true;
-                            self.command_line
-                                .push_output(crate::t!("EXTRUDE: solid created.").as_ref());
-                            if let Some(pd) = pending {
-                                self.commit_undo_delta(i, pd);
-                            }
+                let path = match extent {
+                    ExtrudeExtent::Path(handle) => self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .cloned()
+                        .map(|entity| (handle, entity)),
+                    _ => None,
+                };
+                if matches!(extent, ExtrudeExtent::Path(_)) && path.is_none() {
+                    self.command_line
+                        .push_error(crate::t!("EXTRUDE: path entity not found.").as_ref());
+                    self.tabs[i].active_cmd = None;
+                    return Task::none();
+                }
+                let pending = self.begin_undo(i, "EXTRUDE", handles.len(), true);
+                let mut created_handles = Vec::new();
+                let mut consumed = Vec::new();
+                let mut failed = 0usize;
+                for handle in &handles {
+                    let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
+                        failed += 1;
+                        continue;
+                    };
+                    let Some((profile, closed)) = sweep_model::extrusion_profile_of(&entity) else {
+                        failed += 1;
+                        continue;
+                    };
+                    let direction = match extent {
+                        ExtrudeExtent::Height(height) => profile.plane.normal().map(|normal| {
+                            glam::DVec3::new(
+                                normal[0] * height,
+                                normal[1] * height,
+                                normal[2] * height,
+                            )
+                        }),
+                        ExtrudeExtent::Direction(direction) => Some(direction),
+                        ExtrudeExtent::Path(_) => None,
+                    };
+                    let path_direction = path
+                        .as_ref()
+                        .and_then(|(_, path)| sweep_model::straight_path_direction(path))
+                        .map(glam::DVec3::from_array);
+                    // The creation mode controls closed profiles. Open curves
+                    // always create sheet surfaces.
+                    let creates_surface = matches!(mode, ExtrudeMode::Surface) || !closed;
+                    let body = match (creates_surface, &path, direction) {
+                        (false, Some((_, path)), _) => {
+                            sweep_model::extruded_along_path(&entity, path, taper_angle)
                         }
+                        (false, None, Some(direction)) => {
+                            sweep_model::extruded_direction(
+                                &entity,
+                                direction.to_array(),
+                                taper_angle,
+                            )
+                        }
+                        (true, None, Some(direction)) => {
+                            sweep_model::extruded_surface(
+                                &entity,
+                                direction.to_array(),
+                                taper_angle,
+                            )
+                        }
+                        (true, Some(_), _) => path_direction.and_then(|direction| {
+                            sweep_model::extruded_surface(
+                                &entity,
+                                direction.to_array(),
+                                taper_angle,
+                            )
+                        }),
+                        _ => None,
+                    };
+                    let Some(body) = body else {
+                        failed += 1;
+                        continue;
+                    };
+                    let created = if creates_surface {
+                        let direction = direction
+                            .or(path_direction)
+                            .unwrap_or(glam::DVec3::ZERO);
+                        self.add_surface_model(
+                            empty_extruded_surface(direction, taper_angle),
+                            body,
+                        )
                     } else {
-                        self.command_line.push_error(crate::t!("EXTRUDE: could not build profile. Select a closed 2D entity (Circle, LwPolyline, etc.).").as_ref());
+                            let direction = direction.unwrap_or(glam::DVec3::ZERO);
+                            let history = path
+                                .as_ref()
+                                .and_then(|(_, path)| {
+                                    sweep_model::sweep_history(
+                                        &entity,
+                                        path,
+                                        taper_angle,
+                                        profile.plane.origin,
+                                    )
+                                })
+                                .or_else(|| {
+                                    sweep_model::extrusion_history(
+                                        &entity,
+                                        None,
+                                        direction.to_array(),
+                                        taper_angle,
+                                        profile.plane.origin,
+                                    )
+                                })
+                            .unwrap_or_else(|| crate::scene::model::solid_history::brep_op(&body));
+                            self.add_solid_model(empty_solid3d(), body, history)
+                    };
+                    if created.is_null() {
+                        failed += 1;
+                    } else {
+                        created_handles.push(created);
+                        if delete_sources {
+                            consumed.push(*handle);
+                        }
+                    }
+                }
+                if delete_sources && !created_handles.is_empty() {
+                    consumed.sort_unstable_by_key(|handle| handle.value());
+                    consumed.dedup();
+                    self.tabs[i].scene.erase_entities(&consumed);
+                }
+                if !created_handles.is_empty() {
+                    self.tabs[i].scene.deselect_all();
+                    for handle in &created_handles {
+                        self.tabs[i].scene.select_entity(*handle, true);
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(
+                        crate::tf!(
+                            "EXTRUDE: created %{created} object(s); %{failed} source(s) could not be extruded.",
+                            created = created_handles.len(),
+                            failed = failed
+                        )
+                        .as_ref(),
+                    );
+                    if let Some(pending) = pending {
+                        self.commit_undo_delta(i, pending);
                     }
                 } else {
-                    self.command_line.push_error(crate::t!("EXTRUDE: entity not found.").as_ref());
+                    self.command_line.push_error(crate::t!("EXTRUDE: no selected object could be extruded with the requested options.").as_ref());
+                    if let Some(pending) = pending {
+                        self.commit_undo_delta(i, pending);
+                    }
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
+                self.refresh_properties();
             }
 
             CmdResult::PresspullEntity {
@@ -3629,6 +3900,7 @@ impl OpenCADStudio {
                     let history = sweep_model::sweep_history(
                         &profile,
                         &path,
+                        0.0,
                         reference_point,
                     )
                     .unwrap_or_else(|| solid_history::brep_op(&solid));

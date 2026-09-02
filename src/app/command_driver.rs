@@ -3589,42 +3589,178 @@ impl OpenCADStudio {
                 }
             }
             // ── EXTRUDE ────────────────────────────────────────────────────
-            CmdResult::ExtrudeEntity {
-                handle,
-                height,
+            CmdResult::ExtrudeEntities {
+                handles,
+                extent,
+                mode,
+                taper_angle,
                 color: _,
             } => {
-                if self.reject_locked_edit(i, handle) {
+                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                if handles.is_empty()
+                    || handles
+                        .iter()
+                        .any(|handle| self.reject_locked_edit(i, *handle))
+                {
                     self.tabs[i].active_cmd = None;
                     return Task::none();
                 }
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                use crate::command::{ExtrudeExtent, ExtrudeMode};
+                use crate::modules::insert::solid3d_cmds::{
+                    empty_extruded_surface, empty_solid3d,
+                };
                 use crate::scene::model::sweep_model;
-
-                let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
-                if let Some(entity) = entity_opt {
-                    if let Some(solid) = sweep_model::extruded(&entity, height) {
-                        let history = crate::scene::model::solid_history::brep_op(&solid);
-                        let pending = self.begin_undo(i, "EXTRUDE", 1, true);
-                        let created = self.add_solid_model(empty_solid3d(), solid, history);
-                        if !created.is_null() {
-                            self.tabs[i].dirty = true;
-                            self.command_line
-                                .push_output(crate::t!("EXTRUDE: solid created.").as_ref());
-                            if let Some(pd) = pending {
-                                self.commit_undo_delta(i, pd);
-                            }
+                let path = match extent {
+                    ExtrudeExtent::Path(handle) => self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .cloned()
+                        .map(|entity| (handle, entity)),
+                    _ => None,
+                };
+                if matches!(extent, ExtrudeExtent::Path(_)) && path.is_none() {
+                    self.command_line
+                        .push_error(crate::t!("EXTRUDE: path entity not found.").as_ref());
+                    self.tabs[i].active_cmd = None;
+                    return Task::none();
+                }
+                let pending = self.begin_undo(i, "EXTRUDE", handles.len(), true);
+                let mut created_handles = Vec::new();
+                let mut consumed = Vec::new();
+                let mut failed = 0usize;
+                for handle in &handles {
+                    let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
+                        failed += 1;
+                        continue;
+                    };
+                    let Some((profile, closed)) = sweep_model::extrusion_profile_of(&entity) else {
+                        failed += 1;
+                        continue;
+                    };
+                    let direction = match extent {
+                        ExtrudeExtent::Height(height) => profile.plane.normal().map(|normal| {
+                            glam::DVec3::new(
+                                normal[0] * height,
+                                normal[1] * height,
+                                normal[2] * height,
+                            )
+                        }),
+                        ExtrudeExtent::Direction(direction) => Some(direction),
+                        ExtrudeExtent::Path(_) => None,
+                    };
+                    let path_direction = path
+                        .as_ref()
+                        .and_then(|(_, path)| sweep_model::straight_path_direction(path))
+                        .map(glam::DVec3::from_array);
+                    // The creation mode controls closed profiles. Open curves
+                    // always create sheet surfaces.
+                    let creates_surface = matches!(mode, ExtrudeMode::Surface) || !closed;
+                    let body = match (creates_surface, &path, direction) {
+                        (false, Some((_, path)), _) => {
+                            sweep_model::extruded_along_path(&entity, path, taper_angle)
                         }
+                        (false, None, Some(direction)) => {
+                            sweep_model::extruded_direction(
+                                &entity,
+                                direction.to_array(),
+                                taper_angle,
+                            )
+                        }
+                        (true, None, Some(direction)) => {
+                            sweep_model::extruded_surface(
+                                &entity,
+                                direction.to_array(),
+                                taper_angle,
+                            )
+                        }
+                        (true, Some(_), _) => path_direction.and_then(|direction| {
+                            sweep_model::extruded_surface(
+                                &entity,
+                                direction.to_array(),
+                                taper_angle,
+                            )
+                        }),
+                        _ => None,
+                    };
+                    let Some(body) = body else {
+                        failed += 1;
+                        continue;
+                    };
+                    let created = if creates_surface {
+                        let direction = direction
+                            .or(path_direction)
+                            .unwrap_or(glam::DVec3::ZERO);
+                        self.add_surface_model(
+                            empty_extruded_surface(direction, taper_angle),
+                            body,
+                        )
                     } else {
-                        self.command_line.push_error(crate::t!("EXTRUDE: could not build profile. Select a closed 2D entity (Circle, LwPolyline, etc.).").as_ref());
+                            let direction = direction.unwrap_or(glam::DVec3::ZERO);
+                            let history = path
+                                .as_ref()
+                                .and_then(|(_, path)| {
+                                    sweep_model::sweep_history(
+                                        &entity,
+                                        path,
+                                        taper_angle,
+                                        profile.plane.origin,
+                                    )
+                                })
+                                .or_else(|| {
+                                    sweep_model::extrusion_history(
+                                        &entity,
+                                        None,
+                                        direction.to_array(),
+                                        taper_angle,
+                                        profile.plane.origin,
+                                    )
+                                })
+                            .unwrap_or_else(|| crate::scene::model::solid_history::brep_op(&body));
+                            self.add_solid_model(empty_solid3d(), body, history)
+                    };
+                    if created.is_null() {
+                        failed += 1;
+                    } else {
+                        created_handles.push(created);
+                        if delete_sources {
+                            consumed.push(*handle);
+                        }
+                    }
+                }
+                if delete_sources && !created_handles.is_empty() {
+                    consumed.sort_unstable_by_key(|handle| handle.value());
+                    consumed.dedup();
+                    self.tabs[i].scene.erase_entities(&consumed);
+                }
+                if !created_handles.is_empty() {
+                    self.tabs[i].scene.deselect_all();
+                    for handle in &created_handles {
+                        self.tabs[i].scene.select_entity(*handle, true);
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(
+                        crate::tf!(
+                            "EXTRUDE: created %{created} object(s); %{failed} source(s) could not be extruded.",
+                            created = created_handles.len(),
+                            failed = failed
+                        )
+                        .as_ref(),
+                    );
+                    if let Some(pending) = pending {
+                        self.commit_undo_delta(i, pending);
                     }
                 } else {
-                    self.command_line.push_error(crate::t!("EXTRUDE: entity not found.").as_ref());
+                    self.command_line.push_error(crate::t!("EXTRUDE: no selected object could be extruded with the requested options.").as_ref());
+                    if let Some(pending) = pending {
+                        self.commit_undo_delta(i, pending);
+                    }
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
+                self.refresh_properties();
             }
 
             CmdResult::PresspullEntity {

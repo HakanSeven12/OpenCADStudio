@@ -40,6 +40,33 @@ impl super::OpenCADStudio {
         handle
     }
 
+    /// Add an open sheet body as a persistent Surface entity and register its
+    /// exact B-rep for shaded and wireframe display.
+    pub(super) fn add_surface_model(
+        &mut self,
+        mut entity: EntityType,
+        surface: Body,
+    ) -> Handle {
+        let i = self.active_tab;
+        let EntityType::Surface(inner) = &mut entity else {
+            return Handle::NULL;
+        };
+        inner.common.plotstyle_flags = 2;
+        inner.wires = solid_model::edge_wires(&surface);
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&surface)
+        else {
+            self.command_line
+                .push_error(crate::t!("The surface could not be encoded as ACIS.").as_ref());
+            return Handle::NULL;
+        };
+        inner.acis_data = acadrust::entities::AcisData::from_sat(&document.to_sat_string());
+        let Some(handle) = self.commit_entity_handle(entity) else {
+            return Handle::NULL;
+        };
+        self.tabs[i].scene.register_solid_model(handle, surface);
+        handle
+    }
+
     fn selected_solid_handles(&mut self) -> Vec<Handle> {
         let i = self.active_tab;
         let mut handles: Vec<Handle> = self.tabs[i]

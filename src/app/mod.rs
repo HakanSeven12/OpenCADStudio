@@ -7,7 +7,7 @@ pub use automation::{export_headless, serve};
 mod command_driver;
 pub(crate) mod commands;
 mod document;
-mod expr_eval;
+pub(crate) mod expr_eval;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;

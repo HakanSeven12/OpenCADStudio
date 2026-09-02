@@ -1556,12 +1556,13 @@ pub fn color_picker_dropdown<'a>(
 
     // 9 standard ACI swatches (1-9)
     let standard: Element<'a, Message> = (1u8..=9u8)
-        .fold(row![].spacing(2), |r, idx| {
+        .fold(row![].spacing(2).width(Length::Fill), |r, idx| {
             let c = AcadColor::Index(idx);
             let (bg, _) = acad_color_display(c);
             let msg = on_aci(idx);
             r.push(
                 button(text("").width(18).height(18))
+                    .width(Length::FillPortion(1))
                     .on_press(msg)
                     .style(move |theme: &Theme, status| button::Style {
                         background: Some(Background::Color(bg)),
@@ -1636,46 +1637,57 @@ pub fn color_picker_dropdown<'a>(
     // Full ACI palette (expanded)
     if palette_open {
         const COLS: u16 = 16;
-        let mut rows = column![].spacing(1);
+        let mut rows = column![].spacing(1).width(Length::Fill);
         let mut idx: u16 = 1;
         while idx <= 255 {
-            let mut r = row![].spacing(1);
+            let mut r = row![].spacing(1).width(Length::Fill);
             for _ in 0..COLS {
-                if idx > 255 {
-                    break;
+                if idx <= 255 {
+                    let ci = idx as u8;
+                    let (bg, _) = acad_color_display(AcadColor::Index(ci));
+                    let msg = on_aci(ci);
+                    r = r.push(
+                        button(text("").width(12).height(12))
+                            .width(Length::FillPortion(1))
+                            .on_press(msg)
+                            .style(move |theme: &Theme, status| button::Style {
+                                background: Some(Background::Color(bg)),
+                                border: Border {
+                                    color: if matches!(status, button::Status::Hovered) {
+                                        theme.palette().primary.base.color
+                                    } else {
+                                        theme.palette().background.neutral.color
+                                    },
+                                    width: if matches!(status, button::Status::Hovered) {
+                                        1.5
+                                    } else {
+                                        1.0
+                                    },
+                                    radius: 1.0.into(),
+                                },
+                                text_color: theme.palette().background.base.text,
+                                ..Default::default()
+                            })
+                            .padding(0),
+                    );
+                    idx += 1;
+                } else {
+                    r = r.push(
+                        Space::new()
+                            .width(Length::FillPortion(1))
+                            .height(12),
+                    );
                 }
-                let ci = idx as u8;
-                let (bg, _) = acad_color_display(AcadColor::Index(ci));
-                let msg = on_aci(ci);
-                r = r.push(
-                    button(text("").width(12).height(12))
-                        .on_press(msg)
-                        .style(move |theme: &Theme, status| button::Style {
-                            background: Some(Background::Color(bg)),
-                            border: Border {
-                                color: if matches!(status, button::Status::Hovered) {
-                                    theme.palette().primary.base.color
-                                } else {
-                                    theme.palette().background.neutral.color
-                                },
-                                width: if matches!(status, button::Status::Hovered) {
-                                    1.5
-                                } else {
-                                    1.0
-                                },
-                                radius: 1.0.into(),
-                            },
-                            text_color: theme.palette().background.base.text,
-                            ..Default::default()
-                        })
-                        .padding(0),
-                );
-                idx += 1;
             }
             rows = rows.push(r);
         }
         col = col.push(
-            container(scrollable(rows).height(160))
+            container(
+                scrollable(rows)
+                    .height(160)
+                    .width(Length::Fill)
+                    .spacing(2),
+            )
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
                     container::Style {

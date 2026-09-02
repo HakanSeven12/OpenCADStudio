@@ -731,6 +731,92 @@ type MeshPickItem<'a> = (
     [f64; 6],
 );
 
+type MeshEdgePickItem<'a> = (
+    Handle,
+    &'a [[f32; 3]],
+    &'a [[f32; 3]],
+    Option<acadrust::types::Transform>,
+);
+
+/// Return the closest solid whose actual B-rep feature edge passes through the
+/// cursor aperture. Normal selection uses this path so a shaded body's broad
+/// triangle faces do not turn its entire interior into a pick target. Commands
+/// that deliberately acquire a face continue to use [`mesh_click_hit`].
+pub(crate) fn mesh_edge_click_hit<'a>(
+    cursor: Point,
+    meshes: impl Iterator<Item = MeshEdgePickItem<'a>>,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+    tolerance_px: f32,
+) -> Option<Handle> {
+    if cursor.x < 0.0
+        || cursor.x > bounds.width
+        || cursor.y < 0.0
+        || cursor.y > bounds.height
+    {
+        return None;
+    }
+    let tolerance = tolerance_px.max(1.0);
+    let mut best: Option<(f32, f32, Handle)> = None;
+    for (handle, edges, edges_low, transform) in meshes {
+        if edges.len() < 2 {
+            continue;
+        }
+        let model = transform.map(codec_transform_matrix);
+        if model.is_some_and(|matrix| {
+            !matrix.is_finite() || matrix.determinant().abs() <= 1e-18
+        }) {
+            continue;
+        }
+        for pair_start in (0..edges.len() - 1).step_by(2) {
+            let world_point = |index: usize| {
+                let hi = edges[index];
+                let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
+                let local = glam::DVec3::new(
+                    hi[0] as f64 + low[0] as f64,
+                    hi[1] as f64 + low[1] as f64,
+                    hi[2] as f64 + low[2] as f64,
+                );
+                model.map_or(local, |matrix| matrix.transform_point3(local))
+            };
+            let first = world_point(pair_start);
+            let second = world_point(pair_start + 1);
+            if !first.is_finite() || !second.is_finite() {
+                continue;
+            }
+            let first_ndc = view_rot.project_point3((first - eye).as_vec3());
+            let second_ndc = view_rot.project_point3((second - eye).as_vec3());
+            if !first_ndc.is_finite() || !second_ndc.is_finite() {
+                continue;
+            }
+            let to_screen = |point: glam::Vec3| {
+                Point::new(
+                    (point.x + 1.0) * 0.5 * bounds.width,
+                    (1.0 - point.y) * 0.5 * bounds.height,
+                )
+            };
+            let distance = dist_point_to_segment(
+                cursor,
+                to_screen(first_ndc),
+                to_screen(second_ndc),
+            );
+            if distance > tolerance {
+                continue;
+            }
+            let depth = (first_ndc.z + second_ndc.z) * 0.5;
+            let replace = best.is_none_or(|(best_distance, best_depth, _)| {
+                distance + 1e-4 < best_distance
+                    || ((distance - best_distance).abs() <= 1e-4 && depth < best_depth)
+            });
+            if replace {
+                best = Some((distance, depth, handle));
+            }
+        }
+    }
+    best.map(|(_, _, handle)| handle)
+}
+
 pub(crate) fn mesh_click_hit<'a>(
     cursor: Point,
     meshes: impl Iterator<Item = MeshPickItem<'a>>,

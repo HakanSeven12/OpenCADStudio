@@ -4033,16 +4033,16 @@ impl OpenCADStudio {
                             )
                         })
                         .or_else(|| {
-                            // 3D solids: click anywhere on the shaded
-                            // body — top-level solids and block-internal
-                            // ones together, front-most wins (a block in
-                            // front of a solid resolves to the block).
-                            self.tabs[i].scene.solid_click_hit(
+                            // Normal 3D selection follows the displayed B-rep
+                            // edges. Face-interior picking remains reserved for
+                            // modelling commands that explicitly request it.
+                            self.tabs[i].scene.solid_edge_click_hit(
                                 p,
                                 view_rot,
                                 eye,
                                 bounds,
                                 candidate_handles.as_ref(),
+                                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
                             )
                         });
                         // Selection filter: drop a pick whose type is excluded.
@@ -4352,12 +4352,13 @@ impl OpenCADStudio {
                 )
                 .and_then(|s| Scene::handle_from_wire_name(s))
                 .or_else(|| {
-                    self.tabs[i].scene.solid_click_hit(
+                    self.tabs[i].scene.solid_edge_click_hit(
                         p,
                         view_rot,
                         eye,
                         bounds,
                         candidate_handles.as_ref(),
+                        crate::ui::overlay::pick_box_aperture_px(self.pick_box),
                     )
                 });
                 if let Some(handle) = hit {
@@ -5053,9 +5054,14 @@ impl OpenCADStudio {
         }
         if hovered.is_none() {
             let started = Instant::now();
-            hovered = self.tabs[i]
-                .scene
-                .solid_hover_hit(p, view_rot, eye, bounds, candidate_handles.as_ref());
+            hovered = self.tabs[i].scene.solid_edge_hover_hit(
+                p,
+                view_rot,
+                eye,
+                bounds,
+                candidate_handles.as_ref(),
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+            );
             solid_ms = started.elapsed().as_secs_f64() * 1000.0;
         }
         self.tabs[i].scene.set_hover_highlight(hovered);

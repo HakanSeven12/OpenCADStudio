@@ -28,7 +28,7 @@ pub struct Profile {
 /// is handed over as the arcs it is made of rather than as one curve with
 /// nowhere for the sweep to start.
 pub fn profile_of(entity: &EntityType) -> Option<Profile> {
-    let planar: PlanarCurve = entity_curve(entity)?;
+    let planar = entity_curve(entity).or_else(|| planar_polygon_entity(entity))?;
     if !planar.curve.is_closed() {
         return None;
     }
@@ -156,6 +156,57 @@ fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
     ))
 }
 
+fn region_profiles(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>)> {
+    let EntityType::Region(region) = entity else {
+        return None;
+    };
+    let plane = planar_polygon_entity(entity)?.plane;
+    let mut profiles = Vec::with_capacity(region.wires.len());
+    for wire in &region.wires {
+        let mut points = wire
+            .points
+            .iter()
+            .map(|point| [point.x, point.y, point.z])
+            .collect::<Vec<_>>();
+        if points.len() > 2 && points.first() == points.last() {
+            points.pop();
+        }
+        if points.len() < 3 {
+            return None;
+        }
+        let scale = points
+            .iter()
+            .flatten()
+            .map(|value| value.abs())
+            .fold(1.0_f64, f64::max);
+        if points
+            .iter()
+            .any(|point| !plane.contains(*point, scale * 1e-9))
+        {
+            return None;
+        }
+        let vertices = points
+            .iter()
+            .map(|point| {
+                plane
+                    .project(*point)
+                    .map(|position| cadkernel::geom2d::PolylineVertex {
+                        position,
+                        bulge: 0.0,
+                    })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        profiles.push(
+            Curve::Polyline(cadkernel::geom2d::Polyline {
+                vertices,
+                closed: true,
+            })
+            .segments(),
+        );
+    }
+    (!profiles.is_empty()).then_some((plane, profiles))
+}
+
 /// A circle as four arcs.
 fn quarters(centre: [f64; 2], radius: f64) -> Vec<Curve> {
     use std::f64::consts::FRAC_PI_2;
@@ -219,6 +270,14 @@ pub fn extruded_direction(
     direction: [f64; 3],
     taper_angle: f64,
 ) -> Option<Body> {
+    if let Some((plane, profiles)) =
+        region_profiles(entity).filter(|(_, profiles)| profiles.len() > 1)
+    {
+        if taper_angle.abs() > 1e-12 {
+            return None;
+        }
+        return brep::extrude_region(plane, &profiles, direction);
+    }
     let profile = profile_of(entity)?;
     brep::extrude_tapered(profile.plane, &profile.pieces, direction, taper_angle)
 }
@@ -228,8 +287,10 @@ pub fn extruded_surface(
     direction: [f64; 3],
     taper_angle: f64,
 ) -> Option<Body> {
-    let (profile, closed) = extrusion_profile_of(entity)?;
-    let _ = closed;
+    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+        return None;
+    }
+    let (profile, _) = extrusion_profile_of(entity)?;
     brep::extrude_surface_tapered(
         profile.plane,
         &profile.pieces,
@@ -243,6 +304,12 @@ pub fn extruded_along_path(
     path: &EntityType,
     taper_angle: f64,
 ) -> Option<Body> {
+    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+        if taper_angle.abs() > 1e-12 {
+            return None;
+        }
+        return extruded_direction(entity, straight_path_direction(path)?, 0.0);
+    }
     let profile = profile_of(entity)?;
     if let EntityType::Polyline3D(path) = path {
         let points = path
@@ -417,6 +484,9 @@ pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
 }
 
 fn embedded_planar_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
+    if matches!(entity, EntityType::Region(region) if region.wires.len() > 1) {
+        return None;
+    }
     if !matches!(entity, EntityType::Polyline3D(_)) {
         if let Some(embedded) = embedded_path(entity) {
             return Some((embedded, glam::DMat4::IDENTITY.to_cols_array()));

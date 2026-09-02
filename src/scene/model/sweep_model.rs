@@ -396,6 +396,45 @@ pub fn revolved(
     )
 }
 
+fn profile_center(profile: &Profile) -> Option<Vec3> {
+    let count = profile.pieces.len();
+    let sum = profile.pieces.iter().try_fold(Vec3::ZERO, |sum, piece| {
+        let point = Vec3::from(profile.plane.point_at(piece.point_at(0.0)));
+        point.is_finite().then_some(sum + point)
+    })?;
+    (count > 0).then_some(sum / count as f64)
+}
+
+/// Stores the source profile and canonical axis required to rebuild and edit
+/// a revolved solid.
+pub fn revolve_history(
+    entity: &EntityType,
+    from: [f64; 3],
+    to: [f64; 3],
+    angle: f64,
+) -> Option<SolidHistoryOperation> {
+    if !angle.is_finite() || angle.abs() <= 1e-12 {
+        return None;
+    }
+    let profile = profile_of(entity)?;
+    let from = Vec3::from(from);
+    let direction = (Vec3::from(to) - from).normalize()?;
+    let center = profile_center(&profile)?;
+    let axis_point = from + direction * (center - from).dot(direction);
+    let mut base = SolidHistoryNodeBase::new(1);
+    base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    Some(SolidHistoryOperation::Revolve(SolidHistoryRevolve {
+        base,
+        operation_major: 1,
+        axis_point: Vector3::new(axis_point.x, axis_point.y, axis_point.z),
+        direction: Vector3::new(direction.x, direction.y, direction.z),
+        revolve_angle: angle,
+        flag_290: true,
+        sweep_entity: Some(embedded_path(entity)?),
+        ..SolidHistoryRevolve::default()
+    }))
+}
+
 /// SWEEP as an exact B-rep along straight and circular path pieces.
 pub fn swept(profile: &EntityType, path: &EntityType) -> Option<Body> {
     let profile = profile_of(profile)?;

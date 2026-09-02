@@ -209,11 +209,23 @@ Bug reports, focused pull requests, translations, documentation improvements, an
 
 ## Project growth
 
+### Stars
+
 <a href="https://github.com/HakanSeven12/OpenCADStudio/stargazers">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://www.opencadstudio.com/star-history-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="https://www.opencadstudio.com/star-history-light.svg">
-    <img alt="Open CAD Studio stars and release downloads" src="https://www.opencadstudio.com/star-history-light.svg">
+    <img alt="Open CAD Studio star history" src="https://www.opencadstudio.com/star-history-light.svg">
+  </picture>
+</a>
+
+### Release downloads
+
+<a href="https://github.com/HakanSeven12/OpenCADStudio/releases">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://www.opencadstudio.com/download-history-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://www.opencadstudio.com/download-history-light.svg">
+    <img alt="Open CAD Studio release download history" src="https://www.opencadstudio.com/download-history-light.svg">
   </picture>
 </a>
 

@@ -178,7 +178,7 @@ jobs:
           print(f"supporters: {len(supporters)}")
           PY
 
-      # Publish one themed growth chart for stars and release downloads.
+      # Publish separate light/dark charts for stars and release downloads.
       - name: Generate project growth charts
         env:
           GITHUB_TOKEN: ${{ secrets.OCS_GITHUB_TOKEN }}

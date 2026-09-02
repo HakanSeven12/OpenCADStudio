@@ -162,39 +162,70 @@ def render_svg(
     dates: list[datetime],
     releases: list[tuple[str, datetime, int]],
     theme: str,
+    chart: str,
 ) -> str:
     colors = THEMES[theme]
     now = datetime.now(timezone.utc)
-    start = min(dates[0], releases[0][1]) - timedelta(days=2)
-    end = max(now, dates[-1], releases[-1][1]) + timedelta(days=2)
+    stars = chart == "stars"
+    if stars:
+        points = [(moment, count) for count, moment in enumerate(dates, 1)]
+        title = f"{repository.split('/')[-1]} Stars"
+        subtitle = f"{len(dates)} GitHub stars · Updated {now:%d %b %Y}"
+        legend = "GitHub stars"
+        axis_label = "Stars"
+        line_color = colors["line"]
+        point_color = colors["point"]
+        last_label = f"{len(dates)} stars"
+    else:
+        points = [(published, downloads) for _, published, downloads in releases]
+        total_downloads = sum(downloads for _, _, downloads in releases)
+        title = f"{repository.split('/')[-1]} Release Downloads"
+        subtitle = (
+            f"{total_downloads:,} cleaned asset downloads across {len(releases)} releases "
+            f"· Latest excluded · Updated {now:%d %b %Y}"
+        )
+        legend = "Release downloads"
+        axis_label = "Downloads / release"
+        line_color = colors["download_line"]
+        point_color = colors["download_point"]
+        last_label = f"{releases[-1][0]} · {releases[-1][2]}"
+
+    start = points[0][0] - timedelta(days=2)
+    end = max(now, points[-1][0]) + timedelta(days=2)
     duration = max((end - start).total_seconds(), 1)
     plot_width = PLOT_RIGHT - PLOT_LEFT
     plot_height = PLOT_BOTTOM - PLOT_TOP
-    y_top, y_step = nice_axis(len(dates))
-    download_top, download_step = nice_axis(max(downloads for _, _, downloads in releases))
+    y_top, y_step = nice_axis(max(value for _, value in points))
 
     def x_position(moment: datetime) -> float:
         ratio = (moment - start).total_seconds() / duration
         return PLOT_LEFT + ratio * plot_width
 
-    def y_position(stars: int) -> float:
-        return PLOT_BOTTOM - (stars / y_top) * plot_height
+    def y_position(value: int) -> float:
+        return PLOT_BOTTOM - (value / y_top) * plot_height
 
-    def download_y_position(downloads: int) -> float:
-        return PLOT_BOTTOM - (downloads / download_top) * plot_height
-
-    line_parts = [f"M {PLOT_LEFT:.1f} {PLOT_BOTTOM:.1f}"]
-    for count, moment in enumerate(dates, 1):
-        line_parts.append(f"H {x_position(moment):.1f} V {y_position(count):.1f}")
-    line_path = " ".join(line_parts)
-    area_path = f"{line_path} V {PLOT_BOTTOM:.1f} H {PLOT_LEFT:.1f} Z"
-    download_path = " ".join(
-        (
-            "M" if index == 0 else "L"
+    if stars:
+        line_parts = [f"M {PLOT_LEFT:.1f} {PLOT_BOTTOM:.1f}"]
+        for moment, value in points:
+            line_parts.append(f"H {x_position(moment):.1f} V {y_position(value):.1f}")
+        line_path = " ".join(line_parts)
+        area = (
+            f'<path d="{line_path} V {PLOT_BOTTOM:.1f} H {PLOT_LEFT:.1f} Z" '
+            'fill="url(#series-area)" />'
         )
-        + f" {x_position(published):.1f} {download_y_position(downloads):.1f}"
-        for index, (_, published, downloads) in enumerate(releases)
-    )
+        point_marks = ""
+    else:
+        line_path = " ".join(
+            ("M" if index == 0 else "L")
+            + f" {x_position(moment):.1f} {y_position(value):.1f}"
+            for index, (moment, value) in enumerate(points)
+        )
+        area = ""
+        point_marks = "".join(
+            f'<circle cx="{x_position(moment):.1f}" cy="{y_position(value):.1f}" '
+            f'r="2.5" fill="{point_color}" />'
+            for moment, value in points
+        )
 
     grid = []
     for value in range(0, y_top + 1, y_step):
@@ -206,18 +237,6 @@ def render_svg(
         grid.append(
             f'<text x="{PLOT_LEFT - 14}" y="{y + 4:.1f}" text-anchor="end" '
             f'fill="{colors["muted"]}" font-size="12">{value}</text>'
-        )
-
-    download_axis = []
-    for value in range(0, download_top + 1, download_step):
-        y = download_y_position(value)
-        download_axis.append(
-            f'<line x1="{PLOT_RIGHT}" y1="{y:.1f}" x2="{PLOT_RIGHT + 6}" y2="{y:.1f}" '
-            f'stroke="{colors["download_line"]}" stroke-width="1" />'
-        )
-        download_axis.append(
-            f'<text x="{PLOT_RIGHT + 12}" y="{y + 4:.1f}" text-anchor="start" '
-            f'fill="{colors["download_line"]}" font-size="12">{value}</text>'
         )
 
     x_labels = []
@@ -237,30 +256,22 @@ def render_svg(
             f'fill="{colors["muted"]}" font-size="12">{escape(label)}</text>'
         )
 
-    title = f"{repository.split('/')[-1]} Growth"
-    total_downloads = sum(downloads for _, _, downloads in releases)
-    subtitle = (
-        f"{len(dates)} GitHub stars · {total_downloads:,} cleaned asset downloads across "
-        f"{len(releases)} releases · Latest excluded · Updated {now:%d %b %Y}"
-    )
-    last_x = x_position(dates[-1])
-    last_y = y_position(len(dates))
-    label_y = max(PLOT_TOP + 16, last_y - 14)
-    last_release, last_published, last_downloads = releases[-1]
-    last_release_x = x_position(last_published)
-    last_release_y = download_y_position(last_downloads)
-
-    download_points = "".join(
-        f'<circle cx="{x_position(published):.1f}" cy="{download_y_position(downloads):.1f}" '
-        f'r="2.5" fill="{colors["download_point"]}" />'
-        for _, published, downloads in releases
-    )
+    last_x = x_position(points[-1][0])
+    last_y = y_position(points[-1][1])
+    if stars:
+        label_x = PLOT_RIGHT
+        label_y = max(PLOT_TOP + 16, last_y - 14)
+        label_anchor = "end"
+    else:
+        label_x = last_x - 28
+        label_y = min(PLOT_BOTTOM - 8, last_y + 20)
+        label_anchor = "end"
 
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}" role="img" aria-labelledby="title description">
   <title id="title">{escape(title)}</title>
   <desc id="description">{escape(subtitle)}</desc>
   <defs>
-    <linearGradient id="star-area" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="series-area" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="{colors["area"]}" stop-opacity="0.34" />
       <stop offset="100%" stop-color="{colors["area"]}" stop-opacity="0.03" />
     </linearGradient>
@@ -269,24 +280,16 @@ def render_svg(
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
     <text x="{PLOT_LEFT}" y="34" fill="{colors["text"]}" font-size="21" font-weight="700">{escape(title)}</text>
     <text x="{PLOT_LEFT}" y="58" fill="{colors["muted"]}" font-size="13">{escape(subtitle)}</text>
-    <line x1="{PLOT_LEFT}" y1="82" x2="{PLOT_LEFT + 24}" y2="82" stroke="{colors["line"]}" stroke-width="3" />
-    <text x="{PLOT_LEFT + 32}" y="86" fill="{colors["text"]}" font-size="12">GitHub stars</text>
-    <line x1="{PLOT_LEFT + 138}" y1="82" x2="{PLOT_LEFT + 162}" y2="82" stroke="{colors["download_line"]}" stroke-width="3" />
-    <circle cx="{PLOT_LEFT + 150}" cy="82" r="3" fill="{colors["download_point"]}" />
-    <text x="{PLOT_LEFT + 170}" y="86" fill="{colors["text"]}" font-size="12">Release downloads</text>
-    <text x="{PLOT_LEFT}" y="{PLOT_TOP - 8}" fill="{colors["line"]}" font-size="12">Stars</text>
-    <text x="{PLOT_RIGHT}" y="{PLOT_TOP - 8}" text-anchor="end" fill="{colors["download_line"]}" font-size="12">Downloads / release</text>
+    <line x1="{PLOT_LEFT}" y1="82" x2="{PLOT_LEFT + 24}" y2="82" stroke="{line_color}" stroke-width="3" />
+    <text x="{PLOT_LEFT + 32}" y="86" fill="{colors["text"]}" font-size="12">{legend}</text>
+    <text x="{PLOT_LEFT}" y="{PLOT_TOP - 8}" fill="{line_color}" font-size="12">{axis_label}</text>
     {''.join(grid)}
-    {''.join(download_axis)}
     {''.join(x_labels)}
-    <path d="{area_path}" fill="url(#star-area)" />
-    <path d="{line_path}" fill="none" stroke="{colors["line"]}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-    <path d="{download_path}" fill="none" stroke="{colors["download_line"]}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-    {download_points}
-    <circle cx="{last_x:.1f}" cy="{last_y:.1f}" r="5" fill="{colors["point"]}" stroke="{colors["background"]}" stroke-width="3" />
-    <text x="{PLOT_RIGHT}" y="{label_y:.1f}" text-anchor="end" fill="{colors["text"]}" font-size="14" font-weight="700">{len(dates)} stars</text>
-    <circle cx="{last_release_x:.1f}" cy="{last_release_y:.1f}" r="4.5" fill="{colors["download_point"]}" stroke="{colors["background"]}" stroke-width="2" />
-    <text x="{last_release_x - 28:.1f}" y="{min(PLOT_BOTTOM - 8, last_release_y + 20):.1f}" text-anchor="end" fill="{colors["download_line"]}" font-size="13" font-weight="700">{escape(last_release)} · {last_downloads}</text>
+    {area}
+    <path d="{line_path}" fill="none" stroke="{line_color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    {point_marks}
+    <circle cx="{last_x:.1f}" cy="{last_y:.1f}" r="5" fill="{point_color}" stroke="{colors["background"]}" stroke-width="3" />
+    <text x="{label_x:.1f}" y="{label_y:.1f}" text-anchor="{label_anchor}" fill="{line_color}" font-size="14" font-weight="700">{escape(last_label)}</text>
   </g>
 </svg>
 '''
@@ -306,10 +309,12 @@ def main() -> None:
     releases = fetch_release_downloads(args.repository, token)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for theme in THEMES:
-        output = args.output_dir / f"star-history-{theme}.svg"
-        output.write_text(
-            render_svg(args.repository, dates, releases, theme), encoding="utf-8"
-        )
+        for chart in ("stars", "downloads"):
+            output = args.output_dir / f"{chart[:-1]}-history-{theme}.svg"
+            output.write_text(
+                render_svg(args.repository, dates, releases, theme, chart),
+                encoding="utf-8",
+            )
     print(
         f"growth history: {len(dates)} stars, "
         f"{sum(downloads for _, _, downloads in releases)} downloads"

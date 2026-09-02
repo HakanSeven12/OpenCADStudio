@@ -2080,6 +2080,32 @@ pub fn primitive_grips(
             GripShape::Square,
             None,
         ),
+        SolidHistoryOperation::Extrusion(value) => {
+            let reference = [
+                value.reference_point.x,
+                value.reference_point.y,
+                value.reference_point.z,
+            ];
+            add(
+                GRIP_POSITION,
+                value.base.transform,
+                reference,
+                GripShape::Square,
+                None,
+            );
+            let direction = [value.direction.x, value.direction.y, value.direction.z];
+            add(
+                GRIP_HEIGHT,
+                value.base.transform,
+                [
+                    reference[0] + direction[0],
+                    reference[1] + direction[1],
+                    reference[2] + direction[2],
+                ],
+                GripShape::Triangle,
+                Some(direction),
+            );
+        }
         _ => {}
     }
     grips
@@ -2239,6 +2265,54 @@ pub fn apply_primitive_grip(
             value.base.transform =
                 (glam::DMat4::from_translation(delta) * current).to_cols_array();
         }
+        SolidHistoryOperation::Extrusion(value) => match grip_id {
+            GRIP_POSITION => {
+                let Some(current) = matrix(value.base.transform) else {
+                    return false;
+                };
+                let reference = current.transform_point3(glam::DVec3::new(
+                    value.reference_point.x,
+                    value.reference_point.y,
+                    value.reference_point.z,
+                ));
+                let delta = world - reference;
+                if !delta.is_finite() || delta.length_squared() <= 1e-24 {
+                    return false;
+                }
+                value.base.transform =
+                    (glam::DMat4::from_translation(delta) * current).to_cols_array();
+            }
+            GRIP_HEIGHT => {
+                if value.path_entity.is_some() {
+                    return false;
+                }
+                let reference = glam::DVec3::new(
+                    value.reference_point.x,
+                    value.reference_point.y,
+                    value.reference_point.z,
+                );
+                let direction = local - reference;
+                let height = direction.length();
+                if !direction.is_finite() || !height.is_finite() || height <= 1e-6 {
+                    return false;
+                }
+                let current = glam::DVec3::new(
+                    value.direction.x,
+                    value.direction.y,
+                    value.direction.z,
+                );
+                if (direction - current).length_squared() <= 1e-24 {
+                    return false;
+                }
+                value.direction = acadrust::types::Vector3::new(
+                    direction.x,
+                    direction.y,
+                    direction.z,
+                );
+                value.end_draft_distance = height;
+            }
+            _ => return false,
+        },
         _ => return false,
     }
     true

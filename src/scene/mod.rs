@@ -2725,12 +2725,21 @@ impl Scene {
         if let Some((mut set, wires, center)) =
             crate::scene::model::solid_model::display_from_solid(&solid, color)
         {
-            if let Some(EntityType::Solid3D(entity)) = self.document.get_entity_mut(handle) {
-                entity.point_of_reference = acadrust::types::Vector3::new(
-                    center[0], center[1], center[2],
-                );
-                entity.wires = wires;
-                entity.silhouettes.clear();
+            if let Some(entity) = self.document.get_entity_mut(handle) {
+                let reference = acadrust::types::Vector3::new(center[0], center[1], center[2]);
+                match entity {
+                    EntityType::Solid3D(entity) => {
+                        entity.point_of_reference = reference;
+                        entity.wires = wires;
+                        entity.silhouettes.clear();
+                    }
+                    EntityType::Surface(entity) => {
+                        entity.point_of_reference = reference;
+                        entity.wires = wires;
+                        entity.silhouettes.clear();
+                    }
+                    _ => {}
+                }
             }
             let name = handle.value().to_string();
             for mesh in &mut set.lods {

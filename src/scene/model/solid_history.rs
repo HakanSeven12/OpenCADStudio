@@ -57,6 +57,8 @@ pub const PROP_BANK: &str = "solid_history_bank";
 pub const PROP_TWIST_ALONG_PATH: &str = "solid_history_twist_along_path";
 pub const PROP_SCALE_ALONG_PATH: &str = "solid_history_scale_along_path";
 pub const PROP_SWEEP_LENGTH: &str = "solid_history_sweep_length";
+pub const PROP_EXTRUSION_HEIGHT: &str = "solid_history_extrusion_height";
+pub const PROP_TAPER_ANGLE: &str = "solid_history_taper_angle";
 pub const PROP_PYRAMID_TYPE: &str = "solid_history_pyramid_type";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
@@ -110,6 +112,7 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Torus(_)
                 | SolidHistoryOperation::Pyramid(_)
                 | SolidHistoryOperation::Sweep(_)
+                | SolidHistoryOperation::Extrusion(_)
         )
     )
 }
@@ -125,7 +128,7 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         }
         SolidHistoryOperation::Cone(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
-        SolidHistoryOperation::Sweep(value) => world_point(
+        SolidHistoryOperation::Sweep(value) | SolidHistoryOperation::Extrusion(value) => world_point(
             value.base.transform,
             [
                 value.reference_point.x,
@@ -137,6 +140,100 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         SolidHistoryOperation::Pyramid(value) => world_point(value.base.transform, [0.0; 3]),
         _ => None,
     }
+}
+
+fn extrusion_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistorySweep,
+) -> Vec<PropSection> {
+    let position = world_point(
+        value.base.transform,
+        [
+            value.reference_point.x,
+            value.reference_point.y,
+            value.reference_point.z,
+        ],
+    )
+    .unwrap_or(glam::DVec3::ZERO);
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(object_show_history, show_history_mode);
+    let path_length = sweep_path_length(value);
+    let height_value = path_length.unwrap_or(value.end_draft_distance);
+    let height = if value.path_entity.is_some() {
+        PropValue::ReadOnly(crate::entities::common::format_length(height_value))
+    } else {
+        PropValue::EditText(crate::entities::common::format_length(height_value))
+    };
+    let taper = if value.path_entity.is_some() {
+        PropValue::ReadOnly(crate::entities::common::format_angle(value.draft_angle))
+    } else {
+        PropValue::EditText(crate::entities::common::format_angle(value.draft_angle))
+    };
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Solid type").into_owned(),
+                    field: "solid_history_type",
+                    value: PropValue::ReadOnly(t!("Extrusion").into_owned()),
+                },
+                crate::entities::common::edit_prop(
+                    t!("Position X").as_ref(),
+                    PROP_POSITION_X,
+                    position.x,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Y").as_ref(),
+                    PROP_POSITION_Y,
+                    position.y,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Position Z").as_ref(),
+                    PROP_POSITION_Z,
+                    position.z,
+                ),
+                Property {
+                    label: t!("Height").into_owned(),
+                    field: PROP_EXTRUSION_HEIGHT,
+                    value: height,
+                },
+                Property {
+                    label: t!("Taper angle").into_owned(),
+                    field: PROP_TAPER_ANGLE,
+                    value: taper,
+                },
+            ],
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::Choice {
+                        selected: if record_history { "Record" } else { "None" }.to_string(),
+                        options: vec!["None".to_string(), "Record".to_string()],
+                    },
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: if show_history_editable {
+                        PropValue::Choice {
+                            selected: if show_history { "Yes" } else { "No" }.to_string(),
+                            options: vec!["No".to_string(), "Yes".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(if show_history { "Yes" } else { "No" }.to_string())
+                    },
+                },
+            ],
+        },
+    ]
 }
 
 fn sweep_properties(
@@ -889,6 +986,9 @@ pub fn primitive_properties(
         SolidHistoryOperation::Pyramid(value) => pyramid_properties(document, handle, value),
         SolidHistoryOperation::Torus(value) => torus_properties(document, handle, value),
         SolidHistoryOperation::Sweep(value) => sweep_properties(document, handle, value),
+        SolidHistoryOperation::Extrusion(value) => {
+            extrusion_properties(document, handle, value)
+        }
         _ => Vec::new(),
     }
 }
@@ -919,6 +1019,8 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_PROFILE_ROTATION
             | PROP_TWIST_ALONG_PATH
             | PROP_SCALE_ALONG_PATH
+            | PROP_EXTRUSION_HEIGHT
+            | PROP_TAPER_ANGLE
             | PROP_PYRAMID_TYPE
     )
 }
@@ -931,6 +1033,86 @@ pub fn is_specialized_property(field: &str) -> bool {
     matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH)
         || is_primitive_property(field)
         || is_history_choice(field)
+}
+
+fn apply_extrusion_geometry_property(
+    value: &mut SolidHistorySweep,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    if value.path_entity.is_some()
+        && matches!(field, PROP_EXTRUSION_HEIGHT | PROP_TAPER_ANGLE)
+    {
+        return Some(false);
+    }
+    match field {
+        PROP_POSITION_X | PROP_POSITION_Y | PROP_POSITION_Z => {
+            let axis = match field {
+                PROP_POSITION_X => 0,
+                PROP_POSITION_Y => 1,
+                _ => 2,
+            };
+            let target = crate::entities::common::parse_length(text)?;
+            if !target.is_finite() {
+                return Some(false);
+            }
+            let current = matrix(value.base.transform)?;
+            let reference = current.transform_point3(glam::DVec3::new(
+                value.reference_point.x,
+                value.reference_point.y,
+                value.reference_point.z,
+            ));
+            if !reference.is_finite() || (target - reference[axis]).abs() <= 1e-12 {
+                return Some(false);
+            }
+            let mut delta = glam::DVec3::ZERO;
+            delta[axis] = target - reference[axis];
+            let updated = glam::DMat4::from_translation(delta) * current;
+            if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
+                return Some(false);
+            }
+            value.base.transform = updated.to_cols_array();
+            Some(true)
+        }
+        PROP_EXTRUSION_HEIGHT => {
+            let height = crate::entities::common::parse_length(text)?;
+            if !height.is_finite() || height.abs() <= 1e-9 {
+                return Some(false);
+            }
+            let direction = glam::DVec3::new(
+                value.direction.x,
+                value.direction.y,
+                value.direction.z,
+            );
+            let Some(unit) = direction.try_normalize() else {
+                return Some(false);
+            };
+            let sign = if height.signum() == value.end_draft_distance.signum() {
+                1.0
+            } else {
+                -1.0
+            };
+            let updated = unit * height.abs() * sign;
+            if (updated - direction).length_squared() <= 1e-24 {
+                return Some(false);
+            }
+            value.direction = acadrust::types::Vector3::new(updated.x, updated.y, updated.z);
+            value.end_draft_distance = height;
+            Some(true)
+        }
+        PROP_TAPER_ANGLE => {
+            let angle = crate::entities::common::parse_angle(text)?;
+            if !angle.is_finite()
+                || angle.abs() >= std::f64::consts::FRAC_PI_2
+                || (angle - value.draft_angle).abs() <= 1e-12
+            {
+                return Some(false);
+            }
+            value.draft_angle = angle;
+            Some(true)
+        }
+        _ => None,
+    }
 }
 
 pub fn apply_history_choice(
@@ -1359,6 +1541,13 @@ pub fn apply_primitive_property(
     }
     if let SolidHistoryOperation::Sweep(sweep_value) = operation {
         if let Some(applied) = apply_sweep_geometry_property(sweep_value, field, value) {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Extrusion(extrusion_value) = operation {
+        if let Some(applied) =
+            apply_extrusion_geometry_property(extrusion_value, field, value)
+        {
             return applied;
         }
     }

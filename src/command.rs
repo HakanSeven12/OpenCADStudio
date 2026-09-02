@@ -1129,6 +1129,19 @@ impl CadCommand for TCountCommand {
 }
 // ── Result token ──────────────────────────────────────────────────────────
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtrudeMode {
+    Solid,
+    Surface,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ExtrudeExtent {
+    Height(f64),
+    Direction(DVec3),
+    Path(Handle),
+}
+
 /// Returned by every `CadCommand` method to tell main.rs what to do.
 #[allow(dead_code)]
 pub enum CmdResult {
@@ -1408,10 +1421,12 @@ pub enum CmdResult {
         /// Translation vector applied once to every selected point.
         delta: DVec3,
     },
-    /// Extrude the profile entity `handle` along its plane normal.
-    ExtrudeEntity {
-        handle: Handle,
-        height: f64,
+    /// Extrude one or more profiles with the requested construction mode.
+    ExtrudeEntities {
+        handles: Vec<Handle>,
+        extent: ExtrudeExtent,
+        mode: ExtrudeMode,
+        taper_angle: f64,
         color: [f32; 4],
     },
     /// Pull a closed profile or a planar solid face by a signed distance.

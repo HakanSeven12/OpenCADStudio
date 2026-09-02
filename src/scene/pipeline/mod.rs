@@ -3266,9 +3266,19 @@ impl Pipeline {
         &mut self,
         selected: &rustc_hash::FxHashSet<acadrust::Handle>,
         hovered: &rustc_hash::FxHashSet<acadrust::Handle>,
+        edge_wires: &[WireModel],
     ) {
+        let edge_handles: rustc_hash::FxHashSet<acadrust::Handle> = edge_wires
+            .iter()
+            .filter_map(|wire| wire.name.strip_prefix("mesh-edge:"))
+            .filter_map(|value| value.parse::<u64>().ok())
+            .map(acadrust::Handle::new)
+            .collect();
         let mut out = Vec::new();
-        for handle in selected {
+        for handle in selected
+            .iter()
+            .filter(|handle| !edge_handles.contains(handle))
+        {
             if let Some(ranges) = self.mesh_ranges_by_handle.get(handle) {
                 out.extend(ranges.iter().copied().map(|range| MeshHighlightDraw {
                     range,
@@ -3276,7 +3286,9 @@ impl Pipeline {
                 }));
             }
         }
-        for handle in hovered.iter().filter(|handle| !selected.contains(handle)) {
+        for handle in hovered.iter().filter(|handle| {
+            !selected.contains(handle) && !edge_handles.contains(handle)
+        }) {
             if let Some(ranges) = self.mesh_ranges_by_handle.get(&handle) {
                 out.extend(ranges.iter().copied().map(|range| MeshHighlightDraw {
                     range,

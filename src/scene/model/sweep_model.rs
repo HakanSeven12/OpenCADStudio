@@ -5,7 +5,8 @@ use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use cadkernel::space::{PlanarCurve, Plane, Vec3};
 use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
 use acadrust::objects::{
-    SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep,
+    SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation, SolidHistoryRevolve,
+    SolidHistorySweep,
 };
 use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;

@@ -5,7 +5,9 @@ use std::sync::{Mutex, OnceLock};
 use acadrust::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode};
+use crate::command::{
+    CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, SelectionEntity,
+};
 use crate::scene::WireModel;
 use crate::t;
 
@@ -233,7 +235,7 @@ impl CadCommand for ExtrudeCommand {
         }
     }
     fn needs_entity_pick(&self) -> bool {
-        matches!(self.step, ExtrudeStep::Pick | ExtrudeStep::Path)
+        self.step == ExtrudeStep::Path
     }
     fn entity_pick_uses_surface_point(&self) -> bool {
         true
@@ -312,6 +314,12 @@ impl CadCommand for ExtrudeCommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let value = text.trim();
+        // A bare Enter finalizes the current source selection through
+        // `on_enter`. Treating the empty string as an option prefix makes it
+        // match every keyword and silently advances to the wrong branch.
+        if value.is_empty() {
+            return None;
+        }
         match self.step {
             ExtrudeStep::Pick if "MODE".starts_with(&value.to_ascii_uppercase()) => {
                 self.step = ExtrudeStep::Mode;
@@ -439,6 +447,34 @@ impl CadCommand for ExtrudeCommand {
     }
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         Some((cursor - self.anchor).dot(self.profile_direction?))
+    }
+    fn is_selection_gathering(&self) -> bool {
+        self.step == ExtrudeStep::Pick
+    }
+    fn selection_forces_add(&self) -> bool {
+        self.step == ExtrudeStep::Pick
+    }
+    fn inject_selection_entities(&mut self, entities: Vec<SelectionEntity>) {
+        if self.step != ExtrudeStep::Pick {
+            return;
+        }
+        self.handles = entities.iter().map(|entry| entry.handle).collect();
+        self.preview_profiles = entities
+            .iter()
+            .map(|entry| (entry.handle, entry.entity.clone()))
+            .collect();
+        if let Some(curve) = entities
+            .iter()
+            .find_map(|entry| crate::entities::curve::entity_curve(&entry.entity))
+        {
+            self.anchor = DVec3::from_array(curve.plane.origin);
+            self.profile_direction = curve.plane.normal().map(DVec3::from_array);
+        } else {
+            self.profile_direction = None;
+        }
+    }
+    fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
+        CmdResult::NeedPoint
     }
     fn inject_before_entity_pick(&self) -> bool {
         self.step == ExtrudeStep::Pick

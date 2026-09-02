@@ -5,7 +5,7 @@ use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use cadkernel::space::{PlanarCurve, Plane, Vec3};
 use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
 use acadrust::objects::{
-    SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep,
+    SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep,
 };
 use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;
@@ -449,6 +449,26 @@ pub fn lofted(profiles: &[EntityType]) -> Option<Body> {
         })
         .collect::<Option<Vec<_>>>()?;
     brep::loft(&sections)
+}
+
+/// Stores the source sections required to rebuild and edit a loft.
+pub fn loft_history(profiles: &[EntityType]) -> Option<SolidHistoryOperation> {
+    let cross_sections = profiles
+        .iter()
+        .map(embedded_path)
+        .collect::<Option<Vec<_>>>()?;
+    if cross_sections.len() < 2 {
+        return None;
+    }
+    let mut base = SolidHistoryNodeBase::new(1);
+    base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    Some(SolidHistoryOperation::Loft(SolidHistoryLoft {
+        base,
+        operation_major: 1,
+        cross_sections,
+        guides: Vec::new(),
+        ..SolidHistoryLoft::default()
+    }))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

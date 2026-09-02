@@ -1,7 +1,7 @@
 use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
     DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
-    SolidHistoryCylinder, SolidHistoryNodeBase, SolidHistoryOperation,
+    SolidHistoryCylinder, SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation,
     SolidHistoryPyramid, SolidHistorySphere, SolidHistorySweep, SolidHistoryTorus,
 };
 use acadrust::EntityType;
@@ -28,6 +28,7 @@ pub const GRIP_DRAFT: usize = 10_012;
 pub const GRIP_PROFILE_FIRST: usize = 10_200;
 pub const GRIP_SWEEP_PROFILE_FIRST: usize = 20_000;
 pub const GRIP_SWEEP_PATH_FIRST: usize = 30_000;
+pub const GRIP_LOFT_SECTION_FIRST: usize = 40_000;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -2057,6 +2058,94 @@ fn apply_sweep_embedded_grip(
     true
 }
 
+fn loft_section_grips(value: &SolidHistoryLoft) -> Vec<GripDef> {
+    if !value.guides.is_empty() {
+        return Vec::new();
+    }
+    let Some(transform) = matrix(value.base.transform) else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    let mut index = 0;
+    for section in &value.cross_sections {
+        let Some(entity) = embedded_entity(section) else {
+            continue;
+        };
+        for source in entity.grips() {
+            let id = GRIP_LOFT_SECTION_FIRST + index;
+            index += 1;
+            let world = transform.transform_point3(source.world);
+            if !world.is_finite() {
+                continue;
+            }
+            let transform_vector = |vector: glam::DVec3| {
+                let vector = transform.transform_vector3(vector);
+                (vector.length_squared() > 1e-12).then(|| vector.normalize())
+            };
+            result.push(GripDef {
+                id,
+                world,
+                is_midpoint: source.is_midpoint,
+                shape: source.shape,
+                dir: source.dir.and_then(transform_vector),
+                axis: source.axis.and_then(transform_vector),
+            });
+        }
+    }
+    result
+}
+
+fn apply_loft_section_grip(
+    value: &mut SolidHistoryLoft,
+    mut index: usize,
+    apply: GripApply,
+) -> bool {
+    if !value.guides.is_empty() {
+        return false;
+    }
+    let Some(transform) = matrix(value.base.transform) else {
+        return false;
+    };
+    let inverse = transform.inverse();
+    if !inverse.is_finite() {
+        return false;
+    }
+    let local_apply = match apply {
+        GripApply::Absolute(world) => {
+            let local = inverse.transform_point3(world);
+            if !local.is_finite() {
+                return false;
+            }
+            GripApply::Absolute(local)
+        }
+        GripApply::Translate(world_delta) => {
+            let local_delta = inverse.transform_vector3(world_delta);
+            if !local_delta.is_finite() || local_delta.length_squared() <= 1e-24 {
+                return false;
+            }
+            GripApply::Translate(local_delta)
+        }
+    };
+    for section in &mut value.cross_sections {
+        let Some(mut entity) = embedded_entity(section) else {
+            continue;
+        };
+        let grips = entity.grips();
+        if index >= grips.len() {
+            index -= grips.len();
+            continue;
+        }
+        let grip_id = grips[index].id;
+        entity.apply_grip(grip_id, local_apply);
+        let Some(entity) = into_embedded_entity(entity) else {
+            return false;
+        };
+        *section = entity;
+        return true;
+    }
+    false
+}
+
 fn extrusion_draft_grip(
     value: &SolidHistorySweep,
 ) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3, f64, f64)> {
@@ -2382,6 +2471,7 @@ pub fn primitive_grips(
                 GRIP_SWEEP_PATH_FIRST,
             ));
         }
+        SolidHistoryOperation::Loft(value) => grips.extend(loft_section_grips(value)),
         SolidHistoryOperation::Extrusion(value) => {
             let (profile_grips, profile_center) = extrusion_profile_grips(value);
             grips.extend(profile_grips);
@@ -2418,6 +2508,11 @@ pub fn apply_primitive_grip(
     grip_id: usize,
     apply: GripApply,
 ) -> bool {
+    if let SolidHistoryOperation::Loft(value) = operation {
+        if let Some(index) = grip_id.checked_sub(GRIP_LOFT_SECTION_FIRST) {
+            return apply_loft_section_grip(value, index, apply);
+        }
+    }
     if let SolidHistoryOperation::Sweep(value) = operation {
         if let Some(index) = grip_id.checked_sub(GRIP_SWEEP_PATH_FIRST) {
             return apply_sweep_embedded_grip(

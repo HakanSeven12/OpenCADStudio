@@ -3945,9 +3945,20 @@ impl OpenCADStudio {
                     .iter()
                     .filter_map(|handle| self.tabs[i].scene.document.get_entity(*handle).cloned())
                     .collect();
-                if let Some(solid) = sweep_model::lofted(&profiles) {
+                let result = sweep_model::loft_history(&profiles)
+                    .and_then(|history| {
+                        cadkernel::acis::rebuild_body(&history)
+                            .ok()
+                            .map(|solid| (solid, history))
+                    })
+                    .or_else(|| {
+                        sweep_model::lofted(&profiles).map(|solid| {
+                            let history = solid_history::brep_op(&solid);
+                            (solid, history)
+                        })
+                    });
+                if let Some((solid, history)) = result {
                     let pending = self.begin_undo(i, "LOFT", 1, true);
-                    let history = solid_history::brep_op(&solid);
                     let created = self.add_solid_model(empty_solid3d(), solid, history);
                     if !created.is_null() {
                         self.tabs[i].dirty = true;

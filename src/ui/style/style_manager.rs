@@ -324,9 +324,7 @@ fn btn_s(accent: bool) -> impl Fn(&Theme, Status) -> Style {
 }
 
 pub(crate) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
+    crate::ui::style::common::muted_style(theme)
 }
 
 pub(crate) fn hdivider<'a>(width: iced::Length) -> Element<'a, Message> {

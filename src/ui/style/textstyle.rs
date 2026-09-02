@@ -4,6 +4,7 @@ use crate::app::{Message, StyleKind};
 use crate::t;
 use iced::widget::{button, canvas, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Theme};
+use crate::ui::style::common::muted_style;
 use std::borrow::Cow;
 
 pub struct TextStyleView<'a> {
@@ -35,12 +36,6 @@ const BUILTIN_FONTS: &[&str] = &[
     "ItalicT", "ScriptS", "ScriptC", "GothGBT", "GothGRT", "GothITT", "GreekC",
     "Symbol", "ISO3098", "Unicode",
 ];
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {

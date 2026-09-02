@@ -4,6 +4,7 @@ use crate::app::Message;
 use crate::t;
 use iced::widget::{button, canvas, checkbox, column, container, row, text, text_input};
 use iced::{mouse, Color, Element, Length, Point, Rectangle, Theme};
+use crate::ui::style::common::muted_style;
 use std::borrow::Cow;
 
 pub struct MlStyleView<'a> {
@@ -23,12 +24,6 @@ pub struct MlStyleView<'a> {
     pub elements: &'a [[String; 3]],
     pub rename_active: Option<&'a str>,
     pub rename_buf: &'a str,
-}
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
 }
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {

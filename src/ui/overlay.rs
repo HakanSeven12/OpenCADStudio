@@ -2755,6 +2755,13 @@ impl DynInputCanvas {
         let mut x = bx;
         for (i, b) in self.boxes.iter().enumerate() {
             let w = widths[i];
+            if b.role == DynRole::Angle {
+                if let Some(center) = self.label_screen {
+                    Self::draw_box(frame, b, center, bounds, theme);
+                    x += w + DYN_GAP;
+                    continue;
+                }
+            }
             let rect =
                 canvas::Path::rectangle(Point { x, y: by }, Size { width: w, height: DYN_BOX_H });
             let (fill, border, text) = Self::box_colors(b, theme);
@@ -2850,9 +2857,6 @@ impl canvas::Program<Message> for DynInputCanvas {
 
         // Guided layouts need the anchor; without it fall back to a cursor row.
         match (self.guide, self.base_screen) {
-            (DynGuide::None, Some(base)) if self.label_screen.is_some() => {
-                self.draw_guided(&mut frame, bounds, base, theme)
-            }
             (DynGuide::None, _) | (_, None) => self.draw_row(&mut frame, bounds, theme),
             (_, Some(base)) => self.draw_guided(&mut frame, bounds, base, theme),
         }

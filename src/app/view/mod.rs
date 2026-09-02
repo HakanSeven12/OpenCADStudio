@@ -851,8 +851,10 @@ impl OpenCADStudio {
                                     tab.scene.active_model_tile_bounds(vw, vh),
                                 )
                             });
-                        camera.project(world, bounds).map(|point| {
-                            iced::Point::new(bounds.x + point.x, bounds.y + point.y)
+                        camera.project(world, bounds).and_then(|point| {
+                            (point.x.is_finite() && point.y.is_finite()).then(|| {
+                                iced::Point::new(bounds.x + point.x, bounds.y + point.y)
+                            })
                         })
                     });
                 // A command may drive a typed scalar by mouse (e.g. a

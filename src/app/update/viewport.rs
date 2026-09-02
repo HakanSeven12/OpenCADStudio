@@ -1266,6 +1266,19 @@ impl OpenCADStudio {
                 // the re-wrap is exact).
                let snap = self.tabs[i].scene.wire_models_for(&edited_handles);
 
+                // Preserve the exact geometry from the instant the grip drag began.
+                // This snapshot is visual/reference-only: do NOT append it to
+                // `snap_candidates`, otherwise phantom self-snapping can return.
+                self.grip_reference_wires = snap.clone();
+
+                // The engaged grip is always an intentional OTRACK reference.
+                self.snapper.acquire_grip_tracking_point(
+                    grip.origin_world,
+                    &self.grip_reference_wires,
+                );
+
+                
+
                 self.grip_text_verts = snap
                     .iter()
                     .flat_map(|w| w.text_verts.iter().copied())
@@ -1320,6 +1333,9 @@ impl OpenCADStudio {
                 self.active_construction_ray(i, raw, base, view_rot, eye, bounds);
             // `raw` is already model space (viewport camera or paper→model),
             // and the wires are model space, so the snap result is model.
+            // Normal snap: only the rest of the drawing participates here.
+            // The frozen grip-reference geometry deliberately stays out, so it cannot
+            // pull the edited point back onto its old shape.
             let snap_hit = self.snapper.snap(
                 raw,
                 p,
@@ -1332,11 +1348,87 @@ impl OpenCADStudio {
                 construction_ray,
             );
 
-            self.tabs[i].snap_result = snap_hit;
+            // The frozen pre-drag geometry gets a SECOND, reference-only snap pass.
+            //
+            // Its result is never used to place/move the grip. It exists only so the
+            // user can hover an endpoint/midpoint/etc. of the original geometry and
+            // acquire it for OTRACK exactly like ordinary drawing geometry.
+            let reference_snap_hit = if self.snapper.tracking_active()
+                && !self.grip_reference_wires.is_empty()
+            {
+                self.snapper
+                    .snap(
+                        raw,
+                        p,
+                        &self.grip_reference_wires,
+                        view_rot,
+                        eye,
+                        bounds,
+                        go,
+                        gr,
+                        None,
+                    )
+                    .filter(|hit| {
+                        matches!(
+                            hit.snap_type,
+                            crate::snap::SnapType::Endpoint
+                                | crate::snap::SnapType::Midpoint
+                                | crate::snap::SnapType::Center
+                                | crate::snap::SnapType::Node
+                                | crate::snap::SnapType::Quadrant
+                                | crate::snap::SnapType::Intersection
+                                | crate::snap::SnapType::Insertion
+                                | crate::snap::SnapType::ApparentIntersection
+                        )
+                    })
+            } else {
+                None
+            };
+
+            // The visible marker should normally describe the real snap that is driving
+            // the cursor. However, when there is no real object snap (or only Grid), show
+            // the reference snap marker so the user can see what point is being acquired.
+            let display_snap_hit = match snap_hit {
+                Some(hit) if hit.snap_type != crate::snap::SnapType::Grid => Some(hit),
+                _ => reference_snap_hit.or(snap_hit),
+            };
+
+            self.tabs[i].snap_result = display_snap_hit;
+
+            // OTRACK acquisition needs access to the original wire geometry so, once a
+            // reference point has dwelt long enough, it can capture the segment directions
+            // meeting at that point.
+            //
+            // IMPORTANT: this combined set is used ONLY for OTRACK acquisition.
+            // It is never passed to the normal movement snap above.
+            let mut tracking_candidates: Vec<_> =
+                snap_candidates.iter().cloned().collect();
+
+            tracking_candidates.extend(
+                self.grip_reference_wires.iter().cloned()
+            );
+
+            // Prefer a genuine drawing snap when it is an acquisition-capable point.
+            // Otherwise let the frozen-reference snap drive the dwell acquisition.
+            let normal_tracking_hit = snap_hit.filter(|hit| {
+                matches!(
+                    hit.snap_type,
+                    crate::snap::SnapType::Endpoint
+                        | crate::snap::SnapType::Midpoint
+                        | crate::snap::SnapType::Center
+                        | crate::snap::SnapType::Node
+                        | crate::snap::SnapType::Quadrant
+                        | crate::snap::SnapType::Intersection
+                        | crate::snap::SnapType::Insertion
+                        | crate::snap::SnapType::ApparentIntersection
+                )
+            });
+
+            let dwell_hit = normal_tracking_hit.or(reference_snap_hit);
 
             self.snapper.update_otrack_dwell(
-                snap_hit,
-                &snap_candidates,
+                dwell_hit,
+                &tracking_candidates,
                 view_rot,
                 eye,
                 bounds,
@@ -1357,8 +1449,16 @@ impl OpenCADStudio {
             } else {
                 None
             };
+            // If OTRACK has no acquired-object hit, expose the current polar/ortho
+            // construction ray through the same visual guide.
+            let drafting_guide = construction_ray.and_then(|(base, target)| {
+                let dir = (target - base).try_normalize()?;
+                Some((base, dir))
+            });
+            self.otrack_active = otrack_hit
+                .map(|hit| (hit.base, hit.dir))
+                .or(drafting_guide);
 
-            self.otrack_active = otrack_hit.map(|hit| (hit.base, hit.dir));
             self.otrack_kind = otrack_hit.map(|hit| hit.kind);
 
             let mut snapped = if let Some(dir) = axis_lock {
@@ -1583,12 +1683,31 @@ impl OpenCADStudio {
                 self.tabs[i].scene.set_preview_text(slid);
                 self.tabs[i].scene.set_preview_wires(Vec::new());
             } else {
-                // Wire geometry, or a reshape grip: re-tessellate. The
-                // preview WireModels carry the entity's glyphs (gathered
-                // for the preview-text buffer in the render path), so a
-                // dimension / MTEXT-width drag keeps its text visible too.
-                let preview = self.tabs[i].scene.wire_models_for(&edited_handles);
-                self.tabs[i].scene.set_preview_wires(preview);
+                // Current deformed geometry.
+                let mut preview =
+                    self.tabs[i].scene.wire_models_for(&edited_handles);
+
+                // Also show the drag-start geometry as a faint ghost.
+                //
+                // This is display-only. Preview wires never participate in the resident
+                // hit-test/snap set, so keeping the original shape visible does not
+                // reintroduce self-snapping.
+                let mut reference = self.grip_reference_wires.clone();
+
+                for wire in &mut reference {
+                    wire.selected = false;
+
+                    // Preserve the entity colour but strongly fade it.
+                    wire.color[3] *= 0.48;
+
+                    // The original is a positional reference, not another selected object.
+                    wire.line_weight_px = wire.line_weight_px.min(1.0);
+                }
+
+                // Original first, live/deformed geometry over it.
+                reference.append(&mut preview);
+
+                self.tabs[i].scene.set_preview_wires(reference);
             }
             let preview_ms = preview_started.elapsed().as_secs_f64() * 1000.0;
             let geometry_ms = grip_started.elapsed().as_secs_f64() * 1000.0;
@@ -3024,6 +3143,7 @@ impl OpenCADStudio {
                     );
                     self.tabs[i].dirty = true;
                 }
+                self.grip_reference_wires.clear();
                 self.grip_text_verts = Vec::new();
                 self.grip_text_slide = false;
                 for &handle in &handles {

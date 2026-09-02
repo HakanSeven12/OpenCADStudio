@@ -654,8 +654,13 @@ impl OpenCADStudio {
             // viewport). Without the `ob.x/ob.y` offset it silently vanishes.
             // Shared OTRACK projection basis: the active pane's camera + rect
             // (canvas offset included), matching the grips / UCS icon above.
+            let drafting_alignment_active =
+                self.snapper.alignment_active()
+                    || (tab.active_grip.is_some()
+                        && (self.polar_mode || self.ortho_mode));
+
             let otrack_proj: Option<(glam::Mat4, glam::DVec3, iced::Rectangle)> =
-                if self.snapper.alignment_active() {
+                if drafting_alignment_active {
                     Some(
                         if let Some((vp_cam, full)) = tab.scene.viewport_edit_frame((vw, vh)) {
                             (vp_cam.view_proj_rte(full), vp_cam.eye(), full)

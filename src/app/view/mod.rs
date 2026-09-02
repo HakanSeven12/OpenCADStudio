@@ -836,6 +836,25 @@ impl OpenCADStudio {
             {
                 let w = tab.last_cursor_world;
                 let base = tab.dyn_anchor.or(self.last_point);
+                let label_screen = tab
+                    .active_cmd
+                    .as_ref()
+                    .and_then(|command| command.dyn_label_point(w))
+                    .and_then(|world| {
+                        let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                        let (camera, bounds) = tab
+                            .scene
+                            .viewport_edit_frame((vw, vh))
+                            .unwrap_or_else(|| {
+                                (
+                                    tab.scene.camera.borrow().clone(),
+                                    tab.scene.active_model_tile_bounds(vw, vh),
+                                )
+                            });
+                        camera.project(world, bounds).map(|point| {
+                            iced::Point::new(bounds.x + point.x, bounds.y + point.y)
+                        })
+                    });
                 // A command may drive a typed scalar by mouse (e.g. a
                 // perpendicular distance to a picked object); show that live
                 // value in the box until the user types over it.
@@ -898,6 +917,7 @@ impl OpenCADStudio {
                     tab.last_cursor_screen,
                     tab.last_point_screen,
                     tab.dyn_ref_screen,
+                    label_screen,
                     tab.dyn_guide,
                     boxes,
                     prompt,

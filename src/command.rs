@@ -2179,6 +2179,12 @@ pub trait CadCommand: Send {
     fn dyn_live_value(&self, _cursor: DVec3) -> Option<f64> {
         None
     }
+
+    /// Optional world-space point where the dynamic value box should be
+    /// centred. The view projects it with the active camera.
+    fn dyn_label_point(&self, _cursor: DVec3) -> Option<DVec3> {
+        None
+    }
 }
 
 // ── Autocomplete registry ─────────────────────────────────────────────────

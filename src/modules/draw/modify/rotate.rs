@@ -73,6 +73,19 @@ impl RotateCommand {
         )
     }
 
+    fn angle_arc(
+        center: [f64; 2],
+        radius: f64,
+        angle: f64,
+    ) -> Option<(geom2d::Arc, bool)> {
+        let (start, end, reverse) = if angle > 0.0 {
+            (0.0, angle, false)
+        } else {
+            (angle, 0.0, true)
+        };
+        geom2d::bounded_arc(center, radius, start, end).map(|arc| (arc, reverse))
+    }
+
     fn angle_guide(&self, center: DVec3, radius: f64, angle: f64) -> Vec<WireModel> {
         if radius <= f64::EPSILON {
             return vec![];
@@ -95,13 +108,11 @@ impl RotateCommand {
             return guides;
         }
 
-        let (start, end, reverse) = if angle > 0.0 {
-            (0.0, angle, false)
-        } else {
-            (angle, 0.0, true)
-        };
-        let Some(arc) = geom2d::bounded_arc([center_local.x, center_local.y], radius, start, end)
-        else {
+        let Some((arc, reverse)) = Self::angle_arc(
+            [center_local.x, center_local.y],
+            radius,
+            angle,
+        ) else {
             return guides;
         };
         let mut points = KernelCurve::Arc(arc).tessellate_angle(TAU / 64.0);
@@ -326,5 +337,55 @@ impl CadCommand for RotateCommand {
                 .map(|angle| crate::command::dyn_display_angle_deg(angle as f32) as f64),
             _ => None,
         }
+    }
+
+    fn dyn_label_point(&self, cursor: DVec3) -> Option<DVec3> {
+        let center = match self.step {
+            Step::Angle { center } | Step::RefNew { center, .. } => center,
+            _ => return None,
+        };
+        let center_local = self.plane.to_local(center);
+        let direction = self.plane.vector_to_local(cursor - center);
+        let radius = direction.truncate().length();
+        if radius <= f64::EPSILON {
+            return None;
+        }
+        let angle = direction.y.atan2(direction.x);
+        let point = if angle.abs() <= f64::EPSILON {
+            [center_local.x + radius, center_local.y]
+        } else {
+            let (arc, _) = Self::angle_arc(
+                [center_local.x, center_local.y],
+                radius,
+                angle,
+            )?;
+            KernelCurve::Arc(arc).point_at(0.5)
+        };
+        Some(
+            self.plane
+                .to_world(DVec3::new(point[0], point[1], center_local.z)),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn angle_label_uses_the_working_plane_arc_midpoint() {
+        let plane = WorkingPlane::new(DVec3::ZERO, DVec3::Y, DVec3::Z);
+        let mut command = RotateCommand::new(vec![], vec![]);
+        command.set_working_plane(plane);
+        command.step = Step::Angle {
+            center: DVec3::ZERO,
+        };
+
+        let label = command
+            .dyn_label_point(plane.y * 10.0)
+            .expect("label point");
+        let expected = (plane.x + plane.y) * (50.0_f64).sqrt();
+
+        assert!(label.abs_diff_eq(expected, 1e-9));
     }
 }

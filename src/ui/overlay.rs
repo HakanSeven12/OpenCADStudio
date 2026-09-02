@@ -2301,6 +2301,7 @@ pub fn dynamic_input_overlay<'a>(
     cursor_screen: Point,
     base_screen: Option<Point>,
     ref_screen: Option<Point>,
+    label_screen: Option<Point>,
     guide: DynGuide,
     boxes: Vec<DynBox>,
     prompt: String,
@@ -2310,6 +2311,7 @@ pub fn dynamic_input_overlay<'a>(
         cursor_screen,
         base_screen,
         ref_screen,
+        label_screen,
         guide,
         boxes,
         prompt,
@@ -2327,6 +2329,8 @@ struct DynInputCanvas {
     base_screen: Option<Point>,
     /// Far end of the reference line (projected `dyn_ref`) — for `Perp`.
     ref_screen: Option<Point>,
+    /// Command-supplied world-space label point projected by the active camera.
+    label_screen: Option<Point>,
     guide: DynGuide,
     boxes: Vec<DynBox>,
     /// The active command's current prompt, drawn just above the boxes.
@@ -2357,21 +2361,6 @@ impl DynInputCanvas {
 
     fn box_width(b: &DynBox) -> f32 {
         (Self::box_content(b).len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0
-    }
-
-    fn box_center_near_cursor(b: &DynBox, cursor: Point, bounds: iced::Rectangle) -> Point {
-        let width = Self::box_width(b);
-        let x = if cursor.x + DYN_OFFSET_X + width <= bounds.width {
-            cursor.x + DYN_OFFSET_X + width * 0.5
-        } else {
-            cursor.x - DYN_OFFSET_X - width * 0.5
-        };
-        let y = if cursor.y + DYN_OFFSET_X + DYN_BOX_H <= bounds.height {
-            cursor.y + DYN_OFFSET_X + DYN_BOX_H * 0.5
-        } else {
-            cursor.y - DYN_OFFSET_X - DYN_BOX_H * 0.5
-        };
-        Point { x, y }
     }
 
     /// Draw a value box centred at `center`, clamped inside `bounds`.
@@ -2660,7 +2649,14 @@ impl DynInputCanvas {
         // ── Box placement by role ──
         for b in &self.boxes {
             let center = match b.role {
-                DynRole::Angle => Self::box_center_near_cursor(b, cursor_raw, bounds),
+                DynRole::Angle => self.label_screen.unwrap_or_else(|| {
+                    let a_mid = a_ref + sweep * 0.5;
+                    let r = (len - DYN_BOX_H * 2.0).max(len * 0.5);
+                    Point {
+                        x: base.x + a_mid.cos() * r - nx * 18.0,
+                        y: base.y + a_mid.sin() * r - ny * 18.0,
+                    }
+                }),
                 DynRole::X | DynRole::Width => Point {
                     x: (base.x + cursor.x) * 0.5,
                     y: base.y + 14.0,
@@ -2854,44 +2850,13 @@ impl canvas::Program<Message> for DynInputCanvas {
 
         // Guided layouts need the anchor; without it fall back to a cursor row.
         match (self.guide, self.base_screen) {
+            (DynGuide::None, Some(base)) if self.label_screen.is_some() => {
+                self.draw_guided(&mut frame, bounds, base, theme)
+            }
             (DynGuide::None, _) | (_, None) => self.draw_row(&mut frame, bounds, theme),
             (_, Some(base)) => self.draw_guided(&mut frame, bounds, base, theme),
         }
         vec![frame.into_geometry()]
-    }
-}
-
-#[cfg(test)]
-mod dynamic_input_position_tests {
-    use super::*;
-
-    #[test]
-    fn angle_box_follows_cursor_and_flips_inside_viewport_edges() {
-        let angle = DynBox {
-            label: String::new(),
-            value: "163.7".to_string(),
-            active: true,
-            locked: false,
-            role: DynRole::Angle,
-        };
-        let bounds = iced::Rectangle {
-            x: 0.0,
-            y: 0.0,
-            width: 800.0,
-            height: 600.0,
-        };
-        let width = DynInputCanvas::box_width(&angle);
-
-        let cursor = Point::new(400.0, 300.0);
-        let center = DynInputCanvas::box_center_near_cursor(&angle, cursor, bounds);
-        assert!((center.x - width * 0.5 - cursor.x - DYN_OFFSET_X).abs() < 0.01);
-        assert!((center.y - DYN_BOX_H * 0.5 - cursor.y - DYN_OFFSET_X).abs() < 0.01);
-
-        let cursor = Point::new(795.0, 595.0);
-        let center = DynInputCanvas::box_center_near_cursor(&angle, cursor, bounds);
-        assert!(center.x + width * 0.5 <= bounds.width);
-        assert!(center.y + DYN_BOX_H * 0.5 <= bounds.height);
-        assert!(center.x < cursor.x && center.y < cursor.y);
     }
 }
 

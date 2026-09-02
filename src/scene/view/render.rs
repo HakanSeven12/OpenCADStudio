@@ -3848,7 +3848,7 @@ impl Scene {
             self.document.header.lineweight_display || display_plot_lineweights,
         );
         if self.current_layout == "Model" {
-            uniforms.lineweight_scale = self.model_lineweight_scale;
+            uniforms.lineweight_scale = -self.model_lineweight_scale;
         } else {
             let paper_per_pixel = 2.0 * self.camera.borrow().ortho_size() / canvas.1.max(1.0);
             let paper_units_per_mm = self.paper_space_unit_factor() as f32;

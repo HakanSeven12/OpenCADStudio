@@ -50,6 +50,8 @@ struct HatchInstance {
 // Draw-order depth bias (see wire.wgsl). Higher draw_depth → smaller z →
 // drawn on top, ordering this fill against other entity types.
 const DRAW_ORDER_BIAS: f32 = 0.001;
+const MODEL_LINEWEIGHT_BOOST: f32 = 2.0;
+const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
 
 struct LineFamily {
     cos_a:       f32,
@@ -133,6 +135,18 @@ struct VOut {
 // `ddx_xz`/`ddy_xz` are screen-space derivatives of `xz`, taken once in
 // fs_main: derivative builtins must run in uniform control flow, and the
 // per-family loop's early return makes later iterations non-uniform.
+fn display_lineweight(width: f32) -> f32 {
+    if u.lineweight_scale < 0.0 {
+        let base = select(
+            min(width * MODEL_LINEWEIGHT_BOOST, MODEL_LINEWEIGHT_MAX_PX),
+            1.0,
+            width <= 1.0,
+        );
+        return max(base * -u.lineweight_scale, 1.0);
+    }
+    return max(width * u.lineweight_scale, 1.0);
+}
+
 fn check_family(
     xz:      vec2<f32>,
     ddx_xz:  vec2<f32>,
@@ -163,11 +177,7 @@ fn check_family(
         -ddx_xz.x * sin_a + ddx_xz.y * cos_a,
         -ddy_xz.x * sin_a + ddy_xz.y * cos_a,
     )) * 0.5;
-    let width_px = select(
-        1.0,
-        max(fam.line_width * u.lineweight_scale, 1.0),
-        u.lwdisplay_enable > 0.5,
-    );
+    let width_px = select(1.0, display_lineweight(fam.line_width), u.lwdisplay_enable > 0.5);
     let half_line = half_px * width_px;
 
     // World units per screen pixel on each axis — used to light exactly the

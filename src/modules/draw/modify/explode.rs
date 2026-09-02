@@ -153,6 +153,11 @@ fn explode_polyline2d(p: &Polyline2D) -> Vec<EntityType> {
     let closed = p.is_closed();
     let n_segs = if closed { n } else { n - 1 };
     let elevation = p.elevation;
+    let normal = DVec3::new(p.normal.x, p.normal.y, p.normal.z)
+        .try_normalize()
+        .unwrap_or(DVec3::Z);
+    let normal = Vector3::new(normal.x, normal.y, normal.z);
+    let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
 
     let mut result = Vec::new();
     for i in 0..n_segs {
@@ -164,13 +169,25 @@ fn explode_polyline2d(p: &Polyline2D) -> Vec<EntityType> {
         if v0.bulge.abs() < 1e-10 {
             let mut common = p.common.clone();
             common.handle = Handle::NULL;
+            let start = plane.point_at(p0);
+            let end = plane.point_at(p1);
             result.push(EntityType::Line(LineEnt {
                 common,
-                start: Vector3::new(p0[0], p0[1], elevation),
-                end: Vector3::new(p1[0], p1[1], elevation),
+                start: Vector3::new(start[0], start[1], start[2]),
+                end: Vector3::new(end[0], end[1], end[2]),
+                thickness: p.thickness,
+                normal: normal.clone(),
                 ..LineEnt::new()
             }));
-        } else if let Some(arc) = bulge_to_arc(p0, p1, v0.bulge, elevation, &p.common) {
+        } else if let Some(arc) = bulge_to_arc(
+            p0,
+            p1,
+            v0.bulge,
+            elevation,
+            &p.common,
+            p.thickness,
+            normal.clone(),
+        ) {
             result.push(arc);
         }
     }
@@ -237,12 +254,22 @@ fn explode_lwpolyline(p: &LwPolyline) -> Vec<EntityType> {
                 common,
                 start: Vector3::new(p0[0], p0[1], elevation),
                 end: Vector3::new(p1[0], p1[1], elevation),
+                thickness: p.thickness,
+                normal: p.normal.clone(),
                 ..LineEnt::new()
             };
             result.push(EntityType::Line(line));
         } else {
             // Arc segment from bulge
-            if let Some(arc) = bulge_to_arc(p0, p1, v0.bulge, elevation, &p.common) {
+            if let Some(arc) = bulge_to_arc(
+                p0,
+                p1,
+                v0.bulge,
+                elevation,
+                &p.common,
+                p.thickness,
+                p.normal.clone(),
+            ) {
                 result.push(arc);
             }
         }
@@ -258,6 +285,8 @@ fn bulge_to_arc(
     bulge: f64,
     elevation: f64,
     common_src: &EntityCommon,
+    thickness: f64,
+    normal: Vector3,
 ) -> Option<EntityType> {
     let ba = crate::entities::common::BulgeArc::from_bulge(p0, p1, bulge)?;
 
@@ -280,6 +309,8 @@ fn bulge_to_arc(
         radius: ba.radius,
         start_angle,
         end_angle,
+        thickness,
+        normal,
         ..ArcEnt::new()
     };
     Some(EntityType::Arc(arc))
@@ -1719,5 +1750,67 @@ mod tests {
             "dimension line must be vertical at x=8, got {:?}",
             dim_line
         );
+    }
+
+    // EXPLODE replaces the polyline with fresh Line/Arc entities; each piece
+    // must carry the source thickness instead of resetting to 0 (#916).
+    #[test]
+    fn explode_keeps_lwpolyline_thickness() {
+        use acadrust::entities::LwVertex;
+        use acadrust::types::Vector2;
+
+        let mut pl = LwPolyline::new();
+        // One straight span + one bulged span, so the result holds a Line and
+        // an Arc and both paths through the rebuild are covered.
+        let mut v1 = LwVertex::new(Vector2::new(0.0, 0.0));
+        v1.bulge = 1.0; // semicircle to the next vertex
+        pl.vertices = vec![
+            v1,
+            LwVertex::new(Vector2::new(10.0, 0.0)),
+            LwVertex::new(Vector2::new(20.0, 0.0)),
+        ];
+        pl.thickness = 4.0;
+
+        let pieces = explode_polyline_segments(&EntityType::LwPolyline(pl));
+        assert!(pieces.len() >= 2, "expected a line and an arc piece");
+        for piece in &pieces {
+            match piece {
+                EntityType::Line(l) => assert!(
+                    (l.thickness - 4.0).abs() < 1e-12,
+                    "exploded line must keep thickness, got {}",
+                    l.thickness
+                ),
+                EntityType::Arc(a) => assert!(
+                    (a.thickness - 4.0).abs() < 1e-12,
+                    "exploded arc must keep thickness, got {}",
+                    a.thickness
+                ),
+                other => panic!("unexpected piece type: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn explode_keeps_polyline2d_extrusion() {
+        use acadrust::entities::Vertex2D;
+
+        let mut pl = Polyline2D::new();
+        pl.vertices = vec![
+            Vertex2D::new(Vector3::new(0.0, 0.0, 0.0)),
+            Vertex2D::new(Vector3::new(10.0, 0.0, 0.0)),
+        ];
+        pl.elevation = 2.0;
+        pl.thickness = -4.0;
+        pl.normal = Vector3::new(1.0, 0.0, 0.0);
+
+        let pieces = explode_polyline_segments(&EntityType::Polyline2D(pl));
+        let Some(EntityType::Line(line)) = pieces.first() else {
+            panic!("expected one line");
+        };
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(line.normal, Vector3::new(1.0, 0.0, 0.0));
+        assert!((line.thickness + 4.0).abs() < 1e-12);
+        assert!((line.start.x - 2.0).abs() < 1e-12);
+        assert!((line.end.x - 2.0).abs() < 1e-12);
     }
 }

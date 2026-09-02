@@ -753,7 +753,10 @@ impl OpenCADStudio {
                         .and_then(|curve| curve.plane.normal())
                         .map(glam::DVec3::from_array);
                     cmd.set_preselection(
-                        selected.iter().map(|(handle, _)| *handle).collect(),
+                        selected
+                            .iter()
+                            .map(|(handle, entity)| (*handle, (*entity).clone()))
+                            .collect(),
                         anchor,
                         direction,
                     );

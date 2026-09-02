@@ -2,10 +2,11 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use acadrust::{entities::Solid3D, EntityType};
+use acadrust::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode};
+use crate::scene::WireModel;
 use crate::t;
 
 // ── EXTRUDE command ────────────────────────────────────────────────────────
@@ -13,7 +14,9 @@ use crate::t;
 pub struct ExtrudeCommand {
     command_name: &'static str,
     step: ExtrudeStep,
-    handles: Vec<acadrust::Handle>,
+    handles: Vec<Handle>,
+    preview_profiles: Vec<(Handle, EntityType)>,
+    injected_profile: Option<EntityType>,
     anchor: DVec3,
     profile_direction: Option<DVec3>,
     direction_start: Option<DVec3>,
@@ -65,6 +68,8 @@ impl ExtrudeCommand {
             },
             step: ExtrudeStep::Pick,
             handles: Vec::new(),
+            preview_profiles: Vec::new(),
+            injected_profile: None,
             anchor: DVec3::ZERO,
             profile_direction: None,
             direction_start: None,
@@ -78,11 +83,12 @@ impl ExtrudeCommand {
 
     pub fn set_preselection(
         &mut self,
-        handles: Vec<acadrust::Handle>,
+        profiles: Vec<(Handle, EntityType)>,
         anchor: DVec3,
         direction: Option<DVec3>,
     ) {
-        self.handles = handles;
+        self.handles = profiles.iter().map(|(handle, _)| *handle).collect();
+        self.preview_profiles = profiles;
         self.anchor = anchor;
         self.profile_direction = direction.and_then(DVec3::try_normalize);
         if !self.handles.is_empty() {
@@ -109,6 +115,72 @@ impl ExtrudeCommand {
             color: self.color,
         }
     }
+
+    fn preview_wires(&self, cursor: DVec3) -> Vec<WireModel> {
+        if self.step != ExtrudeStep::Height {
+            return Vec::new();
+        }
+        let Some(axis) = self.profile_direction else {
+            return Vec::new();
+        };
+        let height = (cursor - self.anchor).dot(axis);
+        if !height.is_finite() || height.abs() <= 1e-6 {
+            return Vec::new();
+        }
+
+        self.preview_profiles
+            .iter()
+            .flat_map(|(_, entity)| {
+                let Some((profile, closed)) =
+                    crate::scene::model::sweep_model::extrusion_profile_of(entity)
+                else {
+                    return Vec::new();
+                };
+                let Some(normal) = profile.plane.normal() else {
+                    return Vec::new();
+                };
+                let direction = [normal[0] * height, normal[1] * height, normal[2] * height];
+                let creates_surface = self.mode == ExtrudeMode::Surface || !closed;
+                let body = if creates_surface {
+                    crate::scene::model::sweep_model::extruded_surface(
+                        entity,
+                        direction,
+                        self.taper_angle,
+                    )
+                } else {
+                    crate::scene::model::sweep_model::extruded_direction(
+                        entity,
+                        direction,
+                        self.taper_angle,
+                    )
+                };
+                body.map(|body| preview_body_wires(&body, self.color))
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+}
+
+fn preview_body_wires(body: &cadkernel::brep::Body, color: [f32; 4]) -> Vec<WireModel> {
+    let mesh = cadkernel::brep::mesh::tessellate(
+        body,
+        cadkernel::brep::mesh::TessellationTolerance::new(
+            cadkernel::tessellation::DEFAULT_ANGLE,
+            1e-9,
+        ),
+    );
+    mesh.edges
+        .into_iter()
+        .filter(|edge| edge.positions.len() >= 2)
+        .map(|edge| {
+            WireModel::solid_f64(
+                "EXTRUDE-PREVIEW".to_owned(),
+                edge.positions,
+                color,
+                false,
+            )
+        })
+        .collect()
 }
 
 impl CadCommand for ExtrudeCommand {
@@ -171,7 +243,7 @@ impl CadCommand for ExtrudeCommand {
             self.profile_direction = direction.and_then(DVec3::try_normalize);
         }
     }
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
@@ -180,6 +252,11 @@ impl CadCommand for ExtrudeCommand {
                 if !self.handles.contains(&handle) {
                     self.handles.push(handle);
                     self.anchor = point;
+                    if let Some(entity) = self.injected_profile.take() {
+                        self.preview_profiles.push((handle, entity));
+                    }
+                } else {
+                    self.injected_profile = None;
                 }
                 CmdResult::NeedPoint
             }
@@ -362,6 +439,17 @@ impl CadCommand for ExtrudeCommand {
     }
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         Some((cursor - self.anchor).dot(self.profile_direction?))
+    }
+    fn inject_before_entity_pick(&self) -> bool {
+        self.step == ExtrudeStep::Pick
+    }
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        if self.step == ExtrudeStep::Pick {
+            self.injected_profile = Some(entity);
+        }
+    }
+    fn on_preview_wires(&mut self, cursor: DVec3) -> Vec<WireModel> {
+        self.preview_wires(cursor)
     }
 }
 

@@ -6,7 +6,7 @@ use glam::DVec3;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput,
-    DimensionAssociationSource, WorkingPlane,
+    DimensionAssociationSource, InputKind, WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::dimension_assoc::{
@@ -350,16 +350,16 @@ impl CadCommand for ArcLengthDimensionCommand {
         CmdResult::Cancel
     }
 
-    fn wants_text_input(&self) -> bool {
-        true
+    fn input_kind(&self) -> InputKind {
+        if self.awaiting_text {
+            InputKind::FreeText
+        } else {
+            InputKind::SingleToken
+        }
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
         !self.awaiting_text && !self.awaiting_angle
-    }
-
-    fn wants_text_with_spaces(&self) -> bool {
-        self.awaiting_text
     }
 
     fn options(&self) -> Vec<CmdOption> {

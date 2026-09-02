@@ -1,4 +1,4 @@
-use super::{ArrowKey, Message, OpenCADStudio};
+use super::{ArrowKey, Message, OpenCADStudio, TextEntryMode};
 use crate::scene::VIEWCUBE_DRAW_PX;
 use crate::ui::PropertiesPanel;
 use iced::time::Instant;
@@ -1478,14 +1478,23 @@ impl OpenCADStudio {
                 // string, a path, `UCS Z 90` as one line) can be typed; the `>`
                 // is stripped on submit. (Unfocused Space repeats the last
                 // command via CommandSpace.)
-                // Command-line entry is shown uppercase.
-                let s = s.to_uppercase();
+                // Command-line entry is shown uppercase — except while the
+                // active command collects free-form text (cell text, TEXT /
+                // MTEXT bodies), where the typed case is the content and
+                // Space must stay in the buffer.
+                let text_with_spaces = self.is_free_text_active();
+                let s = if text_with_spaces { s } else { s.to_uppercase() };
                 // A space submits (acts like Enter). The whole value is handed to
                 // the submit path, which tokenises multi-token lines — so a typed
                 // token, a pasted `LINE 0,0 10,10`, or API-fed text all run their
-                // spaces as step separators. A leading `>` keeps spaces literal.
+                // spaces as step separators. A leading `>` keeps spaces literal,
+                // as does an active free-form text prompt.
                 let sweep = self.sync_active_field_if_any();
-                if !self.command_line.literal_spaces && !s.starts_with('>') && s.contains(' ') {
+                if !text_with_spaces
+                    && !self.command_line.literal_spaces
+                    && !s.starts_with('>')
+                    && s.contains(' ')
+                {
                     self.command_line.input = s;
                     return Task::batch(vec![sweep, self.update(Message::CommandSubmit)]);
                 }
@@ -1817,21 +1826,35 @@ impl OpenCADStudio {
             Message::CommandSubmit => self.on_command_submit(),
 
             Message::CommandSpace => {
-                // Space is a literal space inside the MText preview; otherwise
-                // it finalises the active command like Enter.
-                if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
-                    self.mtext_type(" ");
-                    return Task::none();
+                // What Space means is decided in one place: the MText preview
+                // and free-form text prompts take it as a literal character,
+                // everything else finalises the active command like Enter.
+                match self.text_entry_mode() {
+                    TextEntryMode::MTextPreview => {
+                        self.mtext_type(" ");
+                        Task::none()
+                    }
+                    // A free-form text prompt (table cell content, TEXT /
+                    // MTEXT bodies) keeps Space in the buffer as a literal
+                    // character.
+                    TextEntryMode::FreeText => {
+                        self.command_line.input.push(' ');
+                        Task::none()
+                    }
+                    TextEntryMode::Command => {
+                        // A leading `>` (or the persistent `>` toggle) puts
+                        // the command line in "literal space" mode so the user
+                        // can type arguments that contain spaces. The typed
+                        // `>` is stripped on submit.
+                        if self.command_line.literal_spaces
+                            || self.command_line.input.starts_with('>')
+                        {
+                            self.command_line.input.push(' ');
+                            return Task::none();
+                        }
+                        self.update(Message::CommandFinalize)
+                    }
                 }
-                // A leading `>` (or the persistent `>` toggle) puts the command
-                // line in "literal space" mode so the user can type arguments
-                // that contain spaces; otherwise Space works like Enter. The
-                // typed `>` is stripped on submit.
-                if self.command_line.literal_spaces || self.command_line.input.starts_with('>') {
-                    self.command_line.input.push(' ');
-                    return Task::none();
-                }
-                return self.update(Message::CommandFinalize);
             }
             Message::CommandFinalize => self.on_command_finalize(),
 
@@ -8199,5 +8222,133 @@ mod prop_pointer_tests {
 
         let task = app.update(Message::PropPointerPressed);
         assert!(task.units() > 0);
+    }
+}
+
+#[cfg(test)]
+mod free_text_entry_tests {
+    //! The free-form text prompts (table cell content, TEXT / MTEXT bodies)
+    //! change what Space / Enter / typing mean at the command line. These
+    //! tests pin the routing through `text_entry_mode` so the three key
+    //! routes can't drift apart again.
+    use super::Message;
+    use crate::app::{OpenCADStudio, TextEntryMode};
+    use crate::modules::annotate::table_cmd::TableCellEditCommand;
+    use acadrust::entities::Table;
+    use acadrust::types::Vector3;
+    use acadrust::{EntityType, Handle};
+
+    /// A test drawing with a 2×2 table and the cell editor active on [0,0],
+    /// seeded with `cell_text`.
+    fn app_with_cell_command(cell_text: &str) -> (OpenCADStudio, Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let mut table = Table::new(Vector3::new(0.0, 0.0, 0.0), 2, 2);
+        table.cell_mut(0, 0).unwrap().set_text(cell_text);
+        let handle = app.tabs[0]
+            .scene
+            .document
+            .add_entity(EntityType::Table(table.clone()))
+            .unwrap();
+        app.set_active_command(0, Box::new(TableCellEditCommand::new(handle, &table, 0, 0)));
+        (app, handle)
+    }
+
+    fn cell_text(app: &OpenCADStudio, _handle: Handle) -> String {
+        // ReplaceMany commits by erasing the old handle and re-adding the
+        // entity under a new one, so look the (single) table up by type.
+        app.tabs[0]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Table(table) => Some(table.cell_text(0, 0).unwrap_or("").to_string()),
+                _ => None,
+            })
+            .expect("table entity missing")
+    }
+
+    #[test]
+    fn cell_editor_switches_to_free_text_mode() {
+        let (mut app, _) = app_with_cell_command("");
+        assert_eq!(app.text_entry_mode(), TextEntryMode::FreeText);
+        assert!(app.is_free_text_active());
+        app.tabs[0].active_cmd = None;
+        assert_eq!(app.text_entry_mode(), TextEntryMode::Command);
+        assert!(!app.is_free_text_active());
+    }
+
+    #[test]
+    fn cell_edit_typed_space_stays_in_buffer_with_case() {
+        let (mut app, handle) = app_with_cell_command("");
+        // A typed buffer containing a Space must not auto-submit.
+        let _ = app.update(Message::CommandInput("Foo Bar".into()));
+        assert_eq!(app.command_line.input, "Foo Bar");
+        assert!(app.tabs[0].active_cmd.is_some(), "Space must not submit");
+        // The Space key binding inserts a literal space too.
+        let _ = app.update(Message::CommandSpace);
+        assert_eq!(app.command_line.input, "Foo Bar ");
+        // Enter finishes the edit and commits the content, case intact.
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(cell_text(&app, handle), "Foo Bar");
+    }
+
+    #[test]
+    fn cell_edit_slash_n_inserts_line_break() {
+        let (mut app, handle) = app_with_cell_command("");
+        let _ = app.update(Message::CommandInput("Foo/nBar".into()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(cell_text(&app, handle), "Foo\\PBar");
+    }
+
+    #[test]
+    fn cell_edit_unfocused_typing_preserves_case() {
+        // The CommandAppendChar route (typing while the command line is not
+        // focused) must not uppercase free-form text either.
+        let (mut app, handle) = app_with_cell_command("");
+        for ch in ["F", "o", "o"] {
+            let _ = app.update(Message::CommandAppendChar(ch.into()));
+        }
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(cell_text(&app, handle), "Foo");
+    }
+
+    #[test]
+    fn cell_edit_skips_expression_evaluation() {
+        let (mut app, handle) = app_with_cell_command("");
+        let _ = app.update(Message::CommandInput("5*2".into()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(cell_text(&app, handle), "5*2");
+    }
+
+    #[test]
+    fn cell_edit_leading_greater_than_is_content() {
+        // `>` is only a literal-space hint for command prompts; in free
+        // text it is content and must not be stripped on submit.
+        let (mut app, handle) = app_with_cell_command("");
+        let _ = app.update(Message::CommandInput(">Note".into()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(cell_text(&app, handle), ">Note");
+    }
+
+    #[test]
+    fn cell_edit_empty_enter_ends_edit_without_wiping() {
+        let (mut app, handle) = app_with_cell_command("Keep me");
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(cell_text(&app, handle), "Keep me");
+        assert!(app.tabs[0].active_cmd.is_none(), "Enter ends the edit");
+    }
+
+    #[test]
+    fn normal_commands_still_uppercase_and_submit_on_space() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        // No free-text command active: entry is uppercased…
+        let _ = app.update(Message::CommandInput("lin".into()));
+        assert_eq!(app.command_line.input, "LIN");
+        // …and a pasted multi-token line runs as a command, not as text.
+        let _ = app.update(Message::CommandInput("LINE 0,0 10,10".into()));
+        assert!(app.command_line.input.is_empty(), "Space submitted the line");
+        assert_eq!(app.text_entry_mode(), TextEntryMode::Command);
     }
 }

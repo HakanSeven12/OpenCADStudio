@@ -56,3 +56,24 @@ pub struct SelectionState {
     pub middle_last_pos: Option<Point>,
     pub middle_last_press_time: Option<Instant>,
 }
+
+impl SelectionState {
+    /// End every left-button selection gesture without disturbing the previous
+    /// completed-window record or command-owned preview marquee. Grip editing
+    /// owns the left button while engaged and calls this before/after placement
+    /// so a small pointer move cannot also arm a box or lasso selection.
+    pub fn clear_left_selection_gesture(&mut self) {
+        self.left_down = false;
+        self.left_press_pos = None;
+        self.left_press_time = None;
+        self.left_dragging = false;
+        self.box_anchor = None;
+        self.box_anchor_world = None;
+        self.box_current = None;
+        self.box_crossing = false;
+        self.box_crossing_locked = false;
+        self.poly_active = false;
+        self.poly_points.clear();
+        self.poly_crossing = false;
+    }
+}

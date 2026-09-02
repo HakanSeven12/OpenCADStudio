@@ -4,7 +4,7 @@ use acadrust::EntityType;
 use glam::{DVec3, Vec3};
 use crate::t;
 
-use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
@@ -249,11 +249,11 @@ impl CadCommand for InsertBlockCommand {
         }
     }
 
-    fn wants_text_input(&self) -> bool {
-        matches!(
-            self.step,
-            Step::Name | Step::FillAttr { .. } | Step::Point { .. }
-        )
+    fn input_kind(&self) -> InputKind {
+        match self.step {
+            Step::FillAttr { .. } => InputKind::FreeText,
+            Step::Name | Step::Point { .. } => InputKind::SingleToken,
+        }
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
@@ -261,11 +261,6 @@ impl CadCommand for InsertBlockCommand {
         // still accepting a point pick. Once a value is being typed (awaiting),
         // route the whole number through `on_text_input` instead.
         matches!(self.step, Step::Point { .. }) && self.awaiting.is_none()
-    }
-
-    fn wants_text_with_spaces(&self) -> bool {
-        // Block names don't embed whitespace, but attribute values do.
-        matches!(self.step, Step::FillAttr { .. })
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {

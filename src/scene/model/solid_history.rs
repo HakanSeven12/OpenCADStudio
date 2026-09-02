@@ -323,7 +323,30 @@ fn sweep_path_length(value: &SolidHistorySweep) -> Option<f64> {
     use acadrust::entities::EmbeddedEntity;
     use acadrust::EntityType;
 
-    let entity = match value.path_entity.as_ref()? {
+    let path_entity = value.path_entity.as_ref()?;
+    if let EmbeddedEntity::Spline(path) = path_entity {
+        if path.degree == 1 && path.control_points.len() >= 2 && path.weights.is_empty() {
+            let transform = glam::DMat4::from_cols_array(&value.path_entity_transform);
+            if !transform.is_finite() || transform.determinant().abs() <= 1e-12 {
+                return None;
+            }
+            return Some(
+                path.control_points
+                    .windows(2)
+                    .map(|pair| {
+                        let start = transform.transform_point3(glam::DVec3::new(
+                            pair[0].x, pair[0].y, pair[0].z,
+                        ));
+                        let end = transform.transform_point3(glam::DVec3::new(
+                            pair[1].x, pair[1].y, pair[1].z,
+                        ));
+                        end.distance(start)
+                    })
+                    .sum(),
+            );
+        }
+    }
+    let entity = match path_entity {
         EmbeddedEntity::Line(value) => EntityType::Line(value.clone()),
         EmbeddedEntity::Arc(value) => EntityType::Arc(value.clone()),
         EmbeddedEntity::Circle(value) => EntityType::Circle(value.clone()),
@@ -1076,7 +1099,7 @@ fn apply_extrusion_geometry_property(
         }
         PROP_EXTRUSION_HEIGHT => {
             let height = crate::entities::common::parse_length(text)?;
-            if !height.is_finite() || height.abs() <= 1e-9 {
+            if !height.is_finite() || height <= 1e-9 {
                 return Some(false);
             }
             let direction = glam::DVec3::new(
@@ -1087,12 +1110,7 @@ fn apply_extrusion_geometry_property(
             let Some(unit) = direction.try_normalize() else {
                 return Some(false);
             };
-            let sign = if height.signum() == value.end_draft_distance.signum() {
-                1.0
-            } else {
-                -1.0
-            };
-            let updated = unit * height.abs() * sign;
+            let updated = unit * height;
             if (updated - direction).length_squared() <= 1e-24 {
                 return Some(false);
             }

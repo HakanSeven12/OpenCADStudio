@@ -3,7 +3,7 @@
 use cadkernel::brep::{self, Body};
 use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use cadkernel::space::{PlanarCurve, Plane, Vec3};
-use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex};
+use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
 use acadrust::objects::{
     SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep,
 };
@@ -229,22 +229,75 @@ pub fn extruded_surface(
     taper_angle: f64,
 ) -> Option<Body> {
     let (profile, closed) = extrusion_profile_of(entity)?;
-    if closed {
-        brep::extrude_surface_tapered(
-            profile.plane,
-            &profile.pieces,
-            direction,
-            taper_angle,
-        )
-    } else if taper_angle.abs() <= 1e-12 {
-        brep::extrude_surface(profile.plane, &profile.pieces, direction)
-    } else {
-        None
-    }
+    let _ = closed;
+    brep::extrude_surface_tapered(
+        profile.plane,
+        &profile.pieces,
+        direction,
+        taper_angle,
+    )
 }
 
-pub fn extruded_along_path(entity: &EntityType, path: &EntityType) -> Option<Body> {
-    swept(entity, path)
+pub fn extruded_along_path(
+    entity: &EntityType,
+    path: &EntityType,
+    taper_angle: f64,
+) -> Option<Body> {
+    let profile = profile_of(entity)?;
+    if let EntityType::Polyline3D(path) = path {
+        let points = path
+            .vertices
+            .iter()
+            .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
+            .collect::<Vec<_>>();
+        if taper_angle.abs() > 1e-12 {
+            if points.len() != 2 {
+                return None;
+            }
+            return brep::extrude_tapered(
+                profile.plane,
+                &profile.pieces,
+                (Vec3::from(points[1]) - Vec3::from(points[0])).to_array(),
+                taper_angle,
+            );
+        }
+        return brep::sweep_along_polyline3d(profile.plane, &profile.pieces, &points);
+    }
+    if taper_angle.abs() <= 1e-12 {
+        return swept(entity, path);
+    }
+    let curve = entity_curve(path)?;
+    let Curve::Line(line) = curve.curve else {
+        return None;
+    };
+    let direction = Vec3::from(curve.plane.point_at(line.end))
+        - Vec3::from(curve.plane.point_at(line.start));
+    brep::extrude_tapered(
+        profile.plane,
+        &profile.pieces,
+        direction.to_array(),
+        taper_angle,
+    )
+}
+
+pub fn straight_path_direction(path: &EntityType) -> Option<[f64; 3]> {
+    if let EntityType::Polyline3D(path) = path {
+        if path.vertices.len() != 2 {
+            return None;
+        }
+        let start = &path.vertices[0].position;
+        let end = &path.vertices[1].position;
+        return Some([end.x - start.x, end.y - start.y, end.z - start.z]);
+    }
+    let curve = entity_curve(path)?;
+    let Curve::Line(line) = curve.curve else {
+        return None;
+    };
+    Some(
+        (Vec3::from(curve.plane.point_at(line.end))
+            - Vec3::from(curve.plane.point_at(line.start)))
+        .to_array(),
+    )
 }
 
 /// Signed distance of a drag along a profile's normal.
@@ -346,13 +399,28 @@ pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
         EntityType::Ellipse(value) => Some(EmbeddedEntity::Ellipse(value.clone())),
         EntityType::LwPolyline(value) => Some(EmbeddedEntity::LwPolyline(value.clone())),
         EntityType::Spline(value) => Some(EmbeddedEntity::Spline(value.clone())),
+        EntityType::Polyline3D(value) if !value.is_closed() && value.vertices.len() >= 2 => {
+            let mut spline = Spline::from_control_points(
+                1,
+                value
+                    .vertices
+                    .iter()
+                    .map(|vertex| vertex.position)
+                    .collect(),
+            );
+            spline.flags.linear = true;
+            spline.flags.planar = false;
+            Some(EmbeddedEntity::Spline(spline))
+        }
         _ => None,
     }
 }
 
 fn embedded_planar_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
-    if let Some(embedded) = embedded_path(entity) {
-        return Some((embedded, glam::DMat4::IDENTITY.to_cols_array()));
+    if !matches!(entity, EntityType::Polyline3D(_)) {
+        if let Some(embedded) = embedded_path(entity) {
+            return Some((embedded, glam::DMat4::IDENTITY.to_cols_array()));
+        }
     }
     let (profile, closed) = extrusion_profile_of(entity)?;
     let mut polyline = LwPolyline::new();
@@ -406,11 +474,7 @@ pub fn extrusion_history(
     taper_angle: f64,
     reference_point: [f64; 3],
 ) -> Option<SolidHistoryOperation> {
-    let signed_height = extrusion_profile_of(profile)
-        .and_then(|(profile, _)| profile.plane.normal())
-        .map(|normal| Vec3::from(direction).dot(Vec3::from(normal)))
-        .filter(|value| value.is_finite())
-        .unwrap_or_else(|| Vec3::from(direction).length());
+    let signed_height = Vec3::from(direction).length();
     let mut base = SolidHistoryNodeBase::new(1);
     base.transform = glam::DMat4::IDENTITY.to_cols_array();
     let (sweep_entity, sweep_entity_transform) = embedded_planar_entity(profile)?;
@@ -433,6 +497,33 @@ pub fn extrusion_history(
         scale_factor: 1.0,
         sweep_entity_transform,
         path_entity_transform,
+        reference_point: Vector3::new(
+            reference_point[0],
+            reference_point[1],
+            reference_point[2],
+        ),
+        ..SolidHistorySweep::default()
+    }))
+}
+
+pub fn sweep_history(
+    profile: &EntityType,
+    path: &EntityType,
+    taper_angle: f64,
+    reference_point: [f64; 3],
+) -> Option<SolidHistoryOperation> {
+    let mut base = SolidHistoryNodeBase::new(1);
+    base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    let (sweep_entity, sweep_entity_transform) = embedded_planar_entity(profile)?;
+    Some(SolidHistoryOperation::Sweep(SolidHistorySweep {
+        base,
+        operation_major: 1,
+        sweep_entity: Some(sweep_entity),
+        path_entity: Some(embedded_path(path)?),
+        draft_angle: taper_angle,
+        scale_factor: 1.0,
+        sweep_entity_transform,
+        path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
         reference_point: Vector3::new(
             reference_point[0],
             reference_point[1],

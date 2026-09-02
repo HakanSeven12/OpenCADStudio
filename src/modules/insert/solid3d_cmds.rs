@@ -1,5 +1,7 @@
 // Profile-based kernel solid commands stored as exact ACIS data.
 
+use std::sync::{Mutex, OnceLock};
+
 use acadrust::{entities::Solid3D, EntityType};
 use glam::DVec3;
 
@@ -17,7 +19,27 @@ pub struct ExtrudeCommand {
     direction_start: Option<DVec3>,
     mode: ExtrudeMode,
     taper_angle: f64,
+    last_height: Option<f64>,
+    taper_return: ExtrudeStep,
     color: [f32; 4],
+}
+
+#[derive(Clone, Copy)]
+struct ExtrudeDefaults {
+    mode: ExtrudeMode,
+    height: Option<f64>,
+    taper_angle: f64,
+}
+
+fn extrude_defaults() -> &'static Mutex<ExtrudeDefaults> {
+    static DEFAULTS: OnceLock<Mutex<ExtrudeDefaults>> = OnceLock::new();
+    DEFAULTS.get_or_init(|| {
+        Mutex::new(ExtrudeDefaults {
+            mode: ExtrudeMode::Solid,
+            height: None,
+            taper_angle: 0.0,
+        })
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,10 +52,12 @@ enum ExtrudeStep {
     Path,
     Taper,
     Expression,
+    TaperExpression,
 }
 
 impl ExtrudeCommand {
     pub fn new_named(name: &str, color: [f32; 4]) -> Self {
+        let defaults = *extrude_defaults().lock().unwrap_or_else(|error| error.into_inner());
         Self {
             command_name: match name {
                 "THICKEN" => "THICKEN",
@@ -44,8 +68,10 @@ impl ExtrudeCommand {
             anchor: DVec3::ZERO,
             profile_direction: None,
             direction_start: None,
-            mode: ExtrudeMode::Solid,
-            taper_angle: 0.0,
+            mode: defaults.mode,
+            taper_angle: defaults.taper_angle,
+            last_height: defaults.height,
+            taper_return: ExtrudeStep::Height,
             color,
         }
     }
@@ -65,6 +91,16 @@ impl ExtrudeCommand {
     }
 
     fn finish(&self, extent: ExtrudeExtent) -> CmdResult {
+        if let Some(height) = match extent {
+            ExtrudeExtent::Height(height) => Some(height),
+            ExtrudeExtent::Direction(direction) => Some(direction.length()),
+            ExtrudeExtent::Path(_) => None,
+        } {
+            extrude_defaults()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .height = Some(height);
+        }
         CmdResult::ExtrudeEntities {
             handles: self.handles.clone(),
             extent,
@@ -82,13 +118,28 @@ impl CadCommand for ExtrudeCommand {
     fn prompt(&self) -> String {
         match self.step {
             ExtrudeStep::Pick => t!("EXTRUDE  Select objects to extrude or [Mode] (Enter to finish):").into_owned(),
-            ExtrudeStep::Mode => t!("EXTRUDE  Creation mode [Solid/Surface]:").into_owned(),
-            ExtrudeStep::Height => t!("EXTRUDE  Specify height or [Direction/Path/Taper angle/Expression]:").into_owned(),
+            ExtrudeStep::Mode => format!(
+                "{} <{}>:",
+                t!("EXTRUDE  Creation mode [Solid/Surface]"),
+                if self.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" }
+            ),
+            ExtrudeStep::Height => {
+                let base = t!("EXTRUDE  Specify height or [Direction/Path/Taper angle/Expression]");
+                self.last_height.map_or_else(
+                    || format!("{base}:"),
+                    |height| format!("{base} <{}>:", crate::entities::common::format_length(height)),
+                )
+            }
             ExtrudeStep::DirectionStart => t!("EXTRUDE  Start point of direction:").into_owned(),
             ExtrudeStep::DirectionEnd => t!("EXTRUDE  End point of direction:").into_owned(),
-            ExtrudeStep::Path => t!("EXTRUDE  Select extrusion path:").into_owned(),
-            ExtrudeStep::Taper => t!("EXTRUDE  Specify taper angle:").into_owned(),
+            ExtrudeStep::Path => t!("EXTRUDE  Select extrusion path or [Taper angle]:").into_owned(),
+            ExtrudeStep::Taper => format!(
+                "{} <{}>:",
+                t!("EXTRUDE  Specify taper angle or [Expression]"),
+                crate::entities::common::format_angle(self.taper_angle)
+            ),
             ExtrudeStep::Expression => t!("EXTRUDE  Enter height expression:").into_owned(),
+            ExtrudeStep::TaperExpression => t!("EXTRUDE  Enter taper angle expression:").into_owned(),
         }
     }
     fn options(&self) -> Vec<CmdOption> {
@@ -104,6 +155,8 @@ impl CadCommand for ExtrudeCommand {
                 CmdOption::new("Taper angle", "TAPER"),
                 CmdOption::new("Expression", "EXPRESSION"),
             ],
+            ExtrudeStep::Path => vec![CmdOption::new("Taper angle", "TAPER")],
+            ExtrudeStep::Taper => vec![CmdOption::new("Expression", "EXPRESSION")],
             _ => Vec::new(),
         }
     }
@@ -171,12 +224,14 @@ impl CadCommand for ExtrudeCommand {
             ExtrudeStep::Pick
                 | ExtrudeStep::Mode
                 | ExtrudeStep::Height
+                | ExtrudeStep::Path
                 | ExtrudeStep::Taper
                 | ExtrudeStep::Expression
+                | ExtrudeStep::TaperExpression
         )
     }
     fn point_step_accepts_keywords(&self) -> bool {
-        self.step == ExtrudeStep::Height
+        matches!(self.step, ExtrudeStep::Height | ExtrudeStep::Path)
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let value = text.trim();
@@ -194,6 +249,10 @@ impl CadCommand for ExtrudeCommand {
                 } else {
                     return Some(CmdResult::NeedPoint);
                 }
+                extrude_defaults()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .mode = self.mode;
                 self.step = ExtrudeStep::Pick;
                 Some(CmdResult::NeedPoint)
             }
@@ -208,6 +267,7 @@ impl CadCommand for ExtrudeCommand {
                     return Some(CmdResult::NeedPoint);
                 }
                 if "TAPER".starts_with(&upper) || "TAPER ANGLE".starts_with(&upper) {
+                    self.taper_return = ExtrudeStep::Height;
                     self.step = ExtrudeStep::Taper;
                     return Some(CmdResult::NeedPoint);
                 }
@@ -219,27 +279,71 @@ impl CadCommand for ExtrudeCommand {
                     .filter(|height| height.is_finite() && height.abs() > 1e-6)
                     .map(|height| self.finish(ExtrudeExtent::Height(height)))
             }
+            ExtrudeStep::Path => {
+                let upper = value.to_ascii_uppercase();
+                if "TAPER".starts_with(&upper) || "TAPER ANGLE".starts_with(&upper) {
+                    self.taper_return = ExtrudeStep::Path;
+                    self.step = ExtrudeStep::Taper;
+                }
+                Some(CmdResult::NeedPoint)
+            }
             ExtrudeStep::Taper => {
+                if "EXPRESSION".starts_with(&value.to_ascii_uppercase()) {
+                    self.step = ExtrudeStep::TaperExpression;
+                    return Some(CmdResult::NeedPoint);
+                }
                 let angle = crate::entities::common::parse_angle(value)?;
                 if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 {
                     return Some(CmdResult::NeedPoint);
                 }
                 self.taper_angle = angle;
-                self.step = ExtrudeStep::Height;
+                extrude_defaults()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .taper_angle = angle;
+                self.step = self.taper_return;
                 Some(CmdResult::NeedPoint)
             }
             ExtrudeStep::Expression => crate::app::expr_eval::eval_number(value)
                 .filter(|height| height.is_finite() && height.abs() > 1e-6)
                 .map(|height| self.finish(ExtrudeExtent::Height(height))),
+            ExtrudeStep::TaperExpression => {
+                let angle = crate::app::expr_eval::eval_number(value)
+                    .and_then(|value| crate::entities::common::parse_angle(&value.to_string()))?;
+                if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 {
+                    return Some(CmdResult::NeedPoint);
+                }
+                self.taper_angle = angle;
+                extrude_defaults()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .taper_angle = angle;
+                self.step = self.taper_return;
+                Some(CmdResult::NeedPoint)
+            }
             _ => None,
         }
     }
     fn on_enter(&mut self) -> CmdResult {
-        if self.step == ExtrudeStep::Pick && !self.handles.is_empty() {
-            self.step = ExtrudeStep::Height;
-            CmdResult::NeedPoint
-        } else {
-            CmdResult::Cancel
+        match self.step {
+            ExtrudeStep::Pick if !self.handles.is_empty() => {
+                self.step = ExtrudeStep::Height;
+                CmdResult::NeedPoint
+            }
+            ExtrudeStep::Mode => {
+                self.step = ExtrudeStep::Pick;
+                CmdResult::NeedPoint
+            }
+            ExtrudeStep::Height => self
+                .last_height
+                .filter(|height| height.is_finite() && height.abs() > 1e-6)
+                .map(|height| self.finish(ExtrudeExtent::Height(height)))
+                .unwrap_or(CmdResult::Cancel),
+            ExtrudeStep::Taper => {
+                self.step = self.taper_return;
+                CmdResult::NeedPoint
+            }
+            _ => CmdResult::Cancel,
         }
     }
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {

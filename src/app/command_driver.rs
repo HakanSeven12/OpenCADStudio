@@ -3476,13 +3476,12 @@ impl OpenCADStudio {
                 };
                 use crate::scene::model::sweep_model;
                 let path = match extent {
-                    ExtrudeExtent::Path(handle) => {
-                        if delete_sources && self.reject_locked_edit(i, handle) {
-                            self.tabs[i].active_cmd = None;
-                            return Task::none();
-                        }
-                        self.tabs[i].scene.document.get_entity(handle).cloned().map(|entity| (handle, entity))
-                    }
+                    ExtrudeExtent::Path(handle) => self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .cloned()
+                        .map(|entity| (handle, entity)),
                     _ => None,
                 };
                 if matches!(extent, ExtrudeExtent::Path(_)) && path.is_none() {
@@ -3515,22 +3514,16 @@ impl OpenCADStudio {
                         ExtrudeExtent::Direction(direction) => Some(direction),
                         ExtrudeExtent::Path(_) => None,
                     };
-                    let path_direction = path.as_ref().and_then(|(_, path)| {
-                        crate::entities::curve::entity_curve(path).and_then(|curve| {
-                            let cadkernel::geom2d::Curve::Line(line) = curve.curve else {
-                                return None;
-                            };
-                            let start = glam::DVec3::from_array(curve.plane.point_at(line.start));
-                            let end = glam::DVec3::from_array(curve.plane.point_at(line.end));
-                            Some(end - start)
-                        })
-                    });
+                    let path_direction = path
+                        .as_ref()
+                        .and_then(|(_, path)| sweep_model::straight_path_direction(path))
+                        .map(glam::DVec3::from_array);
                     // The creation mode controls closed profiles. Open curves
                     // always create sheet surfaces.
                     let creates_surface = matches!(mode, ExtrudeMode::Surface) || !closed;
                     let body = match (creates_surface, &path, direction) {
-                        (false, Some((_, path)), _) if taper_angle.abs() <= 1e-12 => {
-                            sweep_model::extruded_along_path(&entity, path)
+                        (false, Some((_, path)), _) => {
+                            sweep_model::extruded_along_path(&entity, path, taper_angle)
                         }
                         (false, None, Some(direction)) => {
                             sweep_model::extruded_direction(
@@ -3547,7 +3540,11 @@ impl OpenCADStudio {
                             )
                         }
                         (true, Some(_), _) => path_direction.and_then(|direction| {
-                            sweep_model::extruded_surface(&entity, direction.to_array(), 0.0)
+                            sweep_model::extruded_surface(
+                                &entity,
+                                direction.to_array(),
+                                taper_angle,
+                            )
                         }),
                         _ => None,
                     };
@@ -3565,13 +3562,25 @@ impl OpenCADStudio {
                         )
                     } else {
                             let direction = direction.unwrap_or(glam::DVec3::ZERO);
-                            let history = sweep_model::extrusion_history(
-                                &entity,
-                                path.as_ref().map(|(_, entity)| entity),
-                                direction.to_array(),
-                                taper_angle,
-                                profile.plane.origin,
-                            )
+                            let history = path
+                                .as_ref()
+                                .and_then(|(_, path)| {
+                                    sweep_model::sweep_history(
+                                        &entity,
+                                        path,
+                                        taper_angle,
+                                        profile.plane.origin,
+                                    )
+                                })
+                                .or_else(|| {
+                                    sweep_model::extrusion_history(
+                                        &entity,
+                                        None,
+                                        direction.to_array(),
+                                        taper_angle,
+                                        profile.plane.origin,
+                                    )
+                                })
                             .unwrap_or_else(|| crate::scene::model::solid_history::brep_op(&body));
                             self.add_solid_model(empty_solid3d(), body, history)
                     };
@@ -3585,9 +3594,6 @@ impl OpenCADStudio {
                     }
                 }
                 if delete_sources && !created_handles.is_empty() {
-                    if let Some((path_handle, _)) = path {
-                        consumed.push(path_handle);
-                    }
                     consumed.sort_unstable_by_key(|handle| handle.value());
                     consumed.dedup();
                     self.tabs[i].scene.erase_entities(&consumed);

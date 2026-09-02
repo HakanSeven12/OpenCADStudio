@@ -8215,7 +8215,7 @@ impl Scene {
         view_rot: glam::Mat4,
         eye: glam::DVec3,
         bounds: iced::Rectangle,
-        _candidate_handles: Option<&HashSet<Handle>>,
+        candidate_handles: Option<&HashSet<Handle>>,
         tolerance_px: f32,
     ) -> Option<Handle> {
         let meshes = self.interaction_meshes_arc();
@@ -8223,6 +8223,9 @@ impl Scene {
             cursor,
             meshes.iter().filter_map(|set| {
                 let handle = set.entity_handle()?;
+                if candidate_handles.is_some_and(|handles| !handles.contains(&handle)) {
+                    return None;
+                }
                 let (edges, edges_low) = set.geometry_edges();
                 (!edges.is_empty()).then_some((
                     handle,

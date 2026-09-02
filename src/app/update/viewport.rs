@@ -2690,6 +2690,19 @@ impl OpenCADStudio {
         };
         let (vw, vh) = vp_size;
 
+        // An engaged grip owns the next left press (click-move-click placement
+        // or the release of a press-drag). Do not let the same press arm the
+        // normal box/lasso state or trigger another viewport control; the
+        // release path below will commit the grip.
+        if self.tabs[i].active_grip.is_some() {
+            self.tabs[i]
+                .scene
+                .selection
+                .borrow_mut()
+                .clear_left_selection_gesture();
+            return Task::none();
+        }
+
         // Interactive navigation tools reuse the middle-button movement path,
         // so no selection/pick logic runs while the left button drives them.
         if self.tabs[i].orbit_mode
@@ -2879,6 +2892,11 @@ impl OpenCADStudio {
                     ));
                     self.grip_hover = None;
                     self.grip_popup = None;
+                    self.tabs[i]
+                        .scene
+                        .selection
+                        .borrow_mut()
+                        .clear_left_selection_gesture();
 
                     // A grip edit is not a CAD command, so explicitly seed the shared
                     // dynamic-input fields for the newly engaged grip.
@@ -2956,10 +2974,7 @@ impl OpenCADStudio {
             // click doesn't read as an in-progress drag on later moves.
             {
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                sel.left_down = false;
-                sel.left_press_pos = None;
-                sel.left_press_time = None;
-                sel.left_dragging = false;
+                sel.clear_left_selection_gesture();
             }
             let moved = grip.last_world != grip.origin_world;
             if is_click && !moved {
@@ -3602,7 +3617,7 @@ impl OpenCADStudio {
                 let wants_text = self.tabs[i]
                     .active_cmd
                     .as_ref()
-                    .map(|c| c.wants_text_input())
+                    .map(|c| c.input_kind().wants_text())
                     .unwrap_or(false);
                 if wants_text {
                     if let Some(text) = self.tabs[i]
@@ -4033,16 +4048,16 @@ impl OpenCADStudio {
                             )
                         })
                         .or_else(|| {
-                            // 3D solids: click anywhere on the shaded
-                            // body — top-level solids and block-internal
-                            // ones together, front-most wins (a block in
-                            // front of a solid resolves to the block).
-                            self.tabs[i].scene.solid_click_hit(
+                            // Normal 3D selection follows the displayed B-rep
+                            // edges. Face-interior picking remains reserved for
+                            // modelling commands that explicitly request it.
+                            self.tabs[i].scene.solid_edge_click_hit(
                                 p,
                                 view_rot,
                                 eye,
                                 bounds,
                                 candidate_handles.as_ref(),
+                                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
                             )
                         });
                         // Selection filter: drop a pick whose type is excluded.
@@ -4352,12 +4367,13 @@ impl OpenCADStudio {
                 )
                 .and_then(|s| Scene::handle_from_wire_name(s))
                 .or_else(|| {
-                    self.tabs[i].scene.solid_click_hit(
+                    self.tabs[i].scene.solid_edge_click_hit(
                         p,
                         view_rot,
                         eye,
                         bounds,
                         candidate_handles.as_ref(),
+                        crate::ui::overlay::pick_box_aperture_px(self.pick_box),
                     )
                 });
                 if let Some(handle) = hit {
@@ -4369,102 +4385,14 @@ impl OpenCADStudio {
                         ).as_ref());
                         return Task::none();
                     }
-                    let table_editor = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(handle)
-                        .and_then(|entity| match entity {
-                            AcadEntityType::Table(table) => {
-                                let horizontal = glam::DVec3::new(
-                                    table.horizontal_direction.x,
-                                    table.horizontal_direction.y,
-                                    table.horizontal_direction.z,
-                                )
-                                .normalize_or(glam::DVec3::X);
-                                let normal = glam::DVec3::new(
-                                    table.normal.x,
-                                    table.normal.y,
-                                    table.normal.z,
-                                )
-                                .normalize_or(glam::DVec3::Z);
-                                let mut down = horizontal
-                                    .cross(normal)
-                                    .normalize_or(glam::DVec3::NEG_Y);
-                                let table_style = table.table_style_handle.and_then(|style_handle| {
-                                    self.tabs[i]
-                                        .scene
-                                        .document
-                                        .objects
-                                        .get(&style_handle)
-                                        .and_then(|object| match object {
-                                            acadrust::objects::ObjectType::TableStyle(style) => {
-                                                Some(style)
-                                            }
-                                            _ => None,
-                                        })
-                                });
-                                let flows_up = crate::entities::table::resolved_flow_up(
-                                    table,
-                                    table_style,
-                                );
-                                if flows_up {
-                                    down = -down;
-                                }
-                                let origin = glam::DVec3::new(
-                                    table.insertion_point.x,
-                                    table.insertion_point.y,
-                                    table.insertion_point.z,
-                                );
-                                let relative = click_world - origin;
-                                let x = relative.dot(horizontal);
-                                let y = relative.dot(down);
-                                if x < 0.0 || y < 0.0 {
-                                    return None;
-                                }
-                                let column = table
-                                    .columns
-                                    .iter()
-                                    .scan(0.0, |offset, column| {
-                                        *offset += column.width;
-                                        Some(*offset)
-                                    })
-                                    .position(|end| x <= end)?;
-                                let row = table
-                                    .rows
-                                    .iter()
-                                    .scan(0.0, |offset, row| {
-                                        *offset += row.height;
-                                        Some(*offset)
-                                    })
-                                    .position(|end| y <= end)?;
-                                let locked = table.cell(row, column).is_some_and(|cell| {
-                                    use acadrust::entities::table::CellStateFlags;
-                                    cell.state.intersects(
-                                        CellStateFlags::CONTENT_LOCKED
-                                            | CellStateFlags::CONTENT_READ_ONLY,
-                                    )
-                                });
-                                Some((
-                                    (!locked).then(|| {
-                                        crate::modules::annotate::table_cmd::TableCellEditCommand::new(
-                                            handle, table, row, column,
-                                        )
-                                    }),
-                                    row * table.column_count() + column,
-                                ))
-                            }
-                            _ => None,
-                        });
-                    if let Some((command, cell_index)) = table_editor {
-                        self.tabs[i].properties.prop_vertex = cell_index;
-                        self.tabs[i].properties.prop_vertex_indicator_active = true;
-                        crate::entities::table::set_prop_current_cell(cell_index);
-                        self.refresh_properties();
-                        if let Some(command) = command {
-                            self.command_line
-                                .push_info(&crate::command::CadCommand::prompt(&command));
-                            self.tabs[i].active_cmd = Some(Box::new(command));
-                        }
+                    // Table double-click: shared TABLEDIT editor setup. A
+                    // grid miss returns NoCell and falls through to the
+                    // other text/entity editors below; an editable cell or
+                    // a locked cell (indicator armed, no editor) ends the
+                    // double-click handling here.
+                    if self.begin_table_cell_edit(i, handle, click_world)
+                        != crate::modules::annotate::table_cmd::TableCellEditStart::NoCell
+                    {
                         return Task::none();
                     }
                     // Any text-bearing entity opens its in-place editor
@@ -5053,9 +4981,14 @@ impl OpenCADStudio {
         }
         if hovered.is_none() {
             let started = Instant::now();
-            hovered = self.tabs[i]
-                .scene
-                .solid_hover_hit(p, view_rot, eye, bounds, candidate_handles.as_ref());
+            hovered = self.tabs[i].scene.solid_edge_hover_hit(
+                p,
+                view_rot,
+                eye,
+                bounds,
+                candidate_handles.as_ref(),
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+            );
             solid_ms = started.elapsed().as_secs_f64() * 1000.0;
         }
         self.tabs[i].scene.set_hover_highlight(hovered);

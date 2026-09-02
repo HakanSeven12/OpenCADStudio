@@ -1044,7 +1044,11 @@ impl shader::Primitive for Primitive {
                 vp.selection_generation,
             );
             if hl_key != inner.cached_highlight_key {
-                inner.update_mesh_highlight(&vp.selected_handles, &vp.hover_handles);
+                inner.update_mesh_highlight(
+                    &vp.selected_handles,
+                    &vp.hover_handles,
+                    &vp.annotation_context_wires,
+                );
                 inner.cached_highlight_key = hl_key;
             }
             // Live overlay (command preview / interim / grip drag) — small and
@@ -3324,6 +3328,7 @@ impl Scene {
         highlighted.sort_unstable_by_key(|(handle, _)| handle.value());
 
         let empty_selection = rustc_hash::FxHashSet::default();
+        let interaction_meshes = self.interaction_meshes_arc();
         let mut wires = Vec::new();
         for (handle, selected) in highlighted {
             let Some(entity) = self.document.get_entity(handle) else {
@@ -3337,6 +3342,46 @@ impl Scene {
                     true,
                 ) {
                 continue;
+            }
+
+            let tint = if selected {
+                WireModel::SELECTED
+            } else {
+                WireModel::HOVER
+            };
+            for set in interaction_meshes
+                .iter()
+                .filter(|set| set.entity_handle() == Some(handle))
+            {
+                let (edges, edges_low) = set.geometry_edges();
+                if edges.len() < 2 {
+                    continue;
+                }
+                let mut points = Vec::with_capacity(edges.len() / 2 * 3);
+                for pair_start in (0..edges.len() - 1).step_by(2) {
+                    for index in [pair_start, pair_start + 1] {
+                        let high = edges[index];
+                        let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
+                        let local = acadrust::types::Vector3::new(
+                            high[0] as f64 + low[0] as f64,
+                            high[1] as f64 + low[1] as f64,
+                            high[2] as f64 + low[2] as f64,
+                        );
+                        let world = set
+                            .instance_transform
+                            .map_or(local, |transform| transform.apply(local));
+                        points.push([world.x, world.y, world.z]);
+                    }
+                    points.push([f64::NAN; 3]);
+                }
+                let mut edge_wire = WireModel::solid_f64(
+                    format!("mesh-edge:{}", handle.value()),
+                    points,
+                    tint,
+                    selected,
+                );
+                edge_wire.line_weight_px = 2.0;
+                wires.push(edge_wire);
             }
 
             if matches!(entity, EntityType::Hatch(_)) {
@@ -3390,12 +3435,6 @@ impl Scene {
                     .map(|context| context.scale)
                 })
                 .flatten();
-            let tint = if selected {
-                WireModel::SELECTED
-            } else {
-                WireModel::HOVER
-            };
-
             for scale in scales {
                 if displayed_scale == Some(scale) {
                     continue;

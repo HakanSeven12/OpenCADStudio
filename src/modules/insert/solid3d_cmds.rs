@@ -1,9 +1,14 @@
 // Profile-based kernel solid commands stored as exact ACIS data.
 
-use acadrust::{entities::Solid3D, EntityType};
+use std::sync::{Mutex, OnceLock};
+
+use acadrust::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdResult};
+use crate::command::{
+    CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, SelectionEntity,
+};
+use crate::scene::WireModel;
 use crate::t;
 
 // ── EXTRUDE command ────────────────────────────────────────────────────────
@@ -11,32 +16,173 @@ use crate::t;
 pub struct ExtrudeCommand {
     command_name: &'static str,
     step: ExtrudeStep,
-    pub target_handle: acadrust::Handle,
+    handles: Vec<Handle>,
+    preview_profiles: Vec<(Handle, EntityType)>,
+    injected_profile: Option<EntityType>,
     anchor: DVec3,
-    direction: Option<DVec3>,
+    profile_direction: Option<DVec3>,
+    direction_start: Option<DVec3>,
+    mode: ExtrudeMode,
+    taper_angle: f64,
+    last_height: Option<f64>,
+    taper_return: ExtrudeStep,
     color: [f32; 4],
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy)]
+struct ExtrudeDefaults {
+    mode: ExtrudeMode,
+    height: Option<f64>,
+    taper_angle: f64,
+}
+
+fn extrude_defaults() -> &'static Mutex<ExtrudeDefaults> {
+    static DEFAULTS: OnceLock<Mutex<ExtrudeDefaults>> = OnceLock::new();
+    DEFAULTS.get_or_init(|| {
+        Mutex::new(ExtrudeDefaults {
+            mode: ExtrudeMode::Solid,
+            height: None,
+            taper_angle: 0.0,
+        })
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum ExtrudeStep {
     Pick,
+    Mode,
     Height,
+    DirectionStart,
+    DirectionEnd,
+    Path,
+    Taper,
+    Expression,
+    TaperExpression,
 }
 
 impl ExtrudeCommand {
     pub fn new_named(name: &str, color: [f32; 4]) -> Self {
+        let defaults = *extrude_defaults().lock().unwrap_or_else(|error| error.into_inner());
         Self {
             command_name: match name {
                 "THICKEN" => "THICKEN",
                 _ => "EXTRUDE",
             },
             step: ExtrudeStep::Pick,
-            target_handle: acadrust::Handle::NULL,
+            handles: Vec::new(),
+            preview_profiles: Vec::new(),
+            injected_profile: None,
             anchor: DVec3::ZERO,
-            direction: None,
+            profile_direction: None,
+            direction_start: None,
+            mode: defaults.mode,
+            taper_angle: defaults.taper_angle,
+            last_height: defaults.height,
+            taper_return: ExtrudeStep::Height,
             color,
         }
     }
+
+    pub fn set_preselection(
+        &mut self,
+        profiles: Vec<(Handle, EntityType)>,
+        anchor: DVec3,
+        direction: Option<DVec3>,
+    ) {
+        self.handles = profiles.iter().map(|(handle, _)| *handle).collect();
+        self.preview_profiles = profiles;
+        self.anchor = anchor;
+        self.profile_direction = direction.and_then(DVec3::try_normalize);
+        if !self.handles.is_empty() {
+            self.step = ExtrudeStep::Height;
+        }
+    }
+
+    fn finish(&self, extent: ExtrudeExtent) -> CmdResult {
+        if let Some(height) = match extent {
+            ExtrudeExtent::Height(height) => Some(height),
+            ExtrudeExtent::Direction(direction) => Some(direction.length()),
+            ExtrudeExtent::Path(_) => None,
+        } {
+            extrude_defaults()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .height = Some(height);
+        }
+        CmdResult::ExtrudeEntities {
+            handles: self.handles.clone(),
+            extent,
+            mode: self.mode,
+            taper_angle: self.taper_angle,
+            color: self.color,
+        }
+    }
+
+    fn preview_wires(&self, cursor: DVec3) -> Vec<WireModel> {
+        if self.step != ExtrudeStep::Height {
+            return Vec::new();
+        }
+        let Some(axis) = self.profile_direction else {
+            return Vec::new();
+        };
+        let height = (cursor - self.anchor).dot(axis);
+        if !height.is_finite() || height.abs() <= 1e-6 {
+            return Vec::new();
+        }
+
+        self.preview_profiles
+            .iter()
+            .flat_map(|(_, entity)| {
+                let Some((profile, closed)) =
+                    crate::scene::model::sweep_model::extrusion_profile_of(entity)
+                else {
+                    return Vec::new();
+                };
+                let Some(normal) = profile.plane.normal() else {
+                    return Vec::new();
+                };
+                let direction = [normal[0] * height, normal[1] * height, normal[2] * height];
+                let creates_surface = self.mode == ExtrudeMode::Surface || !closed;
+                let body = if creates_surface {
+                    crate::scene::model::sweep_model::extruded_surface(
+                        entity,
+                        direction,
+                        self.taper_angle,
+                    )
+                } else {
+                    crate::scene::model::sweep_model::extruded_direction(
+                        entity,
+                        direction,
+                        self.taper_angle,
+                    )
+                };
+                body.map(|body| preview_body_wires(&body, self.color))
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+}
+
+fn preview_body_wires(body: &cadkernel::brep::Body, color: [f32; 4]) -> Vec<WireModel> {
+    let mesh = cadkernel::brep::mesh::tessellate(
+        body,
+        cadkernel::brep::mesh::TessellationTolerance::new(
+            cadkernel::tessellation::DEFAULT_ANGLE,
+            1e-9,
+        ),
+    );
+    mesh.edges
+        .into_iter()
+        .filter(|edge| edge.positions.len() >= 2)
+        .map(|edge| {
+            WireModel::solid_f64(
+                "EXTRUDE-PREVIEW".to_owned(),
+                edge.positions,
+                color,
+                false,
+            )
+        })
+        .collect()
 }
 
 impl CadCommand for ExtrudeCommand {
@@ -45,63 +191,249 @@ impl CadCommand for ExtrudeCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            ExtrudeStep::Pick => t!("EXTRUDE  Select closed profile (Circle, LwPolyline…):")
-                .into_owned(),
-            ExtrudeStep::Height => t!("EXTRUDE  Height:").into_owned(),
+            ExtrudeStep::Pick => t!("EXTRUDE  Select objects to extrude or [Mode] (Enter to finish):").into_owned(),
+            ExtrudeStep::Mode => format!(
+                "{} <{}>:",
+                t!("EXTRUDE  Creation mode [Solid/Surface]"),
+                if self.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" }
+            ),
+            ExtrudeStep::Height => {
+                let base = t!("EXTRUDE  Specify height or [Direction/Path/Taper angle/Expression]");
+                self.last_height.map_or_else(
+                    || format!("{base}:"),
+                    |height| format!("{base} <{}>:", crate::entities::common::format_length(height)),
+                )
+            }
+            ExtrudeStep::DirectionStart => t!("EXTRUDE  Start point of direction:").into_owned(),
+            ExtrudeStep::DirectionEnd => t!("EXTRUDE  End point of direction:").into_owned(),
+            ExtrudeStep::Path => t!("EXTRUDE  Select extrusion path or [Taper angle]:").into_owned(),
+            ExtrudeStep::Taper => format!(
+                "{} <{}>:",
+                t!("EXTRUDE  Specify taper angle or [Expression]"),
+                crate::entities::common::format_angle(self.taper_angle)
+            ),
+            ExtrudeStep::Expression => t!("EXTRUDE  Enter height expression:").into_owned(),
+            ExtrudeStep::TaperExpression => t!("EXTRUDE  Enter taper angle expression:").into_owned(),
+        }
+    }
+    fn options(&self) -> Vec<CmdOption> {
+        match self.step {
+            ExtrudeStep::Pick => vec![CmdOption::new("Mode", "MODE"), CmdOption::enter("Done")],
+            ExtrudeStep::Mode => vec![
+                CmdOption::new("Solid", "SOLID"),
+                CmdOption::new("Surface", "SURFACE"),
+            ],
+            ExtrudeStep::Height => vec![
+                CmdOption::new("Direction", "DIRECTION"),
+                CmdOption::new("Path", "PATH"),
+                CmdOption::new("Taper angle", "TAPER"),
+                CmdOption::new("Expression", "EXPRESSION"),
+            ],
+            ExtrudeStep::Path => vec![CmdOption::new("Taper angle", "TAPER")],
+            ExtrudeStep::Taper => vec![CmdOption::new("Expression", "EXPRESSION")],
+            _ => Vec::new(),
         }
     }
     fn needs_entity_pick(&self) -> bool {
-        self.step == ExtrudeStep::Pick
+        self.step == ExtrudeStep::Path
     }
     fn entity_pick_uses_surface_point(&self) -> bool {
         true
     }
     fn set_entity_pick_direction(&mut self, direction: Option<DVec3>) {
-        self.direction = direction.and_then(DVec3::try_normalize);
+        if self.step == ExtrudeStep::Pick {
+            self.profile_direction = direction.and_then(DVec3::try_normalize);
+        }
     }
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
-        self.target_handle = handle;
-        self.anchor = point;
-        self.step = ExtrudeStep::Height;
-        CmdResult::NeedPoint
+        match self.step {
+            ExtrudeStep::Pick => {
+                if !self.handles.contains(&handle) {
+                    self.handles.push(handle);
+                    self.anchor = point;
+                    if let Some(entity) = self.injected_profile.take() {
+                        self.preview_profiles.push((handle, entity));
+                    }
+                } else {
+                    self.injected_profile = None;
+                }
+                CmdResult::NeedPoint
+            }
+            ExtrudeStep::Path if !self.handles.contains(&handle) => {
+                self.finish(ExtrudeExtent::Path(handle))
+            }
+            _ => CmdResult::NeedPoint,
+        }
     }
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if self.step == ExtrudeStep::Height {
-            let height = self
-                .direction
-                .map(|direction| (pt - self.anchor).dot(direction))
-                .unwrap_or_else(|| pt.distance(self.anchor));
-            if !height.is_finite() || height.abs() <= 1e-6 {
-                return CmdResult::NeedPoint;
+        match self.step {
+            ExtrudeStep::Height => {
+                let height = self
+                    .profile_direction
+                    .map(|direction| (pt - self.anchor).dot(direction))
+                    .unwrap_or_else(|| pt.distance(self.anchor));
+                if height.is_finite() && height.abs() > 1e-6 {
+                    self.finish(ExtrudeExtent::Height(height))
+                } else {
+                    CmdResult::NeedPoint
+                }
             }
-            return CmdResult::ExtrudeEntity {
-                handle: self.target_handle,
-                height,
-                color: self.color,
-            };
+            ExtrudeStep::DirectionStart => {
+                self.direction_start = Some(pt);
+                self.step = ExtrudeStep::DirectionEnd;
+                CmdResult::NeedPoint
+            }
+            ExtrudeStep::DirectionEnd => {
+                let direction = pt - self.direction_start.unwrap_or(pt);
+                if direction.is_finite() && direction.length_squared() > 1e-12 {
+                    self.finish(ExtrudeExtent::Direction(direction))
+                } else {
+                    CmdResult::NeedPoint
+                }
+            }
+            _ => CmdResult::NeedPoint,
         }
-        CmdResult::NeedPoint
     }
     fn wants_text_input(&self) -> bool {
-        self.step == ExtrudeStep::Height
+        matches!(
+            self.step,
+            ExtrudeStep::Pick
+                | ExtrudeStep::Mode
+                | ExtrudeStep::Height
+                | ExtrudeStep::Path
+                | ExtrudeStep::Taper
+                | ExtrudeStep::Expression
+                | ExtrudeStep::TaperExpression
+        )
+    }
+    fn point_step_accepts_keywords(&self) -> bool {
+        matches!(self.step, ExtrudeStep::Height | ExtrudeStep::Path)
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        crate::entities::common::parse_typed_length(text)
-            .filter(|&h| h.abs() > 1e-6)
-            .map(|h| CmdResult::ExtrudeEntity {
-                handle: self.target_handle,
-                height: h,
-                color: self.color,
-            })
+        let value = text.trim();
+        // A bare Enter finalizes the current source selection through
+        // `on_enter`. Treating the empty string as an option prefix makes it
+        // match every keyword and silently advances to the wrong branch.
+        if value.is_empty() {
+            return None;
+        }
+        match self.step {
+            ExtrudeStep::Pick if "MODE".starts_with(&value.to_ascii_uppercase()) => {
+                self.step = ExtrudeStep::Mode;
+                Some(CmdResult::NeedPoint)
+            }
+            ExtrudeStep::Mode => {
+                let upper = value.to_ascii_uppercase();
+                if "SOLID".starts_with(&upper) {
+                    self.mode = ExtrudeMode::Solid;
+                } else if "SURFACE".starts_with(&upper) {
+                    self.mode = ExtrudeMode::Surface;
+                } else {
+                    return Some(CmdResult::NeedPoint);
+                }
+                extrude_defaults()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .mode = self.mode;
+                self.step = ExtrudeStep::Pick;
+                Some(CmdResult::NeedPoint)
+            }
+            ExtrudeStep::Height => {
+                let upper = value.to_ascii_uppercase();
+                if "DIRECTION".starts_with(&upper) {
+                    self.step = ExtrudeStep::DirectionStart;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if "PATH".starts_with(&upper) {
+                    self.step = ExtrudeStep::Path;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if "TAPER".starts_with(&upper) || "TAPER ANGLE".starts_with(&upper) {
+                    self.taper_return = ExtrudeStep::Height;
+                    self.step = ExtrudeStep::Taper;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if "EXPRESSION".starts_with(&upper) {
+                    self.step = ExtrudeStep::Expression;
+                    return Some(CmdResult::NeedPoint);
+                }
+                crate::entities::common::parse_typed_length(value)
+                    .filter(|height| height.is_finite() && height.abs() > 1e-6)
+                    .map(|height| self.finish(ExtrudeExtent::Height(height)))
+            }
+            ExtrudeStep::Path => {
+                let upper = value.to_ascii_uppercase();
+                if "TAPER".starts_with(&upper) || "TAPER ANGLE".starts_with(&upper) {
+                    self.taper_return = ExtrudeStep::Path;
+                    self.step = ExtrudeStep::Taper;
+                }
+                Some(CmdResult::NeedPoint)
+            }
+            ExtrudeStep::Taper => {
+                if "EXPRESSION".starts_with(&value.to_ascii_uppercase()) {
+                    self.step = ExtrudeStep::TaperExpression;
+                    return Some(CmdResult::NeedPoint);
+                }
+                let angle = crate::entities::common::parse_angle(value)?;
+                if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 {
+                    return Some(CmdResult::NeedPoint);
+                }
+                self.taper_angle = angle;
+                extrude_defaults()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .taper_angle = angle;
+                self.step = self.taper_return;
+                Some(CmdResult::NeedPoint)
+            }
+            ExtrudeStep::Expression => crate::app::expr_eval::eval_number(value)
+                .filter(|height| height.is_finite() && height.abs() > 1e-6)
+                .map(|height| self.finish(ExtrudeExtent::Height(height))),
+            ExtrudeStep::TaperExpression => {
+                let angle = crate::app::expr_eval::eval_number(value)
+                    .and_then(|value| crate::entities::common::parse_angle(&value.to_string()))?;
+                if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 {
+                    return Some(CmdResult::NeedPoint);
+                }
+                self.taper_angle = angle;
+                extrude_defaults()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .taper_angle = angle;
+                self.step = self.taper_return;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
+        }
     }
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        match self.step {
+            ExtrudeStep::Pick if !self.handles.is_empty() => {
+                self.step = ExtrudeStep::Height;
+                CmdResult::NeedPoint
+            }
+            ExtrudeStep::Mode => {
+                self.step = ExtrudeStep::Pick;
+                CmdResult::NeedPoint
+            }
+            ExtrudeStep::Height => self
+                .last_height
+                .filter(|height| height.is_finite() && height.abs() > 1e-6)
+                .map(|height| self.finish(ExtrudeExtent::Height(height)))
+                .unwrap_or(CmdResult::Cancel),
+            ExtrudeStep::Taper => {
+                self.step = self.taper_return;
+                CmdResult::NeedPoint
+            }
+            _ => CmdResult::Cancel,
+        }
     }
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
-        (self.step == ExtrudeStep::Height).then_some((self.anchor, self.direction?))
+        (self.step == ExtrudeStep::Height)
+            .then_some((self.anchor, self.profile_direction?))
     }
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
         (self.step == ExtrudeStep::Height).then_some(crate::command::DynSpec {
@@ -114,7 +446,46 @@ impl CadCommand for ExtrudeCommand {
         })
     }
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
-        Some((cursor - self.anchor).dot(self.direction?))
+        Some((cursor - self.anchor).dot(self.profile_direction?))
+    }
+    fn is_selection_gathering(&self) -> bool {
+        self.step == ExtrudeStep::Pick
+    }
+    fn selection_forces_add(&self) -> bool {
+        self.step == ExtrudeStep::Pick
+    }
+    fn inject_selection_entities(&mut self, entities: Vec<SelectionEntity>) {
+        if self.step != ExtrudeStep::Pick {
+            return;
+        }
+        self.handles = entities.iter().map(|entry| entry.handle).collect();
+        self.preview_profiles = entities
+            .iter()
+            .map(|entry| (entry.handle, entry.entity.clone()))
+            .collect();
+        if let Some(curve) = entities
+            .iter()
+            .find_map(|entry| crate::entities::curve::entity_curve(&entry.entity))
+        {
+            self.anchor = DVec3::from_array(curve.plane.origin);
+            self.profile_direction = curve.plane.normal().map(DVec3::from_array);
+        } else {
+            self.profile_direction = None;
+        }
+    }
+    fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+    fn inject_before_entity_pick(&self) -> bool {
+        self.step == ExtrudeStep::Pick
+    }
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        if self.step == ExtrudeStep::Pick {
+            self.injected_profile = Some(entity);
+        }
+    }
+    fn on_preview_wires(&mut self, cursor: DVec3) -> Vec<WireModel> {
+        self.preview_wires(cursor)
     }
 }
 
@@ -477,6 +848,24 @@ impl CadCommand for LoftCommand {
 
 pub fn empty_solid3d() -> EntityType {
     EntityType::Solid3D(Solid3D::new())
+}
+
+pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType {
+    use acadrust::entities::{Surface, SurfaceData, SurfaceKind};
+    use acadrust::types::Vector3;
+
+    let mut surface = Surface::new(SurfaceKind::Extruded);
+    if let SurfaceData::Extruded {
+        options,
+        sweep_vector,
+        ..
+    } = &mut surface.surface_data
+    {
+        options.draft_angle = taper_angle;
+        options.is_solid = false;
+        *sweep_vector = Vector3::new(direction.x, direction.y, direction.z);
+    }
+    EntityType::Surface(surface)
 }
 
 // ── Autocomplete registry ─────────────────────────────────

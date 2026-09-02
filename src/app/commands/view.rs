@@ -1285,8 +1285,12 @@ impl CadCommand for DrawOrderCommand {
         }
     }
 
-    fn wants_text_input(&self) -> bool {
-        !matches!(self.step, DrawOrderStep::SelectObjects)
+    fn input_kind(&self) -> crate::command::InputKind {
+        if matches!(self.step, DrawOrderStep::SelectObjects) {
+            crate::command::InputKind::Point
+        } else {
+            crate::command::InputKind::SingleToken
+        }
     }
 
     fn is_selection_gathering(&self) -> bool {
@@ -2116,7 +2120,7 @@ mod tests {
 
         // 1. Shortcut 'F' -> Front
         let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
-        assert_eq!(cmd.wants_text_input(), true);
+        assert_eq!(cmd.input_kind().wants_text(), true);
         let res = cmd.on_text_input("F");
         match res {
             Some(crate::command::CmdResult::Relaunch(c, handles)) => {
@@ -2242,14 +2246,14 @@ mod tests {
         // Start command with no pre-selection
         let mut cmd = DrawOrderCommand::new(vec![]);
         assert!(cmd.is_selection_gathering());
-        assert!(!cmd.wants_text_input());
+        assert!(!cmd.input_kind().wants_text());
 
         // Gather selection
         let _ = cmd.on_selection_complete(vec![h_hatch]);
         let enter_res = cmd.on_enter();
         assert!(matches!(enter_res, crate::command::CmdResult::NeedPoint));
         assert!(!cmd.is_selection_gathering());
-        assert!(cmd.wants_text_input());
+        assert!(cmd.input_kind().wants_text());
 
         // Choose verb Front
         let res = cmd.on_text_input("F");

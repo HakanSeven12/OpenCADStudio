@@ -602,6 +602,9 @@ impl Scene {
                     Some(EntityType::Solid3D(solid)) => {
                         crate::scene::convert::solid3d_tess::kernel_body(solid)
                     }
+                    Some(EntityType::Surface(surface)) => {
+                        crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
+                    }
                     _ => None,
                 })?;
                 Some((handle, body))

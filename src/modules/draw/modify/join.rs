@@ -94,6 +94,25 @@ fn v3(p: DVec3) -> Vector3 {
     Vector3::new(p.x, p.y, p.z)
 }
 
+fn extrusion(entity: &EntityType) -> Option<(f64, DVec3)> {
+    let mut thickness = crate::scene::view::dispatch::entity_thickness(entity)?;
+    let normal = match entity {
+        EntityType::Arc(entity) => &entity.normal,
+        EntityType::Line(entity) => &entity.normal,
+        EntityType::LwPolyline(entity) => &entity.normal,
+        EntityType::Polyline2D(entity) => &entity.normal,
+        _ => return None,
+    };
+    let normal = DVec3::new(normal.x, normal.y, normal.z);
+    if thickness == 0.0 {
+        return Some((0.0, normal.try_normalize().unwrap_or(DVec3::Z)));
+    }
+    let length = normal.length();
+    let normal = normal.try_normalize()?;
+    thickness *= length;
+    (thickness.is_finite() && normal.is_finite()).then_some((thickness, normal))
+}
+
 /// Build the chain segments for one entity, or `None` for an entity type
 /// JOIN can't carry (which aborts the whole join). Lines and arcs contribute
 /// one segment; an OPEN polyline contributes one per span (bulges kept), so
@@ -143,12 +162,23 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
             if p.is_closed() || p.vertices.len() < 2 {
                 return None;
             }
+            let normal = DVec3::new(p.normal.x, p.normal.y, p.normal.z).try_normalize()?;
+            if normal.x.abs() > 1e-12 || normal.y.abs() > 1e-12 {
+                return None;
+            }
+            let cadkernel::geom2d::Curve::Polyline(curve) =
+                crate::entities::curve::entity_curve_xy(&EntityType::Polyline2D(p.clone()))?
+            else {
+                return None;
+            };
+            let z = crate::entities::curve::ocs_plane(p.normal.clone(), p.elevation).origin[2];
             Some(
-                p.vertices
+                curve
+                    .vertices
                     .windows(2)
                     .map(|w| Seg {
-                        a: DVec3::new(w[0].location.x, w[0].location.y, w[0].location.z),
-                        b: DVec3::new(w[1].location.x, w[1].location.y, w[1].location.z),
+                        a: DVec3::new(w[0].position[0], w[0].position[1], z),
+                        b: DVec3::new(w[1].position[0], w[1].position[1], z),
                         bulge: w[0].bulge,
                     })
                     .collect(),
@@ -176,9 +206,7 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
     }
     let handles: Vec<Handle> = entities.iter().map(|(h, _)| *h).collect();
     let common = entities[0].1.common().clone();
-    // Thickness (DXF 39) lives on the entity, not in `common`, so the rebuilt
-    // chain must carry it too or a thick source joins into a flat result (#916).
-    let thickness = crate::scene::view::dispatch::entity_thickness(entities[0].1).unwrap_or(0.0);
+    let (thickness, normal) = extrusion(entities[0].1)?;
 
     let (chain, closed) = stitch(segs)?;
 
@@ -201,16 +229,24 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
         line.common.handle = Handle::NULL;
         line.start = v3(verts.first().unwrap().0);
         line.end = v3(verts.last().unwrap().0);
+        line.normal = v3(normal);
         line.thickness = thickness;
         return Some((handles, vec![EntityType::Line(line)]));
     }
 
     if planar {
+        if thickness != 0.0 && normal.x.hypot(normal.y) > 1e-9 {
+            return None;
+        }
+        let flipped = thickness != 0.0 && normal.z < 0.0;
         let lw_verts: Vec<acadrust::entities::LwVertex> = verts
             .iter()
             .map(|(p, bulge)| {
-                let mut v = acadrust::entities::LwVertex::new(Vector2::new(p.x, p.y));
-                v.bulge = *bulge;
+                let mut v = acadrust::entities::LwVertex::new(Vector2::new(
+                    if flipped { -p.x } else { p.x },
+                    p.y,
+                ));
+                v.bulge = if flipped { -*bulge } else { *bulge };
                 v
             })
             .collect();
@@ -219,14 +255,20 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
         pl.common.handle = Handle::NULL;
         pl.vertices = lw_verts;
         pl.is_closed = closed;
-        pl.elevation = z0;
+        pl.elevation = if flipped { -z0 } else { z0 };
         pl.thickness = thickness;
+        if flipped {
+            pl.normal = Vector3::new(0.0, 0.0, -1.0);
+        }
         return Some((handles, vec![EntityType::LwPolyline(pl)]));
     }
 
     // Non-planar: a 3D polyline carries no bulge, so a curved segment can't
     // be represented — refuse rather than silently flatten it.
     if has_arc {
+        return None;
+    }
+    if thickness != 0.0 {
         return None;
     }
     let mut pl = acadrust::entities::Polyline3D::new();
@@ -319,7 +361,11 @@ mod join_tests {
     fn join_keeps_source_thickness() {
         let h1 = Handle::new(1);
         let h2 = Handle::new(2);
-        let e1 = lw_2pts((0.0, 0.0), (10.0, 0.0), 2.5);
+        let mut e1 = lw_2pts((0.0, 0.0), (10.0, 0.0), 2.5);
+        let EntityType::LwPolyline(source) = &mut e1 else {
+            unreachable!();
+        };
+        source.normal = Vector3::new(0.0, 0.0, -1.0);
         // A corner keeps the chain from collapsing back to a single Line.
         let e2 = line(10.0, 0.0, 10.0, 10.0, 0.0);
         let (removed, out) = join_entities(&[(h1, &e1), (h2, &e2)]).expect("chain joins");
@@ -332,6 +378,7 @@ mod join_tests {
             "joined polyline must keep source thickness, got {}",
             pl.thickness
         );
+        assert_eq!(pl.normal, Vector3::new(0.0, 0.0, -1.0));
     }
 
     // A collinear straight run collapses to a single Line; its thickness must

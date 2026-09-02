@@ -1,7 +1,7 @@
 // PEDIT edits polylines and polygon meshes.
 
 use acadrust::entities::LwVertex;
-use acadrust::types::Vector2;
+use acadrust::types::{Vector2, Vector3};
 use acadrust::{EntityType, Handle};
 use cadkernel::geom2d::nurbs::clamped_uniform_knots;
 use cadkernel::geom2d::NurbsCurve;
@@ -685,16 +685,35 @@ pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
     let mut pl = acadrust::LwPolyline::new();
     match entity {
         EntityType::Line(l) => {
+            let normal = DVec3::new(l.normal.x, l.normal.y, l.normal.z).try_normalize()?;
+            let normal = Vector3::new(normal.x, normal.y, normal.z);
+            let start = [l.start.x, l.start.y, l.start.z];
+            let end = [l.end.x, l.end.y, l.end.z];
+            let elevation = DVec3::from_array(start).dot(DVec3::new(
+                normal.x, normal.y, normal.z,
+            ));
+            let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
+            let tolerance = cadkernel::space::coplanarity_tolerance(&[start, end]);
+            if !plane.contains(end, tolerance) {
+                return None;
+            }
+            let start = plane.project(start)?;
+            let end = plane.project(end)?;
             pl.common = l.common.clone();
             pl.thickness = l.thickness;
+            pl.elevation = elevation;
+            pl.normal = normal;
             pl.vertices = vec![
-                LwVertex::new(Vector2::new(l.start.x, l.start.y)),
-                LwVertex::new(Vector2::new(l.end.x, l.end.y)),
+                LwVertex::new(Vector2::new(start[0], start[1])),
+                LwVertex::new(Vector2::new(end[0], end[1])),
             ];
         }
         EntityType::Arc(a) => {
+            let normal = DVec3::new(a.normal.x, a.normal.y, a.normal.z).try_normalize()?;
             pl.common = a.common.clone();
             pl.thickness = a.thickness;
+            pl.elevation = a.center.z;
+            pl.normal = Vector3::new(normal.x, normal.y, normal.z);
             let (sa, ea) = (a.start_angle, a.end_angle);
             let sweep = {
                 let s = (ea - sa).rem_euclid(TAU);
@@ -731,8 +750,9 @@ mod convert_tests {
     #[test]
     fn convert_keeps_line_thickness() {
         let mut l = acadrust::entities::Line::new();
-        l.start = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-        l.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+        l.start = acadrust::types::Vector3::new(2.0, 3.0, 4.0);
+        l.end = acadrust::types::Vector3::new(2.0, 5.0, 6.0);
+        l.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
         l.thickness = 3.5;
         let Some(EntityType::LwPolyline(pl)) = convert_to_polyline(&EntityType::Line(l)) else {
             panic!("line must convert");
@@ -742,12 +762,15 @@ mod convert_tests {
             "converted polyline must keep source thickness, got {}",
             pl.thickness
         );
+        assert_eq!(pl.normal, acadrust::types::Vector3::new(1.0, 0.0, 0.0));
+        assert!((pl.elevation - 2.0).abs() < 1e-12);
     }
 
     #[test]
     fn convert_keeps_arc_thickness() {
         let mut a = acadrust::entities::Arc::new();
-        a.center = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        a.center = acadrust::types::Vector3::new(0.0, 0.0, 4.0);
+        a.normal = acadrust::types::Vector3::new(0.0, 1.0, 0.0);
         a.radius = 5.0;
         a.start_angle = 0.0;
         a.end_angle = std::f64::consts::FRAC_PI_2;
@@ -760,6 +783,8 @@ mod convert_tests {
             "converted polyline must keep negative thickness, got {}",
             pl.thickness
         );
+        assert_eq!(pl.normal, acadrust::types::Vector3::new(0.0, 1.0, 0.0));
+        assert!((pl.elevation - 4.0).abs() < 1e-12);
     }
 }
 

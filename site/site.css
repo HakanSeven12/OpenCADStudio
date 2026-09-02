@@ -153,6 +153,16 @@ h2 { margin-bottom: 20px; font-size: clamp(38px, 4.4vw, 60px); line-height: 1.04
 .format-list strong { color: var(--ink); font: 700 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
 .format-list span { color: var(--muted); font-size: 14px; }
 
+.growth-section { border-bottom: 1px solid var(--line); background: #0e151d; }
+.growth-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.growth-card { width: 100%; margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.growth-card > a { display: block; }
+.growth-card img { width: 100%; height: auto; }
+.growth-card figcaption { display: flex; justify-content: space-between; gap: 20px; padding: 15px 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.growth-card figcaption span { color: var(--ink); font-weight: 680; }
+.growth-card figcaption a { color: var(--cyan); font-weight: 680; }
+.growth-card figcaption a:hover { color: #91daff; }
+
 .faq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .faq-grid details { border: 1px solid var(--line); border-radius: 7px; background: rgba(17,25,35,.72); }
 .faq-grid summary { padding: 21px 24px; cursor: pointer; font-size: 14px; font-weight: 680; }
@@ -192,11 +202,13 @@ h2 { margin-bottom: 20px; font-size: clamp(38px, 4.4vw, 60px); line-height: 1.04
   .signal-grid div { padding: 19px 16px; border-bottom: 1px solid var(--line); }
   .section { padding-block: 82px; }
   .capability-grid, .edition-grid, .faq-grid { grid-template-columns: 1fr; }
+  .growth-grid { grid-template-columns: 1fr; }
   .capability-wide { grid-column: auto; display: block; min-height: 540px; }
   .drafting-mark { position: absolute; right: -30px; bottom: -55px; width: 290px; opacity: .75; }
   .capability-card, .edition-card { padding: 28px; }
   .format-list div { grid-template-columns: 110px 1fr; gap: 14px; }
   .model-frame figcaption { flex-direction: column; gap: 6px; }
+  .growth-card figcaption { flex-direction: column; gap: 6px; }
   .community-cta { width: var(--shell); margin-bottom: 82px; padding: 34px 24px; }
   .cta-links .button { width: 100%; }
   .footer-grid nav { flex-wrap: wrap; }

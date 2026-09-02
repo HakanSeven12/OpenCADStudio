@@ -2355,6 +2355,25 @@ impl DynInputCanvas {
         }
     }
 
+    fn box_width(b: &DynBox) -> f32 {
+        (Self::box_content(b).len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0
+    }
+
+    fn box_center_near_cursor(b: &DynBox, cursor: Point, bounds: iced::Rectangle) -> Point {
+        let width = Self::box_width(b);
+        let x = if cursor.x + DYN_OFFSET_X + width <= bounds.width {
+            cursor.x + DYN_OFFSET_X + width * 0.5
+        } else {
+            cursor.x - DYN_OFFSET_X - width * 0.5
+        };
+        let y = if cursor.y + DYN_OFFSET_X + DYN_BOX_H <= bounds.height {
+            cursor.y + DYN_OFFSET_X + DYN_BOX_H * 0.5
+        } else {
+            cursor.y - DYN_OFFSET_X - DYN_BOX_H * 0.5
+        };
+        Point { x, y }
+    }
+
     /// Draw a value box centred at `center`, clamped inside `bounds`.
     fn draw_box(
         frame: &mut canvas::Frame,
@@ -2364,7 +2383,7 @@ impl DynInputCanvas {
         theme: &Theme,
     ) {
         let content = Self::box_content(b);
-        let w = (content.len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0;
+        let w = Self::box_width(b);
         let x = (center.x - w * 0.5).clamp(0.0, (bounds.width - w).max(0.0));
         let y = (center.y - DYN_BOX_H * 0.5).clamp(0.0, (bounds.height - DYN_BOX_H).max(0.0));
         let rect = canvas::Path::rectangle(Point { x, y }, Size { width: w, height: DYN_BOX_H });
@@ -2641,19 +2660,7 @@ impl DynInputCanvas {
         // ── Box placement by role ──
         for b in &self.boxes {
             let center = match b.role {
-                DynRole::Angle => {
-                    let a_mid = a_ref + sweep * 0.5;
-                    // Pull the box back along the ray and lift it to the side
-                    // opposite the distance box. A near-zero sweep collapses the
-                    // mid-angle direction onto the cursor ray, so placing the box
-                    // at full `len` would plant it on the cursor / snap point and
-                    // hide it. (#124)
-                    let r = (len - DYN_BOX_H * 2.0).max(len * 0.5);
-                    Point {
-                        x: base.x + a_mid.cos() * r - nx * 18.0,
-                        y: base.y + a_mid.sin() * r - ny * 18.0,
-                    }
-                }
+                DynRole::Angle => Self::box_center_near_cursor(b, cursor_raw, bounds),
                 DynRole::X | DynRole::Width => Point {
                     x: (base.x + cursor.x) * 0.5,
                     y: base.y + 14.0,
@@ -2851,6 +2858,40 @@ impl canvas::Program<Message> for DynInputCanvas {
             (_, Some(base)) => self.draw_guided(&mut frame, bounds, base, theme),
         }
         vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod dynamic_input_position_tests {
+    use super::*;
+
+    #[test]
+    fn angle_box_follows_cursor_and_flips_inside_viewport_edges() {
+        let angle = DynBox {
+            label: String::new(),
+            value: "163.7".to_string(),
+            active: true,
+            locked: false,
+            role: DynRole::Angle,
+        };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let width = DynInputCanvas::box_width(&angle);
+
+        let cursor = Point::new(400.0, 300.0);
+        let center = DynInputCanvas::box_center_near_cursor(&angle, cursor, bounds);
+        assert!((center.x - width * 0.5 - cursor.x - DYN_OFFSET_X).abs() < 0.01);
+        assert!((center.y - DYN_BOX_H * 0.5 - cursor.y - DYN_OFFSET_X).abs() < 0.01);
+
+        let cursor = Point::new(795.0, 595.0);
+        let center = DynInputCanvas::box_center_near_cursor(&angle, cursor, bounds);
+        assert!(center.x + width * 0.5 <= bounds.width);
+        assert!(center.y + DYN_BOX_H * 0.5 <= bounds.height);
+        assert!(center.x < cursor.x && center.y < cursor.y);
     }
 }
 

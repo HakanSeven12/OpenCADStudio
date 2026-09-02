@@ -3566,18 +3566,27 @@ impl OpenCADStudio {
 
                 let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
                 if let Some(entity) = entity_opt {
-                    let result = sweep_model::revolved(
-                        &entity,
-                        [
-                            axis_start.x as f64,
-                            axis_start.y as f64,
-                            axis_start.z as f64,
-                        ],
-                        [axis_end.x as f64, axis_end.y as f64, axis_end.z as f64],
-                        (angle_deg as f64).to_radians(),
-                    );
-                    if let Some(solid) = result {
-                        let history = crate::scene::model::solid_history::brep_op(&solid);
+                    let from = [
+                        axis_start.x as f64,
+                        axis_start.y as f64,
+                        axis_start.z as f64,
+                    ];
+                    let to = [axis_end.x as f64, axis_end.y as f64, axis_end.z as f64];
+                    let angle = (angle_deg as f64).to_radians();
+                    let result = sweep_model::revolve_history(&entity, from, to, angle)
+                        .and_then(|history| {
+                            cadkernel::acis::rebuild_body(&history)
+                                .ok()
+                                .map(|solid| (solid, history))
+                        })
+                        .or_else(|| {
+                            sweep_model::revolved(&entity, from, to, angle).map(|solid| {
+                                let history =
+                                    crate::scene::model::solid_history::brep_op(&solid);
+                                (solid, history)
+                            })
+                        });
+                    if let Some((solid, history)) = result {
                         let pending = self.begin_undo(i, "REVOLVE", 1, true);
                         let created = self.add_solid_model(empty_solid3d(), solid, history);
                         if !created.is_null() {

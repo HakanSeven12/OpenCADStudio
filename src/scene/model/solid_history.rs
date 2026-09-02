@@ -1,12 +1,15 @@
-use acadrust::entities::Solid3D;
+use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
     DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
     SolidHistoryCylinder, SolidHistoryNodeBase, SolidHistoryOperation,
-    SolidHistoryPyramid, SolidHistorySphere, SolidHistorySweep, SolidHistoryTorus,
+    SolidHistoryPyramid, SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep,
+    SolidHistoryTorus,
 };
+use acadrust::EntityType;
 use cadkernel::brep::Body;
 
 use crate::command::EntityTransform;
+use crate::entities::traits::EntityTypeOps;
 use crate::scene::model::object::{
     GripApply, GripDef, GripShape, PropSection, PropValue, Property,
 };
@@ -23,6 +26,8 @@ pub const GRIP_MAJOR_RADIUS: usize = 10_008;
 pub const GRIP_MINOR_RADIUS: usize = 10_009;
 pub const GRIP_TOP_RADIUS: usize = 10_010;
 pub const GRIP_POSITION: usize = 10_011;
+pub const GRIP_REVOLVE_AXIS: usize = 10_012;
+pub const GRIP_REVOLVE_PROFILE_FIRST: usize = 50_000;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -1641,6 +1646,130 @@ fn local_point(transform: [f64; 16], point: glam::DVec3) -> Option<glam::DVec3> 
     Some(matrix(transform)?.inverse().transform_point3(point))
 }
 
+fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
+    Some(match value {
+        EmbeddedEntity::Point(value) => EntityType::Point(value.clone()),
+        EmbeddedEntity::Line(value) => EntityType::Line(value.clone()),
+        EmbeddedEntity::Arc(value) => EntityType::Arc(value.clone()),
+        EmbeddedEntity::Circle(value) => EntityType::Circle(value.clone()),
+        EmbeddedEntity::Ellipse(value) => EntityType::Ellipse(value.clone()),
+        EmbeddedEntity::Spline(value) => EntityType::Spline(value.clone()),
+        EmbeddedEntity::LwPolyline(value) => EntityType::LwPolyline(value.clone()),
+        EmbeddedEntity::Ray(value) => EntityType::Ray(value.clone()),
+        EmbeddedEntity::XLine(value) => EntityType::XLine(value.clone()),
+        EmbeddedEntity::Unknown { .. } => return None,
+    })
+}
+
+fn into_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {
+    Some(match value {
+        EntityType::Point(value) => EmbeddedEntity::Point(value),
+        EntityType::Line(value) => EmbeddedEntity::Line(value),
+        EntityType::Arc(value) => EmbeddedEntity::Arc(value),
+        EntityType::Circle(value) => EmbeddedEntity::Circle(value),
+        EntityType::Ellipse(value) => EmbeddedEntity::Ellipse(value),
+        EntityType::Spline(value) => EmbeddedEntity::Spline(value),
+        EntityType::LwPolyline(value) => EmbeddedEntity::LwPolyline(value),
+        EntityType::Ray(value) => EmbeddedEntity::Ray(value),
+        EntityType::XLine(value) => EmbeddedEntity::XLine(value),
+        _ => return None,
+    })
+}
+
+fn revolve_profile_matrix(value: &SolidHistoryRevolve) -> Option<glam::DMat4> {
+    let base = matrix(value.base.transform)?;
+    let axis_point = glam::DVec3::new(
+        value.axis_point.x,
+        value.axis_point.y,
+        value.axis_point.z,
+    );
+    let axis = glam::DVec3::new(value.direction.x, value.direction.y, value.direction.z)
+        .normalize_or_zero();
+    if !axis_point.is_finite() || axis.length_squared() <= 1e-12 {
+        return None;
+    }
+    Some(
+        base
+            * glam::DMat4::from_translation(axis_point)
+            * glam::DMat4::from_axis_angle(axis, value.start_angle)
+            * glam::DMat4::from_translation(-axis_point),
+    )
+}
+
+fn revolve_profile_grips(value: &SolidHistoryRevolve) -> Vec<GripDef> {
+    let Some(profile) = value.sweep_entity.as_ref().and_then(embedded_entity) else {
+        return Vec::new();
+    };
+    let Some(transform) = revolve_profile_matrix(value) else {
+        return Vec::new();
+    };
+    profile
+        .grips()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, source)| {
+            let world = transform.transform_point3(source.world);
+            if !world.is_finite() {
+                return None;
+            }
+            let transform_vector = |vector: glam::DVec3| {
+                let vector = transform.transform_vector3(vector);
+                (vector.length_squared() > 1e-12).then(|| vector.normalize())
+            };
+            Some(GripDef {
+                id: GRIP_REVOLVE_PROFILE_FIRST + index,
+                world,
+                is_midpoint: source.is_midpoint,
+                shape: source.shape,
+                dir: source.dir.and_then(transform_vector),
+                axis: source.axis.and_then(transform_vector),
+            })
+        })
+        .collect()
+}
+
+fn apply_revolve_profile_grip(
+    value: &mut SolidHistoryRevolve,
+    index: usize,
+    apply: GripApply,
+) -> bool {
+    let Some(mut profile) = value.sweep_entity.as_ref().and_then(embedded_entity) else {
+        return false;
+    };
+    let Some(source) = profile.grips().get(index).cloned() else {
+        return false;
+    };
+    let Some(transform) = revolve_profile_matrix(value) else {
+        return false;
+    };
+    let inverse = transform.inverse();
+    if !inverse.is_finite() {
+        return false;
+    }
+    let apply = match apply {
+        GripApply::Absolute(world) => {
+            let local = inverse.transform_point3(world);
+            if !local.is_finite() {
+                return false;
+            }
+            GripApply::Absolute(local)
+        }
+        GripApply::Translate(delta) => {
+            let local = inverse.transform_vector3(delta);
+            if !local.is_finite() || local.length_squared() <= 1e-24 {
+                return false;
+            }
+            GripApply::Translate(local)
+        }
+    };
+    profile.apply_grip(source.id, apply);
+    let Some(profile) = into_embedded_entity(profile) else {
+        return false;
+    };
+    value.sweep_entity = Some(profile);
+    true
+}
+
 fn grip(
     id: usize,
     world: glam::DVec3,
@@ -1873,6 +2002,16 @@ pub fn primitive_grips(
             GripShape::Square,
             None,
         ),
+        SolidHistoryOperation::Revolve(value) => {
+            add(
+                GRIP_REVOLVE_AXIS,
+                value.base.transform,
+                [value.axis_point.x, value.axis_point.y, value.axis_point.z],
+                GripShape::Square,
+                None,
+            );
+            grips.extend(revolve_profile_grips(value));
+        }
         _ => {}
     }
     grips
@@ -1883,6 +2022,11 @@ pub fn apply_primitive_grip(
     grip_id: usize,
     apply: GripApply,
 ) -> bool {
+    if let SolidHistoryOperation::Revolve(value) = operation {
+        if let Some(index) = grip_id.checked_sub(GRIP_REVOLVE_PROFILE_FIRST) {
+            return apply_revolve_profile_grip(value, index, apply);
+        }
+    }
     let GripApply::Absolute(world) = apply else {
         return false;
     };
@@ -2031,6 +2175,9 @@ pub fn apply_primitive_grip(
             }
             value.base.transform =
                 (glam::DMat4::from_translation(delta) * current).to_cols_array();
+        }
+        SolidHistoryOperation::Revolve(value) if grip_id == GRIP_REVOLVE_AXIS => {
+            value.axis_point = acadrust::types::Vector3::new(local.x, local.y, local.z);
         }
         _ => return false,
     }

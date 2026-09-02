@@ -5,7 +5,7 @@ use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use cadkernel::space::{PlanarCurve, Plane, Vec3};
 use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex};
 use acadrust::objects::{
-    SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep,
+    SolidHistoryNodeBase, SolidHistoryOperation, SolidHistoryRevolve, SolidHistorySweep,
 };
 use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;
@@ -137,6 +137,58 @@ pub fn revolved(
         [to[0] - from[0], to[1] - from[1], to[2] - from[2]],
         angle,
     )
+}
+
+fn profile_bounds_center(profile: &Profile) -> Option<Vec3> {
+    let mut low = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut high = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let mut found = false;
+    for piece in &profile.pieces {
+        for point in piece.tessellate_within(1e-4) {
+            let point = Vec3::from(profile.plane.point_at(point));
+            if !point.is_finite() {
+                continue;
+            }
+            low.x = low.x.min(point.x);
+            low.y = low.y.min(point.y);
+            low.z = low.z.min(point.z);
+            high.x = high.x.max(point.x);
+            high.y = high.y.max(point.y);
+            high.z = high.z.max(point.z);
+            found = true;
+        }
+    }
+    found.then(|| (low + high) * 0.5)
+}
+
+/// Stores the source profile and canonical axis required to rebuild and edit
+/// a revolved solid.
+pub fn revolve_history(
+    entity: &EntityType,
+    from: [f64; 3],
+    to: [f64; 3],
+    angle: f64,
+) -> Option<SolidHistoryOperation> {
+    if !angle.is_finite() || angle.abs() <= 1e-12 {
+        return None;
+    }
+    let profile = profile_of(entity)?;
+    let from = Vec3::from(from);
+    let direction = (Vec3::from(to) - from).normalize()?;
+    let center = profile_bounds_center(&profile)?;
+    let axis_point = from + direction * (center - from).dot(direction);
+    let mut base = SolidHistoryNodeBase::new(1);
+    base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    Some(SolidHistoryOperation::Revolve(SolidHistoryRevolve {
+        base,
+        operation_major: 1,
+        axis_point: Vector3::new(axis_point.x, axis_point.y, axis_point.z),
+        direction: Vector3::new(direction.x, direction.y, direction.z),
+        revolve_angle: angle,
+        flag_290: true,
+        sweep_entity: Some(embedded_path(entity)?),
+        ..SolidHistoryRevolve::default()
+    }))
 }
 
 /// SWEEP as an exact B-rep along straight and circular path pieces.

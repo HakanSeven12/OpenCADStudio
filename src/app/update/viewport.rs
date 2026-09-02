@@ -2657,7 +2657,6 @@ impl OpenCADStudio {
         // press starts a box selection, so without this they'd only
         // close on the second click (issue #104).
         self.tabs[i].properties.color_picker_open = false;
-        self.tabs[i].properties.color_palette_open = false;
         // Click anywhere outside the popup dismisses it. The
         // menu's own buttons live above this mouse_area, so a
         // press that reaches here means the cursor is not on

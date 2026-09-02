@@ -25,7 +25,6 @@ use crate::t;
 // ── Row-height-derived constants ─────────────────────────────────────────
 const FONT_SZ: f32 = ROW_H * 0.42; // ≈11 px
 const COMBO_PAD_V: f32 = (ROW_H - FONT_SZ * 1.3 - 2.0) / 2.0; // fills combo to ROW_H
-const SWATCH_SZ: f32 = ROW_H * 0.54; // ≈14 px color swatch
 const PATTERN_CARD_W: f32 = 158.0;
 const PATTERN_PREVIEW_H: f32 = 58.0;
 const PATTERN_PICKER_W: f32 = 348.0;
@@ -430,8 +429,6 @@ pub struct PropertiesPanel {
     pub source_handles: Vec<Handle>,
     /// Whether the quick color picker dropdown is open.
     pub color_picker_open: bool,
-    /// Whether the full 16×16 ACI palette is expanded inside the color picker.
-    pub color_palette_open: bool,
     /// Whether the MTEXT background-colour picker dropdown is open. Separate
     /// from `color_picker_open` so the entity colour and the background colour
     /// pickers are independent.
@@ -483,7 +480,6 @@ impl Default for PropertiesPanel {
             edit_buf: HashMap::default(),
             source_handles: vec![],
             color_picker_open: false,
-            color_palette_open: false,
             bg_color_picker_open: false,
             open_color_field: None,
             prop_vertex: 0,
@@ -955,59 +951,21 @@ impl PropertiesPanel {
     }
 
     fn render_color_varies_row<'a>(&'a self, label: &'a str) -> Element<'a, Message> {
-        let color_btn = button(
-            row![
-                container(text("?").size(10))
-                    .style(move |theme: &Theme| {
-                        let palette = theme.palette();
-                        container::Style {
-                        background: Some(Background::Color(palette.background.strong.color)),
-                        border: Border {
-                            color: palette.background.neutral.color,
-                            width: 1.0,
-                            radius: 2.0.into()
-                        },
-                        text_color: Some(palette.background.strong.text),
-                        ..Default::default()
-                        }
-                    })
-                    .width(SWATCH_SZ)
-                    .height(SWATCH_SZ)
-                    .align_x(iced::Center)
-                    .align_y(iced::Center),
-                text(VARIES_LABEL).size(FONT_SZ),
-            ]
-            .spacing(4)
-            .align_y(iced::Center),
-        )
-        .on_press(Message::PropColorPickerToggle)
-        .style(combo_btn_style)
-        .padding(Padding {
-            top: COMBO_PAD_V,
-            bottom: COMBO_PAD_V,
-            left: 6.0,
-            right: 6.0,
-        })
-        .width(Length::Fill);
-
-        let color_row = prop_row_widget(label, color_btn.into());
-        if self.color_picker_open {
-            column![color_row, self.render_color_picker()]
-                .spacing(0)
-                .into()
-        } else {
-            color_row
-        }
-    }
-
-    fn render_color_picker(&self) -> Element<'_, Message> {
-        color_picker_dropdown(
-            self.color_palette_open,
-            Message::PropColorPaletteToggle,
-            Some(Message::PropColorChanged(AcadColor::ByLayer)),
-            Some(Message::PropColorChanged(AcadColor::ByBlock)),
-            |aci| Message::PropColorChanged(AcadColor::Index(aci)),
-        )
+        let selector = crate::ui::color_select::color_selector_varies(
+            self.color_picker_open,
+            crate::ui::color_select::ColorExtras {
+                by_layer: true,
+                by_block: true,
+                ..Default::default()
+            },
+            Message::PropColorChanged,
+            Message::PropColorPickerToggle,
+            Message::OpenColorWindow(
+                crate::app::ColorPickTarget::Properties,
+                AcadColor::ByLayer,
+            ),
+        );
+        prop_row_widget(label, selector)
     }
 
     // ── Lineweight row (combo_box) ────────────────────────────────────────
@@ -1527,187 +1485,6 @@ impl PropertiesPanel {
     }
 }
 
-// ── Shared color picker widget ────────────────────────────────────────────
-
-/// Builds the color picker dropdown content (standard swatches + optional
-/// ByLayer/ByBlock + "More Colors…" expanding to full ACI palette).
-/// Use this from both the Properties panel and the Layer Manager.
-pub fn color_picker_dropdown<'a>(
-    palette_open: bool,
-    palette_toggle_msg: Message,
-    by_layer_msg: Option<Message>,
-    by_block_msg: Option<Message>,
-    on_aci: impl Fn(u8) -> Message + 'a,
-) -> Element<'a, Message> {
-    // ByLayer / ByBlock row (optional)
-    let extras: Option<Element<'a, Message>> = match (by_layer_msg, by_block_msg) {
-        (Some(bl), Some(bb)) => Some(
-            row![
-                picker_text_btn("ByLayer", bl),
-                picker_text_btn("ByBlock", bb)
-            ]
-            .spacing(4)
-            .into(),
-        ),
-        (Some(bl), None) => Some(picker_text_btn("ByLayer", bl)),
-        (None, Some(bb)) => Some(picker_text_btn("ByBlock", bb)),
-        (None, None) => None,
-    };
-
-    // 9 standard ACI swatches (1-9)
-    let standard: Element<'a, Message> = (1u8..=9u8)
-        .fold(row![].spacing(2).width(Length::Fill), |r, idx| {
-            let c = AcadColor::Index(idx);
-            let (bg, _) = acad_color_display(c);
-            let msg = on_aci(idx);
-            r.push(
-                button(text("").width(18).height(18))
-                    .width(Length::FillPortion(1))
-                    .on_press(msg)
-                    .style(move |theme: &Theme, status| button::Style {
-                        background: Some(Background::Color(bg)),
-                        border: Border {
-                            color: if matches!(status, button::Status::Hovered) {
-                                theme.palette().primary.base.color
-                            } else {
-                                theme.palette().background.neutral.color
-                            },
-                            width: if matches!(status, button::Status::Hovered) {
-                                1.5
-                            } else {
-                                1.0
-                            },
-                            radius: 2.0.into(),
-                        },
-                        text_color: theme.palette().background.base.text,
-                        ..Default::default()
-                    })
-                    .padding(0),
-            )
-        })
-        .into();
-
-    // "More Colors…" toggle button
-    let more_btn = button(
-        row![
-            if palette_open {
-                crate::ui::icons::themed_arrow_up(9.0)
-            } else {
-                crate::ui::icons::themed_arrow_down(9.0)
-            },
-            text(if palette_open {
-                t!("Less").into_owned()
-            } else {
-                t!("More Colors…").into_owned()
-            })
-            .size(10)
-            .style(hint_text_style),
-        ]
-        .spacing(4)
-        .align_y(iced::Center),
-    )
-    .on_press(palette_toggle_msg)
-    .style(button::subtle)
-    .padding([2, 6])
-    .width(Length::Fill);
-
-    let inner = if let Some(e) = extras {
-        column![e, standard, more_btn].spacing(4)
-    } else {
-        column![standard, more_btn].spacing(4)
-    };
-
-    let mut col = column![container(inner)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-            background: Some(Background::Color(palette.background.base.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 0.0.into()
-            },
-            ..Default::default()
-            }
-        })
-        .padding([6, 8])
-        .width(Length::Fill)]
-    .spacing(0);
-
-    // Full ACI palette (expanded)
-    if palette_open {
-        const COLS: u16 = 16;
-        let mut rows = column![].spacing(1).width(Length::Fill);
-        let mut idx: u16 = 1;
-        while idx <= 255 {
-            let mut r = row![].spacing(1).width(Length::Fill);
-            for _ in 0..COLS {
-                if idx <= 255 {
-                    let ci = idx as u8;
-                    let (bg, _) = acad_color_display(AcadColor::Index(ci));
-                    let msg = on_aci(ci);
-                    r = r.push(
-                        button(text("").width(12).height(12))
-                            .width(Length::FillPortion(1))
-                            .on_press(msg)
-                            .style(move |theme: &Theme, status| button::Style {
-                                background: Some(Background::Color(bg)),
-                                border: Border {
-                                    color: if matches!(status, button::Status::Hovered) {
-                                        theme.palette().primary.base.color
-                                    } else {
-                                        theme.palette().background.neutral.color
-                                    },
-                                    width: if matches!(status, button::Status::Hovered) {
-                                        1.5
-                                    } else {
-                                        1.0
-                                    },
-                                    radius: 1.0.into(),
-                                },
-                                text_color: theme.palette().background.base.text,
-                                ..Default::default()
-                            })
-                            .padding(0),
-                    );
-                    idx += 1;
-                } else {
-                    r = r.push(
-                        Space::new()
-                            .width(Length::FillPortion(1))
-                            .height(12),
-                    );
-                }
-            }
-            rows = rows.push(r);
-        }
-        col = col.push(
-            container(
-                scrollable(rows)
-                    .height(160)
-                    .width(Length::Fill)
-                    .spacing(2),
-            )
-                .style(|theme: &Theme| {
-                    let palette = theme.palette();
-                    container::Style {
-                    background: Some(Background::Color(palette.background.base.color)),
-                    border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                    }
-                })
-                .padding([4, 6])
-                .width(Length::Fill),
-        );
-    }
-
-    col.into()
-}
-
 // ── Standalone helpers ────────────────────────────────────────────────────
 
 /// A boolean toggle button row (for "Invisible" etc.).
@@ -2066,15 +1843,6 @@ fn prop_row_with_active<'a>(
         .into()
 }
 
-/// A plain text button used inside the color picker for ByLayer / ByBlock.
-fn picker_text_btn(label: &str, msg: Message) -> Element<'_, Message> {
-    button(text(t!(label)).size(FONT_SZ))
-        .on_press(msg)
-        .style(button::secondary)
-        .padding([2, 8])
-        .into()
-}
-
 // ── Color display helper ──────────────────────────────────────────────────
 
 /// Returns an (iced::Color swatch_bg, display_label) pair for an AcadColor.
@@ -2129,24 +1897,6 @@ fn aci_label(idx: u8) -> &'static str {
 }
 
 // ── Widget style helpers ──────────────────────────────────────────────────
-
-fn combo_btn_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.palette();
-    let pair = match status {
-        button::Status::Hovered | button::Status::Pressed => palette.background.weak,
-        _ => palette.background.base,
-    };
-    button::Style {
-        background: Some(Background::Color(pair.color)),
-        border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
-            radius: 2.0.into(),
-        },
-        text_color: pair.text,
-        ..Default::default()
-    }
-}
 
 fn text_input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     let palette = theme.palette();

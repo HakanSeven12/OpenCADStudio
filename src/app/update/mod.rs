@@ -4653,7 +4653,6 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
                 if handles.is_empty() {
-                    self.tabs[i].properties.color_palette_open = false;
                     let task = self.on_ribbon_color_changed(color);
                     self.refresh_properties();
                     return task;
@@ -4666,7 +4665,6 @@ impl OpenCADStudio {
                     }
                 });
                 self.tabs[i].properties.color_picker_open = false;
-                self.tabs[i].properties.color_palette_open = false;
                 Task::none()
             }
 
@@ -4751,7 +4749,6 @@ impl OpenCADStudio {
                 panel.hatch_pattern_picker_open = !panel.hatch_pattern_picker_open;
                 if panel.hatch_pattern_picker_open {
                     panel.color_picker_open = false;
-                    panel.color_palette_open = false;
                     panel.open_color_field = None;
                     panel.edit_choice_open = false;
                     panel.hatch_pattern_focus =
@@ -5069,7 +5066,6 @@ impl OpenCADStudio {
                 self.tabs[i].properties.color_picker_open =
                     !self.tabs[i].properties.color_picker_open;
                 if self.tabs[i].properties.color_picker_open {
-                    self.tabs[i].properties.color_palette_open = false;
                     self.tabs[i].properties.hatch_pattern_picker_open = false;
                     self.tabs[i].properties.hatch_pattern_search.clear();
                 }
@@ -5311,15 +5307,8 @@ impl OpenCADStudio {
             Message::PropColorPickerClose => {
                 let i = self.active_tab;
                 self.tabs[i].properties.color_picker_open = false;
-                self.tabs[i].properties.color_palette_open = false;
                 self.tabs[i].properties.hatch_pattern_picker_open = false;
                 self.tabs[i].properties.hatch_pattern_search.clear();
-                Task::none()
-            }
-
-            Message::PropColorPaletteToggle => {
-                self.tabs[self.active_tab].properties.color_palette_open =
-                    !self.tabs[self.active_tab].properties.color_palette_open;
                 Task::none()
             }
 

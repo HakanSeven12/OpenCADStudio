@@ -42,7 +42,6 @@ impl OpenCADStudio {
         // Note: the color-picker dropdown is intentionally NOT carried over — a
         // rebuild means the selection (or a property) changed, so the dropdown
         // closes, matching the deselect / reselect / click-away expectation.
-        let color_palette_open = self.tabs[i].properties.color_palette_open;
         let edit_buf = std::mem::take(&mut self.tabs[i].properties.edit_buf);
         let active_field = std::mem::take(&mut self.tabs[i].properties.active_field);
         // Expanded coordinate groups persist across rebuilds AND selection
@@ -2224,7 +2223,6 @@ impl OpenCADStudio {
             // Precompute the focused-id → field-key map for O(1) lookups on
             // `PropSyncActive`; derived from `sections`, so rebuild it here.
             panel.field_key_by_id = crate::ui::properties::build_field_key_map(&panel.sections);
-            panel.color_palette_open = color_palette_open;
             let new_handles: Vec<acadrust::Handle> = selected.iter().map(|(h, _)| *h).collect();
             // Carry the in-progress edits only when the selection is unchanged
             // (a commit-triggered rebuild); a genuine selection change starts
@@ -2265,7 +2263,6 @@ impl OpenCADStudio {
                 panel.edit_buf.clear();
                 panel.active_field = None;
                 panel.color_picker_open = false;
-                panel.color_palette_open = false;
                 panel.bg_color_picker_open = false;
                 panel.open_color_field = None;
                 panel.hatch_pattern_picker_open = false;

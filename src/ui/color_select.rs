@@ -149,13 +149,72 @@ pub fn color_selector_with_name<'a>(
     let cur_name = display_name
         .map(str::to_string)
         .unwrap_or_else(|| color_display_name(current));
+
+    color_selector_with_indicator(
+        swatch(cur_bg),
+        cur_name,
+        open,
+        extras,
+        on_select,
+        on_toggle,
+        on_more,
+    )
+}
+
+/// Build the shared colour selector for a mixed selection.
+pub fn color_selector_varies<'a>(
+    open: bool,
+    extras: ColorExtras,
+    on_select: impl Fn(AcadColor) -> Message + 'a,
+    on_toggle: Message,
+    on_more: Message,
+) -> Element<'a, Message> {
+    let indicator = container(text("?").size(10))
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.strong.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                text_color: Some(palette.background.strong.text),
+                ..Default::default()
+            }
+        })
+        .width(13)
+        .height(13)
+        .align_x(iced::Center)
+        .align_y(iced::Center);
+
+    color_selector_with_indicator(
+        indicator.into(),
+        "*VARIES*".to_string(),
+        open,
+        extras,
+        on_select,
+        on_toggle,
+        on_more,
+    )
+}
+
+fn color_selector_with_indicator<'a>(
+    indicator: Element<'a, Message>,
+    name: String,
+    open: bool,
+    extras: ColorExtras,
+    on_select: impl Fn(AcadColor) -> Message + 'a,
+    on_toggle: Message,
+    on_more: Message,
+) -> Element<'a, Message> {
     let on_dismiss = on_toggle.clone();
 
     // Closed button: current swatch + name + caret.
     let head = button(
         row![
-            swatch(cur_bg),
-            text(cur_name).size(11),
+            indicator,
+            text(name).size(11),
             iced::widget::Space::new().width(Length::Fill),
             crate::ui::icons::themed_arrow_toggle(open, 9.0),
         ]

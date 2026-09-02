@@ -1,12 +1,14 @@
-use acadrust::entities::Solid3D;
+use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
     DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
-    SolidHistoryCylinder, SolidHistoryNodeBase, SolidHistoryOperation,
+    SolidHistoryCylinder, SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation,
     SolidHistoryPyramid, SolidHistorySphere, SolidHistorySweep, SolidHistoryTorus,
 };
+use acadrust::EntityType;
 use cadkernel::brep::Body;
 
 use crate::command::EntityTransform;
+use crate::entities::traits::EntityTypeOps;
 use crate::scene::model::object::{
     GripApply, GripDef, GripShape, PropSection, PropValue, Property,
 };
@@ -23,6 +25,7 @@ pub const GRIP_MAJOR_RADIUS: usize = 10_008;
 pub const GRIP_MINOR_RADIUS: usize = 10_009;
 pub const GRIP_TOP_RADIUS: usize = 10_010;
 pub const GRIP_POSITION: usize = 10_011;
+pub const GRIP_LOFT_SECTION_FIRST: usize = 40_000;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -1641,6 +1644,121 @@ fn local_point(transform: [f64; 16], point: glam::DVec3) -> Option<glam::DVec3> 
     Some(matrix(transform)?.inverse().transform_point3(point))
 }
 
+fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
+    Some(match value {
+        EmbeddedEntity::Point(value) => EntityType::Point(value.clone()),
+        EmbeddedEntity::Line(value) => EntityType::Line(value.clone()),
+        EmbeddedEntity::Arc(value) => EntityType::Arc(value.clone()),
+        EmbeddedEntity::Circle(value) => EntityType::Circle(value.clone()),
+        EmbeddedEntity::Ellipse(value) => EntityType::Ellipse(value.clone()),
+        EmbeddedEntity::Spline(value) => EntityType::Spline(value.clone()),
+        EmbeddedEntity::LwPolyline(value) => EntityType::LwPolyline(value.clone()),
+        EmbeddedEntity::Ray(value) => EntityType::Ray(value.clone()),
+        EmbeddedEntity::XLine(value) => EntityType::XLine(value.clone()),
+        EmbeddedEntity::Unknown { .. } => return None,
+    })
+}
+
+fn into_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {
+    Some(match value {
+        EntityType::Point(value) => EmbeddedEntity::Point(value),
+        EntityType::Line(value) => EmbeddedEntity::Line(value),
+        EntityType::Arc(value) => EmbeddedEntity::Arc(value),
+        EntityType::Circle(value) => EmbeddedEntity::Circle(value),
+        EntityType::Ellipse(value) => EmbeddedEntity::Ellipse(value),
+        EntityType::Spline(value) => EmbeddedEntity::Spline(value),
+        EntityType::LwPolyline(value) => EmbeddedEntity::LwPolyline(value),
+        EntityType::Ray(value) => EmbeddedEntity::Ray(value),
+        EntityType::XLine(value) => EmbeddedEntity::XLine(value),
+        _ => return None,
+    })
+}
+
+fn loft_section_grips(value: &SolidHistoryLoft) -> Vec<GripDef> {
+    if !value.guides.is_empty() {
+        return Vec::new();
+    }
+    let Some(transform) = matrix(value.base.transform) else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    for section in &value.cross_sections {
+        let Some(entity) = embedded_entity(section) else {
+            continue;
+        };
+        for source in entity.grips() {
+            let world = transform.transform_point3(source.world);
+            if !world.is_finite() {
+                continue;
+            }
+            let transform_vector = |vector: glam::DVec3| {
+                let vector = transform.transform_vector3(vector);
+                (vector.length_squared() > 1e-12).then(|| vector.normalize())
+            };
+            result.push(GripDef {
+                id: GRIP_LOFT_SECTION_FIRST + result.len(),
+                world,
+                is_midpoint: source.is_midpoint,
+                shape: source.shape,
+                dir: source.dir.and_then(transform_vector),
+                axis: source.axis.and_then(transform_vector),
+            });
+        }
+    }
+    result
+}
+
+fn apply_loft_section_grip(
+    value: &mut SolidHistoryLoft,
+    mut index: usize,
+    apply: GripApply,
+) -> bool {
+    if !value.guides.is_empty() {
+        return false;
+    }
+    let Some(transform) = matrix(value.base.transform) else {
+        return false;
+    };
+    let inverse = transform.inverse();
+    if !inverse.is_finite() {
+        return false;
+    }
+    let local_apply = match apply {
+        GripApply::Absolute(world) => {
+            let local = inverse.transform_point3(world);
+            if !local.is_finite() {
+                return false;
+            }
+            GripApply::Absolute(local)
+        }
+        GripApply::Translate(world_delta) => {
+            let local_delta = inverse.transform_vector3(world_delta);
+            if !local_delta.is_finite() || local_delta.length_squared() <= 1e-24 {
+                return false;
+            }
+            GripApply::Translate(local_delta)
+        }
+    };
+    for section in &mut value.cross_sections {
+        let Some(mut entity) = embedded_entity(section) else {
+            continue;
+        };
+        let grips = entity.grips();
+        if index >= grips.len() {
+            index -= grips.len();
+            continue;
+        }
+        let source = grips[index].clone();
+        entity.apply_grip(source.id, local_apply);
+        let Some(entity) = into_embedded_entity(entity) else {
+            return false;
+        };
+        *section = entity;
+        return true;
+    }
+    false
+}
+
 fn grip(
     id: usize,
     world: glam::DVec3,
@@ -1873,6 +1991,9 @@ pub fn primitive_grips(
             GripShape::Square,
             None,
         ),
+        SolidHistoryOperation::Loft(value) => {
+            grips.extend(loft_section_grips(value));
+        }
         _ => {}
     }
     grips
@@ -1883,6 +2004,11 @@ pub fn apply_primitive_grip(
     grip_id: usize,
     apply: GripApply,
 ) -> bool {
+    if let SolidHistoryOperation::Loft(value) = operation {
+        if let Some(index) = grip_id.checked_sub(GRIP_LOFT_SECTION_FIRST) {
+            return apply_loft_section_grip(value, index, apply);
+        }
+    }
     let GripApply::Absolute(world) = apply else {
         return false;
     };

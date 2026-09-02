@@ -164,6 +164,8 @@ pub struct UserSettings {
     pub cursor_type: CursorType,
     /// Explicit crosshair RGB. `None` keeps automatic background contrast.
     pub crosshair_color: Option<[u8; 3]>,
+    /// Model-space lineweight preview scale as a percentage.
+    pub lineweight_display_scale: i32,
     /// Isometric drafting changes the grid and crosshair to the active axis pair.
     pub isometric_drafting: bool,
     pub iso_plane: IsoPlane,
@@ -282,6 +284,7 @@ impl Default for UserSettings {
             pick_box: 3,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,
+            lineweight_display_scale: 100,
             isometric_drafting: false,
             iso_plane: IsoPlane::Left,
             snap_angle_deg: 0.0,

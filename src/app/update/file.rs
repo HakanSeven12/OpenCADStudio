@@ -364,6 +364,7 @@ impl OpenCADStudio {
             pick_box: self.pick_box,
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
+            lineweight_display_scale: self.lineweight_display_scale,
             isometric_drafting: self.isometric_drafting,
             iso_plane: self.iso_plane,
             snap_angle_deg: self.snap_angle_deg,
@@ -416,6 +417,7 @@ impl OpenCADStudio {
             .crosshair_color
             .map(crate::app::config::rgb_to_hex)
             .unwrap_or_default();
+        self.lineweight_display_scale = s.lineweight_display_scale.clamp(25, 200);
         self.isometric_drafting = s.isometric_drafting;
         self.iso_plane = s.iso_plane;
         self.snap_angle_deg = if s.snap_angle_deg.is_finite() {
@@ -469,11 +471,10 @@ impl OpenCADStudio {
             .take(200)
             .map(|(k, v)| (k.clone(), *v))
             .collect();
-        // Push the restored background onto every drawing tab that exists now
-        // (the start tab and any initial drawing). Tabs created later pick it
-        // up via `apply_bg_default` at their construction site.
+        // Push restored display defaults onto every drawing tab that exists now.
+        // Tabs created later pick them up at their construction site.
         for idx in 0..self.tabs.len() {
-            self.apply_bg_default(idx);
+            self.apply_display_defaults(idx);
         }
         self.rebuild_ribbon_modules();
     }
@@ -596,17 +597,16 @@ impl OpenCADStudio {
         h.object_snap_mode = osmode;
     }
 
-    /// Apply the persisted default background(s) to tab `idx`. No-op for the
-    /// start tab or when no default is set. Refreshes the tab's cached wires
-    /// and meshes so background-adaptive colours pick up the change.
-    pub(in crate::app) fn apply_bg_default(&mut self, idx: usize) {
+    /// Apply persisted viewport display defaults to tab `idx`.
+    pub(in crate::app) fn apply_display_defaults(&mut self, idx: usize) {
         let bg = self.default_bg_color;
         let paper_bg = self.default_paper_bg_color;
-        if bg.is_none() && paper_bg.is_none() {
-            return;
-        }
         let tab = &mut self.tabs[idx];
         if tab.is_start {
+            return;
+        }
+        tab.scene.model_lineweight_scale = self.lineweight_display_scale as f32 / 100.0;
+        if bg.is_none() && paper_bg.is_none() {
             return;
         }
         if let Some(c) = bg {
@@ -1286,7 +1286,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     self.tabs.push(new_tab);
                     let idx = self.tabs.len() - 1;
                     self.active_tab = idx;
-                    self.apply_bg_default(idx);
+                    self.apply_display_defaults(idx);
                     idx
                 };
 
@@ -2381,7 +2381,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         self.tab_counter += 1;
         self.tabs[i] = crate::app::document::DocumentTab::new_drawing(self.tab_counter);
         self.active_tab = i;
-        self.apply_bg_default(i);
+        self.apply_display_defaults(i);
         self.update(Message::OpenPathPicked(Some((
             conflict.path,
             metadata.len(),

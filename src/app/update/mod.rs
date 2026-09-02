@@ -1271,7 +1271,7 @@ impl OpenCADStudio {
                 // creating one doesn't silently reset them (its header default is
                 // 0 = no snaps); saving then persists them into the file.
                 self.stamp_header_sysvars(idx);
-                self.apply_bg_default(idx);
+                self.apply_display_defaults(idx);
                 self.sync_ribbon_layers();
                 self.sync_ribbon_styles();
                 // #21: reset ribbon Color / Linetype / Lineweight to the
@@ -5783,6 +5783,16 @@ impl OpenCADStudio {
 
             Message::CursorTypeChanged(value) => {
                 self.cursor_type = value;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::LineweightDisplayScaleChanged(value) => {
+                self.lineweight_display_scale = value.clamp(25, 200);
+                let scale = self.lineweight_display_scale as f32 / 100.0;
+                for tab in &mut self.tabs {
+                    tab.scene.model_lineweight_scale = scale;
+                }
                 self.persist_settings_if_changed();
                 Task::none()
             }

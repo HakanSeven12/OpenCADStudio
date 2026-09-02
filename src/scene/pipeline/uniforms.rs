@@ -25,8 +25,8 @@ pub struct Uniforms {
     /// zooming inside MSPACE changes one scalar instead of re-tessellating and
     /// re-uploading every dashed wire.
     pub linetype_scale: f32,
-    /// Multiplier for screen-space lineweights. Model space keeps `1.0`;
-    /// paper layouts derive it from the current paper zoom.
+    /// Multiplier for screen-space lineweights. Model space uses the user's
+    /// preview scale; paper layouts derive it from the current paper zoom.
     pub lineweight_scale: f32,
 
     // ── Relative-to-eye (double-single) additions ───────────────────────────

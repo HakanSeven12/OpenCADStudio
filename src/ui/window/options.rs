@@ -39,6 +39,7 @@ pub fn view_window<'a>(
     cursor_type: CursorType,
     crosshair_color: Option<[u8; 3]>,
     crosshair_color_input: &'a str,
+    lineweight_display_scale: i32,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let selected_format = crate::io::SAVE_FORMAT_OPTIONS
@@ -263,6 +264,28 @@ pub fn view_window<'a>(
         .align_y(iced::Center),
         Space::new().height(6),
         text(crate::t!("Leave the color blank to keep automatic viewport contrast."))
+            .size(11)
+            .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Lineweight")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Model display scale")).size(12).width(140),
+            slider(
+                25..=200,
+                lineweight_display_scale.clamp(25, 200),
+                Message::LineweightDisplayScaleChanged,
+            )
+            .step(1)
+            .width(Fill),
+            text(format!("{}%", lineweight_display_scale.clamp(25, 200)))
+                .size(11)
+                .width(44),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!("Changes the on-screen width in Model without affecting plotted output."))
             .size(11)
             .width(sizing.width),
     ]

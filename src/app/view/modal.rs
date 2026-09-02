@@ -189,6 +189,7 @@ impl OpenCADStudio {
                         self.cursor_type,
                         self.crosshair_color,
                         &self.crosshair_color_input,
+                        self.lineweight_display_scale,
                         flow,
                     )
                 },

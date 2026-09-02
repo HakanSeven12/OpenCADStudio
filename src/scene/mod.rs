@@ -1469,6 +1469,8 @@ pub struct Scene {
     /// Whether entity transparency is honoured on screen. When false the
     /// wire shader forces every line opaque (a uniform toggle, no retessellate).
     pub transparency_display: bool,
+    /// User-adjustable model-space lineweight preview multiplier.
+    pub model_lineweight_scale: f32,
     /// Selection filter: entity-type names excluded from interactive picking.
     /// Empty = every type is selectable.
     pub selection_filter: HashSet<String>,
@@ -1878,6 +1880,7 @@ impl Scene {
             refedit_keep: None,
             hover_highlight: None,
             transparency_display: true,
+            model_lineweight_scale: 1.0,
             selection_filter: HashSet::default(),
             preview_wires: vec![],
             preview_hatches: Arc::new(Vec::new()),

@@ -492,6 +492,8 @@ pub(super) struct OpenCADStudio {
     crosshair_color: Option<[u8; 3]>,
     /// Editable Options buffer for the crosshair colour.
     crosshair_color_input: String,
+    /// Model-space lineweight preview scale, in percent (25..=200).
+    lineweight_display_scale: i32,
     /// Isometric drafting state and active axis pair.
     isometric_drafting: bool,
     iso_plane: settings::IsoPlane,
@@ -1910,6 +1912,8 @@ pub enum Message {
     PickBoxChanged(i32),
     /// Set CURSORTYPE from Options.
     CursorTypeChanged(settings::CursorType),
+    /// Set the model-space lineweight preview scale from Options.
+    LineweightDisplayScaleChanged(i32),
     /// Edit the optional crosshair RGB value; blank restores automatic contrast.
     CrosshairColorChanged(String),
     /// Set the default type/version used when first saving a new drawing.
@@ -3280,6 +3284,7 @@ impl OpenCADStudio {
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),
+            lineweight_display_scale: 100,
             isometric_drafting: false,
             iso_plane: settings::IsoPlane::Left,
             snap_angle_deg: 0.0,

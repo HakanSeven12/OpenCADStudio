@@ -210,7 +210,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             self.tabs[0] =
                                 crate::app::document::DocumentTab::new_drawing(self.tab_counter);
                             self.active_tab = 0;
-                            self.apply_bg_default(0);
+                            self.apply_display_defaults(0);
                         } else {
                             self.tabs.remove(idx);
                             if self.active_tab >= self.tabs.len() {

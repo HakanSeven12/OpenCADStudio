@@ -124,7 +124,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.tab_counter += 1;
                     self.tabs[0] = crate::app::document::DocumentTab::new_drawing(self.tab_counter);
                     self.active_tab = 0;
-                    self.apply_bg_default(0);
+                    self.apply_display_defaults(0);
                 } else {
                     self.tabs.remove(idx);
                     if self.active_tab >= self.tabs.len() {

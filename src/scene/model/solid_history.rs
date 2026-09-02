@@ -25,6 +25,7 @@ pub const GRIP_MAJOR_RADIUS: usize = 10_008;
 pub const GRIP_MINOR_RADIUS: usize = 10_009;
 pub const GRIP_TOP_RADIUS: usize = 10_010;
 pub const GRIP_POSITION: usize = 10_011;
+pub const GRIP_DRAFT: usize = 10_012;
 pub const GRIP_PROFILE_FIRST: usize = 10_200;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
@@ -1969,6 +1970,96 @@ fn apply_extrusion_profile_grip(
     true
 }
 
+fn extrusion_draft_grip(
+    value: &SolidHistorySweep,
+) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3, f64, f64)> {
+    if value.path_entity.is_some() {
+        return None;
+    }
+    let (profile_grips, center) = extrusion_profile_grips(value);
+    let center = center?;
+    let transform = profile_matrix(value)?;
+    let inverse = transform.inverse();
+    if !inverse.is_finite() {
+        return None;
+    }
+    let profile = value.sweep_entity.as_ref().and_then(embedded_entity)?;
+    let normal = crate::entities::curve::entity_curve(&profile)?.plane.normal()?;
+    let normal = transform
+        .transform_vector3(glam::DVec3::from_array(normal))
+        .try_normalize()?;
+    let center_local = inverse.transform_point3(center);
+    let anchor = profile_grips
+        .into_iter()
+        .filter_map(|grip| {
+            let local = inverse.transform_point3(grip.world);
+            let radius = (grip.world - center).length_squared();
+            (local.is_finite() && radius > 1e-12).then_some((grip.world, local))
+        })
+        .min_by(|(_, a), (_, b)| {
+            a.x.total_cmp(&b.x)
+                .then_with(|| {
+                    (a.y - center_local.y)
+                        .abs()
+                        .total_cmp(&(b.y - center_local.y).abs())
+                })
+                .then_with(|| {
+                    (a.z - center_local.z)
+                        .abs()
+                        .total_cmp(&(b.z - center_local.z).abs())
+                })
+        })?
+        .0;
+    let radial = anchor - center;
+    let radial_length = radial.length();
+    if !radial_length.is_finite() || radial_length <= 1e-6 {
+        return None;
+    }
+    let radial = radial / radial_length;
+    let base = matrix(value.base.transform)?;
+    let direction = base.transform_vector3(glam::DVec3::new(
+        value.direction.x,
+        value.direction.y,
+        value.direction.z,
+    ));
+    let height = direction.dot(normal).abs();
+    if !direction.is_finite() || !height.is_finite() || height <= 1e-6 {
+        return None;
+    }
+    let draft_offset = -height * value.draft_angle.tan();
+    if !draft_offset.is_finite() {
+        return None;
+    }
+    let base_top = anchor + direction;
+    let world = base_top + radial * draft_offset;
+    world
+        .is_finite()
+        .then_some((world, base_top, radial, radial_length, height))
+}
+
+fn apply_extrusion_draft_grip(value: &mut SolidHistorySweep, apply: GripApply) -> bool {
+    let GripApply::Absolute(world) = apply else {
+        return false;
+    };
+    let Some((_, base_top, radial, profile_radius, height)) = extrusion_draft_grip(value) else {
+        return false;
+    };
+    let top_offset = (world - base_top).dot(radial);
+    if !top_offset.is_finite() {
+        return false;
+    }
+    let limit = 89.0_f64.to_radians();
+    let inward_limit = ((profile_radius - 1e-6).max(1e-6) / height)
+        .atan()
+        .min(limit);
+    let angle = (-top_offset).atan2(height).clamp(-limit, inward_limit);
+    if !angle.is_finite() || (angle - value.draft_angle).abs() <= 1e-12 {
+        return false;
+    }
+    value.draft_angle = angle;
+    true
+}
+
 fn grip(
     id: usize,
     world: glam::DVec3,
@@ -2217,6 +2308,14 @@ pub fn primitive_grips(
                         ));
                     }
                 }
+                if let Some((world, _, radial, _, _)) = extrusion_draft_grip(value) {
+                    grips.push(grip(
+                        GRIP_DRAFT,
+                        world,
+                        GripShape::Triangle,
+                        Some(radial),
+                    ));
+                }
             }
         }
         _ => {}
@@ -2232,6 +2331,9 @@ pub fn apply_primitive_grip(
     if let SolidHistoryOperation::Extrusion(value) = operation {
         if let Some(index) = grip_id.checked_sub(GRIP_PROFILE_FIRST) {
             return apply_extrusion_profile_grip(value, index, apply);
+        }
+        if grip_id == GRIP_DRAFT {
+            return apply_extrusion_draft_grip(value, apply);
         }
     }
     let GripApply::Absolute(world) = apply else {

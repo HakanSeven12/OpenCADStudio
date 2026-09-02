@@ -1045,6 +1045,23 @@ impl FilletCommand {
             None => FilletStep::First,
         };
     }
+
+    fn continue_after_fillet(&mut self, replacements: Vec<(Handle, Vec<EntityType>)>) -> CmdResult {
+        self.all_entities.retain(|entity| {
+            !replacements
+                .iter()
+                .any(|(handle, _)| entity.common().handle == *handle)
+        });
+        self.all_entities.extend(
+            replacements
+                .iter()
+                .flat_map(|(_, entities)| entities.iter().cloned()),
+        );
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
+        self.step = FilletStep::First;
+        self.resume_second = None;
+        CmdResult::ReplaceManyContinue(replacements)
+    }
 }
 
 impl CadCommand for FilletCommand {
@@ -1199,19 +1216,17 @@ impl CadCommand for FilletCommand {
                 if let Some(e2) = e2 {
                     match compute_fillet_entities(&e1, click1, &e2, click, self.radius) {
                         Some((new_e1, new_e2, maybe_arc)) => {
-                            let mut additions = vec![];
+                            let mut first_replacements = vec![new_e1];
                             if let Some(arc) = maybe_arc {
-                                additions.push(arc);
+                                first_replacements.push(arc);
                             }
-                            if same_entity {
+                            let replacements = if same_entity {
                                 // Corner fillet: both results are the same rebuilt poly.
-                                CmdResult::ReplaceMany(vec![(h1, vec![new_e1])], additions)
+                                vec![(h1, first_replacements)]
                             } else {
-                                CmdResult::ReplaceMany(
-                                    vec![(h1, vec![new_e1]), (handle, vec![new_e2])],
-                                    additions,
-                                )
-                            }
+                                vec![(h1, first_replacements), (handle, vec![new_e2])]
+                            };
+                            self.continue_after_fillet(replacements)
                         }
                         None => CmdResult::NeedPoint,
                     }
@@ -1300,6 +1315,20 @@ impl CadCommand for FilletCommand {
 
     fn on_point(&mut self, _pt: DVec3) -> CmdResult {
         CmdResult::NeedPoint
+    }
+    fn on_entity_replaced(&mut self, _old: Handle, new_handles: &[Handle]) {
+        let mut handles = new_handles.iter().copied();
+        for entity in self
+            .all_entities
+            .iter_mut()
+            .filter(|entity| entity.common().handle.is_null())
+        {
+            let Some(handle) = handles.next() else {
+                break;
+            };
+            entity.common_mut().handle = handle;
+        }
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
     }
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -1777,3 +1806,53 @@ impl CadCommand for ChamferCommand {
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["CHAMFER"] });  // ChamferCommand
 inventory::submit!(crate::command::CommandRegistration { names: &["FILLET"] });  // FilletCommand
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line(x1: f64, y1: f64, x2: f64, y2: f64, handle: u64) -> EntityType {
+        let mut line = LineEnt::from_coords(x1, y1, 0.0, x2, y2, 0.0);
+        line.common.handle = Handle::new(handle);
+        EntityType::Line(line)
+    }
+
+    #[test]
+    fn fillet_continues_with_replacement_entities() {
+        let first = Handle::new(1);
+        let second = Handle::new(2);
+        let mut command = FilletCommand::new(
+            1.0,
+            vec![line(0.0, 0.0, 10.0, 0.0, 1), line(0.0, 0.0, 0.0, 10.0, 2)],
+        );
+
+        assert!(matches!(
+            command.on_entity_pick(first, DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        let replacements = match command.on_entity_pick(second, DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::ReplaceManyContinue(replacements) => replacements,
+            _ => panic!("fillet should replace entities and stay active"),
+        };
+
+        let mut next_handle = 10;
+        for (old, entities) in replacements {
+            let handles: Vec<_> = entities
+                .iter()
+                .map(|_| {
+                    let handle = Handle::new(next_handle);
+                    next_handle += 1;
+                    handle
+                })
+                .collect();
+            command.on_entity_replaced(old, &handles);
+        }
+
+        assert!(matches!(&command.step, FilletStep::First));
+        assert!(matches!(
+            command.on_entity_pick(Handle::new(10), DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(&command.step, FilletStep::Second { .. }));
+    }
+}

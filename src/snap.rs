@@ -405,6 +405,28 @@ impl Snapper {
             }
         }
     }
+    /// Immediately acquire the explicitly engaged grip as a tracking point.
+    ///
+    /// A grip was deliberately selected by the user, so unlike ordinary cursor
+    /// acquisition it should not require dwell before OTRACK/Extension can use
+    /// its original position and incident edge directions.
+    ///
+    /// `wires` must be the frozen pre-drag geometry. It is used only here to
+    /// capture directions; it is never added to normal OSNAP candidates.
+    pub fn acquire_grip_tracking_point<W: WireSource + ?Sized>(
+        &mut self,
+        p: DVec3,
+        wires: &W,
+    ) {
+        if !self.tracking_active() {
+            return;
+        }
+
+        // With OTRACK disabled, Extension remains endpoint-only.
+        let endpoints_only = !self.otrack_enabled;
+
+        self.acquire_tracking_point(p, wires, endpoints_only);
+    }
     /// Add `p` as a tracking point (capturing its corner edge directions) unless
     /// it is already tracked; drops the oldest when the 4-point cap is reached.
     /// Edge directions are scanned once here, at acquisition, so OTRACK can align

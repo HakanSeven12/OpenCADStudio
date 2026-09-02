@@ -186,6 +186,30 @@ fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
     }
 }
 
+pub fn sweep_history(
+    profile: &EntityType,
+    path: &EntityType,
+    reference_point: [f64; 3],
+) -> Option<SolidHistoryOperation> {
+    let mut base = SolidHistoryNodeBase::new(1);
+    base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    Some(SolidHistoryOperation::Sweep(SolidHistorySweep {
+        base,
+        operation_major: 1,
+        sweep_entity: Some(embedded_path(profile)?),
+        path_entity: Some(embedded_path(path)?),
+        scale_factor: 1.0,
+        sweep_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
+        path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
+        reference_point: Vector3::new(
+            reference_point[0],
+            reference_point[1],
+            reference_point[2],
+        ),
+        ..SolidHistorySweep::default()
+    }))
+}
+
 /// Builds a history-backed wall solid along a supported planar curve.
 pub fn polysolid(
     entity: &EntityType,

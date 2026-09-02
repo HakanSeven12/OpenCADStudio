@@ -1644,7 +1644,7 @@ fn local_point(transform: [f64; 16], point: glam::DVec3) -> Option<glam::DVec3> 
     Some(matrix(transform)?.inverse().transform_point3(point))
 }
 
-fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
+fn sweep_embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
     Some(match value {
         EmbeddedEntity::Point(value) => EntityType::Point(value.clone()),
         EmbeddedEntity::Line(value) => EntityType::Line(value.clone()),
@@ -1659,7 +1659,7 @@ fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
     })
 }
 
-fn into_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {
+fn into_sweep_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {
     Some(match value {
         EntityType::Point(value) => EmbeddedEntity::Point(value),
         EntityType::Line(value) => EmbeddedEntity::Line(value),
@@ -1674,13 +1674,13 @@ fn into_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {
     })
 }
 
-fn embedded_grips(
+fn sweep_embedded_grips(
     value: Option<&EmbeddedEntity>,
     base_transform: [f64; 16],
     entity_transform: [f64; 16],
     first_id: usize,
 ) -> Vec<GripDef> {
-    let Some(entity) = value.and_then(embedded_entity) else {
+    let Some(entity) = value.and_then(sweep_embedded_entity) else {
         return Vec::new();
     };
     let (Some(base), Some(entity_placement)) =
@@ -1714,14 +1714,14 @@ fn embedded_grips(
         .collect()
 }
 
-fn apply_embedded_grip(
+fn apply_sweep_embedded_grip(
     value: &mut Option<EmbeddedEntity>,
     base_transform: [f64; 16],
     entity_transform: [f64; 16],
     index: usize,
     apply: GripApply,
 ) -> bool {
-    let Some(mut entity) = value.as_ref().and_then(embedded_entity) else {
+    let Some(mut entity) = value.as_ref().and_then(sweep_embedded_entity) else {
         return false;
     };
     let Some(source_grip) = entity.grips().get(index).cloned() else {
@@ -1753,7 +1753,7 @@ fn apply_embedded_grip(
         }
     };
     entity.apply_grip(source_grip.id, apply);
-    let Some(entity) = into_embedded_entity(entity) else {
+    let Some(entity) = into_sweep_embedded_entity(entity) else {
         return false;
     };
     *value = Some(entity);
@@ -1982,13 +1982,13 @@ pub fn primitive_grips(
             );
         }
         SolidHistoryOperation::Sweep(value) => {
-            grips.extend(embedded_grips(
+            grips.extend(sweep_embedded_grips(
                 value.sweep_entity.as_ref(),
                 value.base.transform,
                 value.sweep_entity_transform,
                 GRIP_SWEEP_PROFILE_FIRST,
             ));
-            grips.extend(embedded_grips(
+            grips.extend(sweep_embedded_grips(
                 value.path_entity.as_ref(),
                 value.base.transform,
                 value.path_entity_transform,
@@ -2007,7 +2007,7 @@ pub fn apply_primitive_grip(
 ) -> bool {
     if let SolidHistoryOperation::Sweep(value) = operation {
         if let Some(index) = grip_id.checked_sub(GRIP_SWEEP_PATH_FIRST) {
-            return apply_embedded_grip(
+            return apply_sweep_embedded_grip(
                 &mut value.path_entity,
                 value.base.transform,
                 value.path_entity_transform,
@@ -2019,7 +2019,7 @@ pub fn apply_primitive_grip(
             .checked_sub(GRIP_SWEEP_PROFILE_FIRST)
             .filter(|_| grip_id < GRIP_SWEEP_PATH_FIRST)
         {
-            return apply_embedded_grip(
+            return apply_sweep_embedded_grip(
                 &mut value.sweep_entity,
                 value.base.transform,
                 value.sweep_entity_transform,

@@ -310,32 +310,32 @@ pub(super) const PROP_LW_ID: &str = "PROP_LW";
 
 // ── Style context (passed from Ribbon to render_large) ────────────────────
 
-pub(super) struct StyleContext {
-    pub text_style_names: Vec<String>,
-    pub active_text_style: String,
-    pub dim_style_names: Vec<String>,
-    pub active_dim_style: String,
-    pub mleader_style_names: Vec<String>,
-    pub active_mleader_style: String,
-    pub table_style_names: Vec<String>,
-    pub active_table_style: String,
+pub(super) struct StyleContext<'a> {
+    pub text_style_names: &'a [String],
+    pub active_text_style: &'a str,
+    pub dim_style_names: &'a [String],
+    pub active_dim_style: &'a str,
+    pub mleader_style_names: &'a [String],
+    pub active_mleader_style: &'a str,
+    pub table_style_names: &'a [String],
+    pub active_table_style: &'a str,
 }
 
-impl StyleContext {
+impl<'a> StyleContext<'a> {
     pub(super) fn names_for(&self, key: StyleKey) -> &[String] {
         match key {
-            StyleKey::TextStyle => &self.text_style_names,
-            StyleKey::DimStyle => &self.dim_style_names,
-            StyleKey::MLeaderStyle => &self.mleader_style_names,
-            StyleKey::TableStyle => &self.table_style_names,
+            StyleKey::TextStyle => self.text_style_names,
+            StyleKey::DimStyle => self.dim_style_names,
+            StyleKey::MLeaderStyle => self.mleader_style_names,
+            StyleKey::TableStyle => self.table_style_names,
         }
     }
     pub(super) fn active_for(&self, key: StyleKey) -> &str {
         match key {
-            StyleKey::TextStyle => &self.active_text_style,
-            StyleKey::DimStyle => &self.active_dim_style,
-            StyleKey::MLeaderStyle => &self.active_mleader_style,
-            StyleKey::TableStyle => &self.active_table_style,
+            StyleKey::TextStyle => self.active_text_style,
+            StyleKey::DimStyle => self.active_dim_style,
+            StyleKey::MLeaderStyle => self.active_mleader_style,
+            StyleKey::TableStyle => self.active_table_style,
         }
     }
 }
@@ -630,7 +630,7 @@ pub(super) struct RenderCtx<'a> {
     pub active_color: AcadColor,
     pub active_linetype: &'a str,
     pub active_lineweight: LineWeight,
-    pub style_ctx: &'a StyleContext,
+    pub style_ctx: &'a StyleContext<'a>,
     /// When compact, the Properties panel's Match button shrinks to a small icon.
     pub compact: bool,
 }
@@ -1272,5 +1272,58 @@ pub(super) fn top_hist_btn_style(
         },
         shadow: iced::Shadow::default(),
         snap: false,
+    }
+}
+
+#[cfg(test)]
+mod style_context_tests {
+    use super::StyleContext;
+    use crate::modules::StyleKey;
+
+    #[test]
+    fn style_context_borrowed_without_cloning() {
+        // RED: should construct from borrowed slices/strs without cloning.
+        let text_names = vec!["Standard".to_string(), "MyStyle".to_string()];
+        let active_text = "Standard".to_string();
+        let dim_names = vec!["DimStd".to_string()];
+        let active_dim = "DimStd".to_string();
+        let mleader_names: Vec<String> = vec![];
+        let active_mleader = String::new();
+        let table_names: Vec<String> = vec![];
+        let active_table = String::new();
+
+        let ctx = StyleContext {
+            text_style_names: &text_names,
+            active_text_style: &active_text,
+            dim_style_names: &dim_names,
+            active_dim_style: &active_dim,
+            mleader_style_names: &mleader_names,
+            active_mleader_style: &active_mleader,
+            table_style_names: &table_names,
+            active_table_style: &active_table,
+        };
+        assert_eq!(ctx.names_for(StyleKey::TextStyle), &text_names);
+        assert_eq!(ctx.active_for(StyleKey::TextStyle), "Standard");
+        assert_eq!(ctx.names_for(StyleKey::DimStyle), &dim_names);
+    }
+
+    #[test]
+    fn style_context_no_clone_needed() {
+        let names = vec!["A".to_string(), "B".to_string()];
+        let active = "A".to_string();
+        let empty: Vec<String> = vec![];
+        let empty_s = String::new();
+        let ctx = StyleContext {
+            text_style_names: &names,
+            active_text_style: &active,
+            dim_style_names: &empty,
+            active_dim_style: &empty_s,
+            mleader_style_names: &empty,
+            active_mleader_style: &empty_s,
+            table_style_names: &empty,
+            active_table_style: &empty_s,
+        };
+        assert_eq!(ctx.active_for(StyleKey::TableStyle), "");
+        assert!(ctx.names_for(StyleKey::MLeaderStyle).is_empty());
     }
 }

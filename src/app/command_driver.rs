@@ -3894,13 +3894,21 @@ impl OpenCADStudio {
                     .get_entity(profile_handle)
                     .cloned();
                 let path_ent = self.tabs[i].scene.document.get_entity(path_handle).cloned();
-                let result = profile_ent
-                    .zip(path_ent)
-                    .and_then(|(profile, path)| sweep_model::swept(&profile, &path));
+                let result = profile_ent.zip(path_ent).and_then(|(profile, path)| {
+                    let reference_point = sweep_model::profile_of(&profile)?.plane.origin;
+                    let solid = sweep_model::swept(&profile, &path)?;
+                    let history = sweep_model::sweep_history(
+                        &profile,
+                        &path,
+                        0.0,
+                        reference_point,
+                    )
+                    .unwrap_or_else(|| solid_history::brep_op(&solid));
+                    Some((solid, history))
+                });
 
-                if let Some(solid) = result {
+                if let Some((solid, history)) = result {
                     let pending = self.begin_undo(i, "SWEEP", 1, true);
-                    let history = solid_history::brep_op(&solid);
                     let created = self.add_solid_model(empty_solid3d(), solid, history);
                     if !created.is_null() {
                         self.tabs[i].dirty = true;

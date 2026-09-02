@@ -24,9 +24,10 @@ pub const GRIP_SIDES: usize = 10_007;
 pub const GRIP_MAJOR_RADIUS: usize = 10_008;
 pub const GRIP_MINOR_RADIUS: usize = 10_009;
 pub const GRIP_TOP_RADIUS: usize = 10_010;
-pub const GRIP_POSITION: usize = 10_011;
 pub const GRIP_DRAFT: usize = 10_012;
 pub const GRIP_PROFILE_FIRST: usize = 10_200;
+pub const GRIP_SWEEP_PROFILE_FIRST: usize = 20_000;
+pub const GRIP_SWEEP_PATH_FIRST: usize = 30_000;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -1970,6 +1971,92 @@ fn apply_extrusion_profile_grip(
     true
 }
 
+fn sweep_embedded_grips(
+    value: Option<&EmbeddedEntity>,
+    base_transform: [f64; 16],
+    entity_transform: [f64; 16],
+    first_id: usize,
+) -> Vec<GripDef> {
+    let Some(entity) = value.and_then(embedded_entity) else {
+        return Vec::new();
+    };
+    let (Some(base), Some(entity_placement)) =
+        (matrix(base_transform), matrix(entity_transform))
+    else {
+        return Vec::new();
+    };
+    let transform = base * entity_placement;
+    entity
+        .grips()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, grip)| {
+            let world = transform.transform_point3(grip.world);
+            if !world.is_finite() {
+                return None;
+            }
+            let transform_vector = |vector: glam::DVec3| {
+                let vector = transform.transform_vector3(vector);
+                (vector.length_squared() > 1e-12).then(|| vector.normalize())
+            };
+            Some(GripDef {
+                id: first_id + index,
+                world,
+                is_midpoint: grip.is_midpoint,
+                shape: grip.shape,
+                dir: grip.dir.and_then(transform_vector),
+                axis: grip.axis.and_then(transform_vector),
+            })
+        })
+        .collect()
+}
+
+fn apply_sweep_embedded_grip(
+    value: &mut Option<EmbeddedEntity>,
+    base_transform: [f64; 16],
+    entity_transform: [f64; 16],
+    index: usize,
+    apply: GripApply,
+) -> bool {
+    let Some(mut entity) = value.as_ref().and_then(embedded_entity) else {
+        return false;
+    };
+    let Some(source_grip) = entity.grips().get(index).cloned() else {
+        return false;
+    };
+    let (Some(base), Some(entity_placement)) =
+        (matrix(base_transform), matrix(entity_transform))
+    else {
+        return false;
+    };
+    let inverse = (base * entity_placement).inverse();
+    if !inverse.is_finite() {
+        return false;
+    }
+    let apply = match apply {
+        GripApply::Absolute(world) => {
+            let local = inverse.transform_point3(world);
+            if !local.is_finite() {
+                return false;
+            }
+            GripApply::Absolute(local)
+        }
+        GripApply::Translate(world_delta) => {
+            let local_delta = inverse.transform_vector3(world_delta);
+            if !local_delta.is_finite() || local_delta.length_squared() <= 1e-24 {
+                return false;
+            }
+            GripApply::Translate(local_delta)
+        }
+    };
+    entity.apply_grip(source_grip.id, apply);
+    let Some(entity) = into_embedded_entity(entity) else {
+        return false;
+    };
+    *value = Some(entity);
+    true
+}
+
 fn extrusion_draft_grip(
     value: &SolidHistorySweep,
 ) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3, f64, f64)> {
@@ -2281,17 +2368,20 @@ pub fn primitive_grips(
                 None,
             );
         }
-        SolidHistoryOperation::Sweep(value) => add(
-            GRIP_POSITION,
-            value.base.transform,
-            [
-                value.reference_point.x,
-                value.reference_point.y,
-                value.reference_point.z,
-            ],
-            GripShape::Square,
-            None,
-        ),
+        SolidHistoryOperation::Sweep(value) => {
+            grips.extend(sweep_embedded_grips(
+                value.sweep_entity.as_ref(),
+                value.base.transform,
+                value.sweep_entity_transform,
+                GRIP_SWEEP_PROFILE_FIRST,
+            ));
+            grips.extend(sweep_embedded_grips(
+                value.path_entity.as_ref(),
+                value.base.transform,
+                value.path_entity_transform,
+                GRIP_SWEEP_PATH_FIRST,
+            ));
+        }
         SolidHistoryOperation::Extrusion(value) => {
             let (profile_grips, profile_center) = extrusion_profile_grips(value);
             grips.extend(profile_grips);
@@ -2328,6 +2418,29 @@ pub fn apply_primitive_grip(
     grip_id: usize,
     apply: GripApply,
 ) -> bool {
+    if let SolidHistoryOperation::Sweep(value) = operation {
+        if let Some(index) = grip_id.checked_sub(GRIP_SWEEP_PATH_FIRST) {
+            return apply_sweep_embedded_grip(
+                &mut value.path_entity,
+                value.base.transform,
+                value.path_entity_transform,
+                index,
+                apply,
+            );
+        }
+        if let Some(index) = grip_id
+            .checked_sub(GRIP_SWEEP_PROFILE_FIRST)
+            .filter(|_| grip_id < GRIP_SWEEP_PATH_FIRST)
+        {
+            return apply_sweep_embedded_grip(
+                &mut value.sweep_entity,
+                value.base.transform,
+                value.sweep_entity_transform,
+                index,
+                apply,
+            );
+        }
+    }
     if let SolidHistoryOperation::Extrusion(value) = operation {
         if let Some(index) = grip_id.checked_sub(GRIP_PROFILE_FIRST) {
             return apply_extrusion_profile_grip(value, index, apply);
@@ -2469,22 +2582,6 @@ pub fn apply_primitive_grip(
             }
             _ => return false,
         },
-        SolidHistoryOperation::Sweep(value) if grip_id == GRIP_POSITION => {
-            let Some(current) = matrix(value.base.transform) else {
-                return false;
-            };
-            let reference = current.transform_point3(glam::DVec3::new(
-                value.reference_point.x,
-                value.reference_point.y,
-                value.reference_point.z,
-            ));
-            let delta = world - reference;
-            if !delta.is_finite() || delta.length_squared() <= 1e-24 {
-                return false;
-            }
-            value.base.transform =
-                (glam::DMat4::from_translation(delta) * current).to_cols_array();
-        }
         SolidHistoryOperation::Extrusion(value) => match grip_id {
             GRIP_HEIGHT => {
                 if value.path_entity.is_some() {

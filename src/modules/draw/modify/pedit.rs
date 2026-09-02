@@ -686,6 +686,7 @@ pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
     match entity {
         EntityType::Line(l) => {
             pl.common = l.common.clone();
+            pl.thickness = l.thickness;
             pl.vertices = vec![
                 LwVertex::new(Vector2::new(l.start.x, l.start.y)),
                 LwVertex::new(Vector2::new(l.end.x, l.end.y)),
@@ -693,6 +694,7 @@ pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
         }
         EntityType::Arc(a) => {
             pl.common = a.common.clone();
+            pl.thickness = a.thickness;
             let (sa, ea) = (a.start_angle, a.end_angle);
             let sweep = {
                 let s = (ea - sa).rem_euclid(TAU);
@@ -718,6 +720,47 @@ pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
     }
     pl.common.handle = Handle::NULL;
     Some(EntityType::LwPolyline(pl))
+}
+
+#[cfg(test)]
+mod convert_tests {
+    use super::*;
+
+    // PEDIT convert rebuilds the entity as a polyline; thickness must move
+    // onto the new entity instead of resetting to 0 (#916).
+    #[test]
+    fn convert_keeps_line_thickness() {
+        let mut l = acadrust::entities::Line::new();
+        l.start = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        l.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+        l.thickness = 3.5;
+        let Some(EntityType::LwPolyline(pl)) = convert_to_polyline(&EntityType::Line(l)) else {
+            panic!("line must convert");
+        };
+        assert!(
+            (pl.thickness - 3.5).abs() < 1e-12,
+            "converted polyline must keep source thickness, got {}",
+            pl.thickness
+        );
+    }
+
+    #[test]
+    fn convert_keeps_arc_thickness() {
+        let mut a = acadrust::entities::Arc::new();
+        a.center = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        a.radius = 5.0;
+        a.start_angle = 0.0;
+        a.end_angle = std::f64::consts::FRAC_PI_2;
+        a.thickness = -2.0;
+        let Some(EntityType::LwPolyline(pl)) = convert_to_polyline(&EntityType::Arc(a)) else {
+            panic!("arc must convert");
+        };
+        assert!(
+            (pl.thickness - (-2.0)).abs() < 1e-12,
+            "converted polyline must keep negative thickness, got {}",
+            pl.thickness
+        );
+    }
 }
 
 // ── Curve fitting ─────────────────────────────────────────────────────────

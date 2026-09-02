@@ -176,6 +176,9 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
     }
     let handles: Vec<Handle> = entities.iter().map(|(h, _)| *h).collect();
     let common = entities[0].1.common().clone();
+    // Thickness (DXF 39) lives on the entity, not in `common`, so the rebuilt
+    // chain must carry it too or a thick source joins into a flat result (#916).
+    let thickness = crate::scene::view::dispatch::entity_thickness(entities[0].1).unwrap_or(0.0);
 
     let (chain, closed) = stitch(segs)?;
 
@@ -198,6 +201,7 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
         line.common.handle = Handle::NULL;
         line.start = v3(verts.first().unwrap().0);
         line.end = v3(verts.last().unwrap().0);
+        line.thickness = thickness;
         return Some((handles, vec![EntityType::Line(line)]));
     }
 
@@ -216,6 +220,7 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
         pl.vertices = lw_verts;
         pl.is_closed = closed;
         pl.elevation = z0;
+        pl.thickness = thickness;
         return Some((handles, vec![EntityType::LwPolyline(pl)]));
     }
 
@@ -282,6 +287,71 @@ fn stitch(mut segs: Vec<Seg>) -> Option<(Vec<Seg>, bool)> {
     let closed = chain.len() >= 2
         && chain.first().unwrap().a.distance(chain.last().unwrap().b) <= JOIN_EPS;
     Some((chain, closed))
+}
+
+#[cfg(test)]
+mod join_tests {
+    use super::*;
+    use acadrust::entities::{Line as LineEnt, LwVertex};
+    use acadrust::Handle;
+
+    fn line(x0: f64, y0: f64, x1: f64, y1: f64, thickness: f64) -> EntityType {
+        let mut l = LineEnt::new();
+        l.start = Vector3::new(x0, y0, 0.0);
+        l.end = Vector3::new(x1, y1, 0.0);
+        l.thickness = thickness;
+        EntityType::Line(l)
+    }
+
+    fn lw_2pts(p0: (f64, f64), p1: (f64, f64), thickness: f64) -> EntityType {
+        let mut pl = acadrust::entities::LwPolyline::new();
+        pl.vertices = vec![
+            LwVertex::new(Vector2::new(p0.0, p0.1)),
+            LwVertex::new(Vector2::new(p1.0, p1.1)),
+        ];
+        pl.thickness = thickness;
+        EntityType::LwPolyline(pl)
+    }
+
+    // JOIN rebuilds the result entity; thickness must follow the chain's first
+    // entity (the same source `common` comes from), not reset to 0 (#916).
+    #[test]
+    fn join_keeps_source_thickness() {
+        let h1 = Handle::new(1);
+        let h2 = Handle::new(2);
+        let e1 = lw_2pts((0.0, 0.0), (10.0, 0.0), 2.5);
+        // A corner keeps the chain from collapsing back to a single Line.
+        let e2 = line(10.0, 0.0, 10.0, 10.0, 0.0);
+        let (removed, out) = join_entities(&[(h1, &e1), (h2, &e2)]).expect("chain joins");
+        assert_eq!(removed.len(), 2);
+        let Some(EntityType::LwPolyline(pl)) = out.first() else {
+            panic!("expected joined lwpolyline");
+        };
+        assert!(
+            (pl.thickness - 2.5).abs() < 1e-12,
+            "joined polyline must keep source thickness, got {}",
+            pl.thickness
+        );
+    }
+
+    // A collinear straight run collapses to a single Line; its thickness must
+    // come from the first source entity too, not default to 0.
+    #[test]
+    fn collinear_join_keeps_thickness() {
+        let h1 = Handle::new(1);
+        let h2 = Handle::new(2);
+        let e1 = line(0.0, 0.0, 5.0, 0.0, 1.25);
+        let e2 = line(5.0, 0.0, 10.0, 0.0, 0.0);
+        let (_, out) = join_entities(&[(h1, &e1), (h2, &e2)]).expect("chain joins");
+        let Some(EntityType::Line(l)) = out.first() else {
+            panic!("expected collapsed line");
+        };
+        assert!(
+            (l.thickness - 1.25).abs() < 1e-12,
+            "collapsed line must keep source thickness, got {}",
+            l.thickness
+        );
+    }
 }
 
 /// True when every vertex lies on one straight line (within tolerance).

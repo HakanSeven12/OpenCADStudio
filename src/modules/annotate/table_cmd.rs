@@ -10,7 +10,7 @@ use acadrust::EntityType;
 use glam::DVec3;
 use std::sync::{Mutex, OnceLock};
 
-use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
@@ -303,15 +303,19 @@ impl CadCommand for TableCommand {
         }
     }
 
-    fn wants_text_input(&self) -> bool {
-        matches!(
+    fn input_kind(&self) -> InputKind {
+        if matches!(
             self.step,
             Step::Columns
                 | Step::DataRows { .. }
                 | Step::ColumnWidth { .. }
                 | Step::RowHeight { .. }
                 | Step::InsertionMode { .. }
-        )
+        ) {
+            InputKind::SingleToken
+        } else {
+            InputKind::Point
+        }
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
@@ -479,6 +483,147 @@ impl CadCommand for TableCommand {
 
 inventory::submit!(crate::command::CommandRegistration { names: &["TABLE"] });
 
+/// A table cell resolved from a pick: grid coordinates plus whether its
+/// content is locked against editing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TableCellHit {
+    pub row: usize,
+    pub column: usize,
+    pub locked: bool,
+}
+
+/// Outcome of launching the table cell editor for a pick (double-click or
+/// TABLEDIT). Distinguishes "cell found but locked" — the caller should
+/// stop, the indicator is armed — from "nothing to edit" — the caller may
+/// fall through to other handlers or re-prompt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TableCellEditStart {
+    /// Cell editor launched.
+    Started,
+    /// Cell resolved but content-locked/read-only: indicator armed, no
+    /// editor.
+    LockedCell,
+    /// Not a table, or the pick missed the grid.
+    NoCell,
+}
+
+impl TableCellHit {
+    /// Flat cell index, matching the Properties palette ordering.
+    pub fn index(&self, table: &acadrust::entities::Table) -> usize {
+        self.row * table.column_count() + self.column
+    }
+}
+
+/// Resolve the table cell under `click_world`. Shared by the double-click
+/// shortcut and the TABLEDIT command so both agree on grid coordinates,
+/// flow direction and locked-cell detection. `table_style` is the style
+/// object the table references, when the caller has the document at hand;
+/// the table's embedded base style covers the common fallbacks.
+pub(crate) fn table_cell_at(
+    table: &acadrust::entities::Table,
+    table_style: Option<&acadrust::objects::TableStyle>,
+    click_world: DVec3,
+) -> Option<TableCellHit> {
+    let horizontal = glam::DVec3::new(
+        table.horizontal_direction.x,
+        table.horizontal_direction.y,
+        table.horizontal_direction.z,
+    )
+    .normalize_or(glam::DVec3::X);
+    let normal = glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z)
+        .normalize_or(glam::DVec3::Z);
+    let mut down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
+    if crate::entities::table::resolved_flow_up(table, table_style) {
+        down = -down;
+    }
+    let origin = glam::DVec3::new(
+        table.insertion_point.x,
+        table.insertion_point.y,
+        table.insertion_point.z,
+    );
+    let relative = click_world - origin;
+    let x = relative.dot(horizontal);
+    let y = relative.dot(down);
+    if x < 0.0 || y < 0.0 {
+        return None;
+    }
+    let column = table
+        .columns
+        .iter()
+        .scan(0.0, |offset, column| {
+            *offset += column.width;
+            Some(*offset)
+        })
+        .position(|end| x <= end)?;
+    let row = table
+        .rows
+        .iter()
+        .scan(0.0, |offset, row| {
+            *offset += row.height;
+            Some(*offset)
+        })
+        .position(|end| y <= end)?;
+    Some(TableCellHit {
+        row,
+        column,
+        locked: cell_locked(table, row, column),
+    })
+}
+
+/// True when the cell's content may not be edited (locked or read-only).
+pub(crate) fn cell_locked(table: &acadrust::entities::Table, row: usize, column: usize) -> bool {
+    use acadrust::entities::table::CellStateFlags;
+    table.cell(row, column).is_some_and(|cell| {
+        cell.state
+            .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
+    })
+}
+
+/// TABLEDIT — edit a table cell's text by picking it. The pick only
+/// collects (table, point); the host resolves the cell and launches
+/// `TableCellEditCommand`, so the command-first flow and the double-click
+/// shortcut share one resolver and one editor setup.
+pub struct TableditCommand;
+
+impl TableditCommand {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for TableditCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CadCommand for TableditCommand {
+    fn name(&self) -> &'static str {
+        "TABLEDIT"
+    }
+
+    fn prompt(&self) -> String {
+        t!("TABLEDIT  Select a table cell:").into_owned()
+    }
+
+    fn on_point(&mut self, point: DVec3) -> CmdResult {
+        CmdResult::EditTableCell {
+            handle: acadrust::Handle::NULL,
+            point,
+        }
+    }
+
+    // A bare Enter at the pick prompt ends the command (AutoCAD leaves the
+    // select-until-valid loop on Enter).
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+}
+
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["TABLEDIT"]
+});
+
 pub struct TableCellEditCommand {
     handle: acadrust::Handle,
     table: acadrust::entities::Table,
@@ -508,7 +653,11 @@ impl CadCommand for TableCellEditCommand {
     }
 
     fn prompt(&self) -> String {
-        let current = self.table.cell_text(self.row, self.column).unwrap_or("");
+        let current = self
+            .table
+            .cell_text(self.row, self.column)
+            .unwrap_or("")
+            .replace("\\P", "/n");
         t!(
             "TABLE CELL  Enter text for [%{row},%{column}] <%{current}>:",
             row = self.row,
@@ -518,8 +667,11 @@ impl CadCommand for TableCellEditCommand {
         .into_owned()
     }
 
-    fn wants_text_input(&self) -> bool {
-        true
+    // Cell content is free-form prose ("Foo Bar"): Space must type a
+    // literal space instead of submitting, Enter finishes, and
+    // /n or \n inserts a line break.
+    fn input_kind(&self) -> InputKind {
+        InputKind::FreeText
     }
 
     fn on_point(&mut self, _point: DVec3) -> CmdResult {
@@ -535,7 +687,11 @@ impl CadCommand for TableCellEditCommand {
         {
             return Some(CmdResult::Cancel);
         }
-        cell.set_text(text);
+        let formatted = text
+            .replace("/n", "\\P")
+            .replace("\\n", "\\P")
+            .replace('\n', "\\P");
+        cell.set_text(&formatted);
         self.table.block_record_handle = None;
         Some(CmdResult::ReplaceMany(
             vec![(self.handle, vec![EntityType::Table(self.table.clone())])],
@@ -543,7 +699,126 @@ impl CadCommand for TableCellEditCommand {
         ))
     }
 
+    // Bare Enter (empty buffer) ends the edit *without* writing — the
+    // host routes an empty submit here instead of on_text_input(""), so
+    // pressing Enter on an untouched cell keeps its current content.
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+}
+
+#[cfg(test)]
+mod tabledit_tests {
+    //! `table_cell_at` is the one resolver shared by the double-click
+    //! shortcut and the TABLEDIT pick, so its grid math is pinned here.
+    //! `Table::new` seeds 2.5-unit columns and 0.25-unit rows with the
+    //! default orientation (horizontal +X, flow down).
+    use super::{table_cell_at, TableCellEditCommand, TableCellHit, TableditCommand};
+    use crate::command::{CadCommand, CmdResult};
+    use acadrust::entities::Table;
+    use acadrust::entities::table::CellStateFlags;
+    use acadrust::types::Vector3;
+    use glam::DVec3;
+
+    fn table_2x2() -> Table {
+        Table::new(Vector3::new(0.0, 0.0, 0.0), 2, 2)
+    }
+
+    #[test]
+    fn resolves_row_and_column_from_point() {
+        let table = table_2x2();
+        // Centers of the four cells.
+        assert_eq!(
+            table_cell_at(&table, None, DVec3::new(1.25, -0.125, 0.0)),
+            Some(TableCellHit {
+                row: 0,
+                column: 0,
+                locked: false
+            })
+        );
+        assert_eq!(
+            table_cell_at(&table, None, DVec3::new(3.75, -0.125, 0.0)),
+            Some(TableCellHit {
+                row: 0,
+                column: 1,
+                locked: false
+            })
+        );
+        assert_eq!(
+            table_cell_at(&table, None, DVec3::new(1.25, -0.375, 0.0)),
+            Some(TableCellHit {
+                row: 1,
+                column: 0,
+                locked: false
+            })
+        );
+    }
+
+    #[test]
+    fn misses_outside_the_grid() {
+        let table = table_2x2();
+        // Before the insertion point, beyond the last column/row, and a
+        // point in the plane's empty space all miss.
+        assert_eq!(
+            table_cell_at(&table, None, DVec3::new(-0.1, -0.1, 0.0)),
+            None
+        );
+        assert_eq!(table_cell_at(&table, None, DVec3::new(6.0, -0.1, 0.0)), None);
+        assert_eq!(table_cell_at(&table, None, DVec3::new(1.0, -9.0, 0.0)), None);
+        assert_eq!(table_cell_at(&table, None, DVec3::new(1.0, 1.0, 0.0)), None);
+    }
+
+    #[test]
+    fn reports_locked_cells() {
+        let mut table = table_2x2();
+        if let Some(cell) = table.cell_mut(0, 1) {
+            cell.state |= CellStateFlags::CONTENT_LOCKED;
+        }
+        let hit = table_cell_at(&table, None, DVec3::new(3.75, -0.125, 0.0))
+            .expect("locked cell still resolves");
+        assert!(hit.locked);
+        // Its neighbour stays editable through the same pick path.
+        assert!(!table_cell_at(&table, None, DVec3::new(1.25, -0.125, 0.0))
+            .expect("neighbour resolves")
+            .locked);
+    }
+
+    #[test]
+    fn tabledit_point_hands_point_to_host() {
+        let mut cmd = TableditCommand::new();
+        assert!(!cmd.needs_entity_pick());
+        match cmd.on_point(DVec3::new(1.0, 2.0, 0.0)) {
+            CmdResult::EditTableCell {
+                handle,
+                point,
+            } => {
+                assert_eq!(handle, acadrust::Handle::NULL);
+                assert_eq!(point, DVec3::new(1.0, 2.0, 0.0));
+            }
+            _ => panic!("expected EditTableCell"),
+        }
+        // A bare Enter at the pick prompt ends the command.
+        assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
+    }
+
+    #[test]
+    fn table_cell_edit_formats_newlines() {
+        let table = table_2x2();
+        let handle = acadrust::Handle::new(42);
+        let mut edit_cmd = TableCellEditCommand::new(handle, &table, 0, 0);
+        let result = edit_cmd
+            .on_text_input("Line1/nLine2\\nLine3\nLine4")
+            .expect("cell edit commits");
+        match result {
+            CmdResult::ReplaceMany(repl, _) => {
+                assert_eq!(repl.len(), 1);
+                if let acadrust::EntityType::Table(t) = &repl[0].1[0] {
+                    assert_eq!(t.cell_text(0, 0).unwrap(), "Line1\\PLine2\\PLine3\\PLine4");
+                } else {
+                    panic!("expected Table entity");
+                }
+            }
+            _ => panic!("expected ReplaceMany"),
+        }
     }
 }

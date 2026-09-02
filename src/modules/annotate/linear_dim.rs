@@ -5,7 +5,9 @@ use cadkernel::geom2d::{
     closest_point, Circle as KernelCircle, Curve, Line as KernelLine,
 };
 
-use crate::command::{CadCommand, CmdResult, DimensionAssociationInput, WorkingPlane};
+use crate::command::{
+    CadCommand, CmdResult, DimensionAssociationInput, InputKind, WorkingPlane,
+};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use glam::DVec3;
@@ -219,19 +221,18 @@ impl CadCommand for LinearDimensionCommand {
         CmdResult::Cancel
     }
 
-    fn wants_text_input(&self) -> bool {
-        true
+    fn input_kind(&self) -> InputKind {
+        if self.awaiting_text {
+            InputKind::FreeText
+        } else {
+            InputKind::SingleToken
+        }
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
         // While typing the override text or angle, route input as a value, not
         // a point pick / keyword.
         !self.awaiting_text && !self.awaiting_angle && !self.awaiting_rotation
-    }
-
-    fn wants_text_with_spaces(&self) -> bool {
-        // The override text may contain spaces.
-        self.awaiting_text
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {

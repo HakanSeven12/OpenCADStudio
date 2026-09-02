@@ -8,6 +8,7 @@ use crate::app::helpers::{
     CoordKind,
 };
 use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
+use crate::app::TextEntryMode;
 use crate::modules::ModuleEvent;
 use crate::scene::pick::grip::{
     find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit, GripEditMode,
@@ -199,8 +200,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .get_or_insert_with(String::new)
                             .push_str(&s);
                     } else {
-                        // Command-line entry is shown uppercase.
-                        self.command_line.input.push_str(&s.to_uppercase());
+                        // Command-line entry is shown uppercase — except in
+                        // free-form text prompts, where the typed case is the
+                        // content (matches the CommandInput route).
+                        if self.is_free_text_active() {
+                            self.command_line.input.push_str(&s);
+                        } else {
+                            self.command_line.input.push_str(&s.to_uppercase());
+                        }
                         self.command_line.cancel_history_navigation();
                         // Live incremental search for INSERT/MINSERT (see CommandInput)
                         let live = self.command_line.input.clone();
@@ -263,7 +270,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 self.command_line.close_history();
                 // A leading `>` was only a "literal spaces" typing hint (see
                 // CommandSpace) — drop it before the input is interpreted.
-                if self.command_line.input.starts_with('>') {
+                // Free-form text prompts keep it: there it is content, not a
+                // hint, so a cell value like `>Note` commits verbatim.
+                if !self.is_free_text_active() && self.command_line.input.starts_with('>') {
                     self.command_line.input.remove(0);
                 }
                 // Grip-menu value prompt — consume the typed number and
@@ -516,7 +525,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     let wants_spaces = self.tabs[i]
                         .active_cmd
                         .as_ref()
-                        .map(|c| c.wants_text_input() && c.wants_text_with_spaces())
+                        .map(|c| c.is_free_text_step())
                         .unwrap_or(false);
                     let raw = self.command_line.input.clone();
                     let toks: Vec<String> = raw.split_whitespace().map(String::from).collect();
@@ -542,7 +551,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     }
                 }
                 if self.tabs[i].active_cmd.is_some() {
-                    let text = crate::app::expr_eval::eval_to_string(self.command_line.input.trim());
+                    // Free-form text is the content itself: no expression
+                    // evaluation, or a cell value like `5*2` would commit as
+                    // `10`. Single-token prompts keep the calculator behavior.
+                    let free_text = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|c| c.is_free_text_step())
+                        .unwrap_or(false);
+                    let raw = self.command_line.input.trim().to_string();
+                    let text = if free_text {
+                        raw
+                    } else {
+                        crate::app::expr_eval::eval_to_string(&raw)
+                    };
                     self.command_line.input.clear();
 
                     // Offer the typed text to the command's option handler
@@ -559,16 +581,23 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     if self.tabs[i]
                         .active_cmd
                         .as_ref()
-                        .map(|c| c.wants_text_input())
+                        .map(|c| c.input_kind().wants_text())
                         .unwrap_or(false)
                     {
-                        self.push_ucs_to_cmd(i);
-                        if let Some(result) = self.tabs[i]
-                            .active_cmd
-                            .as_mut()
-                            .and_then(|c| c.on_text_input(&text))
-                        {
-                            return self.apply_cmd_result(result);
+                        // An empty submit must not be handed to on_text_input —
+                        // a text step would commit the empty string (wiping a
+                        // table cell, clearing an attribute). It falls through
+                        // to the Enter handling below, which ends the step the
+                        // same way a bare Enter does: unchanged.
+                        if !text.is_empty() {
+                            self.push_ucs_to_cmd(i);
+                            if let Some(result) = self.tabs[i]
+                                .active_cmd
+                                .as_mut()
+                                .and_then(|c| c.on_text_input(&text))
+                            {
+                                return self.apply_cmd_result(result);
+                            }
                         }
                     }
 
@@ -679,9 +708,36 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 Task::none()
     }
 
+    /// The active command's current step collects free-form prose from the
+    /// command line. Single decision point for the routes that type into
+    /// the buffer (CommandInput, Shift+Enter, the view's on_submit wiring).
+    pub(crate) fn is_free_text_active(&self) -> bool {
+        self.tabs[self.active_tab]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|c| c.is_free_text_step())
+    }
+
+    /// What Space / Enter currently mean. Previously every key handler
+    /// re-derived this from the MText editor and the active command, and
+    /// the MText preview case was known only to `CommandSpace` — so Enter
+    /// behaved differently depending on which route carried the key.
+    pub(crate) fn text_entry_mode(&self) -> crate::app::TextEntryMode {
+        if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
+            return TextEntryMode::MTextPreview;
+        }
+        if self.is_free_text_active() {
+            return TextEntryMode::FreeText;
+        }
+        TextEntryMode::Command
+    }
+
     pub(super) fn on_command_finalize(&mut self) -> Task<Message> {
-                // In the MText preview, Enter inserts a line break.
-                if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
+                // In the MText preview, Enter inserts a line break. The
+                // free-text prompt case falls through deliberately: for it
+                // Enter *finishes* the edit (Shift+Enter breaks the line,
+                // handled by the SHIFT+ENTER shortcut route).
+                if self.text_entry_mode() == TextEntryMode::MTextPreview {
                     self.mtext_type("\n");
                     return Task::none();
                 }

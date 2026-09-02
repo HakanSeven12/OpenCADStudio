@@ -8,7 +8,7 @@ use cadkernel::geom2d::{
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput,
-    DimensionAssociationSource, WorkingPlane,
+    DimensionAssociationSource, InputKind, WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
@@ -486,12 +486,12 @@ impl CadCommand for AngularDimensionCommand {
         CmdResult::Cancel
     }
 
-    fn wants_text_input(&self) -> bool {
-        true
-    }
-
-    fn wants_text_with_spaces(&self) -> bool {
-        self.awaiting_text
+    fn input_kind(&self) -> InputKind {
+        if self.awaiting_text {
+            InputKind::FreeText
+        } else {
+            InputKind::SingleToken
+        }
     }
 
     fn options(&self) -> Vec<CmdOption> {

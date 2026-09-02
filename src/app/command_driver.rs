@@ -750,6 +750,88 @@ impl OpenCADStudio {
         task
     }
 
+    /// Resolve the cell under `click` on table `handle` (or any table in the drawing
+    /// if `handle` is `Handle::NULL`), arm the cell indicator, and launch the cell
+    /// editor unless the cell's content is locked. Shared by the double-click shortcut
+    /// and the TABLEDIT point pick so both agree on grid coordinates and editor setup.
+    pub(crate) fn begin_table_cell_edit(
+        &mut self,
+        i: usize,
+        handle: acadrust::Handle,
+        click: glam::DVec3,
+    ) -> crate::modules::annotate::table_cmd::TableCellEditStart {
+        use crate::modules::annotate::table_cmd::{table_cell_at, TableCellEditStart};
+        let target = if handle != acadrust::Handle::NULL {
+            self.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .and_then(|entity| match entity {
+                    acadrust::EntityType::Table(table) => Some((handle, table.clone())),
+                    _ => None,
+                })
+        } else {
+            // Find all tables whose grid contains `click`.
+            // Iterating document.entities() visits entities in draw order;
+            // taking the last match selects the table on top if they overlap.
+            let mut matched = None;
+            for entity in self.tabs[i].scene.document.entities() {
+                if let acadrust::EntityType::Table(table) = entity {
+                    let h = table.common.handle;
+                    let style = table.table_style_handle.and_then(|style_handle| {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .objects
+                            .get(&style_handle)
+                            .and_then(|object| match object {
+                                acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                                _ => None,
+                            })
+                    });
+                    if table_cell_at(table, style, click).is_some() {
+                        matched = Some((h, table.clone()));
+                    }
+                }
+            }
+            matched
+        };
+        let Some((handle, table)) = target else {
+            return TableCellEditStart::NoCell;
+        };
+        let style = table.table_style_handle.and_then(|style_handle| {
+            self.tabs[i]
+                .scene
+                .document
+                .objects
+                .get(&style_handle)
+                .and_then(|object| match object {
+                    acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                    _ => None,
+                })
+        });
+        let Some(hit) = table_cell_at(&table, style, click) else {
+            return TableCellEditStart::NoCell;
+        };
+        // Arm the Properties cell indicator whether or not the cell turns
+        // out to be editable (matches the double-click behavior).
+        let index = hit.index(&table);
+        self.tabs[i].properties.prop_vertex = index;
+        self.tabs[i].properties.prop_vertex_indicator_active = true;
+        crate::entities::table::set_prop_current_cell(index);
+        self.refresh_properties();
+        if hit.locked {
+            return TableCellEditStart::LockedCell;
+        }
+        let command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+            handle, &table, hit.row, hit.column,
+        );
+        self.command_line
+            .push_info(&crate::command::CadCommand::prompt(&command));
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        TableCellEditStart::Started
+    }
+
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         match result {
@@ -2391,6 +2473,59 @@ impl OpenCADStudio {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
                 let _ = self.dispatch_command(&cmd);
+            }
+            CmdResult::EditTableCell { handle, point } => {
+                // TABLEDIT's pick: end the pick phase and hand (table, point)
+                // to the shared cell-edit launcher. A miss or a locked cell
+                // re-prompts, matching AutoCAD's select-until-valid loop.
+                use crate::modules::annotate::table_cmd::{table_cell_at, TableCellEditStart};
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+
+                if handle == acadrust::Handle::NULL && self.selection_cycling {
+                    let mut candidates = Vec::new();
+                    for entity in self.tabs[i].scene.document.entities() {
+                        if let acadrust::EntityType::Table(table) = entity {
+                            let h = table.common.handle;
+                            let style = table.table_style_handle.and_then(|style_handle| {
+                                self.tabs[i]
+                                    .scene
+                                    .document
+                                    .objects
+                                    .get(&style_handle)
+                                    .and_then(|object| match object {
+                                        acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                                        _ => None,
+                                    })
+                            });
+                            if table_cell_at(table, style, point).is_some() {
+                                candidates.push(h);
+                            }
+                        }
+                    }
+                    if candidates.len() >= 2 {
+                        self.cycle_candidates = Some((self.quick_properties_anchor, candidates));
+                        return Task::none();
+                    }
+                }
+
+                match self.begin_table_cell_edit(i, handle, point) {
+                    TableCellEditStart::Started => {}
+                    TableCellEditStart::LockedCell => {
+                        self.command_line.push_error(
+                            crate::t!("The cell is content locked.").as_ref(),
+                        );
+                        let _ = self.dispatch_command("TABLEDIT");
+                    }
+                    TableCellEditStart::NoCell => {
+                        self.command_line.push_error(
+                            crate::t!("No editable table cell picked.").as_ref(),
+                        );
+                        let _ = self.dispatch_command("TABLEDIT");
+                    }
+                }
             }
             CmdResult::MatchEntityLayer { dest, src } => {
                 self.tabs[i].active_cmd = None;

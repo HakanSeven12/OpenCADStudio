@@ -666,6 +666,13 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            "TABLEDIT" => {
+                use crate::modules::annotate::table_cmd::TableditCommand;
+                let cmd = TableditCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "DIMCONTINUE" => {
                 use crate::modules::annotate::dim_continue::DimContinueCommand;
                 let scene = &self.tabs[i].scene;

@@ -1240,6 +1240,12 @@ pub enum CmdResult {
     },
     /// Cancel: discard any preview and end the command.
     Cancel,
+    /// End the command and begin in-place editing of the table cell under
+    /// `point` on table `handle` (TABLEDIT). The host resolves the cell —
+    /// it owns the document needed for the table-style lookup — honors
+    /// content locks, and launches the cell editor, re-prompting the
+    /// command when the pick misses a cell.
+    EditTableCell { handle: Handle, point: DVec3 },
     /// Cancel because the active drawing space changed. Cleanup is identical
     /// to `Cancel`, but the host reports the context change explicitly.
     CancelForSpaceChange,
@@ -1678,6 +1684,38 @@ impl CmdOption {
     }
 }
 
+/// What kind of input the command's current step expects from the command line.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum InputKind {
+    /// Normal point-picking / viewport interaction or keyword options.
+    /// The command line does not await dedicated text input.
+    #[default]
+    Point,
+    /// Single-token command-line text input (option letters, numeric radius,
+    /// layer name, block name, numeric angle). Space acts as a submit delimiter,
+    /// characters are automatically uppercased, and expressions like `5*2`
+    /// are evaluated.
+    SingleToken,
+    /// Free-form text prose (table cell contents, TEXT / MTEXT bodies,
+    /// dimension text overrides, attribute prompt defaults). Space is a
+    /// literal character, typed letter casing is preserved, math expression
+    /// evaluation is bypassed, Enter finishes the edit, and Shift+Enter
+    /// inserts a line break.
+    FreeText,
+}
+
+impl InputKind {
+    /// Returns `true` when the command is waiting for typed text input (`SingleToken` or `FreeText`).
+    pub fn wants_text(self) -> bool {
+        matches!(self, InputKind::SingleToken | InputKind::FreeText)
+    }
+
+    /// Returns `true` when the current prompt collects free-form prose.
+    pub fn is_free_text(self) -> bool {
+        self == InputKind::FreeText
+    }
+}
+
 pub trait CadCommand: Send {
     /// Short name shown in the command line prompt, e.g. `"LINE"`.
     #[allow(dead_code)]
@@ -1904,7 +1942,21 @@ pub trait CadCommand: Send {
         &[]
     }
 
+    /// What kind of input the current step expects from the command line.
+    /// Default is [`InputKind::Point`].
+    fn input_kind(&self) -> InputKind {
+        #[allow(deprecated)]
+        if self.wants_text_with_spaces() {
+            InputKind::FreeText
+        } else if self.wants_text_input() {
+            InputKind::SingleToken
+        } else {
+            InputKind::Point
+        }
+    }
+
     /// Returns `true` when the command is waiting for text typed in the command line.
+    #[deprecated(note = "Use `input_kind().wants_text()` instead")]
     fn wants_text_input(&self) -> bool {
         false
     }
@@ -1931,15 +1983,17 @@ pub trait CadCommand: Send {
 
     /// Returns `true` when the active text prompt expects free-form prose
     /// that can legitimately contain whitespace (the body of a TEXT /
-    /// MTEXT / DDEDIT entity, an attribute default value, etc.). For
-    /// these prompts the command-line input must let `Space` be typed as
-    /// a literal character; for every other prompt `Space` submits the
-    /// input the same way `Enter` does.
-    ///
-    /// Default `false` — single-token prompts (option letters, numeric
-    /// radius, block name) do not embed spaces.
+    /// MTEXT / DDEDIT entity, a table cell, an attribute default value).
+    #[deprecated(note = "Use `input_kind().is_free_text()` instead")]
     fn wants_text_with_spaces(&self) -> bool {
         false
+    }
+
+    /// The current step collects free-form prose from the command line:
+    /// Space is a literal character, typed case is preserved, Enter
+    /// finishes the edit and Shift+Enter inserts a line break.
+    fn is_free_text_step(&self) -> bool {
+        self.input_kind().is_free_text()
     }
 
     /// Called when the user submits text via the command line while `wants_text_input` is true.

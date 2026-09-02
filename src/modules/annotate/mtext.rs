@@ -3,7 +3,7 @@ use acadrust::types::Vector3;
 use acadrust::MText;
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdOption, CmdResult, DynField, WorkingPlane};
+use crate::command::{CadCommand, CmdOption, CmdResult, DynField, InputKind, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
@@ -243,12 +243,12 @@ impl CadCommand for MTextCommand {
         matches!(self.step, Step::FirstCorner | Step::OppositeCorner)
     }
 
-    fn wants_text_input(&self) -> bool {
-        true
-    }
-
-    fn wants_text_with_spaces(&self) -> bool {
-        matches!(self.step, Step::Style)
+    fn input_kind(&self) -> InputKind {
+        if matches!(self.step, Step::Style) {
+            InputKind::FreeText
+        } else {
+            InputKind::SingleToken
+        }
     }
 
     fn dyn_field(&self) -> DynField {

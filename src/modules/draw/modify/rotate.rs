@@ -10,6 +10,7 @@
 //   the applied rotation is new-angle - reference-angle.
 
 use acadrust::Handle;
+use cadkernel::geom2d::{self, Curve as KernelCurve};
 use glam::DVec3;
 use crate::t;
 
@@ -17,6 +18,8 @@ use crate::command::{CadCommand, CmdResult, DynField, EntityTransform, WorkingPl
 use crate::modules::draw::defaults;
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
+
+const TAU: f64 = std::f64::consts::TAU;
 
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
@@ -68,6 +71,57 @@ impl RotateCommand {
                 angle_rad,
             },
         )
+    }
+
+    fn angle_guide(&self, center: DVec3, radius: f64, angle: f64) -> Vec<WireModel> {
+        if radius <= f64::EPSILON {
+            return vec![];
+        }
+
+        let center_local = self.plane.to_local(center);
+        let reference = self.plane.to_world(DVec3::new(
+            center_local.x + radius,
+            center_local.y,
+            center_local.z,
+        ));
+        let mut guides = vec![WireModel::solid_f64(
+            "rotate_reference".into(),
+            vec![center.to_array(), reference.to_array()],
+            WireModel::CYAN,
+            false,
+        )];
+
+        if angle.abs() <= f64::EPSILON {
+            return guides;
+        }
+
+        let (start, end, reverse) = if angle > 0.0 {
+            (0.0, angle, false)
+        } else {
+            (angle, 0.0, true)
+        };
+        let Some(arc) = geom2d::bounded_arc([center_local.x, center_local.y], radius, start, end)
+        else {
+            return guides;
+        };
+        let mut points = KernelCurve::Arc(arc).tessellate_angle(TAU / 64.0);
+        if reverse {
+            points.reverse();
+        }
+        guides.push(WireModel::solid_f64(
+            "rotate_angle".into(),
+            points
+                .into_iter()
+                .map(|point| {
+                    self.plane
+                        .to_world(DVec3::new(point[0], point[1], center_local.z))
+                        .to_array()
+                })
+                .collect(),
+            WireModel::CYAN,
+            false,
+        ));
+        guides
     }
 }
 
@@ -194,12 +248,12 @@ impl CadCommand for RotateCommand {
     }
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
-        let (center, angle_rad) = match &self.step {
+        let (center, angle_rad, guide_angle) = match &self.step {
             Step::Angle { center } => {
                 let Some(angle) = self.plane.angle(*center, pt) else {
                     return vec![];
                 };
-                (*center, angle)
+                (*center, angle, angle)
             }
             Step::RefSecond { first, .. } => {
                 return vec![WireModel::solid(
@@ -216,13 +270,12 @@ impl CadCommand for RotateCommand {
                 let Some(angle) = self.plane.angle(*center, pt) else {
                     return vec![];
                 };
-                (*center, angle - *ref_angle)
+                (*center, angle - *ref_angle, angle)
             }
             _ => return vec![],
         };
-        // Object ghosts rotated to the new angle. The rotation sweep arc is
-        // drawn by the dynamic-input overlay (polar guide), not here.
-        self.wire_models
+        let mut previews: Vec<_> = self
+            .wire_models
             .iter()
             .map(|w| {
                 w.rotated_about_axis(
@@ -231,7 +284,10 @@ impl CadCommand for RotateCommand {
                     angle_rad as f32,
                 )
             })
-            .collect()
+            .collect();
+        let radius = self.plane.vector_to_local(pt - center).truncate().length();
+        previews.extend(self.angle_guide(center, radius, guide_angle));
+        previews
     }
 
     fn dyn_field(&self) -> DynField {
@@ -251,8 +307,8 @@ impl CadCommand for RotateCommand {
             Step::Angle { center } | Step::RefNew { center, .. } => Some(DynSpec {
                 anchor: DynAnchor::Point(center),
                 fields: vec![DynFieldSpec::new(DynRole::Angle)],
-                guide: DynGuide::Polar,
-                ref_point: Some(center + DVec3::X),
+                guide: DynGuide::None,
+                ref_point: None,
             }),
             _ => None,
         }
@@ -264,14 +320,10 @@ impl CadCommand for RotateCommand {
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         match self.step {
-            Step::Angle { center } | Step::RefNew { center, .. } => {
-                let direction = cursor - center;
-                (direction.x.hypot(direction.y) > f64::EPSILON).then(|| {
-                    crate::command::dyn_display_angle_deg(
-                        direction.y.atan2(direction.x) as f32,
-                    ) as f64
-                })
-            }
+            Step::Angle { center } | Step::RefNew { center, .. } => self
+                .plane
+                .angle(center, cursor)
+                .map(|angle| crate::command::dyn_display_angle_deg(angle as f32) as f64),
             _ => None,
         }
     }

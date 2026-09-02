@@ -13,7 +13,8 @@ struct Uniforms {
     lwdisplay_enable:    f32,
     flat_shade:          f32,
     transparency_enable: f32,
-    _pad:                vec2<f32>,
+    _linetype_scale:     f32,
+    lineweight_scale:    f32,
     view_rot:            mat4x4<f32>,
     eye_high:            vec3<f32>,
     _pad_eh:             f32,
@@ -146,7 +147,11 @@ fn check_family(
         -ddx_xz.x * sin_a + ddx_xz.y * cos_a,
         -ddy_xz.x * sin_a + ddy_xz.y * cos_a,
     )) * 0.5;
-    let width_px = select(1.0, max(fam.line_width, 1.0), u.lwdisplay_enable > 0.5);
+    let width_px = select(
+        1.0,
+        max(fam.line_width * u.lineweight_scale, 1.0),
+        u.lwdisplay_enable > 0.5,
+    );
     let half_line = half_px * width_px;
 
     let wpx = length(vec2<f32>(ddx_xz.x, ddy_xz.x));

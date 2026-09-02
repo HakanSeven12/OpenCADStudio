@@ -25,8 +25,9 @@ pub struct Uniforms {
     /// zooming inside MSPACE changes one scalar instead of re-tessellating and
     /// re-uploading every dashed wire.
     pub linetype_scale: f32,
-    /// Pads the struct to the uniform alignment required by wgpu.
-    pub _pad: f32,
+    /// Multiplier for screen-space lineweights. Model space keeps `1.0`;
+    /// paper layouts derive it from the current paper zoom.
+    pub lineweight_scale: f32,
 
     // ── Relative-to-eye (double-single) additions ───────────────────────────
     // Appended at the end so existing field offsets are unchanged; shaders that
@@ -116,7 +117,7 @@ impl Uniforms {
             flat_shade: 0.0,
             transparency_enable: 1.0,
             linetype_scale: 1.0,
-            _pad: 0.0,
+            lineweight_scale: 1.0,
             view_rot: camera.view_proj_rte(bounds),
             eye_high,
             _pad_eh: 0.0,

@@ -23,6 +23,7 @@ use crate::scene::{
 };
 
 const DISPLAY_STYLE_CACHE_LIMIT: usize = if cfg!(target_arch = "wasm32") { 4 } else { 24 };
+const MM_TO_PX: f32 = 96.0 / 25.4;
 
 // ── Camera hover state (shader::Program::State) ───────────────────────────
 
@@ -2592,7 +2593,7 @@ impl Scene {
                     wire.fill_tris_low.clear();
                 }
                 if let Some(mm) = style.resolve_lineweight(wire.aci) {
-                    wire.line_weight_px = (mm * (96.0 / 25.4) * 2.0).max(1.0);
+                    wire.line_weight_px = (mm * MM_TO_PX).max(1.0);
                 }
                 for vertex in &mut wire.text_verts {
                     self.apply_display_plot_style(&mut vertex.color, wire.aci, &style);
@@ -2648,7 +2649,7 @@ impl Scene {
                     }
                 }
                 if let Some(mm) = style.resolve_lineweight(hatch.aci) {
-                    hatch.line_weight_px = (mm * (96.0 / 25.4) * 2.0).max(1.0);
+                    hatch.line_weight_px = (mm * MM_TO_PX).max(1.0);
                 }
                 if let crate::scene::model::hatch_model::HatchPattern::Gradient {
                     color2, ..
@@ -2710,7 +2711,7 @@ impl Scene {
             self.apply_display_plot_style(&mut color, wire.aci, &style);
             let line_weight_px = style
                 .resolve_lineweight(wire.aci)
-                .map(|mm| (mm * (96.0 / 25.4) * 2.0).max(1.0))
+                .map(|mm| (mm * MM_TO_PX).max(1.0))
                 .unwrap_or(wire.line_weight_px);
             for (triangle_index, triangle) in wire.fill_tris.chunks_exact(3).enumerate() {
                 let mut boundary = Vec::with_capacity(4);
@@ -2943,15 +2944,8 @@ pub struct InheritStyle {
 
 /// Convert a concrete (already layer-resolved) lineweight to display pixels.
 pub(crate) fn lineweight_to_px(lw: &LineWeight) -> f32 {
-    const MM_TO_PX: f32 = 96.0 / 25.4;
-    // CAD apps display model-space lineweights larger than their true physical
-    // size so the gradations stay legible on screen — at true scale a 0.5 mm
-    // line is ~2 px and is indistinguishable from thinner weights (which all
-    // floor to 1 px). Apply the same legibility boost so weights are pronounced
-    // and tell apart, matching other DWG editors. (#147)
-    const LWT_DISPLAY_BOOST: f32 = 2.0;
     lw.millimeters()
-        .map(|mm| (mm as f32 * MM_TO_PX * LWT_DISPLAY_BOOST).max(1.0))
+        .map(|mm| (mm as f32 * MM_TO_PX).max(1.0))
         .unwrap_or(1.0)
 }
 
@@ -3853,6 +3847,11 @@ impl Scene {
             full_bounds,
             self.document.header.lineweight_display || display_plot_lineweights,
         );
+        if self.current_layout != "Model" {
+            let paper_per_pixel = 2.0 * self.camera.borrow().ortho_size() / canvas.1.max(1.0);
+            let paper_units_per_mm = self.paper_space_unit_factor() as f32;
+            uniforms.lineweight_scale = paper_units_per_mm / paper_per_pixel / MM_TO_PX;
+        }
 
         // Model space: scale linetypes using the current annotation scale so their
         // appearance can match a paper-space viewport at the same drawing scale.

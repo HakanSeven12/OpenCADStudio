@@ -5,7 +5,7 @@ struct Uniforms {
     flat_shade: f32,
     transparency_enable: f32,
     linetype_scale: f32,
-    _pad: f32,
+    lineweight_scale: f32,
     view_rot: mat4x4<f32>,
     eye_high: vec3<f32>,
     _pad_eh: f32,
@@ -67,7 +67,7 @@ fn resolve_hw(taper_ratio: f32, world_hw: f32, px_hw: f32) -> f32 {
     if world_hw > 0.0 {
         return max(world_hw / u.world_per_pixel, 0.5);
     }
-    return select(0.5, px_hw, u.lwdisplay_enable > 0.5);
+    return select(0.5, max(px_hw * u.lineweight_scale, 0.5), u.lwdisplay_enable > 0.5);
 }
 
 fn marker_relative(

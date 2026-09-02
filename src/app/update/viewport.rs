@@ -2690,6 +2690,19 @@ impl OpenCADStudio {
         };
         let (vw, vh) = vp_size;
 
+        // An engaged grip owns the next left press (click-move-click placement
+        // or the release of a press-drag). Do not let the same press arm the
+        // normal box/lasso state or trigger another viewport control; the
+        // release path below will commit the grip.
+        if self.tabs[i].active_grip.is_some() {
+            self.tabs[i]
+                .scene
+                .selection
+                .borrow_mut()
+                .clear_left_selection_gesture();
+            return Task::none();
+        }
+
         // Interactive navigation tools reuse the middle-button movement path,
         // so no selection/pick logic runs while the left button drives them.
         if self.tabs[i].orbit_mode
@@ -2783,18 +2796,6 @@ impl OpenCADStudio {
             width: vw,
             height: vh,
         };
-
-        // An engaged grip owns the next left press (click-move-click placement
-        // or the release of a press-drag). Do not let the same press arm the
-        // normal box/lasso state; the release path below will commit the grip.
-        if self.tabs[i].active_grip.is_some() {
-            self.tabs[i]
-                .scene
-                .selection
-                .borrow_mut()
-                .clear_left_selection_gesture();
-            return Task::none();
-        }
 
         if self.tabs[i].active_cmd.is_none()
             && self.tabs[i].active_grip.is_none()

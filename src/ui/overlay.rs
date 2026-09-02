@@ -13,6 +13,7 @@ use crate::scene::model::object::GripShape;
 use crate::scene::SelectionState;
 
 use crate::snap::SnapType;
+use std::sync::Arc;
 
 /// Original crosshair geometry retained at the default setting values.
 pub const CROSSHAIR_SQ: f32 = 7.5;
@@ -362,7 +363,7 @@ impl canvas::Program<Message> for GridCanvas {
 }
 
 pub fn selection_overlay<'a>(
-    selection: SelectionState,
+    selection: Arc<RefCell<SelectionState>>,
     snap: Option<(Point, SnapType)>,
     snap_ext_base: Option<Point>,
     snap_ext_base2: Option<Point>,
@@ -411,7 +412,7 @@ pub fn selection_overlay<'a>(
 }
 
 struct SelectionCanvas {
-    selection: SelectionState,
+    selection: Arc<RefCell<SelectionState>>,
     snap: Option<(Point, SnapType)>,
     /// Screen position of the endpoint an active Extension snap extends from,
     /// so the dashed extension guide line can be drawn back to it. (#238)
@@ -588,7 +589,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         // PAN mode owns the whole viewport: an open hand when hovering, a
         // closed hand while dragging.
         if self.pan_mode && cursor.is_over(bounds) {
-            return if self.selection.middle_down {
+            return if self.selection.borrow().middle_down {
                 mouse::Interaction::Grabbing
             } else {
                 mouse::Interaction::Grab
@@ -685,7 +686,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             }
             // Ghost card dragged under the cursor — a 0.32× preview of the
             // source pane, centred on the cursor.
-            if let Some(c) = self.selection.last_move_pos {
+            if let Some(c) = self.selection.borrow().last_move_pos {
                 let gw = (src.width * 0.32).clamp(60.0, 280.0);
                 let gh = (src.height * 0.32).clamp(40.0, 200.0);
                 let g = canvas::Path::rectangle(
@@ -738,27 +739,27 @@ impl canvas::Program<Message> for SelectionCanvas {
             );
         }
 
-        if let (Some(a), Some(b)) = (self.selection.box_anchor, self.selection.box_current) {
-            draw_marquee(&mut frame, a, b, self.selection.box_crossing, theme);
+        if let (Some(a), Some(b)) = (self.selection.borrow().box_anchor, self.selection.borrow().box_current) {
+            draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme);
         }
         // Preview marquee for point-picked windows (STRETCH) — same look, no pick.
-        if let Some((a, b, crossing)) = self.selection.preview_box {
+        if let Some((a, b, crossing)) = self.selection.borrow().preview_box {
             draw_marquee(&mut frame, a, b, crossing, theme);
         }
 
-        if self.selection.poly_active && self.selection.poly_points.len() > 1 {
-            let base = if self.selection.poly_crossing {
+        if self.selection.borrow().poly_active && self.selection.borrow().poly_points.len() > 1 {
+            let base = if self.selection.borrow().poly_crossing {
                 theme.palette().success.base.color
             } else {
                 theme.palette().primary.base.color
             };
             let fill = base.scale_alpha(0.12);
             let stroke = base.scale_alpha(0.9);
-            if let Some(cur) = self.selection.last_move_pos {
-                let start = self.selection.poly_points[0];
+            if let Some(cur) = self.selection.borrow().last_move_pos {
+                let start = self.selection.borrow().poly_points[0];
                 let fill_path = canvas::Path::new(|p| {
                     p.move_to(start);
-                    for pt in &self.selection.poly_points[1..] {
+                    for pt in &self.selection.borrow().poly_points[1..] {
                         p.line_to(*pt);
                     }
                     p.line_to(cur);
@@ -767,8 +768,8 @@ impl canvas::Program<Message> for SelectionCanvas {
                 frame.fill(&fill_path, fill);
             }
             let path = canvas::Path::new(|p| {
-                p.move_to(self.selection.poly_points[0]);
-                for pt in &self.selection.poly_points[1..] {
+                p.move_to(self.selection.borrow().poly_points[0]);
+                for pt in &self.selection.borrow().poly_points[1..] {
                     p.line_to(*pt);
                 }
             });
@@ -780,9 +781,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                     ..Default::default()
                 },
             );
-            if let Some(cur) = self.selection.last_move_pos {
-                let start = self.selection.poly_points[0];
-                let last = *self.selection.poly_points.last().unwrap();
+            if let Some(cur) = self.selection.borrow().last_move_pos {
+                let start = self.selection.borrow().poly_points[0];
+                let last = *self.selection.borrow().poly_points.last().unwrap();
                 let preview = canvas::Path::new(|p| {
                     p.move_to(last);
                     p.line_to(cur);
@@ -1138,7 +1139,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             && !self.suppressed
             && self.crosshair.cursor_type == CursorType::Crosshair
         {
-            if let Some(cp) = self.selection.last_move_pos {
+            if let Some(cp) = self.selection.borrow().last_move_pos {
                 let [r, g, b, a] = self.crosshair.color.map_or_else(
                     || {
                         crate::scene::view::render::adapt_to_bg(

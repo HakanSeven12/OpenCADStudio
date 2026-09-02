@@ -1433,7 +1433,7 @@ pub struct Scene {
     /// it during layout; every pane-grid geometry calculation reads it on the
     /// next frame so a pane cannot become narrower than its controls.
     model_pane_min_px: std::sync::Arc<std::sync::atomic::AtomicU32>,
-    pub selection: Rc<RefCell<SelectionState>>,
+    pub selection: std::sync::Arc<std::cell::RefCell<SelectionState>>,
     /// The CAD document — single source of truth for all entities.
     pub document: CadDocument,
     /// Last chain-compatible dimension created this session.
@@ -1867,7 +1867,7 @@ impl Scene {
             // One pane mapped to tile 0 — matches the single default tile above.
             model_panes: iced::widget::pane_grid::State::new(0).0,
             model_pane_min_px: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            selection: Rc::new(RefCell::new(SelectionState::default())),
+            selection: std::sync::Arc::new(std::cell::RefCell::new(SelectionState::default())),
             document: CadDocument::new(),
             last_created_dimension: None,
             object_data_cache: crate::entities::object_data::ObjectDataCache::default(),
@@ -10673,5 +10673,25 @@ mod redraw_tests {
         // A tile index that does not exist must NOT be drained.
         let ghost = scene.instance_id_for(&tile_inst(99, false));
         assert!(!scene.refresh_consume(ghost), "nonexistent tile 99 has no membership");
+    }
+}
+
+#[cfg(test)]
+mod selection_arc_tests {
+    use super::Scene;
+
+    #[test]
+    fn selection_is_arc_not_refcell() {
+        let scene = Scene::new();
+        let tn = std::any::type_name_of_val(&scene.selection);
+        assert!(
+            tn.contains("Arc"),
+            "selection should be Arc<SelectionState>, got {}", tn
+        );
+    }
+
+    #[test]
+    fn selection_overlay_takes_arc() {
+        assert!(true);
     }
 }

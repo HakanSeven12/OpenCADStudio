@@ -435,14 +435,10 @@ impl OpenCADStudio {
             // Hold a single `Ref<'_, SelectionState>` for the whole overlay
             // block. The `vp_size` and `last_move_pos` reads below become
             // field accesses on `sel_ref` (no redundant `borrow()`s), and
-            // the final widget call takes `(*sel_ref).clone()` — one deep
-            // clone per frame, at the only site that needs an owned
-            // `SelectionState`. The `Ref` is dropped at the end of this
-            // block. **Invariant:** no `selection.borrow_mut()` exists
-            // inside this block (the only two `borrow_mut` sites in
-            // `src/scene` are in `preview.rs:282` and `render.rs:3443`,
-            // neither reachable from here). Holding the `Ref` is therefore
-            // safe.
+            // the final widget call takes `Arc::clone(&selection)` — atomic
+            // bump per frame instead of a deep `SelectionState` clone.
+            // `sel_ref` is a borrowed view for field reads; the widget owns
+            // the Arc clone. No `selection` mutation occurs inside this block.
             let sel_ref = tab.scene.selection.borrow();
             let snap_info = tab.snap_result.map(|s| (s.screen, s.snap_type));
             let snap_ext_base = tab.snap_result.and_then(|s| s.extension_base);
@@ -757,7 +753,7 @@ impl OpenCADStudio {
                 .map(|h| tab.scene.is_layer_locked(h))
                 .unwrap_or(false);
             crate::ui::overlay::selection_overlay(
-                (*sel_ref).clone(),
+                std::sync::Arc::clone(&tab.scene.selection),
                 snap_info,
                 snap_ext_base,
                 snap_ext_base2,

@@ -77,3 +77,86 @@ impl SelectionState {
         self.poly_crossing = false;
     }
 }
+
+#[cfg(test)]
+mod bench_selection_clone_tests {
+    use super::SelectionState;
+    use iced::Point;
+    use std::hint::black_box;
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    fn make_state(poly_len: usize) -> SelectionState {
+        let mut s = SelectionState {
+            vp_size: (1920.0, 1080.0),
+            poly_points: vec![Point::new(10.0, 10.0); poly_len],
+            ..Default::default()
+        };
+        s.box_anchor = Some(Point::new(0.0, 0.0));
+        s.box_current = Some(Point::new(100.0, 100.0));
+        s
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_selection_state_clone() {
+        let state = make_state(64);
+        for _ in 0..20 {
+            black_box(state.clone());
+        }
+        let n = 5000u32;
+        let start = Instant::now();
+        for _ in 0..n {
+            black_box(state.clone());
+        }
+        let elapsed = start.elapsed();
+        let per = elapsed / n;
+        println!(
+            "SelectionState::clone (deep, 64 pts): {:?} per clone (n={}, total {:?})",
+            per, n, elapsed
+        );
+        assert!(per.as_secs_f64() > 0.0);
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_selection_arc_clone() {
+        let state = Arc::new(make_state(64));
+        for _ in 0..20 {
+            black_box(Arc::clone(&state));
+        }
+        let n = 5000u32;
+        let start = Instant::now();
+        for _ in 0..n {
+            black_box(Arc::clone(&state));
+        }
+        let elapsed = start.elapsed();
+        let per = elapsed / n;
+        println!(
+            "Arc<SelectionState>::clone (Arc bump, 64 pts): {:?} per clone (n={}, total {:?})",
+            per, n, elapsed
+        );
+        assert!(per.as_secs_f64() > 0.0);
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_selection_state_clone_empty() {
+        let state = make_state(0);
+        for _ in 0..20 {
+            black_box(state.clone());
+        }
+        let n = 5000u32;
+        let start = Instant::now();
+        for _ in 0..n {
+            black_box(state.clone());
+        }
+        let elapsed = start.elapsed();
+        let per = elapsed / n;
+        println!(
+            "SelectionState::clone (deep, 0 pts): {:?} per clone (n={}, total {:?})",
+            per, n, elapsed
+        );
+        assert!(per.as_secs_f64() > 0.0);
+    }
+}

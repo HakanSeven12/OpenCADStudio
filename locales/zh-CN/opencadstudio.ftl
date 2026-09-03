@@ -3570,6 +3570,7 @@ dimstyle =
     .move-text-outside-first = 优先将文字移到外部
     .period = 句点
     .space = 空格
+    .surveyors-units = 测量单位
 
 style-manager =
     .alignment-spacing = 对齐间距

@@ -3586,6 +3586,7 @@ dimstyle =
     .move-text-outside-first = Déplacer d’abord le texte à l’extérieur
     .period = Point
     .space = Espace
+    .surveyors-units = Unités d’arpentage
 
 style-manager =
     .alignment-spacing = Espacement d’alignement

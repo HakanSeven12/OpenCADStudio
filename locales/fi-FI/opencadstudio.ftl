@@ -3586,6 +3586,7 @@ dimstyle =
     .move-text-outside-first = Siirrä teksti ensin ulos
     .period = Kausi
     .space = Välilyönti
+    .surveyors-units = Maanmittausyksiköt
 
 style-manager =
     .alignment-spacing = Tasausvälit

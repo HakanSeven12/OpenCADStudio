@@ -3511,6 +3511,7 @@ dimstyle =
     .move-text-outside-first = Önce metni dışarı taşı
     .period = Nokta
     .space = Boşluk
+    .surveyors-units = Haritacılık birimleri
 
 style-manager =
     .alignment-spacing = Hizalama aralığı

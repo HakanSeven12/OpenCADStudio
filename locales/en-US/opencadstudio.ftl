@@ -3588,6 +3588,7 @@ dimstyle =
     .move-text-outside-first = Move text outside first
     .period = Period
     .space = Space
+    .surveyors-units = Surveyor's units
 
 style-manager =
     .alignment-spacing = Alignment spacing

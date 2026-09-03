@@ -3575,6 +3575,7 @@ dimstyle =
     .move-text-outside-first = 先に寸法値を外側へ移動
     .period = ピリオド
     .space = 空白
+    .surveyors-units = 測量単位
 
 style-manager =
     .alignment-spacing = 位置合わせ間隔

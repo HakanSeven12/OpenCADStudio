@@ -3587,6 +3587,7 @@ dimstyle =
     .move-text-outside-first = Eerst tekst naar buiten verplaatsen
     .period = Punt
     .space = Spatie
+    .surveyors-units = Landmeeteenheden
 
 style-manager =
     .alignment-spacing = Uitlijningsafstand

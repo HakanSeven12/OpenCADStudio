@@ -6602,6 +6602,8 @@ fn format_angular_value(measurement_deg: f64, style: Option<&DimStyle>) -> Strin
                 swap_decimal_sep(&apply_angular_zero_suppression(&raw, azin), decimal_separator)
             )
         }
+        // 4 = Surveyor's units
+        4 => format_surveyor(measurement_deg, adec, azin, decimal_separator),
         // 0 or unknown = Decimal Degrees
         _ => {
             let raw = format!("{:.*}", adec, measurement_deg);
@@ -6611,6 +6613,48 @@ fn format_angular_value(measurement_deg: f64, style: Option<&DimStyle>) -> Strin
             )
         }
     }
+}
+
+/// Surveyor's units (DIMAUNIT 4): a bearing away from north or south toward
+/// east or west, so the quoted angle never exceeds a quarter turn. Due north,
+/// south, east and west have no bearing to quote and are written as the single
+/// letter, which is also what keeps a quarter turn from reading as a
+/// contradictory `N 90d0'0" E`. The bearing is DMS, so it carries DIMADEC,
+/// DIMAZIN and DIMDSEP the same way the DMS format does.
+fn format_surveyor(deg: f64, sec_dec: usize, azin: i16, decimal_separator: i16) -> String {
+    // Quantise before choosing a cardinal or a quadrant, so a value a hair
+    // under a cardinal direction does not print a quarter-turn bearing.
+    let scale = 3600.0 * 10f64.powi(sec_dec.min(8) as i32);
+    let turn = 360.0 * scale;
+    let ticks = (deg.rem_euclid(360.0) * scale).round().rem_euclid(turn);
+    let at = |d: f64| (ticks - d * scale).abs() < 0.5;
+    if at(0.0) {
+        return "E".into();
+    }
+    if at(90.0) {
+        return "N".into();
+    }
+    if at(180.0) {
+        return "W".into();
+    }
+    if at(270.0) {
+        return "S".into();
+    }
+    let d = ticks / scale;
+    // Measured from the nearer pole, toward the side the angle falls on.
+    let (pole, bearing, side) = if d < 90.0 {
+        ("N", 90.0 - d, "E")
+    } else if d < 180.0 {
+        ("N", d - 90.0, "W")
+    } else if d < 270.0 {
+        ("S", 270.0 - d, "W")
+    } else {
+        ("S", d - 270.0, "E")
+    };
+    format!(
+        "{pole} {} {side}",
+        format_dms(bearing, sec_dec, azin, decimal_separator)
+    )
 }
 
 fn format_dms(deg: f64, sec_dec: usize, azin: i16, decimal_separator: i16) -> String {
@@ -7302,6 +7346,41 @@ mod dimtad_tests {
             "outside must clear the object side, got {}",
             below.y
         );
+    }
+}
+
+#[cfg(test)]
+mod angular_unit_tests {
+    use super::format_angular_value;
+    use acadrust::tables::DimStyle;
+
+    fn style(dimaunit: i16, dimadec: i16) -> DimStyle {
+        let mut s = DimStyle::standard();
+        s.dimaunit = dimaunit;
+        s.dimadec = dimadec;
+        s
+    }
+
+    // DIMAUNIT 4 is Surveyor's units. It used to fall through to the decimal
+    // branch, so an angular dimension in a drawing authored with surveyor
+    // units read as plain degrees while AUNITS=4 elsewhere wrote a bearing.
+    #[test]
+    fn surveyor_units_write_a_bearing() {
+        assert_eq!(format_angular_value(45.0, Some(&style(4, 0))), "N 45\u{b0}0'0\" E");
+        assert_eq!(format_angular_value(135.0, Some(&style(4, 0))), "N 45\u{b0}0'0\" W");
+        assert_eq!(format_angular_value(200.0, Some(&style(4, 0))), "S 70\u{b0}0'0\" W");
+        assert_eq!(format_angular_value(300.0, Some(&style(4, 0))), "S 30\u{b0}0'0\" E");
+        // A hair under a cardinal must not quote a quarter-turn bearing.
+        assert_eq!(format_angular_value(89.99999, Some(&style(4, 0))), "N");
+        assert_eq!(format_angular_value(90.0, Some(&style(4, 0))), "N");
+        assert_eq!(format_angular_value(0.0, Some(&style(4, 0))), "E");
+    }
+
+    // The other unit formats are untouched.
+    #[test]
+    fn other_angular_units_unchanged() {
+        assert_eq!(format_angular_value(45.5, Some(&style(1, 0))), "45\u{b0}30'0\"");
+        assert_eq!(format_angular_value(90.0, Some(&style(2, 1))), "100.0g");
     }
 }
 

@@ -3599,6 +3599,7 @@ dimstyle =
     .move-text-outside-first = نقل النص إلى الخارج أولًا
     .period = نقطة
     .space = مسافة
+    .surveyors-units = وحدات المسّاح
 
 style-manager =
     .alignment-spacing = تباعد المحاذاة

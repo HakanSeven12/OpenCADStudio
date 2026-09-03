@@ -3587,6 +3587,7 @@ dimstyle =
     .move-text-outside-first = Първо премести текста навън
     .period = Точка
     .space = Интервал
+    .surveyors-units = Геодезически единици
 
 style-manager =
     .alignment-spacing = Разстояние на подравняване

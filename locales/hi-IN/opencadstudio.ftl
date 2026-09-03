@@ -3575,6 +3575,7 @@ dimstyle =
     .move-text-outside-first = पहले पाठ बाहर ले जाएँ
     .period = दशमलव बिंदु
     .space = रिक्त स्थान
+    .surveyors-units = सर्वेक्षण इकाइयाँ
 
 style-manager =
     .alignment-spacing = संरेखण अंतराल

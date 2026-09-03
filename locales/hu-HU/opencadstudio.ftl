@@ -3586,6 +3586,7 @@ dimstyle =
     .move-text-outside-first = Először mozgassa ki a szöveget
     .period = Időszak
     .space = Szóköz
+    .surveyors-units = Földmérési egységek
 
 style-manager =
     .alignment-spacing = Igazítási távolság

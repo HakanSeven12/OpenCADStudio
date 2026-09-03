@@ -3224,6 +3224,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Suppress second extension line" => Some(("dimstyle", "suppress-second-extension-line")),
         "Suppress zero feet and zero inches" => Some(("dimstyle", "suppress-zero-feet-and-inches")),
         "Suppress zero feet; show zero inches" => Some(("dimstyle", "suppress-zero-feet-show-zero-inches")),
+        "Surveyor's units" => Some(("dimstyle", "surveyors-units")),
         "Symbols and Arrows" => Some(("dimstyle", "symbols-and-arrows")),
         "Symmetrical" => Some(("dimstyle", "symmetrical")),
         "Text background" => Some(("dimstyle", "text-background")),

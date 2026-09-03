@@ -605,6 +605,10 @@ pub struct OpenTimings {
     pub purge_ms: u32,
     pub caches_ms: u32,
     pub xref_ms: u32,
+    /// The FINALIZING phase: `prepare_open_geometry` — first full Model
+    /// tessellation plus interaction index. Previously unmeasured, which made
+    /// it indistinguishable from parse time in an open that appeared to stall.
+    pub finalize_ms: u32,
 }
 
 /// Build hatch / image / mesh caches from a document without needing `&mut Scene`.
@@ -908,15 +912,36 @@ pub fn prepare_open_geometry(
     };
     scene.current_layout = "Model".to_string();
     let camera = scene.camera.borrow().clone();
+    let perf = crate::perf::enabled();
+    let t_wires = iced::time::Instant::now();
     let wires = scene.model_tile_wires_arc(0, &camera, 1.0, 1.0);
+    let wires_ms = t_wires.elapsed().as_secs_f64() * 1000.0;
+    let t_index = iced::time::Instant::now();
     let interaction_index = if scene.interaction_index_worthwhile(&wires) {
         let index =
             Arc::new(crate::scene::pick::interaction_index::InteractionIndex::build(&wires));
+        let build_ms = t_index.elapsed().as_secs_f64() * 1000.0;
+        let t_screen = iced::time::Instant::now();
         index.prepare_screen();
+        if perf {
+            crate::perf_record!(
+                "[perf] open-index build={:.1}ms prepare_screen={:.1}ms",
+                build_ms,
+                t_screen.elapsed().as_secs_f64() * 1000.0,
+            );
+        }
         Some(index)
     } else {
         None
     };
+    if perf {
+        crate::perf_record!(
+            "[perf] open-finalize wires={:.1}ms index={:.1}ms wire_models={}",
+            wires_ms,
+            t_index.elapsed().as_secs_f64() * 1000.0,
+            wires.len(),
+        );
+    }
     let doc = std::mem::replace(&mut scene.document, CadDocument::new());
     (
         doc,
@@ -5063,14 +5088,29 @@ impl Scene {
                 all_visible,
                 style_viewport,
             );
+        let perf = crate::perf::enabled();
+        let t_post = iced::time::Instant::now();
         // Synthesized nonprint markers (geo-location daisy) live in model space
         // only and are derived from document objects, not entities — append them
         // to the freshly built resident set (incremental patches preserve them).
         if block == self.model_space_block_handle() {
             self.append_scene_markers(&mut wires, bg);
         }
+        let markers_ms = t_post.elapsed().as_secs_f64() * 1000.0;
+        let t_fade = iced::time::Instant::now();
         self.apply_refedit_fade(&mut wires, bg);
+        let fade_ms = t_fade.elapsed().as_secs_f64() * 1000.0;
+        let t_layout = iced::time::Instant::now();
         let layout = Self::resident_wire_layout(&wires);
+        if perf {
+            crate::perf_record!(
+                "[perf] resident-post markers={:.1}ms fade={:.1}ms layout={:.1}ms wires={}",
+                markers_ms,
+                fade_ms,
+                t_layout.elapsed().as_secs_f64() * 1000.0,
+                wires.len(),
+            );
+        }
         self.last_tess_ms
             .set(t_tess.elapsed().as_secs_f32() * 1000.0);
         self.last_tess_wires.set(wires.len());
@@ -8606,6 +8646,12 @@ impl Scene {
     ) -> Vec<WireModel> {
         use acadrust::objects::ObjectType;
 
+        // Stage timings for the load-path investigation. This function also
+        // runs per frame on the cull path, so the reporting stays behind the
+        // PERF gate. `t_fn` doubles as the start of the sort-cache stage.
+        let perf = crate::perf::enabled();
+        let t_fn = iced::time::Instant::now();
+
         // ── Ensure sort-order index is current ────────────────────────────
         // Replaces the old O(objects) find_map with one rebuild per epoch,
         // after which every wires_for_block call is an O(1) HashMap lookup.
@@ -8646,6 +8692,9 @@ impl Scene {
                 all_visible,
             )
         };
+
+        let sort_cache_ms = t_fn.elapsed().as_secs_f64() * 1000.0;
+        let t_visible = iced::time::Instant::now();
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
         // AABB exists (Model layout with a settled camera), only iterate
@@ -8697,6 +8746,9 @@ impl Scene {
                 .collect()
         };
 
+        let visible_ms = t_visible.elapsed().as_secs_f64() * 1000.0;
+        let visible_count = visible.len();
+
         // Tessellate in parallel across all available CPU cores.
         use crate::par::prelude::*;
         let doc = &self.document;
@@ -8729,7 +8781,9 @@ impl Scene {
         // Content shown inside a paper-space viewport carries a scale override;
         // only there does PSLTSCALE resize linetypes by the viewport scale.
         let paper = anno_scale_override.is_some();
+        let t_blk = iced::time::Instant::now();
         let blk_cache = self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
+        let blk_ms = t_blk.elapsed().as_secs_f64() * 1000.0;
         let blk_ref: &cache::block_cache::BlockCache = &blk_cache;
         // Per-entity tessellation memo. Same classify/tessellate logic, two
         // SEPARATE stores so they can't thrash each other:
@@ -8758,6 +8812,15 @@ impl Scene {
         }
         let resident = base_ok && view_aabb.is_none() && wpp.is_none() && resident_memo_enabled();
         let memo_active = base_ok && (view_aabb.is_some() || resident);
+        // Reported in one line below. `tess_ms` / `memo_misses` are assigned by
+        // both branches; the rest exist only on the memo path and stay zero.
+        let mut classify_ms = 0.0f64;
+        let mut hits_ms = 0.0f64;
+        let tess_ms;
+        let mut materialize_ms = 0.0f64;
+        let mut memo_hits = 0usize;
+        let memo_misses;
+        let t_build = iced::time::Instant::now();
         let mut wires: Vec<WireModel> = if memo_active {
             // Guard hash of everything tessellate_entity output depends on
             // besides the entity itself. A mismatch (zoom/tol, view, anno,
@@ -8796,6 +8859,7 @@ impl Scene {
                 guard_cell.set(guard);
             }
             // Classify (serial, cheap): reuse memoized Arcs, collect misses.
+            let t_classify = iced::time::Instant::now();
             let mut hit_arcs: Vec<Arc<Vec<WireModel>>> = Vec::new();
             let mut misses: Vec<&EntityType> = Vec::new();
             {
@@ -8808,11 +8872,17 @@ impl Scene {
                     }
                 }
             }
+            classify_ms = t_classify.elapsed().as_secs_f64() * 1000.0;
+            memo_hits = hit_arcs.len();
+            memo_misses = misses.len();
             // Materialize hits + tessellate misses, both in parallel.
+            let t_hits = iced::time::Instant::now();
             let hit_wires: Vec<WireModel> = hit_arcs
                 .par_iter()
                 .flat_map_iter(|a| a.iter().cloned())
                 .collect();
+            hits_ms = t_hits.elapsed().as_secs_f64() * 1000.0;
+            let t_tess_miss = iced::time::Instant::now();
             let miss_pairs: Vec<(Handle, Arc<Vec<WireModel>>)> = misses
                 .par_iter()
                 .map(|e| {
@@ -8833,6 +8903,12 @@ impl Scene {
                     (e.common().handle, Arc::new(w))
                 })
                 .collect();
+            tess_ms = t_tess_miss.elapsed().as_secs_f64() * 1000.0;
+            // Serial deep-clone of every freshly tessellated wire, while the
+            // memo retains a second copy of the same geometry. Suspected
+            // dominant cost of a cold open; measuring it is the point of this
+            // whole breakdown.
+            let t_materialize = iced::time::Instant::now();
             let mut out = hit_wires;
             {
                 let mut memo = memo_cell.borrow_mut();
@@ -8841,9 +8917,11 @@ impl Scene {
                     memo.insert(*h, Arc::clone(a));
                 }
             }
+            materialize_ms = t_materialize.elapsed().as_secs_f64() * 1000.0;
             out
         } else {
-            visible
+            let t_tess_all = iced::time::Instant::now();
+            let out: Vec<WireModel> = visible
                 .into_par_iter()
                 .flat_map(|e| {
                     tessellate_entity(
@@ -8860,14 +8938,21 @@ impl Scene {
                         paper,
                     )
                 })
-                .collect()
+                .collect();
+            tess_ms = t_tess_all.elapsed().as_secs_f64() * 1000.0;
+            memo_misses = visible_count;
+            out
         };
+        let build_ms = t_build.elapsed().as_secs_f64() * 1000.0;
 
         // Apply draw order via the cached index (O(1) block lookup).
+        let t_sort = iced::time::Instant::now();
+        let mut sorted = false;
         {
             let cache = self.sort_cache.borrow();
             if let Some((_, ref idx)) = *cache {
                 if let Some(sort_map) = idx.get(&block_handle) {
+                    sorted = true;
                     wires.sort_by_key(|w| {
                         let key = Self::handle_from_wire_name(&w.name)
                             .map(|h| h.value())
@@ -8880,6 +8965,29 @@ impl Scene {
                     });
                 }
             }
+        }
+        if perf {
+            crate::perf_record!(
+                "[perf] wires-build total={:.1}ms sort_cache={:.1} visible={:.1} blk_cache={:.1} \
+build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
+entities={} memo_hit={} memo_miss={} wires={} memo={}",
+                t_fn.elapsed().as_secs_f64() * 1000.0,
+                sort_cache_ms,
+                visible_ms,
+                blk_ms,
+                build_ms,
+                classify_ms,
+                hits_ms,
+                tess_ms,
+                materialize_ms,
+                t_sort.elapsed().as_secs_f64() * 1000.0,
+                if sorted { "applied" } else { "skipped" },
+                visible_count,
+                memo_hits,
+                memo_misses,
+                wires.len(),
+                if memo_active { "on" } else { "off" },
+            );
         }
         wires
     }

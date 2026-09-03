@@ -917,8 +917,19 @@ impl shader::Primitive for Primitive {
                     let built = match cached {
                         Some(entry) => entry,
                         None => {
+                            // Runs on the main/render thread inside `prepare`,
+                            // so its cost is UI stall, not background load.
+                            let t_upload = iced::time::Instant::now();
                             let entry =
                                 inner.build_wire_buffers(device, &vp_wires[..], &draw_depths);
+                            if crate::perf::enabled() {
+                                crate::perf_record!(
+                                    "[perf] wire-upload {:.1}ms wires={} content_id={}",
+                                    t_upload.elapsed().as_secs_f64() * 1000.0,
+                                    vp_wires.len(),
+                                    vp.wire_content_id,
+                                );
+                            }
                             pipeline
                                 .wire_buffer_cache
                                 .insert(vp.wire_content_id, entry.clone());

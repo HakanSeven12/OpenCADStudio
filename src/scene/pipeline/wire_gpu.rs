@@ -28,34 +28,20 @@
 use crate::scene::model::wire_model::WireModel;
 use iced::wgpu;
 
-/// Allocate a VERTEX buffer with `mapped_at_creation` and write `data` directly
-/// into the mapped slice. Skips the intermediate staging copy that
-/// `create_buffer_init` performs and avoids holding a second `Vec` worth of
-/// memory during upload — meaningful on cold open where wire buffers can run
-/// into the hundreds of MB.
-fn instance_buffer_mapped<T: bytemuck::Pod>(
+/// Allocate a VERTEX buffer and fill it through the queue.
+///
+/// This used to map at creation to skip the staging copy. Mapping panics on
+/// the invalid buffer an out-of-memory device returns, and that panic aborts
+/// the process from inside iced's redraw, so the staging copy is the price of
+/// a session that survives a failed allocation. Chunking keeps the transient
+/// staging cost bounded. See `super::gpu_upload`.
+fn instance_buffer<T: bytemuck::Pod>(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     label: &str,
     data: &[T],
 ) -> wgpu::Buffer {
-    let bytes: &[u8] = bytemuck::cast_slice(data);
-    // wgpu rejects size-0 buffers; the renderer already guards `instance_count`
-    // before issuing a draw, so a placeholder allocation is fine here.
-    let size = bytes.len().max(std::mem::size_of::<T>()) as u64;
-    let buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(label),
-        size,
-        usage: wgpu::BufferUsages::VERTEX,
-        mapped_at_creation: true,
-    });
-    {
-        let mut view = buf.slice(..).get_mapped_range_mut();
-        if !bytes.is_empty() {
-            view.slice(..bytes.len()).copy_from_slice(bytes);
-        }
-    }
-    buf.unmap();
-    buf
+    super::gpu_upload::upload_buffer(device, queue, label, data, wgpu::BufferUsages::VERTEX)
 }
 
 // ── Instance layout ───────────────────────────────────────────────────────
@@ -684,6 +670,7 @@ pub(crate) fn wire_draw_depth(
 impl BlockWireGpu {
     pub fn from_wires(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[&WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         color_override: Option<[f32; 4]>,
@@ -753,11 +740,13 @@ impl BlockWireGpu {
                 .chunks(max_verts)
                 .map(|chunk| {
                     (
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("block_wire.vertices"),
-                            contents: bytemuck::cast_slice(chunk),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        }),
+                        super::gpu_upload::upload_buffer(
+                            device,
+                            queue,
+                            "block_wire.vertices",
+                            chunk,
+                            wgpu::BufferUsages::VERTEX,
+                        ),
                         chunk.len() as u32,
                     )
                 })
@@ -812,7 +801,7 @@ impl BlockWireGpu {
                 .chunks(max_instances)
                 .map(|chunk| {
                     (
-                        instance_buffer_mapped(device, "block_wire.instances", chunk),
+                        instance_buffer(device, queue, "block_wire.instances", chunk),
                         chunk.len() as u32,
                     )
                 })
@@ -840,18 +829,20 @@ impl BlockWireGpu {
 /// each chunk.
 fn build_const_bind_group(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     bgl: &wgpu::BindGroupLayout,
     consts: &[WireConst],
 ) -> std::sync::Arc<wgpu::BindGroup> {
-    use wgpu::util::DeviceExt;
     // wgpu rejects zero-sized buffers; pad with one zeroed record when empty.
     let one = [<WireConst as bytemuck::Zeroable>::zeroed()];
     let data: &[WireConst] = if consts.is_empty() { &one } else { consts };
-    let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("wire_const.buf"),
-        contents: bytemuck::cast_slice(data),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
+    let buf = super::gpu_upload::upload_buffer(
+        device,
+        queue,
+        "wire_const.buf",
+        data,
+        wgpu::BufferUsages::STORAGE,
+    );
     let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wire_const.bg"),
         layout: bgl,
@@ -869,6 +860,7 @@ impl WireGpu {
     /// of a large selected polyline or block before packing the overlay.
     pub fn from_highlight_refs(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[&WireModel],
         color: [f32; 4],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
@@ -895,12 +887,13 @@ impl WireGpu {
             if instances.is_empty() {
                 return Vec::new();
             }
-            let bind_group = build_const_bind_group(device, const_bgl, &consts);
+            let bind_group = build_const_bind_group(device, queue, const_bgl, &consts);
             return instances
                 .chunks(MAX_INSTANCES)
                 .map(|chunk| Self {
-                    instance_buffer: instance_buffer_mapped(
+                    instance_buffer: instance_buffer(
                         device,
+                        queue,
                         "wire.highlight.ibuf",
                         chunk,
                     ),
@@ -928,8 +921,9 @@ impl WireGpu {
         instances
             .chunks(MAX_PACKED_INSTANCES)
             .map(|chunk| Self {
-                instance_buffer: instance_buffer_mapped(
+                instance_buffer: instance_buffer(
                     device,
+                    queue,
                     "wire.highlight.compat.ibuf",
                     chunk,
                 ),
@@ -947,6 +941,7 @@ impl WireGpu {
     /// uses chunked resident buffers.
     pub fn from_run_refs(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[&WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         mesh_edge: bool,
@@ -975,8 +970,9 @@ impl WireGpu {
             return instances
                 .chunks(MAX_INSTANCES)
                 .map(|chunk| Self {
-                    instance_buffer: instance_buffer_mapped(
+                    instance_buffer: instance_buffer(
                         device,
+                        queue,
                         "wire.run.hybrid.compat.ibuf",
                         chunk,
                     ),
@@ -1012,11 +1008,11 @@ impl WireGpu {
         if instances.is_empty() {
             return Vec::new();
         }
-        let bind_group = build_const_bind_group(device, const_bgl, &consts);
+        let bind_group = build_const_bind_group(device, queue, const_bgl, &consts);
         instances
             .chunks(MAX_INSTANCES)
             .map(|chunk| Self {
-                instance_buffer: instance_buffer_mapped(device, "wire.run.hybrid.ibuf", chunk),
+                instance_buffer: instance_buffer(device, queue, "wire.run.hybrid.ibuf", chunk),
                 first_instance: 0,
                 instance_count: chunk.len() as u32,
                 is_3d_mesh_edge: mesh_edge,
@@ -1037,6 +1033,7 @@ impl WireGpu {
     /// image for transparent / coincident wires.
     pub fn from_run(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         mesh_edge: bool,
@@ -1071,11 +1068,11 @@ impl WireGpu {
             if instances.is_empty() {
                 return vec![];
             }
-            let bg = build_const_bind_group(device, const_bgl, &consts);
+            let bg = build_const_bind_group(device, queue, const_bgl, &consts);
             return instances
                 .chunks(MAX_INSTANCES)
                 .map(|chunk| {
-                    let buf = instance_buffer_mapped(device, "wire.run.ibuf", chunk);
+                    let buf = instance_buffer(device, queue, "wire.run.ibuf", chunk);
                     Self {
                         instance_buffer: buf,
                         first_instance: 0,
@@ -1108,7 +1105,7 @@ impl WireGpu {
         instances
             .chunks(MAX_PACKED_INSTANCES)
             .map(|chunk| {
-                let buf = instance_buffer_mapped(device, "wire.run.compat.ibuf", chunk);
+                let buf = instance_buffer(device, queue, "wire.run.compat.ibuf", chunk);
                 Self {
                     instance_buffer: buf,
                     first_instance: 0,
@@ -1125,6 +1122,7 @@ impl WireGpu {
     /// per-instance.
     pub fn from_batch(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         const_bgl: Option<&wgpu::BindGroupLayout>,
@@ -1158,13 +1156,13 @@ impl WireGpu {
             if instances.is_empty() {
                 return vec![];
             }
-            let bg = build_const_bind_group(device, const_bgl, &consts);
+            let bg = build_const_bind_group(device, queue, const_bgl, &consts);
             return instances
                 .chunks(MAX_INSTANCES)
                 .enumerate()
                 .map(|(i, chunk)| {
                     let label = format!("wire.batch.ibuf.{i}");
-                    let instance_buffer = instance_buffer_mapped(device, &label, chunk);
+                    let instance_buffer = instance_buffer(device, queue, &label, chunk);
                     Self {
                         instance_buffer,
                         first_instance: 0,
@@ -1191,7 +1189,7 @@ impl WireGpu {
             .enumerate()
             .map(|(i, chunk)| {
                 let label = format!("wire.batch.compat.ibuf.{i}");
-                let instance_buffer = instance_buffer_mapped(device, &label, chunk);
+                let instance_buffer = instance_buffer(device, queue, &label, chunk);
                 Self {
                     instance_buffer,
                     first_instance: 0,

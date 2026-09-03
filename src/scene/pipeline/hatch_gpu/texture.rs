@@ -199,16 +199,20 @@ impl TextureHatch {
             .into_iter()
             .map(|[x, y]| HatchVertex { pos: [x, y, 0.0], _pad: 0.0 })
             .collect();
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.texture.vbuf"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.texture.ibuf"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertex_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.texture.vbuf",
+            &vertices,
+            wgpu::BufferUsages::VERTEX,
+        );
+        let index_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.texture.ibuf",
+            &indices,
+            wgpu::BufferUsages::INDEX,
+        );
         let base = model
             .render_instance
             .map_or([0.0; 3], |instance| instance.translation);
@@ -231,11 +235,13 @@ impl TextureHatch {
                 }
             })
             .collect();
-        let placement_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.texture.placements"),
-            contents: bytemuck::cast_slice(&placements),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let placement_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.texture.placements",
+            &placements,
+            wgpu::BufferUsages::VERTEX,
+        );
 
         // ── Gradient projection range (snapped-local space) ───────────────
         let base_mode = mode & 0xFF;

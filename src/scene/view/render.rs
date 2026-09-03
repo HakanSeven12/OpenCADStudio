@@ -608,6 +608,7 @@ impl shader::Primitive for Primitive {
             {
                 inner.upload_face3d(
                     device,
+                    queue,
                     &vp.face3d_wires[..],
                     &vp_wires[..],
                     !face3d_fill_active,
@@ -785,6 +786,7 @@ impl shader::Primitive for Primitive {
                                 inner.wire_arena_fallback = std::sync::Arc::new(
                                     crate::scene::pipeline::WireGpu::from_run_refs(
                                         device,
+                                        queue,
                                         &regular,
                                         &draw_depths,
                                         false,
@@ -821,6 +823,7 @@ impl shader::Primitive for Primitive {
                                 inner.wire_arena_fallback = std::sync::Arc::new(
                                     crate::scene::pipeline::WireGpu::from_run_refs(
                                         device,
+                                        queue,
                                         &mesh,
                                         &draw_depths,
                                         true,
@@ -918,7 +921,7 @@ impl shader::Primitive for Primitive {
                         Some(entry) => entry,
                         None => {
                             let entry =
-                                inner.build_wire_buffers(device, &vp_wires[..], &draw_depths);
+                                inner.build_wire_buffers(device, queue, &vp_wires[..], &draw_depths);
                             pipeline
                                 .wire_buffer_cache
                                 .insert(vp.wire_content_id, entry.clone());
@@ -1000,6 +1003,7 @@ impl shader::Primitive for Primitive {
                 };
                 inner.upload_selected_wires(
                     device,
+                    queue,
                     &vp_wires[..],
                     &vp.selected_handles,
                     &vp.hover_handles,
@@ -1012,6 +1016,7 @@ impl shader::Primitive for Primitive {
                 // base text buffer.
                 inner.upload_text_highlight(
                     device,
+                    queue,
                     &vp_wires[..],
                     &vp.selected_handles,
                     &vp.hover_handles,
@@ -1066,7 +1071,7 @@ impl shader::Primitive for Primitive {
             // Live overlay (command preview / interim / grip drag) — small and
             // refreshed every frame it's present, so a drag never re-uploads
             // the resident base wire buffer.
-            inner.upload_preview_wires(device, &vp.preview_wires[..], &draw_depths);
+            inner.upload_preview_wires(device, queue, &vp.preview_wires[..], &draw_depths);
             inner.upload_preview_text(device, queue, &vp.preview_text_verts[..]);
             // Cull / scissor / LOD project AABBs relative-to-eye (matching the
             // GPU's RTE path) so the math stays precise at UTM-scale coords.
@@ -1087,6 +1092,7 @@ impl shader::Primitive for Primitive {
             if inner.silhouette_key != silhouette_key {
                 inner.upload_silhouettes(
                     device,
+                    queue,
                     if silhouette_enabled { &vp.meshes[..] } else { &[] },
                     vp.wire_content_id,
                     vp.view_dir,

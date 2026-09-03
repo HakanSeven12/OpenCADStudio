@@ -255,48 +255,34 @@ fn make_const_bg(
 
 fn alloc_inst_initialized(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     cap: u64,
     data: &[WireInstance],
 ) -> wgpu::Buffer {
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("wire_arena.ibuf"),
-        size: cap * std::mem::size_of::<WireInstance>() as u64,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: true,
-    });
-    if !data.is_empty() {
-        let bytes = bytemuck::cast_slice(data);
-        let mut mapped = buffer
-            .slice(..bytes.len() as u64)
-            .get_mapped_range_mut();
-        mapped.copy_from_slice(bytes);
-        drop(mapped);
-    }
-    buffer.unmap();
-    buffer
+    super::gpu_upload::alloc_with_prefix(
+        device,
+        queue,
+        "wire_arena.ibuf",
+        cap * std::mem::size_of::<WireInstance>() as u64,
+        data,
+        wgpu::BufferUsages::VERTEX,
+    )
 }
 
 fn alloc_const_initialized(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     cap: u64,
     data: &[WireConst],
 ) -> wgpu::Buffer {
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("wire_arena.cbuf"),
-        size: cap * std::mem::size_of::<WireConst>() as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: true,
-    });
-    if !data.is_empty() {
-        let bytes = bytemuck::cast_slice(data);
-        let mut mapped = buffer
-            .slice(..bytes.len() as u64)
-            .get_mapped_range_mut();
-        mapped.copy_from_slice(bytes);
-        drop(mapped);
-    }
-    buffer.unmap();
-    buffer
+    super::gpu_upload::alloc_with_prefix(
+        device,
+        queue,
+        "wire_arena.cbuf",
+        cap * std::mem::size_of::<WireConst>() as u64,
+        data,
+        wgpu::BufferUsages::STORAGE,
+    )
 }
 
 fn blank_const() -> WireConst {
@@ -328,7 +314,7 @@ impl WireArena {
     /// path).
     pub fn build(
         device: &wgpu::Device,
-        _queue: &wgpu::Queue,
+        queue: &wgpu::Queue,
         wires: &[&WireModel],
         depth_map: &FxHashMap<u64, [f32; 2]>,
         const_bgl: &wgpu::BindGroupLayout,
@@ -468,8 +454,8 @@ impl WireArena {
             .max(MIN_CONST_CAP)
             .min(MAX_CONSTS)) as u32;
         let upload_started = iced::time::Instant::now();
-        let inst_buf = alloc_inst_initialized(device, inst_cap as u64, &instances);
-        let const_buf = alloc_const_initialized(device, const_cap as u64, &consts_cpu);
+        let inst_buf = alloc_inst_initialized(device, queue, inst_cap as u64, &instances);
+        let const_buf = alloc_const_initialized(device, queue, const_cap as u64, &consts_cpu);
         let upload_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
         let const_bind_group = make_const_bg(device, const_bgl, &const_buf);
         if perf {
@@ -934,25 +920,18 @@ fn can_resize_packed_terminal_slab(
 
 fn alloc_packed_initialized(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     cap: u64,
     data: &[PackedWireInstance],
 ) -> wgpu::Buffer {
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("wire_arena.packed.ibuf"),
-        size: cap * std::mem::size_of::<PackedWireInstance>() as u64,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: true,
-    });
-    if !data.is_empty() {
-        let bytes = bytemuck::cast_slice(data);
-        let mut mapped = buffer
-            .slice(..bytes.len() as u64)
-            .get_mapped_range_mut();
-        mapped.copy_from_slice(bytes);
-        drop(mapped);
-    }
-    buffer.unmap();
-    buffer
+    super::gpu_upload::alloc_with_prefix(
+        device,
+        queue,
+        "wire_arena.packed.ibuf",
+        cap * std::mem::size_of::<PackedWireInstance>() as u64,
+        data,
+        wgpu::BufferUsages::VERTEX,
+    )
 }
 
 fn visible_ranges(
@@ -998,6 +977,7 @@ fn visible_ranges(
 impl PackedWireArena {
     fn build(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[&WireModel],
         depth_map: &FxHashMap<u64, [f32; 2]>,
         mesh_edge: bool,
@@ -1078,7 +1058,7 @@ impl PackedWireArena {
         let inst_cap = ((inst_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
             .max(MIN_INST_CAP)
             .min(MAX_PACKED_INSTANCES)) as u32;
-        let inst_buf = alloc_packed_initialized(device, inst_cap as u64, &instances);
+        let inst_buf = alloc_packed_initialized(device, queue, inst_cap as u64, &instances);
 
         Some(Self {
             inst_buf,
@@ -1351,7 +1331,7 @@ impl PersistentWireArena {
             )?)
         } else {
             PersistentWireArenaKind::Packed(PackedWireArena::build(
-                device, wires, depth_map, mesh_edge,
+                device, queue, wires, depth_map, mesh_edge,
             )?)
         };
         Some(Self { inner })

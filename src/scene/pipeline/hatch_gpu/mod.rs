@@ -167,7 +167,7 @@ impl HatchGpu {
                     .filter(|hatch| hatch.boundary.len() >= 3)
                     .cloned()
                     .collect();
-                *resident = StorageHatchBatch::build(device, &self.bind_group_layout, &renderable);
+                *resident = StorageHatchBatch::build(device, queue, &self.bind_group_layout, &renderable);
             }
             HatchBackend::Texture { resident, .. } => {
                 let renderable: Vec<HatchModel> = hatches
@@ -198,7 +198,7 @@ impl HatchGpu {
                     .filter(|hatch| hatch.boundary.len() >= 3)
                     .cloned()
                     .collect();
-                *preview = StorageHatchBatch::build(device, &self.bind_group_layout, &renderable);
+                *preview = StorageHatchBatch::build(device, queue, &self.bind_group_layout, &renderable);
             }
             HatchBackend::Texture { preview, .. } => {
                 let renderable: Vec<HatchModel> = hatches

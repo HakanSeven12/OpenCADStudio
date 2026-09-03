@@ -1,6 +1,7 @@
 mod device_capabilities;
 pub mod face3d_gpu;
 pub mod gpu_budget;
+pub mod gpu_upload;
 pub mod hatch_gpu;
 pub mod wipeout_gpu;
 pub mod image_gpu;
@@ -2341,6 +2342,7 @@ impl Pipeline {
     pub fn build_wire_buffers(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) -> (
@@ -2383,6 +2385,7 @@ impl Pipeline {
             let refs: Vec<&WireModel> = wires[i..j].iter().collect();
             batches.extend(WireGpu::from_run_refs(
                 device,
+                queue,
                 &refs,
                 depth_map,
                 mesh_edge,
@@ -2392,6 +2395,7 @@ impl Pipeline {
         }
         let block_batches = BlockWireGpu::from_wires(
             device,
+            queue,
             &block_wires,
             depth_map,
             None,
@@ -2426,6 +2430,7 @@ impl Pipeline {
     pub fn upload_selected_wires(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[WireModel],
         selected: &rustc_hash::FxHashSet<acadrust::Handle>,
         hovered: &rustc_hash::FxHashSet<acadrust::Handle>,
@@ -2495,6 +2500,7 @@ impl Pipeline {
         let mut gpu = if let Some(tint) = selected_tint {
             WireGpu::from_highlight_refs(
                 device,
+                queue,
                 &selected_regular,
                 tint,
                 depth_map,
@@ -2505,6 +2511,7 @@ impl Pipeline {
         };
         gpu.extend(WireGpu::from_highlight_refs(
             device,
+            queue,
             &hover_regular,
             WireModel::HOVER,
             depth_map,
@@ -2514,6 +2521,7 @@ impl Pipeline {
         let mut block_gpu = if let Some(tint) = selected_tint {
             BlockWireGpu::from_wires(
                 device,
+                queue,
                 &selected_blocks,
                 depth_map,
                 Some(tint),
@@ -2524,6 +2532,7 @@ impl Pipeline {
         };
         block_gpu.extend(BlockWireGpu::from_wires(
             device,
+            queue,
             &hover_blocks,
             depth_map,
             Some(WireModel::HOVER),
@@ -2554,6 +2563,7 @@ impl Pipeline {
     pub fn upload_text_highlight(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[WireModel],
         selected: &rustc_hash::FxHashSet<acadrust::Handle>,
         hovered: &rustc_hash::FxHashSet<acadrust::Handle>,
@@ -2634,10 +2644,11 @@ impl Pipeline {
             }
         }
         self.text_highlight_vcount = out.len() as u32;
-        self.text_highlight_vbuf = text_gpu::upload_vertices(device, &out);
+        self.text_highlight_vbuf = text_gpu::upload_vertices(device, queue, &out);
         let mut block_gpu = if let Some(tint) = selected_tint {
             text_gpu::upload_block_vertex_refs(
                 device,
+                queue,
                 &selected_blocks,
                 depth_map,
                 Some(tint),
@@ -2647,6 +2658,7 @@ impl Pipeline {
         };
         block_gpu.extend(text_gpu::upload_block_vertex_refs(
             device,
+            queue,
             &hover_blocks,
             depth_map,
             Some(WireModel::HOVER),
@@ -2670,13 +2682,14 @@ impl Pipeline {
     pub fn upload_preview_wires(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
         self.gpu_preview_wires = if wires.is_empty() {
             vec![]
         } else {
-            WireGpu::from_run(device, wires, depth_map, false, self.wire_const_bgl.as_ref())
+            WireGpu::from_run(device, queue, wires, depth_map, false, self.wire_const_bgl.as_ref())
         };
     }
 
@@ -2709,7 +2722,7 @@ impl Pipeline {
                 atlas.clear_dirty();
             }
         }
-        self.text_preview_vbuf = text_gpu::upload_vertices(device, verts);
+        self.text_preview_vbuf = text_gpu::upload_vertices(device, queue, verts);
         self.text_preview_vcount = verts.len() as u32;
     }
 
@@ -2720,6 +2733,7 @@ impl Pipeline {
     pub fn upload_silhouettes(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         sets: &[crate::scene::model::mesh_model::MeshLodSet],
         content_id: u64,
         view_dir: glam::Vec3,
@@ -2728,7 +2742,6 @@ impl Pipeline {
         let view = glam::DVec3::new(view_dir.x as f64, view_dir.y as f64, view_dir.z as f64)
             .normalize_or(glam::DVec3::NEG_Z);
         use crate::scene::pipeline::mesh_gpu::{SilhouetteInstance, SilhouetteVertex};
-        use wgpu::util::DeviceExt;
         let chunk_bytes = gpu_budget::buffer_budget(device);
         let max_vertices = chunk_bytes / std::mem::size_of::<SilhouetteVertex>() / 2 * 2;
         if max_vertices < 2 {
@@ -2804,12 +2817,12 @@ impl Pipeline {
                         .chunks(max_instances.max(1))
                         .map(|instances| {
                             (
-                                device.create_buffer_init(
-                                    &wgpu::util::BufferInitDescriptor {
-                                        label: Some("mesh.silhouette.instances"),
-                                        contents: bytemuck::cast_slice(instances),
-                                        usage: wgpu::BufferUsages::VERTEX,
-                                    },
+                                gpu_upload::upload_buffer(
+                                    device,
+                                    queue,
+                                    "mesh.silhouette.instances",
+                                    instances,
+                                    wgpu::BufferUsages::VERTEX,
                                 ),
                                 instances.len() as u32,
                             )
@@ -2911,12 +2924,12 @@ impl Pipeline {
                 if vertex_count == 0 {
                     return;
                 }
-                let vertex_buffer = device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("mesh.silhouette.vbuf"),
-                        contents: bytemuck::cast_slice(&verts[..vertex_count]),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    },
+                let vertex_buffer = gpu_upload::upload_buffer(
+                    device,
+                    queue,
+                    "mesh.silhouette.vbuf",
+                    &verts[..vertex_count],
+                    wgpu::BufferUsages::VERTEX,
                 );
                 for (instance_buffer, instance_count) in &group.instance_buffers {
                     chunks.push(SilhouetteChunk {
@@ -3033,6 +3046,7 @@ impl Pipeline {
     pub fn upload_face3d(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         face3d_wires: &[WireModel],
         all_wires: &[WireModel],
         wireframe_only: bool,
@@ -3044,7 +3058,7 @@ impl Pipeline {
         // Edge buffer is always built from `face3d_wires`, so 3DFACE
         // outlines stay on the screen regardless of mode.
         self.gpu_face3d_edges =
-            WireGpu::from_batch(device, face3d_wires, depth_map, self.wire_const_bgl.as_ref());
+            WireGpu::from_batch(device, queue, face3d_wires, depth_map, self.wire_const_bgl.as_ref());
         // Fill buffer split: 3D quads + PolyfaceMesh / PolygonMesh face
         // tris go to `chunks_3d` (gated by `keep_3d_mesh_fills`);
         // 2D fills (text-LOD greek, MultiLeader background, dimension arrows) go to
@@ -3067,6 +3081,7 @@ impl Pipeline {
         } else {
             self.gpu_face3d_fill = Some(Face3DGpu::from_wires(
                 device,
+                queue,
                 face3d_wires,
                 all_wires,
                 keep_3d_mesh_fills,
@@ -3404,9 +3419,9 @@ impl Pipeline {
                 atlas.clear_dirty();
             }
         }
-        self.text_vbuf = text_gpu::upload_vertices(device, verts);
+        self.text_vbuf = text_gpu::upload_vertices(device, queue, verts);
         self.text_vcount = verts.len() as u32;
-        self.block_text_gpu = text_gpu::upload_block_vertices(device, wires, depth_map);
+        self.block_text_gpu = text_gpu::upload_block_vertices(device, queue, wires, depth_map);
         if let Some(started) = perf_started {
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
             if elapsed_ms >= 1.0 {

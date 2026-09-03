@@ -14,7 +14,6 @@
 #![allow(dead_code)]
 
 use iced::wgpu;
-use iced::wgpu::util::DeviceExt;
 
 use crate::scene::text::glyph_quads::GlyphQuad;
 use crate::scene::text::sdf_atlas::GlyphAtlas;
@@ -462,15 +461,17 @@ pub fn create_pipelines(
 
 pub fn upload_block_vertices(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     wires: &[crate::scene::model::wire_model::WireModel],
     depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
 ) -> Vec<BlockTextGpu> {
     let refs: Vec<&crate::scene::model::wire_model::WireModel> = wires.iter().collect();
-    upload_block_vertex_refs(device, &refs, depth_map, None)
+    upload_block_vertex_refs(device, queue, &refs, depth_map, None)
 }
 
 pub fn upload_block_vertex_refs(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     wires: &[&crate::scene::model::wire_model::WireModel],
     depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     tint: Option<[f32; 4]>,
@@ -516,7 +517,7 @@ pub fn upload_block_vertex_refs(
         } else {
             source.text_verts.as_slice()
         };
-        let Some(vertex_buffer) = upload_vertices(device, vertices) else {
+        let Some(vertex_buffer) = upload_vertices(device, queue, vertices) else {
             continue;
         };
         let instances: Vec<BlockTextInstance> = group
@@ -544,11 +545,13 @@ pub fn upload_block_vertex_refs(
         let max_instances =
             super::gpu_budget::max_elements::<BlockTextInstance>(device);
         for chunk in instances.chunks(max_instances) {
-            let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("block_text.instances"),
-                contents: bytemuck::cast_slice(chunk),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+            let instance_buffer = super::gpu_upload::upload_buffer(
+                device,
+                queue,
+                "block_text.instances",
+                chunk,
+                wgpu::BufferUsages::VERTEX,
+            );
             out.push(BlockTextGpu {
                 vertex_buffer: vertex_buffer.clone(),
                 instance_buffer,
@@ -561,15 +564,21 @@ pub fn upload_block_vertex_refs(
 }
 
 /// Upload a finished vertex list; `None` if empty.
-pub fn upload_vertices(device: &wgpu::Device, verts: &[TextVertex]) -> Option<wgpu::Buffer> {
+pub fn upload_vertices(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    verts: &[TextVertex],
+) -> Option<wgpu::Buffer> {
     if verts.is_empty() {
         return None;
     }
-    Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("text.vbuf"),
-        contents: bytemuck::cast_slice(verts),
-        usage: wgpu::BufferUsages::VERTEX,
-    }))
+    Some(super::gpu_upload::upload_buffer(
+        device,
+        queue,
+        "text.vbuf",
+        verts,
+        wgpu::BufferUsages::VERTEX,
+    ))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────

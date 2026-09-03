@@ -6432,10 +6432,16 @@ fn format_with_unit(
 }
 
 fn format_engineering(inches: f64, dec: usize) -> String {
-    let sign = if inches < 0.0 { "-" } else { "" };
-    let abs = inches.abs();
-    let feet = (abs / 12.0).trunc();
-    let rem_in = abs - feet * 12.0;
+    // Round to the printed precision *first*, then split, so inches that round
+    // up to a full foot carry into the feet instead of printing an
+    // out-of-range "2'-12.00"". Same reasoning as `format_architectural`,
+    // where the grid is the fraction denominator rather than a decimal place.
+    let scale = 10f64.powi(dec.min(15) as i32);
+    let ticks = (inches.abs() * scale).round();
+    let per_foot = 12.0 * scale;
+    let sign = if inches < 0.0 && ticks != 0.0 { "-" } else { "" };
+    let feet = (ticks / per_foot).trunc();
+    let rem_in = (ticks - feet * per_foot) / scale;
     format!("{}{:.0}'-{:.*}\"", sign, feet, dec, rem_in)
 }
 
@@ -7272,7 +7278,7 @@ mod dimtad_tests {
 
 #[cfg(test)]
 mod arch_format_tests {
-    use super::{format_architectural, format_fractional};
+    use super::{format_architectural, format_engineering, format_fractional};
 
     // A 3ft object that measures 35.99" (float noise) must carry the rounded
     // fraction up through inches into feet — not print "2'-11 1"". (Regression
@@ -7304,5 +7310,28 @@ mod arch_format_tests {
         assert_eq!(format_fractional(35.9999, 4, 2), "36");
         assert_eq!(format_fractional(11.999, 4, 2), "12");
         assert_eq!(format_fractional(6.5, 4, 2), "6 1/2");
+    }
+
+    // Engineering units round to DIMDEC before the feet/inches split, so a
+    // remainder that rounds up to 12" carries instead of printing "2'-12.00"".
+    #[test]
+    fn engineering_carries_inches_up_to_feet() {
+        assert_eq!(format_engineering(35.999, 2), "3'-0.00\"");
+        assert_eq!(format_engineering(11.999, 2), "1'-0.00\"");
+        assert_eq!(format_engineering(11.9, 0), "1'-0\"");
+    }
+
+    #[test]
+    fn engineering_normal_values_unchanged() {
+        assert_eq!(format_engineering(30.5, 2), "2'-6.50\"");
+        assert_eq!(format_engineering(36.0, 2), "3'-0.00\"");
+        assert_eq!(format_engineering(0.0, 2), "0'-0.00\"");
+        assert_eq!(format_engineering(-30.25, 2), "-2'-6.25\"");
+    }
+
+    // A magnitude that rounds away to zero must not keep a lone minus sign.
+    #[test]
+    fn engineering_negative_zero_has_no_sign() {
+        assert_eq!(format_engineering(-0.001, 2), "0'-0.00\"");
     }
 }

@@ -462,13 +462,19 @@ impl OpenCADStudio {
         // clearing Z afterwards shifts the picked point on screen in an
         // oblique view. Plain paper space still uses the camera target plane.
         let plane = if self.tabs[i].editing_model_space() {
-            Some(match self.tabs[i].active_ucs.as_ref() {
-                Some(ucs) => (
-                    ucs_z_axis(ucs),
-                    glam::DVec3::new(ucs.origin.x, ucs.origin.y, ucs.origin.z),
-                ),
-                None => (glam::DVec3::Z, glam::DVec3::ZERO),
-            })
+            self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|command| command.cursor_plane())
+                .or_else(|| {
+                    Some(match self.tabs[i].active_ucs.as_ref() {
+                        Some(ucs) => (
+                            ucs_z_axis(ucs),
+                            glam::DVec3::new(ucs.origin.x, ucs.origin.y, ucs.origin.z),
+                        ),
+                        None => (glam::DVec3::Z, glam::DVec3::ZERO),
+                    })
+                })
         } else {
             None
         };
@@ -1908,12 +1914,17 @@ impl OpenCADStudio {
                     && !command.needs_tangent_pick()
                     && !command.is_selection_gathering()
             });
+            let uses_command_cursor_plane = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|command| command.cursor_plane())
+                .is_some();
             let axis_lock = if let Some(base) = self.last_point {
                 self.active_axis_lock(
                     i,
                     cursor_world,
                     base,
-                    wants_point && !is_window_corner,
+                    wants_point && !is_window_corner && !uses_command_cursor_plane,
                 )
             } else {
                 self.axis_lock_dir = None;
@@ -2040,7 +2051,7 @@ impl OpenCADStudio {
                     let osnap_locked = self.tabs[i]
                         .snap_result
                         .is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid);
-                    if !osnap_locked && !is_window_corner {
+                    if !osnap_locked && !is_window_corner && !uses_command_cursor_plane {
                         if let Some(base) = self.last_point {
                             let ucs_xf = self.tabs[i].ucs_xform();
                             if self.ortho_mode {
@@ -2070,7 +2081,10 @@ impl OpenCADStudio {
                 };
                 // Clamp to world XY only when no UCS is active; with a
                 // UCS the point already lies on the UCS XY plane.
-                if self.tabs[i].active_cmd.is_some() && self.tabs[i].active_ucs.is_none() {
+                if self.tabs[i].active_cmd.is_some()
+                    && self.tabs[i].active_ucs.is_none()
+                    && !uses_command_cursor_plane
+                {
                     pt.z = 0.0;
                 }
                 pt
@@ -3367,7 +3381,14 @@ impl OpenCADStudio {
                 let mut pt = snap_hit.map(|s| s.world).unwrap_or(raw);
                 // When no UCS is active clamp to world XY; with a UCS the point is
                 // already constrained to that plane by the ray–plane intersection.
-                if self.tabs[i].active_ucs.is_none() {
+                let uses_command_cursor_plane = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .and_then(|command| command.cursor_plane())
+                    .is_some();
+                let clamp_world_xy =
+                    self.tabs[i].active_ucs.is_none() && !uses_command_cursor_plane;
+                if clamp_world_xy {
                     pt.z = 0.0;
                 }
                 let axis_lock = if let Some(base) = self.last_point {
@@ -3375,7 +3396,10 @@ impl OpenCADStudio {
                         i,
                         raw,
                         base,
-                        !needs_entity_click && !needs_tan && !is_window_corner,
+                        !needs_entity_click
+                            && !needs_tan
+                            && !is_window_corner
+                            && !uses_command_cursor_plane,
                     )
                 } else {
                     self.axis_lock_dir = None;
@@ -3383,7 +3407,7 @@ impl OpenCADStudio {
                 };
                 if let (Some(dir), Some(base)) = (axis_lock, self.last_point) {
                     pt = axis_lock_apply(pt, base, dir);
-                    if self.tabs[i].active_ucs.is_none() {
+                    if clamp_world_xy {
                         pt.z = 0.0;
                     }
                 }
@@ -3403,11 +3427,12 @@ impl OpenCADStudio {
                 };
                 if let Some(h) = otrack {
                     pt = h.aligned;
-                    if self.tabs[i].active_ucs.is_none() {
+                    if clamp_world_xy {
                         pt.z = 0.0;
                     }
                 } else if axis_lock.is_none()
                     && !is_window_corner
+                    && !uses_command_cursor_plane
                     && !snap_hit.is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid)
                 {
                     // Object snap wins over ortho/polar — a snapped point

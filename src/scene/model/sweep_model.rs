@@ -386,15 +386,65 @@ pub fn revolved(
     from: [f64; 3],
     to: [f64; 3],
     angle: f64,
+    start_angle: f64,
 ) -> Option<Body> {
-    let profile = profile_of(entity)?;
-    brep::revolve(
-        profile.plane,
-        &profile.pieces,
-        from,
-        [to[0] - from[0], to[1] - from[1], to[2] - from[2]],
-        angle,
-    )
+    let axis = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    let body = if let Some((plane, profiles)) =
+        region_profiles(entity).filter(|(_, profiles)| profiles.len() > 1)
+    {
+        brep::revolve_region(plane, &profiles, from, axis, angle)?
+    } else {
+        let profile = profile_of(entity)?;
+        brep::revolve(profile.plane, &profile.pieces, from, axis, angle)?
+    };
+    turn_revolved_body(body, from, axis, start_angle)
+}
+
+/// REVOLVE sheet mode for an open or closed planar profile.
+pub fn revolved_surface(
+    entity: &EntityType,
+    from: [f64; 3],
+    to: [f64; 3],
+    angle: f64,
+    start_angle: f64,
+) -> Option<Body> {
+    let axis = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    let body = if let Some((plane, profiles)) =
+        region_profiles(entity).filter(|(_, profiles)| profiles.len() > 1)
+    {
+        brep::revolve_surface_region(plane, &profiles, from, axis, angle)?
+    } else {
+        let (profile, _) = extrusion_profile_of(entity)?;
+        brep::revolve_surface(profile.plane, &profile.pieces, from, axis, angle)?
+    };
+    turn_revolved_body(body, from, axis, start_angle)
+}
+
+fn turn_revolved_body(
+    body: Body,
+    pivot: [f64; 3],
+    axis: [f64; 3],
+    angle: f64,
+) -> Option<Body> {
+    if !angle.is_finite() {
+        return None;
+    }
+    if angle.abs() <= 1e-12 {
+        return Some(body);
+    }
+    let axis = Vec3::from(axis).normalize()?;
+    let rotate = |vector: Vec3| {
+        let (sin, cos) = angle.sin_cos();
+        vector * cos + axis.cross(vector) * sin + axis * axis.dot(vector) * (1.0 - cos)
+    };
+    let pivot = Vec3::from(pivot);
+    let placement = brep::Placement {
+        x_axis: rotate(Vec3::X).to_array(),
+        y_axis: rotate(Vec3::Y).to_array(),
+        z_axis: rotate(Vec3::Z).to_array(),
+        origin: (pivot - rotate(pivot)).to_array(),
+    };
+    brep::transform(&body, &placement)
 }
 
 fn profile_center(profile: &Profile) -> Option<Vec3> {
@@ -413,8 +463,13 @@ pub fn revolve_history(
     from: [f64; 3],
     to: [f64; 3],
     angle: f64,
+    start_angle: f64,
 ) -> Option<SolidHistoryOperation> {
-    if !angle.is_finite() || angle.abs() <= 1e-12 {
+    if !angle.is_finite()
+        || angle.abs() <= 1e-12
+        || !start_angle.is_finite()
+        || matches!(entity, EntityType::Region(region) if region.wires.len() > 1)
+    {
         return None;
     }
     let profile = profile_of(entity)?;
@@ -422,16 +477,27 @@ pub fn revolve_history(
     let direction = (Vec3::from(to) - from).normalize()?;
     let center = profile_center(&profile)?;
     let axis_point = from + direction * (center - from).dot(direction);
+    let (sweep_entity, transform) = embedded_planar_entity(entity)?;
+    let transform = glam::DMat4::from_cols_array(&transform);
+    let inverse = transform.inverse();
+    if !transform.is_finite() || !inverse.is_finite() || transform.determinant().abs() <= 1e-12 {
+        return None;
+    }
+    let axis_point = inverse.transform_point3(glam::DVec3::from_array(axis_point.to_array()));
+    let direction = inverse
+        .transform_vector3(glam::DVec3::from_array(direction.to_array()))
+        .try_normalize()?;
     let mut base = SolidHistoryNodeBase::new(1);
-    base.transform = glam::DMat4::IDENTITY.to_cols_array();
+    base.transform = transform.to_cols_array();
     Some(SolidHistoryOperation::Revolve(SolidHistoryRevolve {
         base,
         operation_major: 1,
         axis_point: Vector3::new(axis_point.x, axis_point.y, axis_point.z),
         direction: Vector3::new(direction.x, direction.y, direction.z),
         revolve_angle: angle,
+        start_angle,
         flag_290: true,
-        sweep_entity: Some(embedded_path(entity)?),
+        sweep_entity: Some(sweep_entity),
         ..SolidHistoryRevolve::default()
     }))
 }
@@ -595,6 +661,10 @@ fn embedded_planar_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 
     )
     .to_cols_array();
     Some((EmbeddedEntity::LwPolyline(polyline), transform))
+}
+
+pub fn embedded_revolve_profile(entity: &EntityType) -> Option<(EmbeddedEntity, [f64; 16])> {
+    embedded_planar_entity(entity)
 }
 
 pub fn extrusion_history(
@@ -850,6 +920,7 @@ mod tests {
             [0.0, 0.0, 0.0],
             [0.0, 10.0, 0.0],
             std::f64::consts::TAU,
+            0.0,
         );
         // The profile is in the XY plane and the axis lies in it, so this is
         // a revolution about the y axis: radius ten, height ten.
@@ -875,7 +946,8 @@ mod tests {
             &square(10.0),
             [0.0, 0.0, 0.0],
             [0.0, 1.0, 1.0],
-            std::f64::consts::TAU
+            std::f64::consts::TAU,
+            0.0,
         )
         .is_none());
     }

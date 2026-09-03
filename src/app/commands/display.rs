@@ -794,8 +794,18 @@ impl OpenCADStudio {
             // ── REVOLVE ────────────────────────────────────────────────────
             "REVOLVE" => {
                 use crate::modules::insert::solid3d_cmds::RevolveCommand;
+                let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
-                let cmd = RevolveCommand::new(color);
+                let isolines = self.tabs[i].scene.document.header.isolines.max(0) as usize;
+                let mut cmd = RevolveCommand::new(color, isolines);
+                if !selected.is_empty() {
+                    cmd.set_preselection(
+                        selected
+                            .iter()
+                            .map(|(handle, entity)| (*handle, (*entity).clone()))
+                            .collect(),
+                    );
+                }
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

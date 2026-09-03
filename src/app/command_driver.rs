@@ -3827,66 +3827,144 @@ impl OpenCADStudio {
             }
 
             // ── REVOLVE ────────────────────────────────────────────────────
-            CmdResult::RevolveEntity {
-                handle,
+            CmdResult::RevolveEntities {
+                handles,
                 axis_start,
                 axis_end,
-                angle_deg,
+                angle,
+                start_angle,
+                mode,
                 color: _,
             } => {
-                if self.reject_locked_edit(i, handle) {
+                if handles.is_empty() {
                     self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.tabs[i].scene.clear_preview_wire();
+                    self.restore_pre_cmd_tangent();
                     return Task::none();
                 }
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                use crate::command::ExtrudeMode;
+                use crate::modules::insert::solid3d_cmds::{
+                    empty_revolved_surface, empty_solid3d,
+                };
                 use crate::scene::model::sweep_model;
-
-                let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
-                if let Some(entity) = entity_opt {
-                    let from = [
-                        axis_start.x as f64,
-                        axis_start.y as f64,
-                        axis_start.z as f64,
-                    ];
-                    let to = [axis_end.x as f64, axis_end.y as f64, axis_end.z as f64];
-                    let angle = (angle_deg as f64).to_radians();
-                    let result = sweep_model::revolve_history(&entity, from, to, angle)
+                let from = axis_start.to_array();
+                let to = axis_end.to_array();
+                let mut editable_handles = Vec::with_capacity(handles.len());
+                let mut failed = 0usize;
+                for handle in handles {
+                    if self.reject_locked_edit(i, handle) {
+                        failed += 1;
+                    } else {
+                        editable_handles.push(handle);
+                    }
+                }
+                let pending = if editable_handles.is_empty() {
+                    None
+                } else {
+                    self.begin_undo(i, "REVOLVE", editable_handles.len(), true)
+                };
+                let mut created_handles = Vec::new();
+                let mut consumed = Vec::new();
+                for handle in &editable_handles {
+                    let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned()
+                    else {
+                        failed += 1;
+                        continue;
+                    };
+                    let Some((_, closed)) = sweep_model::extrusion_profile_of(&entity) else {
+                        failed += 1;
+                        continue;
+                    };
+                    let creates_surface = mode == ExtrudeMode::Surface || !closed;
+                    let created = if creates_surface {
+                        let Some(body) =
+                            sweep_model::revolved_surface(&entity, from, to, angle, start_angle)
+                        else {
+                            failed += 1;
+                            continue;
+                        };
+                        self.add_surface_model(
+                            empty_revolved_surface(
+                                &entity,
+                                axis_start,
+                                axis_end,
+                                angle,
+                                start_angle,
+                            ),
+                            body,
+                        )
+                    } else {
+                        let result = sweep_model::revolve_history(
+                            &entity,
+                            from,
+                            to,
+                            angle,
+                            start_angle,
+                        )
                         .and_then(|history| {
                             cadkernel::acis::rebuild_body(&history)
                                 .ok()
                                 .map(|solid| (solid, history))
                         })
                         .or_else(|| {
-                            sweep_model::revolved(&entity, from, to, angle).map(|solid| {
-                                let history =
-                                    crate::scene::model::solid_history::brep_op(&solid);
-                                (solid, history)
-                            })
+                            sweep_model::revolved(&entity, from, to, angle, start_angle).map(
+                                |solid| {
+                                    let history =
+                                        crate::scene::model::solid_history::brep_op(&solid);
+                                    (solid, history)
+                                },
+                            )
                         });
-                    if let Some((solid, history)) = result {
-                        let pending = self.begin_undo(i, "REVOLVE", 1, true);
-                        let created = self.add_solid_model(empty_solid3d(), solid, history);
-                        if !created.is_null() {
-                            self.tabs[i].dirty = true;
-                            self.command_line.push_output(
-                                crate::tf!("REVOLVE: solid created ({:.0}°).", angle_deg).as_ref(),
-                            );
-                            if let Some(pd) = pending {
-                                self.commit_undo_delta(i, pd);
-                            }
-                        }
+                        let Some((solid, history)) = result else {
+                            failed += 1;
+                            continue;
+                        };
+                        self.add_solid_model(empty_solid3d(), solid, history)
+                    };
+                    if created.is_null() {
+                        failed += 1;
                     } else {
-                        self.command_line
-                            .push_error(crate::t!("REVOLVE: could not revolve profile.").as_ref());
+                        created_handles.push(created);
+                        if delete_sources {
+                            consumed.push(*handle);
+                        }
                     }
+                }
+                if delete_sources && !created_handles.is_empty() {
+                    consumed.sort_unstable_by_key(|handle| handle.value());
+                    consumed.dedup();
+                    self.tabs[i].scene.erase_entities(&consumed);
+                }
+                if !created_handles.is_empty() {
+                    self.tabs[i].scene.deselect_all();
+                    for handle in &created_handles {
+                        self.tabs[i].scene.select_entity(*handle, true);
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(
+                        crate::tf!(
+                            "REVOLVE: created %{created} object(s); %{failed} source(s) could not be revolved.",
+                            created = created_handles.len(),
+                            failed = failed
+                        )
+                        .as_ref(),
+                    );
                 } else {
-                    self.command_line
-                        .push_error(crate::t!("REVOLVE: entity not found.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("REVOLVE: no selected object could be revolved with the requested options.")
+                            .as_ref(),
+                    );
+                }
+                if let Some(pending) = pending {
+                    self.commit_undo_delta(i, pending);
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
+                self.refresh_properties();
             }
             // ── SWEEP ─────────────────────────────────────────────────────
             CmdResult::SweepEntity {

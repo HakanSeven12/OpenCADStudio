@@ -1443,12 +1443,14 @@ pub enum CmdResult {
         drag: Option<DVec3>,
         color: [f32; 4],
     },
-    /// Revolve the profile entity `handle` around the given axis by `angle_deg`.
-    RevolveEntity {
-        handle: Handle,
+    /// Revolve the profile entities around the given axis.
+    RevolveEntities {
+        handles: Vec<Handle>,
         axis_start: glam::DVec3,
         axis_end: glam::DVec3,
-        angle_deg: f32,
+        angle: f64,
+        start_angle: f64,
+        mode: ExtrudeMode,
         color: [f32; 4],
     },
     /// Sweep the profile entity `profile_handle` along `path_handle`.
@@ -1773,6 +1775,12 @@ pub trait CadCommand: Send {
 
     /// Constrain the cursor to a construction axis for this step.
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
+        None
+    }
+
+    /// Override the model-space plane onto which viewport cursor rays are
+    /// projected for this command step.
+    fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
         None
     }
 
@@ -2159,6 +2167,12 @@ pub trait CadCommand: Send {
     /// modes), while the box still previews a live value from the cursor.
     fn dyn_commit_as_text(&self) -> bool {
         false
+    }
+
+    /// Whether a bare dynamic angle inherits its sign from the world-XY
+    /// cursor side. Commands with their own 3D axis semantics opt out.
+    fn dyn_auto_sign_angle(&self) -> bool {
+        true
     }
 
     /// Explicit per-step dynamic-input description. `Some(spec)` takes full

@@ -2729,14 +2729,28 @@ impl Scene {
     }
 
     /// Cache and display a Model-tab kernel solid.
-    pub fn register_solid_model(&mut self, handle: Handle, solid: cadkernel::brep::Body) {
+    pub fn register_solid_model(
+        &mut self,
+        handle: Handle,
+        solid: cadkernel::brep::Body,
+    ) -> bool {
         let color = self
             .document
             .get_entity(handle)
             .map(|e| self.render_style(e).0)
             .unwrap_or([0.8, 0.8, 0.85, 1.0]);
-        if let Some((mut set, wires, center)) =
-            crate::scene::model::solid_model::display_from_solid(&solid, color)
+        let facet_resolution = self.document.header.facet_resolution;
+        let chordal_deflection =
+            crate::entities::solid3d::display_deflection(&self.document.header, facet_resolution);
+        let isolines = self.document.header.isolines.max(0) as usize;
+        let displayed = if let Some((mut set, wires, center)) =
+            crate::scene::model::solid_model::display_from_solid(
+                &solid,
+                color,
+                facet_resolution,
+                chordal_deflection,
+                isolines,
+            )
         {
             if let Some(entity) = self.document.get_entity_mut(handle) {
                 let reference = acadrust::types::Vector3::new(center[0], center[1], center[2]);
@@ -2778,15 +2792,18 @@ impl Scene {
                 );
             }
             self.meshes.insert(handle, set);
+            true
         } else {
             self.meshes.remove(&handle);
-        }
+            false
+        };
         self.solid_models.insert(handle, solid);
         self.sync_solid_reference_point(handle);
         // Only this solid's mesh changed — report just its handle so the mesh /
         // wire caches patch it in rather than rebuilding the whole drawing (and
         // so a bulk register loop stays O(n), not O(n²)).
         self.bump_entities(&[(handle, ChangeKind::Modified)]);
+        displayed
     }
 
     /// `BACKGROUND` change picks up the new `adapt_to_bg` result without

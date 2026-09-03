@@ -781,7 +781,19 @@ impl Scene {
     // ── Erase ─────────────────────────────────────────────────────────────
 
     pub fn erase_entities(&mut self, handles: &[Handle]) {
+        self.remove_entities(handles, true);
+    }
 
+    /// Roll back entities created by the current command after a downstream
+    /// registration failure. These entities were never successful command
+    /// results, so locked-layer edit policy must not prevent their removal.
+    /// The shared removal path keeps first-touch undo state, history objects,
+    /// groups, selection, and derived caches coherent.
+    pub(crate) fn rollback_new_entities(&mut self, handles: &[Handle]) {
+        self.remove_entities(handles, false);
+    }
+
+    fn remove_entities(&mut self, handles: &[Handle], respect_layer_locks: bool) {
         let erase_handles = self.handles_expanded_for_leader_annotations(handles);
 
         let mut handle_set: HashSet<Handle> = HashSet::default();
@@ -791,7 +803,7 @@ impl Scene {
 
         for &h in &erase_handles {
             // Objects on a locked layer can't be erased.
-            if self.is_layer_locked(h) {
+            if respect_layer_locks && self.is_layer_locked(h) {
                 continue;
             }
             // Delta-undo: capture the removed entity so an undo can re-insert it.

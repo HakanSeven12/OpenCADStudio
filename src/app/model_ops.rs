@@ -36,7 +36,13 @@ impl super::OpenCADStudio {
             return Handle::NULL;
         };
         self.tabs[i].scene.create_solid_history(handle, history);
-        self.tabs[i].scene.register_solid_model(handle, solid);
+        if !self.tabs[i].scene.register_solid_model(handle, solid) {
+            // A command result is not successful until it has renderable
+            // geometry. Roll the new entity back so DELOBJ cannot consume a
+            // visible source in exchange for an invisible result.
+            self.tabs[i].scene.rollback_new_entities(&[handle]);
+            return Handle::NULL;
+        }
         handle
     }
 
@@ -63,7 +69,10 @@ impl super::OpenCADStudio {
         let Some(handle) = self.commit_entity_handle(entity) else {
             return Handle::NULL;
         };
-        self.tabs[i].scene.register_solid_model(handle, surface);
+        if !self.tabs[i].scene.register_solid_model(handle, surface) {
+            self.tabs[i].scene.rollback_new_entities(&[handle]);
+            return Handle::NULL;
+        }
         handle
     }
 

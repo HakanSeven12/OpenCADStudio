@@ -18,6 +18,29 @@ fn tessellation(body: &Body) -> brep::mesh::BodyMesh {
     )
 }
 
+fn display_tessellation(
+    body: &Body,
+    facet_resolution: f64,
+    chordal_deflection: Option<f64>,
+    isolines: usize,
+) -> brep::mesh::BodyMesh {
+    let resolution = if facet_resolution.is_finite() && facet_resolution > 0.0 {
+        facet_resolution.clamp(0.01, 10.0)
+    } else {
+        1.0
+    };
+    let max_angle = chordal_deflection.map_or_else(
+        || cadkernel::tessellation::angle_for_resolution(resolution),
+        |_| cadkernel::tessellation::display_angle_for_resolution(resolution),
+    );
+    let mut tolerance = brep::mesh::TessellationTolerance::new(max_angle, TOL)
+        .with_isolines(isolines);
+    if let Some(deflection) = chordal_deflection {
+        tolerance = tolerance.with_chordal_deflection(deflection);
+    }
+    brep::mesh::tessellate(body, tolerance)
+}
+
 /// Axis-aligned box from its center and full extents.
 pub fn box_solid(center: [f64; 3], length: f64, width: f64, height: f64) -> Option<Body> {
     brep::make::cuboid(
@@ -397,8 +420,13 @@ fn mesh_from_tessellation(
         color,
         selected: false,
     });
-    for edge in tessellation.edges {
-        for segment in edge.positions.windows(2) {
+    for positions in tessellation
+        .edges
+        .into_iter()
+        .map(|edge| edge.positions)
+        .chain(tessellation.isolines.into_iter().map(|line| line.positions))
+    {
+        for segment in positions.windows(2) {
             for point in segment {
                 let high = [point[0] as f32, point[1] as f32, point[2] as f32];
                 set.edge_verts.push(high);
@@ -418,9 +446,17 @@ fn mesh_from_tessellation(
 pub fn display_from_solid(
     body: &Body,
     color: [f32; 4],
+    facet_resolution: f64,
+    chordal_deflection: Option<f64>,
+    isolines: usize,
 ) -> Option<(MeshLodSet, Vec<acadrust::entities::Wire>, [f64; 3])> {
     use acadrust::types::Vector3;
-    let tessellation = tessellation(body);
+    let tessellation = display_tessellation(
+        body,
+        facet_resolution,
+        chordal_deflection,
+        isolines,
+    );
     let center = mesh_center(&tessellation.mesh)?;
     let wires = tessellation
         .edges
@@ -496,7 +532,7 @@ mod tests {
     use super::*;
 
     fn tri_count(body: &Body) -> usize {
-        display_from_solid(body, [0.7, 0.7, 0.7, 1.0])
+        display_from_solid(body, [0.7, 0.7, 0.7, 1.0], 1.0, None, 0)
             .map(|(m, _, _)| m.lods[0].indices.len() / 3)
             .unwrap_or(0)
     }

@@ -622,6 +622,7 @@ pub struct RevolveCommand {
     axis_end: DVec3,
     working_plane: WorkingPlane,
     mode: ExtrudeMode,
+    mode_return: RevolveStep,
     angle: f64,
     start_angle: f64,
     reverse: bool,
@@ -670,6 +671,7 @@ impl RevolveCommand {
             axis_end: DVec3::new(0.0, 0.0, 1.0),
             working_plane: WorkingPlane::default(),
             mode: defaults.mode,
+            mode_return: RevolveStep::Pick,
             angle: defaults.angle,
             start_angle: defaults.start_angle,
             reverse: false,
@@ -678,8 +680,18 @@ impl RevolveCommand {
     }
 
     pub fn set_preselection(&mut self, profiles: Vec<(Handle, EntityType)>) {
-        self.handles = profiles.iter().map(|(handle, _)| *handle).collect();
-        self.preview_profiles = profiles;
+        let selected_handles = profiles.iter().map(|(handle, _)| *handle).collect::<Vec<_>>();
+        self.preview_profiles = profiles
+            .into_iter()
+            .filter(|(_, entity)| {
+                crate::scene::model::sweep_model::extrusion_profile_of(entity).is_some()
+            })
+            .collect();
+        self.handles = if self.preview_profiles.is_empty() {
+            Vec::new()
+        } else {
+            selected_handles
+        };
         if !self.handles.is_empty() {
             self.step = RevolveStep::AxisStart;
         }
@@ -844,7 +856,7 @@ impl CadCommand for RevolveCommand {
                 t!("REVOLVE  Creation mode [Solid/Surface]"),
                 if self.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" }
             ),
-            RevolveStep::AxisStart => t!("REVOLVE  Specify axis start point or [Object/X/Y/Z]:").into_owned(),
+            RevolveStep::AxisStart => t!("REVOLVE  Specify axis start point or [Object/X/Y/Z/Mode]:").into_owned(),
             RevolveStep::AxisEnd => t!("REVOLVE  Axis end point:").into_owned(),
             RevolveStep::AxisObject => t!("REVOLVE  Select line, ray, or construction line for axis:").into_owned(),
             RevolveStep::Angle => format!(
@@ -872,6 +884,7 @@ impl CadCommand for RevolveCommand {
                 CmdOption::new("X", "X"),
                 CmdOption::new("Y", "Y"),
                 CmdOption::new("Z", "Z"),
+                CmdOption::new("Mode", "MODE"),
             ],
             RevolveStep::Angle => vec![
                 CmdOption::new("Start angle", "START"),
@@ -955,6 +968,7 @@ impl CadCommand for RevolveCommand {
         let upper = value.to_ascii_uppercase();
         match self.step {
             RevolveStep::Pick if "MODE".starts_with(&upper) => {
+                self.mode_return = RevolveStep::Pick;
                 self.step = RevolveStep::Mode;
                 Some(CmdResult::NeedPoint)
             }
@@ -970,12 +984,16 @@ impl CadCommand for RevolveCommand {
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .mode = self.mode;
-                self.step = RevolveStep::Pick;
+                self.step = self.mode_return;
                 Some(CmdResult::NeedPoint)
             }
             RevolveStep::AxisStart => {
                 if "OBJECT".starts_with(&upper) {
                     self.step = RevolveStep::AxisObject;
+                    Some(CmdResult::NeedPoint)
+                } else if "MODE".starts_with(&upper) {
+                    self.mode_return = RevolveStep::AxisStart;
+                    self.step = RevolveStep::Mode;
                     Some(CmdResult::NeedPoint)
                 } else if upper == "X" {
                     Some(self.set_axis(self.working_plane.x))
@@ -1038,7 +1056,7 @@ impl CadCommand for RevolveCommand {
                 CmdResult::NeedPoint
             }
             RevolveStep::Mode => {
-                self.step = RevolveStep::Pick;
+                self.step = self.mode_return;
                 CmdResult::NeedPoint
             }
             RevolveStep::Angle => self.finish(self.angle),
@@ -1062,11 +1080,19 @@ impl CadCommand for RevolveCommand {
         if self.step != RevolveStep::Pick {
             return;
         }
-        self.handles = entities.iter().map(|entry| entry.handle).collect();
+        let selected_handles = entities.iter().map(|entry| entry.handle).collect::<Vec<_>>();
         self.preview_profiles = entities
             .into_iter()
+            .filter(|entry| {
+                crate::scene::model::sweep_model::extrusion_profile_of(&entry.entity).is_some()
+            })
             .map(|entry| (entry.handle, entry.entity))
             .collect();
+        self.handles = if self.preview_profiles.is_empty() {
+            Vec::new()
+        } else {
+            selected_handles
+        };
     }
     fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
         CmdResult::NeedPoint

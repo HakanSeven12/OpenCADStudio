@@ -113,6 +113,73 @@ fn displayed_history_state(object_show_history: bool, show_history_mode: i16) ->
     }
 }
 
+fn revolve_profile_world_normal(value: &SolidHistoryRevolve) -> Option<glam::DVec3> {
+    let profile = value.sweep_entity.as_ref().and_then(embedded_entity)?;
+    let normal = crate::entities::curve::entity_curve(&profile)?.plane.normal()?;
+    let inverse_transpose = matrix(value.base.transform)?.inverse().transpose();
+    inverse_transpose
+        .transform_vector3(glam::DVec3::from_array(normal))
+        .try_normalize()
+}
+
+fn revolve_position_component_editable(value: &SolidHistoryRevolve, axis: usize) -> bool {
+    revolve_profile_world_normal(value).is_some_and(|normal| normal[axis].abs() <= 1e-9)
+}
+
+fn revolve_direction_component_capacity(
+    value: &SolidHistoryRevolve,
+    axis: usize,
+) -> Option<(glam::DVec3, f64)> {
+    let normal = revolve_profile_world_normal(value)?;
+    let capacity = (1.0 - normal[axis] * normal[axis]).max(0.0).sqrt();
+    Some((normal, capacity))
+}
+
+fn revolve_direction_component_editable(value: &SolidHistoryRevolve, axis: usize) -> bool {
+    revolve_direction_component_capacity(value, axis)
+        .is_some_and(|(_, capacity)| capacity > 1e-9)
+}
+
+fn revolve_position_property(
+    value: &SolidHistoryRevolve,
+    axis: usize,
+    label: &str,
+    field: &'static str,
+    position: f64,
+) -> Property {
+    if revolve_position_component_editable(value, axis) {
+        crate::entities::common::edit_prop(label, field, position)
+    } else {
+        Property {
+            label: label.to_string(),
+            field,
+            value: PropValue::ReadOnly(crate::entities::common::format_length(position)),
+        }
+    }
+}
+
+fn revolve_direction_property(
+    value: &SolidHistoryRevolve,
+    axis: usize,
+    label: &str,
+    field: &'static str,
+    direction: f64,
+) -> Property {
+    if revolve_direction_component_editable(value, axis) {
+        crate::entities::common::edit_scalar_prop(label, field, direction)
+    } else {
+        Property {
+            label: label.to_string(),
+            field,
+            value: PropValue::ReadOnly(if direction == 0.0 {
+                "0".to_string()
+            } else {
+                direction.to_string()
+            }),
+        }
+    }
+}
+
 pub fn has_specialized_primitive_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
@@ -201,32 +268,44 @@ fn revolve_properties(
                         value.revolve_angle,
                     )),
                 },
-                crate::entities::common::edit_prop(
+                revolve_position_property(
+                    value,
+                    0,
                     t!("Axis position X").as_ref(),
                     PROP_AXIS_POSITION_X,
                     axis_position.x,
                 ),
-                crate::entities::common::edit_prop(
+                revolve_position_property(
+                    value,
+                    1,
                     t!("Axis position Y").as_ref(),
                     PROP_AXIS_POSITION_Y,
                     axis_position.y,
                 ),
-                crate::entities::common::edit_prop(
+                revolve_position_property(
+                    value,
+                    2,
                     t!("Axis position Z").as_ref(),
                     PROP_AXIS_POSITION_Z,
                     axis_position.z,
                 ),
-                crate::entities::common::edit_scalar_prop(
+                revolve_direction_property(
+                    value,
+                    0,
                     t!("Axis direction X").as_ref(),
                     PROP_AXIS_DIRECTION_X,
                     axis_direction.x,
                 ),
-                crate::entities::common::edit_scalar_prop(
+                revolve_direction_property(
+                    value,
+                    1,
                     t!("Axis direction Y").as_ref(),
                     PROP_AXIS_DIRECTION_Y,
                     axis_direction.y,
                 ),
-                crate::entities::common::edit_scalar_prop(
+                revolve_direction_property(
+                    value,
+                    2,
                     t!("Axis direction Z").as_ref(),
                     PROP_AXIS_DIRECTION_Z,
                     axis_direction.z,
@@ -1287,6 +1366,9 @@ fn apply_revolve_geometry_property(
             PROP_AXIS_POSITION_Y => 1,
             _ => 2,
         };
+        if !revolve_position_component_editable(value, axis) {
+            return Some(false);
+        }
         let target = crate::entities::common::parse_length(text)?;
         if !target.is_finite() {
             return Some(false);
@@ -1317,17 +1399,38 @@ fn apply_revolve_geometry_property(
             _ => 2,
         };
         let target = text.trim().replace(',', ".").parse::<f64>().ok()?;
-        if !target.is_finite() {
+        let Some((normal, capacity)) = revolve_direction_component_capacity(value, axis) else {
+            return Some(false);
+        };
+        if !target.is_finite() || capacity <= 1e-9 || target.abs() > capacity + 1e-12 {
             return Some(false);
         }
-        let mut world = world_vector(
+        let current_world = world_vector(
             value.base.transform,
             [value.direction.x, value.direction.y, value.direction.z],
         )?;
-        world[axis] = target;
-        let Some(world) = world.try_normalize() else {
+        let target = target.clamp(-capacity, capacity);
+        if (current_world[axis] - target).abs() <= 1e-12 {
+            return Some(false);
+        }
+        let component_axis = match axis {
+            0 => glam::DVec3::X,
+            1 => glam::DVec3::Y,
+            _ => glam::DVec3::Z,
+        };
+        let Some(projected_axis) = (component_axis - normal * normal[axis]).try_normalize() else {
             return Some(false);
         };
+        let other_axis = normal.cross(projected_axis);
+        let along_projected = target / capacity;
+        let remaining = (1.0 - along_projected * along_projected).max(0.0).sqrt();
+        let other_sign = if current_world.dot(other_axis) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let world =
+            projected_axis * along_projected + other_axis * (other_sign * remaining);
         let Some(local) = matrix(value.base.transform)?
             .inverse()
             .transform_vector3(world)

@@ -3831,12 +3831,11 @@ impl OpenCADStudio {
                 mode,
                 color: _,
             } => {
-                if handles.is_empty()
-                    || handles
-                        .iter()
-                        .any(|handle| self.reject_locked_edit(i, *handle))
-                {
+                if handles.is_empty() {
                     self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.tabs[i].scene.clear_preview_wire();
+                    self.restore_pre_cmd_tangent();
                     return Task::none();
                 }
                 let delete_sources = self.tabs[i].scene.document.header.delete_objects;
@@ -3847,11 +3846,23 @@ impl OpenCADStudio {
                 use crate::scene::model::sweep_model;
                 let from = axis_start.to_array();
                 let to = axis_end.to_array();
-                let pending = self.begin_undo(i, "REVOLVE", handles.len(), true);
+                let mut editable_handles = Vec::with_capacity(handles.len());
+                let mut failed = 0usize;
+                for handle in handles {
+                    if self.reject_locked_edit(i, handle) {
+                        failed += 1;
+                    } else {
+                        editable_handles.push(handle);
+                    }
+                }
+                let pending = if editable_handles.is_empty() {
+                    None
+                } else {
+                    self.begin_undo(i, "REVOLVE", editable_handles.len(), true)
+                };
                 let mut created_handles = Vec::new();
                 let mut consumed = Vec::new();
-                let mut failed = 0usize;
-                for handle in &handles {
+                for handle in &editable_handles {
                     let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned()
                     else {
                         failed += 1;

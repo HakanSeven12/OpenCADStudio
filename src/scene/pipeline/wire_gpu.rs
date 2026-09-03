@@ -745,15 +745,10 @@ impl BlockWireGpu {
             // `mesh_gpu.rs` (#203) and the fill chunking in `face3d_gpu.rs`
             // (#358); the block-wire path was never converted, so a
             // block-heavy drawing produced one multi-hundred-MB buffer.
-            // `max_buffer_size` is an API validation limit, not physical VRAM
-            // (NVIDIA reports several GB on a 2 GB card), so clamp it the way
-            // `mesh_gpu.rs` already does.
-            let vertex_budget = ((device.limits().max_buffer_size as usize / 10) * 9)
-                .min(32 * 1024 * 1024);
-            let vsize = std::mem::size_of::<BlockWireVertex>();
             // Round down to a multiple of 6: each segment expands to six
             // vertices and must not straddle two chunks.
-            let max_verts = ((vertex_budget / vsize).max(6) / 6) * 6;
+            let max_verts =
+                super::gpu_budget::max_elements_grouped::<BlockWireVertex>(device, 6);
             let vertex_chunks: Vec<(wgpu::Buffer, u32)> = vertices
                 .chunks(max_verts)
                 .map(|chunk| {
@@ -810,9 +805,7 @@ impl BlockWireGpu {
                     })
                 })
                 .collect();
-            let max_instances = ((device.limits().max_buffer_size as usize / 10) * 9
-                / std::mem::size_of::<BlockWireInstance>())
-                .max(1);
+            let max_instances = super::gpu_budget::max_elements::<BlockWireInstance>(device);
             // Build each instance buffer once and reuse it across vertex
             // chunks, rather than re-uploading it per chunk.
             let instance_chunks: Vec<(wgpu::Buffer, u32)> = instances

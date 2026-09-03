@@ -541,9 +541,8 @@ pub fn upload_block_vertex_refs(
                 })
             })
             .collect();
-        let max_instances = ((device.limits().max_buffer_size as usize / 10) * 9
-            / std::mem::size_of::<BlockTextInstance>())
-            .max(1);
+        let max_instances =
+            super::gpu_budget::max_elements::<BlockTextInstance>(device);
         for chunk in instances.chunks(max_instances) {
             let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("block_text.instances"),

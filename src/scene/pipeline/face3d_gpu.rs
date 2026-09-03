@@ -376,11 +376,9 @@ fn upload_block_chunks(
         if vertices.is_empty() {
             continue;
         }
-        let budget = (device.limits().max_buffer_size as usize / 10) * 9;
-        let max_vertices = ((budget / std::mem::size_of::<Face3DVertex>()).max(3) / 3) * 3;
-        let max_instances = ((device.limits().max_buffer_size as usize / 10) * 9
-            / std::mem::size_of::<Face3DInstance>())
-            .max(1);
+        // Triangle lists: chunks must stay a multiple of 3.
+        let max_vertices = super::gpu_budget::max_elements_grouped::<Face3DVertex>(device, 3);
+        let max_instances = super::gpu_budget::max_elements::<Face3DInstance>(device);
         let instances: Vec<Face3DInstance> = group
             .iter()
             .filter_map(|wire| {
@@ -459,10 +457,8 @@ fn upload_chunks(
     verts: &[Face3DVertex],
     label: &'static str,
 ) -> Vec<Face3DChunk> {
-    let budget = (device.limits().max_buffer_size as usize / 10) * 9; // 10% headroom
-    let vsize = std::mem::size_of::<Face3DVertex>();
     // Round down to a multiple of 3 so triangles never straddle chunks.
-    let max_verts = ((budget / vsize).max(3) / 3) * 3;
+    let max_verts = super::gpu_budget::max_elements_grouped::<Face3DVertex>(device, 3);
     verts
         .chunks(max_verts)
         .map(|c| Face3DChunk {

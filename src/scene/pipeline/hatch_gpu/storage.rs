@@ -196,9 +196,13 @@ impl StorageHatchBatch {
         }
 
         let limits = device.limits();
+        // Both device figures are API validation limits, not physical VRAM, so
+        // the shared budget caps them (`storage.rs` chunks are allocations, not
+        // just size checks — the `*_fits` predicates below are the checks).
         let chunk_limit = limits
             .max_buffer_size
-            .min(limits.max_storage_buffer_binding_size as u64);
+            .min(limits.max_storage_buffer_binding_size as u64)
+            .min(crate::scene::pipeline::gpu_budget::buffer_budget(device) as u64);
         let mut ranges = Vec::new();
         let mut start = 0;
         let mut used = [0u64; 7];

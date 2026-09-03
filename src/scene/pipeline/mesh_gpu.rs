@@ -1580,10 +1580,8 @@ pub fn build_mesh_batch_filtered(
     // Derive the caps from the real device limit and vertex size. The previous
     // fixed 6 M-vertex cap assumed 40 B/vertex, but `position_low` (RTE) grew
     // MeshVertex to 52 B, so 6 M × 52 B = 312 MB blew past the 256 MB cap.
-    let hard_budget = (device.limits().max_buffer_size as usize / 10) * 9;
-    let budget = hard_budget.min(32 * 1024 * 1024);
-    let vsize = std::mem::size_of::<MeshVertex>();
-    let max_verts = (budget / vsize).max(3);
+    let budget = super::gpu_budget::buffer_budget(device);
+    let max_verts = super::gpu_budget::max_elements::<MeshVertex>(device).max(3);
     // A triangle contributes three line segments (six standalone edge
     // vertices). Bound chunks by the largest buffer produced for wire meshes.
     let max_tris =
@@ -1800,9 +1798,9 @@ pub fn build_mesh_batch_filtered(
                 .verts
                 .len()
                 .saturating_mul(std::mem::size_of::<MeshVertex>())
-                <= hard_budget
+                <= budget
             && part.indices.len().saturating_mul(std::mem::size_of::<u32>())
-                <= hard_budget
+                <= budget
             && part
                 .set
                 .instance_source
@@ -1812,7 +1810,7 @@ pub fn build_mesh_batch_filtered(
                         .edge_verts
                         .len()
                         .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
-                        <= hard_budget;
+                        <= budget;
                     let triangle_edges_fit = !part.include_edges
                         || !source.edge_verts.is_empty()
                         || part
@@ -1820,7 +1818,7 @@ pub fn build_mesh_batch_filtered(
                             .len()
                             .saturating_mul(2)
                             .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
-                            <= hard_budget;
+                            <= budget;
                     feature_edges_fit && triangle_edges_fit
                 })
             && part

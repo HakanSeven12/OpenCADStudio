@@ -1,5 +1,6 @@
 mod device_capabilities;
 pub mod face3d_gpu;
+pub mod gpu_budget;
 pub mod hatch_gpu;
 pub mod wipeout_gpu;
 pub mod image_gpu;
@@ -2728,11 +2729,7 @@ impl Pipeline {
             .normalize_or(glam::DVec3::NEG_Z);
         use crate::scene::pipeline::mesh_gpu::{SilhouetteInstance, SilhouetteVertex};
         use wgpu::util::DeviceExt;
-        const SILHOUETTE_CHUNK_BYTES: u64 = 64 * 1024 * 1024;
-        let chunk_bytes = device
-            .limits()
-            .max_buffer_size
-            .min(SILHOUETTE_CHUNK_BYTES) as usize;
+        let chunk_bytes = gpu_budget::buffer_budget(device);
         let max_vertices = chunk_bytes / std::mem::size_of::<SilhouetteVertex>() / 2 * 2;
         if max_vertices < 2 {
             self.silhouette_chunks.clear();

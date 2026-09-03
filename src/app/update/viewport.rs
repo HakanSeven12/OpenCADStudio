@@ -2783,12 +2783,14 @@ impl OpenCADStudio {
         // press starts a box selection, so without this they'd only
         // close on the second click (issue #104).
         self.tabs[i].properties.color_picker_open = false;
-        // Click anywhere outside the popup dismisses it. The
-        // menu's own buttons live above this mouse_area, so a
-        // press that reaches here means the cursor is not on
-        // any menu item.
-        if self.grip_popup.take().is_some() {
+        // Click anywhere outside the popup dismisses it. A hover popup must
+        // not swallow a grip click beneath it; a pinned popup was opened by an
+        // explicit click, so its outside click only dismisses the menu.
+        if let Some(popup) = self.grip_popup.take() {
             self.grip_hover = None;
+            if popup.pinned {
+                return Task::none();
+            }
         }
         // Outside-click dismiss for the visibility-state dropdown
         // (its buttons sit above this mouse_area).

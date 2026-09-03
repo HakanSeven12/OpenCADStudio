@@ -956,7 +956,7 @@ pub fn view_window<'a>(
                 t!("Unit format"),
                 DsField::Dimaunit,
                 vals.dimaunit,
-                &[("0", "Decimal degrees"), ("1", "Degrees, minutes, seconds"), ("2", "Gradians"), ("3", "Radians")],
+                &[("0", "Decimal degrees"), ("1", "Degrees, minutes, seconds"), ("2", "Gradians"), ("3", "Radians"), ("4", "Surveyor's units")],
             ),
             row![lbl(t!("Precision")), mk_field(DsField::Dimadec, vals.dimadec)]
                 .spacing(8).align_y(iced::Center),

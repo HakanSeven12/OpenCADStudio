@@ -475,6 +475,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 // Distance / Angle fields as well.
                                 self.sync_dyn_fields();
 
+                                // A typed grip commit bypasses the normal viewport point-release
+                                // tracking cleanup. Drop the consumed OTRACK / Extension guide now
+                                // so no stale tracking ray remains visible after the grip edit.
+                                self.reset_tracking_after_point();
+
                                 return task;
                             }
                         }

@@ -1238,8 +1238,18 @@ impl OpenCADStudio {
                             .map(|e| (h, e))
                     })
                     .collect();
+                let initial_edges: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .filter_map(|(handle, entity)| {
+                        crate::modules::draw::modify::trim::is_trim_boundary_entity(&entity)
+                            .then_some(handle)
+                    })
+                    .collect();
                 let all_entities: Vec<_> = entities.into_iter().map(|(_, e)| e).collect();
-                let new_cmd = TrimCommand::new(all_entities);
+                let new_cmd =
+                    TrimCommand::with_cutting_edges(all_entities, initial_edges);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

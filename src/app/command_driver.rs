@@ -840,6 +840,10 @@ impl OpenCADStudio {
 
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        let preserve_commit_layer = self.tabs[i]
+        .active_cmd
+        .as_ref()
+        .is_some_and(|command| command.preserve_commit_layer());
         match result {
             CmdResult::NeedPoint => {
                 // ATTEDIT finished its entity pick: hand the chosen block off to
@@ -935,7 +939,11 @@ impl OpenCADStudio {
                 );
                 let association_enabled =
                     self.tabs[i].scene.document.header.dimension_associativity == 2;
-                let committed = self.commit_entity_handle(entity);
+                let committed = if preserve_commit_layer {
+                    self.commit_entity_handle_preserve_layer(entity)
+                } else {
+                    self.commit_entity_handle(entity)
+                };
                 if is_associative_dimension && association_enabled {
                     if let Some(handle) = committed {
                         let sources = self.tabs[i]
@@ -973,7 +981,11 @@ impl OpenCADStudio {
                     .all(|entity| self.delta_add_safe(i, entity));
                 let pending = self.begin_undo(i, label, entities.len(), delta_safe);
                 for entity in entities {
-                    self.commit_entity(entity);
+                    if preserve_commit_layer {
+                        let _ = self.commit_entity_handle_preserve_layer(entity);
+                    } else {
+                        self.commit_entity(entity);
+                    }
                 }
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();

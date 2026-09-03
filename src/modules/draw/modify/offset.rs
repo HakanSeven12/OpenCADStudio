@@ -514,6 +514,9 @@ impl OffsetCommand {
 }
 
 impl CadCommand for OffsetCommand {
+    fn preserve_commit_layer(&self) -> bool {
+        true
+    }
     fn name(&self) -> &'static str {
         "OFFSET"
     }

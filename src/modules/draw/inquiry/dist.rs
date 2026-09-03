@@ -4,8 +4,8 @@ use glam::DVec3;
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
-
 pub struct DistCommand {
     // Keep the picked point in full f64 precision. Downcasting to f32 here
     // loses ~0.03–0.06 units at survey-scale coordinates (e.g. eastings near
@@ -13,7 +13,8 @@ pub struct DistCommand {
     first: Option<DVec3>,
     plane: WorkingPlane,
 }
-
+pub const ICON: IconKind =
+    IconKind::Svg(include_bytes!("../../../../assets/icons/distance.svg"));
 impl DistCommand {
     pub fn new() -> Self {
         Self {

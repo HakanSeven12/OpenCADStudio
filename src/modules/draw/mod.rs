@@ -43,6 +43,7 @@ impl CadModule for DrawModule {
             array, copy, delete, explode, fillet, mirror, offset, rotate, scale, stretch,
             translate, trim,
         };
+        use inquiry::{area, dist};
         use properties::match_prop;
 
         static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
@@ -229,6 +230,21 @@ impl CadModule for DrawModule {
                         },
                         copy_clip::tool().into(),
                         cut::tool().into(),
+                    ],
+                },
+                RibbonGroup {
+                    title: "Measure",
+                    tools: vec![
+                        RibbonItem::LargeDropdown {
+                            id: "MEASURE_MENU",
+                            label: "Measure",
+                            icon: dist::ICON,
+                            items: vec![
+                                ("DIST", "Distance", dist::ICON),
+                                ("AREA", "Area", area::ICON),
+                            ],
+                            default: "DIST",
+                        },
                     ],
                 },
                 // Support group lives on the Start tab now (see view.rs:

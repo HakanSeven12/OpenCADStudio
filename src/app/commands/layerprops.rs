@@ -1376,6 +1376,7 @@ impl OpenCADStudio {
                 .scene
                 .mutate_active_viewport_camera(|c| c.snap_to_face(eye_dir, r_ucs));
         } else {
+            self.tabs[i].scene.refresh_projection_bounds();
             self.tabs[i]
                 .scene
                 .camera

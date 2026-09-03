@@ -1093,6 +1093,7 @@ impl OpenCADStudio {
                         }
                         let pivot = sel.orbit_pivot;
                         drop(sel);
+                        self.tabs[i].scene.refresh_projection_bounds();
                         self.tabs[i].scene.camera.borrow_mut().orbit(dx, dy, pivot);
                         self.tabs[i].scene.camera_generation += 1;
                         self.tabs[i]
@@ -5011,6 +5012,7 @@ impl OpenCADStudio {
                     .snap_active_viewport_to_direction(eye_dir, r_ucs);
             }
         } else {
+            self.tabs[i].scene.refresh_projection_bounds();
             let mut cam = self.tabs[i].scene.camera.borrow_mut();
             if is_face {
                 cam.snap_to_face(eye_dir, r_ucs);

@@ -1499,8 +1499,8 @@ pub struct Scene {
     /// skip re-uploading unchanged geometry buffers every frame.
     pub geometry_epoch: u64,
     /// Geometry epoch represented by the model bounds cached on the live
-    /// camera. Projection switches refresh those bounds through the same
-    /// filtered fit path when this falls behind `geometry_epoch`.
+    /// camera. Projection and orientation changes refresh those bounds through
+    /// the same filtered fit path when this falls behind `geometry_epoch`.
     projection_bounds_epoch: std::cell::Cell<u64>,
     /// Separate epoch for the (expensive) block-definition tessellation cache.
     /// Bumped together with `geometry_epoch` by `bump_geometry`, but NOT by
@@ -2486,6 +2486,7 @@ impl Scene {
         }
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
+        self.invalidate_projection_bounds();
         {
             let mut tm = self.tess_memo.borrow_mut();
             let mut rm = self.resident_tess_memo.borrow_mut();
@@ -2549,6 +2550,7 @@ impl Scene {
     pub fn bump_geometry(&mut self) {
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
+        self.invalidate_projection_bounds();
         // A full structural change may move lights between blocks or alter
         // layer visibility without naming the affected handles.
         self.lighting_cache.borrow_mut().clear();
@@ -2641,6 +2643,7 @@ impl Scene {
     pub fn bump_geometry_no_blocks(&mut self) {
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
+        self.invalidate_projection_bounds();
         self.lighting_cache.borrow_mut().clear();
         self.invalidate_dependency_index();
         self.push_geometry_delta(epoch, Vec::new(), true);

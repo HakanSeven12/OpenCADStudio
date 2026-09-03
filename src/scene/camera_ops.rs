@@ -130,6 +130,17 @@ fn is_active_vport_name(name: &str) -> bool {
 }
 
 impl Scene {
+    /// A geometry mutation makes every fitted Model camera AABB stale. Clear
+    /// both the live camera and inactive tile snapshots immediately so no view
+    /// can clip against the old drawing until its bounds are refreshed.
+    pub(super) fn invalidate_projection_bounds(&self) {
+        self.projection_bounds_epoch.set(0);
+        self.camera.borrow_mut().invalidate_model_bounds();
+        for tile in self.model_tiles.borrow_mut().iter_mut() {
+            tile.camera.invalidate_model_bounds();
+        }
+    }
+
     // ── Hit-test convenience: wire name → Handle ──────────────────────────
 
     pub fn handle_from_wire_name(name: &str) -> Option<Handle> {
@@ -315,7 +326,7 @@ impl Scene {
     /// Refresh model bounds without moving the live camera. Reusing `fit_all`
     /// keeps projection framing on the same visibility and outlier filters as
     /// Zoom Extents instead of accepting every finite cached AABB.
-    fn refresh_projection_bounds(&mut self) {
+    pub(crate) fn refresh_projection_bounds(&mut self) {
         if self.current_layout != "Model"
             || self.active_viewport.is_some()
             || (self.projection_bounds_epoch.get() == self.geometry_epoch
@@ -326,7 +337,7 @@ impl Scene {
 
         let saved_camera = self.camera.borrow().clone();
         let saved_generation = self.camera_generation;
-        self.camera.borrow_mut().model_bounds = None;
+        self.camera.borrow_mut().invalidate_model_bounds();
         self.fit_all();
         let refreshed = self.camera.borrow().fitted_model_bounds();
         *self.camera.borrow_mut() = saved_camera;

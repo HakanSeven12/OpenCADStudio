@@ -3941,6 +3941,11 @@ impl Pipeline {
                 // Selection / hover highlight reuses index ranges already
                 // resident in the chunk buffers; hover never uploads geometry.
                 for kind in [MeshHighlightKind::Selected, MeshHighlightKind::Hover] {
+                    // Hidden-line views keep the depth-only faces colourless;
+                    // visible selected edges are tinted in the pass below.
+                    if hidden_line {
+                        continue;
+                    }
                     if !self
                         .mesh_highlight_draws
                         .iter()
@@ -4405,7 +4410,11 @@ impl Pipeline {
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             pass.set_stencil_reference(stencil_ref);
             if !self.gpu_selected_wires.is_empty() {
-                pass.set_pipeline(&self.wire_xray_pipeline);
+                pass.set_pipeline(if hidden_line {
+                    &self.wire_pipeline
+                } else {
+                    &self.wire_xray_pipeline
+                });
                 for wire in &self.gpu_selected_wires {
                     if wire.instance_count > 0 {
                         if let Some(bg) = &wire.const_bind_group {
@@ -4420,7 +4429,11 @@ impl Pipeline {
                 }
             }
             if !self.gpu_selected_block_wires.is_empty() {
-                pass.set_pipeline(&self.block_wire_xray_pipeline);
+                pass.set_pipeline(if hidden_line {
+                    &self.block_wire_pipeline
+                } else {
+                    &self.block_wire_xray_pipeline
+                });
                 for wire in &self.gpu_selected_block_wires {
                     if wire.instance_count == 0 {
                         continue;

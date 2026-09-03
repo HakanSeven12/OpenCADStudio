@@ -486,17 +486,8 @@ impl Camera {
         let yaw = Quat::from_rotation_z(-delta_x * speed);
         self.rotation = (yaw * self.rotation).normalize();
         let cam_right = self.rotation * Vec3::X;
-        let cur_z = (self.rotation * Vec3::Z).z;
-        let pitched =
+        self.rotation =
             (Quat::from_axis_angle(cam_right, -delta_y * speed) * self.rotation).normalize();
-        let new_z = (pitched * Vec3::Z).z;
-        // Accept the pitch while the gaze stays clear of the poles, OR when it
-        // moves back AWAY from a pole — so the straight-down default view (z = 1)
-        // can still be tilted out of (a hard `< 0.9995` gate alone would freeze
-        // small drags there). Only a step deeper INTO a pole is rejected.
-        if new_z.abs() < 0.9995 || new_z.abs() < cur_z.abs() {
-            self.rotation = pitched;
-        }
 
         // Revolve the target around the pivot by the same rotation delta so the
         // view orbits the chosen centre instead of the fixed file centre (#229).
@@ -649,6 +640,15 @@ impl Camera {
         // Also seed the scalar fallback for the fitted orientation, in case a
         // later reader consults it before the next projection.
         self.depth_half_range = self.depth_extent_in_view(min, max);
+    }
+
+    /// Drop a fitted depth range after the drawing changes. Keeping either the
+    /// old box or its scalar fallback can clip newly-created geometry until the
+    /// next Zoom Extents. The unset projection uses its conservative fallback
+    /// until the scene refreshes the current model bounds.
+    pub(crate) fn invalidate_model_bounds(&mut self) {
+        self.model_bounds = None;
+        self.depth_half_range = 0.0;
     }
 
     pub(crate) fn fitted_model_bounds(&self) -> Option<(DVec3, DVec3)> {
@@ -873,6 +873,32 @@ mod tests {
             half_h >= 40.0,
             "half-height {half_h} no longer contains the drawing"
         );
+    }
+
+    #[test]
+    fn orbit_crosses_a_pole_without_stalling() {
+        let mut cam = Camera::default();
+        for step in 0..200 {
+            let before = cam.rotation;
+            cam.orbit(0.0, 5.0, None);
+            assert!(
+                before.dot(cam.rotation).abs() < 0.999_999,
+                "vertical orbit stalled at step {step}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalidating_model_bounds_also_drops_the_stale_scalar_range() {
+        let mut cam = Camera::default();
+        cam.fit_depth_to_bounds_f64(DVec3::splat(-1.0), DVec3::splat(1.0));
+        assert!(cam.model_bounds.is_some());
+        assert!(cam.depth_half_range > 0.0);
+
+        cam.invalidate_model_bounds();
+
+        assert!(cam.model_bounds.is_none());
+        assert_eq!(cam.depth_half_range, 0.0);
     }
 }
 

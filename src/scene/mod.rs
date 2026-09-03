@@ -1466,6 +1466,10 @@ pub struct Scene {
     /// Entity drawn with the selection-highlight colour without being part
     /// of the real selection — used to preview a row in the cycling list box.
     pub hover_highlight: Option<Handle>,
+    /// Color used to draw the selection highlight overlay wires (SELECTIONEFFECTCOLOR).
+    pub selection_color: [f32; 4],
+    /// Whether selection visual effect (glow/highlight) is enabled (SELECTIONEFFECT).
+    pub selection_effect: bool,
     /// Whether entity transparency is honoured on screen. When false the
     /// wire shader forces every line opaque (a uniform toggle, no retessellate).
     pub transparency_display: bool,
@@ -1882,6 +1886,8 @@ impl Scene {
             command_preview_hidden: HashSet::default(),
             refedit_keep: None,
             hover_highlight: None,
+            selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
+            selection_effect: true,
             transparency_display: true,
             model_lineweight_scale: 1.0,
             selection_filter: HashSet::default(),

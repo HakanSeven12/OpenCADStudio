@@ -2270,13 +2270,17 @@ impl OpenCADStudio {
                         )
                     })?
                 });
-                let highlights_hover = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .map(|c| c.entity_pick_highlights_hover())
-                    .unwrap_or(false);
+                let preview_in_command = (self.model_space.selection_preview & 2) != 0;
+                let highlights_hover = preview_in_command
+                    && self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|c| c.entity_pick_highlights_hover())
+                        .unwrap_or(false);
                 if highlights_hover {
                     self.tabs[i].scene.set_hover_highlight(hovered);
+                } else {
+                    self.tabs[i].scene.set_hover_highlight(None);
                 }
                 let hover_handle = hovered.unwrap_or(acadrust::Handle::NULL);
                 let shift = self.shift_down;
@@ -5118,7 +5122,12 @@ impl OpenCADStudio {
             );
             solid_ms = started.elapsed().as_secs_f64() * 1000.0;
         }
-        self.tabs[i].scene.set_hover_highlight(hovered);
+        let preview_idle = (self.model_space.selection_preview & 1) != 0;
+        if preview_idle {
+            self.tabs[i].scene.set_hover_highlight(hovered);
+        } else {
+            self.tabs[i].scene.set_hover_highlight(None);
+        }
         self.hover_dwell = None;
         let hover_ms = hover_started.elapsed().as_secs_f64() * 1000.0;
         if perf && hover_ms >= 5.0 {

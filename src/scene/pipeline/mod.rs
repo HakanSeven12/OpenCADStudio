@@ -2430,6 +2430,7 @@ impl Pipeline {
         hovered: &rustc_hash::FxHashSet<acadrust::Handle>,
         annotation_context_wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        selected_tint: Option<[f32; 4]>,
     ) {
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
         if selected.is_empty() && hovered.is_empty() && annotation_context_wires.is_empty() {
@@ -2490,13 +2491,17 @@ impl Pipeline {
             .copied()
             .filter(|wire| wire.render_instance.is_some())
             .collect();
-        let mut gpu = WireGpu::from_highlight_refs(
-            device,
-            &selected_regular,
-            WireModel::SELECTED,
-            depth_map,
-            self.wire_const_bgl.as_ref(),
-        );
+        let mut gpu = if let Some(tint) = selected_tint {
+            WireGpu::from_highlight_refs(
+                device,
+                &selected_regular,
+                tint,
+                depth_map,
+                self.wire_const_bgl.as_ref(),
+            )
+        } else {
+            Vec::new()
+        };
         gpu.extend(WireGpu::from_highlight_refs(
             device,
             &hover_regular,
@@ -2505,13 +2510,17 @@ impl Pipeline {
             self.wire_const_bgl.as_ref(),
         ));
         self.gpu_selected_wires = gpu;
-        let mut block_gpu = BlockWireGpu::from_wires(
-            device,
-            &selected_blocks,
-            depth_map,
-            Some(WireModel::SELECTED),
-            &self.block_wire_const_bgl,
-        );
+        let mut block_gpu = if let Some(tint) = selected_tint {
+            BlockWireGpu::from_wires(
+                device,
+                &selected_blocks,
+                depth_map,
+                Some(tint),
+                &self.block_wire_const_bgl,
+            )
+        } else {
+            Vec::new()
+        };
         block_gpu.extend(BlockWireGpu::from_wires(
             device,
             &hover_blocks,
@@ -2549,6 +2558,7 @@ impl Pipeline {
         hovered: &rustc_hash::FxHashSet<acadrust::Handle>,
         annotation_context_wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        selected_tint: Option<[f32; 4]>,
     ) {
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
         if selected.is_empty() && hovered.is_empty() && annotation_context_wires.is_empty() {
@@ -2585,15 +2595,17 @@ impl Pipeline {
                 }
             }
         }
-        for h in selected {
-            push(
-                &self.wire_handle_index,
-                h.value(),
-                WireModel::SELECTED,
-                wires,
-                &mut out,
-                &mut selected_blocks,
-            );
+        if let Some(tint) = selected_tint {
+            for h in selected {
+                push(
+                    &self.wire_handle_index,
+                    h.value(),
+                    tint,
+                    wires,
+                    &mut out,
+                    &mut selected_blocks,
+                );
+            }
         }
         for h in hovered.iter().filter(|handle| !selected.contains(handle)) {
             push(
@@ -2607,25 +2619,31 @@ impl Pipeline {
         }
         for wire in annotation_context_wires {
             let tint = if wire.selected {
-                WireModel::SELECTED
+                selected_tint.unwrap_or(WireModel::SELECTED)
             } else {
                 WireModel::HOVER
             };
-            for vertex in &wire.text_verts {
-                out.push(text_gpu::TextVertex {
-                    color: [tint[0], tint[1], tint[2], vertex.color[3]],
-                    ..*vertex
-                });
+            if !wire.selected || selected_tint.is_some() {
+                for vertex in &wire.text_verts {
+                    out.push(text_gpu::TextVertex {
+                        color: [tint[0], tint[1], tint[2], vertex.color[3]],
+                        ..*vertex
+                    });
+                }
             }
         }
         self.text_highlight_vcount = out.len() as u32;
         self.text_highlight_vbuf = text_gpu::upload_vertices(device, &out);
-        let mut block_gpu = text_gpu::upload_block_vertex_refs(
-            device,
-            &selected_blocks,
-            depth_map,
-            Some(WireModel::SELECTED),
-        );
+        let mut block_gpu = if let Some(tint) = selected_tint {
+            text_gpu::upload_block_vertex_refs(
+                device,
+                &selected_blocks,
+                depth_map,
+                Some(tint),
+            )
+        } else {
+            Vec::new()
+        };
         block_gpu.extend(text_gpu::upload_block_vertex_refs(
             device,
             &hover_blocks,

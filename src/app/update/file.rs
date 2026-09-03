@@ -393,8 +393,8 @@ impl OpenCADStudio {
             pick_add: self.pick_add,
             pick_drag_rect: self.pick_drag_rect,
             quick_properties: self.quick_properties,
-            bg_color: self.default_bg_color.map(f4_to_u3),
-            paper_bg_color: self.default_paper_bg_color.map(f4_to_u3),
+            bg_color: None,
+            paper_bg_color: None,
             language: self.language,
             cliprompt_lines: crate::app::settings::clamp_clipromptlines(self.cliprompt_lines),
             block_mru: self.block_mru.clone(),
@@ -455,8 +455,7 @@ impl OpenCADStudio {
         self.pick_add = s.pick_add;
         self.pick_drag_rect = s.pick_drag_rect;
         self.quick_properties = s.quick_properties;
-        self.default_bg_color = s.bg_color.map(u3_to_f4);
-        self.default_paper_bg_color = s.paper_bg_color.map(u3_to_f4);
+        // Legacy settings.bg_color / paper_bg_color are superseded by model_space config.
         if crate::i18n::set_language(s.language).is_ok() {
             self.language = s.language;
         }
@@ -775,6 +774,7 @@ impl OpenCADStudio {
                     .map(|(key, command)| (key.clone(), command.clone()))
                     .collect(),
             },
+            model_space: self.model_space.clone(),
         }
     }
 
@@ -784,6 +784,23 @@ impl OpenCADStudio {
         self.ui_theme = cfg.theme.clone();
         self.active_theme = self.ui_theme.to_iced();
         self.theme_color_inputs = self.ui_theme.palette.hex_values();
+        self.model_space = cfg.model_space;
+        self.model_bg_input = self
+            .model_space
+            .custom_bg
+            .map(crate::app::config::rgb_to_hex)
+            .unwrap_or_default();
+        self.paper_bg_input = self
+            .model_space
+            .custom_paper_bg
+            .map(crate::app::config::rgb_to_hex)
+            .unwrap_or_default();
+        self.desk_bg_input = self
+            .model_space
+            .custom_desk_bg
+            .map(crate::app::config::rgb_to_hex)
+            .unwrap_or_default();
+        self.sync_model_space_theme(false);
         self.recent_files = cfg
             .recent
             .files
@@ -828,6 +845,40 @@ impl OpenCADStudio {
         // move. The release message saves the final height once.
         if !self.command_history_resizing {
             self.save_config();
+        }
+    }
+
+    /// Sync the active theme and model space configuration into all open tabs
+    /// and the application default background settings.
+    pub(in crate::app) fn sync_model_space_theme(&mut self, geometry_changed: bool) {
+        let model_bg = self.model_space.resolve_model_bg(&self.active_theme);
+        let paper_bg = self.model_space.resolve_paper_bg();
+        let sel_color = self.model_space.resolve_selection_color();
+        let sel_effect = self.model_space.selection_effect;
+        self.default_bg_color = Some(model_bg);
+        self.default_paper_bg_color = Some(paper_bg);
+
+        for tab in &mut self.tabs {
+            let old_bg = tab.scene.bg_color;
+            let old_paper = tab.scene.paper_bg_color;
+            let old_sel_color = tab.scene.selection_color;
+            let old_sel_effect = tab.scene.selection_effect;
+            tab.scene.bg_color = model_bg;
+            tab.scene.paper_bg_color = paper_bg;
+            tab.scene.selection_color = sel_color;
+            tab.scene.selection_effect = sel_effect;
+            tab.bg_color = Some(model_bg);
+            tab.paper_bg_color = Some(paper_bg);
+
+            if old_sel_color != sel_color || old_sel_effect != sel_effect {
+                tab.scene.selection_generation = tab.scene.selection_generation.wrapping_add(1);
+            }
+
+            if geometry_changed || old_bg != model_bg || old_paper != paper_bg {
+                tab.scene.recolor_meshes();
+                tab.scene.bump_geometry();
+            }
+            tab.scene.request_refresh(crate::scene::ViewportRefreshScope::All);
         }
     }
 

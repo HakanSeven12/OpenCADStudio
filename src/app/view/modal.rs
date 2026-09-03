@@ -174,8 +174,8 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::Options => sized_flow(
                 ex,
-                520,
-                500,
+                540,
+                560,
                 |flow| {
                     crate::ui::window::options::view_window(
                         &self.default_save_format,
@@ -190,6 +190,10 @@ impl OpenCADStudio {
                         self.crosshair_color,
                         &self.crosshair_color_input,
                         self.lineweight_display_scale,
+                        &self.model_space,
+                        &self.model_bg_input,
+                        &self.paper_bg_input,
+                        &self.desk_bg_input,
                         flow,
                     )
                 },

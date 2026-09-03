@@ -243,7 +243,7 @@ impl OpenCADStudio {
                 use crate::command::ValuePromptCommand;
                 let c = ValuePromptCommand::new(
                     "BACKGROUND",
-                    "BACKGROUND  colour [Default/Black/DarkGray/Gray/LightGray/White] or R G B (0–255):",
+                    "BACKGROUND  colour [Theme/Classic/Default/Black/DarkGray/Gray/LightGray/White] or R G B (0–255):",
                 );
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
@@ -251,56 +251,78 @@ impl OpenCADStudio {
             cmd if cmd.starts_with("BACKGROUND ") => {
                 let args = cmd.split_whitespace().skip(1).collect::<Vec<_>>();
                 let is_paper = self.tabs[i].scene.current_layout != "Model";
-                if args
-                    .first()
-                    .map(|s| s.eq_ignore_ascii_case("DEFAULT") || s.eq_ignore_ascii_case("RESET"))
-                    .unwrap_or(false)
-                {
+                let first_arg = args.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                if first_arg == "THEME" || first_arg == "AUTO" {
+                    self.model_space.mode = crate::app::config::ModelSpaceMode::MatchTheme;
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
+                    self.command_line
+                        .push_output(crate::t!("Model space background set to Match Theme.").as_ref());
+                } else if first_arg == "CLASSIC" {
+                    self.model_space.mode = crate::app::config::ModelSpaceMode::ClassicDark;
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
+                    self.command_line
+                        .push_output(crate::t!("Model space background set to Classic CAD Dark.").as_ref());
+                } else if first_arg == "DEFAULT" || first_arg == "RESET" {
                     if is_paper {
-                        self.tabs[i].paper_bg_color = None;
-                        self.tabs[i].scene.paper_bg_color = [1.0, 1.0, 1.0, 1.0];
-                        self.default_paper_bg_color = None;
+                        self.model_space.custom_paper_bg = None;
+                        self.paper_bg_input.clear();
                     } else {
-                        self.tabs[i].bg_color = None;
-                        self.tabs[i].scene.bg_color = [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0];
-                        self.default_bg_color = None;
+                        self.model_space.mode = crate::app::config::ModelSpaceMode::MatchTheme;
+                        self.model_space.custom_bg = None;
+                        self.model_bg_input.clear();
                     }
-                    // Wire colour adaptation (`adapt_to_bg`) reads the bg
-                    // at tessellation time, so the cached wires need to
-                    // refresh — otherwise a light→dark bg flip leaves
-                    // black lines invisible against the new bg. Meshes
-                    // bake colour into per-vertex GPU buffers at upload
-                    // time; `recolor_meshes` rewrites the CPU side so
-                    // the next epoch-driven re-upload picks up the new
-                    // colour.
-                    self.tabs[i].scene.recolor_meshes();
-                    self.tabs[i].scene.bump_geometry();
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
                     self.command_line
                         .push_output(crate::t!("Background reset to default.").as_ref());
-                } else if let Some(rgba) = parse_background_color(&args) {
-                    if is_paper {
-                        self.tabs[i].paper_bg_color = Some(rgba);
-                        self.tabs[i].scene.paper_bg_color = rgba;
-                        self.default_paper_bg_color = Some(rgba);
+                } else if first_arg == "DESK" {
+                    let sub_args = &args[1..];
+                    let sub_first = sub_args.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                    if sub_first == "DEFAULT" || sub_first == "RESET" {
+                        self.model_space.custom_desk_bg = None;
+                        self.sync_model_space_theme(false);
+                        self.persist_settings_if_changed();
+                        self.command_line
+                            .push_output(crate::t!("Paper desk surround background reset to default.").as_ref());
+                    } else if let Some(rgba) = parse_background_color(sub_args) {
+                        let [r, g, b, _] = rgba;
+                        let rgb = [(r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8];
+                        self.model_space.custom_desk_bg = Some(rgb);
+                        self.sync_model_space_theme(false);
+                        self.persist_settings_if_changed();
+                        self.command_line.push_output(crate::tf!(
+                            "Desk surround background: rgb({}, {}, {})",
+                            rgb[0],
+                            rgb[1],
+                            rgb[2]
+                        ).as_ref());
                     } else {
-                        self.tabs[i].bg_color = Some(rgba);
-                        self.tabs[i].scene.bg_color = rgba;
-                        self.default_bg_color = Some(rgba);
+                        self.command_line.push_info("Usage: BACKGROUND DESK <r> <g> <b> | DEFAULT");
                     }
-                    self.tabs[i].scene.recolor_meshes();
-                    self.tabs[i].scene.bump_geometry();
+                } else if let Some(rgba) = parse_background_color(&args) {
                     let [r, g, b, _] = rgba;
+                    let rgb = [(r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8];
+                    if is_paper {
+                        self.model_space.custom_paper_bg = Some(rgb);
+                        self.paper_bg_input = crate::app::config::rgb_to_hex(rgb);
+                    } else {
+                        self.model_space.mode = crate::app::config::ModelSpaceMode::Custom;
+                        self.model_space.custom_bg = Some(rgb);
+                        self.model_bg_input = crate::app::config::rgb_to_hex(rgb);
+                    }
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
                     self.command_line.push_output(crate::tf!(
                         "Background: rgb({}, {}, {})",
-                        (r * 255.0).round() as u8,
-                        (g * 255.0).round() as u8,
-                        (b * 255.0).round() as u8
+                        rgb[0],
+                        rgb[1],
+                        rgb[2]
                     ).as_ref());
-                    // Persisted centrally after this message via
-                    // `persist_settings_if_changed()`.
                 } else {
                     self.command_line.push_info(
-                        "Usage: BACKGROUND <r> <g> <b> (0–255) | DEFAULT|BLACK|DARKGRAY|GRAY|LIGHTGRAY|WHITE",
+                        "Usage: BACKGROUND <r> <g> <b> (0–255) | THEME|CLASSIC|DEFAULT|DESK|BLACK|DARKGRAY|GRAY|LIGHTGRAY|WHITE",
                     );
                 }
             }
@@ -366,9 +388,20 @@ impl OpenCADStudio {
 /// Returns `None` if the arguments don't match either form.
 fn parse_background_color(args: &[&str]) -> Option<[f32; 4]> {
     let to_rgba = |[r, g, b]: [u8; 3]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
-    // Single token: a named preset.
+    // Single token: a named preset or comma-separated "r,g,b".
     if args.len() == 1 {
-        let preset = match args[0].to_ascii_uppercase().as_str() {
+        let text = args[0].trim();
+        let parts: Vec<&str> = text.split(',').collect();
+        if parts.len() == 3 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                parts[0].trim().parse::<u8>(),
+                parts[1].trim().parse::<u8>(),
+                parts[2].trim().parse::<u8>(),
+            ) {
+                return Some(to_rgba([r, g, b]));
+            }
+        }
+        let preset = match text.to_ascii_uppercase().as_str() {
             "WHITE" => [255, 255, 255],
             "BLACK" => [0, 0, 0],
             "GRAY" | "GREY" => [128, 128, 128],

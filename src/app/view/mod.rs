@@ -35,28 +35,13 @@ pub(in crate::app) use overlay::{MTEXT_TEXT_ID, TEXT_INLINE_ID};
 pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bounds";
 
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
-/// The desk shown around the sheet, as the widget wants it. One definition,
-/// shared with the renderer that clears the sheet viewport to the same thing.
-const PAPER_SPACE_BACKGROUND: Color = Color {
-    r: crate::scene::PAPER_DESK_COLOR[0],
-    g: crate::scene::PAPER_DESK_COLOR[1],
-    b: crate::scene::PAPER_DESK_COLOR[2],
-    a: crate::scene::PAPER_DESK_COLOR[3],
-};
 
 /// Base surface directly under the crosshair. Paper content viewports render
 /// transparently over the sheet/desk, including while MSPACE input is active.
-fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
+fn crosshair_background(tab: &DocumentTab, is_paper: bool, desk: [f32; 4]) -> [f32; 4] {
     if !is_paper {
         return tab.scene.bg_color;
     }
-
-    let desk = [
-        PAPER_SPACE_BACKGROUND.r,
-        PAPER_SPACE_BACKGROUND.g,
-        PAPER_SPACE_BACKGROUND.b,
-        PAPER_SPACE_BACKGROUND.a,
-    ];
     let (cursor, viewport_size) = {
         let selection = tab.scene.selection.borrow();
         (selection.last_move_pos, selection.vp_size)
@@ -428,7 +413,14 @@ impl OpenCADStudio {
                     }
                 })
                 .collect();
-            crate::ui::overlay::grid_overlay(grid)
+            let desk_bg = self.model_space.resolve_desk_bg();
+            let bg = crosshair_background(tab, is_paper, desk_bg);
+            let bg_lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
+            let grid_style = crate::ui::overlay::GridStyle {
+                opacity: self.model_space.grid_opacity,
+                bg_luminance: bg_lum,
+            };
+            crate::ui::overlay::grid_overlay(grid, grid_style)
         };
 
         let selection_overlay = {
@@ -777,7 +769,7 @@ impl OpenCADStudio {
                 tab.pan_mode || tab.orbit_mode || tab.zoom_dynamic_mode,
                 self.ribbon.open_dropdown.is_some(),
                 hover_locked,
-                crosshair_background(tab, is_paper),
+                crosshair_background(tab, is_paper, self.model_space.resolve_desk_bg()),
                 crate::ui::overlay::CrosshairOptions {
                     size_percent: self.cursor_size,
                     pick_box: self.pick_box,
@@ -786,6 +778,17 @@ impl OpenCADStudio {
                     isometric: self.isometric_drafting,
                     iso_plane: self.iso_plane,
                     snap_angle_deg: self.snap_angle_deg,
+                },
+                crate::ui::overlay::SelectionVisualOptions {
+                    area: self.model_space.selection_area,
+                    opacity: self.model_space.selection_opacity,
+                    window_color: self.model_space.selection_window_color,
+                    crossing_color: self.model_space.selection_crossing_color,
+                    highlight_color: self.model_space.selection_highlight_color,
+                    grip_size: self.model_space.grip_size as f32,
+                    grip_color: self.model_space.grip_color,
+                    grip_hot: self.model_space.grip_hot,
+                    grip_hover: self.model_space.grip_hover,
                 },
             )
         };
@@ -803,18 +806,23 @@ impl OpenCADStudio {
         .on_scroll(Message::ViewportScroll)
         .on_exit(Message::ViewportExit);
 
+        let desk_bg = self.model_space.resolve_desk_bg();
+        let desk_color = Color {
+            r: desk_bg[0],
+            g: desk_bg[1],
+            b: desk_bg[2],
+            a: desk_bg[3],
+        };
         let bg_color = if is_paper {
-            PAPER_SPACE_BACKGROUND
+            desk_color
         } else {
-            tab.bg_color
-                .map(|[r, g, b, a]| Color { r, g, b, a })
-                .unwrap_or(Color {
-                    // Default model background: RGB (33, 40, 48).
-                    r: 33.0 / 255.0,
-                    g: 40.0 / 255.0,
-                    b: 48.0 / 255.0,
-                    a: 1.0,
-                })
+            let c = tab.scene.bg_color;
+            Color {
+                r: c[0],
+                g: c[1],
+                b: c[2],
+                a: c[3],
+            }
         };
 
         // Dynamic input overlay — editable boxes near the cursor, one per
@@ -944,7 +952,7 @@ impl OpenCADStudio {
             .width(Fill)
             .height(Fill)
         } else if thumbnail_capture_clean {
-            let capture_bg = if is_paper { PAPER_SPACE_BACKGROUND } else { bg_color };
+            let capture_bg = if is_paper { desk_color } else { bg_color };
             stack![
                 container(Space::new())
                     .style(move |_: &Theme| container::Style {
@@ -962,7 +970,7 @@ impl OpenCADStudio {
             stack![
                 container(Space::new())
                     .style(move |_: &Theme| container::Style {
-                        background: Some(Background::Color(PAPER_SPACE_BACKGROUND)),
+                        background: Some(Background::Color(desk_color)),
                         ..Default::default()
                     })
                     .width(Fill)

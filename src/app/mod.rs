@@ -977,6 +977,11 @@ pub(super) struct OpenCADStudio {
     active_theme: Theme,
     ui_theme: config::UiThemeConfig,
     theme_color_inputs: [String; 6],
+    model_space: config::ModelSpaceThemeConfig,
+    model_bg_input: String,
+    paper_bg_input: String,
+    desk_bg_input: String,
+    pub(crate) saved_custom_palette: Option<config::UiThemePalette>,
 
     // ── Keyboard Shortcut Editor ──────────────────────────────────────────
     /// Complete editable key → command/action table.
@@ -1928,6 +1933,38 @@ pub enum Message {
     OptionsThemeChanged(String),
     /// Edit one of Custom theme's six base colours as #RRGGBB.
     OptionsThemeColorChanged(usize, String),
+    /// Change Model Space canvas mode (MatchTheme, ClassicDark, Custom).
+    ModelSpaceModeChanged(config::ModelSpaceMode),
+    /// Change Model Space custom background color as hex or empty for default.
+    ModelSpaceBgChanged(String),
+    /// Change Paper Space custom sheet background color as hex or empty for default.
+    PaperSpaceBgChanged(String),
+    /// Change Paper Space desk surround background (#RRGGBB).
+    DeskSpaceBgChanged(String),
+    /// Change Grid opacity percentage (5–100).
+    GridOpacityChanged(u8),
+    /// Change Selection Area indicator toggle (SELECTIONAREA).
+    SelectionAreaToggled(bool),
+    /// Change Selection Area opacity percentage (0–100, SELECTIONAREAOPACITY).
+    SelectionOpacityChanged(u8),
+    /// Change Window selection color ACI index (0 = Theme Primary, 1..=255 = ACI).
+    SelectionWindowColorChanged(u8),
+    /// Change Crossing selection color ACI index (0 = Theme Success, 1..=255 = ACI).
+    SelectionCrossingColorChanged(u8),
+    /// Change Selection Highlight color ACI index (0 = Theme Primary, 1..=255 = ACI).
+    SelectionHighlightColorChanged(u8),
+    /// Change Grip size in pixels (1–25, GRIPSIZE).
+    GripSizeChanged(u8),
+    /// Change Unselected Grip color ACI index (0 = Theme Primary, 1..=255 = ACI, GRIPCOLOR).
+    GripColorChanged(u8),
+    /// Change Selected/Hot Grip color ACI index (0 = Theme Danger, 1..=255 = ACI, GRIPHOT).
+    GripHotChanged(u8),
+    /// Change Hover/Warm Grip color ACI index (0 = Theme Primary Strong, 1..=255 = ACI, GRIPHOVER).
+    GripHoverChanged(u8),
+    /// Restore Model Space display/canvas appearance to defaults.
+    RestoreModelSpaceDisplayDefaults,
+    /// Restore Selection visual effect settings to defaults.
+    RestoreSelectionVisualDefaults,
     /// Register or unregister as the .dwg/.dxf handler, from Options. Same
     /// setting the FILEASSOC command carries.
     FileAssocChanged(bool),
@@ -3472,6 +3509,11 @@ impl OpenCADStudio {
             active_theme: Theme::Oxocarbon,
             ui_theme: config::UiThemeConfig::default(),
             theme_color_inputs: config::UiThemePalette::default().hex_values(),
+            model_space: config::ModelSpaceThemeConfig::default(),
+            model_bg_input: String::new(),
+            paper_bg_input: String::new(),
+            desk_bg_input: String::new(),
+            saved_custom_palette: None,
             // Keyboard shortcuts
             shortcut_bindings: rustc_hash::FxHashMap::default(),
             shortcut_editor_rows: Vec::new(),
@@ -3890,6 +3932,10 @@ pub fn run() -> iced::Result {
         OpenCADStudio::update,
         OpenCADStudio::view,
     )
+    .settings(iced::Settings {
+        power_preference: iced::backend::PowerPreference::HighPerformance,
+        ..iced::Settings::default()
+    })
     .subscription(OpenCADStudio::subscription)
     .title(|state: &OpenCADStudio, window_id: window::Id| {
         let _ = window_id; // all dialogs are in-canvas modals now

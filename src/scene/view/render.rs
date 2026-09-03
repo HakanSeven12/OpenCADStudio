@@ -255,6 +255,10 @@ pub struct Primitive {
     pub(in crate::scene) bg_color: [f32; 4],
     /// Active Iced theme text colour for GPU-rendered ViewCube labels.
     pub(in crate::scene) viewcube_text_color: [f32; 4],
+    /// Color used to draw the selection highlight overlay wires.
+    pub(in crate::scene) selection_color: [f32; 4],
+    /// Whether selection visual effect (glow/highlight) is enabled.
+    pub(in crate::scene) selection_effect: bool,
     /// One input-to-render sample, carried only when PERF tracing is enabled.
     pub(in crate::scene) nav_perf: Option<NavPerfSample>,
 }
@@ -989,6 +993,11 @@ impl shader::Primitive for Primitive {
                         && !Arc::ptr_eq(previous, &vp.annotation_context_wires)
                 });
             if selection_changed || highlighted_geometry_changed || annotation_context_changed {
+                let sel_color = if self.selection_effect {
+                    Some(self.selection_color)
+                } else {
+                    None
+                };
                 inner.upload_selected_wires(
                     device,
                     &vp_wires[..],
@@ -996,6 +1005,7 @@ impl shader::Primitive for Primitive {
                     &vp.hover_handles,
                     &vp.annotation_context_wires,
                     &draw_depths,
+                    sel_color,
                 );
                 // Text highlight rides the same selection key: a pick / rollover
                 // recolours the selected / hovered glyphs without touching the
@@ -1007,6 +1017,7 @@ impl shader::Primitive for Primitive {
                     &vp.hover_handles,
                     &vp.annotation_context_wires,
                     &draw_depths,
+                    sel_color,
                 );
                 inner.cached_annotation_highlight_source =
                     Some(Arc::clone(&vp.annotation_context_wires));
@@ -3339,7 +3350,7 @@ impl Scene {
             }
 
             let tint = if selected {
-                WireModel::SELECTED
+                self.selection_color
             } else {
                 WireModel::HOVER
             };
@@ -3387,7 +3398,7 @@ impl Scene {
                                 entity,
                                 content_viewport.then_some(inst.handle),
                             );
-                        wire.color = WireModel::SELECTED;
+                        wire.color = self.selection_color;
                         wire.selected = true;
                         wire.pattern_length = pattern_length;
                         wire.pattern = pattern;
@@ -3527,6 +3538,8 @@ impl Scene {
             viewports,
             bg_color,
             viewcube_text_color,
+            selection_color: self.selection_color,
+            selection_effect: self.selection_effect,
             nav_perf: perf_nav,
         }
     }
@@ -3555,6 +3568,8 @@ impl Scene {
                 viewports: vec![],
                 bg_color,
                 viewcube_text_color,
+                selection_color: self.selection_color,
+                selection_effect: self.selection_effect,
                 nav_perf: None,
             };
         };
@@ -3615,6 +3630,8 @@ impl Scene {
             viewports,
             bg_color,
             viewcube_text_color,
+            selection_color: self.selection_color,
+            selection_effect: self.selection_effect,
             nav_perf: perf_nav,
         }
     }

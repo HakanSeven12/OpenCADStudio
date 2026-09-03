@@ -39,6 +39,8 @@ pub struct AppConfig {
     pub plot: PlotDialogState,
     /// Complete editable keyboard shortcut table.
     pub shortcuts: ShortcutConfig,
+    /// Model space background, grid, and selection appearance.
+    pub model_space: ModelSpaceThemeConfig,
 }
 
 impl Default for AppConfig {
@@ -54,6 +56,7 @@ impl Default for AppConfig {
             ribbon: RibbonConfig::default(),
             plot: PlotDialogState::default(),
             shortcuts: ShortcutConfig::default(),
+            model_space: ModelSpaceThemeConfig::default(),
         }
     }
 }
@@ -208,6 +211,206 @@ pub(crate) fn parse_hex(value: &str) -> Option<[u8; 3]> {
     ])
 }
 
+/// Canvas mode for Model space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ModelSpaceMode {
+    /// Canvas background dynamically follows the active UI theme.
+    #[default]
+    MatchTheme,
+    /// Classic CAD dark charcoal canvas (#212830) regardless of UI theme.
+    ClassicDark,
+    /// Custom background colors specified by the user.
+    Custom,
+}
+
+impl ModelSpaceMode {
+    pub const ALL: [Self; 3] = [Self::MatchTheme, Self::ClassicDark, Self::Custom];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MatchTheme => "Match Theme",
+            Self::ClassicDark => "Classic CAD Dark",
+            Self::Custom => "Custom",
+        }
+    }
+}
+
+/// Standard classic CAD dark charcoal background [33, 40, 48].
+pub const CLASSIC_CAD_DARK_BG: [u8; 3] = [33, 40, 48];
+
+/// Standard paper space sheet background [255, 255, 255].
+pub const DEFAULT_PAPER_BG: [u8; 3] = [255, 255, 255];
+
+/// Standard paper space desk surround [138, 138, 138].
+pub const DEFAULT_DESK_BG: [u8; 3] = [138, 138, 138];
+
+/// Persistent configuration for Model Space appearance and selection visual effects.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelSpaceThemeConfig {
+    /// How the canvas background is determined.
+    pub mode: ModelSpaceMode,
+    /// Custom model space canvas background [R, G, B] (0–255).
+    pub custom_bg: Option<[u8; 3]>,
+    /// Custom paper space sheet background [R, G, B] (0–255).
+    pub custom_paper_bg: Option<[u8; 3]>,
+    /// Custom paper space desk/surround background [R, G, B] (0–255).
+    pub custom_desk_bg: Option<[u8; 3]>,
+    /// Grid opacity percentage (5–100, default 18%).
+    pub grid_opacity: u8,
+    /// SELECTIONAREA: whether selection marquees have a translucent shaded fill.
+    pub selection_area: bool,
+    /// SELECTIONAREAOPACITY: transparency percentage of selection areas (0–100, default 12%).
+    pub selection_opacity: u8,
+    /// WINDOWSAREACOLOR: ACI index (0 = Theme Primary, 1..=255 = ACI).
+    pub selection_window_color: u8,
+    /// CROSSINGAREACOLOR: ACI index (0 = Theme Success, 1..=255 = ACI).
+    pub selection_crossing_color: u8,
+    /// SELECTIONEFFECTCOLOR: ACI index for selected entities highlight (0 = Theme Primary, 1..=255 = ACI).
+    pub selection_highlight_color: u8,
+    /// SELECTIONEFFECT: whether selected objects glow with solid highlight (true) or dash (false).
+    pub selection_effect: bool,
+    /// SELECTIONPREVIEW: rollover/hover highlight mode (0 = off, 1 = in cmd, 2 = idle, 3 = both).
+    pub selection_preview: u8,
+    /// GRIPSIZE: grip marker half-size in pixels (1–25, default 5).
+    pub grip_size: u8,
+    /// GRIPCOLOR: unselected grip ACI color (0 = Theme Primary outline, 1..=255 = ACI).
+    pub grip_color: u8,
+    /// GRIPHOT: selected/hot grip ACI color (0 = Theme Danger, 1..=255 = ACI).
+    pub grip_hot: u8,
+    /// GRIPHOVER: hovered/warm grip ACI color (0 = Theme Primary Strong, 1..=255 = ACI).
+    pub grip_hover: u8,
+}
+
+impl Default for ModelSpaceThemeConfig {
+    fn default() -> Self {
+        Self {
+            mode: ModelSpaceMode::MatchTheme,
+            custom_bg: None,
+            custom_paper_bg: None,
+            custom_desk_bg: None,
+            grid_opacity: 18,
+            selection_area: true,
+            selection_opacity: 12,
+            selection_window_color: 0,
+            selection_crossing_color: 0,
+            selection_highlight_color: 0,
+            selection_effect: true,
+            selection_preview: 3,
+            grip_size: 5,
+            grip_color: 0,
+            grip_hot: 0,
+            grip_hover: 0,
+        }
+    }
+}
+
+impl ModelSpaceThemeConfig {
+    /// Resolve active model space canvas background as [f32; 4] based on current theme.
+    pub fn resolve_model_bg(&self, theme: &iced::Theme) -> [f32; 4] {
+        let rgb = match self.mode {
+            ModelSpaceMode::MatchTheme => theme_canvas_background(theme),
+            ModelSpaceMode::ClassicDark => CLASSIC_CAD_DARK_BG,
+            ModelSpaceMode::Custom => self.custom_bg.unwrap_or(CLASSIC_CAD_DARK_BG),
+        };
+        [
+            rgb[0] as f32 / 255.0,
+            rgb[1] as f32 / 255.0,
+            rgb[2] as f32 / 255.0,
+            1.0,
+        ]
+    }
+
+    /// Resolve active paper space sheet background as [f32; 4].
+    pub fn resolve_paper_bg(&self) -> [f32; 4] {
+        let rgb = self.custom_paper_bg.unwrap_or(DEFAULT_PAPER_BG);
+        [
+            rgb[0] as f32 / 255.0,
+            rgb[1] as f32 / 255.0,
+            rgb[2] as f32 / 255.0,
+            1.0,
+        ]
+    }
+
+    /// Resolve active paper space desk surround background as [f32; 4].
+    pub fn resolve_desk_bg(&self) -> [f32; 4] {
+        let rgb = self.custom_desk_bg.unwrap_or(DEFAULT_DESK_BG);
+        [
+            rgb[0] as f32 / 255.0,
+            rgb[1] as f32 / 255.0,
+            rgb[2] as f32 / 255.0,
+            1.0,
+        ]
+    }
+
+    /// Resolve active selection highlight overlay color as [f32; 4].
+    pub fn resolve_selection_color(&self) -> [f32; 4] {
+        if self.selection_highlight_color == 0 {
+            crate::scene::model::wire_model::WireModel::SELECTED
+        } else if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(self.selection_highlight_color) {
+            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
+        } else {
+            crate::scene::model::wire_model::WireModel::SELECTED
+        }
+    }
+}
+
+/// Default canvas background for a given theme variant.
+pub fn theme_canvas_background(theme: &iced::Theme) -> [u8; 3] {
+    match theme {
+        iced::Theme::Light => [255, 255, 255],
+        iced::Theme::SolarizedLight => [253, 246, 227],
+        iced::Theme::GruvboxLight => [251, 241, 199],
+        iced::Theme::TokyoNightLight => [225, 226, 231],
+        iced::Theme::KanagawaLotus => [242, 236, 222],
+        iced::Theme::Dark => [32, 34, 37],
+        iced::Theme::Dracula => [40, 42, 54],
+        iced::Theme::Nord => [46, 52, 64],
+        iced::Theme::SolarizedDark => [0, 43, 54],
+        iced::Theme::GruvboxDark => [40, 40, 40],
+        iced::Theme::TokyoNight => [26, 27, 38],
+        iced::Theme::TokyoNightStorm => [36, 40, 59],
+        iced::Theme::KanagawaWave => [31, 31, 40],
+        iced::Theme::KanagawaDragon => [24, 26, 28],
+        iced::Theme::Moonfly => [8, 18, 24],
+        iced::Theme::Nightfly => [1, 22, 39],
+        iced::Theme::Oxocarbon => [22, 22, 22],
+        iced::Theme::Ferra => [43, 41, 46],
+        _ => color_to_rgb(theme.palette().background.base.color),
+    }
+}
+
+/// Parse a flexible theme name string into an `iced::Theme` variant.
+/// Normalizes by stripping spaces, underscores, and dashes, case-insensitive.
+pub fn parse_theme_name(s: &str) -> Option<iced::Theme> {
+    let clean: String = s
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .flat_map(|c| c.to_uppercase())
+        .collect();
+    match clean.as_str() {
+        "DARK" => Some(iced::Theme::Dark),
+        "LIGHT" => Some(iced::Theme::Light),
+        "DRACULA" => Some(iced::Theme::Dracula),
+        "NORD" => Some(iced::Theme::Nord),
+        "SOLARIZEDLIGHT" => Some(iced::Theme::SolarizedLight),
+        "SOLARIZEDDARK" => Some(iced::Theme::SolarizedDark),
+        "GRUVBOXLIGHT" => Some(iced::Theme::GruvboxLight),
+        "GRUVBOXDARK" => Some(iced::Theme::GruvboxDark),
+        "TOKYONIGHT" => Some(iced::Theme::TokyoNight),
+        "TOKYONIGHTSTORM" => Some(iced::Theme::TokyoNightStorm),
+        "TOKYONIGHTLIGHT" => Some(iced::Theme::TokyoNightLight),
+        "KANAGAWAWAVE" => Some(iced::Theme::KanagawaWave),
+        "KANAGAWADRAGON" => Some(iced::Theme::KanagawaDragon),
+        "KANAGAWALOTUS" => Some(iced::Theme::KanagawaLotus),
+        "MOONFLY" => Some(iced::Theme::Moonfly),
+        "NIGHTFLY" => Some(iced::Theme::Nightfly),
+        "OXOCARBON" => Some(iced::Theme::Oxocarbon),
+        "FERRA" => Some(iced::Theme::Ferra),
+        _ => None,
+    }
+}
+
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RecentConfig {
@@ -285,4 +488,101 @@ const WEB_CONFIG_KEY: &str = "opencadstudio.settings";
 #[cfg(not(target_arch = "wasm32"))]
 fn config_path() -> Option<std::path::PathBuf> {
     Some(crate::config::config_dir()?.join("settings.json"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_model_space_defaults() {
+        let cfg = ModelSpaceThemeConfig::default();
+        assert_eq!(cfg.mode, ModelSpaceMode::MatchTheme);
+        assert_eq!(cfg.custom_bg, None);
+        assert_eq!(cfg.custom_paper_bg, None);
+        assert_eq!(cfg.grid_opacity, 18);
+        assert!(cfg.selection_area);
+        assert_eq!(cfg.selection_opacity, 12);
+        assert_eq!(cfg.selection_window_color, 0);
+        assert_eq!(cfg.selection_crossing_color, 0);
+        assert_eq!(cfg.selection_highlight_color, 0);
+        assert!(cfg.selection_effect);
+        assert_eq!(cfg.selection_preview, 3);
+    }
+
+    #[test]
+    fn test_resolve_model_bg_match_theme() {
+        let cfg = ModelSpaceThemeConfig {
+            mode: ModelSpaceMode::MatchTheme,
+            ..Default::default()
+        };
+        // Light theme should produce pure white background [1.0, 1.0, 1.0, 1.0]
+        let light_bg = cfg.resolve_model_bg(&iced::Theme::Light);
+        assert_eq!(light_bg, [1.0, 1.0, 1.0, 1.0]);
+
+        // Oxocarbon theme should produce dark background
+        let oxo_bg = cfg.resolve_model_bg(&iced::Theme::Oxocarbon);
+        assert!((oxo_bg[0] - 22.0 / 255.0).abs() < 1e-4);
+        assert!((oxo_bg[1] - 22.0 / 255.0).abs() < 1e-4);
+        assert!((oxo_bg[2] - 22.0 / 255.0).abs() < 1e-4);
+        assert_eq!(oxo_bg[3], 1.0);
+    }
+
+    #[test]
+    fn test_resolve_model_bg_classic_dark() {
+        let cfg = ModelSpaceThemeConfig {
+            mode: ModelSpaceMode::ClassicDark,
+            ..Default::default()
+        };
+        // Even with Light theme active, ClassicDark must stay locked to [33, 40, 48]
+        let bg = cfg.resolve_model_bg(&iced::Theme::Light);
+        assert!((bg[0] - 33.0 / 255.0).abs() < 1e-4);
+        assert!((bg[1] - 40.0 / 255.0).abs() < 1e-4);
+        assert!((bg[2] - 48.0 / 255.0).abs() < 1e-4);
+        assert_eq!(bg[3], 1.0);
+    }
+
+    #[test]
+    fn test_resolve_model_bg_custom() {
+        let cfg = ModelSpaceThemeConfig {
+            mode: ModelSpaceMode::Custom,
+            custom_bg: Some([10, 20, 30]),
+            ..Default::default()
+        };
+        let bg = cfg.resolve_model_bg(&iced::Theme::Light);
+        assert!((bg[0] - 10.0 / 255.0).abs() < 1e-4);
+        assert!((bg[1] - 20.0 / 255.0).abs() < 1e-4);
+        assert!((bg[2] - 30.0 / 255.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_model_space_config_serde_roundtrip() {
+        let mut original = AppConfig::default();
+        original.model_space.mode = ModelSpaceMode::Custom;
+        original.model_space.custom_bg = Some([12, 34, 56]);
+        original.model_space.grid_opacity = 45;
+        original.model_space.selection_opacity = 35;
+        original.model_space.selection_window_color = 5;
+
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let deserialized: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+
+        assert_eq!(deserialized.model_space.mode, ModelSpaceMode::Custom);
+        assert_eq!(deserialized.model_space.custom_bg, Some([12, 34, 56]));
+        assert_eq!(deserialized.model_space.grid_opacity, 45);
+        assert_eq!(deserialized.model_space.selection_opacity, 35);
+        assert_eq!(deserialized.model_space.selection_window_color, 5);
+    }
+
+    #[test]
+    fn test_parse_theme_name() {
+        assert_eq!(parse_theme_name("light"), Some(iced::Theme::Light));
+        assert_eq!(parse_theme_name("DARK"), Some(iced::Theme::Dark));
+        assert_eq!(parse_theme_name("solarized light"), Some(iced::Theme::SolarizedLight));
+        assert_eq!(parse_theme_name("tokyo-night-storm"), Some(iced::Theme::TokyoNightStorm));
+        assert_eq!(parse_theme_name("Kanagawa_Lotus"), Some(iced::Theme::KanagawaLotus));
+        assert_eq!(parse_theme_name("1"), None);
+        assert_eq!(parse_theme_name("0"), None);
+        assert_eq!(parse_theme_name("nonexistent_theme"), None);
+    }
 }

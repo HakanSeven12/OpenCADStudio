@@ -726,12 +726,9 @@ impl OpenCADStudio {
                 let size_label = format_size(size_bytes);
                 self.command_line
                     .push_info(crate::tf!("Opening \"{name}\" ({size_label})…").as_ref());
-                let model_bg = self.default_bg_color.unwrap_or([
-                    33.0 / 255.0,
-                    40.0 / 255.0,
-                    48.0 / 255.0,
-                    1.0,
-                ]);
+                let model_bg = self.default_bg_color.unwrap_or_else(|| {
+                    self.model_space.resolve_model_bg(&self.active_theme)
+                });
                 Task::perform(
                     crate::io::open_path_with_phase(path, progress, model_bg),
                     move |result| Message::FileOpened(open_id, result),
@@ -5564,11 +5561,15 @@ impl OpenCADStudio {
             }
 
             Message::SetTheme(theme) => {
+                if self.ui_theme.name == "Custom" {
+                    self.saved_custom_palette = Some(self.ui_theme.palette);
+                }
                 self.ui_theme.name = theme.to_string();
                 self.ui_theme.palette =
                     crate::app::config::UiThemePalette::from_iced(theme.seed());
                 self.theme_color_inputs = self.ui_theme.palette.hex_values();
                 self.active_theme = theme;
+                self.sync_model_space_theme(true);
                 self.persist_settings_if_changed();
                 Task::none()
             }
@@ -5817,6 +5818,9 @@ impl OpenCADStudio {
             }
 
             Message::OptionsThemeChanged(name) => {
+                if self.ui_theme.name == "Custom" && name != "Custom" {
+                    self.saved_custom_palette = Some(self.ui_theme.palette);
+                }
                 self.ui_theme.name = name;
                 if let Some(theme) =
                     crate::app::config::builtin_theme(&self.ui_theme.name)
@@ -5827,8 +5831,13 @@ impl OpenCADStudio {
                     self.active_theme = theme;
                 } else {
                     self.ui_theme.name = "Custom".to_string();
+                    if let Some(saved) = self.saved_custom_palette {
+                        self.ui_theme.palette = saved;
+                        self.theme_color_inputs = saved.hex_values();
+                    }
                     self.active_theme = self.ui_theme.to_iced();
                 }
+                self.sync_model_space_theme(true);
                 self.persist_settings_if_changed();
                 Task::none()
             }
@@ -5841,8 +5850,161 @@ impl OpenCADStudio {
                 if self.ui_theme.palette.set_hex(index, &value) {
                     self.ui_theme.name = "Custom".to_string();
                     self.active_theme = self.ui_theme.to_iced();
+                    self.sync_model_space_theme(true);
                     self.persist_settings_if_changed();
                 }
+                Task::none()
+            }
+
+            Message::ModelSpaceModeChanged(mode) => {
+                self.model_space.mode = mode;
+                self.sync_model_space_theme(true);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::ModelSpaceBgChanged(hex) => {
+                self.model_bg_input = hex.clone();
+                if hex.trim().is_empty() {
+                    self.model_space.custom_bg = None;
+                    self.model_space.mode = crate::app::config::ModelSpaceMode::MatchTheme;
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
+                } else if let Some(rgb) = crate::app::config::parse_hex(&hex) {
+                    self.model_space.custom_bg = Some(rgb);
+                    self.model_space.mode = crate::app::config::ModelSpaceMode::Custom;
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+
+            Message::PaperSpaceBgChanged(hex) => {
+                self.paper_bg_input = hex.clone();
+                if hex.trim().is_empty() {
+                    self.model_space.custom_paper_bg = None;
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
+                } else if let Some(rgb) = crate::app::config::parse_hex(&hex) {
+                    self.model_space.custom_paper_bg = Some(rgb);
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+
+            Message::DeskSpaceBgChanged(hex) => {
+                self.desk_bg_input = hex.clone();
+                if hex.trim().is_empty() {
+                    self.model_space.custom_desk_bg = None;
+                    self.sync_model_space_theme(false);
+                    self.persist_settings_if_changed();
+                } else if let Some(rgb) = crate::app::config::parse_hex(&hex) {
+                    self.model_space.custom_desk_bg = Some(rgb);
+                    self.sync_model_space_theme(false);
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+
+            Message::GridOpacityChanged(opacity) => {
+                self.model_space.grid_opacity = opacity.clamp(5, 100);
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionAreaToggled(enabled) => {
+                self.model_space.selection_area = enabled;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionOpacityChanged(opacity) => {
+                self.model_space.selection_opacity = opacity.clamp(0, 100);
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionWindowColorChanged(color) => {
+                self.model_space.selection_window_color = color;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionCrossingColorChanged(color) => {
+                self.model_space.selection_crossing_color = color;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionHighlightColorChanged(color) => {
+                self.model_space.selection_highlight_color = color;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::GripSizeChanged(size) => {
+                self.model_space.grip_size = size.clamp(1, 25);
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::GripColorChanged(color) => {
+                self.model_space.grip_color = color;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::GripHotChanged(color) => {
+                self.model_space.grip_hot = color;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::GripHoverChanged(color) => {
+                self.model_space.grip_hover = color;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::RestoreModelSpaceDisplayDefaults => {
+                self.model_space.mode = crate::app::config::ModelSpaceMode::MatchTheme;
+                self.model_space.custom_bg = None;
+                self.model_space.custom_paper_bg = None;
+                self.model_space.custom_desk_bg = None;
+                self.model_space.grid_opacity = 18;
+                self.model_bg_input.clear();
+                self.paper_bg_input.clear();
+                self.desk_bg_input.clear();
+                self.sync_model_space_theme(true);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::RestoreSelectionVisualDefaults => {
+                self.model_space.selection_area = true;
+                self.model_space.selection_opacity = 12;
+                self.model_space.selection_window_color = 0;
+                self.model_space.selection_crossing_color = 0;
+                self.model_space.selection_highlight_color = 0;
+                self.model_space.selection_effect = true;
+                self.model_space.selection_preview = 3;
+                self.model_space.grip_size = 5;
+                self.model_space.grip_color = 0;
+                self.model_space.grip_hot = 0;
+                self.model_space.grip_hover = 0;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
                 Task::none()
             }
 
@@ -5943,12 +6105,9 @@ impl OpenCADStudio {
                     self.close_active_modal();
                     return Task::none();
                 };
-                let model_bg = self.default_bg_color.unwrap_or([
-                    33.0 / 255.0,
-                    40.0 / 255.0,
-                    48.0 / 255.0,
-                    1.0,
-                ]);
+                let model_bg = self.default_bg_color.unwrap_or_else(|| {
+                    self.model_space.resolve_model_bg(&self.active_theme)
+                });
                 #[cfg(not(target_arch = "wasm32"))]
                 if let Some(path) = opening.source_path.clone() {
                     let current_fingerprint =

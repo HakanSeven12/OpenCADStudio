@@ -888,6 +888,19 @@ impl OpenCADStudio {
                     | "CENTERCROSSGAP"
                     | "CENTERMARKEXE"
                     | "DIMCONTINUEMODE"
+                    | "COLORTHEME"
+                    | "SELECTIONAREA"
+                    | "SELECTIONAREAOPACITY"
+                    | "SELECTIONEFFECT"
+                    | "SELECTIONEFFECTCOLOR"
+                    | "WINDOWSAREACOLOR"
+                    | "WINDOWAREACOLOR"
+                    | "CROSSINGAREACOLOR"
+                    | "SELECTIONPREVIEW"
+                    | "GRIPSIZE"
+                    | "GRIPCOLOR"
+                    | "GRIPHOT"
+                    | "GRIPHOVER"
             ) =>
             {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
@@ -910,7 +923,7 @@ impl OpenCADStudio {
                 let value = it.next().map(|s| s.trim().to_string());
                 if name.is_empty() || name == "?" {
                     self.command_line.push_info(
-                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE | CLAYER CELTYPE TEXTSTYLE (read-only)",
+                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER | CLAYER CELTYPE TEXTSTYLE (read-only)",
                     );
                 } else {
                     let frame_kind = crate::scene::frame::kind_for_name(&name);
@@ -1250,6 +1263,171 @@ impl OpenCADStudio {
                                     ),
                                     false,
                                 )),
+                            },
+                            "COLORTHEME" => match &value {
+                                Some(v) => match v.as_str() {
+                                    "0" => {
+                                        if self.ui_theme.name == "Custom" {
+                                            self.saved_custom_palette = Some(self.ui_theme.palette);
+                                        }
+                                        self.ui_theme.name = iced::Theme::Dark.to_string();
+                                        self.ui_theme.palette =
+                                            crate::app::config::UiThemePalette::from_iced(iced::Theme::Dark.seed());
+                                        self.theme_color_inputs = self.ui_theme.palette.hex_values();
+                                        self.active_theme = iced::Theme::Dark;
+                                        self.sync_model_space_theme(true);
+                                        Ok(("COLORTHEME = 0 (Dark)".to_string(), true))
+                                    }
+                                    "1" => {
+                                        if self.ui_theme.name == "Custom" {
+                                            self.saved_custom_palette = Some(self.ui_theme.palette);
+                                        }
+                                        self.ui_theme.name = iced::Theme::Light.to_string();
+                                        self.ui_theme.palette =
+                                            crate::app::config::UiThemePalette::from_iced(iced::Theme::Light.seed());
+                                        self.theme_color_inputs = self.ui_theme.palette.hex_values();
+                                        self.active_theme = iced::Theme::Light;
+                                        self.sync_model_space_theme(true);
+                                        Ok(("COLORTHEME = 1 (Light)".to_string(), true))
+                                    }
+                                    _ => Err("SETVAR: 0 (Dark) or 1 (Light) required.".into()),
+                                },
+                                None => {
+                                    let bg = self.ui_theme.palette.background;
+                                    let lum = 0.299 * (bg[0] as f32) + 0.587 * (bg[1] as f32) + 0.114 * (bg[2] as f32);
+                                    let code = if lum > 128.0 { 1 } else { 0 };
+                                    Ok((format!("COLORTHEME = {code} ({})", self.ui_theme.name), false))
+                                }
+                            },
+                            "SELECTIONAREA" => match &value {
+                                Some(v) => match v.as_str() {
+                                    "0" => {
+                                        self.model_space.selection_area = false;
+                                        self.sync_model_space_theme(false);
+                                        Ok(("SELECTIONAREA = 0".to_string(), true))
+                                    }
+                                    "1" => {
+                                        self.model_space.selection_area = true;
+                                        self.sync_model_space_theme(false);
+                                        Ok(("SELECTIONAREA = 1".to_string(), true))
+                                    }
+                                    _ => Err("SETVAR: 0 or 1 required.".into()),
+                                },
+                                None => Ok((format!("SELECTIONAREA = {}", if self.model_space.selection_area { 1 } else { 0 }), false)),
+                            },
+                            "SELECTIONAREAOPACITY" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(op) if op <= 100 => {
+                                        self.model_space.selection_opacity = op;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("SELECTIONAREAOPACITY = {op}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 to 100 required.".into()),
+                                },
+                                None => Ok((format!("SELECTIONAREAOPACITY = {}", self.model_space.selection_opacity), false)),
+                            },
+                            "SELECTIONEFFECT" => match &value {
+                                Some(v) => match v.as_str() {
+                                    "0" => {
+                                        self.model_space.selection_effect = false;
+                                        self.sync_model_space_theme(false);
+                                        Ok(("SELECTIONEFFECT = 0".to_string(), true))
+                                    }
+                                    "1" => {
+                                        self.model_space.selection_effect = true;
+                                        self.sync_model_space_theme(false);
+                                        Ok(("SELECTIONEFFECT = 1".to_string(), true))
+                                    }
+                                    _ => Err("SETVAR: 0 or 1 required.".into()),
+                                },
+                                None => Ok((format!("SELECTIONEFFECT = {}", if self.model_space.selection_effect { 1 } else { 0 }), false)),
+                            },
+                            "SELECTIONEFFECTCOLOR" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(color) => {
+                                        self.model_space.selection_highlight_color = color;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("SELECTIONEFFECTCOLOR = {color}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 (Theme) to 255 required.".into()),
+                                },
+                                None => Ok((format!("SELECTIONEFFECTCOLOR = {}", self.model_space.selection_highlight_color), false)),
+                            },
+                            "WINDOWSAREACOLOR" | "WINDOWAREACOLOR" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(color) => {
+                                        self.model_space.selection_window_color = color;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("WINDOWSAREACOLOR = {color}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 (Theme) to 255 required.".into()),
+                                },
+                                None => Ok((format!("WINDOWSAREACOLOR = {}", self.model_space.selection_window_color), false)),
+                            },
+                            "CROSSINGAREACOLOR" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(color) => {
+                                        self.model_space.selection_crossing_color = color;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("CROSSINGAREACOLOR = {color}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 (Theme) to 255 required.".into()),
+                                },
+                                None => Ok((format!("CROSSINGAREACOLOR = {}", self.model_space.selection_crossing_color), false)),
+                            },
+                            "SELECTIONPREVIEW" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(mode @ 0..=3) => {
+                                        self.model_space.selection_preview = mode;
+                                        Ok((format!("SELECTIONPREVIEW = {mode}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 to 3 required.".into()),
+                                },
+                                None => Ok((format!("SELECTIONPREVIEW = {}", self.model_space.selection_preview), false)),
+                            },
+                            "GRIPSIZE" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(size @ 1..=25) => {
+                                        self.model_space.grip_size = size;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("GRIPSIZE = {size}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 1 to 25 required.".into()),
+                                },
+                                None => Ok((format!("GRIPSIZE = {}", self.model_space.grip_size), false)),
+                            },
+                            "GRIPCOLOR" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(color) => {
+                                        self.model_space.grip_color = color;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("GRIPCOLOR = {color}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 (Theme) to 255 required.".into()),
+                                },
+                                None => Ok((format!("GRIPCOLOR = {}", self.model_space.grip_color), false)),
+                            },
+                            "GRIPHOT" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(color) => {
+                                        self.model_space.grip_hot = color;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("GRIPHOT = {color}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 (Theme) to 255 required.".into()),
+                                },
+                                None => Ok((format!("GRIPHOT = {}", self.model_space.grip_hot), false)),
+                            },
+                            "GRIPHOVER" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(color) => {
+                                        self.model_space.grip_hover = color;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("GRIPHOVER = {color}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 (Theme) to 255 required.".into()),
+                                },
+                                None => Ok((format!("GRIPHOVER = {}", self.model_space.grip_hover), false)),
                             },
                             "SNAPANG" => match &value {
                                 Some(v) => match v.parse::<f32>() {
@@ -1872,6 +2050,19 @@ impl OpenCADStudio {
                                         | "CURSORTYPE"
                                         | "SNAPANG"
                                         | "CLIPROMPTLINES"
+                                        | "COLORTHEME"
+                                        | "SELECTIONAREA"
+                                        | "SELECTIONAREAOPACITY"
+                                        | "SELECTIONEFFECT"
+                                        | "SELECTIONEFFECTCOLOR"
+                                        | "WINDOWSAREACOLOR"
+                                        | "WINDOWAREACOLOR"
+                                        | "CROSSINGAREACOLOR"
+                                        | "SELECTIONPREVIEW"
+                                        | "GRIPSIZE"
+                                        | "GRIPCOLOR"
+                                        | "GRIPHOT"
+                                        | "GRIPHOVER"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {
@@ -2669,5 +2860,232 @@ fn rename_symbol(doc: &mut acadrust::CadDocument, ty: &str, old: &str, new: &str
         }
         "VIEW" => rekey(&mut doc.views, old, new),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::OpenCADStudio;
+
+    fn fresh_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    #[test]
+    fn test_cad_selection_and_model_space_sysvars() {
+        let mut app = fresh_app();
+
+        // COLORTHEME 1 (Light)
+        let _ = app.run_command_line("SETVAR COLORTHEME 1");
+        assert_eq!(app.active_theme, iced::Theme::Light);
+        assert_eq!(app.ui_theme.name, "Light");
+
+        // COLORTHEME 0 (Dark)
+        let _ = app.run_command_line("SETVAR COLORTHEME 0");
+        assert_eq!(app.active_theme, iced::Theme::Dark);
+        assert_eq!(app.ui_theme.name, "Dark");
+
+        // Direct command name: COLORTHEME 1
+        let _ = app.run_command_line("COLORTHEME 1");
+        assert_eq!(app.active_theme, iced::Theme::Light);
+
+        // SELECTIONAREA toggle
+        let _ = app.run_command_line("SETVAR SELECTIONAREA 0");
+        assert!(!app.model_space.selection_area);
+        let _ = app.run_command_line("SELECTIONAREA 1");
+        assert!(app.model_space.selection_area);
+
+        // SELECTIONAREAOPACITY
+        let _ = app.run_command_line("SETVAR SELECTIONAREAOPACITY 45");
+        assert_eq!(app.model_space.selection_opacity, 45);
+        let _ = app.run_command_line("SELECTIONAREAOPACITY 80");
+        assert_eq!(app.model_space.selection_opacity, 80);
+
+        // SELECTIONEFFECT
+        let _ = app.run_command_line("SETVAR SELECTIONEFFECT 0");
+        assert!(!app.model_space.selection_effect);
+        assert!(!app.tabs[app.active_tab].scene.selection_effect);
+        let _ = app.run_command_line("SELECTIONEFFECT 1");
+        assert!(app.model_space.selection_effect);
+        assert!(app.tabs[app.active_tab].scene.selection_effect);
+
+        // SELECTIONEFFECTCOLOR
+        let _ = app.run_command_line("SETVAR SELECTIONEFFECTCOLOR 4");
+        assert_eq!(app.model_space.selection_highlight_color, 4);
+        assert_eq!(
+            app.tabs[app.active_tab].scene.selection_color,
+            app.model_space.resolve_selection_color()
+        );
+
+        // WINDOWSAREACOLOR & CROSSINGAREACOLOR
+        let _ = app.run_command_line("SETVAR WINDOWSAREACOLOR 5");
+        assert_eq!(app.model_space.selection_window_color, 5);
+        let _ = app.run_command_line("WINDOWSAREACOLOR 1");
+        assert_eq!(app.model_space.selection_window_color, 1);
+
+        let _ = app.run_command_line("SETVAR CROSSINGAREACOLOR 3");
+        assert_eq!(app.model_space.selection_crossing_color, 3);
+        let _ = app.run_command_line("CROSSINGAREACOLOR 2");
+        assert_eq!(app.model_space.selection_crossing_color, 2);
+
+        // SELECTIONPREVIEW
+        let _ = app.run_command_line("SETVAR SELECTIONPREVIEW 2");
+        assert_eq!(app.model_space.selection_preview, 2);
+    }
+
+    #[test]
+    fn test_background_command_modes() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+
+        // BACKGROUND CLASSIC
+        let _ = app.run_command_line("BACKGROUND CLASSIC");
+        assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::ClassicDark);
+        assert_eq!(
+            app.tabs[i].scene.bg_color,
+            [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0]
+        );
+
+        // Switch to light theme and set BACKGROUND THEME
+        let _ = app.run_command_line("COLORTHEME 1");
+        let _ = app.run_command_line("BACKGROUND THEME");
+        assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::MatchTheme);
+        assert_eq!(app.tabs[i].scene.bg_color, [1.0, 1.0, 1.0, 1.0]);
+
+        // BACKGROUND RGB custom
+        let _ = app.run_command_line("BACKGROUND 50 60 70");
+        assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::Custom);
+        assert_eq!(app.model_space.custom_bg, Some([50, 60, 70]));
+        assert!((app.tabs[i].scene.bg_color[0] - 50.0 / 255.0).abs() < 1e-4);
+        assert!((app.tabs[i].scene.bg_color[1] - 60.0 / 255.0).abs() < 1e-4);
+        assert!((app.tabs[i].scene.bg_color[2] - 70.0 / 255.0).abs() < 1e-4);
+
+        // BACKGROUND DEFAULT restores MatchTheme
+        let _ = app.run_command_line("BACKGROUND DEFAULT");
+        assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::MatchTheme);
+        assert_eq!(app.model_space.custom_bg, None);
+
+        // BACKGROUND DESK
+        let _ = app.run_command_line("BACKGROUND DESK 80 85 90");
+        assert_eq!(app.model_space.custom_desk_bg, Some([80, 85, 90]));
+        let _ = app.run_command_line("BACKGROUND DESK DEFAULT");
+        assert_eq!(app.model_space.custom_desk_bg, None);
+    }
+
+    #[test]
+    fn test_colorscheme_command() {
+        let mut app = fresh_app();
+        app.model_space.mode = crate::app::config::ModelSpaceMode::MatchTheme;
+        let i = app.active_tab;
+
+        // Bare COLORSCHEME launches interactive ValuePromptCommand
+        let _ = app.run_command_line("COLORSCHEME");
+        assert!(app.tabs[i].active_cmd.is_some());
+        assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().name(), "COLORSCHEME");
+
+        // Cancel the interactive command
+        app.tabs[i].active_cmd = None;
+
+        // COLORSCHEME LIGHT sets Light theme and synchronizes model space
+        let _ = app.run_command_line("COLORSCHEME LIGHT");
+        assert_eq!(app.active_theme, iced::Theme::Light);
+        assert_eq!(app.tabs[i].scene.bg_color, [1.0, 1.0, 1.0, 1.0]);
+
+        // Case-insensitive and spaces: "colorscheme tokyo night"
+        let _ = app.run_command_line("colorscheme tokyo night");
+        assert_eq!(app.active_theme, iced::Theme::TokyoNight);
+
+        // COLORSCHEME rejects 1 and 0 (which belong to COLORTHEME)
+        let _ = app.run_command_line("colorscheme 1");
+        assert_ne!(app.active_theme, iced::Theme::Light); // stays TokyoNight
+
+        // COLORTHEME accepts 1 and 0
+        let _ = app.run_command_line("COLORTHEME 1");
+        assert_eq!(app.active_theme, iced::Theme::Light);
+        let _ = app.run_command_line("COLORTHEME 0");
+        assert_eq!(app.active_theme, iced::Theme::Dark);
+    }
+
+    #[test]
+    fn test_reviewer_feedback_fixes() {
+        let mut app = fresh_app();
+
+        // 1. COLORTHEME query returns UI theme scheme regardless of canvas background
+        let _ = app.run_command_line("COLORTHEME 0");
+        // Set canvas background to bright white in custom mode
+        let _ = app.run_command_line("BACKGROUND 255 255 255");
+        let _ = app.run_command_line("SETVAR COLORTHEME");
+        let output = app.command_line.history_plain_text();
+        assert!(output.contains("<0 (Dark)>"), "UI is dark, so query must return 0 despite white canvas: {output}");
+
+        let _ = app.run_command_line("COLORTHEME 1");
+        let _ = app.run_command_line("SETVAR COLORTHEME");
+        let output = app.command_line.history_plain_text();
+        assert!(output.contains("<1 (Light)>"), "UI is light, so query must return 1: {output}");
+
+        // 2. Custom theme safety when COLORTHEME 0/1 or COLORSCHEME runs
+        app.ui_theme.name = "Custom".to_string();
+        app.ui_theme.palette.background = [12, 34, 56];
+        let _ = app.run_command_line("COLORTHEME 0");
+        assert_eq!(app.saved_custom_palette.map(|p| p.background), Some([12, 34, 56]));
+
+        app.saved_custom_palette = None;
+        app.ui_theme.name = "Custom".to_string();
+        app.ui_theme.palette.background = [78, 90, 12];
+        let _ = app.run_command_line("COLORSCHEME DRACULA");
+        assert_eq!(app.saved_custom_palette.map(|p| p.background), Some([78, 90, 12]));
+
+        // 3. ModelSpaceBgChanged empty reverts mode to MatchTheme
+        let _ = app.update(crate::app::Message::ModelSpaceBgChanged("".to_string()));
+        assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::MatchTheme);
+        assert_eq!(app.model_space.custom_bg, None);
+
+        // 4. Split restore defaults: Display vs Selection
+        app.model_space.mode = crate::app::config::ModelSpaceMode::Custom;
+        app.model_space.custom_bg = Some([10, 20, 30]);
+        app.model_space.selection_opacity = 99;
+        let _ = app.update(crate::app::Message::RestoreModelSpaceDisplayDefaults);
+        assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::MatchTheme);
+        assert_eq!(app.model_space.selection_opacity, 99, "Selection visual must not be wiped by display restore");
+
+        let _ = app.update(crate::app::Message::RestoreSelectionVisualDefaults);
+        assert_eq!(app.model_space.selection_opacity, 12, "Selection restore resets selection visual defaults");
+    }
+
+    #[test]
+    fn test_grip_and_desk_surround_sysvars() {
+        let mut app = fresh_app();
+
+        // 1. Desk surround background message
+        let _ = app.update(crate::app::Message::DeskSpaceBgChanged("#1a2b3c".to_string()));
+        assert_eq!(app.model_space.custom_desk_bg, Some([0x1a, 0x2b, 0x3c]));
+        assert_eq!(app.desk_bg_input, "#1a2b3c");
+        let _ = app.update(crate::app::Message::DeskSpaceBgChanged("".to_string()));
+        assert_eq!(app.model_space.custom_desk_bg, None);
+
+        // 2. GRIPSIZE, GRIPCOLOR, GRIPHOT, GRIPHOVER via command line & SETVAR
+        let _ = app.run_command_line("GRIPSIZE 8");
+        assert_eq!(app.model_space.grip_size, 8);
+        let _ = app.run_command_line("GRIPCOLOR 4");
+        assert_eq!(app.model_space.grip_color, 4);
+        let _ = app.run_command_line("GRIPHOT 1");
+        assert_eq!(app.model_space.grip_hot, 1);
+        let _ = app.run_command_line("GRIPHOVER 2");
+        assert_eq!(app.model_space.grip_hover, 2);
+
+        // Direct messages
+        let _ = app.update(crate::app::Message::GripSizeChanged(12));
+        assert_eq!(app.model_space.grip_size, 12);
+        let _ = app.update(crate::app::Message::GripColorChanged(5));
+        assert_eq!(app.model_space.grip_color, 5);
+
+        // Restore defaults resets grips
+        let _ = app.update(crate::app::Message::RestoreSelectionVisualDefaults);
+        assert_eq!(app.model_space.grip_size, 5);
+        assert_eq!(app.model_space.grip_color, 0);
+        assert_eq!(app.model_space.grip_hot, 0);
+        assert_eq!(app.model_space.grip_hover, 0);
     }
 }

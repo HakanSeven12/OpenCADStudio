@@ -427,6 +427,11 @@ impl OpenCADStudio {
             self.finish_active_command(&toks);
             return Task::none();
         }
+        if tokens[0].eq_ignore_ascii_case("BACKGROUND")
+            || tokens[0].eq_ignore_ascii_case("COLORSCHEME")
+        {
+            return self.dispatch_command(cmd);
+        }
         let _ = self.dispatch_command(tokens[0]);
         if self.tabs[i].active_cmd.is_none() {
             // Not an interactive tool — an inline-argument command (`PDMODE 3`).

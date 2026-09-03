@@ -375,56 +375,72 @@ impl OpenCADStudio {
             }
 
             // ── Color Scheme / Theme selector ─────────────────────────────
-            cmd if cmd == "COLORSCHEME" || cmd.starts_with("COLORSCHEME ") => {
-                use iced::Theme;
-                let sub = cmd
-                    .split_once(' ')
-                    .map(|(_, r)| r.trim())
-                    .unwrap_or("")
-                    .to_uppercase();
-                // Map name to Theme variant.
-                let theme: Option<Theme> = match sub.as_str() {
-                    "DARK" => Some(Theme::Dark),
-                    "LIGHT" => Some(Theme::Light),
-                    "DRACULA" => Some(Theme::Dracula),
-                    "NORD" => Some(Theme::Nord),
-                    "SOLARIZED_LIGHT" | "SOLARIZEDLIGHT" => Some(Theme::SolarizedLight),
-                    "SOLARIZED_DARK" | "SOLARIZEDDARK" => Some(Theme::SolarizedDark),
-                    "GRUVBOX_LIGHT" | "GRUVBOXLIGHT" => Some(Theme::GruvboxLight),
-                    "GRUVBOX_DARK" | "GRUVBOXDARK" => Some(Theme::GruvboxDark),
-                    "TOKYONIGHT" | "TOKYO_NIGHT" => Some(Theme::TokyoNight),
-                    "TOKYONIGHTSTORM" | "TOKYO_NIGHT_STORM" => Some(Theme::TokyoNightStorm),
-                    "TOKYONIGHTLIGHT" | "TOKYO_NIGHT_LIGHT" => Some(Theme::TokyoNightLight),
-                    "KANAGAWAWAVE" | "KANAGAWA_WAVE" => Some(Theme::KanagawaWave),
-                    "KANAGAWADRAGON" | "KANAGAWA_DRAGON" => Some(Theme::KanagawaDragon),
-                    "KANAGAWALOTUS" | "KANAGAWA_LOTUS" => Some(Theme::KanagawaLotus),
-                    "MOONFLY" => Some(Theme::Moonfly),
-                    "NIGHTFLY" => Some(Theme::Nightfly),
-                    "OXOCARBON" => Some(Theme::Oxocarbon),
-                    "FERRA" => Some(Theme::Ferra),
-                    "" | "LIST" | "?" => {
-                        self.command_line.push_output(
-                            "Available themes: DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
-                             GRUVBOX_LIGHT GRUVBOX_DARK TOKYONIGHT TOKYONIGHTSTORM TOKYONIGHTLIGHT \
-                             KANAGAWAWAVE KANAGAWADRAGON KANAGAWALOTUS MOONFLY NIGHTFLY OXOCARBON FERRA"
-                        );
-                        return Some(Task::none());
-                    }
-                    _ => {
-                        self.command_line.push_error(crate::tf!(
-                            "COLORSCHEME: unknown theme '{}'. Type COLORSCHEME LIST for options.",
-                            sub
-                        ).as_ref());
-                        return Some(Task::none());
-                    }
-                };
+            cmd if cmd.eq_ignore_ascii_case("COLORSCHEME") => {
+                use crate::command::ValuePromptCommand;
+                let c = ValuePromptCommand::new(
+                    "COLORSCHEME",
+                    "COLORSCHEME  Enter theme name (or ? to list):",
+                );
+                self.command_line.push_output(
+                    "Available themes: DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
+                     GRUVBOX_LIGHT GRUVBOX_DARK TOKYONIGHT TOKYONIGHTSTORM TOKYONIGHTLIGHT \
+                     KANAGAWAWAVE KANAGAWADRAGON KANAGAWALOTUS MOONFLY NIGHTFLY OXOCARBON FERRA",
+                );
+                self.command_line.push_info(&format!(
+                    "Current color scheme: <{}>",
+                    self.ui_theme.name
+                ));
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+                return Some(Task::none());
+            }
+            cmd if cmd.to_ascii_uppercase().starts_with("COLORSCHEME ") => {
+                let sub = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
+                let upper_sub = sub.to_ascii_uppercase();
+                if upper_sub.is_empty() {
+                    self.command_line.push_output(&format!(
+                        "Current color scheme: <{}>",
+                        self.ui_theme.name
+                    ));
+                    return Some(Task::none());
+                }
+                if upper_sub == "LIST" || upper_sub == "?" {
+                    self.command_line.push_output(
+                        "Available themes: DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
+                         GRUVBOX_LIGHT GRUVBOX_DARK TOKYONIGHT TOKYONIGHTSTORM TOKYONIGHTLIGHT \
+                         KANAGAWAWAVE KANAGAWADRAGON KANAGAWALOTUS MOONFLY NIGHTFLY OXOCARBON FERRA",
+                    );
+                    return Some(Task::none());
+                }
+                if sub == "0" || sub == "1" {
+                    self.command_line.push_error(
+                        "COLORSCHEME: 0 and 1 are COLORTHEME options. Enter a theme name (e.g. DARK, LIGHT, DRACULA) or use COLORTHEME.",
+                    );
+                    return Some(Task::none());
+                }
+                let theme = crate::app::config::parse_theme_name(sub);
                 if let Some(t) = theme {
+                    if self.ui_theme.name == "Custom" {
+                        self.saved_custom_palette = Some(self.ui_theme.palette);
+                    }
                     let name = format!("{:?}", t);
+                    self.ui_theme.name = t.to_string();
+                    self.ui_theme.palette =
+                        crate::app::config::UiThemePalette::from_iced(t.seed());
+                    self.theme_color_inputs = self.ui_theme.palette.hex_values();
+                    self.active_theme = t.clone();
+                    self.sync_model_space_theme(true);
+                    self.persist_settings_if_changed();
                     self.command_line
                         .push_output(crate::tf!("Color scheme set to '{name}'.").as_ref());
-                    return Some(Task::done(Message::SetTheme(t)));
+                    return Some(Task::none());
+                } else {
+                    self.command_line.push_error(crate::tf!(
+                        "COLORSCHEME: unknown theme '{}'. Type COLORSCHEME LIST for options.",
+                        sub
+                    ).as_ref());
+                    return Some(Task::none());
                 }
-                return Some(Task::none());
             }
 
             // ── Layout Manager GUI ─────────────────────────────────────────

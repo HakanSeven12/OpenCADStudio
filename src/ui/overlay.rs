@@ -71,6 +71,52 @@ pub struct CrosshairOptions {
     pub snap_angle_deg: f32,
 }
 
+/// Rendering style for the viewport grid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GridStyle {
+    pub opacity: u8,
+    pub bg_luminance: f32,
+}
+
+impl Default for GridStyle {
+    fn default() -> Self {
+        Self {
+            opacity: 18,
+            bg_luminance: 0.15,
+        }
+    }
+}
+
+/// Visual effect options for selection windows, crossings, entity highlights, and grips.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectionVisualOptions {
+    pub area: bool,
+    pub opacity: u8,
+    pub window_color: u8,
+    pub crossing_color: u8,
+    pub highlight_color: u8,
+    pub grip_size: f32,
+    pub grip_color: u8,
+    pub grip_hot: u8,
+    pub grip_hover: u8,
+}
+
+impl Default for SelectionVisualOptions {
+    fn default() -> Self {
+        Self {
+            area: true,
+            opacity: 12,
+            window_color: 0,
+            crossing_color: 0,
+            highlight_color: 0,
+            grip_size: 5.0,
+            grip_color: 0,
+            grip_hot: 0,
+            grip_hover: 0,
+        }
+    }
+}
+
 // ── Grip marker data ──────────────────────────────────────────────────────
 
 /// Describes one grip to be drawn in the viewport overlay.
@@ -147,13 +193,13 @@ impl GridGeometry {
 pub(crate) struct GridKey {
     pub grids: Vec<GridParams>,
     pub bounds: iced::Rectangle,
+    pub style: GridStyle,
 }
 
 impl GridKey {
-    /// Build a key from the per-pane `GridParams` and the overlay bounds. The
-    /// input slice is copied; callers can drop the original.
-    pub(crate) fn from_grids(grids: &[GridParams], bounds: iced::Rectangle) -> Self {
-        Self { grids: grids.to_vec(), bounds }
+    /// Build a key from the per-pane `GridParams`, overlay bounds, and grid style.
+    pub(crate) fn from_grids(grids: &[GridParams], bounds: iced::Rectangle, style: GridStyle) -> Self {
+        Self { grids: grids.to_vec(), bounds, style }
     }
 }
 
@@ -281,8 +327,9 @@ pub struct OstTrackPoint {
 
 pub fn grid_overlay<'a>(
     grid: Vec<GridParams>,
+    style: GridStyle,
 ) -> Element<'a, Message> {
-    canvas(GridCanvas { grid })
+    canvas(GridCanvas { grid, style })
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -290,6 +337,7 @@ pub fn grid_overlay<'a>(
 
 struct GridCanvas {
     grid: Vec<GridParams>,
+    style: GridStyle,
 }
 
 impl canvas::Program<Message> for GridCanvas {
@@ -303,10 +351,10 @@ impl canvas::Program<Message> for GridCanvas {
         bounds: iced::Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let key = GridKey::from_grids(&self.grid, bounds);
+        let key = GridKey::from_grids(&self.grid, bounds, self.style);
 
-        // Hit check: same params, same bounds ⇒ the cached geometry is still
-        // valid. The key includes bounds, so a `should_reuse` match implies
+        // Hit check: same params, same bounds, same style ⇒ the cached geometry is still
+        // valid. The key includes bounds and style, so a `should_reuse` match implies
         // both are equal, and the fork's `draw_with_bounds` will return the
         // cached `Arc` clone (essentially free).
         let hit = should_reuse(state.key.borrow().as_ref(), &key);
@@ -316,11 +364,8 @@ impl canvas::Program<Message> for GridCanvas {
             // returns the cached geometry without invoking the closure.
             state.cache.draw_with_bounds(renderer, bounds, |_frame| {})
         } else {
-            // Params or bounds changed. Clear so the closure runs even when
-            // bounds happen to match the previously-cached frame (e.g. a pan
-            // within the same canvas size would otherwise leave stale
-            // geometry served — the fork's bounds-equality test would return
-            // the cached clone without calling our rebuild closure).
+            // Params, style, or bounds changed. Clear so the closure runs even when
+            // bounds happen to match the previously-cached frame.
             state.cache.clear();
             state.cache.draw_with_bounds(renderer, bounds, |frame| {
                 for g in &self.grid {
@@ -348,14 +393,14 @@ impl canvas::Program<Message> for GridCanvas {
                             g.origin,
                             g.axes,
                             g.limits,
+                            self.style,
                         )
                     });
                 }
             })
         };
 
-        // Update the stored key. Safe: the `borrow()` for `should_reuse` is
-        // dropped at the end of the `if` expression above; no live Ref here.
+        // Update the stored key.
         *state.key.borrow_mut() = Some(key);
 
         vec![geometry]
@@ -383,6 +428,7 @@ pub fn selection_overlay<'a>(
     hover_locked: bool,
     crosshair_bg: [f32; 4],
     crosshair: CrosshairOptions,
+    selection_visual: SelectionVisualOptions,
 ) -> Element<'a, Message> {
     canvas(SelectionCanvas {
         selection,
@@ -405,6 +451,7 @@ pub fn selection_overlay<'a>(
         hover_locked,
         crosshair_bg,
         crosshair,
+        selection_visual,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -462,11 +509,17 @@ struct SelectionCanvas {
     /// rather than the UI theme, which may be light over a dark model viewport.
     crosshair_bg: [f32; 4],
     crosshair: CrosshairOptions,
+    selection_visual: SelectionVisualOptions,
 }
 
-fn draw_grip_marker(frame: &mut canvas::Frame, grip: &GripMarker, theme: &Theme) {
+fn draw_grip_marker(
+    frame: &mut canvas::Frame,
+    grip: &GripMarker,
+    theme: &Theme,
+    visual: &SelectionVisualOptions,
+) {
     let sp = grip.pos;
-    let h = crate::scene::pick::grip::GRIP_HALF_PX;
+    let h = visual.grip_size.clamp(1.0, 25.0);
     let path = match grip.shape {
         GripShape::Square => canvas::Path::rectangle(
             Point::new(sp.x - h, sp.y - h),
@@ -521,10 +574,28 @@ fn draw_grip_marker(frame: &mut canvas::Frame, grip: &GripMarker, theme: &Theme)
     };
 
     if grip.is_hot {
-        frame.fill(&path, theme.palette().danger.base.color);
+        let hot_color = if visual.grip_hot > 0 {
+            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_hot) {
+                Color::from_rgb8(r, g, b)
+            } else {
+                theme.palette().danger.base.color
+            }
+        } else {
+            theme.palette().danger.base.color
+        };
+        frame.fill(&path, hot_color);
     } else if grip.is_hovered {
         let pair = theme.palette().primary.strong;
-        frame.fill(&path, pair.color);
+        let hover_color = if visual.grip_hover > 0 {
+            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_hover) {
+                Color::from_rgb8(r, g, b)
+            } else {
+                pair.color
+            }
+        } else {
+            pair.color
+        };
+        frame.fill(&path, hover_color);
         frame.stroke(
             &path,
             canvas::Stroke {
@@ -535,7 +606,15 @@ fn draw_grip_marker(frame: &mut canvas::Frame, grip: &GripMarker, theme: &Theme)
         );
     } else {
         let palette = theme.palette();
-        let color = palette.primary.base.color;
+        let color = if visual.grip_color > 0 {
+            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_color) {
+                Color::from_rgb8(r, g, b)
+            } else {
+                palette.primary.base.color
+            }
+        } else {
+            palette.primary.base.color
+        };
         let fill = if grip.shape == GripShape::Dropdown {
             color
         } else {
@@ -715,20 +794,40 @@ impl canvas::Program<Message> for SelectionCanvas {
             b: Point,
             crossing: bool,
             theme: &Theme,
+            visual: &SelectionVisualOptions,
         ) {
             let base = if crossing {
-                theme.palette().success.base.color
+                if visual.crossing_color > 0 {
+                    if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.crossing_color) {
+                        Color::from_rgb8(r, g, b)
+                    } else {
+                        theme.palette().success.base.color
+                    }
+                } else {
+                    theme.palette().success.base.color
+                }
             } else {
-                theme.palette().primary.base.color
+                if visual.window_color > 0 {
+                    if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.window_color) {
+                        Color::from_rgb8(r, g, b)
+                    } else {
+                        theme.palette().primary.base.color
+                    }
+                } else {
+                    theme.palette().primary.base.color
+                }
             };
-            let fill = base.scale_alpha(0.12);
-            let stroke = base.scale_alpha(0.9);
             let x0 = a.x.min(b.x);
             let y0 = a.y.min(b.y);
             let w = (a.x - b.x).abs();
             let h = (a.y - b.y).abs();
             let rect = canvas::Path::rectangle(Point::new(x0, y0), Size::new(w, h));
-            frame.fill(&rect, fill);
+            if visual.area && visual.opacity > 0 {
+                let alpha = (visual.opacity as f32 / 100.0).clamp(0.0, 1.0);
+                let fill = base.scale_alpha(alpha);
+                frame.fill(&rect, fill);
+            }
+            let stroke = base.scale_alpha(0.9);
             frame.stroke(
                 &rect,
                 canvas::Stroke {
@@ -740,33 +839,52 @@ impl canvas::Program<Message> for SelectionCanvas {
         }
 
         if let (Some(a), Some(b)) = (self.selection.borrow().box_anchor, self.selection.borrow().box_current) {
-            draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme);
+            draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme, &self.selection_visual);
         }
         // Preview marquee for point-picked windows (STRETCH) — same look, no pick.
         if let Some((a, b, crossing)) = self.selection.borrow().preview_box {
-            draw_marquee(&mut frame, a, b, crossing, theme);
+            draw_marquee(&mut frame, a, b, crossing, theme, &self.selection_visual);
         }
 
         if self.selection.borrow().poly_active && self.selection.borrow().poly_points.len() > 1 {
             let base = if self.selection.borrow().poly_crossing {
-                theme.palette().success.base.color
-            } else {
-                theme.palette().primary.base.color
-            };
-            let fill = base.scale_alpha(0.12);
-            let stroke = base.scale_alpha(0.9);
-            if let Some(cur) = self.selection.borrow().last_move_pos {
-                let start = self.selection.borrow().poly_points[0];
-                let fill_path = canvas::Path::new(|p| {
-                    p.move_to(start);
-                    for pt in &self.selection.borrow().poly_points[1..] {
-                        p.line_to(*pt);
+                if self.selection_visual.crossing_color > 0 {
+                    if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(self.selection_visual.crossing_color) {
+                        Color::from_rgb8(r, g, b)
+                    } else {
+                        theme.palette().success.base.color
                     }
-                    p.line_to(cur);
-                    p.line_to(start);
-                });
-                frame.fill(&fill_path, fill);
+                } else {
+                    theme.palette().success.base.color
+                }
+            } else {
+                if self.selection_visual.window_color > 0 {
+                    if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(self.selection_visual.window_color) {
+                        Color::from_rgb8(r, g, b)
+                    } else {
+                        theme.palette().primary.base.color
+                    }
+                } else {
+                    theme.palette().primary.base.color
+                }
+            };
+            if self.selection_visual.area && self.selection_visual.opacity > 0 {
+                let alpha = (self.selection_visual.opacity as f32 / 100.0).clamp(0.0, 1.0);
+                let fill = base.scale_alpha(alpha);
+                if let Some(cur) = self.selection.borrow().last_move_pos {
+                    let start = self.selection.borrow().poly_points[0];
+                    let fill_path = canvas::Path::new(|p| {
+                        p.move_to(start);
+                        for pt in &self.selection.borrow().poly_points[1..] {
+                            p.line_to(*pt);
+                        }
+                        p.line_to(cur);
+                        p.line_to(start);
+                    });
+                    frame.fill(&fill_path, fill);
+                }
             }
+            let stroke = base.scale_alpha(0.9);
             let path = canvas::Path::new(|p| {
                 p.move_to(self.selection.borrow().poly_points[0]);
                 for pt in &self.selection.borrow().poly_points[1..] {
@@ -840,7 +958,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                     }
                 }
                 for grip in &self.grips {
-                    draw_grip_marker(frame, grip, theme);
+                    draw_grip_marker(frame, grip, theme, &self.selection_visual);
                 }
             });
         }
@@ -1242,6 +1360,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                 ucs.origin_screen,
                 ucs.hover,
                 ucs.selected,
+                self.crosshair_bg,
             );
         }
 
@@ -1341,6 +1460,7 @@ const MIN_GRID_PX: f32 = 20.0;
 /// Stop an infinite perspective grid before adjacent lines merge at the horizon.
 const MIN_HORIZON_GRID_PX: f32 = 5.0;
 
+#[allow(clippy::too_many_arguments)]
 fn draw_grid(
     frame: &mut canvas::Frame,
     view_rot: Mat4,
@@ -1350,12 +1470,25 @@ fn draw_grid(
     grid_origin: glam::DVec3,
     grid_axes: (Vec3, Vec3, Vec3),
     limits: Option<(glam::DVec2, glam::DVec2)>,
+    style: GridStyle,
 ) {
-    let gc = Color {
-        r: 0.28,
-        g: 0.28,
-        b: 0.28,
-        a: 0.7,
+    let alpha = (style.opacity as f32 / 100.0).clamp(0.02, 1.0);
+    let gc = if style.bg_luminance > 0.5 {
+        // Light background: subtle dark grid lines
+        Color {
+            r: 0.10,
+            g: 0.10,
+            b: 0.10,
+            a: alpha,
+        }
+    } else {
+        // Dark background: subtle light grid lines
+        Color {
+            r: 0.80,
+            g: 0.80,
+            b: 0.80,
+            a: alpha,
+        }
     };
     let st = canvas::Stroke {
         width: 0.5,
@@ -1375,7 +1508,7 @@ fn draw_grid(
     if geometry.axis_extent > 0.0 {
         let (gx, gy, gz) = grid_axes;
         let extent = (geometry.axis_extent + step) * 1.5;
-        draw_axes(frame, view_rot, eye, bounds, extent.max(10.0), grid_origin, (gx, gy, gz));
+        draw_axes(frame, view_rot, eye, bounds, extent.max(10.0), grid_origin, (gx, gy, gz), style.bg_luminance);
     }
 }
 
@@ -1922,6 +2055,7 @@ pub(crate) fn grid_segments(
 
 // ── Coloured UCS axes ──────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn draw_axes(
     frame: &mut canvas::Frame,
     view_rot: Mat4,
@@ -1930,6 +2064,7 @@ fn draw_axes(
     extent: f32,
     origin: glam::DVec3,
     axes: (Vec3, Vec3, Vec3),
+    bg_luminance: f32,
 ) {
     let w2s = |world: glam::DVec3| -> Point {
         let ndc = view_rot.project_point3((world - eye).as_vec3());
@@ -1955,8 +2090,9 @@ fn draw_axes(
             axis_stroke(r, g, b),
         );
     };
+    let y_green = if bg_luminance > 0.5 { 0.60 } else { 0.85 };
     line(ax, 0.90, 0.20, 0.20); // X — red
-    line(ay, 0.20, 0.85, 0.20); // Y — green
+    line(ay, 0.20, y_green, 0.20); // Y — green
     line(az, 0.20, 0.40, 0.90); // Z — blue
 }
 
@@ -2090,6 +2226,7 @@ fn draw_ucs_icon(
     origin_screen: Option<Point>,
     hover: bool,
     selected: bool,
+    crosshair_bg: [f32; 4],
 ) {
     let Some((icon_origin, at_origin, geom)) =
         ucs_icon_geometry(vp, bounds, axes, origin_screen)
@@ -2101,6 +2238,8 @@ fn draw_ucs_icon(
     // corner), so hover/selection highlight applies there too.
     let _ = at_origin;
     let highlight = hover || selected;
+    let is_light_bg = 0.299 * crosshair_bg[0] + 0.587 * crosshair_bg[1] + 0.114 * crosshair_bg[2] > 0.5;
+    let y_green = if is_light_bg { 0.60 } else { 0.85 };
 
     struct AxisInfo {
         dx: f32,
@@ -2129,7 +2268,7 @@ fn draw_ucs_icon(
             sc_len: geom[1].sc_len,
             depth: geom[1].depth,
             r: 0.22,
-            g: 0.85,
+            g: y_green,
             b: 0.22,
             label: "Y",
         },
@@ -2228,15 +2367,23 @@ fn draw_ucs_icon(
 
     // Origin dot.
     let circle = canvas::Path::circle(icon_origin, 3.5);
-    frame.fill(
-        &circle,
+    let dot_lum = 0.299 * crosshair_bg[0] + 0.587 * crosshair_bg[1] + 0.114 * crosshair_bg[2];
+    let dot_color = if dot_lum > 0.5 {
+        Color {
+            r: 0.15,
+            g: 0.15,
+            b: 0.15,
+            a: 0.95,
+        }
+    } else {
         Color {
             r: 0.9,
             g: 0.9,
             b: 0.9,
             a: 0.95,
-        },
-    );
+        }
+    };
+    frame.fill(&circle, dot_color);
 
     // Draggable grips when selected: a square at the origin and at the X / Y
     // tips. Warm grip colour with a light border, like an entity grip.
@@ -3043,11 +3190,11 @@ mod bench_grid_geometry_tests {
         // Pre-seed a `GridCanvasState` with the same key the bench will
         // build each iteration — guaranteed hit path.
         let state = GridCanvasState::default();
-        let stored_key = GridKey::from_grids(&grids, canvas_bounds);
+        let stored_key = GridKey::from_grids(&grids, canvas_bounds, GridStyle::default());
         *state.key.borrow_mut() = Some(stored_key);
 
         for _ in 0..20 {
-            let key = GridKey::from_grids(black_box(&grids), black_box(canvas_bounds));
+            let key = GridKey::from_grids(black_box(&grids), black_box(canvas_bounds), GridStyle::default());
             let hit = should_reuse(state.key.borrow().as_ref(), &key);
             black_box(hit);
         }
@@ -3056,7 +3203,7 @@ mod bench_grid_geometry_tests {
         let start = Instant::now();
         let mut hit_count = 0u32;
         for _ in 0..n {
-            let key = GridKey::from_grids(black_box(&grids), black_box(canvas_bounds));
+            let key = GridKey::from_grids(black_box(&grids), black_box(canvas_bounds), GridStyle::default());
             if should_reuse(state.key.borrow().as_ref(), &key) {
                 hit_count += 1;
             }
@@ -3098,17 +3245,17 @@ mod grid_key_tests {
         }
     }
 
-    /// Same `Vec<GridParams>` + same bounds ⇒ keys compare equal.
+    /// Same `Vec<GridParams>` + same bounds + same style ⇒ keys compare equal.
     #[test]
     fn grid_key_matches_identical_params() {
         let grids = vec![baseline_params(), baseline_params()];
         let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
-        let a = GridKey::from_grids(&grids, bounds);
-        let b = GridKey::from_grids(&grids, bounds);
+        let a = GridKey::from_grids(&grids, bounds, GridStyle::default());
+        let b = GridKey::from_grids(&grids, bounds, GridStyle::default());
         assert_eq!(a, b);
     }
 
-    /// One test, one baseline. Every change of any of the 7 inputs must produce
+    /// One test, one baseline. Every change of any of the inputs must produce
     /// a key that differs from the baseline. This is the entire correctness
     /// contract for cache hit/miss — if any input is ignored, the cache serves
     /// a stale grid.
@@ -3121,13 +3268,13 @@ mod grid_key_tests {
             height: 720.0,
         };
         let baseline_grids = vec![baseline_params()];
-        let baseline_key = GridKey::from_grids(&baseline_grids, baseline_bounds);
+        let baseline_key = GridKey::from_grids(&baseline_grids, baseline_bounds, GridStyle::default());
 
         // view_rot: small extra rotation
         let mut p = baseline_params();
         p.view_rot = Mat4::from_rotation_x(0.15 + 0.01) * Mat4::from_rotation_y(0.05);
         assert_ne!(
-            GridKey::from_grids(&[p], baseline_bounds),
+            GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
             baseline_key,
             "view_rot change must invalidate"
         );
@@ -3136,7 +3283,7 @@ mod grid_key_tests {
         let mut p = baseline_params();
         p.eye = glam::DVec3::new(4.0, 3.5, 9.5);
         assert_ne!(
-            GridKey::from_grids(&[p], baseline_bounds),
+            GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
             baseline_key,
             "eye change must invalidate"
         );
@@ -3145,7 +3292,7 @@ mod grid_key_tests {
         let mut p = baseline_params();
         p.step = 40.0;
         assert_ne!(
-            GridKey::from_grids(&[p], baseline_bounds),
+            GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
             baseline_key,
             "step change must invalidate"
         );
@@ -3154,7 +3301,7 @@ mod grid_key_tests {
         let mut p = baseline_params();
         p.origin = glam::DVec3::new(100.0, 0.0, 0.0);
         assert_ne!(
-            GridKey::from_grids(&[p], baseline_bounds),
+            GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
             baseline_key,
             "origin change must invalidate"
         );
@@ -3163,7 +3310,7 @@ mod grid_key_tests {
         let mut p = baseline_params();
         p.axes = (Vec3::Y, Vec3::X, Vec3::Z);
         assert_ne!(
-            GridKey::from_grids(&[p], baseline_bounds),
+            GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
             baseline_key,
             "axes change must invalidate"
         );
@@ -3172,7 +3319,7 @@ mod grid_key_tests {
         let mut p = baseline_params();
         p.limits = Some((glam::DVec2::new(0.0, 0.0), glam::DVec2::new(100.0, 100.0)));
         assert_ne!(
-            GridKey::from_grids(&[p], baseline_bounds),
+            GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
             baseline_key,
             "limits change must invalidate"
         );
@@ -3185,9 +3332,27 @@ mod grid_key_tests {
             height: 720.0,
         };
         assert_ne!(
-            GridKey::from_grids(&baseline_grids, other_bounds),
+            GridKey::from_grids(&baseline_grids, other_bounds, GridStyle::default()),
             baseline_key,
             "bounds change must invalidate"
+        );
+
+        // style opacity: change opacity
+        let mut style = GridStyle::default();
+        style.opacity = 50;
+        assert_ne!(
+            GridKey::from_grids(&baseline_grids, baseline_bounds, style),
+            baseline_key,
+            "style opacity change must invalidate"
+        );
+
+        // style bg_luminance: change luminance (dark to light)
+        let mut style = GridStyle::default();
+        style.bg_luminance = 0.9;
+        assert_ne!(
+            GridKey::from_grids(&baseline_grids, baseline_bounds, style),
+            baseline_key,
+            "style bg_luminance change must invalidate"
         );
     }
 
@@ -3200,13 +3365,13 @@ mod grid_key_tests {
         let pane1 = baseline_params();
         let pane2 = baseline_params();
         let both = vec![pane1.clone(), pane2.clone()];
-        let baseline = GridKey::from_grids(&both, bounds);
+        let baseline = GridKey::from_grids(&both, bounds, GridStyle::default());
 
         let mut pane2_changed = pane2;
         pane2_changed.step = 160.0;
         let dirty = vec![pane1, pane2_changed];
         assert_ne!(
-            GridKey::from_grids(&dirty, bounds),
+            GridKey::from_grids(&dirty, bounds, GridStyle::default()),
             baseline,
             "second pane change must invalidate"
         );
@@ -3217,7 +3382,7 @@ mod grid_key_tests {
     fn should_reuse_empty() {
         let grids = vec![baseline_params()];
         let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
-        let key = GridKey::from_grids(&grids, bounds);
+        let key = GridKey::from_grids(&grids, bounds, GridStyle::default());
         assert!(!should_reuse(None, &key));
     }
 
@@ -3226,7 +3391,7 @@ mod grid_key_tests {
     fn should_reuse_equal() {
         let grids = vec![baseline_params()];
         let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
-        let key = GridKey::from_grids(&grids, bounds);
+        let key = GridKey::from_grids(&grids, bounds, GridStyle::default());
         assert!(should_reuse(Some(&key), &key));
     }
 
@@ -3239,8 +3404,8 @@ mod grid_key_tests {
         pane2.step = 160.0;
         let grids_b = vec![pane2];
         let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
-        let old = GridKey::from_grids(&grids_a, bounds);
-        let new = GridKey::from_grids(&grids_b, bounds);
+        let old = GridKey::from_grids(&grids_a, bounds, GridStyle::default());
+        let new = GridKey::from_grids(&grids_b, bounds, GridStyle::default());
         assert!(!should_reuse(Some(&old), &new));
     }
 }
@@ -3281,7 +3446,7 @@ mod grid_canvas_state_tests {
             axes: grid_axes,
             limits,
         };
-        let key = GridKey::from_grids(&[params], bounds);
+        let key = GridKey::from_grids(&[params], bounds, GridStyle::default());
 
         let state = GridCanvasState::default();
         *state.key.borrow_mut() = Some(key.clone());
@@ -3291,7 +3456,7 @@ mod grid_canvas_state_tests {
 
         // Different bounds on the same params ⇒ different key, do not reuse.
         let other_bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 640.0, height: 480.0 };
-        let other_key = GridKey::from_grids(&[params], other_bounds);
+        let other_key = GridKey::from_grids(&[params], other_bounds, GridStyle::default());
         assert!(!should_reuse(state.key.borrow().as_ref(), &other_key));
     }
 }

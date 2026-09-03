@@ -96,19 +96,3 @@ pub(super) fn parse_plot_scale(s: &str) -> (f64, f64) {
     }
     (1.0, 1.0)
 }
-
-/// Convert an internal `[r,g,b,a]` colour (0.0–1.0) to a persisted 0–255 RGB
-/// triplet, dropping alpha (backgrounds are always opaque).
-pub(super) fn f4_to_u3([r, g, b, _]: [f32; 4]) -> [u8; 3] {
-    [
-        (r * 255.0).round().clamp(0.0, 255.0) as u8,
-        (g * 255.0).round().clamp(0.0, 255.0) as u8,
-        (b * 255.0).round().clamp(0.0, 255.0) as u8,
-    ]
-}
-
-/// Inverse of [`f4_to_u3`]: a persisted 0–255 RGB triplet back to an opaque
-/// `[r,g,b,a]` colour.
-pub(super) fn u3_to_f4([r, g, b]: [u8; 3]) -> [f32; 4] {
-    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
-}

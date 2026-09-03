@@ -1709,22 +1709,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn on_thumbnail_capture_frame(&mut self) -> Task<Message> {
-        let Some(pending) = self.pending_native_thumbnail_save.take() else {
-            return Task::none();
-        };
-        let Some(i) = self.tabs.iter().position(|tab| tab.id == pending.tab_id) else {
-            self.thumbnail_capture_clean = false;
-            return Task::none();
-        };
-        self.queue_native_save(
-            i,
-            pending.path,
-            pending.version,
-            pending.purpose,
-            pending.continuation,
-            pending.set_current_path,
-            pending.check_external_change,
-        )
+        Task::none()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1816,26 +1801,10 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         check_external_change: bool,
     ) -> Task<Message> {
         let tab_id = self.tabs[i].id;
-        if self
-            .pending_native_thumbnail_save
-            .as_ref()
-            .is_some_and(|pending| pending.tab_id == tab_id)
-        {
-            if purpose != crate::app::SavePurpose::Autosave {
-                self.command_line
-                    .push_info(crate::t!("Save already running for this drawing.").as_ref());
-            }
-            return Task::none();
-        }
-        let capture_ready =
-            self.thumbnail_capture_clean && self.pending_native_thumbnail_save.is_none();
         if self.active_save_jobs.contains_key(&tab_id) {
             if purpose != crate::app::SavePurpose::Autosave {
                 self.command_line
                     .push_info(crate::t!("Save already running for this drawing.").as_ref());
-            }
-            if capture_ready {
-                self.thumbnail_capture_clean = false;
             }
             return Task::none();
         }
@@ -1854,9 +1823,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             self.active_tab = i;
             self.save_dialog_for_unsaved =
                 continuation != crate::app::SaveContinuation::None;
-            if capture_ready {
-                self.thumbnail_capture_clean = false;
-            }
             return self.open_save_dialog_window(i);
         }
         if purpose != crate::app::SavePurpose::Autosave
@@ -1881,33 +1847,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             });
             self.restore_failed_save_continuation(continuation, i);
             self.active_modal = Some(crate::app::ModalKind::FileInUse);
-            if capture_ready {
-                self.thumbnail_capture_clean = false;
-            }
-            return Task::none();
-        }
-
-        if purpose != crate::app::SavePurpose::Autosave
-            && i == self.active_tab
-            && !self.thumbnail_capture_clean
-            && self.main_window.is_some()
-            && crate::ui::wrap_bar::dropdown_bounds(
-                crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,
-            )
-            .is_some()
-        {
-            self.pending_native_thumbnail_save = Some(
-                crate::app::PendingNativeThumbnailSave {
-                    tab_id,
-                    path,
-                    version,
-                    purpose,
-                    continuation,
-                    set_current_path,
-                    check_external_change,
-                },
-            );
-            self.thumbnail_capture_clean = true;
             return Task::none();
         }
 
@@ -1934,9 +1873,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     });
                     self.restore_failed_save_continuation(continuation, i);
                     self.active_modal = Some(crate::app::ModalKind::FileInUse);
-                    if capture_ready {
-                        self.thumbnail_capture_clean = false;
-                    }
                     return Task::none();
                 }
                 Err(crate::io::edit_lock::EditLeaseError::Unavailable(error)) => {
@@ -1950,13 +1886,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         let epoch = self.tabs[i].scene.geometry_epoch;
         let revision = self.tabs[i].edit_revision;
         let camera_generation = self.tabs[i].scene.camera_generation;
-        let thumbnail = (purpose != crate::app::SavePurpose::Autosave && i == self.active_tab)
-            .then_some(version >= acadrust::DxfVersion::AC1027);
-        let capture_bounds = thumbnail.and_then(|_| {
-            crate::ui::wrap_bar::dropdown_bounds(
-                crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,
-            )
-        });
         let clone_started = iced::time::Instant::now();
         let snapshot = self.tabs[i].scene.document.clone();
         let clone_ms = clone_started.elapsed().as_secs_f64() * 1000.0;
@@ -2004,9 +1933,6 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         let (expected_fingerprint, verify_reader) = match verification {
             Ok(verification) => verification,
             Err(error) => {
-                if capture_ready {
-                    self.thumbnail_capture_clean = false;
-                }
                 return Task::perform(
                     async move {
                         crate::app::SaveOutcome {
@@ -2030,97 +1956,40 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             }
         };
         let worker_path = path.clone();
-        let capture_window = thumbnail.and(capture_bounds).and(self.main_window);
-        let mut work = Some((
-            snapshot,
-            thumbnail,
-            capture_bounds,
-            worker_path,
-            expected_fingerprint,
-            verify_reader,
-            path,
-            previous_autosave,
-        ));
-        let mut run_save = move |screenshot: Option<iced::window::Screenshot>| {
-            let (
-                mut snapshot,
-                thumbnail,
-                capture_bounds,
-                worker_path,
-                expected_fingerprint,
-                verify_reader,
-                path,
-                previous_autosave,
-            ) = work.take().expect("save capture produced more than one result");
-            Task::perform(
-                async move {
-                    let (result, refreshed_preview) = std::thread::spawn(move || {
-                        let mut refreshed_preview = None;
-                        if let Some(png) = thumbnail {
-                            let started = iced::time::Instant::now();
-                            if let Some(preview) = screenshot.as_ref().and_then(|screenshot| {
-                                capture_bounds.and_then(|bounds| {
-                                    crate::io::thumbnail::from_screenshot(screenshot, bounds, png)
-                                })
-                            }) {
-                                snapshot.preview = Some(preview);
-                                refreshed_preview = Some(snapshot.preview.clone());
-                            }
-                            if crate::perf::enabled() {
-                                crate::perf_record!(
-                                    "[perf] save-thumbnail {:.1}ms",
-                                    started.elapsed().as_secs_f64() * 1000.0,
-                                );
-                            }
-                        }
-                        let result = crate::io::save_owned_as_version_atomic(
-                            snapshot,
-                            &worker_path,
-                            version,
-                            backup,
-                            expected_fingerprint,
-                            verify_reader,
-                        );
-                        (result, refreshed_preview)
-                    })
-                    .join()
-                    .unwrap_or_else(|_| {
-                        (
-                            Err(crate::io::SaveFailure::other("save worker panicked")),
-                            None,
-                        )
-                    });
-                    crate::app::SaveOutcome {
-                        job_id,
-                        tab_id,
-                        epoch,
-                        revision,
-                        camera_generation,
-                        path,
+        Task::perform(
+            async move {
+                let result = std::thread::spawn(move || {
+                    crate::io::save_owned_as_version_atomic(
+                        snapshot,
+                        &worker_path,
                         version,
-                        previous_autosave,
-                        set_current_path,
-                        purpose,
-                        continuation,
-                        refreshed_preview,
-                        result,
-                    }
-                },
-                Message::SaveFinished,
-            )
-        };
-        match capture_window {
-            Some(window) => iced::window::screenshot(window).map(Some).then(move |screenshot| {
-                Task::batch([
-                    Task::done(Message::ThumbnailCaptureFinished),
-                    run_save(screenshot),
-                ])
-            }),
-            None => {
-                self.thumbnail_capture_clean = false;
-                run_save(None)
-            }
-        }
+                        backup,
+                        expected_fingerprint,
+                        verify_reader,
+                    )
+                })
+                .join()
+                .unwrap_or_else(|_| {
+                    Err(crate::io::SaveFailure::other("save worker panicked"))
+                });
+                crate::app::SaveOutcome {
+                    job_id,
+                    tab_id,
+                    epoch,
+                    revision,
+                    camera_generation,
+                    path,
+                    version,
+                    previous_autosave,
+                    set_current_path,
+                    purpose,
+                    continuation,
+                    refreshed_preview: None,
+                    result,
+                }
+            },
+            Message::SaveFinished,
+        )
     }
 
     #[cfg(not(target_arch = "wasm32"))]

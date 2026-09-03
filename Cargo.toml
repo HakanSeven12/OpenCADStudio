@@ -19,8 +19,8 @@ winresource = "0.1"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 semver = "1"
-iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "1d1a17f146a3dc01597883ca524633c14646934a", features = ["image", "svg", "advanced", "canvas", "smol", "markdown"] }
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "1d1a17f146a3dc01597883ca524633c14646934a" }
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["image", "svg", "advanced", "canvas", "smol", "markdown"] }
+iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_aw = { git = "https://github.com/HakanSeven12/iced_aw.git", branch = "agent/fix-iced-fonts", features = ["menu", "context_menu", "color_picker", "drop_down"] }
 bytemuck = { version = "1.25", features = ["derive"] }
 glam = { version = "0.33", features = ["bytemuck"] }
@@ -57,8 +57,8 @@ windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_Window
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "wayland"] }
 
 [patch.crates-io]
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "1d1a17f146a3dc01597883ca524633c14646934a" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "1d1a17f146a3dc01597883ca524633c14646934a" }
+iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
+iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 
 [patch."https://github.com/HakanSeven12/cadcodec.git"]
 acadrust = { git = "https://git@github.com/HakanSeven12/cadcodec.git", rev = "393d6c0857447f9ca678bed97a612707f0a842c6" }
@@ -117,7 +117,7 @@ web-sys = { version = "=0.3.85", features = [
     "Node",
     "HtmlElement",
 ] }
-iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "1d1a17f146a3dc01597883ca524633c14646934a", features = ["webgl", "fira-sans"] }
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["webgl", "fira-sans"] }
 
 [profile.release]
 strip = true

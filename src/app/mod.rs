@@ -671,8 +671,6 @@ pub(super) struct OpenCADStudio {
     main_window: Option<window::Id>,
     /// Hides drawing UI overlays for one thumbnail capture frame.
     thumbnail_capture_clean: bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    pending_native_thumbnail_save: Option<PendingNativeThumbnailSave>,
     #[cfg(target_arch = "wasm32")]
     pending_web_thumbnail_save: Option<PendingWebThumbnailSave>,
     // ── Floating panel windows ────────────────────────────────────────────
@@ -1227,18 +1225,6 @@ pub(super) enum SaveContinuation {
     None,
     CloseTab,
     Quit,
-}
-
-#[derive(Debug, Clone)]
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) struct PendingNativeThumbnailSave {
-    tab_id: u64,
-    path: PathBuf,
-    version: acadrust::DxfVersion,
-    purpose: SavePurpose,
-    continuation: SaveContinuation,
-    set_current_path: bool,
-    check_external_change: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2063,8 +2049,6 @@ pub enum Message {
     AutoSave,
     /// A clean viewport frame is ready for thumbnail capture.
     ThumbnailCaptureFrame,
-    /// Restore drawing UI after the compositor screenshot is captured.
-    ThumbnailCaptureFinished,
     /// Native background save/autosave completed.
     #[cfg(not(target_arch = "wasm32"))]
     SaveFinished(SaveOutcome),
@@ -3389,8 +3373,6 @@ impl OpenCADStudio {
             last_point: None,
             main_window: None,
             thumbnail_capture_clean: false,
-            #[cfg(not(target_arch = "wasm32"))]
-            pending_native_thumbnail_save: None,
             #[cfg(target_arch = "wasm32")]
             pending_web_thumbnail_save: None,
             color_pick_target: None,

@@ -7,12 +7,18 @@
 //!   the shared [`dwg_thumbnailer`] core crate (also used by the Windows/macOS
 //!   thumbnail handlers).
 
+#[cfg(any(target_arch = "wasm32", test))]
 use acadrust::{Preview, PreviewFormat};
+#[cfg(target_arch = "wasm32")]
 use iced::Rectangle;
-use image::{ImageFormat, RgbImage};
+use image::ImageFormat;
+#[cfg(any(target_arch = "wasm32", test))]
+use image::RgbImage;
+#[cfg(any(target_arch = "wasm32", test))]
 use std::io::Cursor;
 
 /// Build a preview from the visible drawing area of an Iced window screenshot.
+#[cfg(target_arch = "wasm32")]
 pub fn from_screenshot(
     screenshot: &iced::window::Screenshot,
     bounds: Rectangle,
@@ -59,6 +65,7 @@ pub fn from_screenshot(
 const MAX_DIM: u32 = 256;
 
 /// Canvas dimensions for an aspect ratio, longest edge = [`MAX_DIM`].
+#[cfg(any(target_arch = "wasm32", test))]
 fn canvas_dims(aspect: f64) -> (u32, u32) {
     if aspect >= 1.0 {
         (MAX_DIM, ((MAX_DIM as f64 / aspect).round() as u32).clamp(16, MAX_DIM))
@@ -68,6 +75,7 @@ fn canvas_dims(aspect: f64) -> (u32, u32) {
 }
 
 /// Encode PNG for R2013+; older targets receive a BMP/DIB.
+#[cfg(any(target_arch = "wasm32", test))]
 fn encode(img: RgbImage, png: bool) -> Option<Preview> {
     if png {
         let mut buf = Cursor::new(Vec::new());
@@ -81,6 +89,7 @@ fn encode(img: RgbImage, png: bool) -> Option<Preview> {
 
 /// Build an 8-bit palettised, `BI_RLE8`-compressed DIB. `None` when the image
 /// holds more than 256 distinct colours (the caller then uses 24-bit).
+#[cfg(any(target_arch = "wasm32", test))]
 fn rle8_dib(img: &RgbImage) -> Option<Vec<u8>> {
     let (w, h) = (img.width(), img.height());
     // Exact palette + per-pixel index (top-to-bottom, left-to-right).
@@ -149,6 +158,7 @@ fn rle8_dib(img: &RgbImage) -> Option<Vec<u8>> {
 }
 
 /// 24-bit uncompressed DIB (fallback): the `image` BMP minus its file header.
+#[cfg(any(target_arch = "wasm32", test))]
 fn bmp24_dib(img: &RgbImage) -> Option<Vec<u8>> {
     let mut buf = Cursor::new(Vec::new());
     img.write_to(&mut buf, ImageFormat::Bmp).ok()?;

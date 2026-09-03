@@ -3586,6 +3586,7 @@ dimstyle =
     .move-text-outside-first = Najpierw przenieś tekst na zewnątrz
     .period = Okres
     .space = Spacja
+    .surveyors-units = Jednostki geodezyjne
 
 style-manager =
     .alignment-spacing = Rozstaw wyrównania

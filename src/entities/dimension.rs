@@ -3803,28 +3803,45 @@ fn tessellate_dimension_inner(
     );
 
     // Per-spec colours: DIMCLRD (dim/arrows), DIMCLRE (ext), DIMCLRT (text).
-    // 0=ByBlock and 256=ByLayer fall through to entity_color. DIMCLRD also
-    // honours a per-object ACAD_DSTYLE override (code 176) so an edited
-    // dim-line colour renders even without touching the style.
+    // 0=ByBlock and 256=ByLayer fall through to entity_color. Each honours the
+    // per-object ACAD_DSTYLE override (codes 176/177/178) the Properties panel
+    // reads and writes, so an edited colour renders without touching the style.
+    let xd = &dim.base().common.extended_data;
     let dim_color = if selected {
         WireModel::SELECTED
     } else {
-        let dim_clr = crate::entities::dim_override::int(
-            &dim.base().common.extended_data,
-            crate::entities::dim_override::DIMCLRD,
+        resolve_dim_color(
+            dim_color_index(
+                xd,
+                crate::entities::dim_override::DIMCLRD,
+                style.map(|s| s.dimclrd).unwrap_or(0),
+            ),
+            entity_color,
         )
-        .unwrap_or_else(|| style.map(|s| s.dimclrd).unwrap_or(0));
-        resolve_dim_color(dim_clr, entity_color)
     };
     let ext_color = if selected {
         WireModel::SELECTED
     } else {
-        resolve_dim_color(style.map(|s| s.dimclre).unwrap_or(0), entity_color)
+        resolve_dim_color(
+            dim_color_index(
+                xd,
+                crate::entities::dim_override::DIMCLRE,
+                style.map(|s| s.dimclre).unwrap_or(0),
+            ),
+            entity_color,
+        )
     };
     let text_color = if selected {
         entity_color // text wire color set by inner tessellate; keep entity tint
     } else {
-        resolve_dim_color(style.map(|s| s.dimclrt).unwrap_or(0), entity_color)
+        resolve_dim_color(
+            dim_color_index(
+                xd,
+                crate::entities::dim_override::DIMCLRT,
+                style.map(|s| s.dimclrt).unwrap_or(0),
+            ),
+            entity_color,
+        )
     };
 
     let snap_pts = dimension_snap_pts(dim);
@@ -4194,6 +4211,18 @@ fn tessellate_dimension_inner(
 
     wires
 }
+/// The ACI index a dimension colour renders with: the per-object ACAD_DSTYLE
+/// override when the entity carries one, else the dimension style's value.
+/// The Properties panel reads and writes these same overrides, so the renderer
+/// has to consult them or an edited colour shows in the panel and nowhere else.
+fn dim_color_index(
+    xd: &acadrust::xdata::ExtendedData,
+    code: i16,
+    inherited: i16,
+) -> i16 {
+    crate::entities::dim_override::int(xd, code).unwrap_or(inherited)
+}
+
 fn resolve_dim_color(idx: i16, fallback: [f32; 4]) -> [f32; 4] {
     // DIMCLR* convention: 0 = BYBLOCK, 256 = BYLAYER → entity colour wins.
     if idx == 0 || idx == 256 {
@@ -6432,10 +6461,16 @@ fn format_with_unit(
 }
 
 fn format_engineering(inches: f64, dec: usize) -> String {
-    let sign = if inches < 0.0 { "-" } else { "" };
-    let abs = inches.abs();
-    let feet = (abs / 12.0).trunc();
-    let rem_in = abs - feet * 12.0;
+    // Round to the printed precision *first*, then split, so inches that round
+    // up to a full foot carry into the feet instead of printing an
+    // out-of-range "2'-12.00"". Same reasoning as `format_architectural`,
+    // where the grid is the fraction denominator rather than a decimal place.
+    let scale = 10f64.powi(dec.min(15) as i32);
+    let ticks = (inches.abs() * scale).round();
+    let per_foot = 12.0 * scale;
+    let sign = if inches < 0.0 && ticks != 0.0 { "-" } else { "" };
+    let feet = (ticks / per_foot).trunc();
+    let rem_in = (ticks - feet * per_foot) / scale;
     format!("{}{:.0}'-{:.*}\"", sign, feet, dec, rem_in)
 }
 
@@ -6567,6 +6602,8 @@ fn format_angular_value(measurement_deg: f64, style: Option<&DimStyle>) -> Strin
                 swap_decimal_sep(&apply_angular_zero_suppression(&raw, azin), decimal_separator)
             )
         }
+        // 4 = Surveyor's units
+        4 => format_surveyor(measurement_deg, adec, azin, decimal_separator),
         // 0 or unknown = Decimal Degrees
         _ => {
             let raw = format!("{:.*}", adec, measurement_deg);
@@ -6576,6 +6613,48 @@ fn format_angular_value(measurement_deg: f64, style: Option<&DimStyle>) -> Strin
             )
         }
     }
+}
+
+/// Surveyor's units (DIMAUNIT 4): a bearing away from north or south toward
+/// east or west, so the quoted angle never exceeds a quarter turn. Due north,
+/// south, east and west have no bearing to quote and are written as the single
+/// letter, which is also what keeps a quarter turn from reading as a
+/// contradictory `N 90d0'0" E`. The bearing is DMS, so it carries DIMADEC,
+/// DIMAZIN and DIMDSEP the same way the DMS format does.
+fn format_surveyor(deg: f64, sec_dec: usize, azin: i16, decimal_separator: i16) -> String {
+    // Quantise before choosing a cardinal or a quadrant, so a value a hair
+    // under a cardinal direction does not print a quarter-turn bearing.
+    let scale = 3600.0 * 10f64.powi(sec_dec.min(8) as i32);
+    let turn = 360.0 * scale;
+    let ticks = (deg.rem_euclid(360.0) * scale).round().rem_euclid(turn);
+    let at = |d: f64| (ticks - d * scale).abs() < 0.5;
+    if at(0.0) {
+        return "E".into();
+    }
+    if at(90.0) {
+        return "N".into();
+    }
+    if at(180.0) {
+        return "W".into();
+    }
+    if at(270.0) {
+        return "S".into();
+    }
+    let d = ticks / scale;
+    // Measured from the nearer pole, toward the side the angle falls on.
+    let (pole, bearing, side) = if d < 90.0 {
+        ("N", 90.0 - d, "E")
+    } else if d < 180.0 {
+        ("N", d - 90.0, "W")
+    } else if d < 270.0 {
+        ("S", 270.0 - d, "W")
+    } else {
+        ("S", d - 270.0, "E")
+    };
+    format!(
+        "{pole} {} {side}",
+        format_dms(bearing, sec_dec, azin, decimal_separator)
+    )
 }
 
 fn format_dms(deg: f64, sec_dec: usize, azin: i16, decimal_separator: i16) -> String {
@@ -7271,8 +7350,105 @@ mod dimtad_tests {
 }
 
 #[cfg(test)]
+mod angular_unit_tests {
+    use super::format_angular_value;
+    use acadrust::tables::DimStyle;
+
+    fn style(dimaunit: i16, dimadec: i16) -> DimStyle {
+        let mut s = DimStyle::standard();
+        s.dimaunit = dimaunit;
+        s.dimadec = dimadec;
+        s
+    }
+
+    // DIMAUNIT 4 is Surveyor's units. It used to fall through to the decimal
+    // branch, so an angular dimension in a drawing authored with surveyor
+    // units read as plain degrees while AUNITS=4 elsewhere wrote a bearing.
+    #[test]
+    fn surveyor_units_write_a_bearing() {
+        assert_eq!(format_angular_value(45.0, Some(&style(4, 0))), "N 45\u{b0}0'0\" E");
+        assert_eq!(format_angular_value(135.0, Some(&style(4, 0))), "N 45\u{b0}0'0\" W");
+        assert_eq!(format_angular_value(200.0, Some(&style(4, 0))), "S 70\u{b0}0'0\" W");
+        assert_eq!(format_angular_value(300.0, Some(&style(4, 0))), "S 30\u{b0}0'0\" E");
+        // A hair under a cardinal must not quote a quarter-turn bearing.
+        assert_eq!(format_angular_value(89.99999, Some(&style(4, 0))), "N");
+        assert_eq!(format_angular_value(90.0, Some(&style(4, 0))), "N");
+        assert_eq!(format_angular_value(0.0, Some(&style(4, 0))), "E");
+    }
+
+    // The other unit formats are untouched.
+    #[test]
+    fn other_angular_units_unchanged() {
+        assert_eq!(format_angular_value(45.5, Some(&style(1, 0))), "45\u{b0}30'0\"");
+        assert_eq!(format_angular_value(90.0, Some(&style(2, 1))), "100.0g");
+    }
+}
+
+#[cfg(test)]
+mod dim_color_override_tests {
+    use super::dim_color_index;
+    use crate::entities::dim_override::{DIMCLRD, DIMCLRE, DIMCLRT};
+    use acadrust::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+
+    // An ACAD/DSTYLE record holding the overrides the Properties panel writes.
+    fn xdata(overrides: &[(i16, i16)]) -> ExtendedData {
+        let mut values = vec![
+            XDataValue::String("DSTYLE".to_string()),
+            XDataValue::ControlString("{".to_string()),
+        ];
+        for (code, aci) in overrides {
+            values.push(XDataValue::Integer16(*code));
+            values.push(XDataValue::Integer16(*aci));
+        }
+        values.push(XDataValue::ControlString("}".to_string()));
+        let mut record = ExtendedDataRecord::new("ACAD");
+        for value in values {
+            record.add_value(value);
+        }
+        let mut xd = ExtendedData::new();
+        xd.add_record(record);
+        xd
+    }
+
+    // Every dim colour honours its per-object override, not just DIMCLRD.
+    // Text and extension-line colours edited on the Properties panel used to
+    // show there and render with the style/layer colour anyway. (#898)
+    #[test]
+    fn override_wins_over_style_for_every_dim_colour() {
+        let xd = xdata(&[(DIMCLRD, 1), (DIMCLRE, 3), (DIMCLRT, 5)]);
+        assert_eq!(dim_color_index(&xd, DIMCLRD, 256), 1);
+        assert_eq!(dim_color_index(&xd, DIMCLRE, 256), 3);
+        assert_eq!(dim_color_index(&xd, DIMCLRT, 256), 5);
+    }
+
+    // Only the overridden variable changes; the rest still inherit the style.
+    #[test]
+    fn absent_override_falls_back_to_the_style_value() {
+        let xd = xdata(&[(DIMCLRT, 5)]);
+        assert_eq!(dim_color_index(&xd, DIMCLRT, 256), 5);
+        assert_eq!(dim_color_index(&xd, DIMCLRD, 7), 7);
+        assert_eq!(dim_color_index(&xd, DIMCLRE, 256), 256);
+    }
+
+    // An entity with no override record at all is unaffected.
+    #[test]
+    fn no_record_uses_the_style_value() {
+        let xd = ExtendedData::new();
+        assert_eq!(dim_color_index(&xd, DIMCLRT, 2), 2);
+    }
+
+    // ByLayer (256) and ByBlock (0) stay meaningful as override values, so an
+    // explicit "back to ByLayer" edit is not mistaken for "no override".
+    #[test]
+    fn bylayer_override_is_kept() {
+        let xd = xdata(&[(DIMCLRT, 256)]);
+        assert_eq!(dim_color_index(&xd, DIMCLRT, 5), 256);
+    }
+}
+
+#[cfg(test)]
 mod arch_format_tests {
-    use super::{format_architectural, format_fractional};
+    use super::{format_architectural, format_engineering, format_fractional};
 
     // A 3ft object that measures 35.99" (float noise) must carry the rounded
     // fraction up through inches into feet — not print "2'-11 1"". (Regression
@@ -7304,5 +7480,28 @@ mod arch_format_tests {
         assert_eq!(format_fractional(35.9999, 4, 2), "36");
         assert_eq!(format_fractional(11.999, 4, 2), "12");
         assert_eq!(format_fractional(6.5, 4, 2), "6 1/2");
+    }
+
+    // Engineering units round to DIMDEC before the feet/inches split, so a
+    // remainder that rounds up to 12" carries instead of printing "2'-12.00"".
+    #[test]
+    fn engineering_carries_inches_up_to_feet() {
+        assert_eq!(format_engineering(35.999, 2), "3'-0.00\"");
+        assert_eq!(format_engineering(11.999, 2), "1'-0.00\"");
+        assert_eq!(format_engineering(11.9, 0), "1'-0\"");
+    }
+
+    #[test]
+    fn engineering_normal_values_unchanged() {
+        assert_eq!(format_engineering(30.5, 2), "2'-6.50\"");
+        assert_eq!(format_engineering(36.0, 2), "3'-0.00\"");
+        assert_eq!(format_engineering(0.0, 2), "0'-0.00\"");
+        assert_eq!(format_engineering(-30.25, 2), "-2'-6.25\"");
+    }
+
+    // A magnitude that rounds away to zero must not keep a lone minus sign.
+    #[test]
+    fn engineering_negative_zero_has_no_sign() {
+        assert_eq!(format_engineering(-0.001, 2), "0'-0.00\"");
     }
 }

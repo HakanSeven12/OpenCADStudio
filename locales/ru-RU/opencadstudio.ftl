@@ -3590,6 +3590,7 @@ dimstyle =
     .move-text-outside-first = Сначала вынести текст
     .period = Точка
     .space = Пробел
+    .surveyors-units = Геодезические единицы
 
 style-manager =
     .alignment-spacing = Интервал выравнивания

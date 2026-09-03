@@ -1685,14 +1685,21 @@ impl OpenCADStudio {
             } else {
                 // Current deformed geometry.
                 let mut preview =
-                    self.tabs[i].scene.wire_models_for(&edited_handles);
+                    self.tabs[i].scene.grip_wire_models_for(&edited_handles);
 
                 // Also show the drag-start geometry as a faint ghost.
                 //
                 // This is display-only. Preview wires never participate in the resident
                 // hit-test/snap set, so keeping the original shape visible does not
                 // reintroduce self-snapping.
-                let mut reference = self.grip_reference_wires.clone();
+                let keep_reference_overlay = edited_handles
+                    .iter()
+                    .any(|handle| self.tabs[i].scene.preview_hidden.contains(handle));
+                let mut reference = if keep_reference_overlay {
+                    self.grip_reference_wires.clone()
+                } else {
+                    Vec::new()
+                };
 
                 for wire in &mut reference {
                     wire.selected = false;
@@ -2776,13 +2783,14 @@ impl OpenCADStudio {
         // press starts a box selection, so without this they'd only
         // close on the second click (issue #104).
         self.tabs[i].properties.color_picker_open = false;
-        // Click anywhere outside the popup dismisses it. The
-        // menu's own buttons live above this mouse_area, so a
-        // press that reaches here means the cursor is not on
-        // any menu item.
-        if self.grip_popup.take().is_some() {
+        // Click anywhere outside the popup dismisses it. A hover popup must
+        // not swallow a grip click beneath it; a pinned popup was opened by an
+        // explicit click, so its outside click only dismisses the menu.
+        if let Some(popup) = self.grip_popup.take() {
             self.grip_hover = None;
-            return Task::none();
+            if popup.pinned {
+                return Task::none();
+            }
         }
         // Outside-click dismiss for the visibility-state dropdown
         // (its buttons sit above this mouse_area).

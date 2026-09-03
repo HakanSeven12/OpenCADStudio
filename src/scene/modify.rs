@@ -841,6 +841,7 @@ impl Scene {
         handle: Handle,
         operation: acadrust::objects::SolidHistoryOperation,
     ) -> bool {
+        self.solid_history_preview_wires.remove(&handle);
         let Ok(body) = cadkernel::acis::rebuild_body(&operation) else {
             return false;
         };
@@ -879,6 +880,7 @@ impl Scene {
         };
         entity.set_sat_document(&document);
         self.sync_solid_reference_point(handle);
+        self.solid_history_preview_wires.remove(&handle);
         self.register_solid_model(handle, body);
         true
     }
@@ -901,7 +903,10 @@ impl Scene {
         let Some(EntityType::Solid3D(_)) = self.document.get_entity(handle) else {
             return false;
         };
-        self.register_solid_model(handle, body);
+        self.solid_history_preview_wires.insert(
+            handle,
+            crate::scene::model::solid_model::grip_preview_wires(&body, handle),
+        );
         true
     }
 

@@ -1734,6 +1734,11 @@ impl InputKind {
 }
 
 pub trait CadCommand: Send {
+    /// Keep the layer already carried by entities committed by this command
+    /// instead of replacing it with the current drawing layer.
+    fn preserve_commit_layer(&self) -> bool {
+        false
+    }
     /// Short name shown in the command line prompt, e.g. `"LINE"`.
     #[allow(dead_code)]
     fn name(&self) -> &'static str;

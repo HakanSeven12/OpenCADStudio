@@ -2596,14 +2596,33 @@ impl OpenCADStudio {
         &mut self,
         entity: acadrust::EntityType,
     ) -> Option<Handle> {
-        self.commit_entity_handle_with_dimension_policy(entity, false)
+        self.commit_entity_handle_with_policies(entity, false, false)
     }
 
-    /// Commit an entity, optionally preserving its source dimension style.
     pub(super) fn commit_entity_handle_with_dimension_policy(
+        &mut self,
+        entity: acadrust::EntityType,
+        preserve_dimension_layer_and_style: bool,
+    ) -> Option<Handle> {
+        self.commit_entity_handle_with_policies(
+            entity,
+            preserve_dimension_layer_and_style,
+            false,
+        )
+    }
+
+    pub(super) fn commit_entity_handle_preserve_layer(
+        &mut self,
+        entity: acadrust::EntityType,
+    ) -> Option<Handle> {
+        self.commit_entity_handle_with_policies(entity, false, true)
+    }
+
+    fn commit_entity_handle_with_policies(
         &mut self,
         mut entity: acadrust::EntityType,
         preserve_dimension_layer_and_style: bool,
+        preserve_entity_layer: bool,
     ) -> Option<Handle> {
         let i = self.active_tab;
         let tracks_dimension_chain = matches!(
@@ -2692,7 +2711,7 @@ impl OpenCADStudio {
         };
         if let Some(layer) = explicit_mleader_layer {
             entity.as_entity_mut().set_layer(layer);
-        } else {
+        } else if !preserve_entity_layer {
             let layer = &self.tabs[i].active_layer;
             if layer != "0" || entity.as_entity().layer().is_empty() {
                 entity.as_entity_mut().set_layer(layer.clone());

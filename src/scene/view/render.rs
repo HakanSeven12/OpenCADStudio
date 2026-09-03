@@ -920,22 +920,40 @@ impl shader::Primitive for Primitive {
                     let built = match cached {
                         Some(entry) => entry,
                         None => {
+                            // Free the superseded content BEFORE allocating its
+                            // replacement. Every geometry edit mints a new content
+                            // id, so a miss here means this slot's current buffers
+                            // are already dead weight — and on a large drawing one
+                            // set is most of the card (measured: 1.3 GB of a 2 GB
+                            // GT 1030). Holding the old set while the new one is
+                            // allocated is what exhausts VRAM after the first edit.
+                            //
+                            // Dropping this slot's handles first is what makes the
+                            // retain below able to see the old entry as garbage; a
+                            // pane still drawing that content keeps its own clone,
+                            // so shared geometry is never pulled out from under it.
+                            inner.gpu_wires = std::sync::Arc::new(Vec::new());
+                            inner.gpu_block_wires = std::sync::Arc::new(Vec::new());
+                            // Entries no slot still holds: only the cache references
+                            // them. An entry drawn by any pane keeps a strong count
+                            // ≥ 2, so this never drops live geometry.
+                            let held_before = pipeline.wire_buffer_cache.len();
+                            pipeline.wire_buffer_cache.retain(|_, (w, b, _)| {
+                                std::sync::Arc::strong_count(w) > 1
+                                    || std::sync::Arc::strong_count(b) > 1
+                            });
+                            if _perf {
+                                crate::perf_record!(
+                                    "[perf] wire-cache evicted={} held={}",
+                                    held_before - pipeline.wire_buffer_cache.len(),
+                                    pipeline.wire_buffer_cache.len(),
+                                );
+                            }
                             let entry =
                                 inner.build_wire_buffers(device, queue, &vp_wires[..], &draw_depths);
                             pipeline
                                 .wire_buffer_cache
                                 .insert(vp.wire_content_id, entry.clone());
-                            // Evict entries no slot still holds (only the cache
-                            // references them). An entry drawn by any pane keeps a
-                            // strong count ≥ 2, so this never drops live geometry.
-                            if pipeline.wire_buffer_cache.len() > 16 {
-                                pipeline
-                                    .wire_buffer_cache
-                                    .retain(|_, (w, b, _)| {
-                                        std::sync::Arc::strong_count(w) > 1
-                                            || std::sync::Arc::strong_count(b) > 1
-                                    });
-                            }
                             entry
                         }
                     };

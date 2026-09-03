@@ -3890,6 +3890,10 @@ pub fn run() -> iced::Result {
         OpenCADStudio::update,
         OpenCADStudio::view,
     )
+    .settings(iced::Settings {
+        power_preference: iced::backend::PowerPreference::HighPerformance,
+        ..iced::Settings::default()
+    })
     .subscription(OpenCADStudio::subscription)
     .title(|state: &OpenCADStudio, window_id: window::Id| {
         let _ = window_id; // all dialogs are in-canvas modals now

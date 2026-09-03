@@ -2789,7 +2789,6 @@ impl OpenCADStudio {
         // any menu item.
         if self.grip_popup.take().is_some() {
             self.grip_hover = None;
-            return Task::none();
         }
         // Outside-click dismiss for the visibility-state dropdown
         // (its buttons sit above this mouse_area).

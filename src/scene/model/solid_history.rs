@@ -2314,7 +2314,7 @@ fn apply_extrusion_draft_grip(value: &mut SolidHistorySweep, apply: GripApply) -
     let GripApply::Absolute(world) = apply else {
         return false;
     };
-    let Some((_, base_top, radial, profile_radius, height)) = extrusion_draft_grip(value) else {
+    let Some((_, base_top, radial, _, height)) = extrusion_draft_grip(value) else {
         return false;
     };
     let top_offset = (world - base_top).dot(radial);
@@ -2322,15 +2322,38 @@ fn apply_extrusion_draft_grip(value: &mut SolidHistorySweep, apply: GripApply) -
         return false;
     }
     let limit = 89.0_f64.to_radians();
-    let inward_limit = ((profile_radius - 1e-6).max(1e-6) / height)
-        .atan()
-        .min(limit);
-    let angle = (-top_offset).atan2(height).clamp(-limit, inward_limit);
+    let desired = (-top_offset).atan2(height).clamp(-limit, limit);
+    let angle = if desired > 0.0 && !extrusion_draft_rebuilds(value, desired) {
+        // The maximum inset is profile-dependent. A corner radius is too
+        // restrictive for many outlines, while allowing the pointer through
+        // a collapsed outline makes the top grow again. Search the actual
+        // rebuild boundary so every supported profile reaches its smallest
+        // valid top without crossing into an inverted result.
+        let mut valid = 0.0;
+        let mut invalid = limit;
+        for _ in 0..16 {
+            let candidate = (valid + invalid) * 0.5;
+            if extrusion_draft_rebuilds(value, candidate) {
+                valid = candidate;
+            } else {
+                invalid = candidate;
+            }
+        }
+        valid
+    } else {
+        desired
+    };
     if !angle.is_finite() || (angle - value.draft_angle).abs() <= 1e-12 {
         return false;
     }
     value.draft_angle = angle;
     true
+}
+
+fn extrusion_draft_rebuilds(value: &SolidHistorySweep, angle: f64) -> bool {
+    let mut candidate = value.clone();
+    candidate.draft_angle = angle;
+    cadkernel::acis::rebuild_body(&SolidHistoryOperation::Extrusion(candidate)).is_ok()
 }
 
 fn grip(

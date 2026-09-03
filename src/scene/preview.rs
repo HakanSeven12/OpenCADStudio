@@ -272,6 +272,7 @@ impl Scene {
         // flips the wire content id back to the base tessellation id, which
         // re-uploads the base wires (without the preview) on the next frame.
         self.preview_wires = vec![];
+        self.solid_history_preview_wires.clear();
         if !self.preview_hatches.is_empty() {
             self.preview_hatches = std::sync::Arc::new(Vec::new());
         }
@@ -298,6 +299,21 @@ impl Scene {
                     Some(e) => self.tessellate_one(e),
                     None => Vec::new(),
                 }
+            })
+            .collect()
+    }
+
+    /// Current candidate geometry for a hot grip. Solid-history candidates
+    /// live outside the document until placement; ordinary entities continue
+    /// to use their current tessellation.
+    pub fn grip_wire_models_for(&self, handles: &[acadrust::Handle]) -> Vec<WireModel> {
+        handles
+            .iter()
+            .flat_map(|handle| {
+                self.solid_history_preview_wires
+                    .get(handle)
+                    .cloned()
+                    .unwrap_or_else(|| self.wire_models_for(std::slice::from_ref(handle)))
             })
             .collect()
     }

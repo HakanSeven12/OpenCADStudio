@@ -3,6 +3,7 @@
 use cadkernel::brep::{self, Body, Curve3, EdgeKey, FaceKey, Surface};
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
+use crate::scene::model::wire_model::WireModel;
 
 /// What counts as the same point when the kernel checks a body over.
 const TOL: f64 = 1e-9;
@@ -238,6 +239,27 @@ pub fn edge_wires(body: &Body) -> Vec<acadrust::entities::Wire> {
                     .iter()
                     .map(|p| Vector3::new(p[0], p[1], p[2]))
                     .collect(),
+            )
+        })
+        .collect()
+}
+
+/// White wireframe used while a solid-history grip is hot.
+///
+/// This deliberately does not touch the resident solid mesh or its entity
+/// wires: the selected source stays visible in blue while the candidate body
+/// is presented as a separate, non-pickable outline until placement.
+pub fn grip_preview_wires(body: &Body, handle: acadrust::Handle) -> Vec<WireModel> {
+    tessellation(body)
+        .edges
+        .into_iter()
+        .filter(|edge| edge.positions.len() >= 2)
+        .map(|edge| {
+            WireModel::solid_f64(
+                format!("{}-GRIP-PREVIEW", handle.value()),
+                edge.positions,
+                WireModel::WHITE,
+                false,
             )
         })
         .collect()

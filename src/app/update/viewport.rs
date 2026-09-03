@@ -1685,14 +1685,21 @@ impl OpenCADStudio {
             } else {
                 // Current deformed geometry.
                 let mut preview =
-                    self.tabs[i].scene.wire_models_for(&edited_handles);
+                    self.tabs[i].scene.grip_wire_models_for(&edited_handles);
 
                 // Also show the drag-start geometry as a faint ghost.
                 //
                 // This is display-only. Preview wires never participate in the resident
                 // hit-test/snap set, so keeping the original shape visible does not
                 // reintroduce self-snapping.
-                let mut reference = self.grip_reference_wires.clone();
+                let keep_reference_overlay = edited_handles
+                    .iter()
+                    .any(|handle| self.tabs[i].scene.preview_hidden.contains(handle));
+                let mut reference = if keep_reference_overlay {
+                    self.grip_reference_wires.clone()
+                } else {
+                    Vec::new()
+                };
 
                 for wire in &mut reference {
                     wire.selected = false;

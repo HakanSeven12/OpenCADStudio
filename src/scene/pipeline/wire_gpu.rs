@@ -740,11 +740,33 @@ impl BlockWireGpu {
                 };
                 vertices.extend_from_slice(&[vertex; 6]);
             }
-            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("block_wire.vertices"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+            // Split vertex data into buffers small enough to allocate on
+            // low-VRAM devices. Same scheme as the solid-mesh chunking in
+            // `mesh_gpu.rs` (#203) and the fill chunking in `face3d_gpu.rs`
+            // (#358); the block-wire path was never converted, so a
+            // block-heavy drawing produced one multi-hundred-MB buffer.
+            // `max_buffer_size` is an API validation limit, not physical VRAM
+            // (NVIDIA reports several GB on a 2 GB card), so clamp it the way
+            // `mesh_gpu.rs` already does.
+            let vertex_budget = ((device.limits().max_buffer_size as usize / 10) * 9)
+                .min(32 * 1024 * 1024);
+            let vsize = std::mem::size_of::<BlockWireVertex>();
+            // Round down to a multiple of 6: each segment expands to six
+            // vertices and must not straddle two chunks.
+            let max_verts = ((vertex_budget / vsize).max(6) / 6) * 6;
+            let vertex_chunks: Vec<(wgpu::Buffer, u32)> = vertices
+                .chunks(max_verts)
+                .map(|chunk| {
+                    (
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("block_wire.vertices"),
+                            contents: bytemuck::cast_slice(chunk),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        }),
+                        chunk.len() as u32,
+                    )
+                })
+                .collect();
             let const_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("block_wire.const"),
                 contents: bytemuck::bytes_of(&constant),
@@ -791,19 +813,28 @@ impl BlockWireGpu {
             let max_instances = ((device.limits().max_buffer_size as usize / 10) * 9
                 / std::mem::size_of::<BlockWireInstance>())
                 .max(1);
-            for chunk in instances.chunks(max_instances) {
-                out.push(Self {
-                    vertex_buffer: vertex_buffer.clone(),
-                    instance_buffer: instance_buffer_mapped(
-                        device,
-                        "block_wire.instances",
-                        chunk,
-                    ),
-                    vertex_count: vertices.len() as u32,
-                    instance_count: chunk.len() as u32,
-                    is_3d_mesh_edge: mesh_edge,
-                    const_bind_group: const_bind_group.clone(),
-                });
+            // Build each instance buffer once and reuse it across vertex
+            // chunks, rather than re-uploading it per chunk.
+            let instance_chunks: Vec<(wgpu::Buffer, u32)> = instances
+                .chunks(max_instances)
+                .map(|chunk| {
+                    (
+                        instance_buffer_mapped(device, "block_wire.instances", chunk),
+                        chunk.len() as u32,
+                    )
+                })
+                .collect();
+            for (vertex_buffer, vertex_count) in &vertex_chunks {
+                for (instance_buffer, instance_count) in &instance_chunks {
+                    out.push(Self {
+                        vertex_buffer: vertex_buffer.clone(),
+                        instance_buffer: instance_buffer.clone(),
+                        vertex_count: *vertex_count,
+                        instance_count: *instance_count,
+                        is_3d_mesh_edge: mesh_edge,
+                        const_bind_group: const_bind_group.clone(),
+                    });
+                }
             }
         }
         out

@@ -3803,28 +3803,45 @@ fn tessellate_dimension_inner(
     );
 
     // Per-spec colours: DIMCLRD (dim/arrows), DIMCLRE (ext), DIMCLRT (text).
-    // 0=ByBlock and 256=ByLayer fall through to entity_color. DIMCLRD also
-    // honours a per-object ACAD_DSTYLE override (code 176) so an edited
-    // dim-line colour renders even without touching the style.
+    // 0=ByBlock and 256=ByLayer fall through to entity_color. Each honours the
+    // per-object ACAD_DSTYLE override (codes 176/177/178) the Properties panel
+    // reads and writes, so an edited colour renders without touching the style.
+    let xd = &dim.base().common.extended_data;
     let dim_color = if selected {
         WireModel::SELECTED
     } else {
-        let dim_clr = crate::entities::dim_override::int(
-            &dim.base().common.extended_data,
-            crate::entities::dim_override::DIMCLRD,
+        resolve_dim_color(
+            dim_color_index(
+                xd,
+                crate::entities::dim_override::DIMCLRD,
+                style.map(|s| s.dimclrd).unwrap_or(0),
+            ),
+            entity_color,
         )
-        .unwrap_or_else(|| style.map(|s| s.dimclrd).unwrap_or(0));
-        resolve_dim_color(dim_clr, entity_color)
     };
     let ext_color = if selected {
         WireModel::SELECTED
     } else {
-        resolve_dim_color(style.map(|s| s.dimclre).unwrap_or(0), entity_color)
+        resolve_dim_color(
+            dim_color_index(
+                xd,
+                crate::entities::dim_override::DIMCLRE,
+                style.map(|s| s.dimclre).unwrap_or(0),
+            ),
+            entity_color,
+        )
     };
     let text_color = if selected {
         entity_color // text wire color set by inner tessellate; keep entity tint
     } else {
-        resolve_dim_color(style.map(|s| s.dimclrt).unwrap_or(0), entity_color)
+        resolve_dim_color(
+            dim_color_index(
+                xd,
+                crate::entities::dim_override::DIMCLRT,
+                style.map(|s| s.dimclrt).unwrap_or(0),
+            ),
+            entity_color,
+        )
     };
 
     let snap_pts = dimension_snap_pts(dim);
@@ -4194,6 +4211,18 @@ fn tessellate_dimension_inner(
 
     wires
 }
+/// The ACI index a dimension colour renders with: the per-object ACAD_DSTYLE
+/// override when the entity carries one, else the dimension style's value.
+/// The Properties panel reads and writes these same overrides, so the renderer
+/// has to consult them or an edited colour shows in the panel and nowhere else.
+fn dim_color_index(
+    xd: &acadrust::xdata::ExtendedData,
+    code: i16,
+    inherited: i16,
+) -> i16 {
+    crate::entities::dim_override::int(xd, code).unwrap_or(inherited)
+}
+
 fn resolve_dim_color(idx: i16, fallback: [f32; 4]) -> [f32; 4] {
     // DIMCLR* convention: 0 = BYBLOCK, 256 = BYLAYER → entity colour wins.
     if idx == 0 || idx == 256 {
@@ -7267,6 +7296,68 @@ mod dimtad_tests {
             "outside must clear the object side, got {}",
             below.y
         );
+    }
+}
+
+#[cfg(test)]
+mod dim_color_override_tests {
+    use super::dim_color_index;
+    use crate::entities::dim_override::{DIMCLRD, DIMCLRE, DIMCLRT};
+    use acadrust::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+
+    // An ACAD/DSTYLE record holding the overrides the Properties panel writes.
+    fn xdata(overrides: &[(i16, i16)]) -> ExtendedData {
+        let mut values = vec![
+            XDataValue::String("DSTYLE".to_string()),
+            XDataValue::ControlString("{".to_string()),
+        ];
+        for (code, aci) in overrides {
+            values.push(XDataValue::Integer16(*code));
+            values.push(XDataValue::Integer16(*aci));
+        }
+        values.push(XDataValue::ControlString("}".to_string()));
+        let mut record = ExtendedDataRecord::new("ACAD");
+        for value in values {
+            record.add_value(value);
+        }
+        let mut xd = ExtendedData::new();
+        xd.add_record(record);
+        xd
+    }
+
+    // Every dim colour honours its per-object override, not just DIMCLRD.
+    // Text and extension-line colours edited on the Properties panel used to
+    // show there and render with the style/layer colour anyway. (#898)
+    #[test]
+    fn override_wins_over_style_for_every_dim_colour() {
+        let xd = xdata(&[(DIMCLRD, 1), (DIMCLRE, 3), (DIMCLRT, 5)]);
+        assert_eq!(dim_color_index(&xd, DIMCLRD, 256), 1);
+        assert_eq!(dim_color_index(&xd, DIMCLRE, 256), 3);
+        assert_eq!(dim_color_index(&xd, DIMCLRT, 256), 5);
+    }
+
+    // Only the overridden variable changes; the rest still inherit the style.
+    #[test]
+    fn absent_override_falls_back_to_the_style_value() {
+        let xd = xdata(&[(DIMCLRT, 5)]);
+        assert_eq!(dim_color_index(&xd, DIMCLRT, 256), 5);
+        assert_eq!(dim_color_index(&xd, DIMCLRD, 7), 7);
+        assert_eq!(dim_color_index(&xd, DIMCLRE, 256), 256);
+    }
+
+    // An entity with no override record at all is unaffected.
+    #[test]
+    fn no_record_uses_the_style_value() {
+        let xd = ExtendedData::new();
+        assert_eq!(dim_color_index(&xd, DIMCLRT, 2), 2);
+    }
+
+    // ByLayer (256) and ByBlock (0) stay meaningful as override values, so an
+    // explicit "back to ByLayer" edit is not mistaken for "no override".
+    #[test]
+    fn bylayer_override_is_kept() {
+        let xd = xdata(&[(DIMCLRT, 256)]);
+        assert_eq!(dim_color_index(&xd, DIMCLRT, 5), 256);
     }
 }
 

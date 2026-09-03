@@ -207,7 +207,13 @@ impl Parser {
         Ok(left)
     }
 
-    // power → unary ('^' unary)?
+    // power → unary ('^' power)?
+    //
+    // The exponent recurses into `parse_power`, not `parse_unary`, so `^` is
+    // right-associative — `2^3^2` is `2^(3^2)`, the standard reading. Binding
+    // it to the left both gave the wrong number and left the trailing `^2`
+    // unconsumed, which the caller's scan then handed back as literal text:
+    // `2^3^2` evaluated to the string "8^2" instead of 512.
     fn parse_power(&mut self, depth: usize) -> Result<f64, ()> {
         if depth > MAX_RECURSION {
             return Err(());
@@ -215,7 +221,7 @@ impl Parser {
         let base = self.parse_unary(depth + 1)?;
         if let Some(Token::Caret) = self.peek() {
             self.advance();
-            let exp = self.parse_unary(depth + 1)?;
+            let exp = self.parse_power(depth + 1)?;
             return Ok(base.powf(exp));
         }
         Ok(base)
@@ -589,6 +595,21 @@ mod tests {
     fn nested_parens() {
         assert_eq!(eval_to_string("((2+3))"), "5");
         assert_eq!(eval_to_string("(((10)))"), "10");
+    }
+
+    // `^` is right-associative, so a chained exponent evaluates as one number
+    // instead of stopping at the first `^` and leaving the rest as text.
+    #[test]
+    fn power_is_right_associative() {
+        assert_eq!(eval_to_string("2^3^2"), "512");
+        assert_eq!(eval_to_string("2^3^2+1"), "513");
+        assert_eq!(eval_to_string("4^0.5^2"), "1.4142135623730951"); // 4^(1/4)
+        assert_eq!(eval_to_string("2^2^2^2"), "65536");
+        // A single exponent, and a parenthesised one, are unaffected.
+        assert_eq!(eval_to_string("2^3"), "8");
+        assert_eq!(eval_to_string("2^(3^2)"), "512");
+        assert_eq!(eval_to_string("(2^3)^2"), "64");
+        assert_eq!(eval_to_string("2^-1"), "0.5");
     }
 
     #[test]

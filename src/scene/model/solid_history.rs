@@ -68,6 +68,13 @@ pub const PROP_SCALE_ALONG_PATH: &str = "solid_history_scale_along_path";
 pub const PROP_SWEEP_LENGTH: &str = "solid_history_sweep_length";
 pub const PROP_EXTRUSION_HEIGHT: &str = "solid_history_extrusion_height";
 pub const PROP_TAPER_ANGLE: &str = "solid_history_taper_angle";
+pub const PROP_REVOLVE_ANGLE: &str = "solid_history_revolve_angle";
+pub const PROP_AXIS_POSITION_X: &str = "solid_history_axis_position_x";
+pub const PROP_AXIS_POSITION_Y: &str = "solid_history_axis_position_y";
+pub const PROP_AXIS_POSITION_Z: &str = "solid_history_axis_position_z";
+pub const PROP_AXIS_DIRECTION_X: &str = "solid_history_axis_direction_x";
+pub const PROP_AXIS_DIRECTION_Y: &str = "solid_history_axis_direction_y";
+pub const PROP_AXIS_DIRECTION_Z: &str = "solid_history_axis_direction_z";
 pub const PROP_PYRAMID_TYPE: &str = "solid_history_pyramid_type";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
@@ -122,6 +129,7 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Pyramid(_)
                 | SolidHistoryOperation::Sweep(_)
                 | SolidHistoryOperation::Extrusion(_)
+                | SolidHistoryOperation::Revolve(_)
         )
     )
 }
@@ -147,8 +155,110 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         ),
         SolidHistoryOperation::Torus(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Pyramid(value) => world_point(value.base.transform, [0.0; 3]),
+        SolidHistoryOperation::Revolve(value) => world_point(
+            value.base.transform,
+            [value.axis_point.x, value.axis_point.y, value.axis_point.z],
+        ),
         _ => None,
     }
+}
+
+fn revolve_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryRevolve,
+) -> Vec<PropSection> {
+    let Some(axis_position) = world_point(
+        value.base.transform,
+        [value.axis_point.x, value.axis_point.y, value.axis_point.z],
+    ) else {
+        return Vec::new();
+    };
+    let Some(axis_direction) = world_vector(
+        value.base.transform,
+        [value.direction.x, value.direction.y, value.direction.z],
+    ) else {
+        return Vec::new();
+    };
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(object_show_history, show_history_mode);
+    let show_value = if show_history { "Yes" } else { "No" };
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Solid type").into_owned(),
+                    field: "solid_history_type",
+                    value: PropValue::ReadOnly(t!("Revolve").into_owned()),
+                },
+                Property {
+                    label: t!("Angle of revolution").into_owned(),
+                    field: PROP_REVOLVE_ANGLE,
+                    value: PropValue::EditText(crate::entities::common::format_angle(
+                        value.revolve_angle,
+                    )),
+                },
+                crate::entities::common::edit_prop(
+                    t!("Axis position X").as_ref(),
+                    PROP_AXIS_POSITION_X,
+                    axis_position.x,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Axis position Y").as_ref(),
+                    PROP_AXIS_POSITION_Y,
+                    axis_position.y,
+                ),
+                crate::entities::common::edit_prop(
+                    t!("Axis position Z").as_ref(),
+                    PROP_AXIS_POSITION_Z,
+                    axis_position.z,
+                ),
+                crate::entities::common::edit_scalar_prop(
+                    t!("Axis direction X").as_ref(),
+                    PROP_AXIS_DIRECTION_X,
+                    axis_direction.x,
+                ),
+                crate::entities::common::edit_scalar_prop(
+                    t!("Axis direction Y").as_ref(),
+                    PROP_AXIS_DIRECTION_Y,
+                    axis_direction.y,
+                ),
+                crate::entities::common::edit_scalar_prop(
+                    t!("Axis direction Z").as_ref(),
+                    PROP_AXIS_DIRECTION_Z,
+                    axis_direction.z,
+                ),
+            ],
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::Choice {
+                        selected: if record_history { "Record" } else { "None" }.to_string(),
+                        options: vec!["None".to_string(), "Record".to_string()],
+                    },
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: if show_history_editable {
+                        PropValue::Choice {
+                            selected: show_value.to_string(),
+                            options: vec!["No".to_string(), "Yes".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(show_value.to_string())
+                    },
+                },
+            ],
+        },
+    ]
 }
 
 fn extrusion_properties(
@@ -1021,6 +1131,7 @@ pub fn primitive_properties(
         SolidHistoryOperation::Extrusion(value) => {
             extrusion_properties(document, handle, value)
         }
+        SolidHistoryOperation::Revolve(value) => revolve_properties(document, handle, value),
         _ => Vec::new(),
     }
 }
@@ -1053,6 +1164,13 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_SCALE_ALONG_PATH
             | PROP_EXTRUSION_HEIGHT
             | PROP_TAPER_ANGLE
+            | PROP_REVOLVE_ANGLE
+            | PROP_AXIS_POSITION_X
+            | PROP_AXIS_POSITION_Y
+            | PROP_AXIS_POSITION_Z
+            | PROP_AXIS_DIRECTION_X
+            | PROP_AXIS_DIRECTION_Y
+            | PROP_AXIS_DIRECTION_Z
             | PROP_PYRAMID_TYPE
     )
 }
@@ -1140,6 +1258,93 @@ fn apply_extrusion_geometry_property(
         }
         _ => None,
     }
+}
+
+fn apply_revolve_geometry_property(
+    value: &mut SolidHistoryRevolve,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    if field == PROP_REVOLVE_ANGLE {
+        let angle = crate::entities::common::parse_angle(text)?;
+        if !angle.is_finite()
+            || angle.abs() <= 1e-12
+            || angle.abs() > std::f64::consts::TAU + 1e-12
+            || (angle - value.revolve_angle).abs() <= 1e-12
+        {
+            return Some(false);
+        }
+        value.revolve_angle = angle;
+        return Some(true);
+    }
+
+    if matches!(
+        field,
+        PROP_AXIS_POSITION_X | PROP_AXIS_POSITION_Y | PROP_AXIS_POSITION_Z
+    ) {
+        let axis = match field {
+            PROP_AXIS_POSITION_X => 0,
+            PROP_AXIS_POSITION_Y => 1,
+            _ => 2,
+        };
+        let target = crate::entities::common::parse_length(text)?;
+        if !target.is_finite() {
+            return Some(false);
+        }
+        let mut world = world_point(
+            value.base.transform,
+            [value.axis_point.x, value.axis_point.y, value.axis_point.z],
+        )?;
+        if (world[axis] - target).abs() <= 1e-12 {
+            return Some(false);
+        }
+        world[axis] = target;
+        let local = local_point(value.base.transform, world)?;
+        if !local.is_finite() {
+            return Some(false);
+        }
+        value.axis_point = acadrust::types::Vector3::new(local.x, local.y, local.z);
+        return Some(true);
+    }
+
+    if matches!(
+        field,
+        PROP_AXIS_DIRECTION_X | PROP_AXIS_DIRECTION_Y | PROP_AXIS_DIRECTION_Z
+    ) {
+        let axis = match field {
+            PROP_AXIS_DIRECTION_X => 0,
+            PROP_AXIS_DIRECTION_Y => 1,
+            _ => 2,
+        };
+        let target = text.trim().replace(',', ".").parse::<f64>().ok()?;
+        if !target.is_finite() {
+            return Some(false);
+        }
+        let mut world = world_vector(
+            value.base.transform,
+            [value.direction.x, value.direction.y, value.direction.z],
+        )?;
+        world[axis] = target;
+        let Some(world) = world.try_normalize() else {
+            return Some(false);
+        };
+        let Some(local) = matrix(value.base.transform)?
+            .inverse()
+            .transform_vector3(world)
+            .try_normalize()
+        else {
+            return Some(false);
+        };
+        let current = glam::DVec3::new(value.direction.x, value.direction.y, value.direction.z)
+            .normalize_or_zero();
+        if (local - current).length_squared() <= 1e-24 {
+            return Some(false);
+        }
+        value.direction = acadrust::types::Vector3::new(local.x, local.y, local.z);
+        return Some(true);
+    }
+
+    None
 }
 
 pub fn apply_history_choice(
@@ -1575,6 +1780,11 @@ pub fn apply_primitive_property(
         if let Some(applied) =
             apply_extrusion_geometry_property(extrusion_value, field, value)
         {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Revolve(revolve_value) = operation {
+        if let Some(applied) = apply_revolve_geometry_property(revolve_value, field, value) {
             return applied;
         }
     }

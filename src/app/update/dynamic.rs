@@ -660,7 +660,16 @@ impl OpenCADStudio {
             // the sign of the cursor's side relative to the reference, so the
             // committed direction matches the drag (the box shows magnitude
             // only). Commands receive an already-signed string.
-            let text = self.dyn_sign_angle_text(i, text);
+            let auto_sign = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| command.dyn_auto_sign_angle())
+                .unwrap_or(true);
+            let text = if auto_sign {
+                self.dyn_sign_angle_text(i, text)
+            } else {
+                text
+            };
             let result = self.tabs[i]
                 .active_cmd
                 .as_mut()

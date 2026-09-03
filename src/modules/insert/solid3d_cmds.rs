@@ -6,7 +6,7 @@ use acadrust::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
-    CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, SelectionEntity,
+    CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, SelectionEntity, WorkingPlane,
 };
 use crate::scene::WireModel;
 use crate::t;
@@ -615,30 +615,221 @@ impl CadCommand for PresspullCommand {
 
 pub struct RevolveCommand {
     step: RevolveStep,
-    target_handle: acadrust::Handle,
+    handles: Vec<Handle>,
+    preview_profiles: Vec<(Handle, EntityType)>,
+    injected_axis: Option<EntityType>,
     axis_start: DVec3,
     axis_end: DVec3,
+    working_plane: WorkingPlane,
+    mode: ExtrudeMode,
+    angle: f64,
+    start_angle: f64,
+    reverse: bool,
     color: [f32; 4],
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy)]
+struct RevolveDefaults {
+    mode: ExtrudeMode,
+    angle: f64,
+    start_angle: f64,
+}
+
+fn revolve_defaults() -> &'static Mutex<RevolveDefaults> {
+    static DEFAULTS: OnceLock<Mutex<RevolveDefaults>> = OnceLock::new();
+    DEFAULTS.get_or_init(|| {
+        Mutex::new(RevolveDefaults {
+            mode: ExtrudeMode::Solid,
+            angle: std::f64::consts::TAU,
+            start_angle: 0.0,
+        })
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum RevolveStep {
     Pick,
+    Mode,
     AxisStart,
     AxisEnd,
+    AxisObject,
     Angle,
+    StartAngle,
+    Expression,
 }
 
 impl RevolveCommand {
     pub fn new(color: [f32; 4]) -> Self {
+        let defaults = *revolve_defaults().lock().unwrap_or_else(|error| error.into_inner());
         Self {
             step: RevolveStep::Pick,
-            target_handle: acadrust::Handle::NULL,
+            handles: Vec::new(),
+            preview_profiles: Vec::new(),
+            injected_axis: None,
             axis_start: DVec3::ZERO,
             axis_end: DVec3::new(0.0, 0.0, 1.0),
+            working_plane: WorkingPlane::default(),
+            mode: defaults.mode,
+            angle: defaults.angle,
+            start_angle: defaults.start_angle,
+            reverse: false,
             color,
         }
     }
+
+    pub fn set_preselection(&mut self, profiles: Vec<(Handle, EntityType)>) {
+        self.handles = profiles.iter().map(|(handle, _)| *handle).collect();
+        self.preview_profiles = profiles;
+        if !self.handles.is_empty() {
+            self.step = RevolveStep::AxisStart;
+        }
+    }
+
+    fn profile_reference(&self) -> Option<DVec3> {
+        let axis = (self.axis_end - self.axis_start).try_normalize()?;
+        self.preview_profiles
+            .iter()
+            .filter_map(|(_, entity)| {
+                crate::scene::model::sweep_model::extrusion_profile_of(entity)
+            })
+            .flat_map(|(profile, _)| {
+                profile.pieces.into_iter().flat_map(move |piece| {
+                    [0.0, 0.5, 1.0].into_iter().map(move |parameter| {
+                        DVec3::from_array(profile.plane.point_at(piece.point_at(parameter)))
+                    })
+                })
+            })
+            .filter(|point| point.is_finite())
+            .max_by(|first, second| {
+                let radial_length = |point: DVec3| {
+                    let delta = point - self.axis_start;
+                    (delta - axis * delta.dot(axis)).length_squared()
+                };
+                radial_length(*first).total_cmp(&radial_length(*second))
+            })
+    }
+
+    fn angle_anchor(&self) -> Option<DVec3> {
+        let axis = (self.axis_end - self.axis_start).try_normalize()?;
+        let reference = self.profile_reference()?;
+        Some(self.axis_start + axis * (reference - self.axis_start).dot(axis))
+    }
+
+    fn cursor_angle(&self, cursor: DVec3, full_at_zero: bool) -> Option<f64> {
+        let axis = (self.axis_end - self.axis_start).try_normalize()?;
+        let anchor = self.angle_anchor()?;
+        let reference = (self.profile_reference()? - anchor).try_normalize()?;
+        let radial = (cursor - (self.axis_start
+            + axis * (cursor - self.axis_start).dot(axis)))
+            .try_normalize()?;
+        let mut angle = axis.dot(reference.cross(radial)).atan2(reference.dot(radial));
+        if angle < 0.0 {
+            angle += std::f64::consts::TAU;
+        }
+        if full_at_zero && angle.abs() <= 1e-9 {
+            angle = std::f64::consts::TAU;
+        }
+        angle.is_finite().then_some(angle)
+    }
+
+    fn signed_angle(&self, angle: f64) -> f64 {
+        angle * if self.reverse { -1.0 } else { 1.0 }
+    }
+
+    fn preview_wires(&self, cursor: DVec3) -> Vec<WireModel> {
+        let (angle, start_angle) = match self.step {
+            RevolveStep::Angle => (
+                self.cursor_angle(cursor, true)
+                    .map(|angle| self.signed_angle(angle)),
+                Some(self.start_angle),
+            ),
+            RevolveStep::StartAngle => (
+                Some(self.signed_angle(self.angle)),
+                self.cursor_angle(cursor, false),
+            ),
+            _ => return Vec::new(),
+        };
+        let (Some(angle), Some(start_angle)) = (angle, start_angle) else {
+            return Vec::new();
+        };
+        let from = self.axis_start.to_array();
+        let to = self.axis_end.to_array();
+        self.preview_profiles
+            .iter()
+            .flat_map(|(_, entity)| {
+                let Some((_, closed)) =
+                    crate::scene::model::sweep_model::extrusion_profile_of(entity)
+                else {
+                    return Vec::new();
+                };
+                let creates_surface = self.mode == ExtrudeMode::Surface || !closed;
+                let body = if creates_surface {
+                    crate::scene::model::sweep_model::revolved_surface(
+                        entity,
+                        from,
+                        to,
+                        angle,
+                        start_angle,
+                    )
+                } else {
+                    crate::scene::model::sweep_model::revolved(
+                        entity,
+                        from,
+                        to,
+                        angle,
+                        start_angle,
+                    )
+                };
+                body.map(|body| preview_body_wires(&body, self.color))
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    fn set_axis(&mut self, direction: DVec3) -> CmdResult {
+        let Some(direction) = direction.try_normalize() else {
+            return CmdResult::NeedPoint;
+        };
+        self.axis_start = self.working_plane.origin;
+        self.axis_end = self.axis_start + direction;
+        self.step = RevolveStep::Angle;
+        CmdResult::NeedPoint
+    }
+
+    fn finish(&self, angle: f64) -> CmdResult {
+        let angle = self.signed_angle(angle);
+        if angle.is_finite() && angle.abs() > 1e-9 && angle.abs() <= std::f64::consts::TAU + 1e-9 {
+            let mut defaults = revolve_defaults().lock().unwrap_or_else(|error| error.into_inner());
+            defaults.mode = self.mode;
+            defaults.angle = angle.abs();
+            defaults.start_angle = self.start_angle;
+        }
+        CmdResult::RevolveEntities {
+            handles: self.handles.clone(),
+            axis_start: self.axis_start,
+            axis_end: self.axis_end,
+            angle,
+            start_angle: self.start_angle,
+            mode: self.mode,
+            color: self.color,
+        }
+    }
+}
+
+fn revolve_axis(entity: &EntityType) -> Option<(DVec3, DVec3)> {
+    let point = |value: &acadrust::types::Vector3| DVec3::new(value.x, value.y, value.z);
+    let (start, direction) = match entity {
+        EntityType::Line(line) => (point(&line.start), point(&line.end) - point(&line.start)),
+        EntityType::Ray(ray) => (point(&ray.base_point), point(&ray.direction)),
+        EntityType::XLine(line) => (point(&line.base_point), point(&line.direction)),
+        EntityType::Polyline3D(line) if line.vertices.len() == 2 => {
+            let start = point(&line.vertices[0].position);
+            (start, point(&line.vertices[1].position) - start)
+        }
+        _ => return None,
+    };
+    let direction = direction.try_normalize()?;
+    Some((start, start + direction))
 }
 
 impl CadCommand for RevolveCommand {
@@ -647,22 +838,69 @@ impl CadCommand for RevolveCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            RevolveStep::Pick => t!("REVOLVE  Select profile:").into_owned(),
-            RevolveStep::AxisStart => t!("REVOLVE  Axis start point:").into_owned(),
+            RevolveStep::Pick => t!("REVOLVE  Select objects to revolve or [Mode] (Enter to finish):").into_owned(),
+            RevolveStep::Mode => format!(
+                "{} <{}>:",
+                t!("REVOLVE  Creation mode [Solid/Surface]"),
+                if self.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" }
+            ),
+            RevolveStep::AxisStart => t!("REVOLVE  Specify axis start point or [Object/X/Y/Z]:").into_owned(),
             RevolveStep::AxisEnd => t!("REVOLVE  Axis end point:").into_owned(),
-            RevolveStep::Angle => t!("REVOLVE  Angle of revolution <360>:").into_owned(),
+            RevolveStep::AxisObject => t!("REVOLVE  Select line, ray, or construction line for axis:").into_owned(),
+            RevolveStep::Angle => format!(
+                "{} <{}>:",
+                t!("REVOLVE  Specify angle of revolution or [Start angle/Reverse/Expression]"),
+                crate::entities::common::format_angle(self.angle)
+            ),
+            RevolveStep::StartAngle => format!(
+                "{} <{}>:",
+                t!("REVOLVE  Specify start angle"),
+                crate::entities::common::format_angle(self.start_angle)
+            ),
+            RevolveStep::Expression => t!("REVOLVE  Enter angle expression:").into_owned(),
+        }
+    }
+    fn options(&self) -> Vec<CmdOption> {
+        match self.step {
+            RevolveStep::Pick => vec![CmdOption::new("Mode", "MODE"), CmdOption::enter("Done")],
+            RevolveStep::Mode => vec![
+                CmdOption::new("Solid", "SOLID"),
+                CmdOption::new("Surface", "SURFACE"),
+            ],
+            RevolveStep::AxisStart => vec![
+                CmdOption::new("Object", "OBJECT"),
+                CmdOption::new("X", "X"),
+                CmdOption::new("Y", "Y"),
+                CmdOption::new("Z", "Z"),
+            ],
+            RevolveStep::Angle => vec![
+                CmdOption::new("Start angle", "START"),
+                CmdOption::new("Reverse", "REVERSE"),
+                CmdOption::new("Expression", "EXPRESSION"),
+            ],
+            _ => Vec::new(),
         }
     }
     fn needs_entity_pick(&self) -> bool {
-        self.step == RevolveStep::Pick
+        self.step == RevolveStep::AxisObject
     }
     fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
-        self.target_handle = handle;
-        self.step = RevolveStep::AxisStart;
-        CmdResult::NeedPoint
+        match self.step {
+            RevolveStep::AxisObject => {
+                let Some((start, end)) = self.injected_axis.take().as_ref().and_then(revolve_axis)
+                else {
+                    return CmdResult::NeedPoint;
+                };
+                self.axis_start = start;
+                self.axis_end = end;
+                self.step = RevolveStep::Angle;
+                CmdResult::NeedPoint
+            }
+            _ => CmdResult::NeedPoint,
+        }
     }
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
@@ -672,46 +910,213 @@ impl CadCommand for RevolveCommand {
                 CmdResult::NeedPoint
             }
             RevolveStep::AxisEnd => {
-                self.axis_end = pt;
+                if (pt - self.axis_start).length_squared() <= 1e-12 {
+                    CmdResult::NeedPoint
+                } else {
+                    self.axis_end = pt;
+                    self.step = RevolveStep::Angle;
+                    CmdResult::NeedPoint
+                }
+            }
+            RevolveStep::Angle => self
+                .cursor_angle(pt, true)
+                .map(|angle| self.finish(angle))
+                .unwrap_or(CmdResult::NeedPoint),
+            RevolveStep::StartAngle => {
+                let Some(angle) = self.cursor_angle(pt, false) else {
+                    return CmdResult::NeedPoint;
+                };
+                self.start_angle = angle;
                 self.step = RevolveStep::Angle;
                 CmdResult::NeedPoint
             }
-            RevolveStep::Angle => self.make_revolve(360.0),
             _ => CmdResult::NeedPoint,
         }
     }
     fn wants_text_input(&self) -> bool {
-        self.step == RevolveStep::Angle
+        matches!(
+            self.step,
+            RevolveStep::Pick
+                | RevolveStep::Mode
+                | RevolveStep::AxisStart
+                | RevolveStep::Angle
+                | RevolveStep::StartAngle
+                | RevolveStep::Expression
+        )
+    }
+    fn point_step_accepts_keywords(&self) -> bool {
+        matches!(self.step, RevolveStep::AxisStart | RevolveStep::Angle)
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let angle = if text.trim().is_empty() {
-            360.0f32
-        } else {
-            text.trim()
-                .parse::<f32>()
-                .ok()
-                .filter(|&a| a.abs() > 1e-3)?
-        };
-        Some(self.make_revolve(angle))
+        let value = text.trim();
+        if value.is_empty() {
+            return None;
+        }
+        let upper = value.to_ascii_uppercase();
+        match self.step {
+            RevolveStep::Pick if "MODE".starts_with(&upper) => {
+                self.step = RevolveStep::Mode;
+                Some(CmdResult::NeedPoint)
+            }
+            RevolveStep::Mode => {
+                if "SOLID".starts_with(&upper) {
+                    self.mode = ExtrudeMode::Solid;
+                } else if "SURFACE".starts_with(&upper) {
+                    self.mode = ExtrudeMode::Surface;
+                } else {
+                    return Some(CmdResult::NeedPoint);
+                }
+                revolve_defaults()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .mode = self.mode;
+                self.step = RevolveStep::Pick;
+                Some(CmdResult::NeedPoint)
+            }
+            RevolveStep::AxisStart => {
+                if "OBJECT".starts_with(&upper) {
+                    self.step = RevolveStep::AxisObject;
+                    Some(CmdResult::NeedPoint)
+                } else if upper == "X" {
+                    Some(self.set_axis(self.working_plane.x))
+                } else if upper == "Y" {
+                    Some(self.set_axis(self.working_plane.y))
+                } else if upper == "Z" {
+                    Some(self.set_axis(self.working_plane.z))
+                } else {
+                    None
+                }
+            }
+            RevolveStep::Angle => {
+                if "START ANGLE".starts_with(&upper) || "START".starts_with(&upper) {
+                    self.step = RevolveStep::StartAngle;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if "REVERSE".starts_with(&upper) {
+                    self.reverse = !self.reverse;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if "EXPRESSION".starts_with(&upper) {
+                    self.step = RevolveStep::Expression;
+                    return Some(CmdResult::NeedPoint);
+                }
+                crate::entities::common::parse_angle(value)
+                    .filter(|angle| {
+                        angle.is_finite()
+                            && angle.abs() > 1e-9
+                            && angle.abs() <= std::f64::consts::TAU + 1e-9
+                    })
+                    .map(|angle| self.finish(angle))
+            }
+            RevolveStep::StartAngle => {
+                let angle = crate::entities::common::parse_angle(value)?;
+                if !angle.is_finite() {
+                    return Some(CmdResult::NeedPoint);
+                }
+                self.start_angle = angle;
+                self.step = RevolveStep::Angle;
+                Some(CmdResult::NeedPoint)
+            }
+            RevolveStep::Expression => {
+                let angle = crate::app::expr_eval::eval_number(value)
+                    .and_then(|value| crate::entities::common::parse_angle(&value.to_string()))?;
+                if !angle.is_finite()
+                    || angle.abs() <= 1e-9
+                    || angle.abs() > std::f64::consts::TAU + 1e-9
+                {
+                    return Some(CmdResult::NeedPoint);
+                }
+                Some(self.finish(angle))
+            }
+            _ => None,
+        }
     }
     fn on_enter(&mut self) -> CmdResult {
-        if self.step == RevolveStep::Angle {
-            self.make_revolve(360.0)
-        } else {
-            CmdResult::Cancel
+        match self.step {
+            RevolveStep::Pick if !self.handles.is_empty() => {
+                self.step = RevolveStep::AxisStart;
+                CmdResult::NeedPoint
+            }
+            RevolveStep::Mode => {
+                self.step = RevolveStep::Pick;
+                CmdResult::NeedPoint
+            }
+            RevolveStep::Angle => self.finish(self.angle),
+            RevolveStep::StartAngle => {
+                self.step = RevolveStep::Angle;
+                CmdResult::NeedPoint
+            }
+            _ => CmdResult::Cancel,
         }
     }
-}
-
-impl RevolveCommand {
-    fn make_revolve(&self, angle_deg: f32) -> CmdResult {
-        CmdResult::RevolveEntity {
-            handle: self.target_handle,
-            axis_start: self.axis_start,
-            axis_end: self.axis_end,
-            angle_deg,
-            color: self.color,
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        self.working_plane = plane;
+    }
+    fn is_selection_gathering(&self) -> bool {
+        self.step == RevolveStep::Pick
+    }
+    fn selection_forces_add(&self) -> bool {
+        self.step == RevolveStep::Pick
+    }
+    fn inject_selection_entities(&mut self, entities: Vec<SelectionEntity>) {
+        if self.step != RevolveStep::Pick {
+            return;
         }
+        self.handles = entities.iter().map(|entry| entry.handle).collect();
+        self.preview_profiles = entities
+            .into_iter()
+            .map(|entry| (entry.handle, entry.entity))
+            .collect();
+    }
+    fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+    fn inject_before_entity_pick(&self) -> bool {
+        self.step == RevolveStep::AxisObject
+    }
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        if self.step == RevolveStep::AxisObject {
+            self.injected_axis = Some(entity);
+        }
+    }
+    fn on_preview_wires(&mut self, cursor: DVec3) -> Vec<WireModel> {
+        self.preview_wires(cursor)
+    }
+    fn dyn_field(&self) -> crate::command::DynField {
+        if matches!(self.step, RevolveStep::Angle | RevolveStep::StartAngle) {
+            crate::command::DynField::Angle
+        } else {
+            crate::command::DynField::Point
+        }
+    }
+    fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
+        matches!(self.step, RevolveStep::Angle | RevolveStep::StartAngle).then(|| {
+            crate::command::DynSpec {
+                anchor: crate::command::DynAnchor::Point(
+                    self.angle_anchor().unwrap_or(self.axis_start),
+                ),
+                fields: vec![crate::command::DynFieldSpec::new(crate::command::DynRole::Angle)],
+                guide: crate::command::DynGuide::None,
+                ref_point: self.profile_reference(),
+            }
+        })
+    }
+    fn dyn_commit_as_text(&self) -> bool {
+        matches!(self.step, RevolveStep::Angle | RevolveStep::StartAngle)
+    }
+    fn dyn_auto_sign_angle(&self) -> bool {
+        false
+    }
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        let full_at_zero = self.step == RevolveStep::Angle;
+        self.cursor_angle(cursor, full_at_zero).map(|angle| {
+            let angle = if self.step == RevolveStep::Angle {
+                self.signed_angle(angle)
+            } else {
+                angle
+            };
+            crate::command::dyn_display_angle_deg(angle as f32) as f64
+        })
     }
 }
 
@@ -864,6 +1269,45 @@ pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType 
         options.draft_angle = taper_angle;
         options.is_solid = false;
         *sweep_vector = Vector3::new(direction.x, direction.y, direction.z);
+    }
+    EntityType::Surface(surface)
+}
+
+pub fn empty_revolved_surface(
+    profile: &EntityType,
+    axis_start: DVec3,
+    axis_end: DVec3,
+    angle: f64,
+    start_angle: f64,
+) -> EntityType {
+    use acadrust::entities::{Surface, SurfaceData, SurfaceKind};
+    use acadrust::types::Vector3;
+
+    let mut surface = Surface::new(SurfaceKind::Revolved);
+    let axis = (axis_end - axis_start).normalize_or(DVec3::Z);
+    surface.point_of_reference = Vector3::new(axis_start.x, axis_start.y, axis_start.z);
+    if let SurfaceData::Revolved {
+        revolve_entity,
+        axis_point,
+        axis_vector,
+        revolve_angle,
+        start_angle: stored_start,
+        entity_transform,
+        solid,
+        ..
+    } = &mut surface.surface_data
+    {
+        if let Some((embedded, transform)) =
+            crate::scene::model::sweep_model::embedded_revolve_profile(profile)
+        {
+            *revolve_entity = Some(embedded);
+            *entity_transform = transform;
+        }
+        *axis_point = Vector3::new(axis_start.x, axis_start.y, axis_start.z);
+        *axis_vector = Vector3::new(axis.x, axis.y, axis.z);
+        *revolve_angle = angle;
+        *stored_start = start_angle;
+        *solid = false;
     }
     EntityType::Surface(surface)
 }

@@ -156,22 +156,28 @@ impl ExtrudeCommand {
                         self.taper_angle,
                     )
                 };
-                body.map(|body| preview_body_wires(&body, self.color))
+                body.map(|body| preview_body_wires(&body, self.color, 0))
                     .unwrap_or_default()
             })
             .collect()
     }
 }
 
-fn preview_body_wires(body: &cadkernel::brep::Body, color: [f32; 4]) -> Vec<WireModel> {
+fn preview_body_wires(
+    body: &cadkernel::brep::Body,
+    color: [f32; 4],
+    isolines: usize,
+) -> Vec<WireModel> {
     let mesh = cadkernel::brep::mesh::tessellate(
         body,
         cadkernel::brep::mesh::TessellationTolerance::new(
             cadkernel::tessellation::DEFAULT_ANGLE,
             1e-9,
-        ),
+        )
+        .with_isolines(isolines),
     );
-    mesh.edges
+    let mut wires = mesh
+        .edges
         .into_iter()
         .filter(|edge| edge.positions.len() >= 2)
         .map(|edge| {
@@ -182,7 +188,21 @@ fn preview_body_wires(body: &cadkernel::brep::Body, color: [f32; 4]) -> Vec<Wire
                 false,
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    wires.extend(
+        mesh.isolines
+            .into_iter()
+            .filter(|line| line.positions.len() >= 2)
+            .map(|line| {
+                WireModel::solid_f64(
+                    "REVOLVE-PREVIEW-ISOLINE".to_owned(),
+                    line.positions,
+                    color,
+                    false,
+                )
+            }),
+    );
+    wires
 }
 
 impl CadCommand for ExtrudeCommand {
@@ -626,6 +646,7 @@ pub struct RevolveCommand {
     angle: f64,
     start_angle: f64,
     reverse: bool,
+    isolines: usize,
     color: [f32; 4],
 }
 
@@ -660,7 +681,7 @@ enum RevolveStep {
 }
 
 impl RevolveCommand {
-    pub fn new(color: [f32; 4]) -> Self {
+    pub fn new(color: [f32; 4], isolines: usize) -> Self {
         let defaults = *revolve_defaults().lock().unwrap_or_else(|error| error.into_inner());
         Self {
             step: RevolveStep::Pick,
@@ -675,6 +696,7 @@ impl RevolveCommand {
             angle: defaults.angle,
             start_angle: defaults.start_angle,
             reverse: false,
+            isolines,
             color,
         }
     }
@@ -727,14 +749,29 @@ impl RevolveCommand {
         Some(self.axis_start + axis * (reference - self.axis_start).dot(axis))
     }
 
+    fn profile_normal(&self) -> Option<DVec3> {
+        self.preview_profiles.iter().find_map(|(_, entity)| {
+            crate::scene::model::sweep_model::extrusion_profile_of(entity)
+                .and_then(|(profile, _)| profile.plane.normal())
+                .map(DVec3::from_array)
+                .and_then(DVec3::try_normalize)
+        })
+    }
+
     fn cursor_angle(&self, cursor: DVec3, full_at_zero: bool) -> Option<f64> {
-        let axis = (self.axis_end - self.axis_start).try_normalize()?;
         let anchor = self.angle_anchor()?;
         let reference = (self.profile_reference()? - anchor).try_normalize()?;
-        let radial = (cursor - (self.axis_start
-            + axis * (cursor - self.axis_start).dot(axis)))
-            .try_normalize()?;
-        let mut angle = axis.dot(reference.cross(radial)).atan2(reference.dot(radial));
+        // The picked cursor is projected onto the active/profile construction
+        // plane. Measuring it about the 3-D revolution axis collapses almost
+        // every ordinary mouse pick to 0 or 180 degrees, and 0 is the full-turn
+        // shortcut. Measure the scalar input in the profile plane instead;
+        // the resulting angle is still applied about the requested 3-D axis.
+        let normal = self.profile_normal().unwrap_or(self.working_plane.z);
+        let cursor_direction = cursor - anchor;
+        let radial = (cursor_direction - normal * cursor_direction.dot(normal)).try_normalize()?;
+        let mut angle = normal
+            .dot(reference.cross(radial))
+            .atan2(reference.dot(radial));
         if angle < 0.0 {
             angle += std::f64::consts::TAU;
         }
@@ -792,7 +829,7 @@ impl RevolveCommand {
                         start_angle,
                     )
                 };
-                body.map(|body| preview_body_wires(&body, self.color))
+                body.map(|body| preview_body_wires(&body, self.color, self.isolines))
                     .unwrap_or_default()
             })
             .collect()

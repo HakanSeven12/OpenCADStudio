@@ -749,27 +749,13 @@ impl RevolveCommand {
         Some(self.axis_start + axis * (reference - self.axis_start).dot(axis))
     }
 
-    fn profile_normal(&self) -> Option<DVec3> {
-        self.preview_profiles.iter().find_map(|(_, entity)| {
-            crate::scene::model::sweep_model::extrusion_profile_of(entity)
-                .and_then(|(profile, _)| profile.plane.normal())
-                .map(DVec3::from_array)
-                .and_then(DVec3::try_normalize)
-        })
-    }
-
     fn cursor_angle(&self, cursor: DVec3, full_at_zero: bool) -> Option<f64> {
+        let axis = (self.axis_end - self.axis_start).try_normalize()?;
         let anchor = self.angle_anchor()?;
         let reference = (self.profile_reference()? - anchor).try_normalize()?;
-        // The picked cursor is projected onto the active/profile construction
-        // plane. Measuring it about the 3-D revolution axis collapses almost
-        // every ordinary mouse pick to 0 or 180 degrees, and 0 is the full-turn
-        // shortcut. Measure the scalar input in the profile plane instead;
-        // the resulting angle is still applied about the requested 3-D axis.
-        let normal = self.profile_normal().unwrap_or(self.working_plane.z);
         let cursor_direction = cursor - anchor;
-        let radial = (cursor_direction - normal * cursor_direction.dot(normal)).try_normalize()?;
-        let mut angle = normal
+        let radial = (cursor_direction - axis * cursor_direction.dot(axis)).try_normalize()?;
+        let mut angle = axis
             .dot(reference.cross(radial))
             .atan2(reference.dot(radial));
         if angle < 0.0 {
@@ -1170,6 +1156,15 @@ impl CadCommand for RevolveCommand {
     fn dyn_auto_sign_angle(&self) -> bool {
         false
     }
+    fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
+        if !matches!(self.step, RevolveStep::Angle | RevolveStep::StartAngle) {
+            return None;
+        }
+        Some((
+            (self.axis_end - self.axis_start).try_normalize()?,
+            self.angle_anchor()?,
+        ))
+    }
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         let full_at_zero = self.step == RevolveStep::Angle;
         self.cursor_angle(cursor, full_at_zero).map(|angle| {
@@ -1381,4 +1376,34 @@ inventory::submit!(crate::command::CommandRegistration {
 });
 inventory::submit!(crate::command::CommandRegistration { names: &["LOFT"] });
 inventory::submit!(crate::command::CommandRegistration { names: &["REVOLVE"] });
+
+#[cfg(test)]
+mod revolve_tests {
+    use super::*;
+
+    #[test]
+    fn cursor_angle_is_measured_about_the_model_axis() {
+        let profile = EntityType::Line(acadrust::entities::Line::from_coords(
+            2.0, 0.0, 0.0, 2.0, 4.0, 0.0,
+        ));
+        let mut command = RevolveCommand::new([1.0; 4], 0);
+        command.set_preselection(vec![(Handle::new(1), profile)]);
+        command.axis_start = DVec3::ZERO;
+        command.axis_end = DVec3::Y;
+        command.step = RevolveStep::Angle;
+
+        let anchor = command.angle_anchor().unwrap();
+        let quarter = anchor - DVec3::Z * 2.0;
+        let angle = command.cursor_angle(quarter, false).unwrap();
+        assert!((angle - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+
+        let displaced_along_axis = quarter + DVec3::Y * 100.0;
+        let angle = command.cursor_angle(displaced_along_axis, false).unwrap();
+        assert!((angle - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+
+        let (normal, origin) = command.cursor_plane().unwrap();
+        assert!((normal - DVec3::Y).length_squared() < 1e-24);
+        assert!((origin - anchor).length_squared() < 1e-24);
+    }
+}
 inventory::submit!(crate::command::CommandRegistration { names: &["SWEEP"] });

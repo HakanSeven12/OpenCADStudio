@@ -1778,6 +1778,12 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// Override the model-space plane onto which viewport cursor rays are
+    /// projected for this command step.
+    fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
+        None
+    }
+
     /// Mid-command Ctrl+Z: a multi-point drawing command can take the undo
     /// itself (PLINE pops its last vertex) instead of the document undo
     /// swallowing the whole in-progress object. `None` (default) lets the

@@ -6994,6 +6994,11 @@ impl OpenCADStudio {
 
             Message::ThumbnailCaptureFrame => self.on_thumbnail_capture_frame(),
 
+            Message::ThumbnailCaptureFinished => {
+                self.thumbnail_capture_clean = false;
+                Task::none()
+            }
+
             #[cfg(not(target_arch = "wasm32"))]
             Message::SaveFinished(outcome) => self.on_save_finished(outcome),
 

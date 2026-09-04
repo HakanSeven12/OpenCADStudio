@@ -16,7 +16,6 @@ pub mod wire_arena;
 pub mod wire_gpu;
 
 use iced::wgpu;
-use iced::wgpu::util::DeviceExt;
 use iced::{Rectangle, Size};
 
 pub use face3d_gpu::Face3DGpu;
@@ -2122,11 +2121,13 @@ impl Pipeline {
         // UV crop uniform: [uv_offset_x, uv_offset_y, uv_scale_x, uv_scale_y]
         // padded to 16 bytes (std140 vec2 alignment). Defaulted to the
         // identity crop (offset 0, scale 1) for the common on-canvas case.
-        let blit_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("blit.uniform_buffer"),
-            contents: bytemuck::cast_slice(&[0.0f32, 0.0, 1.0, 1.0]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let blit_uniform_buffer = gpu_upload::upload_buffer(
+            device,
+            queue,
+            "blit.uniform_buffer",
+            &[0.0f32, 0.0, 1.0, 1.0],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        );
 
         let blit_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("blit.pipeline_layout"),
@@ -2969,8 +2970,7 @@ impl Pipeline {
     /// so the mask pipeline stamps it straight into the stencil with `Invert`
     /// (even-odd fill → interior marked, any convexity). Empty input clears the
     /// boundary so the viewport renders unclipped (its render rectangle clips).
-    pub fn upload_clip_boundary(&mut self, device: &wgpu::Device, boundary_ndc: &[[f32; 2]]) {
-        use wgpu::util::DeviceExt;
+    pub fn upload_clip_boundary(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, boundary_ndc: &[[f32; 2]]) {
         if boundary_ndc.len() < 3 {
             self.clip_boundary = None;
             return;
@@ -2986,11 +2986,13 @@ impl Pipeline {
             self.clip_boundary = None;
             return;
         }
-        let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("clip_boundary.vbuf"),
-            contents: bytemuck::cast_slice(&verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vbuf = gpu_upload::upload_buffer(
+            device,
+            queue,
+            "clip_boundary.vbuf",
+            &verts,
+            wgpu::BufferUsages::VERTEX,
+        );
         self.clip_boundary = Some((vbuf, (verts.len() / 2) as u32));
     }
 
@@ -3378,13 +3380,18 @@ impl Pipeline {
         self.hatch_gpu.upload_preview(device, queue, hatches);
     }
 
-    pub fn upload_wipeouts(&mut self, device: &wgpu::Device, wipeouts: &[HatchModel]) {
+    pub fn upload_wipeouts(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wipeouts: &[HatchModel],
+    ) {
         let renderable: Vec<HatchModel> = wipeouts
             .iter()
             .filter(|h| h.boundary.len() >= 3)
             .cloned()
             .collect();
-        self.gpu_wipeouts = WipeoutGpu::from_models(device, &renderable, &self.wipeout_bgl1);
+        self.gpu_wipeouts = WipeoutGpu::from_models(device, queue, &renderable, &self.wipeout_bgl1);
     }
 
     pub fn upload_images(

@@ -546,6 +546,7 @@ impl shader::Primitive for Primitive {
             if wipeout_changed || fill_changed {
                 inner.upload_wipeouts(
                     device,
+                    queue,
                     if fill_mode {
                         &vp.wipeout_hatches[..]
                     } else {
@@ -1117,7 +1118,7 @@ impl shader::Primitive for Primitive {
                 );
                 inner.silhouette_key = silhouette_key;
             }
-            inner.upload_clip_boundary(device, &vp.clip_boundary_ndc);
+            inner.upload_clip_boundary(device, queue, &vp.clip_boundary_ndc);
             let hatch_lod_key = (
                 Arc::as_ptr(&vp.hatches) as usize,
                 vp.camera_generation,

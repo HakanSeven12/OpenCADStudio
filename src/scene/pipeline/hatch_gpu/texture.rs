@@ -3,7 +3,6 @@
 
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use iced::wgpu;
-use iced::wgpu::util::DeviceExt;
 
 /// Width (in texels) of the RGBA32F data texture. Height grows to fit; a hatch
 /// with N total texels uses ceil(N / WIDTH) rows.
@@ -377,11 +376,13 @@ impl TextureHatch {
             dash_off,
             tex_width: width,
         };
-        let _uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.texture.uniform"),
-            contents: bytemuck::bytes_of(&uniform_data),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let _uniform_buf = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.texture.uniform",
+            std::slice::from_ref(&uniform_data),
+            wgpu::BufferUsages::UNIFORM,
+        );
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hatch.texture.bind_group1"),

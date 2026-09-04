@@ -676,7 +676,6 @@ impl BlockWireGpu {
         color_override: Option<[f32; 4]>,
         const_bgl: &wgpu::BindGroupLayout,
     ) -> Vec<Self> {
-        use wgpu::util::DeviceExt;
 
         let mut slots: rustc_hash::FxHashMap<(u64, bool), usize> =
             rustc_hash::FxHashMap::default();
@@ -751,11 +750,18 @@ impl BlockWireGpu {
                     )
                 })
                 .collect();
-            let const_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("block_wire.const"),
-                contents: bytemuck::bytes_of(&constant),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
+            // Tiny, but size is irrelevant here: once the device is out of
+            // memory every allocation fails, including a one-struct uniform,
+            // and create_buffer_init would map the invalid buffer and panic.
+            // This is the allocation that killed the process after the vertex
+            // buffers had already degraded gracefully.
+            let const_buffer = super::gpu_upload::upload_buffer(
+                device,
+                queue,
+                "block_wire.const",
+                std::slice::from_ref(&constant),
+                wgpu::BufferUsages::UNIFORM,
+            );
             let const_bind_group = std::sync::Arc::new(device.create_bind_group(
                 &wgpu::BindGroupDescriptor {
                     label: Some("block_wire.const.bg"),

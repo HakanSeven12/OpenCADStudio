@@ -354,8 +354,8 @@ pub fn preview_wires(target: &PresspullTarget, distance: f64, color: [f32; 4], i
     };
     let Some((plane, loops, direction)) = geometry else { return Vec::new(); };
     let mut wires = Vec::new();
-    // Each loop is a lateral sheet. Calling extrude_region here would perform
-    // Boolean differences for holes even though this overlay only needs wires.
+    // Each loop is a lateral sheet. This wire-only overlay does not need the
+    // planar caps or complete solid topology of extrude_region.
     for ring in loops {
         let ring = brep::extrusion_profile_pieces(&ring);
         let Some(body) = brep::extrude_surface(plane, &ring, direction) else { continue; };

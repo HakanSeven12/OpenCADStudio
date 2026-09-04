@@ -21,6 +21,7 @@ const PROTOCOL_VERSION: &str = "2025-11-25";
 const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
+const CACHE_TTL_MS: u64 = 3_600_000;
 const INSTRUCTIONS: &str = "Use ocs_sessions first; it opens OpenCADStudio when needed. Read state and commands before editing. Preserve session_id, document_id, revision, selection and request_id. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OpenCADStudio and its geometry kernel calculate geometry. Verify important results with queries and ocs_capture, and save only to an explicit path.";
 const READ_OPS: &[&str] = &[
     "state",
@@ -35,6 +36,10 @@ const READ_OPS: &[&str] = &[
     "commands",
     "events",
     "operation",
+];
+const EXECUTE_OPS: &[&str] = &[
+    "new", "open", "activate", "run", "start", "input", "cancel", "undo", "redo", "select",
+    "property", "action", "save", "stop",
 ];
 
 #[derive(Clone, Deserialize)]
@@ -331,6 +336,14 @@ fn call_tool(
                 .cloned()
                 .map(Value::Object)
                 .ok_or_else(|| "Missing request object".to_string())?;
+            let op = required_string(&request, "op")?;
+            if !EXECUTE_OPS.contains(&op) {
+                return Err(format!("Unknown mutation operation: {op}"));
+            }
+            let request_id = required_string(&request, "request_id")?;
+            if request_id.len() > 128 {
+                return Err("request_id must not exceed 128 bytes".into());
+            }
             let wait = arguments["wait_seconds"].as_f64().unwrap_or(30.0);
             client(clients, session_id)?.request(request, wait)
         }
@@ -357,25 +370,25 @@ fn tool_definitions() -> Value {
         {
             "name":"ocs_sessions",
             "description":"List real OpenCADStudio GUI sessions and documents. Launch the installed editor if none is running.",
-            "inputSchema":{"type":"object","properties":{"launch_if_none":{"type":"boolean","default":true}},"additionalProperties":false},
-            "annotations":{"title":"List OCS sessions","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+            "inputSchema":{"type":"object","properties":{"launch_if_none":{"type":"boolean","default":true,"description":"Launch OpenCADStudio when no live session exists."}},"additionalProperties":false},
+            "annotations":{"title":"List OCS sessions","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_read",
             "description":"Read state, commands/actions, query, entities, layers, header, properties, measurements, history, events or operation status from a live OCS session.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string"},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object"}},"required":["session_id"],"additionalProperties":false},
+            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters such as document_id, handles, after, or request_id."}},"required":["session_id"],"additionalProperties":false},
             "annotations":{"title":"Read OCS state","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_execute",
             "description":"Execute one semantic OCS action. Use state document_id and revision. request_id is the idempotency key. Accepted, running and waiting_input are not completion.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string"},"request":{"type":"object"},"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30}},"required":["session_id","request"],"additionalProperties":false},
-            "annotations":{"title":"Execute OCS action","readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false}
+            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"request":{"type":"object","properties":{"op":{"type":"string","enum":EXECUTE_OPS,"description":"Semantic editor operation."},"request_id":{"type":"string","minLength":1,"maxLength":128,"description":"Caller-generated idempotency key. Reuse it only when retrying the identical request."},"document_id":{"type":"integer","minimum":0,"description":"Target document from current state."},"revision":{"type":"integer","minimum":0,"description":"Expected edit revision from current state."},"geometry_revision":{"type":"integer","minimum":0,"description":"Expected geometry revision when geometry state matters."},"camera_revision":{"type":"integer","minimum":0,"description":"Expected camera revision when view state matters."},"selection":{"type":"array","items":{"type":"string"},"description":"Expected selected handles from current state."}},"required":["op","request_id"]},"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30}},"required":["session_id","request"],"additionalProperties":false},
+            "annotations":{"title":"Execute OCS action","readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_capture",
             "description":"Capture the actual current OpenCADStudio window as PNG for visual verification.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"],"additionalProperties":false},
+            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."}},"required":["session_id"],"additionalProperties":false},
             "annotations":{"title":"Capture OCS window","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
     ])
@@ -392,12 +405,18 @@ fn tool_result(value: Value) -> Value {
     };
     json!({
         "content":[{"type":"text","text":value.to_string()}],
-        "structuredContent":structured
+        "structuredContent":structured,
+        "isError":value["ok"].as_bool() == Some(false)
     })
 }
 
 fn error_result(message: impl ToString) -> Value {
-    json!({"content":[{"type":"text","text":message.to_string()}],"isError":true})
+    let message = message.to_string();
+    json!({
+        "content":[{"type":"text","text":message.clone()}],
+        "structuredContent":{"ok":false,"error":message},
+        "isError":true
+    })
 }
 
 fn response(id: Value, result: Value) -> Value {
@@ -413,7 +432,7 @@ fn modern_request(params: &Value) -> bool {
         == Some(MODERN_PROTOCOL_VERSION)
 }
 
-fn protocol_result(mut result: Value, modern: bool) -> Value {
+fn protocol_result(mut result: Value, modern: bool, cacheable: bool) -> Value {
     if modern {
         let object = result
             .as_object_mut()
@@ -425,12 +444,28 @@ fn protocol_result(mut result: Value, modern: bool) -> Value {
             "_meta".into(),
             json!({"io.modelcontextprotocol/serverInfo":server_info()}),
         );
+        if cacheable {
+            object.insert("ttlMs".into(), Value::from(CACHE_TTL_MS));
+            object.insert("cacheScope".into(), Value::String("public".into()));
+        }
     }
     result
 }
 
 fn rpc_error(id: Value, code: i64, message: impl ToString) -> Value {
     json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message.to_string()}})
+}
+
+fn unsupported_protocol(id: Value, requested: &str) -> Value {
+    json!({
+        "jsonrpc":"2.0",
+        "id":id,
+        "error":{
+            "code":-32022,
+            "message":format!("Unsupported protocol version: {requested}"),
+            "data":{"requested":requested,"supported":[MODERN_PROTOCOL_VERSION,PROTOCOL_VERSION]}
+        }
+    })
 }
 
 fn handle_message(message: Value, clients: &mut HashMap<String, GuiClient>) -> Option<Value> {
@@ -441,8 +476,14 @@ fn handle_message(message: Value, clients: &mut HashMap<String, GuiClient>) -> O
     }
     let id = id.unwrap();
     let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
+    if let Some(requested) = params["_meta"]["io.modelcontextprotocol/protocolVersion"].as_str() {
+        if requested != MODERN_PROTOCOL_VERSION {
+            return Some(unsupported_protocol(id, requested));
+        }
+    }
     let modern = modern_request(&params);
     Some(match method {
+        "initialize" if modern => rpc_error(id, -32601, "Method not found: initialize"),
         "initialize" => {
             let requested = params["protocolVersion"]
                 .as_str()
@@ -472,12 +513,13 @@ fn handle_message(message: Value, clients: &mut HashMap<String, GuiClient>) -> O
                     "instructions":INSTRUCTIONS
                 }),
                 true,
+                true,
             ),
         ),
-        "ping" => response(id, protocol_result(json!({}), modern)),
+        "ping" => response(id, protocol_result(json!({}), modern, false)),
         "tools/list" => response(
             id,
-            protocol_result(json!({"tools":tool_definitions()}), modern),
+            protocol_result(json!({"tools":tool_definitions()}), modern, true),
         ),
         "tools/call" => {
             let Some(name) = params["name"].as_str() else {
@@ -490,7 +532,7 @@ fn handle_message(message: Value, clients: &mut HashMap<String, GuiClient>) -> O
             let result = call_tool(name, &arguments, clients)
                 .map(tool_result)
                 .unwrap_or_else(error_result);
-            response(id, protocol_result(result, modern))
+            response(id, protocol_result(result, modern, false))
         }
         _ => rpc_error(id, -32601, format!("Method not found: {method}")),
     })
@@ -542,6 +584,11 @@ mod tests {
             names,
             ["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"]
         );
+        assert_eq!(tools[0]["annotations"]["readOnlyHint"], false);
+        assert_eq!(
+            tools[2]["inputSchema"]["properties"]["request"]["required"],
+            json!(["op", "request_id"])
+        );
     }
 
     #[test]
@@ -564,6 +611,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 4);
+        assert!(listed["result"].get("ttlMs").is_none());
+        assert!(listed["result"].get("resultType").is_none());
     }
 
     #[test]
@@ -575,11 +624,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(discovered["result"]["resultType"], "complete");
+        assert_eq!(discovered["result"]["ttlMs"], CACHE_TTL_MS);
+        assert_eq!(discovered["result"]["cacheScope"], "public");
         assert_eq!(discovered["result"]["supportedVersions"][0], "2026-07-28");
         assert_eq!(
             discovered["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
             "OpenCADStudio"
         );
+
+        let listed = handle_message(
+            json!({"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
+            &mut clients,
+        )
+        .unwrap();
+        assert_eq!(listed["result"]["resultType"], "complete");
+        assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS);
+        assert_eq!(listed["result"]["cacheScope"], "public");
     }
 
     #[test]
@@ -591,5 +651,48 @@ mod tests {
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
+    }
+
+    #[test]
+    fn rejects_unknown_modern_protocol_versions() {
+        let mut clients = HashMap::new();
+        let rejected = handle_message(
+            json!({"jsonrpc":"2.0","id":4,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01"}}}),
+            &mut clients,
+        )
+        .unwrap();
+        assert_eq!(rejected["error"]["code"], -32022);
+        assert_eq!(rejected["error"]["data"]["requested"], "2099-01-01");
+        assert_eq!(
+            rejected["error"]["data"]["supported"][0],
+            MODERN_PROTOCOL_VERSION
+        );
+    }
+
+    #[test]
+    fn execute_requires_a_visible_request_id() {
+        let mut clients = HashMap::new();
+        let called = handle_message(
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"session_id":"missing","request":{"op":"undo"}}}}),
+            &mut clients,
+        )
+        .unwrap();
+        assert_eq!(called["result"]["isError"], true);
+        assert!(called["result"]["structuredContent"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("request_id"));
+    }
+
+    #[test]
+    fn gui_failures_are_mcp_errors() {
+        let result = tool_result(json!({
+            "ok":false,
+            "status":"failed",
+            "code":"stale_state",
+            "error":"Refresh state before editing"
+        }));
+        assert_eq!(result["isError"], true);
+        assert_eq!(result["structuredContent"]["code"], "stale_state");
     }
 }

@@ -17,7 +17,21 @@ The server provides four tools:
 - `ocs_execute` performs semantic commands and input against the real editor.
 - `ocs_capture` returns a PNG of the current window for visual verification.
 
-Mutations carry a session ID, document ID, expected revision, selection, and idempotent request ID. Commands report `waiting_input` while more input is required and asynchronous work remains `running` until its real callback finishes. Geometry stays in OpenCADStudio and its geometry kernel.
+The normal flow is to call `ocs_sessions`, read the chosen session with `ocs_read`, then pass the returned document state into `ocs_execute`. For example, an undo request has this shape:
+
+```json
+{
+  "session_id": "SESSION_FROM_OCS_SESSIONS",
+  "request": {
+    "op": "undo",
+    "request_id": "undo-1",
+    "document_id": 1,
+    "revision": 12
+  }
+}
+```
+
+Every `ocs_execute` request requires a caller-generated `request_id`. Reuse that ID only to retry the identical request after a timeout, together with the same session ID, document ID, expected revision, and selection. Commands report `waiting_input` while more input is required and asynchronous work remains `running` until its real callback finishes. Geometry stays in OpenCADStudio and its geometry kernel.
 
 The source-tree protocol smoke test uses only the Python standard library:
 

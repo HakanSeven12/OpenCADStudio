@@ -4,8 +4,12 @@ from pathlib import Path
 import subprocess
 import sys
 
-def main() -> None:
-    server = Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/OpenCADStudio").resolve()
+
+TOOLS = {"ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"}
+MODERN = "2026-07-28"
+
+
+def start(server: Path) -> subprocess.Popen[str]:
     process = subprocess.Popen(
         [str(server), "--mcp"],
         stdin=subprocess.PIPE,
@@ -14,13 +18,26 @@ def main() -> None:
         text=True,
     )
     assert process.stdin and process.stdout
+    return process
 
-    def request(payload: dict) -> dict:
-        process.stdin.write(json.dumps(payload) + "\n")
-        process.stdin.flush()
-        return json.loads(process.stdout.readline())
 
-    initialized = request({
+def request(process: subprocess.Popen[str], payload: dict) -> dict:
+    assert process.stdin and process.stdout
+    process.stdin.write(json.dumps(payload) + "\n")
+    process.stdin.flush()
+    return json.loads(process.stdout.readline())
+
+
+def close(process: subprocess.Popen[str]) -> None:
+    assert process.stdin
+    process.stdin.close()
+    assert process.wait(timeout=5) == 0
+
+
+def legacy(server: Path) -> None:
+    process = start(server)
+
+    initialized = request(process, {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "initialize",
@@ -30,18 +47,75 @@ def main() -> None:
     assert initialized["result"]["instructions"]
     process.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
     process.stdin.flush()
-    tools = request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+    tools = request(process, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
     names = {tool["name"] for tool in tools["result"]["tools"]}
-    assert names == {"ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"}, names
-    sessions = request({
+    assert names == TOOLS, names
+    assert "resultType" not in tools["result"]
+    sessions = request(process, {
         "jsonrpc": "2.0",
         "id": 3,
         "method": "tools/call",
         "params": {"name": "ocs_sessions", "arguments": {"launch_if_none": False}},
     })
     assert not sessions["result"].get("isError"), sessions
-    process.stdin.close()
-    assert process.wait(timeout=5) == 0
+    close(process)
+
+
+def modern(server: Path) -> None:
+    process = start(server)
+    meta = {
+        "io.modelcontextprotocol/protocolVersion": MODERN,
+        "io.modelcontextprotocol/clientInfo": {"name": "smoke", "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+    discovered = request(process, {
+        "jsonrpc": "2.0",
+        "id": "discover",
+        "method": "server/discover",
+        "params": {"_meta": meta},
+    })
+    assert discovered["result"]["resultType"] == "complete"
+    assert discovered["result"]["ttlMs"] >= 0
+    assert discovered["result"]["cacheScope"] in {"public", "private"}
+
+    tools = request(process, {
+        "jsonrpc": "2.0",
+        "id": "tools",
+        "method": "tools/list",
+        "params": {"_meta": meta},
+    })
+    assert {tool["name"] for tool in tools["result"]["tools"]} == TOOLS
+    assert tools["result"]["resultType"] == "complete"
+    assert tools["result"]["ttlMs"] >= 0
+    assert tools["result"]["cacheScope"] in {"public", "private"}
+
+    invalid_mutation = request(process, {
+        "jsonrpc": "2.0",
+        "id": "invalid-mutation",
+        "method": "tools/call",
+        "params": {
+            "name": "ocs_execute",
+            "arguments": {"session_id": "missing", "request": {"op": "undo"}},
+            "_meta": meta,
+        },
+    })
+    assert invalid_mutation["result"]["isError"] is True
+    assert "request_id" in invalid_mutation["result"]["structuredContent"]["error"]
+
+    rejected = request(process, {
+        "jsonrpc": "2.0",
+        "id": "unsupported",
+        "method": "tools/list",
+        "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2099-01-01"}},
+    })
+    assert rejected["error"]["code"] == -32022
+    close(process)
+
+
+def main() -> None:
+    server = Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/OpenCADStudio").resolve()
+    legacy(server)
+    modern(server)
 
 if __name__ == "__main__":
     main()

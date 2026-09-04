@@ -2138,6 +2138,14 @@ impl CadCommand for LoftCommand {
         if Self::keyword(text, &["UNDO"]).is_some() {
             return Some(self.undo_selection());
         }
+        // Leave hexadecimal object identifiers to the shared pick-input router.
+        // Treating them as unknown options would consume scripted section,
+        // guide and path selections before on_entity_pick can receive them.
+        if self.needs_entity_pick()
+            && u64::from_str_radix(text.trim().trim_start_matches("0x"), 16).is_ok()
+        {
+            return None;
+        }
         match self.state.step {
             LoftStep::Sections => match Self::keyword(text, &["POINT", "JOIN", "MODE"]) {
                 Some(0) => {
@@ -2239,7 +2247,7 @@ impl CadCommand for LoftCommand {
             }
             LoftStep::StartBulge | LoftStep::EndBulge => {
                 if !self.set_numeric_setting(text) {
-                    return Some(self.invalid(t!("Enter a finite bulge magnitude greater than zero.").into_owned()));
+                    return Some(self.invalid(t!("Enter a finite, non-negative bulge magnitude.").into_owned()));
                 }
             }
             LoftStep::Closed | LoftStep::AlignDirection => {

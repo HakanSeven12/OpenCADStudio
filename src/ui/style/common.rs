@@ -63,10 +63,10 @@ pub(crate) fn accessible_accent_threshold(
     }
 }
 
-/// Returns `accent` if it achieves at least 2.0:1 contrast against `bg`,
+/// Returns `accent` if it achieves at least 3.0:1 contrast against `bg` (WCAG 1.4.11 for UI components),
 /// otherwise safely falls back to `fallback`.
 pub(crate) fn accessible_accent(accent: Color, bg: Color, fallback: Color) -> Color {
-    accessible_accent_threshold(accent, bg, fallback, 2.0)
+    accessible_accent_threshold(accent, bg, fallback, 3.0)
 }
 
 /// Returns true if the given canvas background color has a WCAG relative luminance > 0.5 (light surface).

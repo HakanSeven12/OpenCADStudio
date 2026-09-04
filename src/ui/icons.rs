@@ -13,11 +13,10 @@ use iced::advanced::renderer;
 use iced::advanced::svg::{self as core_svg, Renderer as _};
 use iced::advanced::widget::{Tree, Widget};
 use iced::widget::{container, svg, Space};
-use iced::{
-    Color, ContentFit, Element, Length, Point, Radians, Rectangle, Renderer,
-    Size, Theme,
-};
+use iced::{Color, ContentFit, Element, Length, Point, Radians, Rectangle, Renderer, Size, Theme};
 use rustc_hash::FxHashMap;
+
+use crate::ui::style::common::{accessible_accent, wcag_contrast};
 
 static TRI_DOWN: &[u8] = include_bytes!("../../assets/icons/ui/tri_down.svg");
 static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
@@ -229,11 +228,7 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
         _renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        layout::atomic(
-            limits,
-            Length::Fixed(self.size),
-            Length::Fixed(self.size),
-        )
+        layout::atomic(limits, Length::Fixed(self.size), Length::Fixed(self.size))
     }
 
     fn draw(
@@ -329,9 +324,7 @@ fn recolor_semantic_svg(source: &[u8], theme: &Theme) -> Vec<u8> {
             }
             let digit_count = end - index - 1;
             if matches!(digit_count, 3 | 4 | 6 | 8) {
-                if let Some(replacement) =
-                    semantic_color(&source[index..end], &colors)
-                {
+                if let Some(replacement) = semantic_color(&source[index..end], &colors) {
                     output.extend_from_slice(replacement);
                     index = end;
                     continue;
@@ -350,10 +343,7 @@ fn recolor_semantic_svg(source: &[u8], theme: &Theme) -> Vec<u8> {
     output
 }
 
-fn semantic_color<'a>(
-    token: &[u8],
-    colors: &'a SemanticColors,
-) -> Option<&'a [u8; 7]> {
+fn semantic_color<'a>(token: &[u8], colors: &'a SemanticColors) -> Option<&'a [u8; 7]> {
     if is_one_of(
         token,
         &["#b4b6b9", "#e0e0e0", "#eeeeee", "#ffffff", "#e1e1e1"],
@@ -364,16 +354,14 @@ fn semantic_color<'a>(
     } else if is_one_of(
         token,
         &[
-            "#888888", "#888", "#9e9e9e", "#90a4ae", "#78909c", "#7a7a7a",
-            "#777777",
+            "#888888", "#888", "#9e9e9e", "#90a4ae", "#78909c", "#7a7a7a", "#777777",
         ],
     ) {
         Some(&colors.secondary)
     } else if is_one_of(
         token,
         &[
-            "#505050", "#555", "#606060", "#666", "#616161", "#546e7a",
-            "#455a64", "#37474f",
+            "#505050", "#555", "#606060", "#666", "#616161", "#546e7a", "#455a64", "#37474f",
         ],
     ) {
         Some(&colors.secondary_weak)
@@ -416,11 +404,7 @@ fn is_one_of(token: &[u8], candidates: &[&str]) -> bool {
         .any(|candidate| token.eq_ignore_ascii_case(candidate.as_bytes()))
 }
 
-fn starts_with_word_ignore_ascii_case(
-    source: &[u8],
-    index: usize,
-    word: &[u8],
-) -> bool {
+fn starts_with_word_ignore_ascii_case(source: &[u8], index: usize, word: &[u8]) -> bool {
     let Some(end) = index.checked_add(word.len()) else {
         return false;
     };
@@ -465,14 +449,7 @@ pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
-            color: Some(
-                theme
-                    .palette()
-                    .background
-                    .base
-                    .text
-                    .scale_alpha(0.72),
-            ),
+            color: Some(theme.palette().background.base.text.scale_alpha(0.72)),
         })
         .into()
 }
@@ -483,14 +460,7 @@ pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
-            color: Some(
-                theme
-                    .palette()
-                    .background
-                    .base
-                    .text
-                    .scale_alpha(0.42),
-            ),
+            color: Some(theme.palette().background.base.text.scale_alpha(0.42)),
         })
         .into()
 }
@@ -507,10 +477,7 @@ pub fn themed_primary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a,
 }
 
 /// Render an icon with the foreground chosen for a weak primary surface.
-pub fn themed_primary_weak_text<'a, M: 'a>(
-    bytes: &'static [u8],
-    size: f32,
-) -> Element<'a, M> {
+pub fn themed_primary_weak_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     svg(themed_handle(bytes))
         .width(size)
         .height(size)
@@ -578,11 +545,31 @@ pub fn themed_danger_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element
 /// Fixed-width check column colored from the active Iced theme.
 pub fn themed_check_cell<'a, M: 'a>(active: bool) -> Element<'a, M> {
     let inner: Element<'a, M> = if active {
-        themed_primary(CHECK, 11.0)
+        svg(themed_handle(CHECK))
+            .width(11.0)
+            .height(11.0)
+            .style(|theme: &Theme, _| {
+                let p = theme.palette();
+                let pri = p.primary.base.color;
+                let bg_weak = p.background.weak.color;
+                let bg_strong = p.background.strong.color;
+                let fallback = p.background.weak.text;
+                let candidate = accessible_accent(pri, bg_weak, fallback);
+                let color = if wcag_contrast(candidate, bg_strong) >= 3.0 {
+                    candidate
+                } else {
+                    fallback
+                };
+                svg::Style { color: Some(color) }
+            })
+            .into()
     } else {
         Space::new().width(0).into()
     };
-    container(inner).width(Length::Fixed(14.0)).into()
+    container(inner)
+        .width(Length::Fixed(14.0))
+        .align_x(iced::alignment::Horizontal::Center)
+        .into()
 }
 
 /// SVG bytes for an OSNAP mode's marker symbol, for the snap menu. (#138)
@@ -722,16 +709,13 @@ mod tests {
     fn semantic_svg_maps_named_white() {
         let theme = Theme::Dark;
         let colors = SemanticColors::from_theme(&theme);
-        let themed =
-            recolor_semantic_svg(br##"<path stroke="white"/>"##, &theme);
+        let themed = recolor_semantic_svg(br##"<path stroke="white"/>"##, &theme);
 
         assert!(contains(&themed, &colors.text));
     }
 
     fn contains(source: &[u8], needle: &[u8]) -> bool {
-        source
-            .windows(needle.len())
-            .any(|window| window == needle)
+        source.windows(needle.len()).any(|window| window == needle)
     }
 }
 
@@ -754,10 +738,7 @@ mod themed_cache_tests {
 
     /// Returns a clone of the cached `svg::Handle` for `(ptr, len)`,
     /// or `None` if no entry is cached. Test-only inspection helper.
-    fn themed_cache_get_handle_for_test(
-        ptr: *const u8,
-        len: usize,
-    ) -> Option<svg::Handle> {
+    fn themed_cache_get_handle_for_test(ptr: *const u8, len: usize) -> Option<svg::Handle> {
         THEMED_CACHE.with(|c| c.borrow().get(&(ptr as usize, len)).cloned())
     }
 
@@ -801,8 +782,14 @@ mod themed_cache_tests {
     fn themed_cache_caches_distinct_bytes_separately() {
         themed_cache_remove_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len());
         themed_cache_remove_for_test(TRI_UP.as_ptr(), TRI_UP.len());
-        assert!(!themed_cache_contains_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len()));
-        assert!(!themed_cache_contains_for_test(TRI_UP.as_ptr(), TRI_UP.len()));
+        assert!(!themed_cache_contains_for_test(
+            TRI_DOWN.as_ptr(),
+            TRI_DOWN.len()
+        ));
+        assert!(!themed_cache_contains_for_test(
+            TRI_UP.as_ptr(),
+            TRI_UP.len()
+        ));
         let size_before = themed_cache_size_for_test();
         let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
         let _: Element<'static, ()> = themed(TRI_UP, 16.0);
@@ -811,8 +798,14 @@ mod themed_cache_tests {
             size_before + 2,
             "distinct bytes must produce distinct cache entries (delta +2)"
         );
-        assert!(themed_cache_contains_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len()));
-        assert!(themed_cache_contains_for_test(TRI_UP.as_ptr(), TRI_UP.len()));
+        assert!(themed_cache_contains_for_test(
+            TRI_DOWN.as_ptr(),
+            TRI_DOWN.len()
+        ));
+        assert!(themed_cache_contains_for_test(
+            TRI_UP.as_ptr(),
+            TRI_UP.len()
+        ));
     }
 
     /// The cached `svg::Handle` is a single source of truth: two
@@ -903,12 +896,18 @@ mod themed_cache_tests {
         // SAFETY: TRI_DOWN is at least 2 bytes (real SVG), so [1..] is valid.
         let sub = &TRI_DOWN[1..];
         themed_cache_remove_for_test(sub.as_ptr(), sub.len());
-        assert!(!themed_cache_contains_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len()));
+        assert!(!themed_cache_contains_for_test(
+            TRI_DOWN.as_ptr(),
+            TRI_DOWN.len()
+        ));
         assert!(!themed_cache_contains_for_test(sub.as_ptr(), sub.len()));
         let size_before = themed_cache_size_for_test();
         // Populate full static.
         let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
-        assert!(themed_cache_contains_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len()));
+        assert!(themed_cache_contains_for_test(
+            TRI_DOWN.as_ptr(),
+            TRI_DOWN.len()
+        ));
         assert!(
             !themed_cache_contains_for_test(sub.as_ptr(), sub.len()),
             "sub-slice must not hit the full static's entry"
@@ -992,7 +991,53 @@ mod themed_cache_tests {
         assert!(
             after_ns < before_ns,
             "cached path must be faster than from_memory: after={}ns before={}ns",
-            after_ns, before_ns,
+            after_ns,
+            before_ns,
         );
+    }
+}
+
+#[cfg(test)]
+mod check_cell_tests {
+    use super::*;
+    use crate::ui::style::common::{accessible_accent, wcag_contrast};
+
+    #[test]
+    fn themed_check_cell_contrast_across_all_themes() {
+        for theme in iced::Theme::ALL {
+            let p = theme.palette();
+            let bg_weak = p.background.weak.color;
+            let bg_strong = p.background.strong.color;
+            let pri = p.primary.base.color;
+            let fallback = p.background.weak.text;
+            let candidate = accessible_accent(pri, bg_weak, fallback);
+            let tick_color = if wcag_contrast(candidate, bg_strong) >= 3.0 {
+                candidate
+            } else {
+                fallback
+            };
+            let contrast_weak = wcag_contrast(tick_color, bg_weak);
+            let contrast_strong = wcag_contrast(tick_color, bg_strong);
+            assert!(
+                contrast_weak >= 3.0,
+                "Theme {:?} checkmark contrast {:.2}:1 against weak background is below 3.0:1",
+                theme,
+                contrast_weak
+            );
+            assert!(
+                contrast_strong >= 3.0,
+                "Theme {:?} checkmark contrast {:.2}:1 against strong background is below 3.0:1",
+                theme,
+                contrast_strong
+            );
+        }
+    }
+
+    #[test]
+    fn themed_check_cell_dimensions() {
+        let active: Element<'static, ()> = themed_check_cell(true);
+        let inactive: Element<'static, ()> = themed_check_cell(false);
+        assert_eq!(active.as_widget().size().width, Length::Fixed(14.0));
+        assert_eq!(inactive.as_widget().size().width, Length::Fixed(14.0));
     }
 }

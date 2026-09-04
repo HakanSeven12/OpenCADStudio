@@ -1,8 +1,8 @@
-use super::*;
 use super::super::document::{DynComponent, DynFieldEntry};
 use super::super::Message;
-use iced::widget::{button, canvas, column, container, mouse_area, row, text, tooltip};
-use iced::{Background, Border, Color, Element, Length, Point, Rectangle, Theme};
+use super::*;
+use iced::widget::{button, column, container, mouse_area, row, text, tooltip};
+use iced::{Background, Border, Element, Length, Theme};
 use std::time::Duration;
 
 fn viewport_tooltip<'a>(
@@ -22,189 +22,6 @@ fn viewport_tooltip<'a>(
     .into()
 }
 
-#[derive(Clone, Copy)]
-struct RenderModePreview {
-    mode: acadrust::entities::ViewportRenderMode,
-}
-
-impl canvas::Program<Message> for RenderModePreview {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &iced::Renderer,
-        theme: &Theme,
-        bounds: Rectangle,
-        _cursor: iced::mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-    
-        use acadrust::entities::ViewportRenderMode as M;
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let palette = theme.palette();
-        let ink = palette.background.base.text.scale_alpha(0.86);
-        let faint = ink.scale_alpha(0.34);
-        let accent = palette.primary.base.color;
-        let face = palette.primary.weak.color.scale_alpha(0.72);
-        let face_alt = palette.primary.strong.color.scale_alpha(0.64);
-        let edge = if self.mode == M::Wireframe3D { accent } else { ink };
-        let shaded = matches!(
-            self.mode,
-            M::FlatShaded
-                | M::GouraudShaded
-                | M::FlatShadedWithEdges
-                | M::GouraudShadedWithEdges
-        );
-        let flat = matches!(self.mode, M::FlatShaded | M::FlatShadedWithEdges);
-        let smooth = matches!(self.mode, M::GouraudShaded | M::GouraudShadedWithEdges);
-        let with_edges = matches!(
-            self.mode,
-            M::Wireframe2D
-                | M::Wireframe3D
-                | M::HiddenLine
-                | M::FlatShadedWithEdges
-                | M::GouraudShadedWithEdges
-        );
-
-        // A small cube makes hidden/back edges and the shaded-edge variants
-        // immediately distinguishable without depending on the open drawing.
-        let a = Point::new(25.0, 35.0);
-        let b = Point::new(87.0, 35.0);
-        let c = Point::new(87.0, 94.0);
-        let d = Point::new(25.0, 94.0);
-        let off = iced::Vector::new(22.0, -17.0);
-        let e = a + off;
-        let f = b + off;
-        let g = c + off;
-        let h = d + off;
-        let quad = |points: [Point; 4]| {
-            canvas::Path::new(|path| {
-                path.move_to(points[0]);
-                path.line_to(points[1]);
-                path.line_to(points[2]);
-                path.line_to(points[3]);
-                path.close();
-            })
-        };
-        if shaded || self.mode == M::HiddenLine {
-            frame.fill(&quad([a, b, f, e]), face_alt);
-            frame.fill(&quad([b, c, g, f]), face.scale_alpha(0.82));
-            frame.fill(&quad([a, d, c, b]), face);
-        }
-        let stroke_line = |frame: &mut canvas::Frame, from: Point, to: Point, color: Color| {
-            frame.stroke(
-                &canvas::Path::line(from, to),
-                canvas::Stroke::default().with_color(color).with_width(1.2),
-            );
-        };
-        if matches!(self.mode, M::Wireframe2D | M::Wireframe3D) {
-            for (from, to) in [(e, f), (f, g), (g, h), (h, e)] {
-                stroke_line(&mut frame, from, to, faint);
-            }
-        }
-        if with_edges {
-            for (from, to) in [
-                (a, b), (b, c), (c, d), (d, a),
-                (a, e), (b, f), (c, g), (d, h),
-                (e, f), (f, g),
-            ] {
-                stroke_line(&mut frame, from, to, edge);
-            }
-        }
-
-        // Curved sample: faceted tones for Flat, concentric highlight for
-        // Gouraud, and latitude/longitude lines for the wireframe modes.
-        let center = Point::new((bounds.width - 55.0).max(145.0), 59.0);
-        let radius = 32.0;
-        if flat {
-            for i in 0..12 {
-                let a0 = i as f32 * std::f32::consts::TAU / 12.0;
-                let a1 = (i + 1) as f32 * std::f32::consts::TAU / 12.0;
-                let wedge = canvas::Path::new(|path| {
-                    path.move_to(center);
-                    path.line_to(Point::new(center.x + radius * a0.cos(), center.y + radius * a0.sin()));
-                    path.line_to(Point::new(center.x + radius * a1.cos(), center.y + radius * a1.sin()));
-                    path.close();
-                });
-                frame.fill(&wedge, if i % 3 == 0 { face_alt } else { face });
-            }
-        } else if smooth {
-            frame.fill(&canvas::Path::circle(center, radius), face_alt);
-            frame.fill(
-                &canvas::Path::circle(Point::new(center.x - 7.0, center.y - 8.0), radius * 0.72),
-                face,
-            );
-            frame.fill(
-                &canvas::Path::circle(Point::new(center.x - 12.0, center.y - 13.0), radius * 0.34),
-                palette.primary.weak.text.scale_alpha(0.38),
-            );
-        }
-        if with_edges || self.mode == M::HiddenLine {
-            frame.stroke(
-                &canvas::Path::circle(center, radius),
-                canvas::Stroke::default().with_color(edge).with_width(1.2),
-            );
-        }
-        if matches!(self.mode, M::Wireframe2D | M::Wireframe3D) {
-            for scale in [0.38_f32, 0.72] {
-                let y = radius * scale;
-                let half = (radius * radius - y * y).sqrt();
-                stroke_line(
-                    &mut frame,
-                    Point::new(center.x - half, center.y - y),
-                    Point::new(center.x + half, center.y - y),
-                    faint,
-                );
-                stroke_line(
-                    &mut frame,
-                    Point::new(center.x - half, center.y + y),
-                    Point::new(center.x + half, center.y + y),
-                    faint,
-                );
-            }
-            stroke_line(
-                &mut frame,
-                Point::new(center.x, center.y - radius),
-                Point::new(center.x, center.y + radius),
-                faint,
-            );
-        }
-
-        // Bottom samples show the intentional Wireframe 2D/3D distinction:
-        // the legacy planar solid loses only its interior in the 3D style,
-        // while a hatch-like pattern remains visible in both.
-        let solid = quad([
-            Point::new(18.0, 118.0),
-            Point::new(74.0, 112.0),
-            Point::new(69.0, 140.0),
-            Point::new(23.0, 143.0),
-        ]);
-        if self.mode != M::Wireframe3D {
-            frame.fill(&solid, accent.scale_alpha(0.48));
-        }
-        frame.stroke(
-            &solid,
-            canvas::Stroke::default().with_color(edge).with_width(1.0),
-        );
-        let hatch_box = canvas::Path::rectangle(Point::new(105.0, 112.0), iced::Size::new(82.0, 31.0));
-        frame.stroke(
-            &hatch_box,
-            canvas::Stroke::default().with_color(ink).with_width(1.0),
-        );
-        for x in (94..188).step_by(9) {
-            let x = x as f32;
-            stroke_line(
-                &mut frame,
-                Point::new(x.max(105.0), 143.0),
-                Point::new((x + 24.0).min(187.0), 112.0),
-                faint,
-            );
-        }
-
-        vec![frame.into_geometry()]
-    }
-}
-
 pub(super) fn viewport_controls<'a>(
     render_mode: acadrust::entities::ViewportRenderMode,
     show_grid: bool,
@@ -218,29 +35,27 @@ pub(super) fn viewport_controls<'a>(
         .iter()
         .map(|style| RenderModeChoice(style.mode))
         .collect();
-    let danger_btn = move |bytes: &'static [u8],
-                           msg: Message,
-                           title: String,
-                           command: &'static str| {
-        let button = button(crate::ui::icons::themed_danger(bytes, 15.0))
-            .on_press(msg)
-            .padding([4, 6])
-            .style(move |theme: &Theme, status| iced::widget::button::Style {
-                background: matches!(
-                    status,
-                    iced::widget::button::Status::Hovered
-                        | iced::widget::button::Status::Pressed
-                )
-                .then_some(Background::Color(theme.palette().danger.weak.color)),
-                border: Border {
-                    radius: 3.0.into(),
+    let danger_btn =
+        move |bytes: &'static [u8], msg: Message, title: String, command: &'static str| {
+            let button = button(crate::ui::icons::themed_danger(bytes, 15.0))
+                .on_press(msg)
+                .padding([4, 6])
+                .style(move |theme: &Theme, status| iced::widget::button::Style {
+                    background: matches!(
+                        status,
+                        iced::widget::button::Status::Hovered
+                            | iced::widget::button::Status::Pressed
+                    )
+                    .then_some(Background::Color(theme.palette().danger.weak.color)),
+                    border: Border {
+                        radius: 3.0.into(),
+                        ..Default::default()
+                    },
+                    text_color: theme.palette().danger.base.color,
                     ..Default::default()
-                },
-                text_color: theme.palette().danger.base.color,
-                ..Default::default()
-            });
-        viewport_tooltip(button, title, command)
-    };
+                });
+            viewport_tooltip(button, title, command)
+        };
 
     // Borderless icon button; an `active` toggle gets an accent tint + fill.
     let icon_btn = move |bytes: &'static [u8],
@@ -249,34 +64,33 @@ pub(super) fn viewport_controls<'a>(
                          title: String,
                          command: &'static str| {
         let icon = if active {
-            crate::ui::icons::themed_primary(bytes, 15.0)
+            crate::ui::icons::themed_primary_weak_text(bytes, 15.0)
         } else {
             crate::ui::icons::themed(bytes, 15.0)
         };
-        let button = button(icon)
-            .on_press(msg)
-            .padding([4, 6])
-            .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
-                let pair = match (active, status) {
-                    (_, iced::widget::button::Status::Hovered) => {
-                        Some(palette.background.strong)
+        let button =
+            button(icon)
+                .on_press(msg)
+                .padding([4, 6])
+                .style(move |theme: &Theme, status| {
+                    let palette = theme.palette();
+                    let pair = match (active, status) {
+                        (_, iced::widget::button::Status::Hovered) => {
+                            Some(palette.background.strong)
+                        }
+                        (true, _) => Some(palette.primary.weak),
+                        (false, _) => None,
+                    };
+                    iced::widget::button::Style {
+                        background: pair.map(|p| Background::Color(p.color)),
+                        border: Border {
+                            radius: 3.0.into(),
+                            ..Default::default()
+                        },
+                        text_color: pair.map(|p| p.text).unwrap_or(palette.background.base.text),
+                        ..Default::default()
                     }
-                    (true, _) => Some(palette.primary.weak),
-                    (false, _) => None,
-                };
-                iced::widget::button::Style {
-                background: pair.map(|p| Background::Color(p.color)),
-                border: Border {
-                    radius: 3.0.into(),
-                    ..Default::default()
-                },
-                text_color: pair
-                    .map(|p| p.text)
-                    .unwrap_or(palette.background.base.text),
-                ..Default::default()
-                }
-            });
+                });
         viewport_tooltip(button, title, command)
     };
 
@@ -317,27 +131,42 @@ pub(super) fn viewport_controls<'a>(
     );
 
     let preview_mode = render_mode_preview.unwrap_or(render_mode);
-    let mut choices = column![].spacing(2).width(Length::Fixed(174.0));
+    let max_label_len = render_modes
+        .iter()
+        .map(|c| c.to_string().chars().count())
+        .max()
+        .unwrap_or(0);
+    let dropdown_w = (max_label_len as f32 * 7.5 + 46.0).max(180.0);
+
+    let mut choices = column![].spacing(2).width(Length::Fill);
     for choice in render_modes {
         let highlighted = choice.0 == preview_mode;
         let selected = choice.0 == render_mode;
-        let option = container(text(choice.to_string()).size(11).width(Length::Fill))
-            .padding([6, 8])
+        let checkmark = crate::ui::icons::themed_check_cell(selected);
+        let label = text(choice.to_string())
+            .size(11)
+            .wrapping(iced::advanced::text::Wrapping::None);
+        let row_content = row![checkmark, label]
+            .spacing(6)
+            .align_y(iced::alignment::Vertical::Center);
+        let option = container(row_content)
+            .padding([5, 8])
             .width(Length::Fill)
             .style(move |theme: &Theme| {
                 let palette = theme.palette();
-                let active = highlighted;
+                let bg = if highlighted {
+                    Some(Background::Color(palette.background.strong.color))
+                } else {
+                    None
+                };
+                let text_color = if highlighted || selected {
+                    palette.background.strong.text
+                } else {
+                    palette.background.base.text
+                };
                 container::Style {
-                    background: active.then_some(Background::Color(
-                        if selected { palette.primary.weak.color } else { palette.background.strong.color },
-                    )),
-                    text_color: if selected {
-                        Some(palette.primary.weak.text)
-                    } else if active {
-                        Some(palette.background.strong.text)
-                    } else {
-                        Some(palette.background.base.text)
-                    },
+                    background: bg,
+                    text_color: Some(text_color),
                     border: Border {
                         radius: 3.0.into(),
                         ..Default::default()
@@ -345,47 +174,16 @@ pub(super) fn viewport_controls<'a>(
                     ..Default::default()
                 }
             });
-        choices = choices.push(mouse_area(option)
-            .interaction(iced::mouse::Interaction::Pointer)
-            .on_enter(Message::PreviewRenderMode(choice.0))
-            .on_press(Message::SetRenderMode(choice.0)));
+        choices = choices.push(
+            mouse_area(option)
+                .interaction(iced::mouse::Interaction::Pointer)
+                .on_enter(Message::PreviewRenderMode(choice.0))
+                .on_press(Message::SetRenderMode(choice.0)),
+        );
     }
-    let preview = container(
-        column![
-            container(
-                text(RenderModeChoice(preview_mode).to_string())
-                    .size(12)
-                    .wrapping(iced::advanced::text::Wrapping::None),
-            )
-            .width(Length::Fixed(215.0))
-            .height(Length::Fixed(16.0))
-            .align_y(iced::alignment::Vertical::Center),
-            canvas(RenderModePreview { mode: preview_mode })
-                .width(Length::Fixed(215.0))
-                .height(Length::Fixed(154.0)),
-        ]
-        .spacing(6),
-    )
-    .padding(8)
-    .style(|theme: &Theme| {
-        let palette = theme.palette();
-        container::Style {
-            background: Some(Background::Color(palette.background.base.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            text_color: Some(palette.background.base.text),
-            ..Default::default()
-        }
-    });
-    let popup = container(
-        row![choices, preview]
-            .spacing(6)
-            .align_y(iced::alignment::Vertical::Top),
-    )
-        .padding(6)
+    let popup = container(choices)
+        .padding(4)
+        .width(Length::Fixed(dropdown_w))
         .style(|theme: &Theme| {
             let palette = theme.palette();
             container::Style {
@@ -399,31 +197,27 @@ pub(super) fn viewport_controls<'a>(
                 ..Default::default()
             }
         });
-    let picker: Element<'a, Message> = iced_aw::DropDown::new(
-        picker_head,
-        popup,
-        render_mode_menu_open,
-    )
-    .alignment(iced_aw::drop_down::Alignment::Bottom)
-    .offset(3.0)
-    .on_dismiss(Message::DismissRenderModeMenu)
-    .into();
+    let picker: Element<'a, Message> =
+        iced_aw::DropDown::new(picker_head, popup, render_mode_menu_open)
+            .width(Length::Fixed(dropdown_w))
+            .alignment(iced_aw::drop_down::Alignment::Bottom)
+            .offset(3.0)
+            .on_dismiss(Message::DismissRenderModeMenu)
+            .into();
 
     // Thin vertical divider between control groups.
     let sep = || {
         container(iced::widget::Space::new().width(1.0).height(16.0)).style(|theme: &Theme| {
             iced::widget::container::Style {
                 background: Some(Background::Color(
-                    theme.palette().background.neutral.color.scale_alpha(0.7)
+                    theme.palette().background.neutral.color.scale_alpha(0.7),
                 )),
                 ..Default::default()
             }
         })
     };
 
-    let mut bar = row![]
-        .spacing(3)
-        .align_y(iced::alignment::Vertical::Center);
+    let mut bar = row![].spacing(3).align_y(iced::alignment::Vertical::Center);
     bar = bar
         .push(icon_btn(
             crate::ui::icons::GRID,
@@ -466,29 +260,28 @@ pub(super) fn viewport_controls<'a>(
         // would only fire on release). Placed just left of Close.
         if tile_count > 1 {
             let drag = mouse_area(
-                container(crate::ui::icons::themed_success(crate::ui::icons::MOVE, 15.0))
-                    .padding([4, 6])
-                    .style(|_: &Theme| iced::widget::container::Style {
-                        border: Border {
-                            radius: 3.0.into(),
-                            ..Default::default()
-                        },
+                container(crate::ui::icons::themed_success(
+                    crate::ui::icons::MOVE,
+                    15.0,
+                ))
+                .padding([4, 6])
+                .style(|_: &Theme| iced::widget::container::Style {
+                    border: Border {
+                        radius: 3.0.into(),
                         ..Default::default()
-                    }),
+                    },
+                    ..Default::default()
+                }),
             )
             .interaction(iced::mouse::Interaction::Grab)
             .on_press(Message::PaneMoveStart);
             let drag = viewport_tooltip(drag, crate::tr!("viewport", "move"), "VPORTS");
-            bar = bar
-                .push(sep())
-                .push(drag)
-                .push(sep())
-                .push(danger_btn(
-                    crate::ui::icons::CLOSE,
-                    Message::CloseModelViewport,
-                    crate::tr!("viewport", "close"),
-                    "VPORTS SINGLE",
-                ));
+            bar = bar.push(sep()).push(drag).push(sep()).push(danger_btn(
+                crate::ui::icons::CLOSE,
+                Message::CloseModelViewport,
+                crate::tr!("viewport", "close"),
+                "VPORTS SINGLE",
+            ));
         }
     }
 
@@ -497,15 +290,15 @@ pub(super) fn viewport_controls<'a>(
         .style(|theme: &Theme| {
             let palette = theme.palette();
             iced::widget::container::Style {
-            background: Some(Background::Color(
-                palette.background.weak.color.scale_alpha(0.92)
-            )),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
+                background: Some(Background::Color(
+                    palette.background.weak.color.scale_alpha(0.92),
+                )),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
             }
         })
         .into()
@@ -546,8 +339,10 @@ pub(super) fn dyn_component_value(
     // the user separates the values with `,` the entry is a cartesian
     // coordinate pair, so the fields read as signed X/Y deltas to match the
     // committed point (#269).
-    let wh = matches!(f.role, crate::command::DynRole::Width | crate::command::DynRole::Height)
-        && relative
+    let wh = matches!(
+        f.role,
+        crate::command::DynRole::Width | crate::command::DynRole::Height
+    ) && relative
         && !comma_cartesian;
     match f.component {
         DynComponent::X if relative => format!("{:.4}", if wh { dx.abs() } else { dx }),
@@ -558,15 +353,107 @@ pub(super) fn dyn_component_value(
         DynComponent::Z => format!("{:.4}", p.z),
         // Scaled by the role so a diameter box reads twice the radius.
         DynComponent::Distance => {
-            format!("{:.4}", (dx * dx + dy * dy).sqrt() * f.role.value_scale() as f64)
+            format!(
+                "{:.4}",
+                (dx * dx + dy * dy).sqrt() * f.role.value_scale() as f64
+            )
         }
         // Shared rule: unsigned magnitude of the short angle, so CW (below the
         // reference axis) reads positive (e.g. 30°, not -30°/330°). The
         // committed value stays signed (see dyn_resolve_point).
         DynComponent::Angle => {
-            format!("{:.1}", crate::command::dyn_display_angle_deg(dy.atan2(dx) as f32))
+            format!(
+                "{:.1}",
+                crate::command::dyn_display_angle_deg(dy.atan2(dx) as f32)
+            )
         }
         // Typed-only scalar — no geometric value to track when empty.
         DynComponent::Scalar => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::entities::ViewportRenderMode as M;
+
+    #[test]
+    fn test_viewport_controls_construction() {
+        for style in crate::modules::view::visual_style::VISUAL_STYLES {
+            let _el = viewport_controls(style.mode, true, true, true, 1, false, None);
+            let _el_open = viewport_controls(
+                style.mode,
+                false,
+                false,
+                false,
+                2,
+                true,
+                Some(M::Wireframe3D),
+            );
+        }
+    }
+
+    use crate::ui::style::common::wcag_contrast;
+
+    #[test]
+    fn test_visual_style_dropdown_contrast_across_all_themes() {
+        for theme in iced::Theme::ALL {
+            let p = theme.palette();
+            let bg = p.background.weak.color;
+
+            // 1. Text contrast (WCAG standard AA for normal text is >= 4.5:1, large/ui >= 3:1):
+            let strong_text = p.background.strong.text;
+            let text_contrast = wcag_contrast(strong_text, bg);
+            assert!(
+                text_contrast >= 4.5,
+                "Theme {:?} selected text contrast {:.2} on background is too low",
+                theme,
+                text_contrast
+            );
+
+            let base_text = p.background.base.text;
+            let base_contrast = wcag_contrast(base_text, bg);
+            assert!(
+                base_contrast >= 4.5,
+                "Theme {:?} unselected text contrast {:.2} on background is too low",
+                theme,
+                base_contrast
+            );
+
+            // 2. Checkmark contrast:
+            let pri = p.primary.base.color;
+            let pri_contrast = wcag_contrast(pri, bg);
+            let tick_color = if pri_contrast >= 2.0 {
+                pri
+            } else {
+                p.background.base.text
+            };
+            let final_tick_contrast = wcag_contrast(tick_color, bg);
+            assert!(
+                final_tick_contrast >= 2.0,
+                "Theme {:?} tick contrast {:.2} on background is too low",
+                theme,
+                final_tick_contrast
+            );
+        }
+    }
+
+    #[test]
+    fn test_visual_style_dropdown_width_accommodates_all_items() {
+        let max_label_len = crate::modules::view::visual_style::VISUAL_STYLES
+            .iter()
+            .map(|c| c.label.chars().count())
+            .max()
+            .unwrap_or(0);
+        let dropdown_w = (max_label_len as f32 * 7.5 + 46.0).max(180.0);
+
+        // Longest default label is "Gouraud Shaded + Edges" (22 chars)
+        assert_eq!(max_label_len, 22);
+        // Computed width should easily fit the 22-char label + checkmark + padding
+        assert!(dropdown_w >= 210.0);
+
+        for style in crate::modules::view::visual_style::VISUAL_STYLES {
+            assert!(!style.label.contains('\n'), "Label should be a single line");
+        }
     }
 }

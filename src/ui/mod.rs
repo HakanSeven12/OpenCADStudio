@@ -25,3 +25,6 @@ pub use properties::PropertiesPanel;
 pub use ribbon::Ribbon;
 pub use statusbar::StatusBar;
 pub use window::layers::LayerPanel;
+
+#[cfg(test)]
+mod theme_accessibility_tests;

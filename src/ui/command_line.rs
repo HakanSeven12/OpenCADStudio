@@ -6,11 +6,13 @@ use crate::app::Message;
 use crate::command::CmdOption;
 use crate::t;
 use iced::widget::{
-    button, column, container, opaque, row, rule, scrollable, stack, text, text_editor,
-    text_input, tooltip, Space,
+    button, column, container, opaque, row, rule, scrollable, stack, text, text_editor, text_input,
+    tooltip, Space,
 };
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 use std::ops::Range;
+
+use crate::ui::style::common::accessible_accent_threshold;
 
 pub const CMD_INPUT_ID: &str = "cmd_input";
 pub const HISTORY_SCROLL_ID: &str = "command_history_scroll";
@@ -448,11 +450,7 @@ impl CommandLine {
             return false;
         }
         let current = self.autocomplete_cursor.unwrap_or(0).min(len - 1);
-        self.autocomplete_cursor = Some(if current == 0 {
-            len - 1
-        } else {
-            current - 1
-        });
+        self.autocomplete_cursor = Some(if current == 0 { len - 1 } else { current - 1 });
         true
     }
 
@@ -463,11 +461,7 @@ impl CommandLine {
             return false;
         }
         let current = self.autocomplete_cursor.unwrap_or(0).min(len - 1);
-        self.autocomplete_cursor = Some(if current + 1 < len {
-            current + 1
-        } else {
-            0
-        });
+        self.autocomplete_cursor = Some(if current + 1 < len { current + 1 } else { 0 });
         true
     }
 
@@ -537,34 +531,32 @@ impl CommandLine {
                 // listing is dropped here (the history log keeps the full text).
                 if entry.pinned && !self.step_options.is_empty() {
                     let shown = strip_option_listing(&entry.text);
-                    let mut r = row![entry_text(shown)]
-                        .spacing(6)
-                        .align_y(iced::Center);
+                    let mut r = row![entry_text(shown)].spacing(6).align_y(iced::Center);
                     for opt in &self.step_options {
                         let btn = button(text(opt.label.to_uppercase()).size(11))
-                        .on_press(Message::CommandOptionPick(opt.keyword.clone()))
-                        .padding([1, 6])
-                        .style(|theme: &Theme, status| {
-                            let palette = theme.palette();
-                            let pair = if matches!(
-                                status,
-                                button::Status::Hovered | button::Status::Pressed
-                            ) {
-                                palette.primary.weak
-                            } else {
-                                palette.background.weakest
-                            };
-                            button::Style {
-                                background: Some(Background::Color(pair.color)),
-                                text_color: pair.text,
-                                border: Border {
-                                    color: palette.background.neutral.color,
-                                    width: 1.0,
-                                    radius: 3.0.into(),
-                                },
-                                ..Default::default()
-                            }
-                        });
+                            .on_press(Message::CommandOptionPick(opt.keyword.clone()))
+                            .padding([1, 6])
+                            .style(|theme: &Theme, status| {
+                                let palette = theme.palette();
+                                let pair = if matches!(
+                                    status,
+                                    button::Status::Hovered | button::Status::Pressed
+                                ) {
+                                    palette.primary.weak
+                                } else {
+                                    palette.background.weakest
+                                };
+                                button::Style {
+                                    background: Some(Background::Color(pair.color)),
+                                    text_color: pair.text,
+                                    border: Border {
+                                        color: palette.background.neutral.color,
+                                        width: 1.0,
+                                        radius: 3.0.into(),
+                                    },
+                                    ..Default::default()
+                                }
+                            });
                         r = r.push(btn);
                     }
                     col.push(container(r).padding([1, 8]))
@@ -572,11 +564,20 @@ impl CommandLine {
                     col.push(container(entry_text(entry.text.clone())).padding([1, 8]))
                 }
             });
-        let prompt = container(
-            text(crate::tr!("command-line", "label")).size(11).style(|theme: &Theme| iced::widget::text::Style {
-                color: Some(theme.palette().success.base.color),
-            }),
-        )
+        let prompt = container(text(crate::tr!("command-line", "label")).size(11).style(
+            |theme: &Theme| {
+                let p = theme.palette();
+                let color = accessible_accent_threshold(
+                    p.success.base.color,
+                    p.background.base.color,
+                    p.background.base.text,
+                    4.5,
+                );
+                iced::widget::text::Style {
+                    color: Some(color),
+                }
+            },
+        ))
         .padding([5, 8]);
         // Literal-space toggle: while active, every line behaves as if it
         // started with `>` — Space stays in the line instead of submitting, so
@@ -585,34 +586,31 @@ impl CommandLine {
         // lights the button too (same mode, one line only).
         let literal_active = self.literal_spaces || self.input.starts_with('>');
         let literal_btn = button(text(">").size(11))
-        .on_press(Message::CommandLiteralToggle)
-        .padding([2, 6])
-        .style(move |theme: &Theme, status| {
-            let palette = theme.palette();
-            let pair = if literal_active {
-                palette.primary.weak
-            } else if matches!(
-                status,
-                button::Status::Hovered | button::Status::Pressed
-            ) {
-                palette.background.weak
-            } else {
-                palette.background.weakest
-            };
-            button::Style {
-                background: Some(Background::Color(pair.color)),
-                text_color: pair.text,
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            }
-        });
+            .on_press(Message::CommandLiteralToggle)
+            .padding([2, 6])
+            .style(move |theme: &Theme, status| {
+                let palette = theme.palette();
+                let pair = if literal_active {
+                    palette.primary.weak
+                } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    palette.background.weak
+                } else {
+                    palette.background.weakest
+                };
+                button::Style {
+                    background: Some(Background::Color(pair.color)),
+                    text_color: pair.text,
+                    border: Border {
+                        color: palette.background.neutral.color,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
         let literal_tip = container(text(crate::tr!("command-line", "literal-spaces")).size(11))
-        .padding([3, 6])
-        .style(container::bordered_box);
+            .padding([3, 6])
+            .style(container::bordered_box);
         let literal_btn = tooltip(literal_btn, literal_tip, tooltip::Position::Top).gap(4);
         // While dynamic input is capturing keystrokes, the command-line
         // text field is left without an `on_input` handler so it can't
@@ -737,9 +735,7 @@ impl CommandLine {
                 .id(iced::widget::Id::new(HISTORY_SCROLL_ID))
                 .height(Length::Fixed(history_height))
                 .direction(scrollable::Direction::Vertical(
-                    scrollable::Scrollbar::new()
-                        .width(8)
-                        .scroller_width(6),
+                    scrollable::Scrollbar::new().width(8).scroller_width(6),
                 ))
                 .anchor_bottom();
             // Header strip: a Copy-all and a Clear button pinned above the log.
@@ -806,9 +802,7 @@ impl CommandLine {
         } else {
             container(history_rows)
                 .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(
-                        theme.palette().background.base.color,
-                    )),
+                    background: Some(Background::Color(theme.palette().background.base.color)),
                     ..Default::default()
                 })
                 .width(Length::Fill)
@@ -832,9 +826,7 @@ impl CommandLine {
                     .style(|theme: &Theme| {
                         let palette = theme.palette();
                         container::Style {
-                            background: Some(Background::Color(
-                                palette.background.weakest.color,
-                            )),
+                            background: Some(Background::Color(palette.background.weakest.color)),
                             ..Default::default()
                         }
                     })
@@ -944,7 +936,12 @@ fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
         EntryKind::Command => palette.background.base.text,
         EntryKind::Output => palette.background.base.text.scale_alpha(0.72),
         EntryKind::Error => palette.danger.base.color,
-        EntryKind::Info => palette.primary.base.color,
+        EntryKind::Info => accessible_accent_threshold(
+            palette.primary.base.color,
+            palette.background.base.color,
+            palette.background.base.text,
+            4.5,
+        ),
     }
 }
 
@@ -997,7 +994,10 @@ mod tests {
         // still appears. (#288)
         let a = aliases(&[("L", "LINE")]);
         let m = ranked_matches("L", &[], &a);
-        assert!(!m.iter().any(|c| c == "L"), "alias L should be hidden: {m:?}");
+        assert!(
+            !m.iter().any(|c| c == "L"),
+            "alias L should be hidden: {m:?}"
+        );
         assert!(m.iter().any(|c| c == "LINE"), "LINE should remain: {m:?}");
     }
 
@@ -1039,7 +1039,10 @@ mod tests {
         assert_eq!(line.input, "CIRCLE");
         line.history_next();
         assert_eq!(line.input, "PARTIAL");
-        assert_eq!(line.cmd_recall, vec!["LINE".to_string(), "CIRCLE".to_string()]);
+        assert_eq!(
+            line.cmd_recall,
+            vec!["LINE".to_string(), "CIRCLE".to_string()]
+        );
     }
 
     #[test]

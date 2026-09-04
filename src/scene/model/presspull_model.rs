@@ -141,24 +141,20 @@ fn boundary_sources(scene: &Scene, plane: WorkingPlane) -> FxHashMap<Handle, Bou
     }).collect()
 }
 
-fn ring_curves(ring: &[[f64; 2]]) -> Vec<Curve> {
-    ring.iter().copied().zip(ring.iter().copied().cycle().skip(1))
-        .take(ring.len()).map(|(start, end)| Curve::Line(Line { start, end })).collect()
-}
-
 fn selected_rings(sources: &FxHashMap<Handle, BoundarySource>, point: [f64; 2]) -> Option<Vec<Vec<[f64; 2]>>> {
     let rings = boundary_faces(sources, BOUNDARY_TOLERANCE);
+    let loops = boundary_loops(sources, &rings)?;
     let tolerance = Tolerance::new(BOUNDARY_TOLERANCE);
     let outer = rings.iter().enumerate()
-        .filter(|(_, ring)| contains(&ring_curves(ring), point, tolerance))
+        .filter(|(index, _)| contains(&loops[*index], point, tolerance))
         .min_by(|(_, left), (_, right)| signed_area(left).abs().total_cmp(&signed_area(right).abs()))?
         .0;
     let depths = ring_nesting_depths(&rings);
-    let boundary = ring_curves(&rings[outer]);
+    let boundary = &loops[outer];
     let mut result = vec![rings[outer].clone()];
     for (index, ring) in rings.iter().enumerate() {
         if index != outer && depths.get(index) == depths.get(outer).map(|depth| depth + 1).as_ref()
-            && ring.first().is_some_and(|point| contains(&boundary, *point, tolerance))
+            && ring.first().is_some_and(|point| contains(boundary, *point, tolerance))
         {
             result.push(ring.clone());
         }
@@ -166,17 +162,23 @@ fn selected_rings(sources: &FxHashMap<Handle, BoundarySource>, point: [f64; 2]) 
     Some(result)
 }
 
-fn boundary_region(
-    sources: &FxHashMap<Handle, BoundarySource>, rings: &[Vec<[f64; 2]>], plane: WorkingPlane,
-) -> Option<EntityType> {
+fn boundary_loops(
+    sources: &FxHashMap<Handle, BoundarySource>, rings: &[Vec<[f64; 2]>],
+) -> Option<Vec<Vec<Curve>>> {
     let exterior = (0..rings.len()).map(|index| index == 0).collect::<Vec<_>>();
     let paths = exact_hatch_paths(rings, &exterior, sources, BOUNDARY_TOLERANCE);
     if paths.len() != rings.len() {
         return None;
     }
-    let loops = paths.iter().map(|path| {
+    paths.iter().map(|path| {
         path.edges.iter().map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
-    }).collect::<Option<Vec<_>>>()?;
+    }).collect()
+}
+
+fn boundary_region(
+    sources: &FxHashMap<Handle, BoundarySource>, rings: &[Vec<[f64; 2]>], plane: WorkingPlane,
+) -> Option<EntityType> {
+    let loops = boundary_loops(sources, rings)?;
     let kernel_plane = Plane::from_axes(plane.origin.to_array(), plane.x.to_array(), plane.y.to_array());
     let sheet = brep::planar_region(kernel_plane, &loops)?;
     let document = crate::scene::convert::acis_export::solid_to_sat(&sheet)?;

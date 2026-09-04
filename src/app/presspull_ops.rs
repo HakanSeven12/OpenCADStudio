@@ -237,7 +237,7 @@ impl super::OpenCADStudio {
         if let Some(command) = self.tabs[i].active_cmd.as_mut() {
             command.on_presspull_applied(true);
         }
-        self.command_line.push_output(crate::tf!("PRESSPULL: %{count} object(s) updated.", count = handles.len()).as_ref());
+        self.command_line.push_output(crate::tf!("PRESSPULL: {count} object(s) updated.", count = handles.len()).as_ref());
         self.refresh_properties();
         self.refresh_presspull_prompt();
     }

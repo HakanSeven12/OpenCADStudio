@@ -373,6 +373,7 @@ impl RecoveryReport {
         lines.push(format!("Validation: {} ms", self.timings.purge_ms));
         lines.push(format!("References: {} ms", self.timings.xref_ms));
         lines.push(format!("Scene caches: {} ms", self.timings.caches_ms));
+        lines.push(format!("Geometry prep: {} ms", self.timings.finalize_ms));
         lines.push(format!("Total: {} ms", self.total_ms));
         if !self.diagnostics.is_empty() {
             lines.push(String::new());

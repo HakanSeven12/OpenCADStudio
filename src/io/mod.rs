@@ -383,6 +383,8 @@ async fn open_path_with_phase_attempt(
             purge_ms,
             caches_ms: t_caches.elapsed().as_millis() as u32,
                     xref_ms,
+                    // Filled in after `prepare_open_geometry` below.
+                    finalize_ms: 0,
         };
         caches.corrupt_dropped = dropped;
                 caches.read_stats = Some(read_stats);
@@ -395,11 +397,24 @@ async fn open_path_with_phase_attempt(
                     );
                 }
                 progress2.set(crate::app::OPEN_PHASE_FINALIZING, 9600, 0, 1);
+                let t_finalize = Instant::now();
                 let (prepared_doc, prepared_geometry) =
                     crate::scene::prepare_open_geometry(doc, &caches, model_bg);
+                caches.timings.finalize_ms = t_finalize.elapsed().as_millis() as u32;
                 doc = prepared_doc;
                 caches.prepared_geometry = Some(prepared_geometry);
                 progress2.set(crate::app::OPEN_PHASE_FINALIZING, 9950, 1, 1);
+                // The localized command-line summary predates `finalize_ms` and
+                // is keyed on its format string, so the full breakdown goes out
+                // here instead of changing that key across every locale.
+                crate::perf_record!(
+                    "[perf] open-phases parse={}ms purge={}ms xref={}ms caches={}ms finalize={}ms",
+                    caches.timings.parse_ms,
+                    caches.timings.purge_ms,
+                    caches.timings.xref_ms,
+                    caches.timings.caches_ms,
+                    caches.timings.finalize_ms,
+                );
                     Ok((doc, caches))
                 })()
             }));

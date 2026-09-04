@@ -921,23 +921,10 @@ impl shader::Primitive for Primitive {
                     let built = match cached {
                         Some(entry) => entry,
                         None => {
-                            // Free the superseded content BEFORE allocating its
-                            // replacement. Every geometry edit mints a new content
-                            // id, so a miss here means this slot's current buffers
-                            // are already dead weight — and on a large drawing one
-                            // set is most of the card (measured: 1.3 GB of a 2 GB
-                            // GT 1030). Holding the old set while the new one is
-                            // allocated is what exhausts VRAM after the first edit.
-                            //
-                            // Dropping this slot's handles first is what makes the
-                            // retain below able to see the old entry as garbage; a
-                            // pane still drawing that content keeps its own clone,
-                            // so shared geometry is never pulled out from under it.
+                            // Release superseded buffers before allocating replacements.
+                            // Other panes retain their own references to shared geometry.
                             inner.gpu_wires = std::sync::Arc::new(Vec::new());
                             inner.gpu_block_wires = std::sync::Arc::new(Vec::new());
-                            // Entries no slot still holds: only the cache references
-                            // them. An entry drawn by any pane keeps a strong count
-                            // ≥ 2, so this never drops live geometry.
                             let held_before = pipeline.wire_buffer_cache.len();
                             pipeline.wire_buffer_cache.retain(|_, (w, b, _)| {
                                 std::sync::Arc::strong_count(w) > 1
@@ -950,8 +937,18 @@ impl shader::Primitive for Primitive {
                                     pipeline.wire_buffer_cache.len(),
                                 );
                             }
+                            let t_upload = _perf.then(iced::time::Instant::now);
                             let entry =
                                 inner.build_wire_buffers(device, queue, &vp_wires[..], &draw_depths);
+                            if let Some(start) = t_upload {
+                                crate::perf_record!(
+                                    "[perf] wire-upload {:.1}ms wires={} content_id={}",
+                                    start.elapsed().as_secs_f64() * 1000.0,
+                                    vp_wires.len(),
+                                    vp.wire_content_id,
+                                );
+                            }
+
                             pipeline
                                 .wire_buffer_cache
                                 .insert(vp.wire_content_id, entry.clone());

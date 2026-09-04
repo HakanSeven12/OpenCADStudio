@@ -177,7 +177,20 @@ impl OpenCADStudio {
         // All dialogs are in-canvas modals now (Plan B); view_main stacks the
         // active one. `window_id` is unused — there is only the main window.
         let _ = window_id;
-        self.view_main()
+        // Pan latency on a large drawing is ~120 ms while `update`, `prepare`
+        // and `encode` together account for ~1 ms of it, the GPU sits at 0-8%,
+        // and encoding no scene at all changes nothing. Widget-tree
+        // construction is the largest span between the input handler returning
+        // and `prepare` running, and it was never measured.
+        let started = crate::perf::enabled().then(iced::time::Instant::now);
+        let element = self.view_main();
+        if let Some(started) = started {
+            let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+            if elapsed_ms >= 1.0 {
+                crate::perf_record!("[perf] view {:>7.1}ms", elapsed_ms);
+            }
+        }
+        element
     }
 
     /// The primary window: viewport, ribbon, tab bar, status bar. Split out of

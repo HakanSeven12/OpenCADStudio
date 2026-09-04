@@ -23,6 +23,11 @@ pub fn enabled() -> bool {
         || *ENV_ENABLED.get_or_init(|| std::env::var_os("PERF").is_some())
 }
 
+/// Elapsed diagnostic time; a disabled timer never reads the clock.
+pub fn elapsed_ms(start: Option<iced::time::Instant>) -> f64 {
+    start.map_or(0.0, |start| start.elapsed().as_secs_f64() * 1000.0)
+}
+
 /// Enable or disable collection driven by the in-app `PERF` command.
 pub fn set_ui_enabled(enabled: bool) {
     UI_ENABLED.store(enabled, Ordering::Relaxed);

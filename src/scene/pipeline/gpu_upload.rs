@@ -1,37 +1,8 @@
-//! Buffer creation that survives an out-of-memory device.
-//!
-//! `wgpu::util::DeviceExt::create_buffer_init` — and any
-//! `mapped_at_creation: true` followed by `get_mapped_range_mut()` — maps the
-//! new buffer unconditionally. When the allocation fails wgpu hands back an
-//! *invalid* buffer, and mapping an invalid buffer panics:
-//!
-//! ```text
-//! thread 'main' panicked at wgpu-29.0.4/src/backend/wgpu_core.rs:2253:18:
-//!   Error in Buffer::get_mapped_range: Validation Error
-//!   Caused by: Buffer with 'block_wire.vertices' label is invalid
-//! ```
-//!
-//! That panic unwinds through iced's main-thread redraw, trips the `wgpu-hal`
-//! swapchain assertion in a destructor, and turns into a **non-unwinding
-//! abort** — the process dies with the user's unsaved drawing in it.
-//!
-//! Writing through the queue instead never maps. A failed allocation produces
-//! a validation error on the `write_buffer`, which reaches the handler
-//! installed by `install_gpu_error_handler` and degrades the frame, which is
-//! what that handler was written for: "A bad frame must degrade, not end the
-//! session."
+//! Upload through the queue, avoiding direct mapping of a failed allocation.
 
 use iced::wgpu;
 
-/// Create a buffer and fill it without ever mapping it.
-///
-/// `COPY_DST` is added to `usage` because the contents arrive via
-/// `Queue::write_buffer`. Callers pass the same usage flags they would have
-/// given `create_buffer_init`.
-///
-/// Empty `data` still produces a one-element buffer: wgpu rejects zero-sized
-/// buffers, and every draw path here already guards its instance/vertex count
-/// before issuing a draw, so a placeholder allocation is harmless.
+/// Create an unmapped buffer and upload its contents, adding COPY_DST usage.
 pub fn upload_buffer<T: bytemuck::Pod>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,

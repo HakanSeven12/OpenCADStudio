@@ -987,21 +987,21 @@ pub fn prepare_open_geometry(
     scene.current_layout = "Model".to_string();
     let camera = scene.camera.borrow().clone();
     let perf = crate::perf::enabled();
-    let t_wires = iced::time::Instant::now();
+    let t_wires = perf.then(iced::time::Instant::now);
     let wires = scene.model_tile_wires_arc(0, &camera, 1.0, 1.0);
-    let wires_ms = t_wires.elapsed().as_secs_f64() * 1000.0;
-    let t_index = iced::time::Instant::now();
+    let wires_ms = crate::perf::elapsed_ms(t_wires);
+    let t_index = perf.then(iced::time::Instant::now);
     let interaction_index = if scene.interaction_index_worthwhile(&wires) {
         let index =
             Arc::new(crate::scene::pick::interaction_index::InteractionIndex::build(&wires));
-        let build_ms = t_index.elapsed().as_secs_f64() * 1000.0;
-        let t_screen = iced::time::Instant::now();
+        let build_ms = crate::perf::elapsed_ms(t_index);
+        let t_screen = perf.then(iced::time::Instant::now);
         index.prepare_screen();
         if perf {
             crate::perf_record!(
                 "[perf] open-index build={:.1}ms prepare_screen={:.1}ms",
                 build_ms,
-                t_screen.elapsed().as_secs_f64() * 1000.0,
+                crate::perf::elapsed_ms(t_screen),
             );
         }
         Some(index)
@@ -1012,7 +1012,7 @@ pub fn prepare_open_geometry(
         crate::perf_record!(
             "[perf] open-finalize wires={:.1}ms index={:.1}ms wire_models={}",
             wires_ms,
-            t_index.elapsed().as_secs_f64() * 1000.0,
+            crate::perf::elapsed_ms(t_index),
             wires.len(),
         );
     }
@@ -5195,37 +5195,36 @@ impl Scene {
         // Build once: full tessellation, no cull (region = None), no zoom LOD
         // (wpp = None) — for every space, exactly like the Model static-hold.
         let t_tess = iced::time::Instant::now();
-        let mut wires =
-            self.wires_for_block_culled(
-                block,
-                None,
-                None,
-                frozen_layers,
-                anno_scale_override,
-                annotation_scale_handle,
-                all_visible,
-                style_viewport,
-            );
+        let mut wires = self.wires_for_block_culled(
+            block,
+            None,
+            None,
+            frozen_layers,
+            anno_scale_override,
+            annotation_scale_handle,
+            all_visible,
+            style_viewport,
+        );
         let perf = crate::perf::enabled();
-        let t_post = iced::time::Instant::now();
+        let t_post = perf.then(iced::time::Instant::now);
         // Synthesized nonprint markers (geo-location daisy) live in model space
         // only and are derived from document objects, not entities — append them
         // to the freshly built resident set (incremental patches preserve them).
         if block == self.model_space_block_handle() {
             self.append_scene_markers(&mut wires, bg);
         }
-        let markers_ms = t_post.elapsed().as_secs_f64() * 1000.0;
-        let t_fade = iced::time::Instant::now();
+        let markers_ms = crate::perf::elapsed_ms(t_post);
+        let t_fade = perf.then(iced::time::Instant::now);
         self.apply_refedit_fade(&mut wires, bg);
-        let fade_ms = t_fade.elapsed().as_secs_f64() * 1000.0;
-        let t_layout = iced::time::Instant::now();
+        let fade_ms = crate::perf::elapsed_ms(t_fade);
+        let t_layout = perf.then(iced::time::Instant::now);
         let layout = Self::resident_wire_layout(&wires);
         if perf {
             crate::perf_record!(
                 "[perf] resident-post markers={:.1}ms fade={:.1}ms layout={:.1}ms wires={}",
                 markers_ms,
                 fade_ms,
-                t_layout.elapsed().as_secs_f64() * 1000.0,
+                crate::perf::elapsed_ms(t_layout),
                 wires.len(),
             );
         }
@@ -8764,11 +8763,9 @@ impl Scene {
     ) -> Vec<WireModel> {
         use acadrust::objects::ObjectType;
 
-        // Stage timings for the load-path investigation. This function also
-        // runs per frame on the cull path, so the reporting stays behind the
-        // PERF gate. `t_fn` doubles as the start of the sort-cache stage.
+        // Skip diagnostic clock reads when PERF is disabled.
         let perf = crate::perf::enabled();
-        let t_fn = iced::time::Instant::now();
+        let t_fn = perf.then(iced::time::Instant::now);
 
         // ── Ensure sort-order index is current ────────────────────────────
         // Replaces the old O(objects) find_map with one rebuild per epoch,
@@ -8811,8 +8808,8 @@ impl Scene {
             )
         };
 
-        let sort_cache_ms = t_fn.elapsed().as_secs_f64() * 1000.0;
-        let t_visible = iced::time::Instant::now();
+        let sort_cache_ms = crate::perf::elapsed_ms(t_fn);
+        let t_visible = perf.then(iced::time::Instant::now);
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
         // AABB exists (Model layout with a settled camera), only iterate
@@ -8864,7 +8861,7 @@ impl Scene {
                 .collect()
         };
 
-        let visible_ms = t_visible.elapsed().as_secs_f64() * 1000.0;
+        let visible_ms = crate::perf::elapsed_ms(t_visible);
         let visible_count = visible.len();
 
         // Tessellate in parallel across all available CPU cores.
@@ -8899,9 +8896,10 @@ impl Scene {
         // Content shown inside a paper-space viewport carries a scale override;
         // only there does PSLTSCALE resize linetypes by the viewport scale.
         let paper = anno_scale_override.is_some();
-        let t_blk = iced::time::Instant::now();
-        let blk_cache = self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
-        let blk_ms = t_blk.elapsed().as_secs_f64() * 1000.0;
+        let t_blk = perf.then(iced::time::Instant::now);
+        let blk_cache =
+            self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
+        let blk_ms = crate::perf::elapsed_ms(t_blk);
         let blk_ref: &cache::block_cache::BlockCache = &blk_cache;
         // Per-entity tessellation memo. Same classify/tessellate logic, two
         // SEPARATE stores so they can't thrash each other:
@@ -8938,7 +8936,7 @@ impl Scene {
         let mut materialize_ms = 0.0f64;
         let mut memo_hits = 0usize;
         let memo_misses;
-        let t_build = iced::time::Instant::now();
+        let t_build = perf.then(iced::time::Instant::now);
         let mut wires: Vec<WireModel> = if memo_active {
             // Guard hash of everything tessellate_entity output depends on
             // besides the entity itself. A mismatch (zoom/tol, view, anno,
@@ -8977,7 +8975,7 @@ impl Scene {
                 guard_cell.set(guard);
             }
             // Classify (serial, cheap): reuse memoized Arcs, collect misses.
-            let t_classify = iced::time::Instant::now();
+            let t_classify = perf.then(iced::time::Instant::now);
             let mut hit_arcs: Vec<Arc<Vec<WireModel>>> = Vec::new();
             let mut misses: Vec<&EntityType> = Vec::new();
             {
@@ -8990,17 +8988,17 @@ impl Scene {
                     }
                 }
             }
-            classify_ms = t_classify.elapsed().as_secs_f64() * 1000.0;
+            classify_ms = crate::perf::elapsed_ms(t_classify);
             memo_hits = hit_arcs.len();
             memo_misses = misses.len();
             // Materialize hits + tessellate misses, both in parallel.
-            let t_hits = iced::time::Instant::now();
+            let t_hits = perf.then(iced::time::Instant::now);
             let hit_wires: Vec<WireModel> = hit_arcs
                 .par_iter()
                 .flat_map_iter(|a| a.iter().cloned())
                 .collect();
-            hits_ms = t_hits.elapsed().as_secs_f64() * 1000.0;
-            let t_tess_miss = iced::time::Instant::now();
+            hits_ms = crate::perf::elapsed_ms(t_hits);
+            let t_tess_miss = perf.then(iced::time::Instant::now);
             let miss_pairs: Vec<(Handle, Arc<Vec<WireModel>>)> = misses
                 .par_iter()
                 .map(|e| {
@@ -9021,12 +9019,9 @@ impl Scene {
                     (e.common().handle, Arc::new(w))
                 })
                 .collect();
-            tess_ms = t_tess_miss.elapsed().as_secs_f64() * 1000.0;
-            // Serial deep-clone of every freshly tessellated wire, while the
-            // memo retains a second copy of the same geometry. Suspected
-            // dominant cost of a cold open; measuring it is the point of this
-            // whole breakdown.
-            let t_materialize = iced::time::Instant::now();
+            tess_ms = crate::perf::elapsed_ms(t_tess_miss);
+            // Materialize new wires while the memo retains their shared source.
+            let t_materialize = perf.then(iced::time::Instant::now);
             let mut out = hit_wires;
             {
                 let mut memo = memo_cell.borrow_mut();
@@ -9035,10 +9030,10 @@ impl Scene {
                     memo.insert(*h, Arc::clone(a));
                 }
             }
-            materialize_ms = t_materialize.elapsed().as_secs_f64() * 1000.0;
+            materialize_ms = crate::perf::elapsed_ms(t_materialize);
             out
         } else {
-            let t_tess_all = iced::time::Instant::now();
+            let t_tess_all = perf.then(iced::time::Instant::now);
             let out: Vec<WireModel> = visible
                 .into_par_iter()
                 .flat_map(|e| {
@@ -9057,14 +9052,14 @@ impl Scene {
                     )
                 })
                 .collect();
-            tess_ms = t_tess_all.elapsed().as_secs_f64() * 1000.0;
+            tess_ms = crate::perf::elapsed_ms(t_tess_all);
             memo_misses = visible_count;
             out
         };
-        let build_ms = t_build.elapsed().as_secs_f64() * 1000.0;
+        let build_ms = crate::perf::elapsed_ms(t_build);
 
         // Apply draw order via the cached index (O(1) block lookup).
-        let t_sort = iced::time::Instant::now();
+        let t_sort = perf.then(iced::time::Instant::now);
         let mut sorted = false;
         {
             let cache = self.sort_cache.borrow();
@@ -9089,7 +9084,7 @@ impl Scene {
                 "[perf] wires-build total={:.1}ms sort_cache={:.1} visible={:.1} blk_cache={:.1} \
 build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
 entities={} memo_hit={} memo_miss={} wires={} memo={}",
-                t_fn.elapsed().as_secs_f64() * 1000.0,
+                crate::perf::elapsed_ms(t_fn),
                 sort_cache_ms,
                 visible_ms,
                 blk_ms,
@@ -9098,7 +9093,7 @@ entities={} memo_hit={} memo_miss={} wires={} memo={}",
                 hits_ms,
                 tess_ms,
                 materialize_ms,
-                t_sort.elapsed().as_secs_f64() * 1000.0,
+                crate::perf::elapsed_ms(t_sort),
                 if sorted { "applied" } else { "skipped" },
                 visible_count,
                 memo_hits,

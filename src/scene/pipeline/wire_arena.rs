@@ -50,13 +50,6 @@ const HEADROOM_NUM: u64 = 3;
 const HEADROOM_DEN: u64 = 2;
 const MIN_INST_CAP: u64 = 4096;
 const MIN_CONST_CAP: u64 = 1024;
-/// wgpu caps a single buffer at 256 MB. An arena keeps ONE instance buffer per
-/// batch, so a batch whose instances exceed this can't be an arena — build
-/// returns None and the caller falls back to the chunked batched path. The
-/// buffer (with headroom) is also clamped here so it never exceeds the limit.
-const MAX_INSTANCES: u64 = 268_435_456 / std::mem::size_of::<WireInstance>() as u64;
-const MAX_CONSTS: u64 = 268_435_456 / std::mem::size_of::<WireConst>() as u64;
-
 struct Slab {
     inst_off: u32,
     inst_len: u32,
@@ -320,6 +313,8 @@ impl WireArena {
         const_bgl: &wgpu::BindGroupLayout,
         mesh_edge: bool,
     ) -> Option<Self> {
+        let instance_limit = super::gpu_budget::max_elements::<WireInstance>(device) as u64;
+        let constant_limit = super::gpu_budget::max_storage_elements::<WireConst>(device) as u64;
         let ranges = handle_ranges(wires)?;
         let perf = crate::perf::enabled();
         let total_started = iced::time::Instant::now();
@@ -327,11 +322,8 @@ impl WireArena {
         // Reject an oversized batch before parallel emission allocates hundreds
         // of megabytes. `points.len() - 1` is an upper bound because NaN-break
         // segments are skipped by emit_wire_native.
-        let max_instances: usize = wires
-            .iter()
-            .map(|w| w.points.len().saturating_sub(1))
-            .sum();
-        if max_instances as u64 > MAX_INSTANCES || wires.len() as u64 + 1 > MAX_CONSTS {
+        let max_instances: usize = wires.iter().map(|w| w.points.len().saturating_sub(1)).sum();
+        if max_instances as u64 > instance_limit || wires.len() as u64 + 1 > constant_limit {
             return None;
         }
 
@@ -411,7 +403,7 @@ impl WireArena {
 
         let inst_count: usize = packed.iter().map(|slab| slab.instances.len()).sum();
         let const_count: usize = 1 + packed.iter().map(|slab| slab.consts.len()).sum::<usize>();
-        if inst_count as u64 > MAX_INSTANCES || const_count as u64 > MAX_CONSTS {
+        if inst_count as u64 > instance_limit || const_count as u64 > constant_limit {
             return None;
         }
 
@@ -444,15 +436,15 @@ impl WireArena {
         let const_tail = consts_cpu.len() as u32;
         // A batch bigger than one buffer can't be an arena — let the caller chunk
         // it via the batched path.
-        if inst_tail as u64 > MAX_INSTANCES || const_tail as u64 > MAX_CONSTS {
+        if inst_tail as u64 > instance_limit || const_tail as u64 > constant_limit {
             return None;
         }
         let inst_cap = ((inst_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
             .max(MIN_INST_CAP)
-            .min(MAX_INSTANCES)) as u32;
+            .min(instance_limit)) as u32;
         let const_cap = ((const_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
             .max(MIN_CONST_CAP)
-            .min(MAX_CONSTS)) as u32;
+            .min(constant_limit)) as u32;
         let upload_started = iced::time::Instant::now();
         let inst_buf = alloc_inst_initialized(device, queue, inst_cap as u64, &instances);
         let const_buf = alloc_const_initialized(device, queue, const_cap as u64, &consts_cpu);
@@ -897,9 +889,6 @@ struct PreparedPackedPatchRun {
     order_sensitive: bool,
 }
 
-const MAX_PACKED_INSTANCES: u64 =
-    268_435_456 / std::mem::size_of::<PackedWireInstance>() as u64;
-
 fn blank_packed_instance() -> PackedWireInstance {
     let mut blank = <PackedWireInstance as bytemuck::Zeroable>::zeroed();
     blank.pattern_length = -1.0;
@@ -982,12 +971,13 @@ impl PackedWireArena {
         depth_map: &FxHashMap<u64, [f32; 2]>,
         mesh_edge: bool,
     ) -> Option<Self> {
+        let packed_limit = super::gpu_budget::max_elements::<PackedWireInstance>(device) as u64;
         let ranges = handle_ranges(wires)?;
         let max_instances: usize = wires
             .iter()
             .map(|wire| wire.points.len().saturating_sub(1))
             .sum();
-        if max_instances as u64 > MAX_PACKED_INSTANCES {
+        if max_instances as u64 > packed_limit {
             return None;
         }
 
@@ -1031,7 +1021,7 @@ impl PackedWireArena {
             .collect();
 
         let inst_count: usize = packed.iter().map(|slab| slab.instances.len()).sum();
-        if inst_count as u64 > MAX_PACKED_INSTANCES {
+        if inst_count as u64 > packed_limit {
             return None;
         }
         let mut instances = Vec::with_capacity(inst_count);
@@ -1057,7 +1047,7 @@ impl PackedWireArena {
         let inst_tail = instances.len() as u32;
         let inst_cap = ((inst_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
             .max(MIN_INST_CAP)
-            .min(MAX_PACKED_INSTANCES)) as u32;
+            .min(packed_limit)) as u32;
         let inst_buf = alloc_packed_initialized(device, queue, inst_cap as u64, &instances);
 
         Some(Self {

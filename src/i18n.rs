@@ -402,3 +402,33 @@ macro_rules! tf {
         $crate::i18n::translate_format($template, rendered)
     }};
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn greek_catalog_loads_and_covers_the_source_catalog() {
+        let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+        load_language(&loader, Language::ElGr).expect("Greek Fluent resources must parse");
+        let keys = |language: &str| -> BTreeSet<(String, String)> {
+            loader.with_message_iter(&language.parse().unwrap(), |messages| {
+                messages
+                    .flat_map(|message| {
+                        std::iter::once((message.id.name.to_owned(), String::new())).chain(
+                            message.attributes.iter().map(|attribute| {
+                                (message.id.name.to_owned(), attribute.id.name.to_owned())
+                            }),
+                        )
+                    })
+                    .collect()
+            })
+        };
+        let source = keys("en-US");
+        assert!(!source.is_empty());
+        assert_eq!(keys("el-GR"), source);
+        assert_eq!(loader.get_attr("language", "greek"), "Ελληνικά");
+        assert_eq!(serde_json::to_string(&Language::ElGr).unwrap(), "\"el-GR\"");
+    }
+}

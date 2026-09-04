@@ -276,9 +276,7 @@ pub struct WireGpu {
     /// in shaded modes so the surface reads as a clean solid; pure
     /// wireframe / HiddenLine / *WithEdges modes draw them.
     pub is_3d_mesh_edge: bool,
-    /// Per-wire constants storage (group 1), shared across all chunks of one
-    /// build. `None` on web (the fat instance carries the constants inline) and
-    /// for empty buffers. The draw loop binds it as group 1 when present.
+    /// Per-wire constants for this chunk (group 1); packed instances carry them inline.
     pub const_bind_group: Option<std::sync::Arc<wgpu::BindGroup>>,
 }
 
@@ -829,10 +827,7 @@ impl BlockWireGpu {
     }
 }
 
-/// Build the shared per-wire `WireConst` storage buffer and its bind group
-/// (storage path). All chunks from one build reference the same
-/// buffer via their global `wire_id`, so a single bind group is cloned into
-/// each chunk.
+/// Upload one constant chunk; its instances use chunk-local wire IDs.
 fn build_const_bind_group(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -861,6 +856,48 @@ fn build_const_bind_group(
 }
 
 impl WireGpu {
+    fn upload_native(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        const_bgl: &wgpu::BindGroupLayout,
+        mut instances: Vec<WireInstance>,
+        consts: &[WireConst],
+        mesh_edge: bool,
+        label: &str,
+    ) -> Vec<Self> {
+        let max_consts = super::gpu_budget::max_storage_elements::<WireConst>(device);
+        let max_instances = super::gpu_budget::max_elements::<WireInstance>(device);
+        let mut out = Vec::new();
+        let mut remaining = instances.as_mut_slice();
+        for (group, constants) in consts.chunks(max_consts).enumerate() {
+            let base = group * max_consts;
+            let count =
+                remaining.partition_point(|item| (item.wire_id as usize) < base + constants.len());
+            let (items, rest) = remaining.split_at_mut(count);
+            remaining = rest;
+            if items.is_empty() {
+                continue;
+            }
+            for item in items.iter_mut() {
+                item.wire_id -= base as u32;
+            }
+            debug_assert!(items
+                .iter()
+                .all(|item| (item.wire_id as usize) < constants.len()));
+            let bind_group = build_const_bind_group(device, queue, const_bgl, constants);
+            for chunk in items.chunks(max_instances) {
+                out.push(Self {
+                    instance_buffer: instance_buffer(device, queue, label, chunk),
+                    first_instance: 0,
+                    instance_count: chunk.len() as u32,
+                    is_3d_mesh_edge: mesh_edge,
+                    const_bind_group: Some(bind_group.clone()),
+                });
+            }
+        }
+        out
+    }
+
     /// Build a small selection/hover overlay from borrowed resident wires while
     /// overriding their colour. Avoids deep-cloning every point/text/fill array
     /// of a large selected polyline or block before packing the overlay.
@@ -873,8 +910,6 @@ impl WireGpu {
         const_bgl: Option<&wgpu::BindGroupLayout>,
     ) -> Vec<Self> {
         if let Some(const_bgl) = const_bgl {
-            const MAX_INSTANCES: usize =
-                268_435_456 / std::mem::size_of::<WireInstance>();
             use crate::par::prelude::*;
             let per: Vec<(Vec<WireInstance>, WireConst)> = wires
                 .par_iter()
@@ -893,27 +928,19 @@ impl WireGpu {
             if instances.is_empty() {
                 return Vec::new();
             }
-            let bind_group = build_const_bind_group(device, queue, const_bgl, &consts);
-            return instances
-                .chunks(MAX_INSTANCES)
-                .map(|chunk| Self {
-                    instance_buffer: instance_buffer(
-                        device,
-                        queue,
-                        "wire.highlight.ibuf",
-                        chunk,
-                    ),
-                    first_instance: 0,
-                    instance_count: chunk.len() as u32,
-                    is_3d_mesh_edge: false,
-                    const_bind_group: Some(bind_group.clone()),
-                })
-                .collect();
+            return Self::upload_native(
+                device,
+                queue,
+                const_bgl,
+                instances,
+                &consts,
+                false,
+                "wire.highlight.ibuf",
+            );
         }
 
         let _ = const_bgl;
-        const MAX_PACKED_INSTANCES: usize =
-            268_435_456 / std::mem::size_of::<PackedWireInstance>();
+        let max_packed_instances = super::gpu_budget::max_elements::<PackedWireInstance>(device);
         let per: Vec<Vec<PackedWireInstance>> = wires
             .iter()
             .map(|wire| {
@@ -925,7 +952,7 @@ impl WireGpu {
             instances.append(&mut items);
         }
         instances
-            .chunks(MAX_PACKED_INSTANCES)
+            .chunks(max_packed_instances)
             .map(|chunk| Self {
                 instance_buffer: instance_buffer(
                     device,
@@ -941,10 +968,7 @@ impl WireGpu {
             .collect()
     }
 
-    /// Equivalent of [`from_run`] for an already partitioned set of borrowed
-    /// wires. Used when one arena partition exceeds the 256 MB buffer limit:
-    /// the compatible partition stays patchable while only the oversized side
-    /// uses chunked resident buffers.
+    /// Upload borrowed wires when a partition exceeds the arena budget.
     pub fn from_run_refs(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -954,8 +978,7 @@ impl WireGpu {
         const_bgl: Option<&wgpu::BindGroupLayout>,
     ) -> Vec<Self> {
         let Some(const_bgl) = const_bgl else {
-            const MAX_INSTANCES: usize =
-                268_435_456 / std::mem::size_of::<PackedWireInstance>();
+            let max_instances = super::gpu_budget::max_elements::<PackedWireInstance>(device);
             use crate::par::prelude::*;
             let per: Vec<Vec<PackedWireInstance>> = wires
                 .par_iter()
@@ -974,7 +997,7 @@ impl WireGpu {
                 instances.append(&mut items);
             }
             return instances
-                .chunks(MAX_INSTANCES)
+                .chunks(max_instances)
                 .map(|chunk| Self {
                     instance_buffer: instance_buffer(
                         device,
@@ -989,8 +1012,6 @@ impl WireGpu {
                 })
                 .collect();
         };
-        const MAX_INSTANCES: usize =
-            268_435_456 / std::mem::size_of::<WireInstance>();
         use crate::par::prelude::*;
         let per: Vec<(Vec<WireInstance>, WireConst)> = wires
             .par_iter()
@@ -1014,23 +1035,18 @@ impl WireGpu {
         if instances.is_empty() {
             return Vec::new();
         }
-        let bind_group = build_const_bind_group(device, queue, const_bgl, &consts);
-        instances
-            .chunks(MAX_INSTANCES)
-            .map(|chunk| Self {
-                instance_buffer: instance_buffer(device, queue, "wire.run.hybrid.ibuf", chunk),
-                first_instance: 0,
-                instance_count: chunk.len() as u32,
-                is_3d_mesh_edge: mesh_edge,
-                const_bind_group: Some(bind_group.clone()),
-            })
-            .collect()
+        Self::upload_native(
+            device,
+            queue,
+            const_bgl,
+            instances,
+            &consts,
+            mesh_edge,
+            "wire.run.hybrid.ibuf",
+        )
     }
 
-    /// Merge a run of WireModels that share scissor + mesh-edge state into one
-    /// (or, past the 256 MB GPU limit, a few) instance buffer(s), then stamp
-    /// the shared `scissor` / `mesh_edge` onto each so the draw loop treats the
-    /// whole run as a single batch.
+    /// Upload a run of wires in submission order, within the buffer budget.
     ///
     /// Unlike [`from_batch`], instance order is **guaranteed** to follow wire
     /// order (parallel `collect` is index-ordered; the flatten is sequential).
@@ -1046,12 +1062,8 @@ impl WireGpu {
         const_bgl: Option<&wgpu::BindGroupLayout>,
     ) -> Vec<Self> {
         if let Some(const_bgl) = const_bgl {
-            const MAX_INSTANCES: usize =
-                268_435_456 / std::mem::size_of::<WireInstance>();
             use crate::par::prelude::*;
-            // Global `wire_id` = wire index; one shared WireConst buffer for all
-            // chunks. Indexed `collect` preserves wire order (the pass relies on
-            // submission order for depth-biased / transparent overlap).
+            // Indexed collection preserves transparent and coincident wire order.
             let per: Vec<(Vec<WireInstance>, WireConst)> = wires
                 .par_iter()
                 .enumerate()
@@ -1074,25 +1086,19 @@ impl WireGpu {
             if instances.is_empty() {
                 return vec![];
             }
-            let bg = build_const_bind_group(device, queue, const_bgl, &consts);
-            return instances
-                .chunks(MAX_INSTANCES)
-                .map(|chunk| {
-                    let buf = instance_buffer(device, queue, "wire.run.ibuf", chunk);
-                    Self {
-                        instance_buffer: buf,
-                        first_instance: 0,
-                        instance_count: chunk.len() as u32,
-                        is_3d_mesh_edge: mesh_edge,
-                        const_bind_group: Some(bg.clone()),
-                    }
-                })
-                .collect();
+            return Self::upload_native(
+                device,
+                queue,
+                const_bgl,
+                instances,
+                &consts,
+                mesh_edge,
+                "wire.run.ibuf",
+            );
         }
 
         let _ = const_bgl;
-        const MAX_PACKED_INSTANCES: usize =
-            268_435_456 / std::mem::size_of::<PackedWireInstance>();
+        let max_packed_instances = super::gpu_budget::max_elements::<PackedWireInstance>(device);
         let per: Vec<Vec<PackedWireInstance>> = wires
             .iter()
             .map(|w| {
@@ -1109,7 +1115,7 @@ impl WireGpu {
             return vec![];
         }
         instances
-            .chunks(MAX_PACKED_INSTANCES)
+            .chunks(max_packed_instances)
             .map(|chunk| {
                 let buf = instance_buffer(device, queue, "wire.run.compat.ibuf", chunk);
                 Self {
@@ -1123,9 +1129,7 @@ impl WireGpu {
             .collect()
     }
 
-    /// Merge multiple WireModels into GPU instance buffers, chunked to fit the
-    /// 256 MB GPU limit. Each wire keeps its own color and pattern — they live
-    /// per-instance.
+    /// Upload wires in chunks that retain each wire’s color and pattern.
     pub fn from_batch(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -1138,9 +1142,6 @@ impl WireGpu {
             return vec![];
         }
         if let Some(const_bgl) = const_bgl {
-            // GPU max buffer size is 256 MB; chunk to stay within the limit.
-            const MAX_INSTANCES: usize =
-                268_435_456 / std::mem::size_of::<WireInstance>();
             use crate::par::prelude::*;
             // `block_cache` groups wires by style upstream; order within a batch
             // doesn't affect correctness, but indexed `collect` gives each wire a
@@ -1162,27 +1163,19 @@ impl WireGpu {
             if instances.is_empty() {
                 return vec![];
             }
-            let bg = build_const_bind_group(device, queue, const_bgl, &consts);
-            return instances
-                .chunks(MAX_INSTANCES)
-                .enumerate()
-                .map(|(i, chunk)| {
-                    let label = format!("wire.batch.ibuf.{i}");
-                    let instance_buffer = instance_buffer(device, queue, &label, chunk);
-                    Self {
-                        instance_buffer,
-                        first_instance: 0,
-                        instance_count: chunk.len() as u32,
-                        is_3d_mesh_edge: false,
-                        const_bind_group: Some(bg.clone()),
-                    }
-                })
-                .collect();
+            return Self::upload_native(
+                device,
+                queue,
+                const_bgl,
+                instances,
+                &consts,
+                false,
+                "wire.batch.ibuf",
+            );
         }
 
         let _ = const_bgl;
-        const MAX_PACKED_INSTANCES: usize =
-            268_435_456 / std::mem::size_of::<PackedWireInstance>();
+        let max_packed_instances = super::gpu_budget::max_elements::<PackedWireInstance>(device);
         let instances: Vec<PackedWireInstance> = wires
             .iter()
             .flat_map(|w| emit_wire_packed(w, w.color, wire_draw_depth(w, depth_map)))
@@ -1191,7 +1184,7 @@ impl WireGpu {
             return vec![];
         }
         instances
-            .chunks(MAX_PACKED_INSTANCES)
+            .chunks(max_packed_instances)
             .enumerate()
             .map(|(i, chunk)| {
                 let label = format!("wire.batch.compat.ibuf.{i}");

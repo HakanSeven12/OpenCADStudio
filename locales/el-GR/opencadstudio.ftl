@@ -237,6 +237,8 @@ command-copy =
         } | Διάταξη | Enter=τέλος | βάση { $x },{ $y }]:
 
 common =
+    .revolve-created-objects-failed-sources = REVOLVE: δημιουργήθηκαν __ocs_arg_created__ αντικείμενα· __ocs_arg_failed__ αρχικά αντικείμενα δεν μπόρεσαν να περιστραφούν.
+    .revolve-no-selected-object-could-be-revolved = REVOLVE: κανένα επιλεγμένο αντικείμενο δεν μπόρεσε να περιστραφεί με τις ζητούμενες επιλογές.
     .none-use-shortcuts-set-key-command = (κανένα — χρησιμοποιήστε: SHORTCUTS SET <πλήκτρο> <εντολή>)
     .alignment-indented-label-title-case = Στοίχιση:
     .background-fill-enabled = Γέμισμα φόντου ενεργό
@@ -1988,6 +1990,13 @@ annotate =
     .tcount-numbered-n-text-object-s-from-start-by = TCOUNT: αριθμήθηκαν __ocs_fmt_0__ αντικείμενο(α) κειμένου από __ocs_fmt_1__ με βήμα __ocs_fmt_2__ (__ocs_fmt_3__).
 
 insert =
+    .revolve-creation-mode-solid-surface = REVOLVE  Τρόπος δημιουργίας [Solid/Surface]
+    .revolve-enter-angle-expression = REVOLVE  Δώστε έκφραση γωνίας:
+    .revolve-select-line-ray-or-construction-line-for-axis = REVOLVE  Επιλέξτε γραμμή, ημιευθεία ή βοηθητική ευθεία ως άξονα:
+    .revolve-select-objects-or-mode = REVOLVE  Επιλέξτε αντικείμενα προς περιστροφή ή [Mode] (Enter για τερματισμό):
+    .revolve-specify-angle-or-options = REVOLVE  Ορίστε γωνία περιστροφής ή [Start angle/Reverse/Expression]
+    .revolve-specify-axis-start-or-options = REVOLVE  Ορίστε αρχικό σημείο άξονα ή [Object/X/Y/Z/Mode]:
+    .revolve-specify-start-angle = REVOLVE  Ορίστε αρχική γωνία
     .point-clouds =
         Νέφη
         σημείων
@@ -2414,6 +2423,16 @@ view =
     .viewport-s-in-layout = __ocs_fmt_0__ θύρα(ες) προβολής στη διάταξη "__ocs_fmt_1__":
 
 properties =
+    .angle-of-revolution = Γωνία περιστροφής
+    .axis-direction-x = Διεύθυνση άξονα X
+    .axis-direction-y = Διεύθυνση άξονα Y
+    .axis-direction-z = Διεύθυνση άξονα Z
+    .axis-position-x = Θέση άξονα X
+    .axis-position-y = Θέση άξονα Y
+    .axis-position-z = Θέση άξονα Z
+    .show-history = Εμφάνιση ιστορικού
+    .solid-history = Ιστορικό στερεού
+    .solid-type = Τύπος στερεού
     .count-objects-selected = __ocs_arg_count__ αντικείμενα επιλεγμένα
     .scope-visual-style = Οπτικό στυλ __ocs_arg_scope__
     .value-3d-face = Έδρα 3D

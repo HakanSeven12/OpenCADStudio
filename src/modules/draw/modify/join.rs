@@ -366,8 +366,8 @@ mod join_tests {
             unreachable!();
         };
         source.normal = Vector3::new(0.0, 0.0, -1.0);
-        // A corner keeps the chain from collapsing back to a single Line.
-        let e2 = line(10.0, 0.0, 10.0, 10.0, 0.0);
+        // The -Z normal maps the source endpoint to world X=-10.
+        let e2 = line(-10.0, 0.0, -10.0, 10.0, 0.0);
         let (removed, out) = join_entities(&[(h1, &e1), (h2, &e2)]).expect("chain joins");
         assert_eq!(removed.len(), 2);
         let Some(EntityType::LwPolyline(pl)) = out.first() else {

@@ -331,6 +331,7 @@ impl MeshInstanceGpu {
 // so no per-mesh state is needed between draws. Built once per geometry epoch —
 // selection/hover no longer rebuild it (that tint is dropped in the batch path).
 
+#[derive(Clone)]
 pub struct MeshBatchChunk {
     pub vertex_buffer: wgpu::Buffer,
     pub compact_vertices: bool,
@@ -1166,14 +1167,14 @@ fn material_has_textures(
     })
 }
 
-fn build_instanced_chunk(
+fn build_instanced_chunks(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     stubs: &MeshBatchStubs,
     buffers: &mut InstancedBufferCache,
     parts: &[MeshBatchPart<'_>],
     profile_enabled: bool,
-) -> Option<(MeshBatchChunk, u64, InstancedBuildProfile)> {
+) -> Option<(Vec<MeshBatchChunk>, u64, InstancedBuildProfile)> {
     let started = profile_enabled.then(iced::time::Instant::now);
     let first = parts.first()?;
     let source = first.set.instance_source.as_ref()?;
@@ -1196,7 +1197,34 @@ fn build_instanced_chunk(
         material: material_identity,
         compact: compact_vertices,
     };
-    let shared_vertex_buffer = buffers.vertices.get(&vertex_key).cloned();
+    let budget = super::gpu_budget::buffer_budget(device);
+    let needs_wire_vertices = first.include_edges && source.edge_verts.is_empty();
+    let split_geometry = mesh
+        .verts
+        .len()
+        .saturating_mul(std::mem::size_of::<MeshVertex>())
+        > budget
+        || first
+            .indices
+            .len()
+            .saturating_mul(std::mem::size_of::<u32>())
+            > budget
+        || (needs_wire_vertices
+            && first
+                .indices
+                .len()
+                .saturating_mul(2 * std::mem::size_of::<MeshEdgeVertex>())
+                > budget)
+        || (first.include_edges
+            && source
+                .edge_verts
+                .len()
+                .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
+                > budget);
+    let shared_vertex_buffer = (!split_geometry)
+        .then(|| buffers.vertices.get(&vertex_key).cloned())
+        .flatten();
+
     let has_normals = mesh.normals.len() == mesh.verts.len();
     let bounds = mesh_bounds(mesh);
     let vertex = |index: usize| {
@@ -1229,21 +1257,22 @@ fn build_instanced_chunk(
             uv_normal: uvs[6],
         }
     };
-    let needs_wire_vertices = first.include_edges && source.edge_verts.is_empty();
-    let verts: Vec<_> = if shared_vertex_buffer.is_none() || needs_wire_vertices {
-        (0..mesh.verts.len()).map(vertex).collect()
-    } else {
-        Vec::new()
-    };
+    let verts: Vec<_> =
+        if !split_geometry && (shared_vertex_buffer.is_none() || needs_wire_vertices) {
+            (0..mesh.verts.len()).map(vertex).collect()
+        } else {
+            Vec::new()
+        };
     let vertices_at = profile_enabled.then(iced::time::Instant::now);
     let edge_color = first
         .set
         .visual_style
         .as_ref()
-        .map_or(first.display_color, |style| style.edge_color(first.display_color));
+        .map_or(first.display_color, |style| {
+            style.edge_color(first.display_color)
+        });
     let edge_key = (source_handle, edge_color.map(f32::to_bits));
-    let shared_edge_buffer = first
-        .include_edges
+    let shared_edge_buffer = (first.include_edges && !split_geometry)
         .then(|| buffers.edges.get(&edge_key).cloned())
         .flatten();
     let edge_verts: Vec<_> = if first.include_edges && shared_edge_buffer.is_none() {
@@ -1263,7 +1292,7 @@ fn build_instanced_chunk(
     };
     let has_feature_edges = first.include_edges && !source.edge_verts.is_empty();
     let mut wire_indices = Vec::new();
-    if first.include_edges && !has_feature_edges {
+    if first.include_edges && !has_feature_edges && !split_geometry {
         wire_indices.reserve(first.indices.len() * 2);
         for triangle in first.indices.chunks_exact(3) {
             wire_indices.extend_from_slice(&[
@@ -1330,7 +1359,80 @@ fn build_instanced_chunk(
     } else {
         0
     };
-    let chunk = make_chunk(
+    // Upload each source chunk once, then share it across all instance chunks.
+    let mut geometry = Vec::new();
+    if split_geometry {
+        let max_triangles = (super::gpu_budget::max_elements::<MeshVertex>(device) / 3)
+            .min(super::gpu_budget::max_elements::<u32>(device) / 3)
+            .min(super::gpu_budget::max_elements::<MeshEdgeVertex>(device) / 6)
+            .max(1);
+        if first.include_faces || needs_wire_vertices {
+            for triangles in first.indices.chunks(max_triangles * 3) {
+                let vertices: Vec<_> = triangles
+                    .iter()
+                    .map(|index| vertex(*index as usize))
+                    .collect();
+                let indices: Vec<_> = (0..vertices.len() as u32).collect();
+                let wire_indices: Vec<_> = if needs_wire_vertices {
+                    indices
+                        .chunks_exact(3)
+                        .flat_map(|t| [t[0], t[1], t[1], t[2], t[2], t[0]])
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                geometry.push(make_chunk(
+                    device,
+                    queue,
+                    stubs,
+                    &vertices,
+                    if first.include_faces && !transparent {
+                        &indices
+                    } else {
+                        &[]
+                    },
+                    if first.include_faces && transparent {
+                        &indices
+                    } else {
+                        &[]
+                    },
+                    &wire_indices,
+                    &[],
+                    &[],
+                    &[],
+                    &handles,
+                    Some(bounds),
+                    material,
+                    color,
+                    None,
+                    None,
+                ));
+            }
+        }
+        for edges in edge_verts.chunks(super::gpu_budget::max_elements_grouped::<MeshEdgeVertex>(
+            device, 2,
+        )) {
+            geometry.push(make_chunk(
+                device,
+                queue,
+                stubs,
+                &[],
+                &[],
+                &[],
+                &[],
+                edges,
+                &[],
+                &[],
+                &handles,
+                Some(bounds),
+                material,
+                color,
+                None,
+                None,
+            ));
+        }
+    } else {
+        let mut chunk = make_chunk(
             device,
             queue,
             stubs,
@@ -1339,8 +1441,8 @@ fn build_instanced_chunk(
             transparent_indices,
             &wire_indices,
             &edge_verts,
-            &highlights,
-            &instances,
+            &[],
+            &[],
             &handles,
             Some(bounds),
             material,
@@ -1348,19 +1450,60 @@ fn build_instanced_chunk(
             shared_vertex_buffer,
             shared_edge_buffer,
         );
-    buffers
-        .vertices
-        .entry(vertex_key)
-        .or_insert_with(|| chunk.vertex_buffer.clone());
-    if first.include_edges {
+        if first.include_edges {
+            // Cached buffers still carry the complete source edge count.
+            chunk.edge_vertex_count = source.edge_verts.len() as u32;
+            buffers
+                .edges
+                .entry(edge_key)
+                .or_insert_with(|| chunk.edge_vertex_buffer.clone());
+        }
         buffers
-            .edges
-            .entry(edge_key)
-            .or_insert_with(|| chunk.edge_vertex_buffer.clone());
+            .vertices
+            .entry(vertex_key)
+            .or_insert_with(|| chunk.vertex_buffer.clone());
+        geometry.push(chunk);
+    }
+    let mut chunks = Vec::new();
+    let max_instances = super::gpu_budget::max_elements::<MeshInstanceGpu>(device);
+    for (group, instance_data) in instances.chunks(max_instances).enumerate() {
+        let start = group * max_instances;
+        let end = start + instance_data.len();
+        let instance_buffer = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "mesh.batch.instances",
+            instance_data,
+            wgpu::BufferUsages::VERTEX,
+        );
+        let group_handles: rustc_hash::FxHashSet<_> = parts[start..end]
+            .iter()
+            .filter_map(|part| part.entity_handle)
+            .collect();
+        for source_chunk in &geometry {
+            let mut chunk = source_chunk.clone();
+            chunk.instance_buffer = instance_buffer.clone();
+            chunk.instance_count = instance_data.len() as u32;
+            chunk.handles = group_handles.clone();
+            let index_count = chunk.index_count + chunk.transp_index_count;
+            chunk.highlight_ranges = highlights
+                .iter()
+                .filter(|range| {
+                    (start..end).contains(&(range.instance_start as usize)) && index_count > 0
+                })
+                .map(|range| MeshBatchRange {
+                    instance_start: range.instance_start - start as u32,
+                    index_count,
+                    ..*range
+                })
+                .collect();
+            chunks.push(chunk);
+        }
     }
     let uploaded_at = profile_enabled.then(iced::time::Instant::now);
+    let chunk_count = chunks.len();
     Some((
-        chunk,
+        chunks,
         triangles,
         InstancedBuildProfile {
             vertices: started
@@ -1379,10 +1522,14 @@ fn build_instanced_chunk(
                 .zip(uploaded_at)
                 .map(|(start, end)| end.duration_since(start))
                 .unwrap_or_default(),
-            vertex_count: verts.len(),
+            vertex_count: if split_geometry && (first.include_faces || needs_wire_vertices) {
+                first.indices.len()
+            } else {
+                verts.len()
+            },
             edge_count: edge_verts.len(),
             index_count: first.indices.len(),
-            chunk_count: 1,
+            chunk_count,
         },
     ))
 }
@@ -1802,34 +1949,6 @@ pub fn build_mesh_batch_filtered(
     for part in ordered {
         let eligible = part.set.instance_transform.is_some()
             && part.set.instance_source.is_some()
-            && part
-                .mesh
-                .verts
-                .len()
-                .saturating_mul(std::mem::size_of::<MeshVertex>())
-                <= budget
-            && part.indices.len().saturating_mul(std::mem::size_of::<u32>())
-                <= budget
-            && part
-                .set
-                .instance_source
-                .as_ref()
-                .is_some_and(|source| {
-                    let feature_edges_fit = source
-                        .edge_verts
-                        .len()
-                        .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
-                        <= budget;
-                    let triangle_edges_fit = !part.include_edges
-                        || !source.edge_verts.is_empty()
-                        || part
-                            .indices
-                            .len()
-                            .saturating_mul(2)
-                            .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
-                            <= budget;
-                    feature_edges_fit && triangle_edges_fit
-                })
             && part
                 .indices
                 .iter()
@@ -2264,7 +2383,7 @@ pub fn build_mesh_batch_filtered(
     let mut instanced_profile = InstancedBuildProfile::default();
     let mut instanced_buffers = InstancedBufferCache::default();
     for parts in instance_groups.values() {
-        if let Some((chunk, triangles, profile)) = build_instanced_chunk(
+        if let Some((instanced, triangles, profile)) = build_instanced_chunks(
             device,
             queue,
             &stubs,
@@ -2273,7 +2392,7 @@ pub fn build_mesh_batch_filtered(
             perf_started.is_some(),
         ) {
             total_tris += triangles;
-            chunks.push(chunk);
+            chunks.extend(instanced);
             instanced_profile.vertices += profile.vertices;
             instanced_profile.edges += profile.edges;
             instanced_profile.instances += profile.instances;

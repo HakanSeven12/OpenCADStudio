@@ -360,22 +360,7 @@ impl Scene {
         self.selected.len()
     }
 
-    /// Returns the sorted set of entity-type names present in the active
-    /// layout. Used to populate the Quick Select "Object type" dropdown
-    /// with only the types that actually exist in the drawing.
-    /// Distinct entity type names in the current layout, for the
-    /// selection-filter menu.
-    ///
-    /// The status bar rebuilds on every frame, so this used to run once per
-    /// mouse move over the canvas: a full clone of the layout's handle list
-    /// (1.16 M handles, ~9 MB, on the reproducer), then a lookup, a `String`
-    /// allocation and a `BTreeSet` insert for each one — about 107 ms of a
-    /// 110 ms frame, to produce roughly twenty names.
-    ///
-    /// The answer only changes when entities are added or removed, so it is
-    /// cached against `geometry_epoch` and the layout block. The scan itself
-    /// now borrows the handle list instead of cloning it and collects
-    /// `&str`, allocating only for the names it actually returns.
+    /// Sorted entity types in the current layout, cached until geometry or layout changes.
     pub fn entity_type_names_in_layout(&self) -> std::sync::Arc<Vec<String>> {
         use crate::entities::traits::entity_type_name;
         let block = self.current_layout_block_handle();
@@ -968,6 +953,46 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layout_type_cache_reuses_and_invalidates_on_edits_undo_and_layout() {
+        use acadrust::entities::{Circle, EntityType, Line};
+        use acadrust::types::Vector3;
+        use std::sync::Arc;
+
+        let mut scene = Scene::new();
+        let empty = scene.entity_type_names_in_layout();
+        assert!(empty.is_empty());
+        assert!(Arc::ptr_eq(&empty, &scene.entity_type_names_in_layout()));
+        scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+        )));
+        let lines = scene.entity_type_names_in_layout();
+        assert_eq!(lines.as_slice(), ["Line"]);
+        assert!(Arc::ptr_eq(&lines, &scene.entity_type_names_in_layout()));
+        let circle = scene.add_entity(EntityType::Circle(Circle::new()));
+        let before = scene.document.get_entity_arc(circle);
+        assert_eq!(
+            scene.entity_type_names_in_layout().as_slice(),
+            ["Circle", "Line"]
+        );
+        scene.erase_entities(&[circle]);
+        assert_eq!(scene.entity_type_names_in_layout().as_slice(), ["Line"]);
+        let changes = scene.apply_entity_delta(&[(circle, before, None)], true);
+        scene.bump_entities(&changes);
+        assert_eq!(
+            scene.entity_type_names_in_layout().as_slice(),
+            ["Circle", "Line"]
+        );
+        scene.set_current_layout("Layout1".to_owned());
+        assert!(scene.entity_type_names_in_layout().is_empty());
+        scene.set_current_layout("Model".to_owned());
+        assert_eq!(
+            scene.entity_type_names_in_layout().as_slice(),
+            ["Circle", "Line"]
+        );
+    }
 
     #[test]
     fn selection_fingerprint_tracks_final_set_only() {

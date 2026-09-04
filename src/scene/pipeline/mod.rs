@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod gpu_tests;
 mod device_capabilities;
 pub mod face3d_gpu;
 pub mod gpu_budget;
@@ -155,24 +157,21 @@ pub struct Pipeline {
     /// GPU glyph atlas (texture + sampler + bind group). Rebuilt when the shared
     /// CPU atlas grows (new glyphs baked). `None` until the first text upload.
     text_atlas_gpu: Option<text_gpu::TextAtlasGpu>,
-    /// All glyph-quad vertices for the frame, one buffer, `None` when empty.
-    text_vbuf: Option<wgpu::Buffer>,
-    text_vcount: u32,
+    /// Glyph-quad vertices for the frame, split at whole glyph boundaries.
+    text_gpu: Vec<text_gpu::TextGpu>,
     block_text_gpu: Vec<text_gpu::BlockTextGpu>,
     block_text_highlight_gpu: Vec<text_gpu::BlockTextGpu>,
     /// Tinted glyph quads of just the selected / hovered text, drawn over the
     /// base text pass so a selection / rollover recolours the glyphs (the text
     /// analogue of the selected-wire xray overlay). Rebuilt on selection change.
-    text_highlight_vbuf: Option<wgpu::Buffer>,
-    text_highlight_vcount: u32,
+    text_highlight_gpu: Vec<text_gpu::TextGpu>,
     /// Live grip-drag / command-preview SDF glyph quads. The base text buffer
     /// only re-uploads on a geometry-epoch change, but a grip drag hides the
     /// dragged entity from the base wire set and shows it as a per-frame
     /// overlay — so its glyphs ride here, re-uploaded every frame like
     /// `gpu_preview_wires`, or the dragged text vanishes until release re-tesses
     /// it back into the base set (issue #316).
-    text_preview_vbuf: Option<wgpu::Buffer>,
-    text_preview_vcount: u32,
+    text_preview_gpu: Vec<text_gpu::TextGpu>,
     /// Per-frame silhouette line lists from the kernel mesh and current view.
     silhouette_chunks: Vec<SilhouetteChunk>,
     silhouette_source_key: (usize, usize, u64),
@@ -2222,14 +2221,11 @@ impl Pipeline {
             block_text_highlight_pipeline,
             text_atlas_bgl,
             text_atlas_gpu: None,
-            text_vbuf: None,
-            text_vcount: 0,
+            text_gpu: Vec::new(),
             block_text_gpu: Vec::new(),
             block_text_highlight_gpu: Vec::new(),
-            text_highlight_vbuf: None,
-            text_highlight_vcount: 0,
-            text_preview_vbuf: None,
-            text_preview_vcount: 0,
+            text_highlight_gpu: Vec::new(),
+            text_preview_gpu: Vec::new(),
             silhouette_chunks: Vec::new(),
             silhouette_source_key: (usize::MAX, usize::MAX, u64::MAX),
             silhouette_source_groups: Vec::new(),
@@ -2574,8 +2570,7 @@ impl Pipeline {
     ) {
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
         if selected.is_empty() && hovered.is_empty() && annotation_context_wires.is_empty() {
-            self.text_highlight_vbuf = None;
-            self.text_highlight_vcount = 0;
+            self.text_highlight_gpu.clear();
             self.block_text_highlight_gpu.clear();
             return;
         }
@@ -2644,8 +2639,7 @@ impl Pipeline {
                 }
             }
         }
-        self.text_highlight_vcount = out.len() as u32;
-        self.text_highlight_vbuf = text_gpu::upload_vertices(device, queue, &out);
+        self.text_highlight_gpu = text_gpu::upload_vertices(device, queue, &out);
         let mut block_gpu = if let Some(tint) = selected_tint {
             text_gpu::upload_block_vertex_refs(
                 device,
@@ -2706,8 +2700,7 @@ impl Pipeline {
         verts: &[text_gpu::TextVertex],
     ) {
         if verts.is_empty() {
-            self.text_preview_vbuf = None;
-            self.text_preview_vcount = 0;
+            self.text_preview_gpu.clear();
             return;
         }
         // Ensure the glyph atlas exists / is current even when the base text
@@ -2723,8 +2716,7 @@ impl Pipeline {
                 atlas.clear_dirty();
             }
         }
-        self.text_preview_vbuf = text_gpu::upload_vertices(device, queue, verts);
-        self.text_preview_vcount = verts.len() as u32;
+        self.text_preview_gpu = text_gpu::upload_vertices(device, queue, verts);
     }
 
     // The math lives outside the GPU method so it can be unit-tested; see the
@@ -3426,8 +3418,7 @@ impl Pipeline {
                 atlas.clear_dirty();
             }
         }
-        self.text_vbuf = text_gpu::upload_vertices(device, queue, verts);
-        self.text_vcount = verts.len() as u32;
+        self.text_gpu = text_gpu::upload_vertices(device, queue, verts);
         self.block_text_gpu = text_gpu::upload_block_vertices(device, queue, wires, depth_map);
         if let Some(started) = perf_started {
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -4294,10 +4285,10 @@ impl Pipeline {
         // Selection / rollover text is drawn later with the selected-wire xray
         // overlay, after wipeouts, so normal text cannot hide its own tint.
         if let Some(atlas) = &self.text_atlas_gpu {
-            let have_base = self.text_vbuf.is_some() && self.text_vcount > 0;
+            let have_base = !self.text_gpu.is_empty();
             let have_blocks = !self.block_text_gpu.is_empty();
             let have_preview =
-                self.text_preview_vbuf.is_some() && self.text_preview_vcount > 0;
+                !self.text_preview_gpu.is_empty();
             if have_base || have_blocks || have_preview {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("text.render_pass"),
@@ -4327,11 +4318,9 @@ impl Pipeline {
                 pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 pass.set_stencil_reference(stencil_ref);
                 pass.set_bind_group(1, &atlas.bind_group, &[]);
-                if let Some(vbuf) = &self.text_vbuf {
-                    if self.text_vcount > 0 {
-                        pass.set_vertex_buffer(0, vbuf.slice(..));
-                        pass.draw(0..self.text_vcount, 0..1);
-                    }
+                for text in &self.text_gpu {
+                    pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
+                    pass.draw(0..text.vertex_count, 0..1);
                 }
                 if have_blocks {
                     pass.set_pipeline(&self.block_text_pipeline);
@@ -4342,11 +4331,11 @@ impl Pipeline {
                     }
                 }
                 // Grip-drag / command-preview glyphs, drawn over the base text.
-                if let Some(pbuf) = &self.text_preview_vbuf {
-                    if self.text_preview_vcount > 0 {
-                        pass.set_pipeline(&self.text_pipeline);
-                        pass.set_vertex_buffer(0, pbuf.slice(..));
-                        pass.draw(0..self.text_preview_vcount, 0..1);
+                if have_preview {
+                    pass.set_pipeline(&self.text_pipeline);
+                    for text in &self.text_preview_gpu {
+                        pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
+                        pass.draw(0..text.vertex_count, 0..1);
                     }
                 }
             }
@@ -4396,7 +4385,7 @@ impl Pipeline {
         // Redraws selected wires and text with depth_compare=Always so both
         // appear on top of all other geometry at full brightness.
         let have_text_highlight =
-            (self.text_highlight_vbuf.is_some() && self.text_highlight_vcount > 0)
+            (!self.text_highlight_gpu.is_empty())
                 || !self.block_text_highlight_gpu.is_empty();
         if !self.gpu_selected_wires.is_empty()
             || !self.gpu_selected_block_wires.is_empty()
@@ -4463,14 +4452,14 @@ impl Pipeline {
                     pass.draw(0..wire.vertex_count, 0..wire.instance_count);
                 }
             }
-            if let (Some(atlas), Some(hlbuf)) =
-                (&self.text_atlas_gpu, &self.text_highlight_vbuf)
-            {
-                if self.text_highlight_vcount > 0 {
+            if let Some(atlas) = &self.text_atlas_gpu {
+                if !self.text_highlight_gpu.is_empty() {
                     pass.set_pipeline(&self.text_highlight_pipeline);
                     pass.set_bind_group(1, &atlas.bind_group, &[]);
-                    pass.set_vertex_buffer(0, hlbuf.slice(..));
-                    pass.draw(0..self.text_highlight_vcount, 0..1);
+                    for text in &self.text_highlight_gpu {
+                        pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
+                        pass.draw(0..text.vertex_count, 0..1);
+                    }
                 }
             }
             if let Some(atlas) = &self.text_atlas_gpu {

@@ -443,6 +443,14 @@ pub struct PreparedOpenGeometry {
     /// exactly the old behaviour.
     pub tess_memo: HashMap<Handle, Arc<Vec<WireModel>>>,
     pub tess_guard: u64,
+    /// Block definitions the loader thread built while tessellating, keyed as
+    /// `block_defn_cache` keys them but without an epoch — the receiving scene
+    /// stamps its own.
+    ///
+    /// Dropped with the throwaway scene before, which is why the first edit
+    /// spent 1147 ms rebuilding definitions the loader had just built from the
+    /// same, unmodified document.
+    pub block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)>,
 }
 
 impl std::fmt::Debug for PreparedOpenGeometry {
@@ -451,6 +459,7 @@ impl std::fmt::Debug for PreparedOpenGeometry {
             .field("wires", &self.wires.len())
             .field("interaction_index", &self.interaction_index.is_some())
             .field("tess_memo", &self.tess_memo.len())
+            .field("block_defns", &self.block_defns.len())
             .finish()
     }
 }
@@ -1031,6 +1040,11 @@ pub fn prepare_open_geometry(
     // Taken, not cloned: the scene is discarded on the next line.
     let tess_memo = std::mem::take(&mut *scene.resident_tess_memo.borrow_mut());
     let tess_guard = scene.resident_tess_guard.get();
+    let block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)> =
+        std::mem::take(&mut *scene.block_defn_cache.borrow_mut())
+            .into_iter()
+            .map(|(key, (_epoch, cache))| (key, cache))
+            .collect();
     let doc = std::mem::replace(&mut scene.document, CadDocument::new());
     (
         doc,
@@ -1039,6 +1053,7 @@ pub fn prepare_open_geometry(
             interaction_index,
             tess_memo,
             tess_guard,
+            block_defns,
         },
     )
 }
@@ -2228,6 +2243,16 @@ impl Scene {
         if !prepared.tess_memo.is_empty() {
             *self.resident_tess_memo.borrow_mut() = prepared.tess_memo;
             self.resident_tess_guard.set(prepared.tess_guard);
+        }
+        // Same for the block definitions, stamped with this scene's block
+        // epoch: the document has not been touched between the loader
+        // finishing and this call, so they describe it exactly.
+        if !prepared.block_defns.is_empty() {
+            let epoch = self.block_epoch;
+            let mut cache = self.block_defn_cache.borrow_mut();
+            for (key, defns) in prepared.block_defns {
+                cache.insert(key, (epoch, defns));
+            }
         }
         if let Some(index) = prepared.interaction_index {
             self.cache_interaction_index(self.geometry_epoch, prepared.wires, index);

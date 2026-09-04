@@ -830,6 +830,8 @@ impl OpenCADStudio {
                     | "BLIPMODE"
                     | "SPLFRAME"
                     | "DELOBJ"
+                    | "SOLIDHIST"
+                    | "SHOWHIST"
                     | "PLINEGEN"
                     | "PSLTSCALE"
                     | "DISPSILH"
@@ -926,6 +928,37 @@ impl OpenCADStudio {
                         "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER | CLAYER CELTYPE TEXTSTYLE (read-only)",
                     );
                 } else {
+                    if matches!(name.as_str(), "SHOWHIST" | "SOLIDHIST") {
+                        let current = if name == "SHOWHIST" {
+                            self.tabs[i].scene.document.header.show_solid_history.clamp(0, 2)
+                        } else {
+                            i16::from(self.tabs[i].scene.document.header.record_solid_history)
+                        };
+                        if let Some(value) = &value {
+                            let maximum = if name == "SHOWHIST" { 2 } else { 1 };
+                            match value.parse::<i16>().ok().filter(|value| (0..=maximum).contains(value)) {
+                                Some(mode) => {
+                                    if current != mode {
+                                        self.push_undo_snapshot(i, &name);
+                                        if name == "SHOWHIST" {
+                                            self.tabs[i].scene.document.header.show_solid_history = mode;
+                                            self.tabs[i].scene.bump_geometry();
+                                        } else {
+                                            self.tabs[i].scene.document.header.record_solid_history = mode != 0;
+                                        }
+                                        self.tabs[i].dirty = true;
+                                        self.refresh_properties();
+                                    }
+                                    self.command_line.push_output(&format!("{name} = {mode}"));
+                                }
+                                None => self.command_line.push_error(&format!("{name}: expected an integer from 0 to {maximum}.")),
+                            }
+                        } else {
+                            self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
                     let frame_kind = crate::scene::frame::kind_for_name(&name);
                     if name == "FRAME" || frame_kind.is_some() {
                         let current = frame_kind.map_or_else(

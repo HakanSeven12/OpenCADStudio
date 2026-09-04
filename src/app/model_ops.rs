@@ -35,8 +35,10 @@ impl super::OpenCADStudio {
         let Some(handle) = self.commit_entity_handle(entity) else {
             return Handle::NULL;
         };
+        let require_complete = matches!(history, SolidHistoryOperation::Loft(_));
         self.tabs[i].scene.create_solid_history(handle, history);
-        if !self.tabs[i].scene.register_solid_model(handle, solid) {
+        if !self.tabs[i].scene.register_solid_model(handle, solid)
+            || (require_complete && self.tabs[i].scene.meshes.get(&handle).is_none_or(|mesh| !mesh.complete)) {
             // A command result is not successful until it has renderable
             // geometry. Roll the new entity back so DELOBJ cannot consume a
             // visible source in exchange for an invisible result.
@@ -69,7 +71,10 @@ impl super::OpenCADStudio {
         let Some(handle) = self.commit_entity_handle(entity) else {
             return Handle::NULL;
         };
-        if !self.tabs[i].scene.register_solid_model(handle, surface) {
+        let require_complete = self.tabs[i].scene.document.get_entity(handle).is_some_and(|entity|
+            matches!(entity, EntityType::Surface(value) if value.kind == acadrust::entities::SurfaceKind::Lofted));
+        if !self.tabs[i].scene.register_solid_model(handle, surface)
+            || (require_complete && self.tabs[i].scene.meshes.get(&handle).is_none_or(|mesh| !mesh.complete)) {
             self.tabs[i].scene.rollback_new_entities(&[handle]);
             return Handle::NULL;
         }
@@ -114,6 +119,12 @@ impl super::OpenCADStudio {
         entity.history_handle = None;
         entity.set_sat_document(&document);
 
+        let Some(display) = self.tabs[i].scene.prepare_solid_model_display(handle, &result)
+            .filter(|display| display.0.complete)
+        else {
+            self.command_line.push_error(crate::t!("The result could not be displayed completely. The original solid was retained.").as_ref());
+            return false;
+        };
         self.push_undo_snapshot(i, label);
         self.tabs[i].scene.delete_solid_history(handle);
         if !self.tabs[i]
@@ -126,7 +137,7 @@ impl super::OpenCADStudio {
         }
         let history = solid_history::brep_op(&result);
         self.tabs[i].scene.create_solid_history(handle, history);
-        self.tabs[i].scene.register_solid_model(handle, result);
+        self.tabs[i].scene.register_prepared_solid_model(handle, result, display);
         self.tabs[i].scene.deselect_all();
         self.tabs[i].scene.select_entity(handle, false);
         self.tabs[i].dirty = true;
@@ -180,59 +191,6 @@ impl super::OpenCADStudio {
         if self.replace_solid_body(handle, result, label) {
             self.command_line
                 .push_output(crate::tf!("{label}: solid updated.").as_ref());
-        }
-        Task::none()
-    }
-
-    pub(super) fn solid_face_presspull(
-        &mut self,
-        handle: Handle,
-        pick: glam::DVec3,
-        distance: f64,
-        drag: Option<glam::DVec3>,
-    ) -> Task<Message> {
-        let i = self.active_tab;
-        if self.reject_locked_edit(i, handle) {
-            return Task::none();
-        }
-        self.tabs[i].scene.restore_solid_models(&[handle]);
-        let Some(body) = self.tabs[i].scene.solid_models.get(&handle).cloned() else {
-            self.command_line
-                .push_error(crate::t!("The solid geometry could not be restored.").as_ref());
-            return Task::none();
-        };
-        let Some(face) = solid_model::nearest_planar_face(&body, pick.to_array()) else {
-            self.command_line
-                .push_error(crate::t!("Select a planar solid face.").as_ref());
-            return Task::none();
-        };
-        let distance = match drag {
-            Some(point) => {
-                let Some(normal) = solid_model::planar_face_normal(&body, face) else {
-                    self.command_line
-                        .push_error(crate::t!("Select a planar solid face.").as_ref());
-                    return Task::none();
-                };
-                (point - pick).dot(glam::DVec3::from_array(normal))
-            }
-            None => distance,
-        };
-        if !distance.is_finite() || distance.abs() <= 1e-6 {
-            self.command_line.push_error(
-                crate::t!("PRESSPULL: drag along the selected face normal.").as_ref(),
-            );
-            return Task::none();
-        }
-        let Some(result) = cadkernel::brep::presspull(&body, face, distance) else {
-            self.command_line.push_error(
-                crate::t!("PRESSPULL: the face move would collapse or invalidate the solid.")
-                    .as_ref(),
-            );
-            return Task::none();
-        };
-        if self.replace_solid_body(handle, result, "PRESSPULL") {
-            self.command_line
-                .push_output(crate::t!("PRESSPULL: solid updated.").as_ref());
         }
         Task::none()
     }

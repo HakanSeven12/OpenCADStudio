@@ -448,12 +448,7 @@ impl OpenCADStudio {
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
                     if specialized_primitive {
-                        sections.retain(|section| {
-                            !section.props.iter().any(|property| {
-                                property.field.starts_with("acis_")
-                                    || property.field.starts_with("s3d_")
-                            })
-                        });
+                        retain_specialized_primitive_sections(&mut sections);
                     }
                     sections.extend(
                         crate::scene::model::solid_history::primitive_properties(

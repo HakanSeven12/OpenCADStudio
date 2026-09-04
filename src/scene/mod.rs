@@ -54,9 +54,83 @@ pub(crate) use boundary::{
 // other tessellation code); re-exported here so this root and sibling topic
 // modules (each does `use super::*`) keep referencing them unqualified.
 pub(crate) use convert::tess::{
-    entity_aabb, entity_world_aabb_f64, is_unindexable_entity, tessellate_entity,
+    entity_aabb, entity_world_aabb_f64, is_unindexable_entity,
     tessellate_entity_dim_text,
 };
+
+/// Keep construction-history curves in the same per-entity tessellation memo
+/// as their parent, so navigation never rebuilds them on every frame.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn tessellate_entity(
+    document: &CadDocument,
+    selected: &HashSet<Handle>,
+    active_viewport: Option<Handle>,
+    bg_color: [f32; 4],
+    anno_scale: f32,
+    annotation_scale_handle: Option<Handle>,
+    entity: &EntityType,
+    block_cache: Option<&cache::block_cache::BlockCache>,
+    view_aabb: Option<[f32; 4]>,
+    world_per_pixel: Option<f32>,
+    paper_space: bool,
+) -> Vec<WireModel> {
+    let mut wires = convert::tess::tessellate_entity(
+        document, selected, active_viewport, bg_color, anno_scale,
+        annotation_scale_handle, entity, block_cache, view_aabb,
+        world_per_pixel, paper_space,
+    );
+    if matches!(entity, EntityType::Solid3D(_) | EntityType::Surface(_)) {
+        let handle = entity.common().handle;
+        for source in model::solid_history::loft_visible_history_entities(document, handle) {
+            // Call the raw converter, not this wrapper: sources must not expand
+            // the parent's history again through their shared selection handle.
+            let mut construction = if let EntityType::Region(region) = &source {
+                // Regions normally render through the mesh layer, so the raw
+                // wire converter emits nothing. Decode every exact boundary,
+                // including holes, then sample only for this cached display.
+                let mut boundaries = Vec::new();
+                if let Ok(cadkernel::brep::LoftSection::Profile { plane, wires, .. }) =
+                    cadkernel::acis::loft_section_geometry(&[
+                        acadrust::entities::EmbeddedEntity::Region(region.clone()),
+                    ])
+                {
+                    let (color, _, _, line_weight_px, _) =
+                        view::render::render_style_for_viewport(document, &source, active_viewport);
+                    for boundary in wires {
+                        for curve in boundary {
+                            let points = curve.tessellate(64.0 / std::f64::consts::TAU)
+                                .into_iter().map(|point| plane.point_at(point));
+                            let (points, points_low) = convert::tessellate::points_to_ds(points);
+                            let mut wire = WireModel::solid(
+                                handle.value().to_string(), points, color, selected.contains(&handle),
+                            );
+                            wire.points_low = points_low;
+                            wire.line_weight_px = line_weight_px;
+                            boundaries.push(wire);
+                        }
+                    }
+                }
+                boundaries
+            } else {
+                convert::tess::tessellate_entity(
+                    document, selected, active_viewport, bg_color, anno_scale,
+                    annotation_scale_handle, &source, block_cache, view_aabb,
+                    world_per_pixel, paper_space,
+                )
+            };
+            for wire in &mut construction {
+                wire.name = handle.value().to_string();
+                if !wire.selected {
+                    wire.color = [1.0, 0.25, 0.25, wire.color[3]];
+                }
+                wire.fill_tris.clear();
+                wire.fill_tris_low.clear();
+            }
+            wires.extend(construction);
+        }
+    }
+    wires
+}
 
 /// Result of `Scene::entity_index()`. The wire path queries `tree` for
 /// view-rect candidates and also always emits `unbounded_handles`
@@ -2731,12 +2805,12 @@ impl Scene {
         })
     }
 
-    /// Cache and display a Model-tab kernel solid.
-    pub fn register_solid_model(
-        &mut self,
+    /// Prepare display geometry without changing the entity or resident caches.
+    pub(crate) fn prepare_solid_model_display(
+        &self,
         handle: Handle,
-        solid: cadkernel::brep::Body,
-    ) -> bool {
+        solid: &cadkernel::brep::Body,
+    ) -> Option<(MeshLodSet, Vec<acadrust::entities::Wire>, [f64; 3])> {
         let color = self
             .document
             .get_entity(handle)
@@ -2746,67 +2820,105 @@ impl Scene {
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_resolution);
         let isolines = self.document.header.isolines.max(0) as usize;
-        let displayed = if let Some((mut set, wires, center)) =
+        let (mut set, wires, center) =
             crate::scene::model::solid_model::display_from_solid(
-                &solid,
+                solid,
                 color,
                 facet_resolution,
                 chordal_deflection,
                 isolines,
+            )?;
+        let name = handle.value().to_string();
+        for mesh in &mut set.lods {
+            mesh.name = name.clone();
+        }
+        if let Some(entity) = self.document.get_entity(handle) {
+            crate::scene::model::material_model::resolve_material_with_base(
+                &self.document,
+                entity,
+                color,
+                None,
+                self.material_base_dir.as_deref(),
             )
-        {
-            if let Some(entity) = self.document.get_entity_mut(handle) {
-                let reference = acadrust::types::Vector3::new(center[0], center[1], center[2]);
-                match entity {
-                    EntityType::Solid3D(entity) => {
-                        entity.point_of_reference = reference;
-                        entity.wires = wires;
-                        entity.silhouettes.clear();
-                    }
-                    EntityType::Surface(entity) => {
-                        entity.point_of_reference = reference;
-                        entity.wires = wires;
-                        entity.silhouettes.clear();
-                    }
-                    _ => {}
-                }
-            }
-            let name = handle.value().to_string();
+            .apply_to_with_face_overrides(
+                &mut set,
+                &self.document,
+                self.material_base_dir.as_deref(),
+            );
+            crate::scene::model::visual_style_model::apply_mesh_visual_style(
+                &mut set,
+                &self.document,
+                entity,
+            );
+        }
+        Some((set, wires, center))
+    }
+
+    /// Commit a prepared display without tessellating the body a second time.
+    pub(crate) fn register_prepared_solid_model(
+        &mut self,
+        handle: Handle,
+        solid: cadkernel::brep::Body,
+        display: (MeshLodSet, Vec<acadrust::entities::Wire>, [f64; 3]),
+    ) -> bool {
+        let (mut set, wires, center) = display;
+        // New command results can be prepared before their handle exists.
+        // Apply the committed entity's actual style without retessellating.
+        if let Some(entity) = self.document.get_entity(handle) {
+            let color = self.render_style(entity).0;
             for mesh in &mut set.lods {
-                mesh.name = name.clone();
+                mesh.name = handle.value().to_string();
+                mesh.color = color;
             }
-            if let Some(entity) = self.document.get_entity(handle) {
-                crate::scene::model::material_model::resolve_material_with_base(
-                    &self.document,
-                    entity,
-                    color,
-                    None,
-                    self.material_base_dir.as_deref(),
-                )
-                .apply_to_with_face_overrides(
-                    &mut set,
-                    &self.document,
-                    self.material_base_dir.as_deref(),
-                );
-                crate::scene::model::visual_style_model::apply_mesh_visual_style(
-                    &mut set,
-                    &self.document,
-                    entity,
-                );
+            crate::scene::model::material_model::resolve_material_with_base(
+                &self.document, entity, color, None, self.material_base_dir.as_deref(),
+            ).apply_to_with_face_overrides(
+                &mut set, &self.document, self.material_base_dir.as_deref(),
+            );
+            crate::scene::model::visual_style_model::apply_mesh_visual_style(
+                &mut set, &self.document, entity,
+            );
+        }
+        if let Some(entity) = self.document.get_entity_mut(handle) {
+            let reference = acadrust::types::Vector3::new(center[0], center[1], center[2]);
+            match entity {
+                EntityType::Solid3D(entity) => {
+                    entity.point_of_reference = reference;
+                    entity.wires = wires;
+                    entity.silhouettes.clear();
+                }
+                EntityType::Surface(entity) => {
+                    entity.point_of_reference = reference;
+                    entity.wires = wires;
+                    entity.silhouettes.clear();
+                }
+                _ => {}
             }
-            self.meshes.insert(handle, set);
-            true
-        } else {
-            self.meshes.remove(&handle);
-            false
-        };
+        }
+        self.meshes.insert(handle, set);
         self.solid_models.insert(handle, solid);
         self.sync_solid_reference_point(handle);
-        // Only this solid's mesh changed — report just its handle so the mesh /
-        // wire caches patch it in rather than rebuilding the whole drawing (and
-        // so a bulk register loop stays O(n), not O(n²)).
         self.bump_entities(&[(handle, ChangeKind::Modified)]);
-        displayed
+        true
+    }
+
+    /// Cache and display a Model-tab kernel solid. A failed preparation leaves
+    /// the previous entity, body and mesh untouched.
+    pub fn register_solid_model(
+        &mut self,
+        handle: Handle,
+        solid: cadkernel::brep::Body,
+    ) -> bool {
+        let Some(display) = self.prepare_solid_model_display(handle, &solid) else {
+            return false;
+        };
+        if !display.0.complete && matches!(
+            self.document.solid_history_operation(handle),
+            Some(acadrust::objects::SolidHistoryOperation::Loft(_))
+        ) {
+            return false;
+        }
+        self.register_prepared_solid_model(handle, solid, display)
     }
 
     /// `BACKGROUND` change picks up the new `adapt_to_bg` result without

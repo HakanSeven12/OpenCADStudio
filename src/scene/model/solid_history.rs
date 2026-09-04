@@ -1,7 +1,7 @@
 use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
     DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
-    SolidHistoryCylinder, SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation,
+    SolidHistoryCylinder, SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
     SolidHistoryPyramid, SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep,
     SolidHistoryTorus,
 };
@@ -67,6 +67,9 @@ pub const PROP_TWIST_ALONG_PATH: &str = "solid_history_twist_along_path";
 pub const PROP_SCALE_ALONG_PATH: &str = "solid_history_scale_along_path";
 pub const PROP_SWEEP_LENGTH: &str = "solid_history_sweep_length";
 pub const PROP_EXTRUSION_HEIGHT: &str = "solid_history_extrusion_height";
+pub const PROP_EXTRUSION_DIRECTION_X: &str = "solid_history_extrusion_direction_x";
+pub const PROP_EXTRUSION_DIRECTION_Y: &str = "solid_history_extrusion_direction_y";
+pub const PROP_EXTRUSION_DIRECTION_Z: &str = "solid_history_extrusion_direction_z";
 pub const PROP_TAPER_ANGLE: &str = "solid_history_taper_angle";
 pub const PROP_REVOLVE_ANGLE: &str = "solid_history_revolve_angle";
 pub const PROP_AXIS_POSITION_X: &str = "solid_history_axis_position_x";
@@ -76,6 +79,15 @@ pub const PROP_AXIS_DIRECTION_X: &str = "solid_history_axis_direction_x";
 pub const PROP_AXIS_DIRECTION_Y: &str = "solid_history_axis_direction_y";
 pub const PROP_AXIS_DIRECTION_Z: &str = "solid_history_axis_direction_z";
 pub const PROP_PYRAMID_TYPE: &str = "solid_history_pyramid_type";
+pub const PROP_LOFT_TYPE: &str = "solid_history_loft_type";
+pub const PROP_LOFT_SECTION_COUNT: &str = "solid_history_loft_section_count";
+pub const PROP_LOFT_NORMALS: &str = "solid_history_loft_normals";
+pub const PROP_LOFT_START_DRAFT_ANGLE: &str = "solid_history_loft_start_draft_angle";
+pub const PROP_LOFT_END_DRAFT_ANGLE: &str = "solid_history_loft_end_draft_angle";
+pub const PROP_LOFT_START_MAGNITUDE: &str = "solid_history_loft_start_magnitude";
+pub const PROP_LOFT_END_MAGNITUDE: &str = "solid_history_loft_end_magnitude";
+pub const PROP_LOFT_CLOSED: &str = "solid_history_loft_closed";
+pub const PROP_LOFT_PERIODIC: &str = "solid_history_loft_periodic";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
 
@@ -195,6 +207,7 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Torus(_)
                 | SolidHistoryOperation::Pyramid(_)
                 | SolidHistoryOperation::Sweep(_)
+                | SolidHistoryOperation::Loft(_)
                 | SolidHistoryOperation::Extrusion(_)
                 | SolidHistoryOperation::Revolve(_)
         )
@@ -212,7 +225,9 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         }
         SolidHistoryOperation::Cone(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
-        SolidHistoryOperation::Sweep(value) | SolidHistoryOperation::Extrusion(value) => world_point(
+        SolidHistoryOperation::Sweep(value) => cadkernel::acis::sweep_history_reference_point(value)
+            .ok().map(glam::DVec3::from_array),
+        SolidHistoryOperation::Extrusion(value) => world_point(
             value.base.transform,
             [
                 value.reference_point.x,
@@ -345,15 +360,19 @@ fn extrusion_properties(
     handle: acadrust::Handle,
     value: &SolidHistorySweep,
 ) -> Vec<PropSection> {
-    let position = world_point(
-        value.base.transform,
-        [
-            value.reference_point.x,
-            value.reference_point.y,
-            value.reference_point.z,
-        ],
-    )
-    .unwrap_or(glam::DVec3::ZERO);
+    let direction = matrix(value.base.transform).map(|transform| {
+        transform.transform_vector3(glam::DVec3::new(
+            value.direction.x, value.direction.y, value.direction.z,
+        ))
+    }).filter(|direction| direction.is_finite());
+    let direction_property = |label: &str, field: &'static str, axis: usize| Property {
+        label: label.to_string(),
+        field,
+        value: PropValue::ReadOnly(direction.map_or_else(
+            || t!("Unavailable").into_owned(),
+            |direction| crate::entities::common::format_length(direction[axis]),
+        )),
+    };
     let (record_history, object_show_history, show_history_mode) =
         history_flags(document, handle).unwrap_or((false, false, 1));
     let (show_history, show_history_editable) =
@@ -379,21 +398,6 @@ fn extrusion_properties(
                     field: "solid_history_type",
                     value: PropValue::ReadOnly(t!("Extrusion").into_owned()),
                 },
-                crate::entities::common::edit_prop(
-                    t!("Position X").as_ref(),
-                    PROP_POSITION_X,
-                    position.x,
-                ),
-                crate::entities::common::edit_prop(
-                    t!("Position Y").as_ref(),
-                    PROP_POSITION_Y,
-                    position.y,
-                ),
-                crate::entities::common::edit_prop(
-                    t!("Position Z").as_ref(),
-                    PROP_POSITION_Z,
-                    position.z,
-                ),
                 Property {
                     label: t!("Height").into_owned(),
                     field: PROP_EXTRUSION_HEIGHT,
@@ -404,6 +408,9 @@ fn extrusion_properties(
                     field: PROP_TAPER_ANGLE,
                     value: taper,
                 },
+                direction_property(t!("Direction X").as_ref(), PROP_EXTRUSION_DIRECTION_X, 0),
+                direction_property(t!("Direction Y").as_ref(), PROP_EXTRUSION_DIRECTION_Y, 1),
+                direction_property(t!("Direction Z").as_ref(), PROP_EXTRUSION_DIRECTION_Z, 2),
             ],
         },
         PropSection {
@@ -414,7 +421,7 @@ fn extrusion_properties(
                     field: PROP_HISTORY,
                     value: PropValue::Choice {
                         selected: if record_history { "Record" } else { "None" }.to_string(),
-                        options: vec!["None".to_string(), "Record".to_string()],
+                        options: vec!["Record".to_string(), "None".to_string()],
                     },
                 },
                 Property {
@@ -423,7 +430,7 @@ fn extrusion_properties(
                     value: if show_history_editable {
                         PropValue::Choice {
                             selected: if show_history { "Yes" } else { "No" }.to_string(),
-                            options: vec!["No".to_string(), "Yes".to_string()],
+                            options: vec!["Yes".to_string(), "No".to_string()],
                         }
                     } else {
                         PropValue::ReadOnly(if show_history { "Yes" } else { "No" }.to_string())
@@ -432,6 +439,43 @@ fn extrusion_properties(
             ],
         },
     ]
+}
+
+/// Native surface construction data mirrors the same local profile, placement,
+/// direction and taper used by the extrusion history rebuild.
+pub fn extrusion_surface_data(
+    value: &SolidHistorySweep,
+) -> Option<acadrust::entities::SurfaceData> {
+    use acadrust::entities::{SurfaceData, SurfaceSweepOptions};
+
+    if value.path_entity.is_some() {
+        return None;
+    }
+    let profile = value.sweep_entity.clone()?;
+    matrix(value.base.transform)?;
+    matrix(value.sweep_entity_transform)?;
+    Some(SurfaceData::Extruded {
+        sweep_entity: Some(profile),
+        options: SurfaceSweepOptions {
+            draft_angle: value.draft_angle,
+            draft_start_distance: value.start_draft_distance,
+            draft_end_distance: value.end_draft_distance,
+            twist_angle: value.twist_angle,
+            scale_factor: value.scale_factor,
+            align_angle: value.align_angle,
+            sweep_entity_transform: value.sweep_entity_transform,
+            path_entity_transform: value.path_entity_transform,
+            is_solid: false,
+            sweep_alignment_flags: value.align_option as i16,
+            align_start: value.has_align_start,
+            bank: value.bank,
+            base_point_set: true,
+            reference_vector: value.reference_point,
+            ..SurfaceSweepOptions::default()
+        },
+        sweep_vector: value.direction,
+        sweep_transform: value.base.transform,
+    })
 }
 
 fn sweep_properties(
@@ -444,7 +488,7 @@ fn sweep_properties(
     let (show_history, show_history_editable) =
         displayed_history_state(object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
-    let length = sweep_path_length(value)
+    let length = cadkernel::acis::sweep_history_path_length(value).ok()
         .map(crate::entities::common::format_length)
         .unwrap_or_default();
     vec![
@@ -497,7 +541,7 @@ fn sweep_properties(
                     field: PROP_HISTORY,
                     value: PropValue::Choice {
                         selected: if record_history { "Record" } else { "None" }.to_string(),
-                        options: vec!["None".to_string(), "Record".to_string()],
+                        options: vec!["Record".to_string(), "None".to_string()],
                     },
                 },
                 Property {
@@ -506,7 +550,7 @@ fn sweep_properties(
                     value: if show_history_editable {
                         PropValue::Choice {
                             selected: show_value.to_string(),
-                            options: vec!["No".to_string(), "Yes".to_string()],
+                            options: vec!["Yes".to_string(), "No".to_string()],
                         }
                     } else {
                         PropValue::ReadOnly(show_value.to_string())
@@ -515,6 +559,161 @@ fn sweep_properties(
             ],
         },
     ]
+}
+
+const LOFT_NORMAL_CHOICES: [&str; 7] = [
+    "Ruled",
+    "Smooth",
+    "First normal",
+    "Last normal",
+    "Ends normal",
+    "All normal",
+    "Use draft angles",
+];
+
+fn loft_parameters(value: &SolidHistoryLoft) -> SolidHistoryLoftParameters {
+    value.parameters.clone().unwrap_or_else(|| SolidHistoryLoftParameters {
+        // Older history predates the options extension and rebuilds as ruled.
+        // Displaying or editing it must not silently change it to smooth.
+        normals: 0,
+        ..SolidHistoryLoftParameters::default()
+    })
+}
+
+pub fn loft_section_count(value: &SolidHistoryLoft) -> usize {
+    value.parameters.as_ref()
+        .filter(|parameters| !parameters.section_counts.is_empty())
+        .map_or(value.cross_sections.len(), |parameters| parameters.section_counts.len())
+}
+
+pub fn loft_closed_editable(value: &SolidHistoryLoft) -> bool {
+    loft_section_count(value) >= 3
+        && !value.cross_sections.iter().any(|section| matches!(section, EmbeddedEntity::Point(_)))
+}
+
+fn loft_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryLoft,
+) -> Vec<PropSection> {
+    let parameters = loft_parameters(value);
+    let kind = if parameters.path_entity.is_some() {
+        t!("Loft with path").into_owned()
+    } else if !value.guides.is_empty() {
+        t!("Loft with guides").into_owned()
+    } else {
+        t!("Loft with cross sections only").into_owned()
+    };
+    let mut geometry = vec![
+        Property {
+            label: t!("Solid type").into_owned(),
+            field: PROP_LOFT_TYPE,
+            value: PropValue::ReadOnly(kind),
+        },
+        Property {
+            label: t!("Number of Cross sections").into_owned(),
+            field: PROP_LOFT_SECTION_COUNT,
+            value: PropValue::ReadOnly(loft_section_count(value).to_string()),
+        },
+        Property {
+            label: t!("Surface Normals").into_owned(),
+            field: PROP_LOFT_NORMALS,
+            value: PropValue::Choice {
+                selected: LOFT_NORMAL_CHOICES.get(parameters.normals as usize)
+                    .map_or_else(|| parameters.normals.to_string(), |name| (*name).to_string()),
+                options: LOFT_NORMAL_CHOICES.iter().map(|name| (*name).to_string()).collect(),
+            },
+        },
+    ];
+    if parameters.normals == 6 {
+        geometry.extend([
+            Property {
+                label: t!("Start draft angle").into_owned(),
+                field: PROP_LOFT_START_DRAFT_ANGLE,
+                value: PropValue::EditText(crate::entities::common::format_angle(parameters.start_draft_angle)),
+            },
+            Property {
+                label: t!("End draft angle").into_owned(),
+                field: PROP_LOFT_END_DRAFT_ANGLE,
+                value: PropValue::EditText(crate::entities::common::format_angle(parameters.end_draft_angle)),
+            },
+            Property {
+                label: t!("Start magnitude").into_owned(),
+                field: PROP_LOFT_START_MAGNITUDE,
+                value: PropValue::EditText(parameters.start_magnitude.to_string()),
+            },
+            Property {
+                label: t!("End magnitude").into_owned(),
+                field: PROP_LOFT_END_MAGNITUDE,
+                value: PropValue::EditText(parameters.end_magnitude.to_string()),
+            },
+        ]);
+    }
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(object_show_history, show_history_mode);
+    let show_value = if show_history { "Yes" } else { "No" }.to_string();
+    let closed_value = if parameters.closed { "Yes" } else { "No" }.to_string();
+    let mut sections = vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: geometry,
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::Choice {
+                        selected: if record_history { "Record" } else { "None" }.to_string(),
+                        options: vec!["Record".to_string(), "None".to_string()],
+                    },
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: if show_history_editable {
+                        PropValue::Choice {
+                            selected: show_value,
+                            options: vec!["Yes".to_string(), "No".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(show_value)
+                    },
+                },
+            ],
+        },
+        PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Closed").into_owned(),
+                    field: PROP_LOFT_CLOSED,
+                    value: if loft_closed_editable(value) {
+                        PropValue::Choice {
+                            selected: closed_value,
+                            options: vec!["Yes".to_string(), "No".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(closed_value)
+                    },
+                },
+            ],
+        },
+    ];
+    if parameters.closed {
+        sections[2].props.push(Property {
+            label: t!("Periodic").into_owned(),
+            field: PROP_LOFT_PERIODIC,
+            value: PropValue::Choice {
+                selected: if parameters.periodic { "Yes" } else { "No" }.to_string(),
+                options: vec!["Yes".to_string(), "No".to_string()],
+            },
+        });
+    }
+    sections
 }
 
 fn sweep_path_length(value: &SolidHistorySweep) -> Option<f64> {
@@ -1207,6 +1406,7 @@ pub fn primitive_properties(
         SolidHistoryOperation::Pyramid(value) => pyramid_properties(document, handle, value),
         SolidHistoryOperation::Torus(value) => torus_properties(document, handle, value),
         SolidHistoryOperation::Sweep(value) => sweep_properties(document, handle, value),
+        SolidHistoryOperation::Loft(value) => loft_properties(document, handle, value),
         SolidHistoryOperation::Extrusion(value) => {
             extrusion_properties(document, handle, value)
         }
@@ -1251,6 +1451,13 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_AXIS_DIRECTION_Y
             | PROP_AXIS_DIRECTION_Z
             | PROP_PYRAMID_TYPE
+            | PROP_LOFT_NORMALS
+            | PROP_LOFT_START_DRAFT_ANGLE
+            | PROP_LOFT_END_DRAFT_ANGLE
+            | PROP_LOFT_START_MAGNITUDE
+            | PROP_LOFT_END_MAGNITUDE
+            | PROP_LOFT_CLOSED
+            | PROP_LOFT_PERIODIC
     )
 }
 
@@ -1258,8 +1465,14 @@ pub fn is_history_choice(field: &str) -> bool {
     matches!(field, PROP_HISTORY | PROP_SHOW_HISTORY)
 }
 
+pub fn is_loft_geometry_choice(field: &str) -> bool {
+    matches!(field, PROP_LOFT_NORMALS | PROP_LOFT_CLOSED | PROP_LOFT_PERIODIC)
+}
+
 pub fn is_specialized_property(field: &str) -> bool {
-    matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH)
+    matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH
+        | PROP_LOFT_TYPE | PROP_LOFT_SECTION_COUNT
+        | PROP_EXTRUSION_DIRECTION_X | PROP_EXTRUSION_DIRECTION_Y | PROP_EXTRUSION_DIRECTION_Z)
         || is_primitive_property(field)
         || is_history_choice(field)
 }
@@ -1686,6 +1899,85 @@ fn apply_sweep_geometry_property(
     }
 }
 
+fn apply_loft_geometry_property(
+    value: &mut SolidHistoryLoft,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    let current = loft_parameters(value);
+    let mut parameters = current.clone();
+    match field {
+        PROP_LOFT_NORMALS => {
+            let Some(index) = LOFT_NORMAL_CHOICES.iter()
+                .position(|name| name.eq_ignore_ascii_case(text.trim()))
+            else {
+                return Some(false);
+            };
+            parameters.normals = index as i32;
+        }
+        PROP_LOFT_START_DRAFT_ANGLE | PROP_LOFT_END_DRAFT_ANGLE => {
+            if parameters.normals != 6 {
+                return Some(false);
+            }
+            let Some(angle) = crate::entities::common::parse_angle(text)
+                .filter(|angle| angle.is_finite() && (0.0..=std::f64::consts::PI).contains(angle))
+            else {
+                return Some(false);
+            };
+            if field == PROP_LOFT_START_DRAFT_ANGLE {
+                parameters.start_draft_angle = angle;
+            } else {
+                parameters.end_draft_angle = angle;
+            }
+        }
+        PROP_LOFT_START_MAGNITUDE | PROP_LOFT_END_MAGNITUDE => {
+            if parameters.normals != 6 {
+                return Some(false);
+            }
+            let Some(magnitude) = text.trim().replace(',', ".").parse::<f64>().ok()
+                .filter(|magnitude| magnitude.is_finite() && *magnitude >= 0.0)
+            else {
+                return Some(false);
+            };
+            if field == PROP_LOFT_START_MAGNITUDE {
+                parameters.start_magnitude = magnitude;
+            } else {
+                parameters.end_magnitude = magnitude;
+            }
+        }
+        PROP_LOFT_CLOSED => {
+            if !loft_closed_editable(value) {
+                return Some(false);
+            }
+            parameters.closed = if text.trim().eq_ignore_ascii_case("Yes") {
+                true
+            } else if text.trim().eq_ignore_ascii_case("No") {
+                false
+            } else {
+                return Some(false);
+            };
+        }
+        PROP_LOFT_PERIODIC => {
+            if !parameters.closed {
+                return Some(false);
+            }
+            parameters.periodic = if text.trim().eq_ignore_ascii_case("Yes") {
+                true
+            } else if text.trim().eq_ignore_ascii_case("No") {
+                false
+            } else {
+                return Some(false);
+            };
+        }
+        _ => return None,
+    }
+    if parameters == current {
+        return Some(false);
+    }
+    value.parameters = Some(parameters);
+    Some(true)
+}
+
 fn apply_torus_position_property(
     value: &mut SolidHistoryTorus,
     field: &str,
@@ -1876,6 +2168,11 @@ pub fn apply_primitive_property(
     }
     if let SolidHistoryOperation::Sweep(sweep_value) = operation {
         if let Some(applied) = apply_sweep_geometry_property(sweep_value, field, value) {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Loft(loft_value) = operation {
+        if let Some(applied) = apply_loft_geometry_property(loft_value, field, value) {
             return applied;
         }
     }
@@ -2179,10 +2476,56 @@ fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
         EmbeddedEntity::Ellipse(value) => EntityType::Ellipse(value.clone()),
         EmbeddedEntity::Spline(value) => EntityType::Spline(value.clone()),
         EmbeddedEntity::LwPolyline(value) => EntityType::LwPolyline(value.clone()),
+        EmbeddedEntity::Region(value) => EntityType::Region(value.clone()),
         EmbeddedEntity::Ray(value) => EntityType::Ray(value.clone()),
         EmbeddedEntity::XLine(value) => EntityType::XLine(value.clone()),
         EmbeddedEntity::Unknown { .. } => return None,
     })
+}
+
+/// Visible LOFT construction curves, owned by the parent display entity.
+/// Copies are transformed to WCS and never inserted into the document.
+pub fn loft_visible_history_entities(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> Vec<EntityType> {
+    let Some((_, object_show_history, show_history_mode)) = history_flags(document, handle) else {
+        return Vec::new();
+    };
+    if !displayed_history_state(object_show_history, show_history_mode).0 {
+        return Vec::new();
+    }
+    let Some(SolidHistoryOperation::Loft(value)) = document.solid_history_operation(handle) else {
+        return Vec::new();
+    };
+    let Some(parent) = document.get_entity(handle) else {
+        return Vec::new();
+    };
+    let Some(transform) = matrix(value.base.transform) else {
+        return Vec::new();
+    };
+    let columns = transform.to_cols_array_2d();
+    let affine = acadrust::types::Transform::from_matrix(
+        acadrust::types::Matrix4 {
+            m: std::array::from_fn(|row| std::array::from_fn(|column| columns[column][row])),
+        },
+    );
+    value.cross_sections.iter()
+        .chain(&value.guides)
+        .chain(value.parameters.as_ref().and_then(|parameters| parameters.path_entity.as_ref()))
+        .filter_map(|source| {
+            let mut entity = embedded_entity(source)?;
+            entity.apply_transform(&affine);
+            // Construction sources belong to the visible parent's layer and
+            // selection identity, not a deleted source or hidden source layer.
+            let common = entity.common_mut();
+            common.handle = handle;
+            common.owner_handle = parent.common().owner_handle;
+            common.layer = parent.common().layer.clone();
+            common.invisible = parent.common().invisible;
+            Some(entity)
+        })
+        .collect()
 }
 
 fn into_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {
@@ -2194,6 +2537,7 @@ fn into_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {
         EntityType::Ellipse(value) => EmbeddedEntity::Ellipse(value),
         EntityType::Spline(value) => EmbeddedEntity::Spline(value),
         EntityType::LwPolyline(value) => EmbeddedEntity::LwPolyline(value),
+        EntityType::Region(value) => EmbeddedEntity::Region(value),
         EntityType::Ray(value) => EmbeddedEntity::Ray(value),
         EntityType::XLine(value) => EmbeddedEntity::XLine(value),
         _ => return None,
@@ -2288,21 +2632,27 @@ fn apply_extrusion_profile_grip(
     true
 }
 
+fn sweep_placement_matrices(value: &SolidHistorySweep) -> Option<(glam::DMat4, glam::DMat4)> {
+    let (profile, path) = cadkernel::acis::sweep_history_placements(value).ok()?;
+    let matrix = |place: cadkernel::brep::Placement| {
+        glam::DMat4::from_cols(
+            glam::DVec3::from_array(place.x_axis).extend(0.0),
+            glam::DVec3::from_array(place.y_axis).extend(0.0),
+            glam::DVec3::from_array(place.z_axis).extend(0.0),
+            glam::DVec3::from_array(place.origin).extend(1.0),
+        )
+    };
+    Some((matrix(profile), matrix(path)))
+}
+
 fn sweep_embedded_grips(
     value: Option<&EmbeddedEntity>,
-    base_transform: [f64; 16],
-    entity_transform: [f64; 16],
+    transform: glam::DMat4,
     first_id: usize,
 ) -> Vec<GripDef> {
     let Some(entity) = value.and_then(embedded_entity) else {
         return Vec::new();
     };
-    let (Some(base), Some(entity_placement)) =
-        (matrix(base_transform), matrix(entity_transform))
-    else {
-        return Vec::new();
-    };
-    let transform = base * entity_placement;
     entity
         .grips()
         .into_iter()
@@ -2330,8 +2680,7 @@ fn sweep_embedded_grips(
 
 fn apply_sweep_embedded_grip(
     value: &mut Option<EmbeddedEntity>,
-    base_transform: [f64; 16],
-    entity_transform: [f64; 16],
+    transform: glam::DMat4,
     index: usize,
     apply: GripApply,
 ) -> bool {
@@ -2341,12 +2690,7 @@ fn apply_sweep_embedded_grip(
     let Some(source_grip) = entity.grips().get(index).cloned() else {
         return false;
     };
-    let (Some(base), Some(entity_placement)) =
-        (matrix(base_transform), matrix(entity_transform))
-    else {
-        return false;
-    };
-    let inverse = (base * entity_placement).inverse();
+    let inverse = transform.inverse();
     if !inverse.is_finite() {
         return false;
     }
@@ -2666,7 +3010,15 @@ fn apply_extrusion_draft_grip(value: &mut SolidHistorySweep, apply: GripApply) -
 fn extrusion_draft_rebuilds(value: &SolidHistorySweep, angle: f64) -> bool {
     let mut candidate = value.clone();
     candidate.draft_angle = angle;
-    cadkernel::acis::rebuild_body(&SolidHistoryOperation::Extrusion(candidate)).is_ok()
+    let Some(profile) = candidate.sweep_entity.as_ref() else {
+        return false;
+    };
+    let Ok((_, _, closed)) = cadkernel::acis::sweep_profile_geometry(
+        profile, candidate.sweep_entity_transform,
+    ) else {
+        return false;
+    };
+    cadkernel::acis::rebuild_extrusion_with_mode(&candidate, !closed).is_ok()
 }
 
 fn grip(
@@ -2891,18 +3243,14 @@ pub fn primitive_grips(
             );
         }
         SolidHistoryOperation::Sweep(value) => {
-            grips.extend(sweep_embedded_grips(
-                value.sweep_entity.as_ref(),
-                value.base.transform,
-                value.sweep_entity_transform,
-                GRIP_SWEEP_PROFILE_FIRST,
-            ));
-            grips.extend(sweep_embedded_grips(
-                value.path_entity.as_ref(),
-                value.base.transform,
-                value.path_entity_transform,
-                GRIP_SWEEP_PATH_FIRST,
-            ));
+            if let Some((profile, path)) = sweep_placement_matrices(value) {
+                grips.extend(sweep_embedded_grips(
+                    value.sweep_entity.as_ref(), profile, GRIP_SWEEP_PROFILE_FIRST,
+                ));
+                grips.extend(sweep_embedded_grips(
+                    value.path_entity.as_ref(), path, GRIP_SWEEP_PATH_FIRST,
+                ));
+            }
         }
         SolidHistoryOperation::Loft(value) => grips.extend(loft_section_grips(value)),
         SolidHistoryOperation::Revolve(value) => {
@@ -2962,11 +3310,13 @@ pub fn apply_primitive_grip(
         }
     }
     if let SolidHistoryOperation::Sweep(value) = operation {
+        let Some((profile, path)) = sweep_placement_matrices(value) else {
+            return false;
+        };
         if let Some(index) = grip_id.checked_sub(GRIP_SWEEP_PATH_FIRST) {
             return apply_sweep_embedded_grip(
                 &mut value.path_entity,
-                value.base.transform,
-                value.path_entity_transform,
+                path,
                 index,
                 apply,
             );
@@ -2977,8 +3327,7 @@ pub fn apply_primitive_grip(
         {
             return apply_sweep_embedded_grip(
                 &mut value.sweep_entity,
-                value.base.transform,
-                value.sweep_entity_transform,
+                profile,
                 index,
                 apply,
             );

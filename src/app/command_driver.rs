@@ -353,6 +353,17 @@ impl OpenCADStudio {
             self.reset_tracking_after_point();
             self.push_ucs_to_cmd(i);
         }
+        if let StepInput::EntityPick(handle, _) = &input {
+            if self.tabs[i].active_cmd.as_ref()
+                .is_some_and(|command| command.inject_before_entity_pick())
+            {
+                if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() {
+                    if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                        command.inject_picked_entity(entity);
+                    }
+                }
+            }
+        }
         if let StepInput::SelectionComplete(handles) = &input {
             let entities = {
                 let scene = &self.tabs[i].scene;
@@ -3781,61 +3792,11 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
 
-            CmdResult::PresspullEntity {
-                handle,
-                pick,
-                distance,
-                drag,
-                color,
-            } => {
-                if matches!(
-                    self.tabs[i].scene.document.get_entity(handle),
-                    Some(acadrust::EntityType::Solid3D(_))
-                ) {
-                    let task = self.solid_face_presspull(handle, pick, distance, drag);
-                    self.tabs[i].active_cmd = None;
-                    self.tabs[i].snap_result = None;
-                    self.tabs[i].scene.clear_preview_wire();
-                    self.restore_pre_cmd_tangent();
-                    return task;
-                }
-                if self.reject_locked_edit(i, handle) {
-                    self.tabs[i].active_cmd = None;
-                    return Task::none();
-                }
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::{solid_history, sweep_model};
-
-                let result = self.tabs[i].scene.document.get_entity(handle).and_then(|entity| {
-                    let distance = match drag {
-                        Some(point) => sweep_model::projected_drag(entity, pick, point)?,
-                        None => distance,
-                    };
-                    sweep_model::extruded(entity, distance)
-                });
-                if let Some(solid) = result {
-                    let pending = self.begin_undo(i, "PRESSPULL", 1, true);
-                    let history = solid_history::brep_op(&solid);
-                    let created = self.add_solid_model(empty_solid3d(), solid, history);
-                    let _ = color;
-                    if !created.is_null() {
-                        self.tabs[i].dirty = true;
-                        self.command_line
-                            .push_output(crate::t!("PRESSPULL: solid created.").as_ref());
-                        if let Some(delta) = pending {
-                            self.commit_undo_delta(i, delta);
-                        }
-                    }
-                } else {
-                    self.command_line.push_error(
-                        crate::t!("PRESSPULL: select a closed profile or planar solid face.")
-                            .as_ref(),
-                    );
-                }
-                self.tabs[i].active_cmd = None;
-                self.tabs[i].snap_result = None;
-                self.tabs[i].scene.clear_preview_wire();
-                self.restore_pre_cmd_tangent();
+            CmdResult::PresspullPick { handle, point, offset, multiple: _ } => {
+                self.presspull_pick(handle, point, offset);
+            }
+            CmdResult::PresspullApply { targets, distance, color: _ } => {
+                self.presspull_apply(targets, distance);
             }
 
             // ── REVOLVE ────────────────────────────────────────────────────
@@ -3979,107 +3940,165 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
             // ── SWEEP ─────────────────────────────────────────────────────
-            CmdResult::SweepEntity {
-                profile_handle,
+            CmdResult::SweepEntities {
+                handles,
                 path_handle,
+                mode,
+                options,
                 color: _,
             } => {
-                if self.reject_locked_edit(i, profile_handle)
-                    || self.reject_locked_edit(i, path_handle)
-                {
-                    self.tabs[i].active_cmd = None;
-                    return Task::none();
-                }
+                use crate::command::ExtrudeMode;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::{solid_history, sweep_model};
-
-                let profile_ent = self.tabs[i]
-                    .scene
-                    .document
-                    .get_entity(profile_handle)
-                    .cloned();
-                let path_ent = self.tabs[i].scene.document.get_entity(path_handle).cloned();
-                let result = profile_ent.zip(path_ent).and_then(|(profile, path)| {
-                    let reference_point = sweep_model::profile_of(&profile)?.plane.origin;
-                    let solid = sweep_model::swept(&profile, &path)?;
-                    let history = sweep_model::sweep_history(
-                        &profile,
-                        &path,
-                        0.0,
-                        reference_point,
-                    )
-                    .unwrap_or_else(|| solid_history::brep_op(&solid));
-                    Some((solid, history))
-                });
-
-                if let Some((solid, history)) = result {
-                    let pending = self.begin_undo(i, "SWEEP", 1, true);
-                    let created = self.add_solid_model(empty_solid3d(), solid, history);
-                    if !created.is_null() {
-                        self.tabs[i].dirty = true;
-                        self.command_line
-                            .push_output(crate::t!("SWEEP: solid created.").as_ref());
-                        if let Some(pd) = pending {
-                            self.commit_undo_delta(i, pd);
+                use crate::scene::model::sweep_model;
+                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let path = self.tabs[i].scene.document.get_entity(path_handle).cloned();
+                let mut profiles = Vec::new();
+                let mut failed = 0usize;
+                for handle in handles {
+                    if handle == path_handle || self.reject_locked_edit(i, handle) {
+                        failed += 1;
+                        continue;
+                    }
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                        profiles.push((handle, entity));
+                    } else {
+                        failed += 1;
+                    }
+                }
+                let selection = profiles.iter().map(|(_, entity)| entity.clone()).collect::<Vec<_>>();
+                let options = sweep_model::sweep_selection_options(&selection, options);
+                let pending = if profiles.is_empty() {
+                    None
+                } else {
+                    self.begin_undo(i, "SWEEP", profiles.len(), true)
+                };
+                let mut created_handles = Vec::new();
+                let mut consumed = Vec::new();
+                for (handle, profile) in profiles {
+                    let result = path.as_ref().zip(options).and_then(|(path, options)| {
+                        let record = sweep_model::sweep_record(&profile, path, options)?;
+                        let (_, _, closed) = cadkernel::acis::sweep_profile_geometry(
+                            record.sweep_entity.as_ref()?, record.sweep_entity_transform,
+                        ).ok()?;
+                        let surface = mode == ExtrudeMode::Surface || !closed;
+                        let body = cadkernel::acis::rebuild_sweep_with_mode(&record, surface).ok()?;
+                        Some((body, record, surface))
+                    });
+                    let Some((body, record, surface)) = result else {
+                        failed += 1;
+                        continue;
+                    };
+                    let created = if surface {
+                        self.add_surface_model(sweep_model::swept_surface_entity(&record), body)
+                    } else {
+                        self.add_solid_model(
+                            empty_solid3d(), body,
+                            acadrust::objects::SolidHistoryOperation::Sweep(record),
+                        )
+                    };
+                    if created.is_null() {
+                        failed += 1;
+                    } else {
+                        created_handles.push(created);
+                        if delete_sources {
+                            consumed.push(handle);
                         }
                     }
+                }
+                if !created_handles.is_empty() {
+                    consumed.sort_unstable_by_key(|handle| handle.value());
+                    consumed.dedup();
+                    self.tabs[i].scene.erase_entities(&consumed);
+                    self.tabs[i].scene.deselect_all();
+                    for handle in &created_handles {
+                        self.tabs[i].scene.select_entity(*handle, true);
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(crate::tf!(
+                        "SWEEP: created {created} object(s); {failed} source(s) could not be swept.",
+                        created = created_handles.len(), failed = failed
+                    ).as_ref());
                 } else {
                     self.command_line.push_error(crate::t!("SWEEP: could not sweep the profile along the path.").as_ref());
                 }
+                if let Some(pending) = pending {
+                    self.commit_undo_delta(i, pending);
+                }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
+                self.refresh_properties();
             }
 
             // ── LOFT ──────────────────────────────────────────────────────
-            CmdResult::LoftEntities { handles, color: _ } => {
-                if let Some(handle) = handles
-                    .iter()
-                    .find(|handle| self.tabs[i].scene.is_layer_locked(**handle))
-                    .copied()
-                {
-                    self.reject_locked_edit(i, handle);
-                    self.tabs[i].active_cmd = None;
-                    return Task::none();
-                }
+            CmdResult::LoftEntities { sections, guides, path, mode, options, color: _ } => {
+                use crate::command::LoftSectionSelection;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::{solid_history, sweep_model};
-
-                let profiles: Vec<acadrust::EntityType> = handles
-                    .iter()
-                    .filter_map(|handle| self.tabs[i].scene.document.get_entity(*handle).cloned())
-                    .collect();
-                let result = sweep_model::loft_history(&profiles)
-                    .and_then(|history| {
-                        cadkernel::acis::rebuild_body(&history)
-                            .ok()
-                            .map(|solid| (solid, history))
-                    })
-                    .or_else(|| {
-                        sweep_model::lofted(&profiles).map(|solid| {
-                            let history = solid_history::brep_op(&solid);
-                            (solid, history)
-                        })
-                    });
-                if let Some((solid, history)) = result {
-                    let pending = self.begin_undo(i, "LOFT", 1, true);
-                    let created = self.add_solid_model(empty_solid3d(), solid, history);
-                    if !created.is_null() {
-                        self.tabs[i].dirty = true;
-                        self.command_line
-                            .push_output(crate::t!("LOFT: solid created.").as_ref());
-                        if let Some(pd) = pending {
-                            self.commit_undo_delta(i, pd);
-                        }
-                    }
+                use crate::scene::model::loft_command_model;
+                let mut sources = sections.iter().flat_map(|section| match section {
+                    LoftSectionSelection::Entity(handle) => vec![*handle],
+                    LoftSectionSelection::Join(handles) => handles.clone(),
+                    LoftSectionSelection::Point(_) => Vec::new(),
+                }).collect::<Vec<_>>();
+                sources.sort_unstable_by_key(|handle| handle.value());
+                sources.dedup();
+                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let locked = delete_sources && sources.iter().any(|handle| self.tabs[i].scene.is_layer_locked(*handle));
+                let available = sources.iter().chain(guides.iter()).copied().chain(path)
+                    .filter_map(|handle| self.tabs[i].scene.document.get_entity(handle)
+                        .cloned().map(|entity| (handle, entity))).collect::<Vec<_>>();
+                let result = if locked {
+                    Err("LOFT: a source is on a locked layer; disable source deletion or unlock it.".to_string())
                 } else {
-                    self.command_line.push_error(crate::t!("LOFT: select at least two closed profiles.").as_ref());
+                    loft_command_model::record(&sections, &guides, path, &available, mode, options)
+                        .and_then(|record| cadkernel::acis::rebuild_loft_with_options(&record).map(|body| (body, record)))
+                };
+                match result {
+                    Ok((body, record)) => {
+                        let surface = record.parameters.as_ref().is_some_and(|settings| settings.surface);
+                        let dirty_before = self.tabs[i].dirty;
+                        let pending = self.begin_undo(i, "LOFT", 1, true);
+                        let created = if surface {
+                            let handle = self.add_surface_model(loft_command_model::surface_entity(&record), body);
+                            if !handle.is_null() {
+                                self.tabs[i].scene.create_solid_history(handle,
+                                    acadrust::objects::SolidHistoryOperation::Loft(record));
+                            }
+                            handle
+                        } else {
+                            self.add_solid_model(empty_solid3d(), body,
+                                acadrust::objects::SolidHistoryOperation::Loft(record))
+                        };
+                        if created.is_null() {
+                            // The creation helper already removed its provisional
+                            // result. Discard its empty undo recording as well.
+                            self.tabs[i].scene.take_undo_recording();
+                            self.tabs[i].dirty = dirty_before;
+                            self.command_line.push_error(crate::t!("LOFT could not create a complete display. The source sections were preserved.").as_ref());
+                            return Task::none();
+                        } else {
+                            if delete_sources { self.tabs[i].scene.erase_entities(&sources); }
+                            self.tabs[i].scene.deselect_all();
+                            self.tabs[i].scene.select_entity(created, true);
+                            self.tabs[i].dirty = true;
+                            let message = if surface {
+                                crate::t!("LOFT: surface created.")
+                            } else { crate::t!("LOFT: solid created.") };
+                            self.command_line.push_output(message.as_ref());
+                        }
+                        if let Some(pending) = pending { self.commit_undo_delta(i, pending); }
+                    }
+                    Err(error) => {
+                        self.command_line.push_error(&error);
+                        return Task::none();
+                    }
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
+                self.refresh_properties();
             }
 
             CmdResult::SolidEdgeBlend {

@@ -12,6 +12,9 @@ use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;
 
 use crate::entities::curve::entity_curve;
+pub use super::sweep_command_model::{
+    is_sweep_path, is_sweep_profile, sweep_record, sweep_selection_options, swept_surface_entity, swept_with_options,
+};
 
 /// A drawn profile, as the kernel wants it: the plane it lies in and the
 /// chain of pieces closing a loop in that plane.
@@ -591,18 +594,32 @@ pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
         EntityType::Circle(value) => Some(EmbeddedEntity::Circle(value.clone())),
         EntityType::Ellipse(value) => Some(EmbeddedEntity::Ellipse(value.clone())),
         EntityType::LwPolyline(value) => Some(EmbeddedEntity::LwPolyline(value.clone())),
+        EntityType::Polyline2D(value) => {
+            let mut polyline = LwPolyline::new();
+            polyline.elevation = value.elevation;
+            polyline.normal = value.normal;
+            polyline.is_closed = value.is_closed();
+            polyline.vertices = value.vertices.iter().map(|vertex| {
+                let mut converted = LwVertex::new(Vector2::new(vertex.location.x, vertex.location.y));
+                converted.bulge = vertex.bulge;
+                converted
+            }).collect();
+            Some(EmbeddedEntity::LwPolyline(polyline))
+        }
         EntityType::Spline(value) => Some(EmbeddedEntity::Spline(value.clone())),
-        EntityType::Polyline3D(value) if !value.is_closed() && value.vertices.len() >= 2 => {
+        EntityType::Helix(value) => Some(EmbeddedEntity::Spline(value.spline.clone())),
+        EntityType::Polyline3D(value) if value.vertices.len() >= 2 => {
+            let mut points = value.vertices.iter().map(|vertex| vertex.position).collect::<Vec<_>>();
+            if value.is_closed() && points.first() != points.last() {
+                points.push(*points.first()?);
+            }
             let mut spline = Spline::from_control_points(
                 1,
-                value
-                    .vertices
-                    .iter()
-                    .map(|vertex| vertex.position)
-                    .collect(),
+                points,
             );
             spline.flags.linear = true;
             spline.flags.planar = false;
+            spline.flags.closed = value.is_closed();
             Some(EmbeddedEntity::Spline(spline))
         }
         _ => None,

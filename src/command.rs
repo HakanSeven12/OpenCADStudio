@@ -1142,6 +1142,78 @@ pub enum ExtrudeExtent {
     Path(Handle),
 }
 
+/// Construction options shared by SWEEP creation and its live preview.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SweepOptions {
+    pub align: bool,
+    pub bank: bool,
+    pub base_point: Option<DVec3>,
+    pub scale: f64,
+    /// Total twist along the path, in radians.
+    pub twist_angle: f64,
+}
+
+impl Default for SweepOptions {
+    fn default() -> Self {
+        Self {
+            align: true,
+            bank: false,
+            base_point: None,
+            scale: 1.0,
+            twist_angle: 0.0,
+        }
+    }
+}
+
+/// Ordered cross-sections used by LOFT creation, validation and preview.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LoftSectionSelection {
+    Entity(Handle),
+    Point(DVec3),
+    /// Connected source edges forming one exact cross-section.
+    Join(Vec<Handle>),
+}
+
+/// Construction parameters shared by the LOFT command and its history.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LoftOptions {
+    /// Ruled, Smooth, First normal, Last normal, Ends normal, All normal,
+    /// or Use draft angles, respectively.
+    pub normals: i32,
+    pub start_draft_angle: f64,
+    pub end_draft_angle: f64,
+    pub start_magnitude: f64,
+    pub end_magnitude: f64,
+    /// Point-end continuity: G0 (0) or G1 (1).
+    pub start_continuity: i32,
+    pub end_continuity: i32,
+    /// Positive point-end bulge factors; independent of draft magnitudes.
+    pub start_bulge: f64,
+    pub end_bulge: f64,
+    pub closed: bool,
+    pub periodic: bool,
+    pub align_direction: bool,
+}
+
+impl Default for LoftOptions {
+    fn default() -> Self {
+        Self {
+            normals: 1,
+            start_draft_angle: std::f64::consts::FRAC_PI_2,
+            end_draft_angle: std::f64::consts::FRAC_PI_2,
+            start_magnitude: 0.0,
+            end_magnitude: 0.0,
+            start_continuity: 1,
+            end_continuity: 1,
+            start_bulge: 0.5,
+            end_bulge: 0.5,
+            closed: false,
+            periodic: true,
+            align_direction: true,
+        }
+    }
+}
+
 /// Returned by every `CadCommand` method to tell main.rs what to do.
 #[allow(dead_code)]
 pub enum CmdResult {
@@ -1435,12 +1507,17 @@ pub enum CmdResult {
         taper_angle: f64,
         color: [f32; 4],
     },
-    /// Pull a closed profile or a planar solid face by a signed distance.
-    PresspullEntity {
-        handle: Handle,
-        pick: DVec3,
+    /// Resolve a profile, bounded area, or solid face for PRESSPULL.
+    PresspullPick {
+        handle: Option<Handle>,
+        point: DVec3,
+        offset: bool,
+        multiple: bool,
+    },
+    /// Apply a signed distance to the resolved PRESSPULL selection.
+    PresspullApply {
+        targets: Vec<crate::scene::model::presspull_model::PresspullTarget>,
         distance: f64,
-        drag: Option<DVec3>,
         color: [f32; 4],
     },
     /// Revolve the profile entities around the given axis.
@@ -1453,15 +1530,21 @@ pub enum CmdResult {
         mode: ExtrudeMode,
         color: [f32; 4],
     },
-    /// Sweep the profile entity `profile_handle` along `path_handle`.
-    SweepEntity {
-        profile_handle: Handle,
+    /// Sweep the selected profiles along one path in a single undo step.
+    SweepEntities {
+        handles: Vec<Handle>,
         path_handle: Handle,
+        mode: ExtrudeMode,
+        options: SweepOptions,
         color: [f32; 4],
     },
-    /// Loft through a series of profile entities.
+    /// Loft through ordered cross-sections, with optional guides or a path.
     LoftEntities {
-        handles: Vec<Handle>,
+        sections: Vec<LoftSectionSelection>,
+        guides: Vec<Handle>,
+        path: Option<Handle>,
+        mode: ExtrudeMode,
+        options: LoftOptions,
         color: [f32; 4],
     },
     /// Round or bevel the straight edge nearest `pick` on a solid.
@@ -1859,6 +1942,19 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// Expensive bounded-area acquisition runs once after cursor dwell, not
+    /// from every pointer event. The host supplies the same WCS surface pick
+    /// used for clicks, and clears the overlay when movement resumes.
+    fn entity_pick_deferred_hover(&self) -> bool {
+        false
+    }
+
+    fn on_deferred_entity_hover(
+        &mut self, _scene: &Scene, _handle: Option<Handle>, _point: DVec3,
+    ) -> Vec<WireModel> {
+        Vec::new()
+    }
+
     /// Called when the text editor closes, either because the user committed or cancelled the edit.
     fn on_editor_closed(&mut self, _committed: bool) -> CmdResult {
         CmdResult::Cancel
@@ -1874,6 +1970,17 @@ pub trait CadCommand: Send {
     fn on_entity_pick(&mut self, _handle: Handle, _pt: DVec3) -> CmdResult {
         CmdResult::Cancel
     }
+
+    /// Supply a resolved PRESSPULL target after an object or bounded-area pick.
+    fn on_presspull_target(
+        &mut self,
+        _target: crate::scene::model::presspull_model::PresspullTarget,
+    ) {
+    }
+
+    /// Resume PRESSPULL after an atomic apply attempt. A failed operation keeps
+    /// the current targets available for another distance or selection undo.
+    fn on_presspull_applied(&mut self, _success: bool) {}
 
     /// Host callback after `CmdResult::CommitLiveEntity`: records the handle the
     /// new live entity was assigned so later `UpdateLiveEntity` results can
@@ -1950,6 +2057,14 @@ pub trait CadCommand: Send {
     fn on_hover_entity(&mut self, _handle: Handle, _pt: DVec3) -> Vec<WireModel> {
         vec![]
     }
+
+    /// Request a source snapshot only when the hovered entity changes.
+    /// Commands can cache geometry across mouse moves without holding a scene.
+    fn wants_hover_entity(&self, _handle: Handle) -> bool {
+        false
+    }
+
+    fn inject_hover_entity(&mut self, _handle: Handle, _entity: EntityType) {}
 
     /// Called on every mouse-move in the viewport.
     /// Return `Some(WireModel)` to update the rubber-band preview, `None` to skip.

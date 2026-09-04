@@ -27,8 +27,8 @@ glam = { version = "0.33", features = ["bytemuck"] }
 rfd = "0.17"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
-acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "393d6c0857447f9ca678bed97a612707f0a842c6", features = ["serde"] }
-cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "1a1505c7bb8e26770f14b49859587660c7519a25", features = ["acis", "offset"] }
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "305e93d4cf8ff70ce8449015edb201c2765fcc04", features = ["serde"] }
+cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "209df414c9c0434af00edabc5529c6c774091f0e", features = ["acis", "offset"] }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
@@ -61,7 +61,7 @@ iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aa
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 
 [patch."https://github.com/HakanSeven12/cadcodec.git"]
-acadrust = { git = "https://git@github.com/HakanSeven12/cadcodec.git", rev = "393d6c0857447f9ca678bed97a612707f0a842c6" }
+acadrust = { git = "https://git@github.com/HakanSeven12/cadcodec.git", rev = "305e93d4cf8ff70ce8449015edb201c2765fcc04" }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -11,5 +11,6 @@ pub mod mesh_model;
 pub mod solid_model;
 pub mod solid_history;
 pub mod sweep_model;
+mod sweep_command_model;
 pub mod visual_style_model;
 pub mod object;

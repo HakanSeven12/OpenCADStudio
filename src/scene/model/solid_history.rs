@@ -212,7 +212,9 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         }
         SolidHistoryOperation::Cone(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
-        SolidHistoryOperation::Sweep(value) | SolidHistoryOperation::Extrusion(value) => world_point(
+        SolidHistoryOperation::Sweep(value) => cadkernel::acis::sweep_history_reference_point(value)
+            .ok().map(glam::DVec3::from_array),
+        SolidHistoryOperation::Extrusion(value) => world_point(
             value.base.transform,
             [
                 value.reference_point.x,
@@ -444,7 +446,7 @@ fn sweep_properties(
     let (show_history, show_history_editable) =
         displayed_history_state(object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
-    let length = sweep_path_length(value)
+    let length = cadkernel::acis::sweep_history_path_length(value).ok()
         .map(crate::entities::common::format_length)
         .unwrap_or_default();
     vec![
@@ -497,7 +499,7 @@ fn sweep_properties(
                     field: PROP_HISTORY,
                     value: PropValue::Choice {
                         selected: if record_history { "Record" } else { "None" }.to_string(),
-                        options: vec!["None".to_string(), "Record".to_string()],
+                        options: vec!["Record".to_string(), "None".to_string()],
                     },
                 },
                 Property {
@@ -506,7 +508,7 @@ fn sweep_properties(
                     value: if show_history_editable {
                         PropValue::Choice {
                             selected: show_value.to_string(),
-                            options: vec!["No".to_string(), "Yes".to_string()],
+                            options: vec!["Yes".to_string(), "No".to_string()],
                         }
                     } else {
                         PropValue::ReadOnly(show_value.to_string())
@@ -2179,6 +2181,7 @@ fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
         EmbeddedEntity::Ellipse(value) => EntityType::Ellipse(value.clone()),
         EmbeddedEntity::Spline(value) => EntityType::Spline(value.clone()),
         EmbeddedEntity::LwPolyline(value) => EntityType::LwPolyline(value.clone()),
+        EmbeddedEntity::Region(value) => EntityType::Region(value.clone()),
         EmbeddedEntity::Ray(value) => EntityType::Ray(value.clone()),
         EmbeddedEntity::XLine(value) => EntityType::XLine(value.clone()),
         EmbeddedEntity::Unknown { .. } => return None,
@@ -2194,6 +2197,7 @@ fn into_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {
         EntityType::Ellipse(value) => EmbeddedEntity::Ellipse(value),
         EntityType::Spline(value) => EmbeddedEntity::Spline(value),
         EntityType::LwPolyline(value) => EmbeddedEntity::LwPolyline(value),
+        EntityType::Region(value) => EmbeddedEntity::Region(value),
         EntityType::Ray(value) => EmbeddedEntity::Ray(value),
         EntityType::XLine(value) => EmbeddedEntity::XLine(value),
         _ => return None,
@@ -2288,21 +2292,27 @@ fn apply_extrusion_profile_grip(
     true
 }
 
+fn sweep_placement_matrices(value: &SolidHistorySweep) -> Option<(glam::DMat4, glam::DMat4)> {
+    let (profile, path) = cadkernel::acis::sweep_history_placements(value).ok()?;
+    let matrix = |place: cadkernel::brep::Placement| {
+        glam::DMat4::from_cols(
+            glam::DVec3::from_array(place.x_axis).extend(0.0),
+            glam::DVec3::from_array(place.y_axis).extend(0.0),
+            glam::DVec3::from_array(place.z_axis).extend(0.0),
+            glam::DVec3::from_array(place.origin).extend(1.0),
+        )
+    };
+    Some((matrix(profile), matrix(path)))
+}
+
 fn sweep_embedded_grips(
     value: Option<&EmbeddedEntity>,
-    base_transform: [f64; 16],
-    entity_transform: [f64; 16],
+    transform: glam::DMat4,
     first_id: usize,
 ) -> Vec<GripDef> {
     let Some(entity) = value.and_then(embedded_entity) else {
         return Vec::new();
     };
-    let (Some(base), Some(entity_placement)) =
-        (matrix(base_transform), matrix(entity_transform))
-    else {
-        return Vec::new();
-    };
-    let transform = base * entity_placement;
     entity
         .grips()
         .into_iter()
@@ -2330,8 +2340,7 @@ fn sweep_embedded_grips(
 
 fn apply_sweep_embedded_grip(
     value: &mut Option<EmbeddedEntity>,
-    base_transform: [f64; 16],
-    entity_transform: [f64; 16],
+    transform: glam::DMat4,
     index: usize,
     apply: GripApply,
 ) -> bool {
@@ -2341,12 +2350,7 @@ fn apply_sweep_embedded_grip(
     let Some(source_grip) = entity.grips().get(index).cloned() else {
         return false;
     };
-    let (Some(base), Some(entity_placement)) =
-        (matrix(base_transform), matrix(entity_transform))
-    else {
-        return false;
-    };
-    let inverse = (base * entity_placement).inverse();
+    let inverse = transform.inverse();
     if !inverse.is_finite() {
         return false;
     }
@@ -2891,18 +2895,14 @@ pub fn primitive_grips(
             );
         }
         SolidHistoryOperation::Sweep(value) => {
-            grips.extend(sweep_embedded_grips(
-                value.sweep_entity.as_ref(),
-                value.base.transform,
-                value.sweep_entity_transform,
-                GRIP_SWEEP_PROFILE_FIRST,
-            ));
-            grips.extend(sweep_embedded_grips(
-                value.path_entity.as_ref(),
-                value.base.transform,
-                value.path_entity_transform,
-                GRIP_SWEEP_PATH_FIRST,
-            ));
+            if let Some((profile, path)) = sweep_placement_matrices(value) {
+                grips.extend(sweep_embedded_grips(
+                    value.sweep_entity.as_ref(), profile, GRIP_SWEEP_PROFILE_FIRST,
+                ));
+                grips.extend(sweep_embedded_grips(
+                    value.path_entity.as_ref(), path, GRIP_SWEEP_PATH_FIRST,
+                ));
+            }
         }
         SolidHistoryOperation::Loft(value) => grips.extend(loft_section_grips(value)),
         SolidHistoryOperation::Revolve(value) => {
@@ -2962,11 +2962,13 @@ pub fn apply_primitive_grip(
         }
     }
     if let SolidHistoryOperation::Sweep(value) = operation {
+        let Some((profile, path)) = sweep_placement_matrices(value) else {
+            return false;
+        };
         if let Some(index) = grip_id.checked_sub(GRIP_SWEEP_PATH_FIRST) {
             return apply_sweep_embedded_grip(
                 &mut value.path_entity,
-                value.base.transform,
-                value.path_entity_transform,
+                path,
                 index,
                 apply,
             );
@@ -2977,8 +2979,7 @@ pub fn apply_primitive_grip(
         {
             return apply_sweep_embedded_grip(
                 &mut value.sweep_entity,
-                value.base.transform,
-                value.sweep_entity_transform,
+                profile,
                 index,
                 apply,
             );

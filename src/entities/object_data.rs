@@ -204,6 +204,7 @@ fn embedded_name(value: Option<&acadrust::entities::EmbeddedEntity>) -> &'static
         Some(acadrust::entities::EmbeddedEntity::Ellipse(_)) => "Ellipse",
         Some(acadrust::entities::EmbeddedEntity::Spline(_)) => "Spline",
         Some(acadrust::entities::EmbeddedEntity::LwPolyline(_)) => "Polyline",
+        Some(acadrust::entities::EmbeddedEntity::Region(_)) => "Region",
         Some(acadrust::entities::EmbeddedEntity::Ray(_)) => "Ray",
         Some(acadrust::entities::EmbeddedEntity::XLine(_)) => "XLine",
         Some(acadrust::entities::EmbeddedEntity::Unknown { .. }) => "Unknown",

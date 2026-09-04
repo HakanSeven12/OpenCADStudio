@@ -2298,6 +2298,15 @@ impl OpenCADStudio {
                     self.tabs[i].scene.set_hover_highlight(None);
                 }
                 let hover_handle = hovered.unwrap_or(acadrust::Handle::NULL);
+                let wants_entity = self.tabs[i].active_cmd.as_ref()
+                    .is_some_and(|command| command.wants_hover_entity(hover_handle));
+                if wants_entity {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity(hover_handle).cloned() {
+                        if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                            command.inject_hover_entity(hover_handle, entity);
+                        }
+                    }
+                }
                 let shift = self.shift_down;
                 let mut p = self.tabs[i]
                     .active_cmd

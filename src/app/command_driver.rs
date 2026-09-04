@@ -353,6 +353,17 @@ impl OpenCADStudio {
             self.reset_tracking_after_point();
             self.push_ucs_to_cmd(i);
         }
+        if let StepInput::EntityPick(handle, _) = &input {
+            if self.tabs[i].active_cmd.as_ref()
+                .is_some_and(|command| command.inject_before_entity_pick())
+            {
+                if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() {
+                    if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                        command.inject_picked_entity(entity);
+                    }
+                }
+            }
+        }
         if let StepInput::SelectionComplete(handles) = &input {
             let entities = {
                 let scene = &self.tabs[i].scene;
@@ -3979,57 +3990,95 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
             // ── SWEEP ─────────────────────────────────────────────────────
-            CmdResult::SweepEntity {
-                profile_handle,
+            CmdResult::SweepEntities {
+                handles,
                 path_handle,
+                mode,
+                options,
                 color: _,
             } => {
-                if self.reject_locked_edit(i, profile_handle)
-                    || self.reject_locked_edit(i, path_handle)
-                {
-                    self.tabs[i].active_cmd = None;
-                    return Task::none();
-                }
+                use crate::command::ExtrudeMode;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::{solid_history, sweep_model};
-
-                let profile_ent = self.tabs[i]
-                    .scene
-                    .document
-                    .get_entity(profile_handle)
-                    .cloned();
-                let path_ent = self.tabs[i].scene.document.get_entity(path_handle).cloned();
-                let result = profile_ent.zip(path_ent).and_then(|(profile, path)| {
-                    let reference_point = sweep_model::profile_of(&profile)?.plane.origin;
-                    let solid = sweep_model::swept(&profile, &path)?;
-                    let history = sweep_model::sweep_history(
-                        &profile,
-                        &path,
-                        0.0,
-                        reference_point,
-                    )
-                    .unwrap_or_else(|| solid_history::brep_op(&solid));
-                    Some((solid, history))
-                });
-
-                if let Some((solid, history)) = result {
-                    let pending = self.begin_undo(i, "SWEEP", 1, true);
-                    let created = self.add_solid_model(empty_solid3d(), solid, history);
-                    if !created.is_null() {
-                        self.tabs[i].dirty = true;
-                        self.command_line
-                            .push_output(crate::t!("SWEEP: solid created.").as_ref());
-                        if let Some(pd) = pending {
-                            self.commit_undo_delta(i, pd);
+                use crate::scene::model::sweep_model;
+                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let path = self.tabs[i].scene.document.get_entity(path_handle).cloned();
+                let mut profiles = Vec::new();
+                let mut failed = 0usize;
+                for handle in handles {
+                    if handle == path_handle || self.reject_locked_edit(i, handle) {
+                        failed += 1;
+                        continue;
+                    }
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                        profiles.push((handle, entity));
+                    } else {
+                        failed += 1;
+                    }
+                }
+                let selection = profiles.iter().map(|(_, entity)| entity.clone()).collect::<Vec<_>>();
+                let options = sweep_model::sweep_selection_options(&selection, options);
+                let pending = if profiles.is_empty() {
+                    None
+                } else {
+                    self.begin_undo(i, "SWEEP", profiles.len(), true)
+                };
+                let mut created_handles = Vec::new();
+                let mut consumed = Vec::new();
+                for (handle, profile) in profiles {
+                    let result = path.as_ref().zip(options).and_then(|(path, options)| {
+                        let record = sweep_model::sweep_record(&profile, path, options)?;
+                        let (_, _, closed) = cadkernel::acis::sweep_profile_geometry(
+                            record.sweep_entity.as_ref()?, record.sweep_entity_transform,
+                        ).ok()?;
+                        let surface = mode == ExtrudeMode::Surface || !closed;
+                        let body = cadkernel::acis::rebuild_sweep_with_mode(&record, surface).ok()?;
+                        Some((body, record, surface))
+                    });
+                    let Some((body, record, surface)) = result else {
+                        failed += 1;
+                        continue;
+                    };
+                    let created = if surface {
+                        self.add_surface_model(sweep_model::swept_surface_entity(&record), body)
+                    } else {
+                        self.add_solid_model(
+                            empty_solid3d(), body,
+                            acadrust::objects::SolidHistoryOperation::Sweep(record),
+                        )
+                    };
+                    if created.is_null() {
+                        failed += 1;
+                    } else {
+                        created_handles.push(created);
+                        if delete_sources {
+                            consumed.push(handle);
                         }
                     }
+                }
+                if !created_handles.is_empty() {
+                    consumed.sort_unstable_by_key(|handle| handle.value());
+                    consumed.dedup();
+                    self.tabs[i].scene.erase_entities(&consumed);
+                    self.tabs[i].scene.deselect_all();
+                    for handle in &created_handles {
+                        self.tabs[i].scene.select_entity(*handle, true);
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(crate::tf!(
+                        "SWEEP: created %{created} object(s); %{failed} source(s) could not be swept.",
+                        created = created_handles.len(), failed = failed
+                    ).as_ref());
                 } else {
                     self.command_line.push_error(crate::t!("SWEEP: could not sweep the profile along the path.").as_ref());
+                }
+                if let Some(pending) = pending {
+                    self.commit_undo_delta(i, pending);
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
+                self.refresh_properties();
             }
 
             // ── LOFT ──────────────────────────────────────────────────────

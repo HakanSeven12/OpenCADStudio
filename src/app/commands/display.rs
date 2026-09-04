@@ -814,7 +814,16 @@ impl OpenCADStudio {
             "SWEEP" => {
                 use crate::modules::insert::solid3d_cmds::SweepCommand;
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
-                let cmd = SweepCommand::new(color);
+                let isolines = self.tabs[i].scene.document.header.isolines.max(0) as usize;
+                let mut cmd = SweepCommand::new(color, isolines);
+                let selected = self.tabs[i].scene.selected_handles_in_order()
+                    .into_iter()
+                    .filter_map(|handle| self.tabs[i].scene.document.get_entity(handle)
+                        .cloned().map(|entity| (handle, entity)))
+                    .collect::<Vec<_>>();
+                if !selected.is_empty() {
+                    cmd.set_preselection(selected);
+                }
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

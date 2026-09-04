@@ -1142,6 +1142,29 @@ pub enum ExtrudeExtent {
     Path(Handle),
 }
 
+/// Construction options shared by SWEEP creation and its live preview.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SweepOptions {
+    pub align: bool,
+    pub bank: bool,
+    pub base_point: Option<DVec3>,
+    pub scale: f64,
+    /// Total twist along the path, in radians.
+    pub twist_angle: f64,
+}
+
+impl Default for SweepOptions {
+    fn default() -> Self {
+        Self {
+            align: true,
+            bank: false,
+            base_point: None,
+            scale: 1.0,
+            twist_angle: 0.0,
+        }
+    }
+}
+
 /// Returned by every `CadCommand` method to tell main.rs what to do.
 #[allow(dead_code)]
 pub enum CmdResult {
@@ -1453,10 +1476,12 @@ pub enum CmdResult {
         mode: ExtrudeMode,
         color: [f32; 4],
     },
-    /// Sweep the profile entity `profile_handle` along `path_handle`.
-    SweepEntity {
-        profile_handle: Handle,
+    /// Sweep the selected profiles along one path in a single undo step.
+    SweepEntities {
+        handles: Vec<Handle>,
         path_handle: Handle,
+        mode: ExtrudeMode,
+        options: SweepOptions,
         color: [f32; 4],
     },
     /// Loft through a series of profile entities.
@@ -1950,6 +1975,14 @@ pub trait CadCommand: Send {
     fn on_hover_entity(&mut self, _handle: Handle, _pt: DVec3) -> Vec<WireModel> {
         vec![]
     }
+
+    /// Request a source snapshot only when the hovered entity changes.
+    /// Commands can cache geometry across mouse moves without holding a scene.
+    fn wants_hover_entity(&self, _handle: Handle) -> bool {
+        false
+    }
+
+    fn inject_hover_entity(&mut self, _handle: Handle, _entity: EntityType) {}
 
     /// Called on every mouse-move in the viewport.
     /// Return `Some(WireModel)` to update the rubber-band preview, `None` to skip.

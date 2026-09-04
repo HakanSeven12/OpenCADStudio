@@ -6,7 +6,8 @@ use acadrust::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
-    CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, SelectionEntity, WorkingPlane,
+    CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, SelectionEntity, SweepOptions,
+    WorkingPlane,
 };
 use crate::scene::WireModel;
 use crate::t;
@@ -1184,23 +1185,117 @@ impl CadCommand for RevolveCommand {
 
 pub struct SweepCommand {
     step: SweepStep,
-    profile_handle: acadrust::Handle,
+    profiles: Vec<(Handle, EntityType)>,
+    injected_path: Option<EntityType>,
+    hover_path: Option<(Handle, EntityType)>,
+    preview_key: Option<(Handle, ExtrudeMode, SweepOptions)>,
+    preview_cache: Vec<WireModel>,
+    mode: ExtrudeMode,
+    options: SweepOptions,
+    reference_start: Option<DVec3>,
+    reference_length: f64,
+    new_length_start: Option<DVec3>,
+    isolines: usize,
     color: [f32; 4],
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SweepStep {
-    PickProfile,
+    PickProfiles,
+    Mode,
     PickPath,
+    Alignment,
+    BasePoint,
+    Scale,
+    ReferenceLength,
+    ReferenceEnd,
+    NewLength,
+    NewLengthStart,
+    NewLengthEnd,
+    Twist,
 }
 
 impl SweepCommand {
-    pub fn new(color: [f32; 4]) -> Self {
+    pub fn new(color: [f32; 4], isolines: usize) -> Self {
         Self {
-            step: SweepStep::PickProfile,
-            profile_handle: acadrust::Handle::NULL,
+            step: SweepStep::PickProfiles,
+            profiles: Vec::new(),
+            injected_path: None,
+            hover_path: None,
+            preview_key: None,
+            preview_cache: Vec::new(),
+            mode: ExtrudeMode::Solid,
+            options: SweepOptions::default(),
+            reference_start: None,
+            reference_length: 1.0,
+            new_length_start: None,
+            isolines,
             color,
         }
+    }
+
+    pub fn set_preselection(&mut self, profiles: Vec<(Handle, EntityType)>) {
+        self.set_profiles(profiles);
+        if !self.profiles.is_empty() {
+            self.step = SweepStep::PickPath;
+        }
+    }
+
+    fn set_profiles(&mut self, profiles: Vec<(Handle, EntityType)>) {
+        self.profiles.clear();
+        for (handle, entity) in profiles {
+            if !handle.is_null()
+                && !self.profiles.iter().any(|(selected, _)| *selected == handle)
+                && crate::scene::model::sweep_model::is_sweep_profile(&entity)
+            {
+                self.profiles.push((handle, entity));
+            }
+        }
+        self.preview_key = None;
+        self.preview_cache.clear();
+    }
+
+    fn contains_profile(&self, handle: Handle) -> bool {
+        self.profiles.iter().any(|(selected, _)| *selected == handle)
+    }
+
+    fn selection_options(&self) -> Option<SweepOptions> {
+        let profiles = self.profiles.iter().map(|(_, entity)| entity.clone()).collect::<Vec<_>>();
+        crate::scene::model::sweep_model::sweep_selection_options(&profiles, self.options)
+    }
+
+    fn finish(&self, path_handle: Handle) -> CmdResult {
+        CmdResult::SweepEntities {
+            handles: self.profiles.iter().map(|(handle, _)| *handle).collect(),
+            path_handle,
+            mode: self.mode,
+            options: self.options,
+            color: self.color,
+        }
+    }
+
+    fn set_scale(&mut self, scale: f64) -> bool {
+        if !scale.is_finite() || scale <= 0.0 {
+            return false;
+        }
+        self.options.scale = scale;
+        self.step = SweepStep::PickPath;
+        true
+    }
+
+    fn set_reference_length(&mut self, length: f64) -> bool {
+        if !length.is_finite() || length <= 1e-12 {
+            return false;
+        }
+        self.reference_length = length;
+        self.step = SweepStep::NewLength;
+        true
+    }
+
+    fn length_anchor(&self) -> DVec3 {
+        self.reference_start
+            .or_else(|| self.selection_options().and_then(|options| options.base_point))
+            .unwrap_or(DVec3::ZERO)
     }
 }
 
@@ -1210,37 +1305,301 @@ impl CadCommand for SweepCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            SweepStep::PickProfile => t!("SWEEP  Select profile to sweep:").into_owned(),
-            SweepStep::PickPath => {
-                t!("SWEEP  Select path (Line, Arc, LwPolyline):").into_owned()
-            }
+            SweepStep::PickProfiles => t!("SWEEP  Select objects to sweep or [Mode] (Enter to finish):").into_owned(),
+            SweepStep::Mode => format!(
+                "{} <{}>:",
+                t!("SWEEP  Creation mode [Solid/Surface]"),
+                if self.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" },
+            ),
+            SweepStep::PickPath => t!("SWEEP  Select sweep path or [Alignment/Base point/Scale/Twist]:").into_owned(),
+            SweepStep::Alignment => format!(
+                "{} <{}>:",
+                t!("SWEEP  Align sweep object perpendicular to path [Yes/No]"),
+                if self.options.align { "Yes" } else { "No" },
+            ),
+            SweepStep::BasePoint => t!("SWEEP  Specify base point:").into_owned(),
+            SweepStep::Scale => format!(
+                "{} <{}>:", t!("SWEEP  Enter scale factor or [Reference]"), self.options.scale,
+            ),
+            SweepStep::ReferenceLength => format!(
+                "{} <{}>:",
+                t!("SWEEP  Specify reference length or first point"),
+                crate::entities::common::format_length(self.reference_length),
+            ),
+            SweepStep::ReferenceEnd => t!("SWEEP  Specify second reference point:").into_owned(),
+            SweepStep::NewLength => format!(
+                "{} <{}>:",
+                t!("SWEEP  Specify new length or [Points]"),
+                crate::entities::common::format_length(self.reference_length * self.options.scale),
+            ),
+            SweepStep::NewLengthStart => t!("SWEEP  Specify first point of new length:").into_owned(),
+            SweepStep::NewLengthEnd => t!("SWEEP  Specify second point of new length:").into_owned(),
+            SweepStep::Twist => format!(
+                "{} <{}>:",
+                t!("SWEEP  Specify twist angle or [Bank]"),
+                crate::entities::common::format_angle(self.options.twist_angle),
+            ),
         }
     }
-    fn needs_entity_pick(&self) -> bool {
-        true
+
+    fn options(&self) -> Vec<CmdOption> {
+        match self.step {
+            SweepStep::PickProfiles => vec![CmdOption::new("Mode", "MODE"), CmdOption::enter("Done")],
+            SweepStep::Mode => vec![CmdOption::new("Solid", "SOLID"), CmdOption::new("Surface", "SURFACE")],
+            SweepStep::PickPath => vec![
+                CmdOption::new("Alignment", "ALIGNMENT"),
+                CmdOption::new("Base point", "BASE"),
+                CmdOption::new("Scale", "SCALE"),
+                CmdOption::new("Twist", "TWIST"),
+            ],
+            SweepStep::Alignment => vec![CmdOption::new("Yes", "YES"), CmdOption::new("No", "NO")],
+            SweepStep::Scale => vec![CmdOption::new("Reference", "REFERENCE")],
+            SweepStep::NewLength => vec![CmdOption::new("Points", "POINTS")],
+            SweepStep::Twist => vec![CmdOption::new("Bank", "BANK")],
+            _ => Vec::new(),
+        }
     }
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
-        if handle.is_null() {
+
+    fn needs_entity_pick(&self) -> bool {
+        self.step == SweepStep::PickPath
+    }
+
+    fn entity_pick_highlights_hover(&self) -> bool {
+        self.step == SweepStep::PickPath
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
+        if self.step != SweepStep::PickPath || handle.is_null() || self.contains_profile(handle) {
+            self.injected_path = None;
+            return CmdResult::NeedPoint;
+        }
+        let path = self.injected_path.take().or_else(|| {
+            self.hover_path.as_ref()
+                .filter(|(hovered, _)| *hovered == handle)
+                .map(|(_, entity)| entity.clone())
+        });
+        if path.as_ref().is_some_and(crate::scene::model::sweep_model::is_sweep_path) {
+            self.finish(handle)
+        } else {
+            CmdResult::NeedPoint
+        }
+    }
+
+    fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if !point.is_finite() {
             return CmdResult::NeedPoint;
         }
         match self.step {
-            SweepStep::PickProfile => {
-                self.profile_handle = handle;
+            SweepStep::BasePoint => {
+                self.options.base_point = Some(point);
                 self.step = SweepStep::PickPath;
-                CmdResult::NeedPoint
             }
-            SweepStep::PickPath => CmdResult::SweepEntity {
-                profile_handle: self.profile_handle,
-                path_handle: handle,
-                color: self.color,
-            },
+            SweepStep::ReferenceLength => {
+                self.reference_start = Some(point);
+                self.step = SweepStep::ReferenceEnd;
+            }
+            SweepStep::ReferenceEnd => {
+                if let Some(start) = self.reference_start {
+                    self.set_reference_length(point.distance(start));
+                }
+            }
+            SweepStep::NewLength => {
+                self.set_scale(point.distance(self.length_anchor()) / self.reference_length);
+            }
+            SweepStep::NewLengthStart => {
+                self.new_length_start = Some(point);
+                self.step = SweepStep::NewLengthEnd;
+            }
+            SweepStep::NewLengthEnd => {
+                if let Some(start) = self.new_length_start {
+                    self.set_scale(point.distance(start) / self.reference_length);
+                }
+            }
+            _ => {}
         }
-    }
-    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
         CmdResult::NeedPoint
     }
+
+    fn wants_text_input(&self) -> bool {
+        matches!(self.step,
+            SweepStep::PickProfiles | SweepStep::Mode | SweepStep::PickPath
+                | SweepStep::Alignment | SweepStep::Scale | SweepStep::ReferenceLength
+                | SweepStep::NewLength | SweepStep::Twist
+        )
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        matches!(self.step, SweepStep::PickPath | SweepStep::ReferenceLength | SweepStep::NewLength)
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let value = text.trim();
+        if value.is_empty() {
+            return None;
+        }
+        let keyword = value.to_ascii_uppercase();
+        match self.step {
+            SweepStep::PickProfiles if "MODE".starts_with(&keyword) => {
+                self.step = SweepStep::Mode;
+            }
+            SweepStep::Mode => {
+                if "SOLID".starts_with(&keyword) {
+                    self.mode = ExtrudeMode::Solid;
+                } else if "SURFACE".starts_with(&keyword) {
+                    self.mode = ExtrudeMode::Surface;
+                } else {
+                    return Some(CmdResult::NeedPoint);
+                }
+                self.step = SweepStep::PickProfiles;
+            }
+            SweepStep::PickPath => {
+                self.step = if "ALIGNMENT".starts_with(&keyword) {
+                    SweepStep::Alignment
+                } else if "BASE".starts_with(&keyword) || "BASE POINT".starts_with(&keyword) {
+                    SweepStep::BasePoint
+                } else if "SCALE".starts_with(&keyword) {
+                    SweepStep::Scale
+                } else if "TWIST".starts_with(&keyword) {
+                    SweepStep::Twist
+                } else {
+                    // Unconsumed text can be an object handle from automation.
+                    return None;
+                };
+            }
+            SweepStep::Alignment => {
+                if "YES".starts_with(&keyword) {
+                    self.options.align = true;
+                } else if "NO".starts_with(&keyword) {
+                    self.options.align = false;
+                } else {
+                    return Some(CmdResult::NeedPoint);
+                }
+                self.step = SweepStep::PickPath;
+            }
+            SweepStep::Scale => {
+                if "REFERENCE".starts_with(&keyword) {
+                    self.reference_start = None;
+                    self.new_length_start = None;
+                    self.step = SweepStep::ReferenceLength;
+                } else if let Ok(scale) = value.parse::<f64>() {
+                    self.set_scale(scale);
+                }
+            }
+            SweepStep::ReferenceLength => {
+                if let Some(length) = crate::entities::common::parse_typed_length(value) {
+                    self.set_reference_length(length);
+                } else {
+                    return None;
+                }
+            }
+            SweepStep::NewLength => {
+                if "POINTS".starts_with(&keyword) {
+                    self.step = SweepStep::NewLengthStart;
+                } else if let Some(length) = crate::entities::common::parse_typed_length(value) {
+                    self.set_scale(length / self.reference_length);
+                } else {
+                    return None;
+                }
+            }
+            SweepStep::Twist => {
+                if "BANK".starts_with(&keyword) {
+                    self.options.bank = true;
+                    self.step = SweepStep::PickPath;
+                } else if let Some(angle) = crate::entities::common::parse_angle(value) {
+                    if angle.is_finite() {
+                        self.options.twist_angle = angle;
+                        self.options.bank = false;
+                        self.step = SweepStep::PickPath;
+                    }
+                }
+            }
+            _ => return None,
+        }
+        Some(CmdResult::NeedPoint)
+    }
+
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        match self.step {
+            SweepStep::PickProfiles if !self.profiles.is_empty() => {
+                self.step = SweepStep::PickPath;
+            }
+            SweepStep::Mode => self.step = SweepStep::PickProfiles,
+            SweepStep::Alignment | SweepStep::Scale | SweepStep::Twist
+                | SweepStep::NewLength => self.step = SweepStep::PickPath,
+            SweepStep::ReferenceLength => self.step = SweepStep::NewLength,
+            _ => return CmdResult::Cancel,
+        }
+        CmdResult::NeedPoint
+    }
+
+    fn is_selection_gathering(&self) -> bool {
+        self.step == SweepStep::PickProfiles
+    }
+
+    fn selection_forces_add(&self) -> bool {
+        self.step == SweepStep::PickProfiles
+    }
+
+    fn inject_selection_entities(&mut self, entities: Vec<SelectionEntity>) {
+        if self.step == SweepStep::PickProfiles {
+            self.set_profiles(entities.into_iter().map(|entry| (entry.handle, entry.entity)).collect());
+        }
+    }
+
+    fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn inject_before_entity_pick(&self) -> bool {
+        self.step == SweepStep::PickPath
+    }
+
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        if self.step == SweepStep::PickPath {
+            self.injected_path = Some(entity);
+        }
+    }
+
+    fn wants_hover_entity(&self, handle: Handle) -> bool {
+        self.step == SweepStep::PickPath
+            && !handle.is_null()
+            && !self.contains_profile(handle)
+            && self.hover_path.as_ref().is_none_or(|(hovered, _)| *hovered != handle)
+    }
+
+    fn inject_hover_entity(&mut self, handle: Handle, entity: EntityType) {
+        self.hover_path = Some((handle, entity));
+        self.preview_key = None;
+    }
+
+    fn on_hover_entity(&mut self, handle: Handle, _point: DVec3) -> Vec<WireModel> {
+        if self.step != SweepStep::PickPath || handle.is_null() || self.contains_profile(handle) {
+            return Vec::new();
+        }
+        let key = (handle, self.mode, self.options);
+        if self.preview_key == Some(key) {
+            return self.preview_cache.clone();
+        }
+        self.preview_cache.clear();
+        let Some((hovered, path)) = self.hover_path.as_ref() else {
+            return Vec::new();
+        };
+        if *hovered != handle {
+            return Vec::new();
+        }
+        self.preview_key = Some(key);
+        if !crate::scene::model::sweep_model::is_sweep_path(path) {
+            return Vec::new();
+        }
+        let Some(options) = self.selection_options() else {
+            return Vec::new();
+        };
+        self.preview_cache = self.profiles.iter().flat_map(|(_, profile)| {
+            crate::scene::model::sweep_model::swept_with_options(profile, path, self.mode, options)
+                .map(|body| preview_body_wires(&body, self.color, self.isolines))
+                .unwrap_or_default()
+        }).collect();
+        self.preview_cache.clone()
     }
 }
 

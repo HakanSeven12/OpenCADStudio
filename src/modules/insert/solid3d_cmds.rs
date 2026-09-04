@@ -6,8 +6,8 @@ use acadrust::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
-    CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, SelectionEntity, SweepOptions,
-    WorkingPlane,
+    CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, LoftOptions,
+    LoftSectionSelection, SelectionEntity, SweepOptions, WorkingPlane,
 };
 use crate::scene::WireModel;
 use crate::t;
@@ -1606,15 +1606,400 @@ impl CadCommand for SweepCommand {
 // ── LOFT command ───────────────────────────────────────────────────────────
 
 pub struct LoftCommand {
-    profiles: Vec<acadrust::Handle>,
+    state: LoftState,
+    undo: Vec<LoftState>,
+    available: Vec<(Handle, EntityType)>,
+    injected_entity: Option<EntityType>,
+    entity_revision: u64,
+    preview_key: Option<LoftPreviewKey>,
+    preview_cache: Vec<WireModel>,
+    preview_error: Option<String>,
+    notice: Option<String>,
+    isolines: usize,
     color: [f32; 4],
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoftStep {
+    Sections,
+    Join,
+    Point,
+    Mode,
+    Options,
+    Guides,
+    Path,
+    Settings,
+    Normals,
+    StartDraft,
+    EndDraft,
+    StartMagnitude,
+    EndMagnitude,
+    StartContinuity,
+    EndContinuity,
+    StartBulge,
+    EndBulge,
+    Closed,
+    AlignDirection,
+}
+
+#[derive(Clone)]
+struct LoftState {
+    step: LoftStep,
+    return_step: LoftStep,
+    sections: Vec<LoftSectionSelection>,
+    join: Vec<Handle>,
+    guides: Vec<Handle>,
+    path: Option<Handle>,
+    mode: ExtrudeMode,
+    options: LoftOptions,
+}
+
+#[derive(Clone, PartialEq)]
+struct LoftPreviewKey {
+    sections: Vec<LoftSectionSelection>,
+    guides: Vec<Handle>,
+    path: Option<Handle>,
+    mode: ExtrudeMode,
+    options: LoftOptions,
+    entity_revision: u64,
+}
+
 impl LoftCommand {
-    pub fn new(color: [f32; 4]) -> Self {
-        Self {
-            profiles: Vec::new(),
+    pub fn new(
+        color: [f32; 4],
+        isolines: usize,
+        mode: ExtrudeMode,
+        seed: Vec<(Handle, EntityType)>,
+        available: Vec<(Handle, EntityType)>,
+    ) -> Self {
+        let mut command = Self {
+            state: LoftState {
+                step: LoftStep::Sections,
+                return_step: LoftStep::Sections,
+                sections: Vec::new(),
+                join: Vec::new(),
+                guides: Vec::new(),
+                path: None,
+                mode,
+                options: LoftOptions::default(),
+            },
+            undo: Vec::new(),
+            available,
+            injected_entity: None,
+            entity_revision: 0,
+            preview_key: None,
+            preview_cache: Vec::new(),
+            preview_error: None,
+            notice: None,
+            isolines,
             color,
+        };
+        // Preserve supplied selection order; a loft is not an unordered set.
+        for (handle, entity) in seed {
+            if !handle.is_null()
+                && !command.contains_section(handle)
+                && crate::scene::model::loft_command_model::is_section(&entity)
+            {
+                command.store_entity(handle, entity);
+                command.state.sections.push(LoftSectionSelection::Entity(handle));
+            }
+        }
+        let invalid_point = command.state.sections.iter().enumerate().find_map(|(index, section)| {
+            (command.is_point_section(section)
+                && ((index > 0 && index + 1 < command.state.sections.len())
+                    || (index > 0 && command.is_point_section(&command.state.sections[index - 1]))))
+                .then_some(index)
+        });
+        if let Some(index) = invalid_point {
+            command.state.sections.truncate(index);
+            command.notice = Some(t!("Point cross-sections are allowed only at the first or last end, with a curve between point ends.").into_owned());
+        } else if command.state.sections.len() >= 2 {
+            command.state.step = LoftStep::Options;
+        }
+        command
+    }
+
+    fn store_entity(&mut self, handle: Handle, entity: EntityType) {
+        if let Some((_, stored)) = self.available.iter_mut().find(|(id, _)| *id == handle) {
+            *stored = entity;
+        } else {
+            self.available.push((handle, entity));
+        }
+        self.entity_revision = self.entity_revision.wrapping_add(1);
+    }
+
+    fn contains_section(&self, handle: Handle) -> bool {
+        self.state.sections.iter().any(|section| match section {
+            LoftSectionSelection::Entity(id) => *id == handle,
+            LoftSectionSelection::Join(handles) => handles.contains(&handle),
+            LoftSectionSelection::Point(_) => false,
+        })
+    }
+
+    fn is_point_section(&self, section: &LoftSectionSelection) -> bool {
+        match section {
+            LoftSectionSelection::Point(_) => true,
+            LoftSectionSelection::Entity(handle) => self.available.iter().any(|(id, entity)| {
+                id == handle && matches!(entity, EntityType::Point(_))
+            }),
+            LoftSectionSelection::Join(_) => false,
+        }
+    }
+
+    fn point_ends(&self) -> (bool, bool) {
+        (
+            self.state.sections.first().is_some_and(|section| self.is_point_section(section)),
+            self.state.sections.last().is_some_and(|section| self.is_point_section(section)),
+        )
+    }
+
+    fn point_setting_next(&self, step: LoftStep) -> LoftStep {
+        match step {
+            LoftStep::StartContinuity if self.point_ends().1 => LoftStep::EndContinuity,
+            LoftStep::StartBulge if self.point_ends().1 => LoftStep::EndBulge,
+            _ => LoftStep::Options,
+        }
+    }
+
+    fn remember(&mut self) {
+        self.undo.push(self.state.clone());
+        self.notice = None;
+    }
+
+    fn enter_step(&mut self, step: LoftStep) {
+        self.remember();
+        self.state.step = step;
+    }
+
+    fn invalid(&mut self, message: String) -> CmdResult {
+        self.notice = Some(message);
+        CmdResult::NeedPoint
+    }
+
+    fn can_close(&self) -> bool {
+        self.state.sections.len() >= 3
+            && !self.state.sections.iter().any(|section| self.is_point_section(section))
+    }
+
+    fn key(&self) -> LoftPreviewKey {
+        LoftPreviewKey {
+            sections: self.state.sections.clone(),
+            guides: self.state.guides.clone(),
+            path: self.state.path,
+            mode: self.state.mode,
+            options: self.state.options,
+            entity_revision: self.entity_revision,
+        }
+    }
+
+    fn cached_preview(&mut self, key: LoftPreviewKey) -> Vec<WireModel> {
+        if self.preview_key.as_ref() == Some(&key) {
+            return self.preview_cache.clone();
+        }
+        self.preview_cache.clear();
+        self.preview_error = None;
+        if key.sections.len() >= 2 {
+            match crate::scene::model::loft_command_model::build_body(
+                &key.sections,
+                &key.guides,
+                key.path,
+                &self.available,
+                key.mode,
+                key.options,
+            ) {
+                Ok(body) => {
+                    // Only edges/isolines: do not triangulate faces on mouse movement.
+                    self.preview_cache = preview_body_wires(&body, self.color, self.isolines);
+                }
+                Err(error) => self.preview_error = Some(error),
+            }
+        }
+        self.preview_key = Some(key);
+        self.preview_cache.clone()
+    }
+
+    fn finish(&mut self) -> CmdResult {
+        if self.state.sections.len() < 2 {
+            return self.invalid(t!("LOFT requires at least two cross-sections.").into_owned());
+        }
+        if self.state.sections.iter().enumerate().any(|(index, section)| {
+            self.is_point_section(section)
+                && ((index > 0 && index + 1 < self.state.sections.len())
+                    || (index > 0 && self.is_point_section(&self.state.sections[index - 1])))
+        }) {
+            return self.invalid(t!("Point cross-sections are allowed only at the first or last end, with a curve between point ends.").into_owned());
+        }
+        if self.state.options.closed && !self.can_close() {
+            return self.invalid(t!("A closed loft requires at least three curve cross-sections and no point ends.").into_owned());
+        }
+        let key = self.key();
+        self.cached_preview(key);
+        if let Some(error) = self.preview_error.clone() {
+            return self.invalid(error);
+        }
+        CmdResult::LoftEntities {
+            sections: self.state.sections.clone(),
+            guides: self.state.guides.clone(),
+            path: self.state.path,
+            mode: self.state.mode,
+            options: self.state.options,
+            color: self.color,
+        }
+    }
+
+    fn undo_selection(&mut self) -> CmdResult {
+        if let Some(state) = self.undo.pop() {
+            self.state = state;
+        } else if !self.state.sections.is_empty() {
+            self.state.sections.pop();
+            self.state.step = LoftStep::Sections;
+            self.state.options.closed = false;
+        }
+        self.notice = None;
+        CmdResult::NeedPoint
+    }
+
+    fn add_section(&mut self, handle: Handle) -> CmdResult {
+        if self.state.sections.len() >= 2 && self.point_ends().1 {
+            return self.invalid(t!("A point must remain the last cross-section; use Undo to change the end.").into_owned());
+        }
+        if self.contains_section(handle) {
+            return self.invalid(t!("That cross-section is already selected.").into_owned());
+        }
+        if self.available.iter().find(|(id, _)| *id == handle)
+            .is_none_or(|(_, entity)| !crate::scene::model::loft_command_model::is_section(entity))
+        {
+            return self.invalid(t!("Select a supported planar curve or region cross-section.").into_owned());
+        }
+        let section = LoftSectionSelection::Entity(handle);
+        let point = self.is_point_section(&section);
+        if point && self.point_ends().1 {
+            return self.invalid(t!("Add a curve cross-section between point ends.").into_owned());
+        }
+        self.remember();
+        self.state.sections.push(section);
+        if point {
+            self.state.options.closed = false;
+            if self.state.sections.len() >= 2 {
+                self.state.step = LoftStep::Options;
+            }
+        }
+        CmdResult::NeedPoint
+    }
+
+    fn set_numeric_setting(&mut self, text: &str) -> bool {
+        let angle = matches!(self.state.step, LoftStep::StartDraft | LoftStep::EndDraft);
+        let bulge = matches!(self.state.step, LoftStep::StartBulge | LoftStep::EndBulge);
+        let number = if angle {
+            crate::entities::common::parse_angle(text)
+        } else {
+            text.trim().replace(',', ".").parse::<f64>().ok()
+        };
+        let Some(number) = number.filter(|number| number.is_finite()) else {
+            return false;
+        };
+        if (angle && !(0.0..=std::f64::consts::PI).contains(&number))
+            || (!angle && number < 0.0)
+            || (bulge && number < 0.0)
+        {
+            return false;
+        }
+        self.remember();
+        self.state.step = match self.state.step {
+            LoftStep::StartDraft => {
+                self.state.options.start_draft_angle = number;
+                LoftStep::EndDraft
+            }
+            LoftStep::EndDraft => {
+                self.state.options.end_draft_angle = number;
+                LoftStep::Settings
+            }
+            LoftStep::StartMagnitude => {
+                self.state.options.start_magnitude = number;
+                LoftStep::EndMagnitude
+            }
+            LoftStep::EndMagnitude => {
+                self.state.options.end_magnitude = number;
+                LoftStep::Settings
+            }
+            LoftStep::StartBulge => {
+                self.state.options.start_bulge = number;
+                self.point_setting_next(LoftStep::StartBulge)
+            }
+            LoftStep::EndBulge => {
+                self.state.options.end_bulge = number;
+                LoftStep::Options
+            }
+            _ => return false,
+        };
+        true
+    }
+
+    fn keyword(text: &str, choices: &[&str]) -> Option<usize> {
+        let keyword = text.trim().trim_start_matches('_').replace([' ', '-'], "").to_ascii_uppercase();
+        let keyword = match keyword.as_str() {
+            "CROSSSECTIONSONLY" => "CROSSSECTIONS",
+            "BULGEMAGNITUDE" => "BULGE",
+            _ => keyword.as_str(),
+        };
+        if keyword.is_empty() {
+            return None;
+        }
+        if let Some(index) = choices.iter().position(|choice| *choice == keyword) {
+            return Some(index);
+        }
+        let mut matches = choices.iter().enumerate().filter(|(_, choice)| choice.starts_with(keyword));
+        let index = matches.next()?.0;
+        matches.next().is_none().then_some(index)
+    }
+
+    fn option_prompt(&self) -> String {
+        match self.state.step {
+            LoftStep::Sections => format!(
+                "{} ({}):", t!("LOFT  Select cross-sections in order or [Point/Join/Mode/Undo] (Enter to finish)"),
+                self.state.sections.len(),
+            ),
+            LoftStep::Join => format!(
+                "{} ({}):", t!("LOFT  Select connected edges for one cross-section or [Undo] (Enter to finish)"),
+                self.state.join.len(),
+            ),
+            LoftStep::Point => t!("LOFT  Specify point end:").into_owned(),
+            LoftStep::Mode => format!("{} <{}>:", t!("LOFT  Creation mode [Solid/Surface]"),
+                if self.state.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" }),
+            LoftStep::Options => {
+                let (start, end) = self.point_ends();
+                if start || end {
+                    t!("LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude/Mode/Undo] <Cross sections only>:").into_owned()
+                } else {
+                    t!("LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Mode/Undo] <Cross sections only>:").into_owned()
+                }
+            }
+            LoftStep::Guides => format!("{} ({}):", t!("LOFT  Select guide curves or [Undo] (Enter to finish)"), self.state.guides.len()),
+            LoftStep::Path => t!("LOFT  Select path or [Undo]:").into_owned(),
+            LoftStep::Settings => {
+                let mut choices = vec![t!("Normals").into_owned()];
+                if self.state.options.normals == 6 {
+                    choices.push(t!("Draft angles").into_owned());
+                    choices.push(t!("Magnitudes").into_owned());
+                }
+                if self.can_close() {
+                    choices.push(t!("Closed").into_owned());
+                }
+                choices.push(t!("Align direction").into_owned());
+                choices.push(t!("Done").into_owned());
+                format!("{} [{}]:", t!("LOFT  Settings"), choices.join("/"))
+            }
+            LoftStep::Normals => t!("LOFT  Surface normals [Ruled/Smooth/First normal/Last normal/Ends normal/All normal/Use draft angles]:").into_owned(),
+            LoftStep::StartDraft => format!("{} <{}>:", t!("LOFT  Start draft angle"), crate::entities::common::format_angle(self.state.options.start_draft_angle)),
+            LoftStep::EndDraft => format!("{} <{}>:", t!("LOFT  End draft angle"), crate::entities::common::format_angle(self.state.options.end_draft_angle)),
+            LoftStep::StartMagnitude => format!("{} <{}>:", t!("LOFT  Start magnitude"), self.state.options.start_magnitude),
+            LoftStep::EndMagnitude => format!("{} <{}>:", t!("LOFT  End magnitude"), self.state.options.end_magnitude),
+            LoftStep::StartContinuity => format!("{} <G{}>:", t!("LOFT  Start point continuity [G0/G1]"), self.state.options.start_continuity),
+            LoftStep::EndContinuity => format!("{} <G{}>:", t!("LOFT  End point continuity [G0/G1]"), self.state.options.end_continuity),
+            LoftStep::StartBulge => format!("{} <{:.4}>:", t!("LOFT  Start point bulge magnitude"), self.state.options.start_bulge),
+            LoftStep::EndBulge => format!("{} <{:.4}>:", t!("LOFT  End point bulge magnitude"), self.state.options.end_bulge),
+            LoftStep::Closed => format!("{} <{}>:", t!("LOFT  Closed [Yes/No]"), if self.state.options.closed { "Yes" } else { "No" }),
+            LoftStep::AlignDirection => format!("{} <{}>:", t!("LOFT  Align cross-section directions [Yes/No]"), if self.state.options.align_direction { "Yes" } else { "No" }),
         }
     }
 }
@@ -1624,47 +2009,331 @@ impl CadCommand for LoftCommand {
         "LOFT"
     }
     fn prompt(&self) -> String {
-        if self.profiles.is_empty() {
-            t!("LOFT  Select first cross-section:").into_owned()
-        } else {
-            t!(
-                "LOFT  Select next cross-section (%{count} selected, Enter to finish):",
-                count = self.profiles.len()
-            )
-            .into_owned()
+        let prompt = self.option_prompt();
+        match &self.notice {
+            Some(notice) => format!("{notice}\n{prompt}"),
+            None => prompt,
         }
+    }
+    fn options(&self) -> Vec<CmdOption> {
+        let mut options = match self.state.step {
+            LoftStep::Sections => vec![CmdOption::new("Point", "POINT"), CmdOption::new("Join", "JOIN"), CmdOption::new("Mode", "MODE"), CmdOption::enter("Done")],
+            LoftStep::Join | LoftStep::Guides => vec![CmdOption::enter("Done")],
+            LoftStep::Mode => vec![CmdOption::new("Solid", "SOLID"), CmdOption::new("Surface", "SURFACE")],
+            LoftStep::Options => {
+                let mut choices = vec![CmdOption::new("Guides", "GUIDES"), CmdOption::new("Path", "PATH"), CmdOption::new("Cross sections only", "CROSSSECTIONS"), CmdOption::new("Settings", "SETTINGS")];
+                let (start, end) = self.point_ends();
+                if start || end {
+                    choices.push(CmdOption::new("Continuity", "CONTINUITY"));
+                    choices.push(CmdOption::new("Bulge magnitude", "BULGE"));
+                }
+                choices.push(CmdOption::new("Mode", "MODE"));
+                choices
+            }
+            LoftStep::Settings => {
+                let mut choices = vec![CmdOption::new("Normals", "NORMALS")];
+                if self.state.options.normals == 6 {
+                    choices.push(CmdOption::new("Draft angles", "DRAFTANGLES"));
+                    choices.push(CmdOption::new("Magnitudes", "MAGNITUDES"));
+                }
+                if self.can_close() {
+                    choices.push(CmdOption::new("Closed", "CLOSED"));
+                }
+                choices.push(CmdOption::new("Align direction", "ALIGNDIRECTION"));
+                choices.push(CmdOption::enter("Done"));
+                choices
+            }
+            LoftStep::Normals => vec![
+                CmdOption::new("Ruled", "RULED"), CmdOption::new("Smooth", "SMOOTH"),
+                CmdOption::new("First normal", "FIRSTNORMAL"), CmdOption::new("Last normal", "LASTNORMAL"),
+                CmdOption::new("Ends normal", "ENDSNORMAL"), CmdOption::new("All normal", "ALLNORMAL"),
+                CmdOption::new("Use draft angles", "USEDRAFTANGLES"),
+            ],
+            LoftStep::Closed | LoftStep::AlignDirection => vec![CmdOption::new("Yes", "YES"), CmdOption::new("No", "NO")],
+            LoftStep::StartContinuity | LoftStep::EndContinuity => vec![CmdOption::new("G0", "G0"), CmdOption::new("G1", "G1")],
+            _ => Vec::new(),
+        };
+        options.push(CmdOption::new("Undo", "UNDO"));
+        options
     }
     fn needs_entity_pick(&self) -> bool {
-        true
+        matches!(self.state.step, LoftStep::Sections | LoftStep::Join | LoftStep::Guides | LoftStep::Path)
     }
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
-        if handle.is_null() {
+    fn entity_pick_highlights_hover(&self) -> bool {
+        self.needs_entity_pick()
+    }
+    fn inject_before_entity_pick(&self) -> bool {
+        self.needs_entity_pick()
+    }
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.injected_entity = Some(entity);
+    }
+    fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
+        if !self.needs_entity_pick() || handle.is_null() {
+            self.injected_entity = None;
             return CmdResult::NeedPoint;
         }
-        // Avoid duplicate picks.
-        if !self.profiles.contains(&handle) {
-            self.profiles.push(handle);
+        if let Some(entity) = self.injected_entity.take() {
+            self.store_entity(handle, entity);
         }
-        CmdResult::NeedPoint
-    }
-    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        if self.state.step == LoftStep::Sections {
+            return self.add_section(handle);
+        }
+        if self.contains_section(handle) {
+            return self.invalid(t!("A cross-section cannot also be a guide, path, or joined edge.").into_owned());
+        }
+        if self.available.iter().find(|(id, _)| *id == handle)
+            .is_none_or(|(_, entity)| !crate::scene::model::loft_command_model::is_guide_or_path(entity))
+        {
+            return self.invalid(t!("Select a supported guide or path curve.").into_owned());
+        }
+        match self.state.step {
+            LoftStep::Join => {
+                if self.state.join.contains(&handle) {
+                    return self.invalid(t!("That edge is already selected.").into_owned());
+                }
+                self.remember();
+                self.state.join.push(handle);
+            }
+            LoftStep::Guides => {
+                if self.state.guides.contains(&handle) {
+                    return self.invalid(t!("That guide is already selected.").into_owned());
+                }
+                self.remember();
+                self.state.guides.push(handle);
+            }
+            LoftStep::Path => {
+                self.remember();
+                self.state.path = Some(handle);
+                self.state.guides.clear();
+                return self.finish();
+            }
+            _ => {}
+        }
         CmdResult::NeedPoint
     }
     fn wants_text_input(&self) -> bool {
-        self.profiles.len() >= 2
+        true
     }
-    fn on_text_input(&mut self, _text: &str) -> Option<CmdResult> {
-        None
+    fn point_step_accepts_keywords(&self) -> bool {
+        self.state.step == LoftStep::Point
     }
-    fn on_enter(&mut self) -> CmdResult {
-        if self.profiles.len() < 2 {
-            CmdResult::Cancel
-        } else {
-            CmdResult::LoftEntities {
-                handles: self.profiles.clone(),
-                color: self.color,
+    fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if self.state.step != LoftStep::Point || !point.is_finite() {
+            return CmdResult::NeedPoint;
+        }
+        if self.point_ends().1 {
+            return self.invalid(t!("Add a curve cross-section between point ends.").into_owned());
+        }
+        self.remember();
+        self.state.sections.push(LoftSectionSelection::Point(point));
+        self.state.options.closed = false;
+        self.state.step = if self.state.sections.len() >= 2 { LoftStep::Options } else { LoftStep::Sections };
+        CmdResult::NeedPoint
+    }
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if text.trim().is_empty() {
+            return Some(self.on_enter());
+        }
+        if Self::keyword(text, &["UNDO"]).is_some() {
+            return Some(self.undo_selection());
+        }
+        match self.state.step {
+            LoftStep::Sections => match Self::keyword(text, &["POINT", "JOIN", "MODE"]) {
+                Some(0) => {
+                    if self.point_ends().1 {
+                        return Some(self.invalid(t!("Select a curve cross-section before another point end.").into_owned()));
+                    }
+                    self.enter_step(LoftStep::Point);
+                }
+                Some(1) => {
+                    if self.state.sections.len() >= 2 && self.point_ends().1 {
+                        return Some(self.invalid(t!("A point must remain the last cross-section; use Undo to change the end.").into_owned()));
+                    }
+                    self.enter_step(LoftStep::Join);
+                    self.state.join.clear();
+                }
+                Some(2) => {
+                    self.enter_step(LoftStep::Mode);
+                    self.state.return_step = LoftStep::Sections;
+                }
+                _ => return Some(self.invalid(t!("Select a cross-section or enter Point, Join, Mode, or Undo.").into_owned())),
+            },
+            LoftStep::Mode => match Self::keyword(text, &["SOLID", "SURFACE"]) {
+                Some(mode) => {
+                    self.remember();
+                    self.state.mode = if mode == 0 { ExtrudeMode::Solid } else { ExtrudeMode::Surface };
+                    self.state.step = self.state.return_step;
+                }
+                _ => return Some(self.invalid(t!("Enter Solid or Surface.").into_owned())),
+            },
+            LoftStep::Options => match Self::keyword(text, &["GUIDES", "PATH", "CROSSSECTIONS", "SETTINGS", "MODE", "CONTINUITY", "BULGE"]) {
+                Some(0) => {
+                    self.enter_step(LoftStep::Guides);
+                    self.state.path = None;
+                }
+                Some(1) => {
+                    self.enter_step(LoftStep::Path);
+                    self.state.guides.clear();
+                }
+                Some(2) => {
+                    self.remember();
+                    self.state.guides.clear();
+                    self.state.path = None;
+                    return Some(self.finish());
+                }
+                Some(3) => self.enter_step(LoftStep::Settings),
+                Some(4) => {
+                    self.enter_step(LoftStep::Mode);
+                    self.state.return_step = LoftStep::Options;
+                }
+                Some(5) | Some(6) if !self.point_ends().0 && !self.point_ends().1 => {
+                    return Some(self.invalid(t!("Continuity and bulge magnitude require a point cross-section at an end.").into_owned()));
+                }
+                Some(5) => self.enter_step(if self.point_ends().0 { LoftStep::StartContinuity } else { LoftStep::EndContinuity }),
+                Some(6) => self.enter_step(if self.point_ends().0 { LoftStep::StartBulge } else { LoftStep::EndBulge }),
+                _ => return Some(self.invalid(t!("Enter one of the listed loft options.").into_owned())),
+            },
+            LoftStep::Settings => match Self::keyword(text, &["NORMALS", "DRAFTANGLES", "MAGNITUDES", "CLOSED", "ALIGNDIRECTION", "DONE"]) {
+                Some(0) => self.enter_step(LoftStep::Normals),
+                Some(1) | Some(2) if self.state.options.normals != 6 => {
+                    return Some(self.invalid(t!("Choose Use draft angles under Normals before editing draft angles or magnitudes.").into_owned()));
+                }
+                Some(1) => self.enter_step(LoftStep::StartDraft),
+                Some(2) => self.enter_step(LoftStep::StartMagnitude),
+                Some(3) if self.can_close() => self.enter_step(LoftStep::Closed),
+                Some(3) => return Some(self.invalid(t!("Closed is available for at least three curve cross-sections without point ends.").into_owned())),
+                Some(4) => self.enter_step(LoftStep::AlignDirection),
+                Some(5) => self.enter_step(LoftStep::Options),
+                _ => return Some(self.invalid(t!("Enter a listed loft setting.").into_owned())),
+            },
+            LoftStep::Normals => {
+                let selected = Self::keyword(text, &["RULED", "SMOOTH", "FIRSTNORMAL", "LASTNORMAL", "ENDSNORMAL", "ALLNORMAL", "USEDRAFTANGLES"])
+                    .or_else(|| text.trim().parse::<usize>().ok().filter(|value| *value <= 6));
+                let Some(selected) = selected else {
+                    return Some(self.invalid(t!("Select one of the seven surface normal options.").into_owned()));
+                };
+                self.remember();
+                self.state.options.normals = selected as i32;
+                self.state.step = LoftStep::Settings;
+            }
+            LoftStep::StartDraft | LoftStep::EndDraft | LoftStep::StartMagnitude | LoftStep::EndMagnitude => {
+                if !self.set_numeric_setting(text) {
+                    return Some(self.invalid(t!("Enter a finite draft angle from 0 to 180 degrees or a non-negative magnitude.").into_owned()));
+                }
+            }
+            LoftStep::StartContinuity | LoftStep::EndContinuity => {
+                let continuity = match text.trim().trim_start_matches('_').to_ascii_uppercase().as_str() {
+                    "G0" => 0,
+                    "G1" => 1,
+                    _ => return Some(self.invalid(t!("Enter G0 or G1.").into_owned())),
+                };
+                let step = self.state.step;
+                self.remember();
+                if step == LoftStep::StartContinuity {
+                    self.state.options.start_continuity = continuity;
+                } else {
+                    self.state.options.end_continuity = continuity;
+                }
+                self.state.step = self.point_setting_next(step);
+            }
+            LoftStep::StartBulge | LoftStep::EndBulge => {
+                if !self.set_numeric_setting(text) {
+                    return Some(self.invalid(t!("Enter a finite bulge magnitude greater than zero.").into_owned()));
+                }
+            }
+            LoftStep::Closed | LoftStep::AlignDirection => {
+                let Some(selected) = Self::keyword(text, &["YES", "NO"]) else {
+                    return Some(self.invalid(t!("Enter Yes or No.").into_owned()));
+                };
+                if self.state.step == LoftStep::Closed && selected == 0 && !self.can_close() {
+                    return Some(self.invalid(t!("A closed loft requires at least three curve cross-sections and no point ends.").into_owned()));
+                }
+                self.remember();
+                if self.state.step == LoftStep::Closed {
+                    self.state.options.closed = selected == 0;
+                } else {
+                    self.state.options.align_direction = selected == 0;
+                }
+                self.state.step = LoftStep::Settings;
+            }
+            LoftStep::Point => return None,
+            LoftStep::Join | LoftStep::Guides | LoftStep::Path => {
+                return Some(self.invalid(t!("Select a curve or use Undo.").into_owned()));
             }
         }
+        Some(CmdResult::NeedPoint)
+    }
+    fn on_enter(&mut self) -> CmdResult {
+        match self.state.step {
+            LoftStep::Sections if self.state.sections.len() >= 2 => self.enter_step(LoftStep::Options),
+            LoftStep::Sections => return self.invalid(t!("LOFT requires at least two cross-sections; select another section or a point end.").into_owned()),
+            LoftStep::Join if !self.state.join.is_empty() => {
+                self.remember();
+                self.state.sections.push(LoftSectionSelection::Join(std::mem::take(&mut self.state.join)));
+                self.state.step = LoftStep::Sections;
+            }
+            LoftStep::Join => return self.invalid(t!("Select connected edges for the cross-section.").into_owned()),
+            LoftStep::Options => return self.finish(),
+            LoftStep::Guides if !self.state.guides.is_empty() => return self.finish(),
+            LoftStep::Guides => return self.invalid(t!("Select at least one guide curve.").into_owned()),
+            LoftStep::Mode => self.enter_step(self.state.return_step),
+            LoftStep::Settings => self.enter_step(LoftStep::Options),
+            LoftStep::Normals | LoftStep::Closed | LoftStep::AlignDirection | LoftStep::EndDraft | LoftStep::EndMagnitude => self.enter_step(LoftStep::Settings),
+            LoftStep::StartDraft => self.enter_step(LoftStep::EndDraft),
+            LoftStep::StartMagnitude => self.enter_step(LoftStep::EndMagnitude),
+            LoftStep::StartContinuity | LoftStep::EndContinuity | LoftStep::StartBulge | LoftStep::EndBulge => self.enter_step(self.point_setting_next(self.state.step)),
+            LoftStep::Path | LoftStep::Point => return self.invalid(t!("Specify the requested path or point, or use Undo.").into_owned()),
+        }
+        CmdResult::NeedPoint
+    }
+    fn on_undo_step(&mut self) -> Option<CmdResult> {
+        Some(self.undo_selection())
+    }
+    fn wants_hover_entity(&self, handle: Handle) -> bool {
+        self.needs_entity_pick() && !handle.is_null()
+            && !self.available.iter().any(|(id, _)| *id == handle)
+    }
+    fn inject_hover_entity(&mut self, handle: Handle, entity: EntityType) {
+        self.store_entity(handle, entity);
+    }
+    fn on_hover_entity(&mut self, handle: Handle, _point: DVec3) -> Vec<WireModel> {
+        let mut key = self.key();
+        if !handle.is_null() && !self.contains_section(handle) {
+            if let Some((_, entity)) = self.available.iter().find(|(id, _)| *id == handle) {
+                match self.state.step {
+                    LoftStep::Sections if crate::scene::model::loft_command_model::is_section(entity) => {
+                        let section = LoftSectionSelection::Entity(handle);
+                        let point = self.is_point_section(&section);
+                        if !(self.point_ends().1 && (point || self.state.sections.len() >= 2)) {
+                            key.sections.push(section);
+                            if point {
+                                key.options.closed = false;
+                            }
+                        }
+                    }
+                    LoftStep::Guides if !key.guides.contains(&handle)
+                        && crate::scene::model::loft_command_model::is_guide_or_path(entity) => key.guides.push(handle),
+                    LoftStep::Path if crate::scene::model::loft_command_model::is_guide_or_path(entity) => {
+                        key.path = Some(handle);
+                        key.guides.clear();
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.cached_preview(key)
+    }
+    fn on_preview_wires(&mut self, point: DVec3) -> Vec<WireModel> {
+        let mut key = self.key();
+        if self.state.step == LoftStep::Point && point.is_finite()
+            && !key.sections.is_empty()
+            && !self.point_ends().1
+        {
+            key.sections.push(LoftSectionSelection::Point(point));
+            key.options.closed = false;
+        }
+        self.cached_preview(key)
     }
 }
 

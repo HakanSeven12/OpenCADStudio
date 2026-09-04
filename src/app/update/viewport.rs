@@ -3152,6 +3152,19 @@ impl OpenCADStudio {
                 is_added_polyline_vertex(original, current, target.grip_id)
                     .then_some(target.grip_id)
             });
+            // Keep originals available until every history shape has a valid
+            // final display. A rejected rebuild cancels the entire gesture.
+            let history_handles: Vec<_> = self.grip_preview_handles.iter().copied()
+                .filter(|handle| self.tabs[i].scene.document.solid_history_operation(*handle).is_some())
+                .collect();
+            for handle in history_handles {
+                if !self.tabs[i].scene.finalize_solid_history(handle) {
+                    self.cancel_active_grip_edit();
+                    self.command_line.push_error(crate::t!("The edited shape could not be displayed; the original geometry was restored.").as_ref());
+                    self.refresh_properties();
+                    return Task::none();
+                }
+            }
             self.tabs[i].active_grip = None;
             // Commit the grip drag as one undoable group, then put every
             // edited entity back into the resident tessellation.
@@ -3160,9 +3173,6 @@ impl OpenCADStudio {
             let history_originals = std::mem::take(&mut self.grip_history_originals);
             let dirty_before = self.grip_dirty_before.take().unwrap_or(self.tabs[i].dirty);
             if !handles.is_empty() {
-                for &handle in &handles {
-                    let _ = self.tabs[i].scene.finalize_solid_history(handle);
-                }
                 if !originals.is_empty() {
                     self.push_entity_group_history(
                         i,

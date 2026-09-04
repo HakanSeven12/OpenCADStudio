@@ -832,7 +832,13 @@ impl OpenCADStudio {
             "LOFT" => {
                 use crate::modules::insert::solid3d_cmds::LoftCommand;
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
-                let cmd = LoftCommand::new(color);
+                let isolines = self.tabs[i].scene.document.header.isolines.max(0) as usize;
+                let selected = self.tabs[i].scene.selected_handles_in_order().into_iter()
+                    .filter_map(|handle| self.tabs[i].scene.document.get_entity(handle)
+                        .cloned().map(|entity| (handle, entity))).collect();
+                let available = self.tabs[i].scene.document.entities()
+                    .map(|entity| (entity.common().handle, entity.clone())).collect();
+                let cmd = LoftCommand::new(color, isolines, crate::command::ExtrudeMode::Solid, selected, available);
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

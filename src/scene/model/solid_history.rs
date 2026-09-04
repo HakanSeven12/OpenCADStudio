@@ -1,7 +1,7 @@
 use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
     DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
-    SolidHistoryCylinder, SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation,
+    SolidHistoryCylinder, SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
     SolidHistoryPyramid, SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep,
     SolidHistoryTorus,
 };
@@ -76,6 +76,15 @@ pub const PROP_AXIS_DIRECTION_X: &str = "solid_history_axis_direction_x";
 pub const PROP_AXIS_DIRECTION_Y: &str = "solid_history_axis_direction_y";
 pub const PROP_AXIS_DIRECTION_Z: &str = "solid_history_axis_direction_z";
 pub const PROP_PYRAMID_TYPE: &str = "solid_history_pyramid_type";
+pub const PROP_LOFT_TYPE: &str = "solid_history_loft_type";
+pub const PROP_LOFT_SECTION_COUNT: &str = "solid_history_loft_section_count";
+pub const PROP_LOFT_NORMALS: &str = "solid_history_loft_normals";
+pub const PROP_LOFT_START_DRAFT_ANGLE: &str = "solid_history_loft_start_draft_angle";
+pub const PROP_LOFT_END_DRAFT_ANGLE: &str = "solid_history_loft_end_draft_angle";
+pub const PROP_LOFT_START_MAGNITUDE: &str = "solid_history_loft_start_magnitude";
+pub const PROP_LOFT_END_MAGNITUDE: &str = "solid_history_loft_end_magnitude";
+pub const PROP_LOFT_CLOSED: &str = "solid_history_loft_closed";
+pub const PROP_LOFT_PERIODIC: &str = "solid_history_loft_periodic";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
 
@@ -195,6 +204,7 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Torus(_)
                 | SolidHistoryOperation::Pyramid(_)
                 | SolidHistoryOperation::Sweep(_)
+                | SolidHistoryOperation::Loft(_)
                 | SolidHistoryOperation::Extrusion(_)
                 | SolidHistoryOperation::Revolve(_)
         )
@@ -517,6 +527,161 @@ fn sweep_properties(
             ],
         },
     ]
+}
+
+const LOFT_NORMAL_CHOICES: [&str; 7] = [
+    "Ruled",
+    "Smooth",
+    "First normal",
+    "Last normal",
+    "Ends normal",
+    "All normal",
+    "Use draft angles",
+];
+
+fn loft_parameters(value: &SolidHistoryLoft) -> SolidHistoryLoftParameters {
+    value.parameters.clone().unwrap_or_else(|| SolidHistoryLoftParameters {
+        // Older history predates the options extension and rebuilds as ruled.
+        // Displaying or editing it must not silently change it to smooth.
+        normals: 0,
+        ..SolidHistoryLoftParameters::default()
+    })
+}
+
+pub fn loft_section_count(value: &SolidHistoryLoft) -> usize {
+    value.parameters.as_ref()
+        .filter(|parameters| !parameters.section_counts.is_empty())
+        .map_or(value.cross_sections.len(), |parameters| parameters.section_counts.len())
+}
+
+pub fn loft_closed_editable(value: &SolidHistoryLoft) -> bool {
+    loft_section_count(value) >= 3
+        && !value.cross_sections.iter().any(|section| matches!(section, EmbeddedEntity::Point(_)))
+}
+
+fn loft_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryLoft,
+) -> Vec<PropSection> {
+    let parameters = loft_parameters(value);
+    let kind = if parameters.path_entity.is_some() {
+        t!("Loft with path").into_owned()
+    } else if !value.guides.is_empty() {
+        t!("Loft with guides").into_owned()
+    } else {
+        t!("Loft with cross sections only").into_owned()
+    };
+    let mut geometry = vec![
+        Property {
+            label: t!("Solid type").into_owned(),
+            field: PROP_LOFT_TYPE,
+            value: PropValue::ReadOnly(kind),
+        },
+        Property {
+            label: t!("Number of Cross sections").into_owned(),
+            field: PROP_LOFT_SECTION_COUNT,
+            value: PropValue::ReadOnly(loft_section_count(value).to_string()),
+        },
+        Property {
+            label: t!("Surface Normals").into_owned(),
+            field: PROP_LOFT_NORMALS,
+            value: PropValue::Choice {
+                selected: LOFT_NORMAL_CHOICES.get(parameters.normals as usize)
+                    .map_or_else(|| parameters.normals.to_string(), |name| (*name).to_string()),
+                options: LOFT_NORMAL_CHOICES.iter().map(|name| (*name).to_string()).collect(),
+            },
+        },
+    ];
+    if parameters.normals == 6 {
+        geometry.extend([
+            Property {
+                label: t!("Start draft angle").into_owned(),
+                field: PROP_LOFT_START_DRAFT_ANGLE,
+                value: PropValue::EditText(crate::entities::common::format_angle(parameters.start_draft_angle)),
+            },
+            Property {
+                label: t!("End draft angle").into_owned(),
+                field: PROP_LOFT_END_DRAFT_ANGLE,
+                value: PropValue::EditText(crate::entities::common::format_angle(parameters.end_draft_angle)),
+            },
+            Property {
+                label: t!("Start magnitude").into_owned(),
+                field: PROP_LOFT_START_MAGNITUDE,
+                value: PropValue::EditText(parameters.start_magnitude.to_string()),
+            },
+            Property {
+                label: t!("End magnitude").into_owned(),
+                field: PROP_LOFT_END_MAGNITUDE,
+                value: PropValue::EditText(parameters.end_magnitude.to_string()),
+            },
+        ]);
+    }
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(object_show_history, show_history_mode);
+    let show_value = if show_history { "Yes" } else { "No" }.to_string();
+    let closed_value = if parameters.closed { "Yes" } else { "No" }.to_string();
+    let mut sections = vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: geometry,
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("History").into_owned(),
+                    field: PROP_HISTORY,
+                    value: PropValue::Choice {
+                        selected: if record_history { "Record" } else { "None" }.to_string(),
+                        options: vec!["Record".to_string(), "None".to_string()],
+                    },
+                },
+                Property {
+                    label: t!("Show History").into_owned(),
+                    field: PROP_SHOW_HISTORY,
+                    value: if show_history_editable {
+                        PropValue::Choice {
+                            selected: show_value,
+                            options: vec!["Yes".to_string(), "No".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(show_value)
+                    },
+                },
+            ],
+        },
+        PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![
+                Property {
+                    label: t!("Closed").into_owned(),
+                    field: PROP_LOFT_CLOSED,
+                    value: if loft_closed_editable(value) {
+                        PropValue::Choice {
+                            selected: closed_value,
+                            options: vec!["Yes".to_string(), "No".to_string()],
+                        }
+                    } else {
+                        PropValue::ReadOnly(closed_value)
+                    },
+                },
+            ],
+        },
+    ];
+    if parameters.closed {
+        sections[2].props.push(Property {
+            label: t!("Periodic").into_owned(),
+            field: PROP_LOFT_PERIODIC,
+            value: PropValue::Choice {
+                selected: if parameters.periodic { "Yes" } else { "No" }.to_string(),
+                options: vec!["Yes".to_string(), "No".to_string()],
+            },
+        });
+    }
+    sections
 }
 
 fn sweep_path_length(value: &SolidHistorySweep) -> Option<f64> {
@@ -1209,6 +1374,7 @@ pub fn primitive_properties(
         SolidHistoryOperation::Pyramid(value) => pyramid_properties(document, handle, value),
         SolidHistoryOperation::Torus(value) => torus_properties(document, handle, value),
         SolidHistoryOperation::Sweep(value) => sweep_properties(document, handle, value),
+        SolidHistoryOperation::Loft(value) => loft_properties(document, handle, value),
         SolidHistoryOperation::Extrusion(value) => {
             extrusion_properties(document, handle, value)
         }
@@ -1253,6 +1419,13 @@ pub fn is_primitive_property(field: &str) -> bool {
             | PROP_AXIS_DIRECTION_Y
             | PROP_AXIS_DIRECTION_Z
             | PROP_PYRAMID_TYPE
+            | PROP_LOFT_NORMALS
+            | PROP_LOFT_START_DRAFT_ANGLE
+            | PROP_LOFT_END_DRAFT_ANGLE
+            | PROP_LOFT_START_MAGNITUDE
+            | PROP_LOFT_END_MAGNITUDE
+            | PROP_LOFT_CLOSED
+            | PROP_LOFT_PERIODIC
     )
 }
 
@@ -1260,8 +1433,13 @@ pub fn is_history_choice(field: &str) -> bool {
     matches!(field, PROP_HISTORY | PROP_SHOW_HISTORY)
 }
 
+pub fn is_loft_geometry_choice(field: &str) -> bool {
+    matches!(field, PROP_LOFT_NORMALS | PROP_LOFT_CLOSED | PROP_LOFT_PERIODIC)
+}
+
 pub fn is_specialized_property(field: &str) -> bool {
-    matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH)
+    matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH
+        | PROP_LOFT_TYPE | PROP_LOFT_SECTION_COUNT)
         || is_primitive_property(field)
         || is_history_choice(field)
 }
@@ -1688,6 +1866,85 @@ fn apply_sweep_geometry_property(
     }
 }
 
+fn apply_loft_geometry_property(
+    value: &mut SolidHistoryLoft,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    let current = loft_parameters(value);
+    let mut parameters = current.clone();
+    match field {
+        PROP_LOFT_NORMALS => {
+            let Some(index) = LOFT_NORMAL_CHOICES.iter()
+                .position(|name| name.eq_ignore_ascii_case(text.trim()))
+            else {
+                return Some(false);
+            };
+            parameters.normals = index as i32;
+        }
+        PROP_LOFT_START_DRAFT_ANGLE | PROP_LOFT_END_DRAFT_ANGLE => {
+            if parameters.normals != 6 {
+                return Some(false);
+            }
+            let Some(angle) = crate::entities::common::parse_angle(text)
+                .filter(|angle| angle.is_finite() && (0.0..=std::f64::consts::PI).contains(angle))
+            else {
+                return Some(false);
+            };
+            if field == PROP_LOFT_START_DRAFT_ANGLE {
+                parameters.start_draft_angle = angle;
+            } else {
+                parameters.end_draft_angle = angle;
+            }
+        }
+        PROP_LOFT_START_MAGNITUDE | PROP_LOFT_END_MAGNITUDE => {
+            if parameters.normals != 6 {
+                return Some(false);
+            }
+            let Some(magnitude) = text.trim().replace(',', ".").parse::<f64>().ok()
+                .filter(|magnitude| magnitude.is_finite() && *magnitude >= 0.0)
+            else {
+                return Some(false);
+            };
+            if field == PROP_LOFT_START_MAGNITUDE {
+                parameters.start_magnitude = magnitude;
+            } else {
+                parameters.end_magnitude = magnitude;
+            }
+        }
+        PROP_LOFT_CLOSED => {
+            if !loft_closed_editable(value) {
+                return Some(false);
+            }
+            parameters.closed = if text.trim().eq_ignore_ascii_case("Yes") {
+                true
+            } else if text.trim().eq_ignore_ascii_case("No") {
+                false
+            } else {
+                return Some(false);
+            };
+        }
+        PROP_LOFT_PERIODIC => {
+            if !parameters.closed {
+                return Some(false);
+            }
+            parameters.periodic = if text.trim().eq_ignore_ascii_case("Yes") {
+                true
+            } else if text.trim().eq_ignore_ascii_case("No") {
+                false
+            } else {
+                return Some(false);
+            };
+        }
+        _ => return None,
+    }
+    if parameters == current {
+        return Some(false);
+    }
+    value.parameters = Some(parameters);
+    Some(true)
+}
+
 fn apply_torus_position_property(
     value: &mut SolidHistoryTorus,
     field: &str,
@@ -1878,6 +2135,11 @@ pub fn apply_primitive_property(
     }
     if let SolidHistoryOperation::Sweep(sweep_value) = operation {
         if let Some(applied) = apply_sweep_geometry_property(sweep_value, field, value) {
+            return applied;
+        }
+    }
+    if let SolidHistoryOperation::Loft(loft_value) = operation {
+        if let Some(applied) = apply_loft_geometry_property(loft_value, field, value) {
             return applied;
         }
     }
@@ -2186,6 +2448,51 @@ fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
         EmbeddedEntity::XLine(value) => EntityType::XLine(value.clone()),
         EmbeddedEntity::Unknown { .. } => return None,
     })
+}
+
+/// Visible LOFT construction curves, owned by the parent display entity.
+/// Copies are transformed to WCS and never inserted into the document.
+pub fn loft_visible_history_entities(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> Vec<EntityType> {
+    let Some((_, object_show_history, show_history_mode)) = history_flags(document, handle) else {
+        return Vec::new();
+    };
+    if !displayed_history_state(object_show_history, show_history_mode).0 {
+        return Vec::new();
+    }
+    let Some(SolidHistoryOperation::Loft(value)) = document.solid_history_operation(handle) else {
+        return Vec::new();
+    };
+    let Some(parent) = document.get_entity(handle) else {
+        return Vec::new();
+    };
+    let Some(transform) = matrix(value.base.transform) else {
+        return Vec::new();
+    };
+    let columns = transform.to_cols_array_2d();
+    let affine = acadrust::types::Transform::from_matrix(
+        acadrust::types::Matrix4 {
+            m: std::array::from_fn(|row| std::array::from_fn(|column| columns[column][row])),
+        },
+    );
+    value.cross_sections.iter()
+        .chain(&value.guides)
+        .chain(value.parameters.as_ref().and_then(|parameters| parameters.path_entity.as_ref()))
+        .filter_map(|source| {
+            let mut entity = embedded_entity(source)?;
+            entity.apply_transform(&affine);
+            // Construction sources belong to the visible parent's layer and
+            // selection identity, not a deleted source or hidden source layer.
+            let common = entity.common_mut();
+            common.handle = handle;
+            common.owner_handle = parent.common().owner_handle;
+            common.layer = parent.common().layer.clone();
+            common.invisible = parent.common().invisible;
+            Some(entity)
+        })
+        .collect()
 }
 
 fn into_embedded_entity(value: EntityType) -> Option<EmbeddedEntity> {

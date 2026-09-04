@@ -35,8 +35,10 @@ impl super::OpenCADStudio {
         let Some(handle) = self.commit_entity_handle(entity) else {
             return Handle::NULL;
         };
+        let require_complete = matches!(history, SolidHistoryOperation::Loft(_));
         self.tabs[i].scene.create_solid_history(handle, history);
-        if !self.tabs[i].scene.register_solid_model(handle, solid) {
+        if !self.tabs[i].scene.register_solid_model(handle, solid)
+            || (require_complete && self.tabs[i].scene.meshes.get(&handle).is_none_or(|mesh| !mesh.complete)) {
             // A command result is not successful until it has renderable
             // geometry. Roll the new entity back so DELOBJ cannot consume a
             // visible source in exchange for an invisible result.
@@ -69,7 +71,10 @@ impl super::OpenCADStudio {
         let Some(handle) = self.commit_entity_handle(entity) else {
             return Handle::NULL;
         };
-        if !self.tabs[i].scene.register_solid_model(handle, surface) {
+        let require_complete = self.tabs[i].scene.document.get_entity(handle).is_some_and(|entity|
+            matches!(entity, EntityType::Surface(value) if value.kind == acadrust::entities::SurfaceKind::Lofted));
+        if !self.tabs[i].scene.register_solid_model(handle, surface)
+            || (require_complete && self.tabs[i].scene.meshes.get(&handle).is_none_or(|mesh| !mesh.complete)) {
             self.tabs[i].scene.rollback_new_entities(&[handle]);
             return Handle::NULL;
         }

@@ -1165,6 +1165,55 @@ impl Default for SweepOptions {
     }
 }
 
+/// Ordered cross-sections used by LOFT creation, validation and preview.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LoftSectionSelection {
+    Entity(Handle),
+    Point(DVec3),
+    /// Connected source edges forming one exact cross-section.
+    Join(Vec<Handle>),
+}
+
+/// Construction parameters shared by the LOFT command and its history.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LoftOptions {
+    /// Ruled, Smooth, First normal, Last normal, Ends normal, All normal,
+    /// or Use draft angles, respectively.
+    pub normals: i32,
+    pub start_draft_angle: f64,
+    pub end_draft_angle: f64,
+    pub start_magnitude: f64,
+    pub end_magnitude: f64,
+    /// Point-end continuity: G0 (0) or G1 (1).
+    pub start_continuity: i32,
+    pub end_continuity: i32,
+    /// Positive point-end bulge factors; independent of draft magnitudes.
+    pub start_bulge: f64,
+    pub end_bulge: f64,
+    pub closed: bool,
+    pub periodic: bool,
+    pub align_direction: bool,
+}
+
+impl Default for LoftOptions {
+    fn default() -> Self {
+        Self {
+            normals: 1,
+            start_draft_angle: std::f64::consts::FRAC_PI_2,
+            end_draft_angle: std::f64::consts::FRAC_PI_2,
+            start_magnitude: 0.0,
+            end_magnitude: 0.0,
+            start_continuity: 1,
+            end_continuity: 1,
+            start_bulge: 0.5,
+            end_bulge: 0.5,
+            closed: false,
+            periodic: true,
+            align_direction: true,
+        }
+    }
+}
+
 /// Returned by every `CadCommand` method to tell main.rs what to do.
 #[allow(dead_code)]
 pub enum CmdResult {
@@ -1484,9 +1533,13 @@ pub enum CmdResult {
         options: SweepOptions,
         color: [f32; 4],
     },
-    /// Loft through a series of profile entities.
+    /// Loft through ordered cross-sections, with optional guides or a path.
     LoftEntities {
-        handles: Vec<Handle>,
+        sections: Vec<LoftSectionSelection>,
+        guides: Vec<Handle>,
+        path: Option<Handle>,
+        mode: ExtrudeMode,
+        options: LoftOptions,
         color: [f32; 4],
     },
     /// Round or bevel the straight edge nearest `pick` on a solid.

@@ -841,13 +841,29 @@ impl Scene {
         handle: Handle,
         operation: acadrust::objects::SolidHistoryOperation,
     ) -> bool {
-        self.solid_history_preview_wires.remove(&handle);
         let Ok(body) = cadkernel::acis::rebuild_body(&operation) else {
             return false;
         };
         let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
             return false;
         };
+        let loft_surface_data = match (&operation, self.document.get_entity(handle)) {
+            (acadrust::objects::SolidHistoryOperation::Loft(record), Some(EntityType::Surface(_))) => {
+                let EntityType::Surface(surface) = crate::scene::model::loft_command_model::surface_entity(record)
+                    else { return false; };
+                Some(surface.surface_data)
+            }
+            (_, Some(EntityType::Solid3D(_))) => None,
+            _ => return false,
+        };
+        let Some(display) = self.prepare_solid_model_display(handle, &body) else {
+            return false;
+        };
+        if matches!(&operation, acadrust::objects::SolidHistoryOperation::Loft(_))
+            && !display.0.complete
+        {
+            return false;
+        }
         self.record_solid_history_before(handle);
         if self
             .document
@@ -856,12 +872,16 @@ impl Scene {
         {
             return false;
         }
-        let Some(EntityType::Solid3D(entity)) = self.document.get_entity_mut(handle) else {
-            return false;
-        };
-        entity.set_sat_document(&document);
-        self.sync_solid_reference_point(handle);
-        self.register_solid_model(handle, body);
+        match self.document.get_entity_mut(handle) {
+            Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
+            Some(EntityType::Surface(entity)) => {
+                entity.acis_data = acadrust::entities::AcisData::from_sat(&document.to_sat_string());
+                if let Some(data) = loft_surface_data { entity.surface_data = data; }
+            }
+            _ => return false,
+        }
+        self.register_prepared_solid_model(handle, body, display);
+        self.solid_history_preview_wires.remove(&handle);
         true
     }
 
@@ -875,13 +895,28 @@ impl Scene {
         let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
             return false;
         };
-        let Some(EntityType::Solid3D(entity)) = self.document.get_entity_mut(handle) else {
+        let Some(display) = self.prepare_solid_model_display(handle, &body) else {
             return false;
         };
-        entity.set_sat_document(&document);
-        self.sync_solid_reference_point(handle);
+        if matches!(&operation, acadrust::objects::SolidHistoryOperation::Loft(_))
+            && !display.0.complete
+        {
+            return false;
+        }
+        match self.document.get_entity_mut(handle) {
+            Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
+            Some(EntityType::Surface(entity)) => {
+                entity.acis_data = acadrust::entities::AcisData::from_sat(&document.to_sat_string());
+                if let acadrust::objects::SolidHistoryOperation::Loft(record) = &operation {
+                    if let EntityType::Surface(updated) = crate::scene::model::loft_command_model::surface_entity(record) {
+                        entity.surface_data = updated.surface_data;
+                    }
+                }
+            }
+            _ => return false,
+        }
+        self.register_prepared_solid_model(handle, body, display);
         self.solid_history_preview_wires.remove(&handle);
-        self.register_solid_model(handle, body);
         true
     }
 
@@ -900,9 +935,9 @@ impl Scene {
         {
             return false;
         }
-        let Some(EntityType::Solid3D(_)) = self.document.get_entity(handle) else {
+        if !matches!(self.document.get_entity(handle), Some(EntityType::Solid3D(_) | EntityType::Surface(_))) {
             return false;
-        };
+        }
         self.solid_history_preview_wires.insert(
             handle,
             crate::scene::model::solid_model::grip_preview_wires(&body, handle),
@@ -945,12 +980,16 @@ impl Scene {
         value: &str,
     ) -> bool {
         self.record_solid_history_before(handle);
-        crate::scene::model::solid_history::apply_history_choice(
+        let applied = crate::scene::model::solid_history::apply_history_choice(
             &mut self.document,
             handle,
             field,
             value,
-        )
+        );
+        if applied {
+            self.bump_entities(&[(handle, ChangeKind::Modified)]);
+        }
+        applied
     }
 
     fn apply_solid_history_grip(

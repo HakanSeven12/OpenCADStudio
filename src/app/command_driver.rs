@@ -4082,53 +4082,73 @@ impl OpenCADStudio {
             }
 
             // ── LOFT ──────────────────────────────────────────────────────
-            CmdResult::LoftEntities { handles, color: _ } => {
-                if let Some(handle) = handles
-                    .iter()
-                    .find(|handle| self.tabs[i].scene.is_layer_locked(**handle))
-                    .copied()
-                {
-                    self.reject_locked_edit(i, handle);
-                    self.tabs[i].active_cmd = None;
-                    return Task::none();
-                }
+            CmdResult::LoftEntities { sections, guides, path, mode, options, color: _ } => {
+                use crate::command::LoftSectionSelection;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::{solid_history, sweep_model};
-
-                let profiles: Vec<acadrust::EntityType> = handles
-                    .iter()
-                    .filter_map(|handle| self.tabs[i].scene.document.get_entity(*handle).cloned())
-                    .collect();
-                let result = sweep_model::loft_history(&profiles)
-                    .and_then(|history| {
-                        cadkernel::acis::rebuild_body(&history)
-                            .ok()
-                            .map(|solid| (solid, history))
-                    })
-                    .or_else(|| {
-                        sweep_model::lofted(&profiles).map(|solid| {
-                            let history = solid_history::brep_op(&solid);
-                            (solid, history)
-                        })
-                    });
-                if let Some((solid, history)) = result {
-                    let pending = self.begin_undo(i, "LOFT", 1, true);
-                    let created = self.add_solid_model(empty_solid3d(), solid, history);
-                    if !created.is_null() {
-                        self.tabs[i].dirty = true;
-                        self.command_line
-                            .push_output(crate::t!("LOFT: solid created.").as_ref());
-                        if let Some(pd) = pending {
-                            self.commit_undo_delta(i, pd);
-                        }
-                    }
+                use crate::scene::model::loft_command_model;
+                let mut sources = sections.iter().flat_map(|section| match section {
+                    LoftSectionSelection::Entity(handle) => vec![*handle],
+                    LoftSectionSelection::Join(handles) => handles.clone(),
+                    LoftSectionSelection::Point(_) => Vec::new(),
+                }).collect::<Vec<_>>();
+                sources.sort_unstable_by_key(|handle| handle.value());
+                sources.dedup();
+                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let locked = delete_sources && sources.iter().any(|handle| self.tabs[i].scene.is_layer_locked(*handle));
+                let available = sources.iter().chain(guides.iter()).copied().chain(path)
+                    .filter_map(|handle| self.tabs[i].scene.document.get_entity(handle)
+                        .cloned().map(|entity| (handle, entity))).collect::<Vec<_>>();
+                let result = if locked {
+                    Err("LOFT: a source is on a locked layer; disable source deletion or unlock it.".to_string())
                 } else {
-                    self.command_line.push_error(crate::t!("LOFT: select at least two closed profiles.").as_ref());
+                    loft_command_model::record(&sections, &guides, path, &available, mode, options)
+                        .and_then(|record| cadkernel::acis::rebuild_loft_with_options(&record).map(|body| (body, record)))
+                };
+                match result {
+                    Ok((body, record)) => {
+                        let surface = record.parameters.as_ref().is_some_and(|settings| settings.surface);
+                        let dirty_before = self.tabs[i].dirty;
+                        let pending = self.begin_undo(i, "LOFT", 1, true);
+                        let created = if surface {
+                            let handle = self.add_surface_model(loft_command_model::surface_entity(&record), body);
+                            if !handle.is_null() {
+                                self.tabs[i].scene.create_solid_history(handle,
+                                    acadrust::objects::SolidHistoryOperation::Loft(record));
+                            }
+                            handle
+                        } else {
+                            self.add_solid_model(empty_solid3d(), body,
+                                acadrust::objects::SolidHistoryOperation::Loft(record))
+                        };
+                        if created.is_null() {
+                            // The creation helper already removed its provisional
+                            // result. Discard its empty undo recording as well.
+                            self.tabs[i].scene.take_undo_recording();
+                            self.tabs[i].dirty = dirty_before;
+                            self.command_line.push_error(crate::t!("LOFT could not create a complete display. The source sections were preserved.").as_ref());
+                            return Task::none();
+                        } else {
+                            if delete_sources { self.tabs[i].scene.erase_entities(&sources); }
+                            self.tabs[i].scene.deselect_all();
+                            self.tabs[i].scene.select_entity(created, true);
+                            self.tabs[i].dirty = true;
+                            let message = if surface {
+                                crate::t!("LOFT: surface created.")
+                            } else { crate::t!("LOFT: solid created.") };
+                            self.command_line.push_output(message.as_ref());
+                        }
+                        if let Some(pending) = pending { self.commit_undo_delta(i, pending); }
+                    }
+                    Err(error) => {
+                        self.command_line.push_error(&error);
+                        return Task::none();
+                    }
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
+                self.refresh_properties();
             }
 
             CmdResult::SolidEdgeBlend {

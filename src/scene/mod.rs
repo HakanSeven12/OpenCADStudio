@@ -7912,6 +7912,11 @@ impl Scene {
     /// already waiting. A second on an open that is already seconds long reads
     /// very differently from a second-long freeze on a mouse move.
     pub(crate) fn warm_interaction_caches(&self) {
+        // Both indexes on the hover path, not just one. The handle index alone
+        // left `hover-detail ... handles=384.6` on the first hover: the same
+        // stage also builds the entity quadtree, which is keyed on
+        // `geometry_epoch` and equally cold at that point.
+        let _ = self.entity_index();
         let _ = self.interaction_handle_index();
     }
 

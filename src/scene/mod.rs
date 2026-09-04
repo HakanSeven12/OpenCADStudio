@@ -9066,7 +9066,12 @@ impl Scene {
             if let Some((_, ref idx)) = *cache {
                 if let Some(sort_map) = idx.get(&block_handle) {
                     sorted = true;
-                    wires.sort_by_key(|w| {
+                    // `sort_by_cached_key`, not `sort_by_key`: the key parses
+                    // the wire's name out of a `String`, and `sort_by_key` calls
+                    // it O(n log n) times. On the resident set that is ~198 k
+                    // wires parsed eighteen times over — 295 ms on every rebuild,
+                    // including rebuilds where nothing was re-tessellated.
+                    wires.sort_by_cached_key(|w| {
                         let key = Self::handle_from_wire_name(&w.name)
                             .map(|h| h.value())
                             .unwrap_or(u64::MAX);

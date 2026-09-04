@@ -20,7 +20,6 @@
 
 use crate::scene::model::wire_model::WireModel;
 use iced::wgpu;
-use iced::wgpu::util::DeviceExt;
 
 pub(crate) fn planar_solid_faces_view(wire: &WireModel, view_dir: glam::Vec3) -> bool {
     if !wire.fill_is_2d_solid || wire.fill_is_3d {
@@ -187,6 +186,7 @@ impl Face3DGpu {
     ///   legacy planar SOLID interior while keeping other 2-D overlays.
     pub fn from_wires(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         face3d_wires: &[WireModel],
         all_wires: &[WireModel],
         keep_3d_mesh_fills: bool,
@@ -302,6 +302,7 @@ impl Face3DGpu {
 
         let (block_chunks_3d, block_chunks_2d) = upload_block_chunks(
             device,
+            queue,
             all_wires,
             keep_3d_mesh_fills,
             show_2d_solid_fills,
@@ -309,8 +310,8 @@ impl Face3DGpu {
             depth_map,
         );
         Self {
-            chunks_3d: upload_chunks(device, &verts_3d, "face3d.vbuf.3d"),
-            chunks_2d: upload_chunks(device, &verts_2d, "face3d.vbuf.2d"),
+            chunks_3d: upload_chunks(device, queue, &verts_3d, "face3d.vbuf.3d"),
+            chunks_2d: upload_chunks(device, queue, &verts_2d, "face3d.vbuf.2d"),
             block_chunks_3d,
             block_chunks_2d,
         }
@@ -319,6 +320,7 @@ impl Face3DGpu {
 
 fn upload_block_chunks(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     wires: &[WireModel],
     keep_3d_mesh_fills: bool,
     show_2d_solid_fills: bool,
@@ -376,11 +378,9 @@ fn upload_block_chunks(
         if vertices.is_empty() {
             continue;
         }
-        let budget = (device.limits().max_buffer_size as usize / 10) * 9;
-        let max_vertices = ((budget / std::mem::size_of::<Face3DVertex>()).max(3) / 3) * 3;
-        let max_instances = ((device.limits().max_buffer_size as usize / 10) * 9
-            / std::mem::size_of::<Face3DInstance>())
-            .max(1);
+        // Triangle lists: chunks must stay a multiple of 3.
+        let max_vertices = super::gpu_budget::max_elements_grouped::<Face3DVertex>(device, 3);
+        let max_instances = super::gpu_budget::max_elements::<Face3DInstance>(device);
         let instances: Vec<Face3DInstance> = group
             .iter()
             .filter_map(|wire| {
@@ -417,21 +417,25 @@ fn upload_block_chunks(
             .chunks(max_instances)
             .map(|chunk| {
                 (
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("face3d.block.instances"),
-                        contents: bytemuck::cast_slice(chunk),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
+                    super::gpu_upload::upload_buffer(
+                        device,
+                        queue,
+                        "face3d.block.instances",
+                        chunk,
+                        wgpu::BufferUsages::VERTEX,
+                    ),
                     chunk.len() as u32,
                 )
             })
             .collect();
         for vertex_chunk in vertices.chunks(max_vertices) {
-            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("face3d.block.vertices"),
-                contents: bytemuck::cast_slice(vertex_chunk),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+            let vertex_buffer = super::gpu_upload::upload_buffer(
+                device,
+                queue,
+                "face3d.block.vertices",
+                vertex_chunk,
+                wgpu::BufferUsages::VERTEX,
+            );
             for (instance_buffer, instance_count) in &instance_buffers {
                 let chunk = BlockFace3DChunk {
                     vertex_buffer: vertex_buffer.clone(),
@@ -456,21 +460,22 @@ fn upload_block_chunks(
 /// range never truncates.
 fn upload_chunks(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     verts: &[Face3DVertex],
     label: &'static str,
 ) -> Vec<Face3DChunk> {
-    let budget = (device.limits().max_buffer_size as usize / 10) * 9; // 10% headroom
-    let vsize = std::mem::size_of::<Face3DVertex>();
     // Round down to a multiple of 3 so triangles never straddle chunks.
-    let max_verts = ((budget / vsize).max(3) / 3) * 3;
+    let max_verts = super::gpu_budget::max_elements_grouped::<Face3DVertex>(device, 3);
     verts
         .chunks(max_verts)
         .map(|c| Face3DChunk {
-            vertex_buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: bytemuck::cast_slice(c),
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
+            vertex_buffer: super::gpu_upload::upload_buffer(
+                device,
+                queue,
+                label,
+                c,
+                wgpu::BufferUsages::VERTEX,
+            ),
             vertex_count: c.len() as u32,
         })
         .collect()

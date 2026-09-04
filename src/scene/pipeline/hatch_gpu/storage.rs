@@ -3,7 +3,6 @@
 
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily};
 use iced::wgpu;
-use iced::wgpu::util::DeviceExt;
 
 // ── GPU structs ────────────────────────────────────────────────────────────
 //
@@ -188,6 +187,7 @@ impl StorageHatchBatch {
     /// Builds whole-hatch chunks within the device's buffer limits.
     pub(super) fn build(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         bgl: &wgpu::BindGroupLayout,
         hatches: &[HatchModel],
     ) -> Vec<Self> {
@@ -196,9 +196,13 @@ impl StorageHatchBatch {
         }
 
         let limits = device.limits();
+        // Both device figures are API validation limits, not physical VRAM, so
+        // the shared budget caps them (`storage.rs` chunks are allocations, not
+        // just size checks — the `*_fits` predicates below are the checks).
         let chunk_limit = limits
             .max_buffer_size
-            .min(limits.max_storage_buffer_binding_size as u64);
+            .min(limits.max_storage_buffer_binding_size as u64)
+            .min(crate::scene::pipeline::gpu_budget::buffer_budget(device) as u64);
         let mut ranges = Vec::new();
         let mut start = 0;
         let mut used = [0u64; 7];
@@ -220,12 +224,13 @@ impl StorageHatchBatch {
         ranges.push(start..hatches.len());
         ranges
             .into_iter()
-            .filter_map(|range| Self::build_chunk(device, bgl, &hatches[range]))
+            .filter_map(|range| Self::build_chunk(device, queue, bgl, &hatches[range]))
             .collect()
     }
 
     fn build_chunk(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         bgl: &wgpu::BindGroupLayout,
         hatches: &[HatchModel],
     ) -> Option<Self> {
@@ -496,42 +501,56 @@ impl StorageHatchBatch {
             return None;
         }
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.vertex"),
-            contents: bytemuck::cast_slice(&verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.index"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-        let placement_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.placements"),
-            contents: bytemuck::cast_slice(&placements),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.instances"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-        let family_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.families"),
-            contents: bytemuck::cast_slice(&families),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let dash_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.dashes"),
-            contents: bytemuck::cast_slice(&dashes),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let vertex_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.vertex",
+            &verts,
+            wgpu::BufferUsages::VERTEX,
+        );
+        let index_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.index",
+            &indices,
+            wgpu::BufferUsages::INDEX,
+        );
+        let placement_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.placements",
+            &placements,
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let instance_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.instances",
+            &instances,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        );
+        let family_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.families",
+            &families,
+            wgpu::BufferUsages::STORAGE,
+        );
+        let dash_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.dashes",
+            &dashes,
+            wgpu::BufferUsages::STORAGE,
+        );
 
-        let visibility_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.visibility"),
-            contents: bytemuck::cast_slice(&visibility),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
+        let visibility_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.visibility",
+            &visibility,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        );
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hatch.bg"),

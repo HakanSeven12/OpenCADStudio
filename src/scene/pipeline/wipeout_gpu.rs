@@ -17,7 +17,6 @@ use crate::scene::model::hatch_model::{
     FillPlane, HatchModel, HatchPattern, PatFamily, MAX_HATCH_BOUNDARY_VERTS,
 };
 use iced::wgpu;
-use iced::wgpu::util::DeviceExt;
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -157,6 +156,7 @@ pub struct WipeoutGpu {
 impl WipeoutGpu {
     pub fn from_models(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         models: &[HatchModel],
         bgl1: &wgpu::BindGroupLayout,
     ) -> Vec<Self> {
@@ -176,11 +176,16 @@ impl WipeoutGpu {
         }
         groups
             .into_iter()
-            .map(|group| Self::new(device, &group, bgl1))
+            .map(|group| Self::new(device, queue, &group, bgl1))
             .collect()
     }
 
-    fn new(device: &wgpu::Device, models: &[&HatchModel], bgl1: &wgpu::BindGroupLayout) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        models: &[&HatchModel],
+        bgl1: &wgpu::BindGroupLayout,
+    ) -> Self {
         let model = models[0];
         // ── Decode pattern mode ──────────────────────────────────────────
         let (mode, color2, grad_cos, grad_sin) = match &model.pattern {
@@ -264,11 +269,13 @@ impl WipeoutGpu {
                 _pad: 0.0,
             },
         ];
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.vbuf"),
-            contents: bytemuck::cast_slice(&quad),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.vbuf",
+            &quad,
+            wgpu::BufferUsages::VERTEX,
+        );
 
         // ── Gradient: projection range (in snapped-local space) ──────────
         let (grad_min, grad_range) = if mode == 2 {
@@ -354,21 +361,27 @@ impl WipeoutGpu {
         let family_batch = build_family_batch(&model.pattern);
 
         // ── GPU buffers ───────────────────────────────────────────────────
-        let _uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.uniforms"),
-            contents: bytemuck::bytes_of(&uniform_data),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let _boundary_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.boundary"),
-            contents: bytemuck::bytes_of(&boundary_data),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let _family_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hatch.families"),
-            contents: bytemuck::bytes_of(&family_batch),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let _uniform_buf = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.uniforms",
+            std::slice::from_ref(&uniform_data),
+            wgpu::BufferUsages::UNIFORM,
+        );
+        let _boundary_buf = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.boundary",
+            std::slice::from_ref(&boundary_data),
+            wgpu::BufferUsages::UNIFORM,
+        );
+        let _family_buf = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "hatch.families",
+            std::slice::from_ref(&family_batch),
+            wgpu::BufferUsages::UNIFORM,
+        );
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hatch.bind_group1"),
@@ -419,11 +432,13 @@ impl WipeoutGpu {
                 }
             })
             .collect();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("wipeout.instances"),
-            contents: bytemuck::cast_slice(&placements),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let instance_buffer = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "wipeout.instances",
+            &placements,
+            wgpu::BufferUsages::VERTEX,
+        );
         let mut world_bounds = [
             f32::INFINITY,
             f32::INFINITY,

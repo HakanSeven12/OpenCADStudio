@@ -7,7 +7,6 @@
 
 use crate::scene::model::image_model::ImageModel;
 use iced::wgpu;
-use iced::wgpu::util::DeviceExt;
 use std::sync::Arc;
 
 // ── Vertex ────────────────────────────────────────────────────────────────
@@ -179,24 +178,24 @@ impl ImageGpu {
                 }
             })
             .collect();
-        let instance_buffer = Arc::new(device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("image.instances"),
-                contents: bytemuck::cast_slice(&instances),
-                usage: wgpu::BufferUsages::VERTEX,
-            },
+        let instance_buffer = Arc::new(super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "image.instances",
+            &instances,
+            wgpu::BufferUsages::VERTEX,
         ));
         let params = ImageParams {
             opacity: model.opacity.clamp(0.0, 1.0),
             draw_depth: 0.0,
             _pad: [0.0; 2],
         };
-        let params_buf = Arc::new(device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("image.params"),
-                contents: bytemuck::bytes_of(&params),
-                usage: wgpu::BufferUsages::UNIFORM,
-            },
+        let params_buf = Arc::new(super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            "image.params",
+            std::slice::from_ref(&params),
+            wgpu::BufferUsages::UNIFORM,
         ));
 
         let mut output = Vec::with_capacity(x_tiles.len() * y_tiles.len());
@@ -264,12 +263,13 @@ impl ImageGpu {
                         },
                     ],
                 });
-                let vertex_buffer =
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("image.vbuf"),
-                        contents: bytemuck::cast_slice(&verts),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+                let vertex_buffer = super::gpu_upload::upload_buffer(
+                    device,
+                    queue,
+                    "image.vbuf",
+                    &verts,
+                    wgpu::BufferUsages::VERTEX,
+                );
                 output.push(Self {
                     vertex_buffer,
                     instance_buffer: Arc::clone(&instance_buffer),

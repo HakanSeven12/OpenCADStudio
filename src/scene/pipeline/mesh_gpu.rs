@@ -2,7 +2,6 @@
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 use iced::wgpu;
-use iced::wgpu::util::DeviceExt;
 
 // ── Vertex layout ─────────────────────────────────────────────────────────
 
@@ -377,13 +376,15 @@ struct MeshBatchStubs {
 }
 
 impl MeshBatchStubs {
-    fn new(device: &wgpu::Device) -> Self {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         Self {
-            index: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("mesh.batch.empty_ibuf"),
-                contents: bytemuck::cast_slice(&[0u32]),
-                usage: wgpu::BufferUsages::INDEX,
-            }),
+            index: super::gpu_upload::upload_buffer(
+                device,
+                queue,
+                "mesh.batch.empty_ibuf",
+                &[0u32],
+                wgpu::BufferUsages::INDEX,
+            ),
             vertex: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mesh.batch.empty_vbuf"),
                 size: std::mem::size_of::<MeshVertex>() as u64,
@@ -784,11 +785,13 @@ pub fn create_material_resources(
             [material.color_bleed_scale, 0.0, 0.0, 0.0]
         }),
     };
-    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("mesh.material.params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let params_buffer = super::gpu_upload::upload_buffer(
+        device,
+        queue,
+        "mesh.material.params",
+        std::slice::from_ref(&params),
+        wgpu::BufferUsages::UNIFORM,
+    );
     MeshMaterialResources {
         diffuse_view,
         specular_view,
@@ -810,6 +813,7 @@ pub fn create_material_resources(
 
 pub fn create_material_bind_group_from_resources(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     resources: &MeshMaterialResources,
     material: Option<&crate::scene::model::material_model::MeshMaterial>,
@@ -825,11 +829,13 @@ pub fn create_material_bind_group_from_resources(
         advanced,
         flags,
     };
-    let surface_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("mesh.material.surface"),
-        contents: bytemuck::bytes_of(&surface),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let surface_buffer = super::gpu_upload::upload_buffer(
+        device,
+        queue,
+        "mesh.material.surface",
+        std::slice::from_ref(&surface),
+        wgpu::BufferUsages::UNIFORM,
+    );
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("mesh.material.bind_group"),
         layout,
@@ -912,6 +918,7 @@ pub fn create_material_bind_group(
     let color = material.map_or([0.8, 0.8, 0.8, 1.0], |material| material.diffuse);
     create_material_bind_group_from_resources(
         device,
+        queue,
         layout,
         &resources,
         material,
@@ -936,6 +943,7 @@ pub fn upload_chunk_material_bind_groups(
                     let resources = create_material_resources(device, queue, Some(material));
                     chunk.material_bind_group = Some(create_material_bind_group_from_resources(
                         device,
+                        queue,
                         layout,
                         &resources,
                         chunk.material.as_ref(),
@@ -950,6 +958,7 @@ pub fn upload_chunk_material_bind_groups(
         };
         chunk.material_bind_group = Some(create_material_bind_group_from_resources(
             device,
+            queue,
             layout,
             resources,
             chunk.material.as_ref(),
@@ -1580,15 +1589,13 @@ pub fn build_mesh_batch_filtered(
     // Derive the caps from the real device limit and vertex size. The previous
     // fixed 6 M-vertex cap assumed 40 B/vertex, but `position_low` (RTE) grew
     // MeshVertex to 52 B, so 6 M × 52 B = 312 MB blew past the 256 MB cap.
-    let hard_budget = (device.limits().max_buffer_size as usize / 10) * 9;
-    let budget = hard_budget.min(32 * 1024 * 1024);
-    let vsize = std::mem::size_of::<MeshVertex>();
-    let max_verts = (budget / vsize).max(3);
+    let budget = super::gpu_budget::buffer_budget(device);
+    let max_verts = super::gpu_budget::max_elements::<MeshVertex>(device).max(3);
     // A triangle contributes three line segments (six standalone edge
     // vertices). Bound chunks by the largest buffer produced for wire meshes.
     let max_tris =
         (budget / (6 * std::mem::size_of::<MeshEdgeVertex>())).max(1);
-    let stubs = MeshBatchStubs::new(device);
+    let stubs = MeshBatchStubs::new(device, queue);
 
     let mut chunks = Vec::new();
     let mut verts: Vec<MeshVertex> = Vec::new();
@@ -1800,9 +1807,9 @@ pub fn build_mesh_batch_filtered(
                 .verts
                 .len()
                 .saturating_mul(std::mem::size_of::<MeshVertex>())
-                <= hard_budget
+                <= budget
             && part.indices.len().saturating_mul(std::mem::size_of::<u32>())
-                <= hard_budget
+                <= budget
             && part
                 .set
                 .instance_source
@@ -1812,7 +1819,7 @@ pub fn build_mesh_batch_filtered(
                         .edge_verts
                         .len()
                         .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
-                        <= hard_budget;
+                        <= budget;
                     let triangle_edges_fit = !part.include_edges
                         || !source.edge_verts.is_empty()
                         || part
@@ -1820,7 +1827,7 @@ pub fn build_mesh_batch_filtered(
                             .len()
                             .saturating_mul(2)
                             .saturating_mul(std::mem::size_of::<MeshEdgeVertex>())
-                            <= hard_budget;
+                            <= budget;
                     feature_edges_fit && triangle_edges_fit
                 })
             && part

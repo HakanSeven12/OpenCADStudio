@@ -546,6 +546,7 @@ impl shader::Primitive for Primitive {
             if wipeout_changed || fill_changed {
                 inner.upload_wipeouts(
                     device,
+                    queue,
                     if fill_mode {
                         &vp.wipeout_hatches[..]
                     } else {
@@ -608,6 +609,7 @@ impl shader::Primitive for Primitive {
             {
                 inner.upload_face3d(
                     device,
+                    queue,
                     &vp.face3d_wires[..],
                     &vp_wires[..],
                     !face3d_fill_active,
@@ -785,6 +787,7 @@ impl shader::Primitive for Primitive {
                                 inner.wire_arena_fallback = std::sync::Arc::new(
                                     crate::scene::pipeline::WireGpu::from_run_refs(
                                         device,
+                                        queue,
                                         &regular,
                                         &draw_depths,
                                         false,
@@ -821,6 +824,7 @@ impl shader::Primitive for Primitive {
                                 inner.wire_arena_fallback = std::sync::Arc::new(
                                     crate::scene::pipeline::WireGpu::from_run_refs(
                                         device,
+                                        queue,
                                         &mesh,
                                         &draw_depths,
                                         true,
@@ -917,22 +921,40 @@ impl shader::Primitive for Primitive {
                     let built = match cached {
                         Some(entry) => entry,
                         None => {
+                            // Free the superseded content BEFORE allocating its
+                            // replacement. Every geometry edit mints a new content
+                            // id, so a miss here means this slot's current buffers
+                            // are already dead weight — and on a large drawing one
+                            // set is most of the card (measured: 1.3 GB of a 2 GB
+                            // GT 1030). Holding the old set while the new one is
+                            // allocated is what exhausts VRAM after the first edit.
+                            //
+                            // Dropping this slot's handles first is what makes the
+                            // retain below able to see the old entry as garbage; a
+                            // pane still drawing that content keeps its own clone,
+                            // so shared geometry is never pulled out from under it.
+                            inner.gpu_wires = std::sync::Arc::new(Vec::new());
+                            inner.gpu_block_wires = std::sync::Arc::new(Vec::new());
+                            // Entries no slot still holds: only the cache references
+                            // them. An entry drawn by any pane keeps a strong count
+                            // ≥ 2, so this never drops live geometry.
+                            let held_before = pipeline.wire_buffer_cache.len();
+                            pipeline.wire_buffer_cache.retain(|_, (w, b, _)| {
+                                std::sync::Arc::strong_count(w) > 1
+                                    || std::sync::Arc::strong_count(b) > 1
+                            });
+                            if _perf {
+                                crate::perf_record!(
+                                    "[perf] wire-cache evicted={} held={}",
+                                    held_before - pipeline.wire_buffer_cache.len(),
+                                    pipeline.wire_buffer_cache.len(),
+                                );
+                            }
                             let entry =
-                                inner.build_wire_buffers(device, &vp_wires[..], &draw_depths);
+                                inner.build_wire_buffers(device, queue, &vp_wires[..], &draw_depths);
                             pipeline
                                 .wire_buffer_cache
                                 .insert(vp.wire_content_id, entry.clone());
-                            // Evict entries no slot still holds (only the cache
-                            // references them). An entry drawn by any pane keeps a
-                            // strong count ≥ 2, so this never drops live geometry.
-                            if pipeline.wire_buffer_cache.len() > 16 {
-                                pipeline
-                                    .wire_buffer_cache
-                                    .retain(|_, (w, b, _)| {
-                                        std::sync::Arc::strong_count(w) > 1
-                                            || std::sync::Arc::strong_count(b) > 1
-                                    });
-                            }
                             entry
                         }
                     };
@@ -1000,6 +1022,7 @@ impl shader::Primitive for Primitive {
                 };
                 inner.upload_selected_wires(
                     device,
+                    queue,
                     &vp_wires[..],
                     &vp.selected_handles,
                     &vp.hover_handles,
@@ -1012,6 +1035,7 @@ impl shader::Primitive for Primitive {
                 // base text buffer.
                 inner.upload_text_highlight(
                     device,
+                    queue,
                     &vp_wires[..],
                     &vp.selected_handles,
                     &vp.hover_handles,
@@ -1066,7 +1090,7 @@ impl shader::Primitive for Primitive {
             // Live overlay (command preview / interim / grip drag) — small and
             // refreshed every frame it's present, so a drag never re-uploads
             // the resident base wire buffer.
-            inner.upload_preview_wires(device, &vp.preview_wires[..], &draw_depths);
+            inner.upload_preview_wires(device, queue, &vp.preview_wires[..], &draw_depths);
             inner.upload_preview_text(device, queue, &vp.preview_text_verts[..]);
             // Cull / scissor / LOD project AABBs relative-to-eye (matching the
             // GPU's RTE path) so the math stays precise at UTM-scale coords.
@@ -1087,13 +1111,14 @@ impl shader::Primitive for Primitive {
             if inner.silhouette_key != silhouette_key {
                 inner.upload_silhouettes(
                     device,
+                    queue,
                     if silhouette_enabled { &vp.meshes[..] } else { &[] },
                     vp.wire_content_id,
                     vp.view_dir,
                 );
                 inner.silhouette_key = silhouette_key;
             }
-            inner.upload_clip_boundary(device, &vp.clip_boundary_ndc);
+            inner.upload_clip_boundary(device, queue, &vp.clip_boundary_ndc);
             let hatch_lod_key = (
                 Arc::as_ptr(&vp.hatches) as usize,
                 vp.camera_generation,

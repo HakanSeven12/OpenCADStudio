@@ -65,10 +65,12 @@ pub enum Language {
     PlPl,
     #[serde(rename = "zh-TW")]
     ZhTw,
+    #[serde(rename = "el-GR")]
+    ElGr,
 }
 
 impl Language {
-    pub const ALL: [Language; 21] = [
+    pub const ALL: [Language; 22] = [
         Language::System,
         Language::EnUs,
         Language::BgBg,
@@ -78,6 +80,7 @@ impl Language {
         Language::FrFr,
         Language::FiFi,
         Language::DeDe,
+        Language::ElGr,
         Language::HuHu,
         Language::ItIt,
         Language::JaJp,
@@ -115,6 +118,7 @@ impl Language {
             Language::HuHu => vec!["hu-HU".parse().expect("valid locale")],
             Language::PlPl => vec!["pl-PL".parse().expect("valid locale")],
             Language::ZhTw => vec!["zh-TW".parse().expect("valid locale")],
+            Language::ElGr => vec!["el-GR".parse().expect("valid locale")],
         }
     }
 
@@ -141,6 +145,7 @@ impl Language {
             Language::HuHu => crate::tr!("language", "hungarian"),
             Language::PlPl => crate::tr!("language", "polish"),
             Language::ZhTw => crate::tr!("language", "chinese-traditional"),
+            Language::ElGr => crate::tr!("language", "greek"),
         }
     }
 }

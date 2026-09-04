@@ -1162,7 +1162,7 @@ impl OpenCADStudio {
                 )))
                 .position(iced::Point::new(
                         cube_x + VIEWCUBE_HIT_SIZE * 0.5 - UCS_PICKER_W * 0.5,
-                        cube_y + VIEWCUBE_HIT_SIZE + 6.0,
+                        cube_y + VIEWCUBE_HIT_SIZE + 10.0,
                     ));
                 viewport_stack = viewport_stack.push(picker);
             }
@@ -1202,7 +1202,7 @@ impl OpenCADStudio {
             )))
             .position(iced::Point::new(
                     cube_x + VIEWCUBE_HIT_SIZE * 0.5 - UCS_PICKER_W * 0.5,
-                    cube_y + VIEWCUBE_HIT_SIZE + 6.0,
+                    cube_y + VIEWCUBE_HIT_SIZE + 10.0,
                 ));
             viewport_stack = viewport_stack.push(picker);
         }

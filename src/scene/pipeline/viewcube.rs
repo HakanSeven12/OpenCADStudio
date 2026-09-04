@@ -38,7 +38,7 @@ pub const VIEWCUBE_PAD: f32 = 12.0;
 pub const NAV_INSET_F: f32 = 2.0;
 /// Side of the whole nav widget (cube + compass ring + controls) in pixels.
 pub const VIEWCUBE_REGION_PX: f32 = VIEWCUBE_DRAW_PX * NAV_INSET_F;
-pub const VIEWCUBE_RENDER_PX: f32 = VIEWCUBE_REGION_PX + 8.0;
+pub const VIEWCUBE_RENDER_PX: f32 = VIEWCUBE_REGION_PX + 20.0;
 /// Z height of the compass ring + cardinals in cube-local space. The cube
 /// spans ±1, so −1 parks the ring at the cube's base — it sits *under* the
 /// cube in 3D views and reads as a ground compass.

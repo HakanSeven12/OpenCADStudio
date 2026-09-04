@@ -432,6 +432,17 @@ struct ResidentWireLayout {
 pub struct PreparedOpenGeometry {
     pub wires: Arc<Vec<WireModel>>,
     pub interaction_index: Option<Arc<crate::scene::pick::interaction_index::InteractionIndex>>,
+    /// The per-entity tessellation memo the loader thread filled while building
+    /// `wires`, with the guard hash it was valid under.
+    ///
+    /// `prepare_open_geometry` works on a throwaway `Scene`, so this used to be
+    /// dropped with it and the first geometry edit re-tessellated all 186 455
+    /// entities from cold — 1.3 s of work the loader had already done. The
+    /// guard travels with it because the memo is only usable under the state it
+    /// was built for; a mismatch on the receiving side clears it, which is
+    /// exactly the old behaviour.
+    pub tess_memo: HashMap<Handle, Arc<Vec<WireModel>>>,
+    pub tess_guard: u64,
 }
 
 impl std::fmt::Debug for PreparedOpenGeometry {
@@ -439,6 +450,7 @@ impl std::fmt::Debug for PreparedOpenGeometry {
         f.debug_struct("PreparedOpenGeometry")
             .field("wires", &self.wires.len())
             .field("interaction_index", &self.interaction_index.is_some())
+            .field("tess_memo", &self.tess_memo.len())
             .finish()
     }
 }
@@ -1016,12 +1028,17 @@ pub fn prepare_open_geometry(
             wires.len(),
         );
     }
+    // Taken, not cloned: the scene is discarded on the next line.
+    let tess_memo = std::mem::take(&mut *scene.resident_tess_memo.borrow_mut());
+    let tess_guard = scene.resident_tess_guard.get();
     let doc = std::mem::replace(&mut scene.document, CadDocument::new());
     (
         doc,
         PreparedOpenGeometry {
             wires,
             interaction_index,
+            tess_memo,
+            tess_guard,
         },
     )
 }
@@ -2206,6 +2223,12 @@ impl Scene {
                 layout: None,
             },
         );
+        // Adopt the loader thread's tessellation memo so the first edit patches
+        // the entities it touched instead of rebuilding every one of them.
+        if !prepared.tess_memo.is_empty() {
+            *self.resident_tess_memo.borrow_mut() = prepared.tess_memo;
+            self.resident_tess_guard.set(prepared.tess_guard);
+        }
         if let Some(index) = prepared.interaction_index {
             self.cache_interaction_index(self.geometry_epoch, prepared.wires, index);
         }

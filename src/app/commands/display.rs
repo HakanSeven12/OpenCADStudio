@@ -771,22 +771,10 @@ impl OpenCADStudio {
 
             "PRESSPULL" => {
                 use crate::modules::insert::solid3d_cmds::PresspullCommand;
-                let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
                 let mut command = PresspullCommand::new(color);
-                if selected.len() == 1
-                    && !matches!(selected[0].1, acadrust::EntityType::Solid3D(_))
-                {
-                    if let Some(curve) = crate::entities::curve::entity_curve(selected[0].1) {
-                        command.set_entity_pick_direction(
-                            curve.plane.normal().map(glam::DVec3::from_array),
-                        );
-                        command.on_entity_pick(
-                            selected[0].0,
-                            glam::DVec3::from_array(curve.plane.origin),
-                        );
-                    }
-                }
+                command.set_isolines(self.tabs[i].scene.document.header.isolines.max(0) as usize);
+                command.set_preselection(self.presspull_preselection());
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }

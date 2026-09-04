@@ -3792,61 +3792,11 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
 
-            CmdResult::PresspullEntity {
-                handle,
-                pick,
-                distance,
-                drag,
-                color,
-            } => {
-                if matches!(
-                    self.tabs[i].scene.document.get_entity(handle),
-                    Some(acadrust::EntityType::Solid3D(_))
-                ) {
-                    let task = self.solid_face_presspull(handle, pick, distance, drag);
-                    self.tabs[i].active_cmd = None;
-                    self.tabs[i].snap_result = None;
-                    self.tabs[i].scene.clear_preview_wire();
-                    self.restore_pre_cmd_tangent();
-                    return task;
-                }
-                if self.reject_locked_edit(i, handle) {
-                    self.tabs[i].active_cmd = None;
-                    return Task::none();
-                }
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
-                use crate::scene::model::{solid_history, sweep_model};
-
-                let result = self.tabs[i].scene.document.get_entity(handle).and_then(|entity| {
-                    let distance = match drag {
-                        Some(point) => sweep_model::projected_drag(entity, pick, point)?,
-                        None => distance,
-                    };
-                    sweep_model::extruded(entity, distance)
-                });
-                if let Some(solid) = result {
-                    let pending = self.begin_undo(i, "PRESSPULL", 1, true);
-                    let history = solid_history::brep_op(&solid);
-                    let created = self.add_solid_model(empty_solid3d(), solid, history);
-                    let _ = color;
-                    if !created.is_null() {
-                        self.tabs[i].dirty = true;
-                        self.command_line
-                            .push_output(crate::t!("PRESSPULL: solid created.").as_ref());
-                        if let Some(delta) = pending {
-                            self.commit_undo_delta(i, delta);
-                        }
-                    }
-                } else {
-                    self.command_line.push_error(
-                        crate::t!("PRESSPULL: select a closed profile or planar solid face.")
-                            .as_ref(),
-                    );
-                }
-                self.tabs[i].active_cmd = None;
-                self.tabs[i].snap_result = None;
-                self.tabs[i].scene.clear_preview_wire();
-                self.restore_pre_cmd_tangent();
+            CmdResult::PresspullPick { handle, point, offset, multiple: _ } => {
+                self.presspull_pick(handle, point, offset);
+            }
+            CmdResult::PresspullApply { targets, distance, color: _ } => {
+                self.presspull_apply(targets, distance);
             }
 
             // ── REVOLVE ────────────────────────────────────────────────────

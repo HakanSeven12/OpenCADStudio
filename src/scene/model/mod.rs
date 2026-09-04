@@ -11,6 +11,7 @@ pub mod mesh_model;
 pub mod solid_model;
 pub mod solid_history;
 pub mod sweep_model;
+pub mod presspull_model;
 pub mod loft_command_model;
 mod sweep_command_model;
 pub mod visual_style_model;

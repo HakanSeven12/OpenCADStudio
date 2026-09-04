@@ -67,6 +67,9 @@ pub const PROP_TWIST_ALONG_PATH: &str = "solid_history_twist_along_path";
 pub const PROP_SCALE_ALONG_PATH: &str = "solid_history_scale_along_path";
 pub const PROP_SWEEP_LENGTH: &str = "solid_history_sweep_length";
 pub const PROP_EXTRUSION_HEIGHT: &str = "solid_history_extrusion_height";
+pub const PROP_EXTRUSION_DIRECTION_X: &str = "solid_history_extrusion_direction_x";
+pub const PROP_EXTRUSION_DIRECTION_Y: &str = "solid_history_extrusion_direction_y";
+pub const PROP_EXTRUSION_DIRECTION_Z: &str = "solid_history_extrusion_direction_z";
 pub const PROP_TAPER_ANGLE: &str = "solid_history_taper_angle";
 pub const PROP_REVOLVE_ANGLE: &str = "solid_history_revolve_angle";
 pub const PROP_AXIS_POSITION_X: &str = "solid_history_axis_position_x";
@@ -357,15 +360,19 @@ fn extrusion_properties(
     handle: acadrust::Handle,
     value: &SolidHistorySweep,
 ) -> Vec<PropSection> {
-    let position = world_point(
-        value.base.transform,
-        [
-            value.reference_point.x,
-            value.reference_point.y,
-            value.reference_point.z,
-        ],
-    )
-    .unwrap_or(glam::DVec3::ZERO);
+    let direction = matrix(value.base.transform).map(|transform| {
+        transform.transform_vector3(glam::DVec3::new(
+            value.direction.x, value.direction.y, value.direction.z,
+        ))
+    }).filter(|direction| direction.is_finite());
+    let direction_property = |label: &str, field: &'static str, axis: usize| Property {
+        label: label.to_string(),
+        field,
+        value: PropValue::ReadOnly(direction.map_or_else(
+            || t!("Unavailable").into_owned(),
+            |direction| crate::entities::common::format_length(direction[axis]),
+        )),
+    };
     let (record_history, object_show_history, show_history_mode) =
         history_flags(document, handle).unwrap_or((false, false, 1));
     let (show_history, show_history_editable) =
@@ -391,21 +398,6 @@ fn extrusion_properties(
                     field: "solid_history_type",
                     value: PropValue::ReadOnly(t!("Extrusion").into_owned()),
                 },
-                crate::entities::common::edit_prop(
-                    t!("Position X").as_ref(),
-                    PROP_POSITION_X,
-                    position.x,
-                ),
-                crate::entities::common::edit_prop(
-                    t!("Position Y").as_ref(),
-                    PROP_POSITION_Y,
-                    position.y,
-                ),
-                crate::entities::common::edit_prop(
-                    t!("Position Z").as_ref(),
-                    PROP_POSITION_Z,
-                    position.z,
-                ),
                 Property {
                     label: t!("Height").into_owned(),
                     field: PROP_EXTRUSION_HEIGHT,
@@ -416,6 +408,9 @@ fn extrusion_properties(
                     field: PROP_TAPER_ANGLE,
                     value: taper,
                 },
+                direction_property(t!("Direction X").as_ref(), PROP_EXTRUSION_DIRECTION_X, 0),
+                direction_property(t!("Direction Y").as_ref(), PROP_EXTRUSION_DIRECTION_Y, 1),
+                direction_property(t!("Direction Z").as_ref(), PROP_EXTRUSION_DIRECTION_Z, 2),
             ],
         },
         PropSection {
@@ -426,7 +421,7 @@ fn extrusion_properties(
                     field: PROP_HISTORY,
                     value: PropValue::Choice {
                         selected: if record_history { "Record" } else { "None" }.to_string(),
-                        options: vec!["None".to_string(), "Record".to_string()],
+                        options: vec!["Record".to_string(), "None".to_string()],
                     },
                 },
                 Property {
@@ -435,7 +430,7 @@ fn extrusion_properties(
                     value: if show_history_editable {
                         PropValue::Choice {
                             selected: if show_history { "Yes" } else { "No" }.to_string(),
-                            options: vec!["No".to_string(), "Yes".to_string()],
+                            options: vec!["Yes".to_string(), "No".to_string()],
                         }
                     } else {
                         PropValue::ReadOnly(if show_history { "Yes" } else { "No" }.to_string())
@@ -444,6 +439,43 @@ fn extrusion_properties(
             ],
         },
     ]
+}
+
+/// Native surface construction data mirrors the same local profile, placement,
+/// direction and taper used by the extrusion history rebuild.
+pub fn extrusion_surface_data(
+    value: &SolidHistorySweep,
+) -> Option<acadrust::entities::SurfaceData> {
+    use acadrust::entities::{SurfaceData, SurfaceSweepOptions};
+
+    if value.path_entity.is_some() {
+        return None;
+    }
+    let profile = value.sweep_entity.clone()?;
+    matrix(value.base.transform)?;
+    matrix(value.sweep_entity_transform)?;
+    Some(SurfaceData::Extruded {
+        sweep_entity: Some(profile),
+        options: SurfaceSweepOptions {
+            draft_angle: value.draft_angle,
+            draft_start_distance: value.start_draft_distance,
+            draft_end_distance: value.end_draft_distance,
+            twist_angle: value.twist_angle,
+            scale_factor: value.scale_factor,
+            align_angle: value.align_angle,
+            sweep_entity_transform: value.sweep_entity_transform,
+            path_entity_transform: value.path_entity_transform,
+            is_solid: false,
+            sweep_alignment_flags: value.align_option as i16,
+            align_start: value.has_align_start,
+            bank: value.bank,
+            base_point_set: true,
+            reference_vector: value.reference_point,
+            ..SurfaceSweepOptions::default()
+        },
+        sweep_vector: value.direction,
+        sweep_transform: value.base.transform,
+    })
 }
 
 fn sweep_properties(
@@ -1439,7 +1471,8 @@ pub fn is_loft_geometry_choice(field: &str) -> bool {
 
 pub fn is_specialized_property(field: &str) -> bool {
     matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH
-        | PROP_LOFT_TYPE | PROP_LOFT_SECTION_COUNT)
+        | PROP_LOFT_TYPE | PROP_LOFT_SECTION_COUNT
+        | PROP_EXTRUSION_DIRECTION_X | PROP_EXTRUSION_DIRECTION_Y | PROP_EXTRUSION_DIRECTION_Z)
         || is_primitive_property(field)
         || is_history_choice(field)
 }
@@ -2977,7 +3010,15 @@ fn apply_extrusion_draft_grip(value: &mut SolidHistorySweep, apply: GripApply) -
 fn extrusion_draft_rebuilds(value: &SolidHistorySweep, angle: f64) -> bool {
     let mut candidate = value.clone();
     candidate.draft_angle = angle;
-    cadkernel::acis::rebuild_body(&SolidHistoryOperation::Extrusion(candidate)).is_ok()
+    let Some(profile) = candidate.sweep_entity.as_ref() else {
+        return false;
+    };
+    let Ok((_, _, closed)) = cadkernel::acis::sweep_profile_geometry(
+        profile, candidate.sweep_entity_transform,
+    ) else {
+        return false;
+    };
+    cadkernel::acis::rebuild_extrusion_with_mode(&candidate, !closed).is_ok()
 }
 
 fn grip(

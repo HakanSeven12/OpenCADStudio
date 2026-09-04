@@ -810,14 +810,16 @@ impl Scene {
         let Some(reference) = reference else {
             return;
         };
-        let Some(EntityType::Solid3D(entity)) = self.document.get_entity_mut(handle) else {
-            return;
-        };
-        entity.point_of_reference = acadrust::types::Vector3::new(
+        let point = acadrust::types::Vector3::new(
             reference.x,
             reference.y,
             reference.z,
         );
+        match self.document.get_entity_mut(handle) {
+            Some(EntityType::Solid3D(entity)) => entity.point_of_reference = point,
+            Some(EntityType::Surface(entity)) => entity.point_of_reference = point,
+            _ => {}
+        }
     }
 
     fn copy_solid_history(&mut self, source: Handle, target: Handle) -> bool {
@@ -832,8 +834,53 @@ impl Scene {
     }
 
     pub(crate) fn delete_solid_history(&mut self, handle: Handle) {
+        if self.is_recording_undo() {
+            // The codec also clears the entity's history handle. Capture that
+            // link before deletion so undo reconnects the restored graph.
+            let before = self.document.get_entity_arc(handle);
+            self.record_undo_before(handle, before);
+        }
         self.record_solid_history_before(handle);
         self.document.delete_solid_history(handle);
+    }
+
+    fn rebuild_history_body(
+        &self,
+        handle: Handle,
+        operation: &acadrust::objects::SolidHistoryOperation,
+    ) -> Option<cadkernel::brep::Body> {
+        use acadrust::objects::SolidHistoryOperation;
+
+        match (self.document.get_entity(handle)?, operation) {
+            (EntityType::Surface(_), SolidHistoryOperation::Extrusion(value)) => {
+                cadkernel::acis::rebuild_extrusion_with_mode(value, true).ok()
+            }
+            (EntityType::Surface(_), SolidHistoryOperation::Loft(_))
+                | (EntityType::Solid3D(_), _) => cadkernel::acis::rebuild_body(operation).ok(),
+            _ => None,
+        }
+    }
+
+    fn history_surface_data(
+        &self,
+        handle: Handle,
+        operation: &acadrust::objects::SolidHistoryOperation,
+    ) -> Option<Option<acadrust::entities::SurfaceData>> {
+        use acadrust::objects::SolidHistoryOperation;
+
+        match (self.document.get_entity(handle)?, operation) {
+            (EntityType::Surface(_), SolidHistoryOperation::Extrusion(value)) => {
+                crate::scene::model::solid_history::extrusion_surface_data(value).map(Some)
+            }
+            (EntityType::Surface(_), SolidHistoryOperation::Loft(value)) => {
+                let EntityType::Surface(surface) =
+                    crate::scene::model::loft_command_model::surface_entity(value)
+                else { return None; };
+                Some(Some(surface.surface_data))
+            }
+            (EntityType::Solid3D(_), _) => Some(None),
+            _ => None,
+        }
     }
 
     pub fn rebuild_solid_history(
@@ -841,25 +888,20 @@ impl Scene {
         handle: Handle,
         operation: acadrust::objects::SolidHistoryOperation,
     ) -> bool {
-        let Ok(body) = cadkernel::acis::rebuild_body(&operation) else {
+        let Some(body) = self.rebuild_history_body(handle, &operation) else {
             return false;
         };
         let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
             return false;
         };
-        let loft_surface_data = match (&operation, self.document.get_entity(handle)) {
-            (acadrust::objects::SolidHistoryOperation::Loft(record), Some(EntityType::Surface(_))) => {
-                let EntityType::Surface(surface) = crate::scene::model::loft_command_model::surface_entity(record)
-                    else { return false; };
-                Some(surface.surface_data)
-            }
-            (_, Some(EntityType::Solid3D(_))) => None,
-            _ => return false,
+        let Some(surface_data) = self.history_surface_data(handle, &operation) else {
+            return false;
         };
         let Some(display) = self.prepare_solid_model_display(handle, &body) else {
             return false;
         };
-        if matches!(&operation, acadrust::objects::SolidHistoryOperation::Loft(_))
+        if matches!(&operation, acadrust::objects::SolidHistoryOperation::Loft(_)
+            | acadrust::objects::SolidHistoryOperation::Extrusion(_))
             && !display.0.complete
         {
             return false;
@@ -876,7 +918,12 @@ impl Scene {
             Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
             Some(EntityType::Surface(entity)) => {
                 entity.acis_data = acadrust::entities::AcisData::from_sat(&document.to_sat_string());
-                if let Some(data) = loft_surface_data { entity.surface_data = data; }
+                if let Some(data) = surface_data {
+                    if matches!(&data, acadrust::entities::SurfaceData::Extruded { .. }) {
+                        entity.kind = acadrust::entities::SurfaceKind::Extruded;
+                    }
+                    entity.surface_data = data;
+                }
             }
             _ => return false,
         }
@@ -889,16 +936,20 @@ impl Scene {
         let Some(operation) = self.document.solid_history_operation(handle).cloned() else {
             return false;
         };
-        let Ok(body) = cadkernel::acis::rebuild_body(&operation) else {
+        let Some(body) = self.rebuild_history_body(handle, &operation) else {
             return false;
         };
         let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
             return false;
         };
+        let Some(surface_data) = self.history_surface_data(handle, &operation) else {
+            return false;
+        };
         let Some(display) = self.prepare_solid_model_display(handle, &body) else {
             return false;
         };
-        if matches!(&operation, acadrust::objects::SolidHistoryOperation::Loft(_))
+        if matches!(&operation, acadrust::objects::SolidHistoryOperation::Loft(_)
+            | acadrust::objects::SolidHistoryOperation::Extrusion(_))
             && !display.0.complete
         {
             return false;
@@ -907,10 +958,11 @@ impl Scene {
             Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
             Some(EntityType::Surface(entity)) => {
                 entity.acis_data = acadrust::entities::AcisData::from_sat(&document.to_sat_string());
-                if let acadrust::objects::SolidHistoryOperation::Loft(record) = &operation {
-                    if let EntityType::Surface(updated) = crate::scene::model::loft_command_model::surface_entity(record) {
-                        entity.surface_data = updated.surface_data;
+                if let Some(data) = surface_data {
+                    if matches!(&data, acadrust::entities::SurfaceData::Extruded { .. }) {
+                        entity.kind = acadrust::entities::SurfaceKind::Extruded;
                     }
+                    entity.surface_data = data;
                 }
             }
             _ => return false,
@@ -925,17 +977,17 @@ impl Scene {
         handle: Handle,
         operation: acadrust::objects::SolidHistoryOperation,
     ) -> bool {
-        let Ok(body) = cadkernel::acis::rebuild_body(&operation) else {
+        let Some(body) = self.rebuild_history_body(handle, &operation) else {
             return false;
         };
+        if self.history_surface_data(handle, &operation).is_none() {
+            return false;
+        }
         if self
             .document
             .update_solid_history(handle, operation)
             .is_none()
         {
-            return false;
-        }
-        if !matches!(self.document.get_entity(handle), Some(EntityType::Solid3D(_) | EntityType::Surface(_))) {
             return false;
         }
         self.solid_history_preview_wires.insert(
@@ -960,12 +1012,26 @@ impl Scene {
             return false;
         }
         if let EntityTransform::Translate(delta) = transform {
+            let surface_data = match (&operation, self.document.get_entity(handle)) {
+                (acadrust::objects::SolidHistoryOperation::Extrusion(value), Some(EntityType::Surface(_))) => {
+                    let Some(data) = crate::scene::model::solid_history::extrusion_surface_data(value) else {
+                        return false;
+                    };
+                    Some(data)
+                }
+                _ => None,
+            };
             if self
                 .document
                 .update_solid_history(handle, operation)
                 .is_none()
             {
                 return false;
+            }
+            if let (Some(data), Some(EntityType::Surface(entity))) =
+                (surface_data, self.document.get_entity_mut(handle))
+            {
+                entity.surface_data = data;
             }
             self.translate_solid_geometry(handle, delta.to_array());
             return true;

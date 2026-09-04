@@ -1507,12 +1507,17 @@ pub enum CmdResult {
         taper_angle: f64,
         color: [f32; 4],
     },
-    /// Pull a closed profile or a planar solid face by a signed distance.
-    PresspullEntity {
-        handle: Handle,
-        pick: DVec3,
+    /// Resolve a profile, bounded area, or solid face for PRESSPULL.
+    PresspullPick {
+        handle: Option<Handle>,
+        point: DVec3,
+        offset: bool,
+        multiple: bool,
+    },
+    /// Apply a signed distance to the resolved PRESSPULL selection.
+    PresspullApply {
+        targets: Vec<crate::scene::model::presspull_model::PresspullTarget>,
         distance: f64,
-        drag: Option<DVec3>,
         color: [f32; 4],
     },
     /// Revolve the profile entities around the given axis.
@@ -1937,6 +1942,19 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// Expensive bounded-area acquisition runs once after cursor dwell, not
+    /// from every pointer event. The host supplies the same WCS surface pick
+    /// used for clicks, and clears the overlay when movement resumes.
+    fn entity_pick_deferred_hover(&self) -> bool {
+        false
+    }
+
+    fn on_deferred_entity_hover(
+        &mut self, _scene: &Scene, _handle: Option<Handle>, _point: DVec3,
+    ) -> Vec<WireModel> {
+        Vec::new()
+    }
+
     /// Called when the text editor closes, either because the user committed or cancelled the edit.
     fn on_editor_closed(&mut self, _committed: bool) -> CmdResult {
         CmdResult::Cancel
@@ -1952,6 +1970,17 @@ pub trait CadCommand: Send {
     fn on_entity_pick(&mut self, _handle: Handle, _pt: DVec3) -> CmdResult {
         CmdResult::Cancel
     }
+
+    /// Supply a resolved PRESSPULL target after an object or bounded-area pick.
+    fn on_presspull_target(
+        &mut self,
+        _target: crate::scene::model::presspull_model::PresspullTarget,
+    ) {
+    }
+
+    /// Resume PRESSPULL after an atomic apply attempt. A failed operation keeps
+    /// the current targets available for another distance or selection undo.
+    fn on_presspull_applied(&mut self, _success: bool) {}
 
     /// Host callback after `CmdResult::CommitLiveEntity`: records the handle the
     /// new live entity was assigned so later `UpdateLiveEntity` results can

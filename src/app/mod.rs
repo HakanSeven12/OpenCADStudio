@@ -17,6 +17,7 @@ mod mtext_editor;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod properties;
+mod presspull_ops;
 mod recent;
 pub(crate) mod settings;
 mod shortcuts;

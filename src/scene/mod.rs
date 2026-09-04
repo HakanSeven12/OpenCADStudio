@@ -2861,7 +2861,24 @@ impl Scene {
         solid: cadkernel::brep::Body,
         display: (MeshLodSet, Vec<acadrust::entities::Wire>, [f64; 3]),
     ) -> bool {
-        let (set, wires, center) = display;
+        let (mut set, wires, center) = display;
+        // New command results can be prepared before their handle exists.
+        // Apply the committed entity's actual style without retessellating.
+        if let Some(entity) = self.document.get_entity(handle) {
+            let color = self.render_style(entity).0;
+            for mesh in &mut set.lods {
+                mesh.name = handle.value().to_string();
+                mesh.color = color;
+            }
+            crate::scene::model::material_model::resolve_material_with_base(
+                &self.document, entity, color, None, self.material_base_dir.as_deref(),
+            ).apply_to_with_face_overrides(
+                &mut set, &self.document, self.material_base_dir.as_deref(),
+            );
+            crate::scene::model::visual_style_model::apply_mesh_visual_style(
+                &mut set, &self.document, entity,
+            );
+        }
         if let Some(entity) = self.document.get_entity_mut(handle) {
             let reference = acadrust::types::Vector3::new(center[0], center[1], center[2]);
             match entity {

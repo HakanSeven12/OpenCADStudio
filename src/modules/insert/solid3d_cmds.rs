@@ -10,6 +10,7 @@ use crate::command::{
     LoftSectionSelection, SelectionEntity, SweepOptions, WorkingPlane,
 };
 use crate::scene::WireModel;
+use crate::scene::model::presspull_model::{PresspullTarget, PresspullTargetKind};
 use crate::t;
 
 // ── EXTRUDE command ────────────────────────────────────────────────────────
@@ -515,18 +516,124 @@ impl CadCommand for ExtrudeCommand {
 // ── PRESSPULL command ─────────────────────────────────────────────────────
 
 pub struct PresspullCommand {
-    picked: Option<(acadrust::Handle, DVec3)>,
-    direction: Option<DVec3>,
+    step: PresspullStep,
+    targets: Vec<PresspullTarget>,
+    ctrl: bool,
+    shift: bool,
+    isolines: usize,
+    target_generation: u64,
+    preview_key: Option<(u64, u64)>,
+    preview_cache: Vec<WireModel>,
+    working_plane: WorkingPlane,
+    hover_key: Option<(u64, Option<Handle>, [u64; 3], bool)>,
+    hover_cache: Vec<WireModel>,
     color: [f32; 4],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PresspullStep {
+    Pick,
+    Multiple,
+    Height,
 }
 
 impl PresspullCommand {
     pub fn new(color: [f32; 4]) -> Self {
         Self {
-            picked: None,
-            direction: None,
+            step: PresspullStep::Pick,
+            targets: Vec::new(),
+            ctrl: false,
+            shift: false,
+            isolines: 0,
+            target_generation: 0,
+            preview_key: None,
+            preview_cache: Vec::new(),
+            working_plane: WorkingPlane::default(),
+            hover_key: None,
+            hover_cache: Vec::new(),
             color,
         }
+    }
+
+    pub fn set_isolines(&mut self, isolines: usize) {
+        if self.isolines != isolines {
+            self.isolines = isolines;
+            self.invalidate_preview();
+        }
+    }
+
+    pub fn set_preselection(&mut self, targets: Vec<PresspullTarget>) {
+        self.targets.clear();
+        self.step = PresspullStep::Pick;
+        self.invalidate_preview();
+        for target in targets {
+            self.on_presspull_target(target);
+        }
+    }
+
+    fn invalidate_preview(&mut self) {
+        self.target_generation = self.target_generation.wrapping_add(1);
+        self.preview_key = None;
+        self.preview_cache.clear();
+        self.hover_key = None;
+        self.hover_cache.clear();
+    }
+
+    fn has_target(&self, target: &PresspullTarget) -> bool {
+        self.targets.iter().any(|selected| match (&selected.kind, &target.kind) {
+            (
+                PresspullTargetKind::Profile { source: Some(first), .. },
+                PresspullTargetKind::Profile { source: Some(second), .. },
+            ) => first == second,
+            (
+                PresspullTargetKind::Face { handle: first, face: first_face, .. },
+                PresspullTargetKind::Face { handle: second, face: second_face, .. },
+            ) => first == second && first_face == second_face,
+            (
+                PresspullTargetKind::Profile { source: None, entity: first, owner: first_owner },
+                PresspullTargetKind::Profile { source: None, entity: second, owner: second_owner },
+            ) => first_owner == second_owner && first == second,
+            _ => false,
+        })
+    }
+
+    fn pick(&self, handle: Option<Handle>, point: DVec3) -> CmdResult {
+        if !point.is_finite() {
+            return CmdResult::NeedPoint;
+        }
+        CmdResult::PresspullPick {
+            handle: handle.filter(|handle| !handle.is_null()),
+            point,
+            offset: self.ctrl,
+            multiple: self.step == PresspullStep::Multiple || self.shift,
+        }
+    }
+
+    fn height(&self, point: DVec3) -> Option<f64> {
+        let target = self.targets.last()?;
+        let distance = (point - target.anchor).dot(target.direction);
+        distance.is_finite().then_some(distance)
+    }
+
+    fn finish(&self, distance: f64) -> CmdResult {
+        if self.targets.is_empty() || !distance.is_finite() || distance.abs() <= 1e-6 {
+            return CmdResult::NeedPoint;
+        }
+        CmdResult::PresspullApply {
+            targets: self.targets.clone(),
+            distance,
+            color: self.color,
+        }
+    }
+
+    fn undo_selection(&mut self) -> CmdResult {
+        if self.targets.pop().is_some() {
+            self.invalidate_preview();
+        }
+        if self.targets.is_empty() {
+            self.step = PresspullStep::Pick;
+        }
+        CmdResult::NeedPoint
     }
 }
 
@@ -536,15 +643,37 @@ impl CadCommand for PresspullCommand {
     }
 
     fn prompt(&self) -> String {
-        if self.picked.is_none() {
-            t!("PRESSPULL  Select a closed profile or planar solid face:").into_owned()
-        } else {
-            t!("PRESSPULL  Signed distance:").into_owned()
+        match self.step {
+            PresspullStep::Pick => {
+                t!("PRESSPULL  Select object or bounded area (Enter to finish):").into_owned()
+            }
+            PresspullStep::Multiple => {
+                t!("PRESSPULL  Select additional objects or bounded areas [Undo] (Enter for height):").into_owned()
+            }
+            PresspullStep::Height => {
+                t!("PRESSPULL  Specify signed extrusion height or [Multiple/Undo]:").into_owned()
+            }
+        }
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        match self.step {
+            PresspullStep::Pick => vec![CmdOption::enter("Done")],
+            PresspullStep::Multiple => {
+                vec![CmdOption::new("Undo", "UNDO"), CmdOption::enter("Height")]
+            }
+            PresspullStep::Height => {
+                vec![CmdOption::new("Multiple", "MULTIPLE"), CmdOption::new("Undo", "UNDO")]
+            }
         }
     }
 
     fn needs_entity_pick(&self) -> bool {
-        self.picked.is_none()
+        self.step != PresspullStep::Height || self.shift
+    }
+
+    fn entity_pick_accepts_points(&self) -> bool {
+        true
     }
 
     fn entity_pick_includes_fills(&self) -> bool {
@@ -555,69 +684,166 @@ impl CadCommand for PresspullCommand {
         true
     }
 
-    fn set_entity_pick_direction(&mut self, direction: Option<DVec3>) {
-        self.direction = direction.and_then(|value| value.try_normalize());
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.ctrl = ctrl;
+    }
+
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        if self.working_plane.origin != plane.origin || self.working_plane.x != plane.x
+            || self.working_plane.y != plane.y
+        {
+            self.hover_key = None;
+            self.hover_cache.clear();
+        }
+        self.working_plane = plane;
+    }
+
+    fn set_shift(&mut self, shift: bool) {
+        self.shift = shift;
     }
 
     fn entity_pick_highlights_hover(&self) -> bool {
         true
     }
 
+    fn entity_pick_deferred_hover(&self) -> bool {
+        self.needs_entity_pick()
+    }
+
+    fn on_deferred_entity_hover(
+        &mut self, scene: &crate::scene::Scene, handle: Option<Handle>, point: DVec3,
+    ) -> Vec<WireModel> {
+        if !self.needs_entity_pick() {
+            return Vec::new();
+        }
+        let key = (scene.geometry_epoch, handle, point.to_array().map(f64::to_bits), self.ctrl);
+        if self.hover_key == Some(key) {
+            return self.hover_cache.clone();
+        }
+        self.hover_key = Some(key);
+        self.hover_cache.clear();
+        let Ok(target) = crate::scene::model::presspull_model::resolve_target(
+            scene, handle, point, self.working_plane, self.ctrl,
+        ) else { return Vec::new(); };
+        let geometry = match target.kind {
+            PresspullTargetKind::Profile { entity, .. } =>
+                crate::scene::model::presspull_model::profile_geometry(&entity)
+                    .map(|(plane, loops, _)| (plane, loops)),
+            PresspullTargetKind::Face { body, face, .. } =>
+                cadkernel::brep::planar_face_profile(&body, face)
+                    .map(|profile| (profile.plane, profile.loops)),
+        };
+        if let Some((plane, loops)) = geometry {
+            self.hover_cache = loops.into_iter().flatten().filter_map(|curve| {
+                let points = curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                    .into_iter().map(|point| plane.point_at(point)).collect::<Vec<_>>();
+                (points.len() >= 2).then(|| {
+                    let mut wire = WireModel::solid_f64(
+                        "PRESSPULL-BOUNDARY-HOVER".to_owned(), points, [1.0, 0.65, 0.1, 1.0], false,
+                    );
+                    wire.line_weight_px = 2.0;
+                    wire
+                })
+            }).collect();
+        }
+        self.hover_cache.clone()
+    }
+
     fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
-        if handle.is_null() {
+        if !self.needs_entity_pick() {
             return CmdResult::NeedPoint;
         }
-        self.picked = Some((handle, point));
-        CmdResult::NeedPoint
+        self.pick(Some(handle), point)
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
-        let Some((handle, pick)) = self.picked else {
-            return CmdResult::NeedPoint;
-        };
-        let distance = self
-            .direction
-            .map(|direction| (point - pick).dot(direction))
-            .unwrap_or_else(|| point.distance(pick));
-        if !distance.is_finite() || distance.abs() <= 1e-6 {
-            return CmdResult::NeedPoint;
+        if self.needs_entity_pick() {
+            return self.pick(None, point);
         }
-        CmdResult::PresspullEntity {
-            handle,
-            pick,
-            distance,
-            drag: Some(point),
-            color: self.color,
+        self.height(point).map_or(CmdResult::NeedPoint, |height| self.finish(height))
+    }
+
+    fn on_presspull_target(&mut self, mut target: PresspullTarget) {
+        let Some(direction) = target.direction.try_normalize() else {
+            return;
+        };
+        if !target.anchor.is_finite() || self.has_target(&target) {
+            return;
+        }
+        target.direction = direction;
+        self.targets.push(target);
+        if self.step != PresspullStep::Multiple {
+            self.step = PresspullStep::Height;
+        }
+        self.invalidate_preview();
+    }
+
+    fn on_presspull_applied(&mut self, success: bool) {
+        if success {
+            self.targets.clear();
+            self.step = PresspullStep::Pick;
+            self.invalidate_preview();
+        } else if !self.targets.is_empty() {
+            self.step = PresspullStep::Height;
         }
     }
 
     fn wants_text_input(&self) -> bool {
-        self.picked.is_some()
+        true
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        self.needs_entity_pick()
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let (handle, pick) = self.picked?;
-        crate::entities::common::parse_typed_length(text)
-            .filter(|distance| distance.abs() > 1e-6)
-            .map(|distance| CmdResult::PresspullEntity {
-                handle,
-                pick,
-                distance,
-                drag: None,
-                color: self.color,
-            })
+        let text = text.trim();
+        if text.is_empty() {
+            return Some(self.on_enter());
+        }
+        match text.trim_start_matches('_').to_ascii_uppercase().as_str() {
+            "M" | "MULTIPLE" if !self.targets.is_empty() => {
+                self.step = PresspullStep::Multiple;
+                return Some(CmdResult::NeedPoint);
+            }
+            "U" | "UNDO" => return Some(self.undo_selection()),
+            _ => {}
+        }
+        // The shared picker resolves coordinates and hexadecimal handles.
+        // Do not consume either as a distance while selecting targets.
+        if self.needs_entity_pick() || text.starts_with("0x") || text.starts_with("0X") {
+            return None;
+        }
+        crate::entities::common::parse_typed_length(text).map(|height| self.finish(height))
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        if self.step == PresspullStep::Multiple && !self.targets.is_empty() {
+            self.step = PresspullStep::Height;
+            CmdResult::NeedPoint
+        } else {
+            CmdResult::Cancel
+        }
+    }
+
+    fn on_undo_step(&mut self) -> Option<CmdResult> {
+        (!self.targets.is_empty()).then(|| self.undo_selection())
     }
 
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
-        Some((self.picked?.1, self.direction?))
+        if self.needs_entity_pick() {
+            return None;
+        }
+        let target = self.targets.last()?;
+        Some((target.anchor, target.direction))
+    }
+
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        self.targets.last().map(|target| target.anchor)
     }
 
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
-        let (_, anchor) = self.picked?;
+        let (anchor, _) = self.cursor_axis()?;
         Some(crate::command::DynSpec {
             anchor: crate::command::DynAnchor::Point(anchor),
             fields: vec![crate::command::DynFieldSpec::new(
@@ -629,8 +855,36 @@ impl CadCommand for PresspullCommand {
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
-        let (_, anchor) = self.picked?;
-        Some((cursor - anchor).dot(self.direction?))
+        if self.needs_entity_pick() {
+            return None;
+        }
+        self.height(cursor)
+    }
+
+    fn dyn_commit_as_text(&self) -> bool {
+        !self.needs_entity_pick()
+    }
+
+    fn on_preview_wires(&mut self, cursor: DVec3) -> Vec<WireModel> {
+        if self.needs_entity_pick() {
+            return Vec::new();
+        }
+        let Some(height) = self.height(cursor).filter(|height| height.abs() > 1e-6) else {
+            return Vec::new();
+        };
+        let key = (self.target_generation, height.to_bits());
+        if self.preview_key != Some(key) {
+            self.preview_cache = self.targets.iter().flat_map(|target| {
+                crate::scene::model::presspull_model::preview_wires(
+                    target,
+                    height,
+                    self.color,
+                    self.isolines,
+                )
+            }).collect();
+            self.preview_key = Some(key);
+        }
+        self.preview_cache.clone()
     }
 }
 

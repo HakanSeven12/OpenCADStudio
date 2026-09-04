@@ -1948,9 +1948,8 @@ impl OpenCADStudio {
                         selection_types: tab
                             .scene
                             .entity_type_names_in_layout()
-                            .into_iter()
-                            .map(|name| name.to_string())
-                            .collect(),
+                            .as_ref()
+                            .clone(),
                         selection_filter: &tab.scene.selection_filter,
                         tooltip_hidden: self.status_menu_tooltip_hidden,
                     };

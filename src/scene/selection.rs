@@ -363,16 +363,50 @@ impl Scene {
     /// Returns the sorted set of entity-type names present in the active
     /// layout. Used to populate the Quick Select "Object type" dropdown
     /// with only the types that actually exist in the drawing.
-    pub fn entity_type_names_in_layout(&self) -> Vec<String> {
+    /// Distinct entity type names in the current layout, for the
+    /// selection-filter menu.
+    ///
+    /// The status bar rebuilds on every frame, so this used to run once per
+    /// mouse move over the canvas: a full clone of the layout's handle list
+    /// (1.16 M handles, ~9 MB, on the reproducer), then a lookup, a `String`
+    /// allocation and a `BTreeSet` insert for each one — about 107 ms of a
+    /// 110 ms frame, to produce roughly twenty names.
+    ///
+    /// The answer only changes when entities are added or removed, so it is
+    /// cached against `geometry_epoch` and the layout block. The scan itself
+    /// now borrows the handle list instead of cloning it and collects
+    /// `&str`, allocating only for the names it actually returns.
+    pub fn entity_type_names_in_layout(&self) -> std::sync::Arc<Vec<String>> {
         use crate::entities::traits::entity_type_name;
-        let mut names: std::collections::BTreeSet<String> =
-            std::collections::BTreeSet::new();
-        for h in self.current_layout_entity_handles() {
-            if let Some(e) = self.document.get_entity(h) {
-                names.insert(entity_type_name(e).to_string());
+        let block = self.current_layout_block_handle();
+        {
+            let cache = self.layout_type_names_cache.borrow();
+            if let Some((epoch, cached_block, names)) = cache.as_ref() {
+                if *epoch == self.geometry_epoch && *cached_block == block {
+                    return std::sync::Arc::clone(names);
+                }
             }
         }
-        names.into_iter().collect()
+        let mut names: std::collections::BTreeSet<&str> =
+            std::collections::BTreeSet::new();
+        if let Some(record) = self
+            .document
+            .block_records
+            .iter()
+            .find(|record| record.handle == block)
+        {
+            for &handle in &record.entity_handles {
+                if let Some(entity) = self.document.get_entity(handle) {
+                    names.insert(entity_type_name(entity));
+                }
+            }
+        }
+        let names: std::sync::Arc<Vec<String>> = std::sync::Arc::new(
+            names.into_iter().map(str::to_string).collect(),
+        );
+        *self.layout_type_names_cache.borrow_mut() =
+            Some((self.geometry_epoch, block, std::sync::Arc::clone(&names)));
+        names
     }
 
     /// True when `handle`'s entity type is allowed by the selection filter.

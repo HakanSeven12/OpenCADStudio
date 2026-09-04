@@ -1715,6 +1715,11 @@ pub struct Scene {
     /// Reverse map: entity_handle → block_record_handle, built from entity_handles lists.
     /// Keyed by geometry_epoch. Eliminates the O(B) fallback scan in belongs_to_visible_block.
     entity_block_map_cache: RefCell<Option<(u64, HashMap<Handle, Handle>)>>,
+    /// Distinct entity type names present in a layout, keyed by
+    /// (geometry_epoch, layout block). The status bar asks for this on every
+    /// frame to populate the selection-filter menu, but the answer only
+    /// changes when entities are added or removed.
+    layout_type_names_cache: RefCell<Option<(u64, Handle, std::sync::Arc<Vec<String>>)>>,
     /// Reverse dependencies from layer/style/block definitions to the top-level
     /// entities whose resident wire runs actually change. Kept independent from
     /// `geometry_epoch`: a layer colour toggle can reuse the index, invalidate
@@ -1950,6 +1955,7 @@ impl Scene {
             annotation_affects_wires: std::cell::Cell::new(None),
             model_extents_cache: RefCell::new(None),
             entity_block_map_cache: RefCell::new(None),
+            layout_type_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
             associative_hatch_source_cache: RefCell::new(None),
             block_defn_cache: RefCell::new(HashMap::default()),

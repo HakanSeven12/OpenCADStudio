@@ -8,6 +8,7 @@ version = "0.9.8"
 dependencies = [
  "acadrust",
  "ashpd",
+ "base64",
  "bincode",
  "bytemuck",
  "cadkernel",

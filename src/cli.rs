@@ -1,7 +1,8 @@
 //! Command-line interface.
 //!
-//! Parsing lives here; `main` interprets the result. Three run modes split out
+//! Parsing lives here; `main` interprets the result. Four run modes split out
 //! of the parsed args:
+//!   - `--mcp`              local stdio MCP server for AI clients
 //!   - `--serve`            headless JSON automation server (see `app::serve`)
 //!   - `--export IN OUT`    one-shot headless format conversion, then exit
 //!   - otherwise            launch the GUI editor, configured via [`GuiConfig`]
@@ -58,6 +59,10 @@ pub struct Cli {
     /// Run the headless JSON automation server (stdin/stdout, or --port).
     #[arg(long)]
     pub serve: bool,
+
+    /// Expose the running desktop editor to AI clients over MCP stdio.
+    #[arg(long)]
+    pub mcp: bool,
 
     /// TCP port for --serve (defaults to stdin/stdout).
     #[arg(long, value_name = "PORT")]

@@ -1823,6 +1823,8 @@ impl OpenCADStudio {
             dyn_capturing,
             &self.history_content,
             self.win_size.1,
+            self.control.enabled,
+            self.control_busy(),
         );
         let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
             workspace
@@ -1987,8 +1989,6 @@ impl OpenCADStudio {
                         self.quick_properties,
                         tab.scene.selection_filter_active(),
                         self.selection_cycling,
-                        self.control.enabled,
-                        self.control_busy(),
                         &self.statusbar_config,
                         status_menu_data,
                     )

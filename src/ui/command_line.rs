@@ -42,6 +42,25 @@ fn cmd_input_id() -> iced::widget::Id {
     iced::widget::Id::new(CMD_INPUT_ID)
 }
 
+fn mcp_status(enabled: bool, busy: bool) -> (&'static str, Color) {
+    if !enabled {
+        (
+            "MCP control is off",
+            Color::from_rgb(0.90, 0.35, 0.35),
+        )
+    } else if busy {
+        (
+            "MCP is handling a request",
+            Color::from_rgb(0.95, 0.72, 0.25),
+        )
+    } else {
+        (
+            "MCP control is ready",
+            Color::from_rgb(0.35, 0.85, 0.55),
+        )
+    }
+}
+
 /// Drop a prompt's "[A / B / …]" option listing — used for the pinned line
 /// when the same options render as clickable buttons beside it. Collapses the
 /// leftover double spaces and the orphaned " :" the removal leaves behind.
@@ -506,6 +525,8 @@ impl CommandLine {
         dyn_capturing: bool,
         history_content: &'a text_editor::Content,
         window_height: f32,
+        control_enabled: bool,
+        control_busy: bool,
     ) -> Element<'a, Message> {
         // Only the most recent entries pushed within the last few
         // seconds show on the overlay. The dropdown button keeps the
@@ -715,7 +736,24 @@ impl CommandLine {
                 .align_y(iced::alignment::Vertical::Center),
         ]
         .width(Length::Fill);
-        let input_row = row![prompt, literal_btn, input_with_history]
+        let (mcp_tooltip, mcp_color) = mcp_status(control_enabled, control_busy);
+        let mcp_btn = button(text("MCP").size(11))
+            .on_press(Message::ControlToggle)
+            .style(move |theme: &Theme, status| {
+                let mut style = button::subtle(theme, status);
+                style.background = Some(Background::Color(mcp_color));
+                style.text_color = Color::from_rgb(0.08, 0.08, 0.10);
+                style.border.color = mcp_color;
+                style.border.width = 1.0;
+                style
+            })
+            .padding([2, 8])
+            .width(Length::Fixed(50.0));
+        let mcp_tip = container(text(mcp_tooltip).size(11))
+            .padding([3, 6])
+            .style(container::bordered_box);
+        let mcp_btn = tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4);
+        let input_row = row![prompt, literal_btn, input_with_history, mcp_btn]
             .spacing(4)
             .align_y(iced::Center);
 
@@ -975,7 +1013,7 @@ fn history_highlight_format(
 
 #[cfg(test)]
 mod tests {
-    use super::{ranked_matches, CommandLine};
+    use super::{mcp_status, ranked_matches, CommandLine};
     use crate::t;
     use rustc_hash::FxHashMap;
 
@@ -984,6 +1022,13 @@ mod tests {
             .iter()
             .map(|(a, c)| (a.to_string(), c.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn mcp_status_distinguishes_off_ready_and_busy() {
+        assert_eq!(mcp_status(false, false).0, "MCP control is off");
+        assert_eq!(mcp_status(true, false).0, "MCP control is ready");
+        assert_eq!(mcp_status(true, true).0, "MCP is handling a request");
     }
 
     #[test]

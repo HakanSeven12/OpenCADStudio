@@ -19,13 +19,15 @@ jobs:
         run: cargo test --lib app::control::tests
       - name: Validate Python adapters
         if: runner.os != 'Windows'
-        run: python3 -m py_compile docs/automation/live.py docs/automation/mcp_server.py
+        run: python3 -m py_compile docs/automation/live.py docs/automation/mcp_smoke.py
   mcp:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 -m pip install -r docs/automation/requirements-mcp.txt
-      - run: python3 docs/automation/mcp_smoke.py
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --lib mcp::tests
+      - run: cargo build
+      - run: python3 docs/automation/mcp_smoke.py target/debug/OpenCADStudio
   web:
     runs-on: ubuntu-latest
     steps:

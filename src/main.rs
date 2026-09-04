@@ -14,6 +14,8 @@ mod i18n;
 mod io;
 #[cfg(not(target_arch = "wasm32"))]
 mod network;
+#[cfg(not(target_arch = "wasm32"))]
+mod mcp;
 mod modules;
 mod patreon;
 mod discussions;
@@ -73,6 +75,14 @@ fn main() -> iced::Result {
                 size,
             );
             std::process::exit(if ok { 0 } else { 1 });
+        }
+
+        // MCP is a client-neutral local entry point. It uses only stdin,
+        // stdout and the authenticated GUI bridge, so it must run before any
+        // logging or graphics setup can write to the protocol stream.
+        if args.mcp {
+            mcp::run();
+            return Ok(());
         }
 
         // Opt-in logging. `--log LEVEL` seeds RUST_LOG; the subscriber then

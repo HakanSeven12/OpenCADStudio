@@ -10,6 +10,8 @@ pub mod i18n;
 pub mod io;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod network;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mcp;
 pub mod modules;
 pub mod patreon;
 pub mod discussions;

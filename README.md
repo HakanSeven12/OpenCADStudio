@@ -174,15 +174,16 @@ trunk serve
 
 ## Automation
 
-The desktop binary supports one-shot conversion and a persistent headless server:
+The desktop binary supports one-shot conversion, a persistent headless server, and a client-neutral MCP endpoint for AI applications:
 
 ```bash
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-The server exchanges one JSON object per line over standard input/output or a local TCP socket. See the [automation guide](docs/automation/README.md) and the included [Python client](docs/automation/ocs.py).
+The automation server exchanges one JSON object per line over standard input/output or a local TCP socket. The MCP endpoint exposes the live desktop editor through the same tools to every compatible client without an additional runtime. See the [automation guide](docs/automation/README.md) and the included [Python client](docs/automation/ocs.py).
 
 ## Plugins
 

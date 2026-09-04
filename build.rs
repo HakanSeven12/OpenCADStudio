@@ -1,12 +1,19 @@
-// build.rs — Windows executable icon embedding.
-//
-// The core ribbon module registry used to be generated here; it is now a
-// hand-written static list in src/modules/registry.rs.
+// Build metadata and Windows executable resources.
 
 #[cfg(windows)]
 use std::path::Path;
 
 fn main() {
+    let version = std::env::var("CARGO_PKG_VERSION").expect("Cargo package version");
+    let parts: Vec<&str> = version.split('.').collect();
+    let app_version = if parts.len() == 3 && parts[0].len() == 4
+        && parts[0].starts_with("20") && parts[2] == "0"
+    {
+        format!("{}.{:02}", parts[0], parts[1].parse::<u32>().expect("week number"))
+    } else {
+        version.clone()
+    };
+    println!("cargo:rustc-env=OCS_APP_VERSION={app_version}");
     println!("cargo:rerun-if-changed=.git/HEAD");
     if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
         if let Some(reference) = head.trim().strip_prefix("ref: ") {
@@ -57,22 +64,17 @@ fn main() {
         }
     );
 
-    // The Patreon token is baked in at compile time via `option_env!` in
-    // src/patreon.rs. `option_env!` is not tracked by Cargo, so without this a
-    // token change wouldn't trigger a rebuild — declare the dependency so an
-    // updated OCS_PATREON_TOKEN re-bakes the binary. (#229-adjacent)
     println!("cargo:rerun-if-env-changed=OCS_PATREON_TOKEN");
 
-    // Windows: embed AppIcon.ico into the .exe so the executable carries its
-    // own icon (Explorer, taskbar, Start-menu tile, file associations). The
-    // .ico is produced from assets/logo.svg by the release workflow before the
-    // build; when it is absent (local/dev builds) this is skipped. See #107.
+    // Release builds generate the icon before compiling.
     #[cfg(windows)]
     {
         println!("cargo:rerun-if-changed=packaging/windows/AppIcon.ico");
         if Path::new("packaging/windows/AppIcon.ico").exists() {
             let mut res = winresource::WindowsResource::new();
             res.set_icon("packaging/windows/AppIcon.ico");
+            res.set("ProductVersion", &app_version);
+            res.set("FileVersion", &app_version);
             if let Err(e) = res.compile() {
                 println!("cargo:warning=failed to embed Windows icon: {e}");
             }

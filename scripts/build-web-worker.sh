@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-cargo build --release --target wasm32-unknown-unknown --package ocs_web_worker
+cargo build --locked --release --target wasm32-unknown-unknown --package ocs_web_worker
 worker_out="${TRUNK_STAGING_DIR:?}/worker_pkg"
 mkdir -p "$worker_out"
 wasm-bindgen \

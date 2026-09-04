@@ -1,12 +1,17 @@
-# Build the wasm web app and publish it to GitHub Pages on every release
-# (issue #45). No threads are used on wasm (rayon runs sequentially), so the
-# COOP/COEP headers GitHub Pages can't set are not needed.
 name: Deploy web (GitHub Pages)
 run-name: ${{ github.event.release.tag_name || github.ref_name }} Web
 
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      commit:
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
@@ -23,8 +28,42 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
     steps:
+      - name: Resolve release source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          COMMIT=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
+          if [ -n "$RELEASE_COMMIT" ] && [ "$RELEASE_COMMIT" != "$COMMIT" ]; then
+            echo "::error::Release tag and commit do not match"
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.commit }}
+
+      - name: Validate release version
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+        run: |
+          if [ -f scripts/release.py ]; then
+            python3 scripts/release.py versions --tag "$RELEASE_TAG"
+          else
+            VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+            test "v$VERSION" = "$RELEASE_TAG"
+          fi
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -51,10 +90,18 @@ jobs:
           tool: wasm-bindgen@${{ steps.wasm-bindgen-version.outputs.version }}
 
       - name: Build web bundle
-        run: trunk build --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
+        run: trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
 
       - name: Assemble landing page
         run: sh scripts/assemble-site.sh
+
+      - name: Record release version and source
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+          RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
+        run: |
+          jq -n --arg version "${RELEASE_TAG#v}" --arg commit "$RELEASE_COMMIT" \
+            '{version: $version, commit: $commit}' > dist/app/release.json
 
       # GitHub Pages runs Jekyll, which ignores files; opt out so the
       # wasm-bindgen output is served verbatim.
@@ -248,9 +295,7 @@ jobs:
           print(f"videos: {len(json.loads(output.read_text(encoding='utf-8')))}")
           PY
 
-      # GitHub's Discussions API is authenticated GraphQL. Generate a public,
-      # token-free snapshot next to the web app; discussion activity (including
-      # pin/unpin) triggers this workflow so pinned entries stay at the top.
+      # Publish a public snapshot of GitHub discussions.
       - name: Generate discussions.json
         env:
           GH_TOKEN: ${{ github.token }}
@@ -313,3 +358,30 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify deployed release
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.request
+
+          expected = {"version": os.environ["RELEASE_TAG"].removeprefix("v"), "commit": os.environ["RELEASE_COMMIT"]}
+          url = os.environ["PAGE_URL"].rstrip("/") + "/app/release.json?commit=" + expected["commit"]
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as response:
+                      if json.load(response) == expected:
+                          print("Verified web release", expected["version"], expected["commit"])
+                          break
+              except (OSError, ValueError) as error:
+                  print(error)
+              time.sleep(10)
+          else:
+              raise SystemExit("Deployed web version does not match the release")
+          PY

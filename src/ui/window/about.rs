@@ -76,7 +76,7 @@ pub(crate) fn architecture_name() -> &'static str {
 pub fn view_window(
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'static, Message> {
-    let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let version = format!("v{}", env!("OCS_APP_VERSION"));
     let content_width = if matches!(sizing.width, Length::Fill) {
         Fill
     } else {

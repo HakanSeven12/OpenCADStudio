@@ -16,7 +16,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Validate control contract
-        run: cargo test --lib app::control::tests
+        run: |
+          cargo test --lib app::control::tests
+          cargo test --lib io::update_check::tests
       - name: Validate MCP smoke script
         if: runner.os != 'Windows'
         run: python3 -m py_compile docs/automation/mcp_smoke.py
@@ -24,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate weekly release automation
+        run: python3 scripts/test_release.py
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --lib mcp::tests
       - run: cargo build

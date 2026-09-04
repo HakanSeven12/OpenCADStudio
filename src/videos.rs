@@ -26,7 +26,7 @@ pub fn watch_url(id: &str) -> String {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const UA: &str = concat!("OpenCADStudio/", env!("CARGO_PKG_VERSION"));
+const UA: &str = concat!("OpenCADStudio/", env!("OCS_APP_VERSION"));
 
 /// Directory of the on-disk thumbnail / listing cache.
 #[cfg(not(target_arch = "wasm32"))]

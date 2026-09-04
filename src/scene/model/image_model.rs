@@ -430,7 +430,7 @@ fn fetch_remote(url: &str) -> Option<Vec<u8>> {
         .get(url)
         .header(
             "User-Agent",
-            concat!("OpenCADStudio/", env!("CARGO_PKG_VERSION")),
+            concat!("OpenCADStudio/", env!("OCS_APP_VERSION")),
         )
         .call()
         .ok()?;

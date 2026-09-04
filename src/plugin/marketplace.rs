@@ -107,7 +107,7 @@ fn agent() -> ureq::Agent {
     crate::network::agent(std::time::Duration::from_secs(15))
 }
 
-const UA: &str = concat!("OpenCADStudio/", env!("CARGO_PKG_VERSION"));
+const UA: &str = concat!("OpenCADStudio/", env!("OCS_APP_VERSION"));
 
 /// Fetch releases without consuming GitHub API quota. The public Atom feed
 /// supplies tags and the expanded-assets endpoint supplies download links.

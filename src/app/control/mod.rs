@@ -177,7 +177,7 @@ impl OpenCADStudio {
             "name":c.name(),"prompt":c.prompt(),"options":c.options().iter().map(|o|json!({"label":o.label,"keyword":o.keyword})).collect::<Vec<_>>(),
             "entity_pick":c.needs_entity_pick(),"structure_pick":c.needs_structure_point_pick(),"selection":c.is_selection_gathering(),"tangent_pick":c.needs_tangent_pick(),"free_text":c.is_free_text_step()
         }));
-        json!({"ok":true,"protocol":1,"session_id":session_id(),"version":env!("CARGO_PKG_VERSION"),
+        json!({"ok":true,"protocol":1,"session_id":session_id(),"version":env!("OCS_APP_VERSION"),
             "mode":if self.main_window.is_some(){"gui"}else{"headless"},"enabled":self.control.enabled,
             "document_id":tab.id,"revision":tab.edit_revision,"geometry_revision":tab.scene.geometry_epoch,"camera_revision":tab.scene.camera_generation,
             "plugins":plugin_ids(),

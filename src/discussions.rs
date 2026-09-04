@@ -91,7 +91,7 @@ fn get_text(agent: &ureq::Agent, url: &str) -> Result<String, String> {
         .get(url)
         .header(
             "User-Agent",
-            concat!("OpenCADStudio/", env!("CARGO_PKG_VERSION")),
+            concat!("OpenCADStudio/", env!("OCS_APP_VERSION")),
         )
         .call()
         .map_err(|e| e.to_string())?

@@ -67,7 +67,7 @@ fn port_arg() -> Option<u16> {
 }
 
 fn ready() -> Value {
-    json!({ "ok": true, "ready": true, "version": env!("CARGO_PKG_VERSION") })
+    json!({ "ok": true, "ready": true, "version": env!("OCS_APP_VERSION") })
 }
 
 fn serve_stdio(app: &mut OpenCADStudio) {

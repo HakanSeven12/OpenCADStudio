@@ -1,10 +1,4 @@
-// One-shot update check.
-//
-// `check_for_update()` runs on a background thread (joined inside an
-// async wrapper, mirroring how the rest of `crate::io` wraps blocking
-// work for iced's `Task::perform`). It hits the GitHub releases API and
-// returns `Some(UpdateInfo)` when a newer release is available, or
-// `None` when up to date / on network failure / on parse error.
+// Check for a newer published native release.
 
 #[cfg(not(target_arch = "wasm32"))]
 const RELEASES_API: &str =
@@ -12,11 +6,7 @@ const RELEASES_API: &str =
 pub const RELEASES_PAGE: &str =
     "https://github.com/HakanSeven12/OpenCADStudio/releases/latest";
 
-/// Minimum age before a freshly-published release is offered to the user.
-/// GitHub Actions takes ~15 min to build and attach the platform binaries
-/// after a tag is pushed, so suppressing notifications for the first hour
-/// prevents users from clicking through to a release page whose
-/// asset list is still empty.
+/// Give release assets time to propagate before offering an update.
 #[cfg(not(target_arch = "wasm32"))]
 const MIN_RELEASE_AGE_SECS: u64 = 60 * 60;
 
@@ -51,23 +41,37 @@ fn fetch_latest_if_outdated() -> Option<UpdateInfo> {
     let agent = crate::network::agent(std::time::Duration::from_secs(5));
     let body = agent
         .get(RELEASES_API)
-        .header("User-Agent", concat!("OpenCADStudio/", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", concat!("OpenCADStudio/", env!("OCS_APP_VERSION")))
         .header("Accept", "application/vnd.github+json")
         .call()
         .ok()?
         .body_mut()
         .read_to_string()
         .ok()?;
-    let latest = extract_string_field(&body, "tag_name")?
+    let metadata: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let suffix = if cfg!(target_os = "windows") {
+        "-windows-x86_64-portable.exe"
+    } else if cfg!(target_os = "macos") {
+        "-macos-arm64.dmg"
+    } else {
+        "-linux-x86_64.AppImage"
+    };
+    if !metadata.get("assets")?.as_array()?.iter().any(|asset| {
+        asset.get("name").and_then(|name| name.as_str()).is_some_and(|name| name.ends_with(suffix))
+            && asset.get("size").and_then(|size| size.as_u64()).unwrap_or(0) > 0
+    }) {
+        return None;
+    }
+    let latest = metadata.get("tag_name")?.as_str()?
         .trim_start_matches('v')
         .to_string();
-    if latest == env!("CARGO_PKG_VERSION") {
+    if !is_newer(&latest, env!("OCS_APP_VERSION")) {
         return None;
     }
     // Suppress the notification until the release is old enough for the
     // Actions build to have published binaries.
-    if let Some(published) = extract_string_field(&body, "published_at")
-        .as_deref()
+    if let Some(published) = metadata.get("published_at")
+        .and_then(|value| value.as_str())
         .and_then(parse_iso8601_utc)
     {
         let now = std::time::SystemTime::now()
@@ -79,7 +83,7 @@ fn fetch_latest_if_outdated() -> Option<UpdateInfo> {
         }
     }
     // Release notes are optional; treat missing as empty.
-    let notes = extract_string_field(&body, "body").unwrap_or_default();
+    let notes = metadata.get("body").and_then(|value| value.as_str()).unwrap_or_default().to_string();
     Some(UpdateInfo { version: latest, body: notes })
 }
 
@@ -129,61 +133,31 @@ fn parse_iso8601_utc(s: &str) -> Option<u64> {
     )
 }
 
-/// Minimal extractor for a top-level string field in the releases JSON.
-/// Avoids pulling in `serde_json` for two fields. Handles standard JSON
-/// string escapes (`\"`, `\\`, `\n`, `\r`, `\t`, `\/`) which are all the
-/// GitHub release body uses in practice.
 #[cfg(not(target_arch = "wasm32"))]
-fn extract_string_field(body: &str, field: &str) -> Option<String> {
-    let key = format!("\"{}\":\"", field);
-    let start = body.find(&key)? + key.len();
-    // Walk to the closing unescaped `"`, JSON-unescaping as we go.
-    let mut out = String::new();
-    let bytes = body.as_bytes();
-    let mut i = start;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'"' {
-            return Some(out);
-        }
-        if b == b'\\' && i + 1 < bytes.len() {
-            match bytes[i + 1] {
-                b'"' => out.push('"'),
-                b'\\' => out.push('\\'),
-                b'/' => out.push('/'),
-                b'n' => out.push('\n'),
-                b'r' => out.push('\r'),
-                b't' => out.push('\t'),
-                b'u' => {
-                    // \uXXXX — decode 4 hex digits. Surrogate pairs (BMP only
-                    // for now) are uncommon in release notes; skip on parse
-                    // failure.
-                    if i + 5 < bytes.len() {
-                        let hex = std::str::from_utf8(&bytes[i + 2..i + 6]).ok()?;
-                        if let Ok(code) = u32::from_str_radix(hex, 16) {
-                            if let Some(c) = char::from_u32(code) {
-                                out.push(c);
-                            }
-                        }
-                        i += 6;
-                        continue;
-                    }
-                    return None;
-                }
-                other => {
-                    // Unknown escape — keep the literal pair, GitHub doesn't emit these.
-                    out.push('\\');
-                    out.push(other as char);
-                }
+fn is_newer(latest: &str, installed: &str) -> bool {
+    let parse = |version: &str| {
+        let version = version.trim_start_matches('v');
+        if let Some((year, week)) = version.split_once('.') {
+            if year.len() == 4 && year.starts_with("20") && !week.contains('.') {
+                return Some(semver::Version::new(year.parse().ok()?, week.parse().ok()?, 0));
             }
-            i += 2;
-            continue;
         }
-        // UTF-8 multi-byte chars: push the whole code-point so we don't
-        // bisect a sequence.
-        let ch = body[i..].chars().next()?;
-        out.push(ch);
-        i += ch.len_utf8();
+        semver::Version::parse(version).ok()
+    };
+    matches!((parse(latest), parse(installed)), (Some(latest), Some(installed)) if latest > installed)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calendar_releases_compare_numerically() {
+        assert!(is_newer("2026.35", "0.9.8"));
+        assert!(is_newer("2026.10", "2026.09"));
+        assert!(is_newer("2027.01", "2026.53"));
+        assert!(!is_newer("2026.35", "2026.35"));
+        assert!(!is_newer("0.9.8", "2026.35"));
+        assert!(!is_newer("invalid", "2026.35"));
     }
-    None
 }

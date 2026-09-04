@@ -1,0 +1,68 @@
+name: Weekly release
+
+on:
+  schedule:
+    - cron: '0 12 * * 0'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish this week's release (otherwise preview notes only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+  discussions: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: weekly-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    outputs:
+      ready: ${{ steps.release.outputs.ready }}
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Validate release automation
+        run: python3 scripts/test_release.py
+      - name: Prepare release and verify published notes
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+        run: |
+          if [ "$PUBLISH" = true ]; then
+            python3 scripts/release.py prepare --publish
+          else
+            python3 scripts/release.py prepare
+          fi
+
+  # GITHUB_TOKEN releases do not trigger release events, so call both builds.
+  web:
+    needs: prepare
+    if: needs.prepare.outputs.ready == 'true'
+    uses: ./.github/workflows/pages.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      commit: ${{ needs.prepare.outputs.commit }}
+    secrets: inherit
+
+  native:
+    needs: prepare
+    if: needs.prepare.outputs.ready == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      commit: ${{ needs.prepare.outputs.commit }}
+    secrets: inherit

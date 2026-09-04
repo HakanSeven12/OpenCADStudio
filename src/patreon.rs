@@ -43,7 +43,7 @@ pub fn merge_manual(mut patrons: Vec<(String, i64)>) -> Vec<(String, i64)> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const UA: &str = concat!("OpenCADStudio/", env!("CARGO_PKG_VERSION"));
+const UA: &str = concat!("OpenCADStudio/", env!("OCS_APP_VERSION"));
 
 /// Fetch patrons with a successful payment in the last month from the Patreon
 /// API as `(display name, amount in USD cents)`, highest payment first. `Err`

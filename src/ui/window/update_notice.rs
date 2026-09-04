@@ -156,7 +156,7 @@ pub fn view_window<'a>(
     // row layout. The arrow between them is purely decorative.
     let installed = version_card(
         t!("Installed"),
-        format!("v{}", env!("CARGO_PKG_VERSION")),
+        format!("v{}", env!("OCS_APP_VERSION")),
         false,
         sizing.width,
     );

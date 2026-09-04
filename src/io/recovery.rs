@@ -254,7 +254,7 @@ impl RecoveryReport {
         lines.push("Open CAD Studio drawing recovery report".to_string());
         lines.push(format!("Report schema: {}", REPORT_SCHEMA_VERSION));
         lines.push(format!("Report ID: {}", self.report_id));
-        lines.push(format!("Application version: {}", env!("CARGO_PKG_VERSION")));
+        lines.push(format!("Application version: {}", env!("OCS_APP_VERSION")));
         lines.push(format!("Application revision: {}", env!("OCS_GIT_REV")));
         lines.push(format!("Build profile: {}", env!("OCS_BUILD_PROFILE")));
         lines.push(format!("Build features: {}", env!("OCS_BUILD_FEATURES")));

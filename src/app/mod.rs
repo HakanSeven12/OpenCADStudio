@@ -3951,9 +3951,9 @@ pub fn run() -> iced::Result {
         if let Some(tab) = state.tabs.get(state.active_tab) {
             let dot = if tab.dirty { "● " } else { "" };
             let name = tab.tab_display_name();
-            format!("{}Open CAD Studio — {}", dot, name)
+            format!("{}Open CAD Studio {} - {}", dot, env!("OCS_APP_VERSION"), name)
         } else {
-            "Open CAD Studio".to_string()
+            concat!("Open CAD Studio ", env!("OCS_APP_VERSION")).to_string()
         }
     })
     .theme(|state: &OpenCADStudio, _| state.active_theme.clone())
@@ -3985,7 +3985,7 @@ pub fn run_web() -> iced::Result {
         OpenCADStudio::view_main,
     )
     .subscription(OpenCADStudio::subscription)
-    .title(|_state: &OpenCADStudio| "Open CAD Studio".to_string())
+    .title(|_state: &OpenCADStudio| concat!("Open CAD Studio ", env!("OCS_APP_VERSION")).to_string())
     .theme(|state: &OpenCADStudio| state.active_theme.clone())
     .backend(iced::Backend::Hardware(iced::backend::Api::OpenGL))
     .font(iced_aw::ICED_AW_FONT_BYTES)

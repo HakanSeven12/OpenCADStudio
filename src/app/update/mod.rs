@@ -6458,7 +6458,7 @@ impl OpenCADStudio {
             Message::AboutCopyInfo => {
                 let info = format!(
                     "Open CAD Studio v{}\nOS: {}\nArch: {}",
-                    env!("CARGO_PKG_VERSION"),
+                    env!("OCS_APP_VERSION"),
                     crate::ui::window::about::platform_name(),
                     crate::ui::window::about::architecture_name(),
                 );
@@ -6676,7 +6676,7 @@ impl OpenCADStudio {
                 if let Some(error) = &self.plugin_registry_error {
                     return iced::clipboard::write(format!(
                         "Open CAD Studio v{}\nOS: {}\nArchitecture: {}\nRegistry: {}\nError: {}",
-                        env!("CARGO_PKG_VERSION"),
+                        env!("OCS_APP_VERSION"),
                         std::env::consts::OS,
                         std::env::consts::ARCH,
                         crate::plugin::marketplace::REGISTRY_URL,

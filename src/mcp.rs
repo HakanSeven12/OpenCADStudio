@@ -424,7 +424,7 @@ fn response(id: Value, result: Value) -> Value {
 }
 
 fn server_info() -> Value {
-    json!({"name":"OpenCADStudio","title":"Open CAD Studio","version":env!("CARGO_PKG_VERSION")})
+    json!({"name":"OpenCADStudio","title":"Open CAD Studio","version":env!("OCS_APP_VERSION")})
 }
 
 fn modern_request(params: &Value) -> bool {

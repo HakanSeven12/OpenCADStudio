@@ -206,7 +206,7 @@ impl OpenCADStudio {
                 let body = format!(
                     "<!-- Describe the issue and the steps to reproduce it. -->\n\n\n\
                      ---\n- Open CAD Studio: v{}\n- Platform: {}\n",
-                    env!("CARGO_PKG_VERSION"),
+                    env!("OCS_APP_VERSION"),
                     crate::sys::platform_info(),
                 );
                 let url = format!(

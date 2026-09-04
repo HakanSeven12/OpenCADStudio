@@ -326,7 +326,12 @@ impl CommandLine {
         self.push(EntryKind::Error, text);
     }
     pub fn push_info(&mut self, msg: &str) {
-        self.push(EntryKind::Info, msg.to_string());
+        let text = if msg.starts_with("i  ") {
+            msg.to_string()
+        } else {
+            format!("i  {msg}")
+        };
+        self.push(EntryKind::Info, text);
     }
     fn push(&mut self, kind: EntryKind, text: String) {
         self.history.push(HistoryEntry {
@@ -356,10 +361,15 @@ impl CommandLine {
             e.created_at = Instant::now();
         }
         if let Some(p) = &prompt {
+            let formatted = if p.starts_with("i  ") {
+                p.clone()
+            } else {
+                format!("i  {p}")
+            };
             // Reuse the prompt line dispatch/step-transition just pushed;
             // otherwise add it.
-            if self.history.last().map(|e| &e.text) != Some(p) {
-                self.push(EntryKind::Info, p.clone());
+            if self.history.last().map(|e| &e.text) != Some(&formatted) {
+                self.push(EntryKind::Info, formatted);
             }
             if let Some(last) = self.history.last_mut() {
                 last.pinned = true;
@@ -1058,5 +1068,26 @@ mod tests {
             line.cmd_recall.last().map(String::as_str),
             Some("MOVE 0,0 10,0")
         );
+    }
+
+    #[test]
+    fn info_entries_carry_prefix_marker() {
+        let mut line = CommandLine::new();
+        line.push_info("Object selected.");
+        assert_eq!(line.history.last().map(|e| e.text.as_str()), Some("i  Object selected."));
+        assert_eq!(line.history.last().map(|e| &e.kind), Some(&super::EntryKind::Info));
+    }
+
+    #[test]
+    fn set_step_prompt_reuses_push_info_entry() {
+        let mut line = CommandLine::new();
+        let initial_len = line.history.len();
+        line.push_info("Specify first point:");
+        assert_eq!(line.history.len(), initial_len + 1);
+        line.set_step_prompt(Some("Specify first point:".to_string()));
+        assert_eq!(line.history.len(), initial_len + 1, "prompt must reuse push_info entry without duplicating");
+        let last = line.history.last().unwrap();
+        assert!(last.pinned);
+        assert_eq!(last.text, "i  Specify first point:");
     }
 }

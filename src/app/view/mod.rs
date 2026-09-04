@@ -36,9 +36,12 @@ pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bo
 
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
 
-/// Base surface directly under the crosshair and selection marquee.
-/// In paper space, the drafting surface is the white sheet (`tab.scene.paper_bg_color`).
-fn crosshair_background(tab: &DocumentTab, is_paper: bool, _desk: [f32; 4]) -> [f32; 4] {
+/// Base surface directly under the crosshair, selection marquee, and grid overlay.
+/// In paper space, drafting surface context is unconditionally the white sheet (`tab.scene.paper_bg_color`),
+/// matching AutoCAD's model (where crosshairs and overlays adapt per context — model vs. sheet/layout —
+/// rather than per-pixel cursor sampling). This avoids flicker across sheet edges and provides a clean
+/// dark crosshair that maintains ~5.85:1 contrast against the default medium-gray desk margin (#8A8A8A).
+fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
     if !is_paper {
         return tab.scene.bg_color;
     }
@@ -395,8 +398,7 @@ impl OpenCADStudio {
                     }
                 })
                 .collect();
-            let desk_bg = self.model_space.resolve_desk_bg();
-            let bg = crosshair_background(tab, is_paper, desk_bg);
+            let bg = crosshair_background(tab, is_paper);
             let bg_lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
             let grid_style = crate::ui::overlay::GridStyle {
                 opacity: self.model_space.grid_opacity,
@@ -751,7 +753,7 @@ impl OpenCADStudio {
                 tab.pan_mode || tab.orbit_mode || tab.zoom_dynamic_mode,
                 self.ribbon.open_dropdown.is_some(),
                 hover_locked,
-                crosshair_background(tab, is_paper, self.model_space.resolve_desk_bg()),
+                crosshair_background(tab, is_paper),
                 crate::ui::overlay::CrosshairOptions {
                     size_percent: self.cursor_size,
                     pick_box: self.pick_box,
@@ -3915,8 +3917,7 @@ mod tests {
     #[test]
     fn test_crosshair_background_paper_space() {
         let tab = crate::app::document::DocumentTab::new_drawing(1);
-        let desk_bg = [0.1, 0.1, 0.1, 1.0]; // Dark themed desk background
-        let bg = crosshair_background(&tab, true, desk_bg);
+        let bg = crosshair_background(&tab, true);
         assert_eq!(bg, tab.scene.paper_bg_color);
         assert!(crate::ui::style::common::canvas_is_light(bg));
     }

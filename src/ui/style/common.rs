@@ -70,11 +70,14 @@ pub(crate) fn accessible_accent(accent: Color, bg: Color, fallback: Color) -> Co
 }
 
 /// Returns true if the given canvas background color has a WCAG relative luminance > 0.5 (light surface).
+/// Ignores alpha assuming canvas backgrounds are opaque (or composited against default viewport clear).
 pub(crate) fn canvas_is_light(bg: [f32; 4]) -> bool {
     wcag_luminance(Color::from_rgb(bg[0], bg[1], bg[2])) > 0.5
 }
 
 /// True if a character is East Asian Wide or Fullwidth (CJK ideographs, kana, hangul, fullwidth forms).
+/// Approximation of East Asian Wide/Fullwidth; not exhaustive (e.g. emoji ranges and CJK Extension B+
+/// beyond 0x2FA1F omitted for the backlog).
 pub(crate) fn is_wide(c: char) -> bool {
     let u = c as u32;
     matches!(

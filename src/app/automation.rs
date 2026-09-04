@@ -193,6 +193,19 @@ fn entity_json(e: &acadrust::EntityType) -> Value {
 impl OpenCADStudio {
     /// Handle one JSON request line and return the JSON response.
     pub(crate) fn automation_op(&mut self, line: &str) -> Value {
+        if let Ok(req) = serde_json::from_str::<Value>(line) {
+            if req["protocol"].is_number() {
+                let id = req["request_id"].clone();
+                let (response, task) = self.control_request(req);
+                if let Err(error) = self.drive_headless_task(task) {
+                    return err(error);
+                }
+                if matches!(response["status"].as_str(), Some("accepted" | "running")) {
+                    return self.control_request(json!({"op":"operation","request_id":id})).0;
+                }
+                return response;
+            }
+        }
         let res = self.automation_op_inner(line);
         // Most automation ops mutate `Scene::selected` directly rather than
         // going through `update()` (`select` calls `deselect_all` /
@@ -203,7 +216,7 @@ impl OpenCADStudio {
         res
     }
 
-    fn automation_op_inner(&mut self, line: &str) -> Value {
+    pub(super) fn automation_op_inner(&mut self, line: &str) -> Value {
         let req: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => return err(format!("invalid JSON: {e}")),
@@ -220,6 +233,7 @@ impl OpenCADStudio {
                 self.tabs[i].scene.bump_geometry();
                 self.entity_summary()
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "open" => {
                 let Some(path) = req["path"].as_str() else {
                     return err("open: missing \"path\"");
@@ -249,6 +263,8 @@ impl OpenCADStudio {
                     Err(e) => err(format!("open: {e}")),
                 }
             }
+            #[cfg(target_arch = "wasm32")]
+            "open" => err("open: use the browser file action"),
             "run" => {
                 let cmd = req["cmd"].as_str().unwrap_or("").to_string();
                 if cmd.is_empty() {
@@ -256,11 +272,16 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 let before = self.tabs[i].scene.document.entities().count();
-                self.run_headless(&cmd);
+                let error_revision = self.command_line.error_revision;
+                if let Err(error) = self.run_headless(&cmd) { return err(error); }
+                if self.command_line.error_revision != error_revision {
+                    return err(self.command_line.last_error.clone().unwrap_or_default());
+                }
                 let after = self.tabs[i].scene.document.entities().count();
                 json!({
                     "ok": true,
                     "cmd": cmd,
+                    "status": if self.tabs[i].active_cmd.is_some() { "waiting_input" } else { "completed" },
                     "entities": after,
                     "added": after as i64 - before as i64,
                 })
@@ -269,12 +290,17 @@ impl OpenCADStudio {
             "query" => self.entity_query(&req),
             "layers" => {
                 let i = self.active_tab;
+                let offset = req["offset"].as_u64().unwrap_or(0) as usize;
+                let limit = req["limit"].as_u64().unwrap_or(1000).min(10_000) as usize;
+                let count = self.tabs[i].scene.document.layers.iter().count();
                 let layers: Vec<Value> = self
                     .tabs[i]
                     .scene
                     .document
                     .layers
                     .iter()
+                    .skip(offset)
+                    .take(limit)
                     .map(|l| {
                         let mut o = json!({
                             "name": l.name,
@@ -295,6 +321,8 @@ impl OpenCADStudio {
                 json!({
                     "ok": true,
                     "current": self.tabs[i].scene.document.header.current_layer_name,
+                    "count": count,
+                    "next_offset": (offset + layers.len() < count).then_some(offset + layers.len()),
                     "layers": layers,
                 })
             }
@@ -385,8 +413,28 @@ impl OpenCADStudio {
     /// [`OpenCADStudio::run_command_line`] (see `cmd_result.rs`), which the GUI
     /// command line uses too so both process `UCS Z 90` / `LINE 0,0 10,10` /
     /// `PDMODE 3` identically.
-    fn run_headless(&mut self, cmd: &str) {
-        let _ = self.run_command_line(cmd);
+    fn run_headless(&mut self, cmd: &str) -> Result<(), String> {
+        let task = self.run_command_line(cmd);
+        self.drive_headless_task(task)
+    }
+
+    pub(super) fn drive_headless_task(&mut self, task: iced::Task<super::Message>) -> Result<(), String> {
+        use iced::futures::StreamExt;
+        let mut streams = Vec::new();
+        if let Some(stream) = iced_runtime::task::into_stream(task) { streams.push(stream); }
+        while let Some(stream) = streams.last_mut() {
+            match iced::futures::executor::block_on(stream.next()) {
+                Some(iced_runtime::Action::Output(message)) => {
+                    let next = self.update(message);
+                    if let Some(stream) = iced_runtime::task::into_stream(next) { streams.push(stream); }
+                }
+                Some(iced_runtime::Action::Widget(_)) | Some(iced_runtime::Action::Tick) | Some(iced_runtime::Action::Reload) => {},
+                Some(action) => return Err(format!("GUI runtime required for {action:?}")),
+                None => { streams.pop(); }
+            }
+        }
+        self.finish_all_pending_history();
+        Ok(())
     }
 
     /// List entities (handle, type, layer, basic geometry), optionally filtered
@@ -395,7 +443,8 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let type_filter = req["type"].as_str();
         let layer_filter = req["layer"].as_str();
-        let limit = req["limit"].as_u64().unwrap_or(1000) as usize;
+        let limit = req["limit"].as_u64().unwrap_or(1000).min(10000) as usize;
+        let offset = req["offset"].as_u64().unwrap_or(0);
 
         let mut entities = Vec::new();
         let mut matched = 0u64;
@@ -411,7 +460,7 @@ impl OpenCADStudio {
                 }
             }
             matched += 1;
-            if entities.len() < limit {
+            if matched > offset && entities.len() < limit {
                 entities.push(entity_json(e));
             }
         }
@@ -419,6 +468,7 @@ impl OpenCADStudio {
             "ok": true,
             "count": matched,
             "returned": entities.len(),
+            "next_offset": if offset + (entities.len() as u64) < matched { Some(offset + entities.len() as u64) } else { None },
             "entities": entities,
         })
     }
@@ -796,7 +846,7 @@ mod tests {
         // (feed_active_cmd is the same path the GUI submit offers first).
         let _ = app.run_command_line("PICKDRAG");
         assert!(app.tabs[app.active_tab].active_cmd.is_some(), "prompt must open");
-        app.feed_active_cmd("1");
+        let _ = app.feed_active_cmd("1");
         assert!(app.pick_drag_rect, "PICKDRAG 1 via the prompt must switch");
     }
 

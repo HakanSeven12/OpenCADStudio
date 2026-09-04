@@ -69,6 +69,8 @@ pub struct CommandLine {
     /// instead of submitting. Saved in the user config.
     pub literal_spaces: bool,
     pub history: Vec<HistoryEntry>,
+    pub error_revision: u64,
+    pub last_error: Option<String>,
     /// Successfully dispatched commands used for ↑/↓ recall, newest last.
     /// Stored separately because recall also maintains its own cursor and draft.
     pub cmd_recall: Vec<String>,
@@ -116,6 +118,8 @@ impl Default for CommandLine {
             input: String::new(),
             literal_spaces: false,
             history: Vec::new(),
+            error_revision: 0,
+            last_error: None,
             cmd_recall: Vec::new(),
             recent_commands: Vec::new(),
             recall_cursor: None,
@@ -307,6 +311,8 @@ impl CommandLine {
         self.push(EntryKind::Output, msg.to_string());
     }
     pub fn push_error(&mut self, msg: &str) {
+        self.error_revision = self.error_revision.wrapping_add(1);
+        self.last_error = Some(msg.to_owned());
         self.push(EntryKind::Error, format!("*{}*  {msg}", t!("Invalid")));
     }
     /// Append an error unless it is already the latest history line. Repeated
@@ -314,6 +320,8 @@ impl CommandLine {
     /// with identical copies (#498).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn push_error_once(&mut self, msg: &str) {
+        self.error_revision = self.error_revision.wrapping_add(1);
+        self.last_error = Some(msg.to_owned());
         let text = format!("*{}*  {msg}", t!("Invalid"));
         if let Some(last) = self
             .history

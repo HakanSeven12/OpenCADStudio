@@ -435,40 +435,41 @@ impl OpenCADStudio {
         // the first-word + fed-tokens path below. (#162)
         if crate::plugin::try_dispatch(self, i, cmd) {
             let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
-            self.finish_active_command(&toks);
-            return Task::none();
+            return self.finish_active_command(&toks);
         }
         if tokens[0].eq_ignore_ascii_case("BACKGROUND")
             || tokens[0].eq_ignore_ascii_case("COLORSCHEME")
         {
             return self.dispatch_command(cmd);
         }
-        let _ = self.dispatch_command(tokens[0]);
+        let start_task = self.dispatch_command(tokens[0]);
         if self.tabs[i].active_cmd.is_none() {
             // Not an interactive tool — an inline-argument command (`PDMODE 3`).
             return self.dispatch_command(cmd);
         }
         let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
-        self.finish_active_command(&toks);
-        Task::none()
+        let finish_task = self.finish_active_command(&toks);
+        Task::batch([start_task, finish_task])
     }
 
     /// Feed `tokens[1..]` to the active interactive command as points / option
     /// keywords, then terminate it as if Enter were pressed. No-op when no
     /// command is active.
-    pub(super) fn finish_active_command(&mut self, tokens: &[String]) {
+    pub(super) fn finish_active_command(&mut self, tokens: &[String]) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].active_cmd.is_none() {
-            return;
+            return Task::none();
         }
         self.last_point = None;
+        let mut tasks = Vec::new();
         for tok in &tokens[1..] {
             if self.tabs[i].active_cmd.is_none() {
                 break;
             }
-            self.feed_active_cmd(tok);
+            tasks.push(self.feed_active_cmd(tok));
         }
-        let _ = self.feed_command(StepInput::Enter);
+        tasks.push(self.feed_command(StepInput::Enter));
+        Task::batch(tasks)
     }
 
     /// Classify one typed token into a [`StepInput`] and route it through the
@@ -577,7 +578,7 @@ impl OpenCADStudio {
         Some(self.feed_command(StepInput::SelectionComplete(handles)))
     }
 
-    pub(super) fn feed_active_cmd(&mut self, token: &str) {
+    pub(super) fn feed_active_cmd(&mut self, token: &str) -> Task<Message> {
         let i = self.active_tab;
         // Object-pick step: the token is a handle (as returned by `query`).
         if self.tabs[i]
@@ -594,8 +595,7 @@ impl OpenCADStudio {
                 .as_mut()
                 .and_then(|c| c.on_text_input(token));
             if let Some(r) = consumed {
-                let _ = self.apply_cmd_result(r);
-                return;
+                return self.apply_cmd_result(r);
             }
             let accepts_points = self.tabs[i]
                 .active_cmd
@@ -622,9 +622,9 @@ impl OpenCADStudio {
                     if self.command_point_allowed(i, wcs) {
                         self.last_point = Some(wcs);
                         self.push_ucs_to_cmd(i);
-                        let _ = self.feed_command(StepInput::Point(wcs));
+                        return self.feed_command(StepInput::Point(wcs));
                     }
-                    return;
+                    return Task::none();
                 }
             }
             if let Ok(v) = u64::from_str_radix(token.trim_start_matches("0x"), 16) {
@@ -642,9 +642,9 @@ impl OpenCADStudio {
                         )
                     })
                     .unwrap_or(glam::Vec3::ZERO);
-                let _ = self.feed_command(StepInput::EntityPick(handle, pt.as_dvec3()));
+                return self.feed_command(StepInput::EntityPick(handle, pt.as_dvec3()));
             }
-            return;
+            return Task::none();
         }
         if let Some((coord, kind)) = super::helpers::parse_coord(token) {
             // Match the GUI command line: typed coordinates are in the active
@@ -667,13 +667,13 @@ impl OpenCADStudio {
                 },
             };
             if !self.command_point_allowed(i, wcs) {
-                return;
+                return Task::none();
             }
             self.last_point = Some(wcs);
             self.push_ucs_to_cmd(i);
-            let _ = self.feed_command(StepInput::Point(wcs));
+            return self.feed_command(StepInput::Point(wcs));
         } else {
-            let _ = self.feed_command(StepInput::Text(token.to_string()));
+            return self.feed_command(StepInput::Text(token.to_string()));
         }
     }
 

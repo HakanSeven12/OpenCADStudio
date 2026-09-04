@@ -20,6 +20,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 semver = "1"
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["image", "svg", "advanced", "canvas", "smol", "markdown"] }
+iced_runtime = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_aw = { git = "https://github.com/HakanSeven12/iced_aw.git", branch = "agent/fix-iced-fonts", features = ["menu", "context_menu", "color_picker", "drop_down"] }
 bytemuck = { version = "1.25", features = ["derive"] }
@@ -65,6 +66,7 @@ acadrust = { git = "https://git@github.com/HakanSeven12/cadcodec.git", rev = "5b
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = "0.3"
 ocs_plugin_api = { path = "crates/ocs_plugin_api", features = ["host"] }
 meshopt = "0.6.2"
 i18n-embed = { version = "0.16", features = ["desktop-requester"] }

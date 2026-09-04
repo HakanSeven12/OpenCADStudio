@@ -25,6 +25,7 @@ dependencies = [
  "iced",
  "iced_aw",
  "iced_core",
+ "iced_runtime",
  "image",
  "inventory",
  "js-sys",

@@ -1,73 +1,27 @@
-# Headless automation API
+# OpenCADStudio automation
 
-Open CAD Studio can run without a GUI and be driven over a line-based JSON
-protocol — for scripts, batch jobs, or AI agents.
+`--serve` remains available for isolated headless scripts. `live.py` connects to the real desktop application through a private per-process descriptor under the user's OCS configuration directory. The GUI owns every mutation: transport threads only validate and enqueue requests.
 
-```sh
-OpenCADStudio --serve              # stdin/stdout transport
-OpenCADStudio --serve --port 4242  # listen on 127.0.0.1:4242 instead
-```
+The live protocol requires protocol version 1, stable session/document IDs, an expected edit revision for mutations, and a unique request ID. Commands report `waiting_input` while interactive work remains. Asynchronous file and renderer work remains `running` until its real callback finishes. A bounded operation cache makes retries with the same payload idempotent; after a restart or an expired operation, clients must read state instead of replaying a mutation.
 
-It reads one JSON request per line and writes one JSON response per line — over
-**stdin/stdout**, or over a **local TCP socket** with `--port`. The active
-document persists across requests (and, on the socket, across reconnects), so a
-caller can act → observe → act.
+Operations include document state and activation, paged entity queries, layer/header/property inspection, command discovery, start/run/step/cancel, WCS/UCS/relative points, entity and structure picks, selection, property edits, semantic UI actions, undo/redo, protected save, event polling, and current-window PNG capture. The status bar includes a control switch whose green, yellow, and red states mean ready, busy, and off.
 
-## Protocol
+The Web build exposes `ocs_control_submit(json)` and `ocs_control_take(ticket)`. They enter the same bounded GUI queue and return the same semantic responses; browser code polls the ticket until a response is present.
 
-| Request | Response |
-|---------|----------|
-| `{"op":"new"}` | `{"ok":true,"total":0,"by_type":{}}` |
-| `{"op":"open","path":"plan.dwg"}` | entity summary |
-| `{"op":"run","cmd":"LAYER Walls"}` | `{"ok":true,"cmd":...,"entities":N,"added":D}` |
-| `{"op":"entities"}` | `{"ok":true,"total":N,"by_type":{"Line":42,...}}` |
-| `{"op":"query","type":"Line","layer":"Walls"}` | per-entity `{handle,type,layer,…geometry}` (Line/Circle/Arc/Point/Ellipse/Text/MText/Polyline/Insert; filters + `limit` optional) |
-| `{"op":"layers"}` | layers `{name,color,off,frozen,locked}` + the current layer |
-| `{"op":"header"}` | drawing variables (units, PDMODE/PDSIZE, LTSCALE, …) |
-| `{"op":"select","handles":["2B"]}` | set the selection (by `handles`, `type`, or `layer`; `clear` to deselect) → `{"ok":true,"selected":N}` |
-| `{"op":"undo"}` / `{"op":"redo"}` | step the document history → entity summary |
-| `{"op":"save","path":"out.dwg"}` | `{"ok":true,"saved":"out.dwg"}` (path optional once opened/saved) |
+Run `./docs/automation/install.sh` once. It installs the release binary and pinned MCP environment in `~/.local/share/ocs-control`, registers the `opencadstudio` stdio server in the user's Codex configuration, and leaves source-independent launch paths. The personal `opencadstudio-control` skill tells later Codex sessions how to use it safely.
 
-Selection drives modify commands — `select` the targets (e.g. the handles a
-`query` returned), then `run("ERASE")`:
-
-```python
-ocs.select(type="Line"); ocs.run("ERASE")   # erase every line
-ids = [e["handle"] for e in ocs.query(layer="Walls")["entities"]]
-ocs.select(handles=ids); ocs.run("ERASE")
-```
-
-Every response has `"ok"`; failures carry `"error"`. `run` drives Open CAD
-Studio's **own** command system — no separate bindings to maintain — so its
-coverage grows with the app.
-
-Interactive draw commands take their points as coordinate tokens; the tool is
-started, the points are fed, and it is terminated as if Enter were pressed:
-
-```
-{"op":"run","cmd":"LINE 0,0 10,10 10,20"}   → two Line segments
-{"op":"run","cmd":"CIRCLE 5,5 3"}           → centre 5,5 radius 3
-```
-
-Coordinates are `x,y` or `x,y,z`; `@dx,dy` is relative to the previous point.
-Inline-argument commands (`PDMODE 3`, `LAYER Walls`) are passed through as-is.
-
-> Coverage is growing: commands whose options are typed keywords or coordinates
-> work; ones that still rely on on-screen picking (object selection by clicking)
-> are being wired next.
-
-## Python client
-
-[`ocs.py`](ocs.py) is a ~100-line client — nothing to compile:
+The legacy client is unchanged:
 
 ```python
 from ocs import Ocs
-
-with Ocs(binary="OpenCADStudio") as ocs:   # spawns `--serve`
-    ocs.open("plan.dwg")
-    ocs.run("LAYER Walls")
-    print(ocs.entities())
-    ocs.save("plan_out.dwg")
+with Ocs(binary="OpenCADStudio") as app:
+    app.new()
+    app.run("LINE 0,0 100,0")
 ```
 
-Any language can speak the same protocol over a subprocess pipe.
+For direct live diagnostics:
+
+```sh
+python3 docs/automation/live.py --launch
+python3 docs/automation/live.py '{"op":"state"}'
+```

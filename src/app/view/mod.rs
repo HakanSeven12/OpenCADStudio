@@ -1987,6 +1987,8 @@ impl OpenCADStudio {
                         self.quick_properties,
                         tab.scene.selection_filter_active(),
                         self.selection_cycling,
+                        self.control.enabled,
+                        self.control_busy(),
                         &self.statusbar_config,
                         status_menu_data,
                     )
@@ -2403,7 +2405,12 @@ impl OpenCADStudio {
                 }
             })
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        let control = super::control::subscribe().map(Message::ControlRequest);
+        #[cfg(target_arch = "wasm32")]
+        let control = iced::time::every(std::time::Duration::from_millis(50)).map(|_|Message::PollWebControl);
         iced::Subscription::batch([
+            control,
             frames,
             history_tick,
             grip_dwell,
@@ -3934,4 +3941,3 @@ mod tests {
         assert!(crate::ui::style::common::canvas_is_light(bg));
     }
 }
-

@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenCADStudio Control"
+  short_description: "Control and inspect the live OpenCADStudio GUI"
+  default_prompt: "Use the live OpenCADStudio session to complete this CAD task and verify the result."

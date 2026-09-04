@@ -1,6 +1,6 @@
 mod alias;
-#[cfg(not(target_arch = "wasm32"))]
 mod automation;
+mod control;
 pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub use automation::{export_headless, serve};
@@ -341,6 +341,7 @@ pub(crate) enum TextEntryMode {
 
 pub(super) struct OpenCADStudio {
     start: Instant,
+    control: control::State,
     tabs: Vec<DocumentTab>,
     active_tab: usize,
     hovered_doc_tab: Option<usize>,
@@ -1651,7 +1652,7 @@ impl ClipboardDeps {
 /// Which in-canvas modal dialog is currently open (Plan B). At most one shows
 /// at a time; dialog-specific data lives in its own fields. Closed via the
 /// modal's ✕ (`Message::CloseModal`).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModalKind {
     About,
     Shortcuts,
@@ -1806,6 +1807,12 @@ pub enum ArrowKey {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    ControlRequest(control::Envelope),
+    PollWebControl,
+    ControlStep(String, Box<Message>),
+    ControlTaskDone(String),
+    ControlScreenshot(String, Option<iced::window::Screenshot>),
+    ControlToggle,
     Tick(Instant),
     /// Periodic drain of plugin-to-host requests that arrived outside a host
     /// call (e.g. mutations from the Python REPL).
@@ -3257,6 +3264,7 @@ impl OpenCADStudio {
         // explicitly (File → New); we never auto-spawn Drawing1.
         let start_tab = DocumentTab::new_start();
         let mut app = Self {
+            control: control::State::new(),
             start: Instant::now(),
             tabs: vec![start_tab],
             active_tab: 0,

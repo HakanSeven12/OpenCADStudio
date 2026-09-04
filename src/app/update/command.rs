@@ -537,13 +537,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     if toks.len() > 1 && !wants_spaces {
                         self.command_line.input.clear();
                         if self.tabs[i].active_cmd.is_some() {
+                            let mut tasks = Vec::new();
                             for tok in &toks {
                                 if self.tabs[i].active_cmd.is_none() {
                                     break;
                                 }
-                                self.feed_active_cmd(tok);
+                                tasks.push(self.feed_active_cmd(tok));
                             }
-                            return Task::none();
+                            return Task::batch(tasks);
                         }
                         return self.run_command_line(&raw);
                     }

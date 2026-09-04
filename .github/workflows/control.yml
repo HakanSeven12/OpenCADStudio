@@ -1,0 +1,36 @@
+name: OCS control contract
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Validate control contract
+        run: cargo test --lib app::control::tests
+      - name: Validate Python adapters
+        if: runner.os != 'Windows'
+        run: python3 -m py_compile docs/automation/live.py docs/automation/mcp_server.py
+  mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install -r docs/automation/requirements-mcp.txt
+      - run: python3 docs/automation/mcp_smoke.py
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo check --lib --target wasm32-unknown-unknown

@@ -122,6 +122,8 @@ impl StatusBar {
         selection_filter_active: bool,
         // Whether selection cycling is enabled.
         selection_cycling: bool,
+        control_enabled: bool,
+        control_busy: bool,
         // Which pills the user has chosen to show on the bar.
         config: &'a StatusBarConfig,
         menu_data: StatusMenuData<'a>,
@@ -493,6 +495,35 @@ impl StatusBar {
         // use the remaining space on the final tab row when they fit; otherwise
         // WrapBar adds another right-aligned row.
         let mut left: Vec<Element<'_, Message>> = Vec::new();
+        let control_label = if !control_enabled {
+            "Control: off"
+        } else if control_busy {
+            "Control: busy"
+        } else {
+            "Control: ready"
+        };
+        let control_color = if !control_enabled {
+            Color::from_rgb(0.90, 0.35, 0.35)
+        } else if control_busy {
+            Color::from_rgb(0.95, 0.72, 0.25)
+        } else {
+            Color::from_rgb(0.35, 0.85, 0.55)
+        };
+        left.push(
+            button(text(control_label).size(11))
+                .on_press(Message::ControlToggle)
+                .style(move |theme: &Theme, status| {
+                    let mut style = button::subtle(theme, status);
+                    style.background = Some(Background::Color(control_color));
+                    style.text_color = Color::from_rgb(0.08, 0.08, 0.10);
+                    style.border.color = control_color;
+                    style.border.width = 1.0;
+                    style
+                })
+                .padding([4, 8])
+                .width(Length::Fixed(100.0))
+                .into(),
+        );
         left.push(menu_btn);
         if show_layout_tabs {
             let reorderable_layouts: Arc<[String]> = reorderable_layouts.into();

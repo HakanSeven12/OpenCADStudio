@@ -261,6 +261,7 @@ impl OpenCADStudio {
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
+        self.control_observe_user_message(&msg);
         let perf_started = crate::perf::enabled().then(Instant::now);
         let perf_label = perf_message_label(&msg);
         // A modal dialog must capture the keyboard the same way it already
@@ -335,6 +336,7 @@ impl OpenCADStudio {
         if self.tabs[i].active_cmd.is_none() {
             self.block_palette.placing = None;
         }
+        self.control_settle();
         task
     }
 
@@ -350,6 +352,19 @@ impl OpenCADStudio {
 
     fn update_inner(&mut self, msg: Message) -> Task<Message> {
         match msg {
+            Message::ControlRequest(envelope) => {
+                let (response, task) = self.control_request(envelope.request);
+                envelope.reply.send(response);
+                task
+            }
+            #[cfg(target_arch="wasm32")]
+            Message::PollWebControl => if let Some(request)=super::control::web_request(){self.update(Message::ControlRequest(request))}else{Task::none()},
+            #[cfg(not(target_arch="wasm32"))]
+            Message::PollWebControl => Task::none(),
+            Message::ControlStep(id, message) => self.control_step(id, *message),
+            Message::ControlTaskDone(id) => { self.control_task_done(&id); Task::none() }
+            Message::ControlScreenshot(path, screenshot) => { self.control_screenshot(path, screenshot); Task::none() }
+            Message::ControlToggle => { self.control.enabled = !self.control.enabled; Task::none() }
             // Drain plugin-to-host requests that arrived outside of a host call.
             // This runs on a periodic timer so long-lived plugin sessions such
             // as the Python REPL can mutate the document without requiring a
@@ -1816,8 +1831,7 @@ impl OpenCADStudio {
                 if kw.is_empty() {
                     return self.feed_command(crate::command::StepInput::Enter);
                 }
-                self.feed_active_cmd(&kw);
-                Task::none()
+                self.feed_active_cmd(&kw)
             }
 
             Message::CommandSubmit => self.on_command_submit(),

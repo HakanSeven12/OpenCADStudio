@@ -28,7 +28,7 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "580678d28f11ccbefbce3f9d3390d28ef4bbde80", features = ["serde"] }
-cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "37a33babe7d64e05d9d4144981eeb9bc8ebf390e", features = ["acis", "offset"] }
+cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "c7b9fc0425224aaa76e903ae8158f20241d0eaa0", features = ["acis", "offset"] }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }

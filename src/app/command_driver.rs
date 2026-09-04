@@ -4065,7 +4065,7 @@ impl OpenCADStudio {
                     }
                     self.tabs[i].dirty = true;
                     self.command_line.push_output(crate::tf!(
-                        "SWEEP: created %{created} object(s); %{failed} source(s) could not be swept.",
+                        "SWEEP: created {created} object(s); {failed} source(s) could not be swept.",
                         created = created_handles.len(), failed = failed
                     ).as_ref());
                 } else {

@@ -168,7 +168,9 @@ fn preview_body_wires(
     color: [f32; 4],
     isolines: usize,
 ) -> Vec<WireModel> {
-    let mesh = cadkernel::brep::mesh::tessellate(
+    // This overlay only consumes curves. Do not triangulate the body's faces
+    // on every cursor event just to discard the resulting surface mesh.
+    let wireframe = cadkernel::brep::mesh::tessellate_wireframe(
         body,
         cadkernel::brep::mesh::TessellationTolerance::new(
             cadkernel::tessellation::DEFAULT_ANGLE,
@@ -176,7 +178,7 @@ fn preview_body_wires(
         )
         .with_isolines(isolines),
     );
-    let mut wires = mesh
+    let mut wires = wireframe
         .edges
         .into_iter()
         .filter(|edge| edge.positions.len() >= 2)
@@ -190,7 +192,7 @@ fn preview_body_wires(
         })
         .collect::<Vec<_>>();
     wires.extend(
-        mesh.isolines
+        wireframe.isolines
             .into_iter()
             .filter(|line| line.positions.len() >= 2)
             .map(|line| {

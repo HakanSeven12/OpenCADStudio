@@ -1,42 +1,23 @@
-# OpenCADStudio automation
+# OpenCADStudio MCP control
 
-`--serve` remains available for isolated headless scripts. `live.py` connects to the real desktop application through a private per-process descriptor under the user's OCS configuration directory. The GUI owns every mutation: transport threads only validate and enqueue requests.
+Every native OpenCADStudio build contains the same MCP server as the editor. `OpenCADStudio --mcp` starts it over stdio, opens the desktop editor when needed, and exposes the live document without Python, a package manager, a sidecar service, or client-specific code.
 
-The live protocol requires protocol version 1, stable session/document IDs, an expected edit revision for mutations, and a unique request ID. Commands report `waiting_input` while interactive work remains. Asynchronous file and renderer work remains `running` until its real callback finishes. A bounded operation cache makes retries with the same payload idempotent; after a restart or an expired operation, clients must read state instead of replaying a mutation.
+The server provides four tools:
 
-Operations include document state and activation, paged entity queries, layer/header/property inspection, command discovery, start/run/step/cancel, WCS/UCS/relative points, entity and structure picks, selection, property edits, semantic UI actions, undo/redo, protected save, event polling, and current-window PNG capture. The status bar includes a control switch whose green, yellow, and red states mean ready, busy, and off.
+- `ocs_sessions` finds running editor sessions and opens OpenCADStudio when none exists.
+- `ocs_read` reads document state, commands, entities, layers, properties, measurements, history, events, and operation status.
+- `ocs_execute` performs semantic commands and input against the real editor.
+- `ocs_capture` returns a PNG of the current window for visual verification.
 
-The Web build exposes `ocs_control_submit(json)` and `ocs_control_take(ticket)`. They enter the same bounded GUI queue and return the same semantic responses; browser code polls the ticket until a response is present.
+Mutations carry a session ID, document ID, expected revision, selection, and idempotent request ID. Commands report `waiting_input` while more input is required and asynchronous work remains `running` until its real callback finishes. Geometry stays in OpenCADStudio and its geometry kernel.
 
-`OpenCADStudio --mcp` is the common local entry point for every MCP client. It is built into the application, uses stdio, launches the editor when needed, and has no Python or package-manager dependency. Tool definitions and safety instructions are served by MCP itself, so the drawing behavior is identical in every client.
+Release builds also produce one standard MCP Bundle containing the native binaries for supported desktop platforms. The release workflow publishes its `server.json` metadata to the official MCP Registry. Compatible AI hosts can therefore discover and install the same server without an OpenCADStudio-specific adapter.
 
-Run `./docs/automation/install.sh` once for a source build. It installs the release binary in `~/.local/share/ocs-control` and automatically connects installed Codex and Claude Code CLIs. Both registrations point to the same binary. Re-run an individual connection later with:
+Registry discovery and permission prompts belong to the AI host. Hosts that implement MCP Registry and MCP Bundle support need no OpenCADStudio-specific setup; other hosts cannot be enabled silently by the application.
 
-```sh
-~/.local/share/ocs-control/connect.sh codex
-~/.local/share/ocs-control/connect.sh claude-code
-```
-
-Any other local MCP client uses the same command and argument. `connect.sh config` prints the portable configuration object to paste into clients that do not provide a registration CLI:
-
-```json
-{"mcpServers":{"opencadstudio":{"command":"/path/to/OpenCADStudio","args":["--mcp"]}}}
-```
-
-Client-specific skills and extension manifests may improve discovery, but contain no drawing or protocol implementation. Adding another AI client therefore requires only registering this command; the OpenCADStudio executable and tools do not change.
-
-The legacy client is unchanged:
-
-```python
-from ocs import Ocs
-with Ocs(binary="OpenCADStudio") as app:
-    app.new()
-    app.run("LINE 0,0 100,0")
-```
-
-For direct live diagnostics:
+The source-tree protocol smoke test uses only the Python standard library:
 
 ```sh
-python3 docs/automation/live.py --launch
-python3 docs/automation/live.py '{"op":"state"}'
+cargo build
+python3 docs/automation/mcp_smoke.py target/debug/OpenCADStudio
 ```

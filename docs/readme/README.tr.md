@@ -151,9 +151,10 @@ Masaüstü ikili dosyası tek seferlik dönüştürmeyi ve kalıcı arayüzsüz 
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-Sunucu standart giriş/çıkış veya yerel TCP soketi üzerinden satır başına bir JSON nesnesi alışverişi yapar. [Otomasyon kılavuzuna](../automation/README.md) ve birlikte verilen [Python istemcisine](../automation/ocs.py) bakın.
+Sunucu standart giriş/çıkış veya yerel TCP soketi üzerinden satır başına bir JSON nesnesi alışverişi yapar. [Otomasyon kılavuzuna](../automation/README.md) bakın.
 
 ## Eklentiler
 

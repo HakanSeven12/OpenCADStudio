@@ -149,9 +149,10 @@ Program komputerowy obsługuje jednorazową konwersję i trwały serwer bez inte
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-Serwer wymienia jeden obiekt JSON na wiersz przez standardowe wejście/wyjście lub lokalne gniazdo TCP. Zobacz [przewodnik automatyzacji](../automation/README.md) i dołączonego [klienta Python](../automation/ocs.py).
+Serwer wymienia jeden obiekt JSON na wiersz przez standardowe wejście/wyjście lub lokalne gniazdo TCP. Zobacz [przewodnik automatyzacji](../automation/README.md).
 
 ## Wtyczki
 

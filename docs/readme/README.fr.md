@@ -149,9 +149,10 @@ Le binaire de bureau prend en charge la conversion ponctuelle et un serveur pers
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-Le serveur échange un objet JSON par ligne via l’entrée/sortie standard ou un socket TCP local. Consultez le [guide d’automatisation](../automation/README.md) et le [client Python](../automation/ocs.py) fourni.
+Le serveur échange un objet JSON par ligne via l’entrée/sortie standard ou un socket TCP local. Consultez le [guide d’automatisation](../automation/README.md).
 
 ## Plugins
 

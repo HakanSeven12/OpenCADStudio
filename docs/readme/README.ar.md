@@ -149,9 +149,10 @@ trunk serve
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-يتبادل الخادم كائن JSON واحداً في كل سطر عبر الإدخال/الإخراج القياسي أو مقبس TCP محلي. راجع [دليل الأتمتة](../automation/README.md) و[عميل Python](../automation/ocs.py) المرفق.
+يتبادل الخادم كائن JSON واحداً في كل سطر عبر الإدخال/الإخراج القياسي أو مقبس TCP محلي. راجع [دليل الأتمتة](../automation/README.md).
 
 ## الإضافات
 

@@ -149,9 +149,10 @@ trunk serve
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-सर्वर मानक इनपुट/आउटपुट या स्थानीय TCP सॉकेट के माध्यम से प्रति पंक्ति एक JSON ऑब्जेक्ट का आदान-प्रदान करता है। [स्वचालन मार्गदर्शिका](../automation/README.md) और शामिल [Python क्लाइंट](../automation/ocs.py) देखें।
+सर्वर मानक इनपुट/आउटपुट या स्थानीय TCP सॉकेट के माध्यम से प्रति पंक्ति एक JSON ऑब्जेक्ट का आदान-प्रदान करता है। [स्वचालन मार्गदर्शिका](../automation/README.md) देखें।
 
 ## प्लगइन
 

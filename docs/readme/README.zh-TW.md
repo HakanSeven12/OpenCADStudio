@@ -149,9 +149,10 @@ trunk serve
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-伺服器透過標準輸入/輸出或本機 TCP 通訊端逐行交換 JSON 物件。請參閱[自動化指南](../automation/README.md)和隨附的 [Python 用戶端](../automation/ocs.py)。
+伺服器透過標準輸入/輸出或本機 TCP 通訊端逐行交換 JSON 物件。請參閱[自動化指南](../automation/README.md)。
 
 ## 外掛程式
 

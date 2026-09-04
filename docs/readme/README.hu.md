@@ -149,9 +149,10 @@ Az asztali bináris egyszeri konverziót és tartós, felület nélküli kiszolg
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-A kiszolgáló soronként egy JSON-objektumot cserél a szabványos bemeneten/kimeneten vagy helyi TCP-foglalaton. Lásd az [automatizálási útmutatót](../automation/README.md) és a mellékelt [Python-klienst](../automation/ocs.py).
+A kiszolgáló soronként egy JSON-objektumot cserél a szabványos bemeneten/kimeneten vagy helyi TCP-foglalaton. Lásd az [automatizálási útmutatót](../automation/README.md).
 
 ## Bővítmények
 

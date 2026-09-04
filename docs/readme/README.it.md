@@ -149,9 +149,10 @@ Il binario desktop supporta conversioni singole e un server headless persistente
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-Il server scambia un oggetto JSON per riga tramite ingresso/uscita standard o un socket TCP locale. Consulta la [guida all’automazione](../automation/README.md) e il [client Python](../automation/ocs.py) incluso.
+Il server scambia un oggetto JSON per riga tramite ingresso/uscita standard o un socket TCP locale. Consulta la [guida all’automazione](../automation/README.md).
 
 ## Plugin
 

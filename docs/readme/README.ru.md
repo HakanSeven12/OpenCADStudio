@@ -149,9 +149,10 @@ trunk serve
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-Сервер обменивается одним объектом JSON в строке через стандартный ввод/вывод или локальный TCP-сокет. См. [руководство по автоматизации](../automation/README.md) и включённый [клиент Python](../automation/ocs.py).
+Сервер обменивается одним объектом JSON в строке через стандартный ввод/вывод или локальный TCP-сокет. См. [руководство по автоматизации](../automation/README.md).
 
 ## Плагины
 

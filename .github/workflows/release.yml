@@ -233,6 +233,14 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      - name: Upload signed executable for MCP Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb-windows-binary
+          path: target/release/OpenCADStudio.exe
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build MSI installer
         shell: pwsh
         run: |
@@ -428,6 +436,14 @@ jobs:
           codesign --force --deep --sign - --timestamp=none OpenCADStudio.app
           codesign --verify --strict --verbose=2 OpenCADStudio.app
 
+      - name: Upload signed executable for MCP Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb-macos-binary
+          path: OpenCADStudio.app/Contents/MacOS/OpenCADStudio
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Create .dmg
         run: |
           # hdiutil intermittently fails with "Resource busy" on the hosted
@@ -475,3 +491,99 @@ jobs:
             echo "  sha256 \"$SHA\""
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  build-mcpb:
+    if: github.event_name == 'release' || inputs.target == 'all'
+    needs: [build-appimage, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux executable
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-payload
+          path: mcpb/linux
+
+      - name: Download Windows executable
+        uses: actions/download-artifact@v4
+        with:
+          name: mcpb-windows-binary
+          path: mcpb/windows
+
+      - name: Download macOS executable
+        uses: actions/download-artifact@v4
+        with:
+          name: mcpb-macos-binary
+          path: mcpb/macos
+
+      - name: Set package version
+        id: package
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "release" ]; then
+            VERSION="${REF_NAME#v}"
+            if [ "v$VERSION" != "$REF_NAME" ]; then
+              echo "::error::Release tag must be vX.Y.Z"
+              exit 1
+            fi
+          else
+            VERSION="$(sed -n 's/^version = "\([0-9][0-9.]*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid package version: $VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build MCP Bundle
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          tar -C mcpb/linux -xzf mcpb/linux/linux-payload.tar.gz
+          chmod +x \
+            mcpb/linux/usr/bin/OpenCADStudio \
+            mcpb/windows/OpenCADStudio.exe \
+            mcpb/macos/OpenCADStudio
+          python3 packaging/mcpb/pack.py \
+            --version "$VERSION" \
+            --linux mcpb/linux/usr/bin/OpenCADStudio \
+            --windows mcpb/windows/OpenCADStudio.exe \
+            --macos mcpb/macos/OpenCADStudio \
+            --output "OpenCADStudio-v${VERSION}.mcpb" \
+            --server-json server.json
+
+      - name: Upload MCP Bundle to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: gh release upload "${{ github.ref_name }}" "OpenCADStudio-v${VERSION}.mcpb" server.json --clobber --repo "${{ github.repository }}"
+
+      - name: Install MCP Registry publisher
+        if: github.event_name == 'release'
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Publish to official MCP Registry
+        if: github.event_name == 'release'
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish server.json
+
+      - name: Upload MCP Bundle as workflow artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenCADStudio-v${{ steps.package.outputs.version }}-mcpb
+          path: |
+            OpenCADStudio-v${{ steps.package.outputs.version }}.mcpb
+            server.json
+          if-no-files-found: error

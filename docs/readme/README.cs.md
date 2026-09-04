@@ -149,9 +149,10 @@ Desktopový program podporuje jednorázovou konverzi a trvalý bezobslužný ser
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-Server předává jeden objekt JSON na řádek přes standardní vstup/výstup nebo místní TCP socket. Viz [průvodce automatizací](../automation/README.md) a přiložený [klient Python](../automation/ocs.py).
+Server předává jeden objekt JSON na řádek přes standardní vstup/výstup nebo místní TCP socket. Viz [průvodce automatizací](../automation/README.md).
 
 ## Pluginy
 

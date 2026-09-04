@@ -149,9 +149,10 @@ Het desktopprogramma ondersteunt eenmalige conversie en een permanente headless 
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-De server wisselt per regel één JSON-object uit via standaardinvoer/-uitvoer of een lokale TCP-socket. Bekijk de [automatiseringshandleiding](../automation/README.md) en de meegeleverde [Python-client](../automation/ocs.py).
+De server wisselt per regel één JSON-object uit via standaardinvoer/-uitvoer of een lokale TCP-socket. Bekijk de [automatiseringshandleiding](../automation/README.md).
 
 ## Plug-ins
 

@@ -149,9 +149,10 @@ Työpöytäohjelma tukee kertaluonteista muunnosta ja pysyvää käyttöliittym�
 OpenCADStudio --export input.dwg output.dxf
 OpenCADStudio --serve
 OpenCADStudio --serve --port 4242
+OpenCADStudio --mcp
 ```
 
-Palvelin vaihtaa yhden JSON-objektin riviä kohti vakiotulon/-lähdön tai paikallisen TCP-pistokkeen kautta. Katso [automaatio-opas](../automation/README.md) ja mukana toimitettu [Python-asiakas](../automation/ocs.py).
+Palvelin vaihtaa yhden JSON-objektin riviä kohti vakiotulon/-lähdön tai paikallisen TCP-pistokkeen kautta. Katso [automaatio-opas](../automation/README.md).
 
 ## Liitännäiset
 

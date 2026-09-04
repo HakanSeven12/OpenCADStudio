@@ -1809,7 +1809,8 @@ impl LoftCommand {
             ) {
                 Ok(body) => {
                     // Only edges/isolines: do not triangulate faces on mouse movement.
-                    self.preview_cache = preview_body_wires(&body, self.color, self.isolines);
+                    // Keep the transient cage blue without changing the result's layer color.
+                    self.preview_cache = preview_body_wires(&body, WireModel::SELECTED, self.isolines);
                 }
                 Err(error) => self.preview_error = Some(error),
             }

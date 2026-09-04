@@ -17,9 +17,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Validate control contract
         run: cargo test --lib app::control::tests
-      - name: Validate MCP packaging scripts
+      - name: Validate MCP smoke script
         if: runner.os != 'Windows'
-        run: python3 -m py_compile docs/automation/mcp_smoke.py packaging/mcpb/pack.py
+        run: python3 -m py_compile docs/automation/mcp_smoke.py
   mcp:
     runs-on: ubuntu-latest
     steps:
@@ -28,7 +28,6 @@ jobs:
       - run: cargo test --lib mcp::tests
       - run: cargo build
       - run: python3 docs/automation/mcp_smoke.py target/debug/OpenCADStudio
-      - run: python3 packaging/mcpb/pack.py --version 0.0.0 --linux /bin/true --windows /bin/true --macos /bin/true --output /tmp/OpenCADStudio.mcpb --server-json /tmp/server.json
   web:
     runs-on: ubuntu-latest
     steps:

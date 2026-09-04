@@ -183,7 +183,7 @@ OpenCADStudio --serve --port 4242
 OpenCADStudio --mcp
 ```
 
-The automation server exchanges one JSON object per line over standard input/output or a local TCP socket. The self-contained MCP endpoint exposes the live desktop editor through the same tools to every compatible client. Releases also publish a standard MCP Bundle and official registry metadata. See the [MCP control guide](docs/automation/README.md).
+The automation server exchanges one JSON object per line over standard input/output or a local TCP socket. The self-contained MCP endpoint exposes the live desktop editor through the same tools to every compatible client. To connect a client, configure it to launch `OpenCADStudio --mcp`. See the [MCP control guide](docs/automation/README.md).
 
 ## Plugins
 

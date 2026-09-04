@@ -747,8 +747,7 @@ impl CommandLine {
                 style.border.width = 1.0;
                 style
             })
-            .padding([2, 8])
-            .width(Length::Fixed(50.0));
+            .padding([2, 6]);
         let mcp_tip = container(text(mcp_tooltip).size(11))
             .padding([3, 6])
             .style(container::bordered_box);

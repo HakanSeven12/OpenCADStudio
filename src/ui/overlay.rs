@@ -117,6 +117,221 @@ impl Default for SelectionVisualOptions {
     }
 }
 
+/// Standard CAD crossing selection color (emerald green: `#33B870` / RGB `0.20, 0.72, 0.44`).
+pub const DEFAULT_CROSSING_COLOR: Color = Color {
+    r: 0.20,
+    g: 0.72,
+    b: 0.44,
+    a: 1.0,
+};
+
+/// Standard CAD window selection color (cobalt blue: `#3370B8` / RGB `0.20, 0.44, 0.72`).
+pub const DEFAULT_WINDOW_COLOR: Color = Color {
+    r: 0.20,
+    g: 0.44,
+    b: 0.72,
+    a: 1.0,
+};
+
+/// Returns the curated (crossing_color, window_color) pair tailored for a specific theme.
+/// Crossing is always a theme-harmonious green/teal variant, and Window is always a theme-harmonious blue/cyan variant.
+pub fn theme_selection_colors(theme: &Theme) -> (Color, Color) {
+    match theme {
+        Theme::Dark => (
+            DEFAULT_CROSSING_COLOR,
+            DEFAULT_WINDOW_COLOR,
+        ),
+        Theme::Light => (
+            Color::from_rgb(0.12, 0.52, 0.30), // Engineering Forest Green
+            Color::from_rgb(0.13, 0.40, 0.70), // Engineering Blueprint Blue
+        ),
+        Theme::Oxocarbon => (
+            Color::from_rgb(0.26, 0.75, 0.40), // Oxocarbon Green (#42be65)
+            Color::from_rgb(0.20, 0.69, 1.00), // Oxocarbon Vibrant Cyan (#33b1ff)
+        ),
+        Theme::Dracula => (
+            Color::from_rgb(0.31, 0.98, 0.48), // Dracula Neon Green (#50fa7b)
+            Color::from_rgb(0.54, 0.91, 0.99), // Dracula Vibrant Cyan (#8be9fd)
+        ),
+        Theme::Nord => (
+            Color::from_rgb(0.64, 0.75, 0.55), // Nord Aurora Green (#a3be8c)
+            Color::from_rgb(0.53, 0.75, 0.82), // Nord Frost Cyan (#88c0d0)
+        ),
+        Theme::GruvboxDark => (
+            Color::from_rgb(0.72, 0.73, 0.15), // Gruvbox Bright Green (#b8bb26)
+            Color::from_rgb(0.51, 0.65, 0.60), // Gruvbox Blue/Aqua (#83a598)
+        ),
+        Theme::GruvboxLight => (
+            Color::from_rgb(0.47, 0.46, 0.05), // Gruvbox Dark Olive Green (#78750d)
+            Color::from_rgb(0.03, 0.40, 0.47), // Gruvbox Deep Teal (#076678)
+        ),
+        Theme::SolarizedDark => (
+            Color::from_rgb(0.52, 0.60, 0.00), // Solarized Green (#859900)
+            Color::from_rgb(0.15, 0.55, 0.82), // Solarized Blue (#268bd2)
+        ),
+        Theme::SolarizedLight => (
+            Color::from_rgb(0.44, 0.53, 0.00), // Solarized Deep Green (#708700)
+            Color::from_rgb(0.12, 0.47, 0.72), // Solarized Deep Blue (#1f78b8)
+        ),
+        Theme::TokyoNight | Theme::TokyoNightStorm => (
+            Color::from_rgb(0.45, 0.85, 0.79), // Tokyo Night Teal Green (#73daca)
+            Color::from_rgb(0.48, 0.64, 0.97), // Tokyo Night Electric Blue (#7aa2f7)
+        ),
+        Theme::TokyoNightLight => (
+            Color::from_rgb(0.22, 0.45, 0.37), // Tokyo Night Dark Teal (#38735e)
+            Color::from_rgb(0.20, 0.35, 0.60), // Tokyo Night Deep Blue (#335999)
+        ),
+        Theme::KanagawaWave => (
+            Color::from_rgb(0.60, 0.73, 0.42), // Spring Green (#98bb6c)
+            Color::from_rgb(0.49, 0.61, 0.85), // Crystal Blue (#7e9cd8)
+        ),
+        Theme::KanagawaDragon => (
+            Color::from_rgb(0.53, 0.66, 0.53), // Dragon Green (#87a987)
+            Color::from_rgb(0.40, 0.52, 0.58), // Dragon Blue (#668594)
+        ),
+        Theme::KanagawaLotus => (
+            Color::from_rgb(0.38, 0.49, 0.25), // Lotus Deep Green (#617d40)
+            Color::from_rgb(0.24, 0.38, 0.53), // Lotus Deep Blue (#3d6187)
+        ),
+        Theme::CatppuccinMocha => (
+            Color::from_rgb(0.65, 0.89, 0.63), // Mocha Green (#a6e3a1)
+            Color::from_rgb(0.54, 0.71, 0.98), // Mocha Sapphire (#89b4fa)
+        ),
+        Theme::CatppuccinMacchiato => (
+            Color::from_rgb(0.65, 0.85, 0.58), // Macchiato Green (#a6da95)
+            Color::from_rgb(0.54, 0.68, 0.96), // Macchiato Blue (#8aadf4)
+        ),
+        Theme::CatppuccinFrappe => (
+            Color::from_rgb(0.65, 0.82, 0.54), // Frappe Green (#a6d189)
+            Color::from_rgb(0.55, 0.67, 0.93), // Frappe Blue (#8caaee)
+        ),
+        Theme::CatppuccinLatte => (
+            Color::from_rgb(0.25, 0.63, 0.17), // Latte Green (#40a02b)
+            Color::from_rgb(0.12, 0.40, 0.96), // Latte Blue (#1e66f5)
+        ),
+        Theme::Moonfly => (
+            Color::from_rgb(0.55, 0.78, 0.37), // Moonfly Lime Green (#8cc85f)
+            Color::from_rgb(0.50, 0.63, 1.00), // Moonfly Sky Blue (#80a0ff)
+        ),
+        Theme::Nightfly => (
+            Color::from_rgb(0.13, 0.85, 0.43), // Nightfly Emerald (#21d96e)
+            Color::from_rgb(0.51, 0.67, 1.00), // Nightfly Electric Blue (#82aaff)
+        ),
+        Theme::Ferra => (
+            Color::from_rgb(0.69, 0.87, 0.63), // Ferra Sage Green (#b1dda1)
+            Color::from_rgb(0.69, 0.84, 0.97), // Ferra Ice Blue (#b1d5f7)
+        ),
+        _ => (
+            DEFAULT_CROSSING_COLOR,
+            DEFAULT_WINDOW_COLOR,
+        ),
+    }
+}
+
+/// Selection colors for light surfaces (paper space sheet or user-configured light model space background).
+/// Uses deep-contrast pairs for the six light themes and the shared engineering pair (#1F854D / #2166B3)
+/// for dark themes rendered on a light canvas.
+pub fn light_canvas_color(crossing: bool, theme: &Theme) -> Color {
+    let (crossing_color, window_color) = match theme {
+        Theme::Light => (
+            Color::from_rgb8(0x1F, 0x85, 0x4D), // Engineering Forest Green (#1F854D)
+            Color::from_rgb8(0x21, 0x66, 0xB3), // Engineering Blueprint Blue (#2166B3)
+        ),
+        Theme::GruvboxLight => (
+            Color::from_rgb8(0x78, 0x75, 0x0D), // Gruvbox Dark Olive Green (#78750d)
+            Color::from_rgb8(0x07, 0x66, 0x78), // Gruvbox Deep Teal (#076678)
+        ),
+        Theme::SolarizedLight => (
+            Color::from_rgb8(0x70, 0x87, 0x00), // Solarized Deep Green (#708700)
+            Color::from_rgb8(0x1F, 0x78, 0xB8), // Solarized Deep Blue (#1f78b8)
+        ),
+        Theme::TokyoNightLight => (
+            Color::from_rgb8(0x38, 0x73, 0x5E), // Tokyo Night Dark Teal (#38735e)
+            Color::from_rgb8(0x33, 0x59, 0x99), // Tokyo Night Deep Blue (#335999)
+        ),
+        Theme::KanagawaLotus => (
+            Color::from_rgb8(0x61, 0x7D, 0x40), // Lotus Deep Green (#617d40)
+            Color::from_rgb8(0x3D, 0x61, 0x87), // Lotus Deep Blue (#3d6187)
+        ),
+        Theme::CatppuccinLatte => (
+            Color::from_rgb8(0x40, 0xA0, 0x2B), // Latte Green (#40a02b)
+            Color::from_rgb8(0x1E, 0x66, 0xF5), // Latte Blue (#1e66f5)
+        ),
+        Theme::Dark
+        | Theme::Oxocarbon
+        | Theme::Dracula
+        | Theme::Nord
+        | Theme::GruvboxDark
+        | Theme::SolarizedDark
+        | Theme::TokyoNight
+        | Theme::TokyoNightStorm
+        | Theme::KanagawaWave
+        | Theme::KanagawaDragon
+        | Theme::CatppuccinMocha
+        | Theme::CatppuccinMacchiato
+        | Theme::CatppuccinFrappe
+        | Theme::Moonfly
+        | Theme::Nightfly
+        | Theme::Ferra
+        | Theme::Custom(_) => (
+            Color::from_rgb8(0x1F, 0x85, 0x4D), // Shared engineering crossing (#1F854D)
+            Color::from_rgb8(0x21, 0x66, 0xB3), // Shared engineering window (#2166B3)
+        ),
+    };
+    if crossing {
+        crossing_color
+    } else {
+        window_color
+    }
+}
+
+/// Calculates the fill opacity for selection marquees.
+/// The 1.35× scale and 0.45 ceiling on light canvases compensate for the reduced
+/// perceived contrast of translucent fills on light surfaces, ensuring the fill
+/// remains perceptible without washing out underlying drawing geometry.
+pub fn selection_fill_alpha(user_opacity_percent: f32, canvas_light: bool) -> f32 {
+    let base = (user_opacity_percent / 100.0).clamp(0.0, 1.0);
+    if canvas_light {
+        (base * 1.35).clamp(0.0, 0.45)
+    } else {
+        base
+    }
+}
+
+/// Resolve the base color for selection marquee / polygon.
+/// Resolves in this priority order:
+/// 1. User ACI override (if custom > 0)
+/// 2. Light-canvas palette (if canvas background is light)
+/// 3. Theme curated palette (for dark/normal canvas)
+pub fn resolve_selection_base_color(
+    crossing: bool,
+    theme: &Theme,
+    visual: &SelectionVisualOptions,
+    canvas_bg: [f32; 4],
+) -> Color {
+    let custom = if crossing {
+        visual.crossing_color
+    } else {
+        visual.window_color
+    };
+    // ACI 0 (BYBLOCK) and 256 (BYLAYER) are not explicit overrides;
+    // the sysvar uses 0 as the unset sentinel; valid user picks are 1..=255.
+    if custom > 0 {
+        if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(custom) {
+            return Color::from_rgb8(r, g, b);
+        }
+    }
+    if crate::ui::style::common::canvas_is_light(canvas_bg) {
+        return light_canvas_color(crossing, theme);
+    }
+    let (theme_crossing, theme_window) = theme_selection_colors(theme);
+    if crossing {
+        theme_crossing
+    } else {
+        theme_window
+    }
+}
+
 // ── Grip marker data ──────────────────────────────────────────────────────
 
 /// Describes one grip to be drawn in the viewport overlay.
@@ -795,81 +1010,55 @@ impl canvas::Program<Message> for SelectionCanvas {
             crossing: bool,
             theme: &Theme,
             visual: &SelectionVisualOptions,
+            canvas_bg: [f32; 4],
         ) {
-            let base = if crossing {
-                if visual.crossing_color > 0 {
-                    if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.crossing_color) {
-                        Color::from_rgb8(r, g, b)
-                    } else {
-                        theme.palette().success.base.color
-                    }
-                } else {
-                    theme.palette().success.base.color
-                }
-            } else {
-                if visual.window_color > 0 {
-                    if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.window_color) {
-                        Color::from_rgb8(r, g, b)
-                    } else {
-                        theme.palette().primary.base.color
-                    }
-                } else {
-                    theme.palette().primary.base.color
-                }
-            };
+            let base = resolve_selection_base_color(crossing, theme, visual, canvas_bg);
+            let canvas_light = crate::ui::style::common::canvas_is_light(canvas_bg);
+            // Desk-spanning marquee edge case: deliberate limitation to avoid mid-drag rectangle color splits when dragged past sheet onto desk.
             let x0 = a.x.min(b.x);
             let y0 = a.y.min(b.y);
             let w = (a.x - b.x).abs();
             let h = (a.y - b.y).abs();
             let rect = canvas::Path::rectangle(Point::new(x0, y0), Size::new(w, h));
             if visual.area && visual.opacity > 0 {
-                let alpha = (visual.opacity as f32 / 100.0).clamp(0.0, 1.0);
+                let alpha = selection_fill_alpha(visual.opacity as f32, canvas_light);
                 let fill = base.scale_alpha(alpha);
                 frame.fill(&rect, fill);
             }
-            let stroke = base.scale_alpha(0.9);
+            let stroke_alpha = if canvas_light { 0.95 } else { 0.90 };
+            let stroke = base.scale_alpha(stroke_alpha);
             frame.stroke(
                 &rect,
                 canvas::Stroke {
                     width: 1.0,
                     style: canvas::Style::Solid(stroke),
+                    line_dash: if crossing {
+                        canvas::LineDash {
+                            segments: &[4.0, 4.0],
+                            offset: 0,
+                        }
+                    } else {
+                        canvas::LineDash::default()
+                    },
                     ..Default::default()
                 },
             );
         }
 
         if let (Some(a), Some(b)) = (self.selection.borrow().box_anchor, self.selection.borrow().box_current) {
-            draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme, &self.selection_visual);
+            draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme, &self.selection_visual, self.crosshair_bg);
         }
         // Preview marquee for point-picked windows (STRETCH) — same look, no pick.
         if let Some((a, b, crossing)) = self.selection.borrow().preview_box {
-            draw_marquee(&mut frame, a, b, crossing, theme, &self.selection_visual);
+            draw_marquee(&mut frame, a, b, crossing, theme, &self.selection_visual, self.crosshair_bg);
         }
 
         if self.selection.borrow().poly_active && self.selection.borrow().poly_points.len() > 1 {
-            let base = if self.selection.borrow().poly_crossing {
-                if self.selection_visual.crossing_color > 0 {
-                    if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(self.selection_visual.crossing_color) {
-                        Color::from_rgb8(r, g, b)
-                    } else {
-                        theme.palette().success.base.color
-                    }
-                } else {
-                    theme.palette().success.base.color
-                }
-            } else {
-                if self.selection_visual.window_color > 0 {
-                    if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(self.selection_visual.window_color) {
-                        Color::from_rgb8(r, g, b)
-                    } else {
-                        theme.palette().primary.base.color
-                    }
-                } else {
-                    theme.palette().primary.base.color
-                }
-            };
+            let crossing = self.selection.borrow().poly_crossing;
+            let base = resolve_selection_base_color(crossing, theme, &self.selection_visual, self.crosshair_bg);
+            let canvas_light = crate::ui::style::common::canvas_is_light(self.crosshair_bg);
             if self.selection_visual.area && self.selection_visual.opacity > 0 {
-                let alpha = (self.selection_visual.opacity as f32 / 100.0).clamp(0.0, 1.0);
+                let alpha = selection_fill_alpha(self.selection_visual.opacity as f32, canvas_light);
                 let fill = base.scale_alpha(alpha);
                 if let Some(cur) = self.selection.borrow().last_move_pos {
                     let start = self.selection.borrow().poly_points[0];
@@ -884,21 +1073,28 @@ impl canvas::Program<Message> for SelectionCanvas {
                     frame.fill(&fill_path, fill);
                 }
             }
-            let stroke = base.scale_alpha(0.9);
+            let stroke_alpha = if canvas_light { 0.95 } else { 0.90 };
+            let stroke = base.scale_alpha(stroke_alpha);
             let path = canvas::Path::new(|p| {
                 p.move_to(self.selection.borrow().poly_points[0]);
                 for pt in &self.selection.borrow().poly_points[1..] {
                     p.line_to(*pt);
                 }
             });
-            frame.stroke(
-                &path,
-                canvas::Stroke {
-                    width: 1.0,
-                    style: canvas::Style::Solid(stroke),
-                    ..Default::default()
+            let stroke_style = canvas::Stroke {
+                width: 1.0,
+                style: canvas::Style::Solid(stroke),
+                line_dash: if crossing {
+                    canvas::LineDash {
+                        segments: &[4.0, 4.0],
+                        offset: 0,
+                    }
+                } else {
+                    canvas::LineDash::default()
                 },
-            );
+                ..Default::default()
+            };
+            frame.stroke(&path, stroke_style.clone());
             if let Some(cur) = self.selection.borrow().last_move_pos {
                 let start = self.selection.borrow().poly_points[0];
                 let last = *self.selection.borrow().poly_points.last().unwrap();
@@ -907,14 +1103,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                     p.line_to(cur);
                     p.line_to(start);
                 });
-                frame.stroke(
-                    &preview,
-                    canvas::Stroke {
-                        width: 1.0,
-                        style: canvas::Style::Solid(stroke),
-                        ..Default::default()
-                    },
-                );
+                frame.stroke(&preview, stroke_style);
             }
         }
 
@@ -3460,3 +3649,141 @@ mod grid_canvas_state_tests {
         assert!(!should_reuse(state.key.borrow().as_ref(), &other_key));
     }
 }
+
+#[cfg(test)]
+mod selection_visual_color_tests {
+    use super::*;
+
+    #[test]
+    fn default_selection_colors_match_theme_palette() {
+        let visual = SelectionVisualOptions::default();
+        let dark_canvas = [0.0, 0.0, 0.0, 1.0];
+
+        // Dark theme uses authentic classic CAD green and blue
+        let dark_crossing = resolve_selection_base_color(true, &Theme::Dark, &visual, dark_canvas);
+        let dark_window = resolve_selection_base_color(false, &Theme::Dark, &visual, dark_canvas);
+        assert_eq!(dark_crossing, DEFAULT_CROSSING_COLOR);
+        assert_eq!(dark_window, DEFAULT_WINDOW_COLOR);
+
+        // Oxocarbon uses curated vibrant cyan and green
+        let (oxo_crossing, oxo_window) = theme_selection_colors(&Theme::Oxocarbon);
+        assert_eq!(oxo_crossing, Color::from_rgb(0.26, 0.75, 0.40));
+        assert_eq!(oxo_window, Color::from_rgb(0.20, 0.69, 1.00));
+
+        // Dracula uses iconic neon green and cyan
+        let (drac_crossing, drac_window) = theme_selection_colors(&Theme::Dracula);
+        assert_eq!(drac_crossing, Color::from_rgb(0.31, 0.98, 0.48));
+        assert_eq!(drac_window, Color::from_rgb(0.54, 0.91, 0.99));
+
+        // Nord uses aurora green and frost cyan
+        let (nord_crossing, nord_window) = theme_selection_colors(&Theme::Nord);
+        assert_eq!(nord_crossing, Color::from_rgb(0.64, 0.75, 0.55));
+        assert_eq!(nord_window, Color::from_rgb(0.53, 0.75, 0.82));
+
+        // Gruvbox Dark uses bright green and aqua
+        let (gruv_crossing, gruv_window) = theme_selection_colors(&Theme::GruvboxDark);
+        assert_eq!(gruv_crossing, Color::from_rgb(0.72, 0.73, 0.15));
+        assert_eq!(gruv_window, Color::from_rgb(0.51, 0.65, 0.60));
+
+        // All 22 themes must provide non-zero, full-alpha colors
+        for theme in Theme::ALL {
+            let (c, w) = theme_selection_colors(theme);
+            assert_eq!(c.a, 1.0, "Theme {:?} crossing alpha should be 1.0", theme);
+            assert_eq!(w.a, 1.0, "Theme {:?} window alpha should be 1.0", theme);
+            assert!(c.g > 0.0, "Theme {:?} crossing should have green component", theme);
+            assert!(w.b > 0.0 || w.g > 0.0, "Theme {:?} window should have blue/cyan component", theme);
+        }
+    }
+
+    #[test]
+    fn custom_aci_selection_colors_override_defaults() {
+        let mut visual = SelectionVisualOptions::default();
+        visual.crossing_color = 1; // Red
+        visual.window_color = 5; // Blue
+        let dark_canvas = [0.0, 0.0, 0.0, 1.0];
+        let light_canvas = [1.0, 1.0, 1.0, 1.0];
+
+        for theme in Theme::ALL {
+            let crossing_dark = resolve_selection_base_color(true, theme, &visual, dark_canvas);
+            let window_dark = resolve_selection_base_color(false, theme, &visual, dark_canvas);
+            assert_eq!(crossing_dark, Color::from_rgb8(255, 0, 0));
+            assert_eq!(window_dark, Color::from_rgb8(0, 0, 255));
+
+            let crossing_light = resolve_selection_base_color(true, theme, &visual, light_canvas);
+            let window_light = resolve_selection_base_color(false, theme, &visual, light_canvas);
+            assert_eq!(crossing_light, Color::from_rgb8(255, 0, 0));
+            assert_eq!(window_light, Color::from_rgb8(0, 0, 255));
+        }
+    }
+
+    #[test]
+    fn paper_space_on_dark_themes_uses_light_canvas_palette() {
+        let visual = SelectionVisualOptions::default();
+        let paper_bg = [1.0, 1.0, 1.0, 1.0];
+        for theme in Theme::ALL {
+            let crossing = resolve_selection_base_color(true, theme, &visual, paper_bg);
+            let window = resolve_selection_base_color(false, theme, &visual, paper_bg);
+            let c_lum = crate::ui::style::common::wcag_luminance(crossing);
+            let w_lum = crate::ui::style::common::wcag_luminance(window);
+            assert!(
+                c_lum < 0.5,
+                "Theme {:?} crossing on paper ({:.3}) must have luminance < 0.5",
+                theme,
+                c_lum
+            );
+            assert!(
+                w_lum < 0.5,
+                "Theme {:?} window on paper ({:.3}) must have luminance < 0.5",
+                theme,
+                w_lum
+            );
+        }
+    }
+
+    #[test]
+    fn classic_dark_model_bg_resolves_dark_canvas_palette() {
+        let visual = SelectionVisualOptions::default();
+        let classic_dark = [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0];
+        for theme in Theme::ALL {
+            let crossing = resolve_selection_base_color(true, theme, &visual, classic_dark);
+            let window = resolve_selection_base_color(false, theme, &visual, classic_dark);
+            let (expected_crossing, expected_window) = theme_selection_colors(theme);
+            assert_eq!(
+                crossing, expected_crossing,
+                "Theme {:?} crossing on ClassicDark should match theme pair",
+                theme
+            );
+            assert_eq!(
+                window, expected_window,
+                "Theme {:?} window on ClassicDark should match theme pair",
+                theme
+            );
+        }
+    }
+
+    #[test]
+    fn custom_light_background_resolves_light_canvas_palette() {
+        let visual = SelectionVisualOptions::default();
+        let custom_light = [0.95, 0.95, 0.9, 1.0];
+        let crossing = resolve_selection_base_color(true, &Theme::Dark, &visual, custom_light);
+        let window = resolve_selection_base_color(false, &Theme::Dark, &visual, custom_light);
+        assert_eq!(crossing, light_canvas_color(true, &Theme::Dark));
+        assert_eq!(window, light_canvas_color(false, &Theme::Dark));
+    }
+
+    #[test]
+    fn test_selection_fill_alpha_clamping() {
+        // Dark canvas preserves user opacity directly clamped to [0.0, 1.0]
+        assert_eq!(selection_fill_alpha(0.0, false), 0.0);
+        assert!((selection_fill_alpha(50.0, false) - 0.5).abs() < 1e-5);
+        assert_eq!(selection_fill_alpha(100.0, false), 1.0);
+        assert_eq!(selection_fill_alpha(150.0, false), 1.0);
+
+        // Light canvas applies 1.35x boost and clamps to [0.0, 0.45]
+        assert_eq!(selection_fill_alpha(0.0, true), 0.0);
+        assert!((selection_fill_alpha(20.0, true) - 0.27).abs() < 1e-4);
+        assert!((selection_fill_alpha(50.0, true) - 0.45).abs() < 1e-5);
+        assert!((selection_fill_alpha(100.0, true) - 0.45).abs() < 1e-5);
+    }
+}
+

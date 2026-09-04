@@ -10,7 +10,7 @@
 //! `plotstyle` does not. Unifying them would silently change the plotstyle
 //! disabled appearance. See `cargo test --lib ui::style::common_tests`.
 
-use iced::Theme;
+use iced::{Color, Theme};
 
 /// Muted secondary text style — `background.base.text` at 68% opacity.
 pub(crate) fn muted_style(theme: &Theme) -> iced::widget::text::Style {
@@ -25,4 +25,51 @@ pub(crate) fn muted_style(theme: &Theme) -> iced::widget::text::Style {
 #[allow(dead_code)]
 pub(crate) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
     muted_style(theme)
+}
+
+/// Convert sRGB channel [0.0, 1.0] to linear light for WCAG luminance calculations.
+pub(crate) fn to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Calculate standard WCAG 2.1 relative luminance for an opaque color.
+pub(crate) fn wcag_luminance(color: Color) -> f32 {
+    0.2126 * to_linear(color.r) + 0.7152 * to_linear(color.g) + 0.0722 * to_linear(color.b)
+}
+
+/// Calculate standard WCAG contrast ratio between two colors (range: 1.0 to 21.0).
+pub(crate) fn wcag_contrast(c1: Color, c2: Color) -> f32 {
+    let l1 = wcag_luminance(c1);
+    let l2 = wcag_luminance(c2);
+    (l1.max(l2) + 0.05) / (l1.min(l2) + 0.05)
+}
+
+/// Returns `accent` if it achieves at least `min_contrast` against `bg`,
+/// otherwise safely falls back to `fallback`.
+pub(crate) fn accessible_accent_threshold(
+    accent: Color,
+    bg: Color,
+    fallback: Color,
+    min_contrast: f32,
+) -> Color {
+    if wcag_contrast(accent, bg) >= min_contrast {
+        accent
+    } else {
+        fallback
+    }
+}
+
+/// Returns `accent` if it achieves at least 2.0:1 contrast against `bg`,
+/// otherwise safely falls back to `fallback`.
+pub(crate) fn accessible_accent(accent: Color, bg: Color, fallback: Color) -> Color {
+    accessible_accent_threshold(accent, bg, fallback, 2.0)
+}
+
+/// Returns true if the given canvas background color has a WCAG relative luminance > 0.5 (light surface).
+pub(crate) fn canvas_is_light(bg: [f32; 4]) -> bool {
+    wcag_luminance(Color::from_rgb(bg[0], bg[1], bg[2])) > 0.5
 }

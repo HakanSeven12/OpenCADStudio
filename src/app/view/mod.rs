@@ -36,31 +36,13 @@ pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bo
 
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
 
-/// Base surface directly under the crosshair. Paper content viewports render
-/// transparently over the sheet/desk, including while MSPACE input is active.
-fn crosshair_background(tab: &DocumentTab, is_paper: bool, desk: [f32; 4]) -> [f32; 4] {
+/// Base surface directly under the crosshair and selection marquee.
+/// In paper space, the drafting surface is the white sheet (`tab.scene.paper_bg_color`).
+fn crosshair_background(tab: &DocumentTab, is_paper: bool, _desk: [f32; 4]) -> [f32; 4] {
     if !is_paper {
         return tab.scene.bg_color;
     }
-    let (cursor, viewport_size) = {
-        let selection = tab.scene.selection.borrow();
-        (selection.last_move_pos, selection.vp_size)
-    };
-    let Some(cursor) = cursor else {
-        return desk;
-    };
-    if viewport_size.0 <= 0.0 || viewport_size.1 <= 0.0 {
-        return desk;
-    }
-    let on_sheet = tab
-        .scene
-        .paper_sheet_screen_rect(viewport_size)
-        .is_some_and(|rect| rect.contains(cursor));
-    if on_sheet {
-        tab.scene.paper_bg_color
-    } else {
-        desk
-    }
+    tab.scene.paper_bg_color
 }
 
 /// Clear gap (px) kept between the render-mode bar (top-left) and the ViewCube
@@ -3925,3 +3907,18 @@ pub(super) fn recent_files_panel<'a>(
     })
     .into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_crosshair_background_paper_space() {
+        let tab = crate::app::document::DocumentTab::new_drawing(1);
+        let desk_bg = [0.1, 0.1, 0.1, 1.0]; // Dark themed desk background
+        let bg = crosshair_background(&tab, true, desk_bg);
+        assert_eq!(bg, tab.scene.paper_bg_color);
+        assert!(crate::ui::style::common::canvas_is_light(bg));
+    }
+}
+

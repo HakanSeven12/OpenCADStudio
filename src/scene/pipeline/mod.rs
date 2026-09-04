@@ -2402,12 +2402,32 @@ impl Pipeline {
         // Index handle → wire slots once, here, so the per-hover selection
         // overlay can gather just the highlighted wires instead of scanning +
         // string-parsing the whole set every time the hovered entity changes.
+        //
+        // Parsing 198 k names is the bulk of this and each one is independent,
+        // so it runs across cores; only the map insertion stays serial, and
+        // that is cheap once the parse is done. Emission order is preserved --
+        // `par_iter().enumerate()` collects in index order -- which the slot
+        // lists rely on.
+        let t_index = crate::perf::enabled().then(iced::time::Instant::now);
+        let parsed: Vec<(u64, u32)> = {
+            use crate::par::prelude::*;
+            wires
+                .par_iter()
+                .enumerate()
+                .filter_map(|(idx, w)| w.name.parse::<u64>().ok().map(|h| (h, idx as u32)))
+                .collect()
+        };
         let mut index: rustc_hash::FxHashMap<u64, Vec<u32>> = rustc_hash::FxHashMap::default();
-        index.reserve(wires.len());
-        for (idx, w) in wires.iter().enumerate() {
-            if let Ok(h) = w.name.parse::<u64>() {
-                index.entry(h).or_default().push(idx as u32);
-            }
+        index.reserve(parsed.len());
+        for (handle, idx) in parsed {
+            index.entry(handle).or_default().push(idx);
+        }
+        if let Some(started) = t_index {
+            crate::perf_record!(
+                "[perf] wire-handle-index {:.1}ms wires={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                wires.len(),
+            );
         }
         (
             std::sync::Arc::new(batches),

@@ -131,12 +131,13 @@ pub(super) fn viewport_controls<'a>(
     );
 
     let preview_mode = render_mode_preview.unwrap_or(render_mode);
-    let max_label_len = render_modes
-        .iter()
-        .map(|c| c.to_string().chars().count())
-        .max()
-        .unwrap_or(0);
-    let dropdown_w = (max_label_len as f32 * 7.5 + 46.0).max(180.0);
+    let mode_names: Vec<String> = render_modes.iter().map(|c| c.to_string()).collect();
+    let dropdown_w = crate::ui::style::common::dropdown_popup_width(
+        mode_names.iter().map(|s| s.as_str()),
+        11.0,
+        46.0,
+        180.0,
+    );
 
     let mut choices = column![].spacing(2).width(Length::Fill);
     for choice in render_modes {
@@ -445,12 +446,29 @@ mod tests {
             .map(|c| c.label.chars().count())
             .max()
             .unwrap_or(0);
-        let dropdown_w = (max_label_len as f32 * 7.5 + 46.0).max(180.0);
+        let dropdown_w = crate::ui::style::common::dropdown_popup_width(
+            crate::modules::view::visual_style::VISUAL_STYLES
+                .iter()
+                .map(|c| c.label),
+            11.0,
+            46.0,
+            180.0,
+        );
 
         // Longest default label is "Gouraud Shaded + Edges" (22 chars)
         assert_eq!(max_label_len, 22);
         // Computed width should easily fit the 22-char label + checkmark + padding
         assert!(dropdown_w >= 210.0);
+
+        // CJK labels count wide characters double
+        let cjk_labels = ["二维线框", "着色+边"];
+        let cjk_w = crate::ui::style::common::dropdown_popup_width(
+            cjk_labels.iter().copied(),
+            11.0,
+            46.0,
+            180.0,
+        );
+        assert_eq!(cjk_w, 180.0);
 
         for style in crate::modules::view::visual_style::VISUAL_STYLES {
             assert!(!style.label.contains('\n'), "Label should be a single line");

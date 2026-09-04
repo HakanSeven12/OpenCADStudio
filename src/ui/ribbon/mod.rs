@@ -853,6 +853,7 @@ impl Ribbon {
                 let label_el =
                     text(t!(*label))
                         .size(11)
+                        .wrapping(iced::advanced::text::Wrapping::None)
                         .style(move |theme: &Theme| iced::widget::text::Style {
                             color: (!is_current).then_some(
                                 theme
@@ -880,11 +881,22 @@ impl Ribbon {
             })
             .collect();
 
+        let labels: Vec<String> = items
+            .iter()
+            .map(|(_, label, _)| t!(*label).to_string())
+            .collect();
+        let panel_w = crate::ui::style::common::dropdown_popup_width(
+            labels.iter().map(|s| s.as_str()),
+            11.0,
+            68.0,
+            190.0,
+        );
+
         let panel = container(column(rows))
             .style(popup_panel_style)
-            .width(Length::Fixed(190.0));
+            .width(Length::Fixed(panel_w));
 
-        let (align_right, h_pad, top) = self.dd_anchor(open_id, 190.0, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(open_id, panel_w, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             panel.into(),
             align_right,

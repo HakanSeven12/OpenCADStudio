@@ -73,3 +73,33 @@ pub(crate) fn accessible_accent(accent: Color, bg: Color, fallback: Color) -> Co
 pub(crate) fn canvas_is_light(bg: [f32; 4]) -> bool {
     wcag_luminance(Color::from_rgb(bg[0], bg[1], bg[2])) > 0.5
 }
+
+/// True if a character is East Asian Wide or Fullwidth (CJK ideographs, kana, hangul, fullwidth forms).
+pub(crate) fn is_wide(c: char) -> bool {
+    let u = c as u32;
+    matches!(
+        u,
+        0x1100..=0x115F   // Hangul Jamo
+        | 0x2E80..=0xA4CF // CJK Radicals, Kangxi, Hiragana, Katakana, Bopomofo, Hangul Compatibility, CJK Unified Ideographs, Yi
+        | 0xAC00..=0xD7A3 // Hangul Syllables
+        | 0xF900..=0xFAFF // CJK Compatibility Ideographs
+        | 0xFE30..=0xFE4F // CJK Compatibility Forms
+        | 0xFF01..=0xFF60 // Fullwidth ASCII variants
+        | 0xFFE0..=0xFFE6 // Fullwidth symbol variants
+        | 0x20000..=0x2FA1F // CJK Unified Ideographs Extension B-F, Compatibility Supplement
+    )
+}
+
+/// Estimated popup width for a vertical list of labels. Wide (CJK) glyphs
+/// count double so localized labels via t!() don't truncate.
+pub fn dropdown_popup_width<'a>(
+    labels: impl Iterator<Item = &'a str>,
+    font_size: f32,
+    chrome: f32,
+    min: f32,
+) -> f32 {
+    let max_units = labels
+        .map(|l| l.chars().map(|c| if is_wide(c) { 2.0 } else { 1.0 }).sum::<f32>())
+        .fold(0.0f32, f32::max);
+    (max_units * font_size * 0.68 + chrome).max(min)
+}

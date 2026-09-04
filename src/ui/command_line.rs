@@ -752,7 +752,13 @@ impl CommandLine {
         let mcp_tip = container(text(mcp_tooltip).size(11))
             .padding([3, 6])
             .style(container::bordered_box);
-        let mcp_btn = tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4);
+        let mcp_btn = container(tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4))
+            .padding(Padding {
+                top: 0.0,
+                right: 6.0,
+                bottom: 0.0,
+                left: 0.0,
+            });
         let input_row = row![prompt, literal_btn, input_with_history, mcp_btn]
             .spacing(4)
             .align_y(iced::Center);

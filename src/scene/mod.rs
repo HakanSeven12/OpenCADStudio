@@ -7874,6 +7874,22 @@ impl Scene {
         }
     }
 
+    /// Build the interaction handle index and the insert-hatch map now, while
+    /// the drawing is still opening.
+    ///
+    /// Both are built lazily on first use, and first use is the user's first
+    /// hover over the canvas — where the cold build cost 992 ms mid-gesture
+    /// (`hover-detail ... handles=986.1`). They cannot move to the loader
+    /// thread: they read `hatches` / `meshes` / `block_meshes`, which are
+    /// installed on the real `Scene` after the loader is done.
+    ///
+    /// This does not make the work cheaper, it moves it to where the user is
+    /// already waiting. A second on an open that is already seconds long reads
+    /// very differently from a second-long freeze on a mouse move.
+    pub(crate) fn warm_interaction_caches(&self) {
+        let _ = self.interaction_handle_index();
+    }
+
     fn interaction_handle_index(
         &self,
     ) -> Arc<crate::scene::pick::interaction_index::InteractionHandleIndex> {

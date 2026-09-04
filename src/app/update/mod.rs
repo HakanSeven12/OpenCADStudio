@@ -3687,8 +3687,8 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let types = self.tabs[i].scene.entity_type_names_in_layout();
                 let f = &mut self.tabs[i].scene.selection_filter;
-                for t in types {
-                    f.insert(t.to_string());
+                for t in types.iter() {
+                    f.insert(t.clone());
                 }
                 Task::none()
             }

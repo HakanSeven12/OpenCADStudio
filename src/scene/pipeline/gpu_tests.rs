@@ -268,3 +268,54 @@ fn bounded_gpu_uploads_preserve_geometry_and_instancing() {
         "GPU validation failed"
     );
 }
+
+/// The shadow map is 16 MiB and every slot used to hold one whether or not its
+/// visual style enabled shadows. Now it is allocated on the transition, which
+/// means the frame bind group is rebuilt while the device is watching — the one
+/// path the other GPU tests never take.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn toggling_shadows_reallocates_without_upsetting_the_device() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+
+    assert!(
+        pipeline.shadow_full.is_none(),
+        "a fresh slot must not hold a shadow map"
+    );
+    let camera = crate::scene::view::camera::Camera::default();
+    let bounds = iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(64.0, 64.0));
+    let with_shadows = |on: bool| {
+        let mut u = Uniforms::new(&camera, bounds, false);
+        u.shadow_params[0] = if on { 1.0 } else { 0.0 };
+        u
+    };
+
+    // Off → on → off → on, so both transitions are exercised twice and the
+    // second `on` proves the release did not leave the bind group stale.
+    for expected in [true, false, true] {
+        pipeline.upload_uniforms(&device, &queue, &with_shadows(expected));
+        assert_eq!(
+            pipeline.shadow_full.is_some(),
+            expected,
+            "shadow target should follow shadow_params[0]"
+        );
+    }
+    // Releasing a cold slot gives it back and must rebuild the bind group too.
+    pipeline.release_heavy_resources(&device);
+    assert!(pipeline.shadow_full.is_none(), "a released slot holds none");
+
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(
+        block_on(validation.pop()).is_none(),
+        "GPU validation failed"
+    );
+}

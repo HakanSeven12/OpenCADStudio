@@ -150,8 +150,16 @@ pub struct Pipeline {
     background_sampler: wgpu::Sampler,
     background_source_id: usize,
     environment_source_id: usize,
-    _shadow_texture: wgpu::Texture,
-    shadow_view: wgpu::TextureView,
+    /// The shadow depth target, allocated only while this viewport actually
+    /// casts shadows. `SHADOW_MAP_SIZE` squared at `Depth32Float` is 16 MiB,
+    /// and every slot used to hold one whether or not its visual style enabled
+    /// shadows — 128 MiB across eight viewports, none of it ever sampled.
+    shadow_full: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Bound at the frame group's shadow slot while `shadow_full` is `None`.
+    /// The binding must be filled for the layout to be satisfied, but nothing
+    /// samples it when shadows are off, so 1x1 is the whole requirement.
+    _shadow_fallback_texture: wgpu::Texture,
+    shadow_fallback_view: wgpu::TextureView,
     shadow_sampler: wgpu::Sampler,
     shadow_enabled: bool,
     wipeout_bgl1: wgpu::BindGroupLayout,
@@ -489,21 +497,9 @@ impl Pipeline {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
-        let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("shadow.texture"),
-            size: wgpu::Extent3d {
-                width: SHADOW_MAP_SIZE,
-                height: SHADOW_MAP_SIZE,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shadow_fallback_texture = create_shadow_texture(device, 1);
+        let shadow_fallback_view =
+            shadow_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow.sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -542,7 +538,7 @@ impl Pipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                    resource: wgpu::BindingResource::TextureView(&shadow_fallback_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 6,
@@ -2276,8 +2272,9 @@ impl Pipeline {
             background_sampler,
             background_source_id: 0,
             environment_source_id: 0,
-            _shadow_texture: shadow_texture,
-            shadow_view,
+            shadow_full: None,
+            _shadow_fallback_texture: shadow_fallback_texture,
+            shadow_fallback_view,
             shadow_sampler,
             shadow_enabled: false,
             wipeout_bgl1,
@@ -3494,8 +3491,90 @@ impl Pipeline {
         }
     }
 
-    pub fn upload_uniforms(&mut self, queue: &wgpu::Queue, uniforms: &Uniforms) {
+    /// Whatever is bound at the frame group's shadow slot: the real depth
+    /// target when this viewport casts shadows, the 1x1 placeholder otherwise.
+    fn shadow_view(&self) -> &wgpu::TextureView {
+        match &self.shadow_full {
+            Some((_, view)) => view,
+            None => &self.shadow_fallback_view,
+        }
+    }
+
+    /// Rebuild the frame bind group from whatever this slot currently holds.
+    ///
+    /// Three things can change what belongs in it — a background image, an
+    /// environment image, and whether the shadow target exists — and it used to
+    /// be assembled inline at each. One builder means a shadow transition
+    /// cannot forget the background the slot already had.
+    fn rebuild_frame_bind_group(&mut self, device: &wgpu::Device) {
+        let background_view = self
+            .background_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let environment_view = self
+            .environment_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewer.bind_group"),
+            layout: &self.frame_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&background_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&environment_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(self.shadow_view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
+                },
+            ],
+        });
+    }
+
+    /// Allocate or drop the shadow target to match `shadow_enabled`.
+    ///
+    /// Only on a transition: the frame bind group has to be rebuilt with the
+    /// new view, and a viewport that keeps its shadow setting should not pay
+    /// for that every frame.
+    fn sync_shadow_target(&mut self, device: &wgpu::Device) {
+        match (self.shadow_enabled, self.shadow_full.is_some()) {
+            (true, false) => {
+                let texture = create_shadow_texture(device, SHADOW_MAP_SIZE);
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                self.shadow_full = Some((texture, view));
+            }
+            (false, true) => self.shadow_full = None,
+            _ => return,
+        }
+        self.rebuild_frame_bind_group(device);
+    }
+
+    pub fn upload_uniforms(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        uniforms: &Uniforms,
+    ) {
         self.shadow_enabled = uniforms.shadow_params[0] > 0.5;
+        self.sync_shadow_target(device);
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(uniforms));
     }
 
@@ -3562,46 +3641,7 @@ impl Pipeline {
             environment,
             [128, 128, 128, 255],
         );
-        let background_view = self
-            .background_texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let environment_view = self
-            .environment_texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        self.uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewer.bind_group"),
-            layout: &self.frame_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&background_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&environment_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&self.shadow_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
-                },
-            ],
-        });
+        self.rebuild_frame_bind_group(device);
         self.background_source_id = background_id;
         self.environment_source_id = environment_id;
     }
@@ -3670,12 +3710,20 @@ impl Pipeline {
         // render rectangle does the clipping).
         let stencil_ref: u32 = if self.clip_boundary.is_some() { 0xFF } else { 0 };
 
-        if self.shadow_enabled && !self.skip_geometry && !mesh_wireframe {
+        // `shadow_enabled` says the style wants shadows; the target existing
+        // says the device could give us one. Without the second test a failed
+        // 16 MiB allocation would render the pass into the 1x1 placeholder.
+        if let Some(shadow_target) = self
+            .shadow_full
+            .as_ref()
+            .map(|(_, view)| view)
+            .filter(|_| self.shadow_enabled && !self.skip_geometry && !mesh_wireframe)
+        {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow.render_pass"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.shadow_view,
+                    view: shadow_target,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -4663,6 +4711,13 @@ impl Pipeline {
         self.silhouette_source_groups.clear();
         self.clip_boundary = None;
 
+        // A cold slot's shadow target goes back too. `shadow_enabled` is left
+        // alone, so `sync_shadow_target` reallocates on the next frame that
+        // still wants shadows.
+        if self.shadow_full.take().is_some() {
+            self.rebuild_frame_bind_group(device);
+        }
+
         self.text_atlas_gpu = None;
         self.text_gpu.clear();
         self.block_text_gpu.clear();
@@ -4845,8 +4900,12 @@ impl Pipeline {
         let pixels = u64::from(self.alloc_size.width) * u64::from(self.alloc_size.height);
         GpuLiveBytes {
             slots: 1,
-            // Allocated by every slot whether or not shadows are enabled.
-            shadow: u64::from(SHADOW_MAP_SIZE) * u64::from(SHADOW_MAP_SIZE) * 4,
+            // Only while this viewport casts shadows; the placeholder that
+            // stands in otherwise is 4 bytes.
+            shadow: match &self.shadow_full {
+                Some(_) => u64::from(SHADOW_MAP_SIZE) * u64::from(SHADOW_MAP_SIZE) * 4,
+                None => 4,
+            },
             render_targets: pixels * BYTES_PER_PIXEL,
             text_atlas: self
                 .text_atlas_gpu
@@ -4901,7 +4960,9 @@ impl MultiPipeline {
             }
             // Nothing to give back — releasing again would only churn the
             // render targets it just rebuilt at their smallest size.
-            if self.inners[index].gpu_live_bytes().wire_arena == 0
+            let held = self.inners[index].gpu_live_bytes();
+            if held.wire_arena == 0
+                && held.shadow <= 4
                 && self.inners[index].alloc_size == Size::new(0, 0)
             {
                 continue;
@@ -4946,6 +5007,26 @@ fn bind_and_draw_block_wire(pass: &mut wgpu::RenderPass<'_>, wire: &wire_gpu::Bl
         None => pass.set_vertex_buffer(0, wire.instance_buffer.slice(..)),
     }
     pass.draw(0..wire.vertex_count, 0..wire.instance_count);
+}
+
+/// A square `Depth32Float` render target for the shadow pass. `side` is 1 for
+/// the placeholder that keeps the frame bind group satisfied while shadows are
+/// off, and `SHADOW_MAP_SIZE` for the real thing.
+fn create_shadow_texture(device: &wgpu::Device, side: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow.texture"),
+        size: wgpu::Extent3d {
+            width: side,
+            height: side,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
 }
 
 fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture {

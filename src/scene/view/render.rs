@@ -373,6 +373,12 @@ impl shader::Primitive for Primitive {
 
         for (i, vp) in self.viewports.iter().enumerate() {
             let inner = &mut pipeline.inners[slots[i]];
+            // Compared at the end of this viewport's turn. Every "we hold this
+            // now" latch below is stamped after its upload, whether or not the
+            // device accepted it — and the wire latch gates the whole upload
+            // block, so one rejected allocation could leave a slotpermanently empty with
+            // nothing that would ever rebuild it.
+            let slot_errors_before = crate::scene::pipeline::gpu_errors_seen();
             // Pipeline slots are addressed by list index, but off-canvas
             // viewports are dropped from the list — so a slot can be reused by a
             // DIFFERENT viewport across frames (e.g. the first viewport scrolls
@@ -1179,6 +1185,15 @@ impl shader::Primitive for Primitive {
                     vp.hover_region,
                     self.viewcube_text_color,
                 );
+            }
+
+            // A rejected allocation leaves buffers that are invalid but
+            // indistinguishable from good ones at every cache key. Forget
+            // them all, so the next frame rebuilds this slot instead of
+            // drawing nothing for the rest of the session — which is what
+            // sent a user to REGENALL to get the model back.
+            if crate::scene::pipeline::gpu_errors_seen() != slot_errors_before {
+                inner.forget_cached_keys();
             }
         }
         let prepare_ms = nav_prepare_started.elapsed().as_secs_f64() * 1000.0;

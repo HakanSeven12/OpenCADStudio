@@ -2419,15 +2419,7 @@ impl Pipeline {
             Some(&mut self.block_geometry),
         );
 
-        // Index handle → wire slots once, here, so the per-hover selection
-        // overlay can gather just the highlighted wires instead of scanning +
-        // string-parsing the whole set every time the hovered entity changes.
-        //
-        // Parsing 198 k names is the bulk of this and each one is independent,
-        // so it runs across cores; only the map insertion stays serial, and
-        // that is cheap once the parse is done. Emission order is preserved --
-        // `par_iter().enumerate()` collects in index order -- which the slot
-        // lists rely on.
+        // Parse handles in parallel, preserving wire order for hover slot lists.
         let t_index = crate::perf::enabled().then(iced::time::Instant::now);
         let parsed: Vec<(u64, u32)> = {
             use crate::par::prelude::*;

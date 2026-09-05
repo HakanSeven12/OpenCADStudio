@@ -8,13 +8,8 @@ fn device_ceiling(device: &wgpu::Device) -> usize {
     (usize::try_from(device.limits().max_buffer_size).unwrap_or(usize::MAX) / 10) * 9
 }
 
-/// The wire arena keeps one persistent instance buffer for the whole resident
-/// set and patches it in place. Capping that at the per-chunk budget pushes any
-/// drawing past ~524 k instances onto the batched fallback, which re-uploads
-/// everything on every edit — 200 ms a click on a drawing with 821 k. A single
-/// long-lived buffer can afford more than a transient chunk, and 128 MiB is
-/// still four times smaller than the 505 MiB allocation that crashed a 2 GB
-/// card in the first place.
+/// Persistent arenas need a larger cap than transient chunks to keep large
+/// drawings on the incremental upload path.
 const ARENA_CAP_BYTES: usize = 128 * 1024 * 1024;
 
 /// `OCS_GPU_CHUNK_MIB`, when set. Overrides both caps so a test can force

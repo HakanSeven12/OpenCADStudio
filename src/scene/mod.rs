@@ -432,24 +432,10 @@ struct ResidentWireLayout {
 pub struct PreparedOpenGeometry {
     pub wires: Arc<Vec<WireModel>>,
     pub interaction_index: Option<Arc<crate::scene::pick::interaction_index::InteractionIndex>>,
-    /// The per-entity tessellation memo the loader thread filled while building
-    /// `wires`, with the guard hash it was valid under.
-    ///
-    /// `prepare_open_geometry` works on a throwaway `Scene`, so this used to be
-    /// dropped with it and the first geometry edit re-tessellated all 186 455
-    /// entities from cold — 1.3 s of work the loader had already done. The
-    /// guard travels with it because the memo is only usable under the state it
-    /// was built for; a mismatch on the receiving side clears it, which is
-    /// exactly the old behaviour.
+    /// Loader tessellations and their guard; a state mismatch clears the memo.
     pub tess_memo: HashMap<Handle, Arc<Vec<WireModel>>>,
     pub tess_guard: u64,
-    /// Block definitions the loader thread built while tessellating, keyed as
-    /// `block_defn_cache` keys them but without an epoch — the receiving scene
-    /// stamps its own.
-    ///
-    /// Dropped with the throwaway scene before, which is why the first edit
-    /// spent 1147 ms rebuilding definitions the loader had just built from the
-    /// same, unmodified document.
+    /// Loader block definitions; the receiving scene supplies its own epoch.
     pub block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)>,
 }
 
@@ -1859,14 +1845,8 @@ pub struct Scene {
     /// Boundary source → associative hatch handles. Source edits reuse this
     /// index instead of scanning the document during every drag step.
     associative_hatch_source_cache: RefCell<Option<HashMap<Handle, Vec<Handle>>>>,
-    /// Whether the drawing contains any associative centerline or center mark.
-    ///
-    /// Refreshing those means scanning every entity and parsing its extended
-    /// data — 1.17 M entities and ~30 ms each on the reproducer, run twice on
-    /// every edit, to find none at all. `None` means not yet determined; the
-    /// first scan records the answer, and later edits only re-examine the
-    /// handles they actually changed. Staying `true` after the last one is
-    /// deleted is merely slower, never wrong.
+    /// Conservative association hint: unknown until scanned, then updated from
+    /// changed entities. Retaining `true` after deletion only costs an extra scan.
     has_associative_centers: std::cell::Cell<Option<bool>>,
     /// Tessellated block definitions in block-local coords, keyed by render
     /// background and block epoch. Model and Paper adapt black/white colours
@@ -2589,12 +2569,7 @@ impl Scene {
         changes
     }
 
-    /// Whether the associative centerline / center-mark scans can be skipped.
-    ///
-    /// Answers from the cached hint when it is known, and otherwise from the
-    /// changed entities alone: if any of them carries an association the hint
-    /// flips to `true` and the scans run from then on. Only an undetermined
-    /// hint costs a full pass, and that happens once.
+    /// Check changed entities and scan the document only when the hint is unknown.
     fn associative_centers_possible(&self, changes: &[(Handle, ChangeKind)]) -> bool {
         if changes.iter().any(|(handle, _)| {
             self.document.get_entity(*handle).is_some_and(|entity| {
@@ -7943,23 +7918,8 @@ impl Scene {
         }
     }
 
-    /// Build the interaction handle index and the insert-hatch map now, while
-    /// the drawing is still opening.
-    ///
-    /// Both are built lazily on first use, and first use is the user's first
-    /// hover over the canvas — where the cold build cost 992 ms mid-gesture
-    /// (`hover-detail ... handles=986.1`). They cannot move to the loader
-    /// thread: they read `hatches` / `meshes` / `block_meshes`, which are
-    /// installed on the real `Scene` after the loader is done.
-    ///
-    /// This does not make the work cheaper, it moves it to where the user is
-    /// already waiting. A second on an open that is already seconds long reads
-    /// very differently from a second-long freeze on a mouse move.
+    /// Prepare hover indexes after derived geometry is installed during open.
     pub(crate) fn warm_interaction_caches(&self) {
-        // Both indexes on the hover path, not just one. The handle index alone
-        // left `hover-detail ... handles=384.6` on the first hover: the same
-        // stage also builds the entity quadtree, which is keyed on
-        // `geometry_epoch` and equally cold at that point.
         let _ = self.entity_index();
         let _ = self.interaction_handle_index();
     }
@@ -9179,11 +9139,7 @@ impl Scene {
             if let Some((_, ref idx)) = *cache {
                 if let Some(sort_map) = idx.get(&block_handle) {
                     sorted = true;
-                    // `sort_by_cached_key`, not `sort_by_key`: the key parses
-                    // the wire's name out of a `String`, and `sort_by_key` calls
-                    // it O(n log n) times. On the resident set that is ~198 k
-                    // wires parsed eighteen times over — 295 ms on every rebuild,
-                    // including rebuilds where nothing was re-tessellated.
+                    // Parse each handle once while preserving stable draw order.
                     wires.sort_by_cached_key(|w| {
                         let key = Self::handle_from_wire_name(&w.name)
                             .map(|h| h.value())

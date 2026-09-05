@@ -19,6 +19,7 @@ jobs:
         run: |
           cargo test --lib app::control::tests
           cargo test --lib io::update_check::tests
+          cargo test --lib scene::pipeline::wire_arena::tests
       - name: Validate MCP smoke script
         if: runner.os != 'Windows'
         run: python3 -m py_compile docs/automation/mcp_smoke.py

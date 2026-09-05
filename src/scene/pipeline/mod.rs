@@ -94,6 +94,10 @@ pub struct Pipeline {
     /// compatibility mode. Passed to `WireGpu::from_run` / `from_batch`.
     pub(crate) wire_const_bgl: Option<wgpu::BindGroupLayout>,
     block_wire_const_bgl: wgpu::BindGroupLayout,
+    /// Which block-wire pipeline was built. Decides whether a definition's
+    /// segments go to a vertex buffer six times over or to a storage buffer
+    /// once.
+    block_wire_mode: wire_gpu::WirePipelineMode,
     wipeout_pipeline: wgpu::RenderPipeline,
     /// Capability-selected hatch renderer. Storage and texture transports are
     /// private backends behind one upload/LOD/draw lifecycle.
@@ -581,7 +585,8 @@ impl Pipeline {
             bind_group_layouts: &wire_bgls,
             immediate_size: 0,
         });
-        let block_wire_const_bgl = wire_gpu::block_const_bind_group_layout(device);
+        let block_wire_const_bgl =
+            wire_gpu::block_const_bind_group_layout(device, wire_mode.uses_storage());
         let block_wire_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("block_wire.pipeline_layout"),
             bind_group_layouts: &[Some(&frame_bgl), Some(&block_wire_const_bgl)],
@@ -602,9 +607,13 @@ impl Pipeline {
         });
         let block_wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("block_wire.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/block_wire.wgsl"
-            ))),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
+                if wire_mode.uses_storage() {
+                    include_str!("../../shaders/block_wire_storage.wgsl")
+                } else {
+                    include_str!("../../shaders/block_wire.wgsl")
+                },
+            )),
         });
 
         // Stencil test shared by every paper content pipeline: draw only where
@@ -880,6 +889,14 @@ impl Pipeline {
             multiview_mask: None,
             cache: None,
         });
+        let block_wire_buffers: &[wgpu::VertexBufferLayout<'_>] = if wire_mode.uses_storage() {
+            &[wire_gpu::BlockWireInstance::layout()]
+        } else {
+            &[
+                wire_gpu::BlockWireVertex::layout(),
+                wire_gpu::BlockWireInstance::layout(),
+            ]
+        };
         let make_block_wire_pipeline = |
             label: &'static str,
             fragment: &'static str,
@@ -892,10 +909,10 @@ impl Pipeline {
                 vertex: wgpu::VertexState {
                     module: &block_wire_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[
-                        wire_gpu::BlockWireVertex::layout(),
-                        wire_gpu::BlockWireInstance::layout(),
-                    ],
+                    // Storage mode has no geometry vertex buffer: the
+                    // instances become slot 0 and the segments arrive through
+                    // the bind group.
+                    buffers: block_wire_buffers,
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 primitive: wgpu::PrimitiveState {
@@ -2215,6 +2232,7 @@ impl Pipeline {
             block_wire_xray_pipeline,
             wire_const_bgl,
             block_wire_const_bgl,
+            block_wire_mode: wire_mode,
             wipeout_pipeline,
             hatch_gpu,
             image_pipeline,
@@ -2349,7 +2367,10 @@ impl Pipeline {
             wires,
             depth_map,
             None,
-            &self.block_wire_const_bgl,
+            wire_gpu::BlockWireTarget {
+                const_bgl: &self.block_wire_const_bgl,
+                mode: self.block_wire_mode,
+            },
             Some(&mut self.block_geometry),
         )
     }
@@ -2415,7 +2436,10 @@ impl Pipeline {
             &block_wires,
             depth_map,
             None,
-            &self.block_wire_const_bgl,
+            wire_gpu::BlockWireTarget {
+                const_bgl: &self.block_wire_const_bgl,
+                mode: self.block_wire_mode,
+            },
             Some(&mut self.block_geometry),
         );
 
@@ -2554,7 +2578,10 @@ impl Pipeline {
                 &selected_blocks,
                 depth_map,
                 Some(tint),
-                &self.block_wire_const_bgl,
+                wire_gpu::BlockWireTarget {
+                    const_bgl: &self.block_wire_const_bgl,
+                    mode: self.block_wire_mode,
+                },
                 None,
             )
         } else {
@@ -2566,7 +2593,10 @@ impl Pipeline {
             &hover_blocks,
             depth_map,
             Some(WireModel::HOVER),
-            &self.block_wire_const_bgl,
+            wire_gpu::BlockWireTarget {
+                const_bgl: &self.block_wire_const_bgl,
+                mode: self.block_wire_mode,
+            },
             None,
         ));
         self.gpu_selected_block_wires = block_gpu;
@@ -4288,10 +4318,7 @@ impl Pipeline {
                     });
                     block_black_active = use_black;
                 }
-                pass.set_bind_group(1, wire.const_bind_group.as_ref(), &[]);
-                pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, wire.instance_buffer.slice(..));
-                pass.draw(0..wire.vertex_count, 0..wire.instance_count);
+                bind_and_draw_block_wire(&mut pass, wire);
             }
             // Live overlay wires (command preview / interim / grip drag) always
             // on top: the xray pipeline (depth_compare=Always, no depth write)
@@ -4480,10 +4507,7 @@ impl Pipeline {
                     if wire.instance_count == 0 {
                         continue;
                     }
-                    pass.set_bind_group(1, wire.const_bind_group.as_ref(), &[]);
-                    pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, wire.instance_buffer.slice(..));
-                    pass.draw(0..wire.vertex_count, 0..wire.instance_count);
+                    bind_and_draw_block_wire(&mut pass, wire);
                 }
             }
             if let Some(atlas) = &self.text_atlas_gpu {
@@ -4703,6 +4727,24 @@ fn aabb_below_pixel(
         if py > max_py { max_py = py; }
     }
     (max_px - min_px).max(max_py - min_py) < threshold_px
+}
+
+/// Bind one block-wire batch and draw it.
+///
+/// The two pipeline modes lay the vertex slots out differently — packed puts
+/// the six-per-segment geometry in slot 0 and the placements in slot 1, while
+/// storage has no geometry vertex buffer at all and the placements become slot
+/// 0. Both draw loops go through here so they cannot drift apart.
+fn bind_and_draw_block_wire(pass: &mut wgpu::RenderPass<'_>, wire: &wire_gpu::BlockWireGpu) {
+    pass.set_bind_group(1, wire.const_bind_group.as_ref(), &[]);
+    match &wire.vertex_buffer {
+        Some(vertices) => {
+            pass.set_vertex_buffer(0, vertices.slice(..));
+            pass.set_vertex_buffer(1, wire.instance_buffer.slice(..));
+        }
+        None => pass.set_vertex_buffer(0, wire.instance_buffer.slice(..)),
+    }
+    pass.draw(0..wire.vertex_count, 0..wire.instance_count);
 }
 
 fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture {

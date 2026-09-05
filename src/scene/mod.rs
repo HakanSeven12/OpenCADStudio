@@ -8901,6 +8901,9 @@ impl Scene {
 
         let sort_cache_ms = crate::perf::elapsed_ms(t_fn);
         let t_visible = perf.then(iced::time::Instant::now);
+        // Which path the selection took, and how many candidates it looked at.
+        let mut visible_path = "quadtree";
+        let mut visible_candidates = 0usize;
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
         // AABB exists (Model layout with a settled camera), only iterate
@@ -9200,7 +9203,7 @@ impl Scene {
             crate::perf_record!(
                 "[perf] wires-build total={:.1}ms sort_cache={:.1} visible={:.1} blk_cache={:.1} \
 build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
-entities={} memo_hit={} memo_miss={} wires={} memo={}",
+entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates={}",
                 crate::perf::elapsed_ms(t_fn),
                 sort_cache_ms,
                 visible_ms,
@@ -9217,6 +9220,8 @@ entities={} memo_hit={} memo_miss={} wires={} memo={}",
                 memo_misses,
                 wires.len(),
                 if memo_active { "on" } else { "off" },
+                visible_path,
+                visible_candidates,
             );
         }
         wires

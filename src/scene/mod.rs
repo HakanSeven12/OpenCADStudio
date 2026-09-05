@@ -9080,6 +9080,11 @@ impl Scene {
         let mut materialize_ms = 0.0f64;
         let mut memo_hits = 0usize;
         let memo_misses;
+        // Two consecutive identical resident builds both missed every entry,
+        // which a stable guard cannot explain — the memo is being cleared
+        // between them. Report the guard and the inputs that can move it.
+        let mut guard_dbg = 0u64;
+        let mut guard_was_stale = false;
         let t_build = perf.then(iced::time::Instant::now);
         let mut wires: Vec<WireModel> = if memo_active {
             // Guard hash of everything tessellate_entity output depends on
@@ -9114,7 +9119,9 @@ impl Scene {
             } else {
                 (&self.tess_memo, &self.tess_memo_guard)
             };
-            if guard_cell.get() != guard {
+            guard_dbg = guard;
+            guard_was_stale = guard_cell.get() != guard;
+            if guard_was_stale {
                 memo_cell.borrow_mut().clear();
                 guard_cell.set(guard);
             }
@@ -9228,7 +9235,8 @@ impl Scene {
             crate::perf_record!(
                 "[perf] wires-build total={:.1}ms sort_cache={:.1} visible={:.1} blk_cache={:.1} \
 build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
-entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates={}",
+entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates={} \
+guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
                 crate::perf::elapsed_ms(t_fn),
                 sort_cache_ms,
                 visible_ms,
@@ -9247,6 +9255,13 @@ entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates
                 if memo_active { "on" } else { "off" },
                 visible_path,
                 visible_candidates,
+                guard_dbg,
+                guard_was_stale,
+                avp.map(|h| h.value()).unwrap_or(0),
+                anno,
+                annotation_scale_handle.map(|h| h.value()).unwrap_or(0),
+                all_visible,
+                crate::scene::text::sdf_atlas::generation(),
             );
         }
         wires

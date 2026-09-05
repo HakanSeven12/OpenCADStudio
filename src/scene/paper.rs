@@ -69,7 +69,36 @@ impl Scene {
         (layout_block, sheet, content)
     }
 
+    /// Could any viewport in this layout draw a grid?
+    ///
+    /// Read from the same fields `active_viewports` copies into
+    /// `ViewportInstance::grid_on`, and deliberately without the visibility
+    /// filters that function also applies: answering "maybe" only costs the
+    /// work that would have happened anyway, while answering "no" wrongly
+    /// would drop a grid the user asked for.
+    fn any_viewport_grid_on(&self) -> bool {
+        if self.current_layout == "Model" {
+            return self.model_tiles.borrow().iter().any(|tile| tile.grid_on);
+        }
+        let (_, sheet, content) = self.paper_viewport_handles();
+        let grid_on = |handle: Handle| {
+            matches!(
+                self.document.get_entity(handle),
+                Some(EntityType::Viewport(vp)) if vp.status.grid_on
+            )
+        };
+        grid_on(sheet) || content.iter().copied().any(grid_on)
+    }
+
     pub fn grid_views(&self, vw: f32, vh: f32) -> Vec<(iced::Rectangle, Camera, Handle)> {
+        // `active_viewports` resolves a camera for every viewport, and
+        // `camera_for_viewport` reaches `model_space_extents`, which outside the
+        // Model layout tessellates the whole drawing. Filtering on `grid_on`
+        // afterwards threw all of that away: on the reproducer the first paper
+        // frame spent 7.8 s here to produce `n=0` views. Ask first.
+        if !self.any_viewport_grid_on() {
+            return Vec::new();
+        }
         self.active_viewports(vw, vh, acadrust::entities::ViewportRenderMode::Wireframe2D)
             .into_iter()
             .filter(|inst| inst.grid_on)

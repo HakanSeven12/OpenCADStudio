@@ -296,6 +296,7 @@ pub fn frame_wire(
         lo.push([lx, ly, 0.0]);
     }
     WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

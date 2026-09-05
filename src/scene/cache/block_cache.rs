@@ -1591,6 +1591,25 @@ impl Batches {
                     [b.min_x, b.min_y, b.max_x, b.max_y]
                 };
                 let contrast_bg = b.contrast_bg.unwrap_or(bg_color);
+                // Record what this resolution consumed, so switching layout can
+                // redo it for another background instead of re-running the
+                // tessellation that produced identical geometry. Skipped when
+                // the resolution is a no-op — a preserved colour with no canvas
+                // fill looks the same under every background.
+                let bg_adapt: crate::scene::model::wire_model::BgAdapt =
+                    (b.canvas_color || !b.preserve_color).then(|| {
+                        Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                            raw_color: b.color,
+                            text_raw_colors: if b.preserve_color {
+                                Vec::new()
+                            } else {
+                                b.text_verts.iter().map(|v| v.color).collect()
+                            },
+                            contrast_bg: b.contrast_bg,
+                            canvas_color: b.canvas_color,
+                            preserve_color: b.preserve_color,
+                        })
+                    });
                 let color = if b.canvas_color {
                     bg_color
                 } else if b.preserve_color {
@@ -1615,6 +1634,7 @@ impl Batches {
                     );
                 }
                 WireModel {
+                    bg_adapt,
                     point_marker: b.point_marker,
                     taper_widths: Vec::new(),
                     pattern_stations: b.pattern_stations,
@@ -2726,5 +2746,121 @@ fn is_unreasonable_extent(e: &EntityType) -> bool {
                 || el.major_axis.z.abs() > SANE_EXTENT
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod bg_resolution_tests {
+    use super::*;
+    use crate::scene::pipeline::text_gpu::TextVertex;
+    use crate::scene::view::render::{adapt_to_bg, resolve_colors_for_bg};
+
+    const DARK: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
+    const LIGHT: [f32; 4] = [0.95, 0.95, 0.95, 1.0];
+    /// Near-white, not pure white: the case that makes `adapt_to_bg`
+    /// non-re-appliable, so it must survive a round trip through the recorded
+    /// raw colour.
+    const NEAR_WHITE: [f32; 4] = [0.97, 0.99, 0.96, 1.0];
+
+    fn entry(
+        color: [f32; 4],
+        contrast_bg: Option<[f32; 4]>,
+        preserve_color: bool,
+        canvas_color: bool,
+    ) -> BatchEntry {
+        let mut e = BatchEntry::new(
+            color,
+            contrast_bg,
+            preserve_color,
+            canvas_color,
+            0.0,
+            [0.0; 8],
+            1.0,
+            0.0,
+            0.0,
+            None,
+            1,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+        );
+        e.points = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+        e.text_verts = vec![TextVertex {
+            pos: [0.0; 3],
+            pos_low: [0.0; 3],
+            uv: [0.0; 2],
+            color,
+            draw_depth: 0.0,
+        }];
+        e
+    }
+
+    /// Every combination `finalize` distinguishes, in one set.
+    fn batches() -> Batches {
+        Batches {
+            by_style: HashMap::default(),
+            closed: vec![
+                entry(NEAR_WHITE, None, false, false),
+                entry([0.0, 0.0, 0.0, 1.0], None, false, false),
+                entry(NEAR_WHITE, None, true, false),
+                entry(NEAR_WHITE, Some(LIGHT), false, false),
+                entry(NEAR_WHITE, None, false, true),
+            ],
+            extra_wires: Vec::new(),
+            nested_prototypes: HashMap::default(),
+        }
+    }
+
+    fn colors(wires: &[WireModel]) -> Vec<([f32; 4], Vec<[f32; 4]>)> {
+        wires
+            .iter()
+            .map(|w| (w.color, w.text_verts.iter().map(|v| v.color).collect()))
+            .collect()
+    }
+
+    /// The contract the whole background-key removal rests on: resolving a set
+    /// built under one background for another must land exactly where building
+    /// it under that background would have.
+    #[test]
+    fn resolving_for_a_background_matches_building_under_it() {
+        for (from, to) in [(DARK, LIGHT), (LIGHT, DARK), (DARK, DARK), (LIGHT, LIGHT)] {
+            let mut resolved = batches().finalize("b", false, from);
+            resolve_colors_for_bg(&mut resolved, to);
+            let direct = batches().finalize("b", false, to);
+            assert_eq!(
+                colors(&resolved),
+                colors(&direct),
+                "built under {from:?}, resolved for {to:?}",
+            );
+        }
+    }
+
+    /// Safe to apply twice, and over a set mixing already-resolved wires with
+    /// freshly built ones — which is exactly what a memo hit plus a miss is.
+    #[test]
+    fn resolving_twice_changes_nothing() {
+        let mut once = batches().finalize("b", false, DARK);
+        resolve_colors_for_bg(&mut once, LIGHT);
+        let mut twice = once.clone();
+        resolve_colors_for_bg(&mut twice, LIGHT);
+        assert_eq!(colors(&once), colors(&twice));
+    }
+
+    /// Why the raw colour is stored instead of re-adapting the resolved one.
+    /// If this ever starts passing, `raw_color` could be dropped — and if it
+    /// is removed while this still fails, near-white geometry loses its tint
+    /// on the first layout switch.
+    #[test]
+    fn adapt_to_bg_cannot_be_reapplied() {
+        let once = adapt_to_bg(NEAR_WHITE, LIGHT);
+        assert_eq!(once, [0.0, 0.0, 0.0, 1.0], "near-white snaps to pure black");
+        assert_ne!(
+            adapt_to_bg(once, DARK),
+            adapt_to_bg(NEAR_WHITE, DARK),
+            "re-adapting the resolved colour must not equal adapting the raw one",
+        );
     }
 }

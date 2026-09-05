@@ -270,6 +270,7 @@ fn is_x_type(feature: DVec3, leader: DVec3) -> bool {
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {
     WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

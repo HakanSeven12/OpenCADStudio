@@ -86,6 +86,7 @@ impl CadCommand for DimJogLineCommand {
         }
         let d = 0.3_f32;
         Some(WireModel {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),

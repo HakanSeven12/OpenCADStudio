@@ -467,6 +467,7 @@ fn ocs_point(point: [f64; 2], elevation: f64, normal: Vector3) -> DVec3 {
 
 fn preview_wire(points: Vec<DVec3>) -> WireModel {
     WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

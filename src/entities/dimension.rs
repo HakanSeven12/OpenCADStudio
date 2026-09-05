@@ -3882,6 +3882,7 @@ fn tessellate_dimension_inner(
             let (ext1, ext2) = split_ext_lines(&geom.ext_lines);
             if !ext1.is_empty() {
                 wires.push(WireModel {
+                    bg_adapt: None,
                     point_marker: None,
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
@@ -3917,6 +3918,7 @@ fn tessellate_dimension_inner(
             }
             if !ext2.is_empty() {
                 wires.push(WireModel {
+                    bg_adapt: None,
                     point_marker: None,
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
@@ -3952,6 +3954,7 @@ fn tessellate_dimension_inner(
             }
         } else {
             wires.push(WireModel {
+                bg_adapt: None,
                 point_marker: None,
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
@@ -3988,6 +3991,7 @@ fn tessellate_dimension_inner(
     }
 
     wires.push(WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),
@@ -4032,6 +4036,7 @@ fn tessellate_dimension_inner(
         let mut points = Vec::new();
         add_polyline(&mut points, &symbol);
         wires.push(WireModel {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
@@ -4080,6 +4085,7 @@ fn tessellate_dimension_inner(
                     aci_to_rgba(&c)
                 };
                 wires.push(WireModel {
+                    bg_adapt: None,
                     point_marker: None,
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
@@ -4130,6 +4136,7 @@ fn tessellate_dimension_inner(
             let p3 = rect[2];
             let p4 = rect[5];
             wires.push(WireModel {
+                bg_adapt: None,
                 point_marker: None,
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),

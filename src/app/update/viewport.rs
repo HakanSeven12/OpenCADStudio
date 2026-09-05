@@ -2407,6 +2407,7 @@ impl OpenCADStudio {
                         let far_pos = base + dir * far;
                         let far_neg = base - dir * far;
                         let guide = crate::scene::WireModel {
+                            bg_adapt: None,
                             point_marker: None,
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),

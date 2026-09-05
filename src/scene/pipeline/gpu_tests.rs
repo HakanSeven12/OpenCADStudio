@@ -319,3 +319,92 @@ fn toggling_shadows_reallocates_without_upsetting_the_device() {
         "GPU validation failed"
     );
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn urgent_release_preserves_visible_panes_and_frees_cold_slots() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter =
+        block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).unwrap();
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .unwrap();
+    let mut pipeline = <MultiPipeline as iced::widget::shader::Pipeline>::new(
+        &device,
+        &queue,
+        wgpu::TextureFormat::Bgra8UnormSrgb,
+    );
+    let first = pipeline.resolve_slots(&device, &queue, &[10])[0];
+    pipeline.inners[first].slot_id = 10;
+    pipeline.inners[first].ensure_depth_texture(&device, Size::new(512, 512));
+    let second = pipeline.resolve_slots(&device, &queue, &[20])[0];
+    pipeline.inners[second].slot_id = 20;
+    pipeline.inners[second].ensure_depth_texture(&device, Size::new(512, 512));
+    pipeline.release_idle_slots(&device, &[second], true);
+    assert_eq!(
+        pipeline.inners[first].alloc_size,
+        Size::new(512, 512),
+        "a sibling pane prepared immediately before this pane is still visible"
+    );
+
+    pipeline
+        .frame_rendered
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let next = pipeline.resolve_slots(&device, &queue, &[20]);
+    assert_eq!(
+        pipeline.release_idle_slots(&device, &next, true),
+        0,
+        "a previous-frame pane may still be prepared later in this frame"
+    );
+    pipeline
+        .frame_rendered
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let next = pipeline.resolve_slots(&device, &queue, &[20]);
+    assert_eq!(pipeline.release_idle_slots(&device, &next, true), 1);
+    assert_eq!(pipeline.inners[first].alloc_size, Size::new(0, 0));
+    assert_eq!(pipeline.inners[second].alloc_size, Size::new(512, 512));
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn late_device_errors_invalidate_uploaded_content_and_targets() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter =
+        block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).unwrap();
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .unwrap();
+    let mut pipeline = <MultiPipeline as iced::widget::shader::Pipeline>::new(
+        &device,
+        &queue,
+        wgpu::TextureFormat::Bgra8UnormSrgb,
+    );
+    let inner = &mut pipeline.inners[0];
+    inner.cached_wire_id = 7;
+    inner.wire_arena_id = 7;
+    inner.ensure_depth_texture(&device, Size::new(512, 512));
+    let before = gpu_errors_seen();
+    let _rejected = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("rejected test allocation"),
+        size: device.limits().max_buffer_size + 4,
+        usage: wgpu::BufferUsages::VERTEX,
+        mapped_at_creation: false,
+    });
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(gpu_errors_seen() > before);
+    inner.sync_gpu_error_epoch();
+    assert_eq!(inner.cached_wire_id, u64::MAX);
+    assert_eq!(inner.wire_arena_id, u64::MAX);
+    assert_eq!(inner.alloc_size, Size::new(0, 0));
+    assert_eq!(inner.background_source_id, usize::MAX);
+    inner.cached_wire_id = 8;
+    inner.sync_gpu_error_epoch();
+    assert_eq!(
+        inner.cached_wire_id, 8,
+        "the same error must not invalidate twice"
+    );
+}

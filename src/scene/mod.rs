@@ -1495,8 +1495,8 @@ pub enum ViewportRefreshScope {
     All,
 }
 
-/// `(geometry_epoch, entities per block, entities no block claims)`.
-type BlockMembers = (u64, HashMap<Handle, Vec<Handle>>, Vec<Handle>);
+/// Entity membership in document order, keyed by geometry epoch.
+type BlockMembers = (u64, HashMap<Handle, Vec<Handle>>);
 
 pub struct Scene {
     pub camera: Rc<RefCell<Camera>>,
@@ -1836,24 +1836,9 @@ pub struct Scene {
     /// Reverse map: entity_handle → block_record_handle, built from entity_handles lists.
     /// Keyed by geometry_epoch. Eliminates the O(B) fallback scan in belongs_to_visible_block.
     entity_block_map_cache: RefCell<Option<(u64, HashMap<Handle, Handle>)>>,
-    /// Candidate entities per block, keyed by `geometry_epoch`.
-    ///
-    /// Selecting a block's contents used to walk every entity in the document
-    /// and ask `belongs_to_visible_block` about each: 313 ms of a 334 ms
-    /// resident build for a paper sheet holding 43 entities, on a drawing with
-    /// 1.17 M. The membership rules only depend on owner handles and the block
-    /// records, so one pass answers them for every block at once.
-    ///
-    /// The second field holds entities no block claims, which
-    /// `belongs_to_visible_block` treats as belonging to everything — but only
-    /// when no block record enumerates its contents at all.
+    /// Candidate handles per block, in document order and keyed by geometry epoch.
     block_members_cache: RefCell<Option<BlockMembers>>,
-    /// Handles of entities the quadtree cannot index — Insert, Viewport, Block,
-    /// BlockEnd — in document order, keyed by `geometry_epoch`.
-    ///
-    /// The quadtree path has to append these regardless of the view, and did so
-    /// by walking every entity in the document: ~300 ms of every resident
-    /// rebuild on a 1.17 M-entity drawing, to find a few thousand.
+    /// Insert/Viewport/Block/BlockEnd handles omitted by the spatial index.
     unindexable_cache: RefCell<Option<(u64, Vec<Handle>)>>,
     /// Distinct entity type names present in a layout, keyed by
     /// (geometry_epoch, layout block). The status bar asks for this on every
@@ -1958,17 +1943,9 @@ pub struct Scene {
     /// Hash of the tessellation parameters `tess_memo` was built under. When
     /// the current call's parameters differ, the memo is stale and cleared.
     tess_memo_guard: std::cell::Cell<u64>,
-    /// Per-entity memo for the **resident** model wire set (`model_tile_wires_arc`,
-    /// the one the main GPU render holds). Kept separate from `tess_memo` because
-    /// the resident set is camera-INDEPENDENT (no view cull, no zoom LOD), so its
-    /// guard depends only on anno-scale — it survives pan/zoom and layout switches, and a
-    /// single-entity edit re-tessellates just the changed entity instead of the
-    /// whole model. Sharing `tess_memo` would let the camera-dependent culled path
-    /// thrash it on every zoom. (#perf)
+    /// Camera-independent model tessellation, separate from the culled memo.
     resident_tess_memo: RefCell<HashMap<Handle, Arc<Vec<WireModel>>>>,
-    /// Guard hash for `resident_tess_memo` (anno-scale only). The background
-    /// is not part of it: it changes colours, not geometry, and
-    /// `resolve_colors_for_bg` reapplies it to the assembled set.
+    /// Annotation, background, viewport and glyph-atlas signature.
     resident_tess_guard: std::cell::Cell<u64>,
     /// Per-mutation delta journal: which handles changed on each `geometry_epoch`
     /// bump. Bounded ring ([`GEOMETRY_JOURNAL_CAP`]); a derived cache replays the
@@ -8916,7 +8893,7 @@ impl Scene {
         // the compiler enforces that. A default here is what made the first
         // version of this diagnostic report a constant.
         let visible_path: &str;
-        let mut visible_candidates = 0usize;
+        let mut visible_candidates: usize;
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
         // AABB exists (Model layout with a settled camera), only iterate
@@ -8978,6 +8955,7 @@ impl Scene {
             // — the legacy-DXF case. Both need the full walk, and both must
             // keep document order, which is draw order for the wire pass.
             visible_path = "full-scan";
+            visible_candidates = self.document.entity_count();
             self.document
                 .entities()
                 .filter(|e| visibility_ok(e))
@@ -8993,7 +8971,7 @@ impl Scene {
             // in exactly the order the full scan produced.
             visible_path = "block-index";
             let members = self.block_members();
-            let (_, by_block, _) = &*members;
+            let (_, by_block) = &*members;
             let claimed = by_block.get(&block_handle).map(Vec::as_slice).unwrap_or(&[]);
             visible_candidates = claimed.len();
             let mut out: Vec<&EntityType> = Vec::with_capacity(claimed.len());
@@ -9089,11 +9067,7 @@ impl Scene {
         let mut guard_was_stale = false;
         let t_build = perf.then(iced::time::Instant::now);
         let mut wires: Vec<WireModel> = if memo_active {
-            // Guard hash of everything tessellate_entity's GEOMETRY depends on
-            // besides the entity itself. A mismatch (zoom/tol, view, anno,
-            // offset, entered viewport) means the memo is stale. For the
-            // resident path wpp/view_aabb are None, so this collapses to anno.
-            // The background is excluded on purpose — see the note below.
+            // Invalidate when any baked display input changes.
             let guard = {
                 let mut g: u64 = 0xcbf2_9ce4_8422_2325;
                 let mut mix = |x: u64| g = g.rotate_left(13) ^ x;
@@ -9106,13 +9080,11 @@ impl Scene {
                 mix(anno.to_bits() as u64);
                 mix(annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0));
                 mix(all_visible as u64);
-                // The background is deliberately NOT mixed in. It changes
-                // colours, never geometry — `local_wires_for` discards it with
-                // `let _ = bg_color;` and `Batches::finalize` applies it last —
-                // so a memo entry built under one background serves any other
-                // once `resolve_colors_for_bg` has run over the assembled set
-                // below. Keying on it made a layout switch re-tessellate the
-                // whole model to arrive at identical points.
+                // Direct entities and inherited/faded block colours still bake
+                // the background before Batches::finalize records its inputs.
+                for channel in bg {
+                    mix(channel.to_bits() as u64);
+                }
                 mix(avp.map(|h| h.value()).unwrap_or(0));
                 // SDF glyph quads bake the atlas UV of each tile, so a growth or
                 // a re-bake (which rescale / rewind every UV) makes memoized text
@@ -9283,21 +9255,7 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
         wires
     }
 
-    /// Decide whether an entity should be drawn as direct content of `block_handle`.
-    /// Entities each block may contain, and the ones no block claims.
-    ///
-    /// Mirrors `belongs_to_visible_block` exactly, resolved once per
-    /// `geometry_epoch` for every block instead of per entity per query:
-    ///
-    ///   * a non-null owner *is* the block, so the entity is that block's;
-    ///   * a null owner falls back to the reverse map built from the block
-    ///     records' `entity_handles`;
-    ///   * an entity neither names nor is named by any block is "unowned", and
-    ///     counts towards every block only when no block record enumerates its
-    ///     contents at all — the legacy-DXF case that predicate allows.
-    /// Entities the quadtree cannot index, in document order, resolved once per
-    /// `geometry_epoch`. Membership depends only on the entity's type, so an
-    /// edit that does not add or remove one leaves the list unchanged.
+    /// Unindexable entity handles in document order, cached per geometry epoch.
     fn unindexable_handles(&self) -> std::cell::Ref<'_, (u64, Vec<Handle>)> {
         {
             let cache = self.unindexable_cache.borrow();
@@ -9318,10 +9276,11 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
         std::cell::Ref::map(self.unindexable_cache.borrow(), |c| c.as_ref().unwrap())
     }
 
+    /// Resolve owner handles and block-record membership once per geometry epoch.
     fn block_members(&self) -> std::cell::Ref<'_, BlockMembers> {
         {
             let cache = self.block_members_cache.borrow();
-            if cache.as_ref().is_some_and(|(epoch, _, _)| *epoch == self.geometry_epoch) {
+            if cache.as_ref().is_some_and(|(epoch, _)| *epoch == self.geometry_epoch) {
                 drop(cache);
                 return std::cell::Ref::map(self.block_members_cache.borrow(), |c| {
                     c.as_ref().unwrap()
@@ -9329,7 +9288,6 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
             }
         }
         let mut members: HashMap<Handle, Vec<Handle>> = HashMap::default();
-        let mut unowned: Vec<Handle> = Vec::new();
         {
             let map = self.entity_block_map();
             for entity in self.document.entities() {
@@ -9339,16 +9297,15 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
                     members.entry(owner).or_default().push(common.handle);
                 } else if let Some(&block) = map.get(&common.handle) {
                     members.entry(block).or_default().push(common.handle);
-                } else {
-                    unowned.push(common.handle);
                 }
             }
         }
         *self.block_members_cache.borrow_mut() =
-            Some((self.geometry_epoch, members, unowned));
+            Some((self.geometry_epoch, members));
         std::cell::Ref::map(self.block_members_cache.borrow(), |c| c.as_ref().unwrap())
     }
 
+    /// Whether the entity is direct content of this block.
     fn belongs_to_visible_block(
         &self,
         entity_handle: Handle,
@@ -10044,15 +10001,7 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
         std::cell::Ref::map(self.entity_index_cache.borrow(), |c| &c.as_ref().unwrap().1)
     }
 
-    /// Full tessellation pipeline for one entity.
-    /// The document-wide inputs `tessellate_entity` takes, resolved from the
-    /// current layout and viewport.
-    ///
-    /// Every entity in a walk gets the same four, and resolving them per entity
-    /// is not free — `block_cache_arc_for` takes a `RefCell` borrow and a cache
-    /// lookup. Callers that tessellate more than one entity resolve them once
-    /// and pass them down; sharing the resolution keeps those callers from
-    /// drifting away from `tessellate_one`.
+    /// Resolve the active layout and annotation context for tessellation.
     fn tessellation_context(
         &self,
     ) -> ([f32; 4], f32, Option<Handle>, Arc<cache::block_cache::BlockCache>, bool) {
@@ -10227,167 +10176,43 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
         if model_block.is_null() {
             return None;
         }
-        let mut min = glam::Vec3::splat(f32::INFINITY);
-        let mut max = glam::Vec3::splat(f32::NEG_INFINITY);
-        let mut any = false;
-
-        // Prefer the already-computed wire AABB cache when available — avoids re-tessellating.
-        if self.current_layout == "Model" {
-            let cache = self.wire_cache.borrow();
-            if let Some(((epoch, _cam_gen), _gen, ref arc)) = *cache {
-                if epoch == self.geometry_epoch {
-                    for wire in arc.iter() {
-                        let [ax, ay, bx, by] = wire.aabb;
-                        let lo = glam::Vec3::new(ax, ay, 0.0);
-                        let hi = glam::Vec3::new(bx, by, 0.0);
-                        // Reject the whole AABB unless every component is finite:
-                        // rays/xlines carry an unbounded AABB, and checking only
-                        // x let a vertical ray's infinite y poison the extents.
-                        if lo.is_finite() && hi.is_finite() {
-                            min = min.min(lo);
-                            max = max.max(hi);
-                            any = true;
-                        }
-                    }
-                    // 3D solids render as meshes, not wires, so fold their
-                    // complete 3D boxes in too — otherwise view fitting loses
-                    // both solid-only drawings and their depth.
-                    for (&handle, set) in &self.meshes {
-                        if !self.mesh_entity_visible(handle)
-                            || !self.document.get_entity(handle).is_some_and(|entity| {
-                                self.belongs_to_visible_block(
-                                    handle,
-                                    entity.common().owner_handle,
-                                    model_block,
-                                )
-                            })
-                        {
-                            continue;
-                        }
-                        let [ax, ay, bx, by] = set.world_aabb;
-                        let [az, bz] = set.z_aabb;
-                        let lo = glam::Vec3::new(ax, ay, az);
-                        let hi = glam::Vec3::new(bx, by, bz);
-                        if lo.is_finite() && hi.is_finite() {
-                            min = min.min(lo);
-                            max = max.max(hi);
-                            any = true;
-                        }
-                    }
-                    return if any { Some((min, max)) } else { None };
-                }
-            }
-        }
-
-        // Fallback: tessellate (first call or paper-space context).
-        // wire.key_vertices live in offset-rel coords (world_offset
-        // already subtracted at tessellation time). Add it back so the
-        // result matches Path 1 above and the caller's expectation —
-        // callers (auto_fit_viewport) write the centroid directly to
-        // `Viewport.view_target`, which is a WCS field; storing
-        // offset-rel coords there silently double-subtracts world_offset
-        // inside `camera_for_viewport` and points the viewport at the
-        // wrong location on UTM-scale drawings.
-        //
-        // `tessellate_one` resolves the background, annotation scale and block
-        // cache from `&self` on every call, and this walk calls it once per
-        // model entity — 186 k times on a large drawing, each one taking a
-        // `RefCell` borrow for a block cache that is the same every time. Those
-        // inputs do not vary across the loop, so they are resolved once and the
-        // shared tessellator is called directly, which also lets the walk run
-        // in parallel the way the wire builder's own tessellation pass does.
-        // Same arguments, same output: only who computes them changed.
-        let (bg_for_tess, anno_for_tess, anno_handle_for_tess, blk_for_tess, paper_for_tess) =
-            self.tessellation_context();
-        let subjects: Vec<&EntityType> = self
-            .document
-            .entities()
-            .filter(|entity| {
-                let c = entity.common();
-                c.owner_handle == model_block
-                    && !c.invisible
-                    && !self.entity_temporarily_hidden(c.handle)
-            })
-            .collect();
-        let doc = &self.document;
-        let sel = &self.selected;
-        let avp = self.active_viewport;
-        let blk_ref: &cache::block_cache::BlockCache = &blk_for_tess;
-        use rayon::iter::{IntoParallelIterator, ParallelIterator};
-        let reduced = subjects
-            .into_par_iter()
-            .map(|entity| {
-                let mut lo = glam::Vec3::splat(f32::INFINITY);
-                let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
-                let mut hit = false;
-                for wire in tessellate_entity(
-                    doc,
-                    sel,
-                    avp,
-                    bg_for_tess,
-                    anno_for_tess,
-                    anno_handle_for_tess,
-                    entity,
-                    Some(blk_ref),
-                    None,
-                    None,
-                    paper_for_tess,
-                ) {
-                    for &[x, y, z] in &wire.key_vertices {
-                        let v = glam::Vec3::new(x as f32, y as f32, z as f32);
-                        // Check finiteness *after* the f32 cast: a ray/xline
-                        // endpoint is a huge-but-finite f64 that overflows to
-                        // inf in f32, which the f64 `is_finite` test would have
-                        // let through.
-                        if v.is_finite() {
-                            lo = lo.min(v);
-                            hi = hi.max(v);
-                            hit = true;
-                        }
-                    }
-                }
-                (lo, hi, hit)
-            })
-            .reduce(
-                || {
-                    (
-                        glam::Vec3::splat(f32::INFINITY),
-                        glam::Vec3::splat(f32::NEG_INFINITY),
-                        false,
-                    )
-                },
-                |a, b| (a.0.min(b.0), a.1.max(b.1), a.2 || b.2),
-            );
-        if reduced.2 {
-            min = min.min(reduced.0);
-            max = max.max(reduced.1);
-            any = true;
-        }
-        // Same mesh inclusion for the tessellate fallback path.
-        for (&handle, set) in &self.meshes {
+        // Reuse the full resident source in every layout. The kernel bounds
+        // its world-space key vertices; camera fitting never tessellates a
+        // second copy or reads the current paper sheet's wire cache.
+        let scale = crate::scene::annotative::scale_handle_by_name(
+            &self.document,
+            &self.document.header.current_annotation_scale,
+        );
+        let wires = self.resident_wires_for(
+            model_block,
+            Some(self.annotation_scale),
+            scale,
+            None,
+            None,
+        );
+        let wire_points = wires.iter().flat_map(|wire| wire.key_vertices.iter().copied());
+        let mesh_points = self.meshes.iter().filter_map(|(&handle, set)| {
+            let entity = self.document.get_entity(handle)?;
             if !self.mesh_entity_visible(handle)
-                || !self.document.get_entity(handle).is_some_and(|entity| {
-                    self.belongs_to_visible_block(
-                        handle,
-                        entity.common().owner_handle,
-                        model_block,
-                    )
-                })
+                || !self.belongs_to_visible_block(handle, entity.common().owner_handle, model_block)
             {
-                continue;
+                return None;
             }
             let [ax, ay, bx, by] = set.world_aabb;
             let [az, bz] = set.z_aabb;
-            let lo = glam::Vec3::new(ax, ay, az);
-            let hi = glam::Vec3::new(bx, by, bz);
-            if lo.is_finite() && hi.is_finite() {
-                min = min.min(lo);
-                max = max.max(hi);
-                any = true;
-            }
-        }
-        if any {
-            return Some((min, max));
+            Some([
+                [ax as f64, ay as f64, az as f64],
+                [bx as f64, by as f64, bz as f64],
+            ])
+        }).flatten();
+        let points = wire_points.chain(mesh_points).filter(|point| {
+            point.iter().all(|coordinate| (*coordinate as f32).is_finite())
+        });
+        if let Some(bounds) = cadkernel::brep::bounds::Aabb::around(points) {
+            return Some((
+                glam::Vec3::from_array(bounds.min.map(|v| v as f32)),
+                glam::Vec3::from_array(bounds.max.map(|v| v as f32)),
+            ));
         }
         // Last resort: saved EXTMIN/EXTMAX before the wire cache is built.
         const SANE_EXTENT: f64 = 1.0e16;
@@ -10649,7 +10474,7 @@ mod journal_tests {
         // What the membership index reports for `block`, in order.
         fn indexed(s: &Scene, block: Handle) -> Vec<Handle> {
             let members = s.block_members();
-            let (_, by_block, _) = &*members;
+            let (_, by_block) = &*members;
             by_block.get(&block).cloned().unwrap_or_default()
         }
 
@@ -11309,5 +11134,85 @@ mod selection_arc_tests {
     #[test]
     fn selection_overlay_takes_arc() {
         assert!(true);
+    }
+}
+
+#[cfg(test)]
+mod layout_cache_tests {
+    use super::*;
+    #[test]
+    fn memoized_plain_line_matches_fresh_background() {
+        let mut s = Scene::new();
+        s.bg_color = [0.1, 0.1, 0.1, 1.0];
+        let handle = s.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        )));
+        let build = |s: &Scene| {
+            s.wires_for_block_culled(
+                s.model_space_block_handle(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                true,
+                None,
+            )
+            .into_iter()
+            .find(|wire| wire.name == handle.value().to_string())
+            .unwrap()
+        };
+        let original = build(&s);
+        assert!(s.resident_tess_memo.borrow().contains_key(&handle));
+        s.paper_bg_color = [1.0; 4];
+        s.document.add_layout("Review").unwrap();
+        s.set_current_layout("Review".to_string());
+        let cached = build(&s);
+        s.resident_tess_memo.borrow_mut().clear();
+        let fresh = build(&s);
+        assert_ne!(
+            original.color, fresh.color,
+            "fixture must depend on background"
+        );
+        assert_eq!(
+            cached.color, fresh.color,
+            "memo hit should match fresh tessellation on a white background"
+        );
+    }
+
+    #[test]
+    fn model_extents_reuse_resident_geometry_in_every_layout() {
+        let mut s = Scene::new();
+        s.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(1_000_000.0, 2_000_000.0, 30.0),
+            acadrust::types::Vector3::new(1_000_010.0, 2_000_020.0, 40.0),
+        )));
+        s.document.add_layout("Review").unwrap();
+        for layout in ["Model", "Review"] {
+            s.set_current_layout(layout.to_string());
+            *s.model_extents_cache.borrow_mut() = None;
+            let scale = crate::scene::annotative::scale_handle_by_name(
+                &s.document,
+                &s.document.header.current_annotation_scale,
+            );
+            let source = s.resident_wires_for(
+                s.model_space_block_handle(),
+                Some(s.annotation_scale),
+                scale,
+                None,
+                None,
+            );
+            let generation = s.last_model_wire_gen.get();
+            let bounds = s.model_space_extents().unwrap();
+            assert_eq!(bounds.0, glam::Vec3::new(1_000_000.0, 2_000_000.0, 30.0));
+            assert_eq!(bounds.1, glam::Vec3::new(1_000_010.0, 2_000_020.0, 40.0));
+            assert_eq!(
+                s.last_model_wire_gen.get(),
+                generation,
+                "fitting must reuse the resident source"
+            );
+            assert!(!source.is_empty());
+        }
     }
 }

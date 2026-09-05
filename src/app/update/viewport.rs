@@ -5535,9 +5535,7 @@ impl OpenCADStudio {
             .layers
             .sync_with_viewports(&doc_layers, vp_info);
         let layers_ms = perf_phase.elapsed().as_secs_f64() * 1000.0;
-        // The switch is cheap; the frame that follows it is not. Draw a notice
-        // for one frame first, so the compositor gets an answer before the main
-        // thread disappears into rebuilding the wire set.
+        // Give the layout rebuild a visible notice first.
         self.layout_settling = true;
         if perf {
             crate::perf_record!(

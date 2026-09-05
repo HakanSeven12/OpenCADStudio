@@ -3046,8 +3046,7 @@ impl OpenCADStudio {
             }
 
             Message::LayoutSettled => {
-                // The notice frame has been presented, so the compositor has
-                // had its answer. Let the next frame build the real thing.
+                // Restore the scene after the notice redraw.
                 self.layout_settling = false;
                 Task::none()
             }

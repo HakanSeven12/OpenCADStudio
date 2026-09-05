@@ -364,20 +364,20 @@ impl shader::Primitive for Primitive {
         viewport: &Viewport,
     ) {
         let nav_prepare_started = iced::time::Instant::now();
+        let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
+        let recovering = pipeline.gpu_error_epoch != errors_at_entry;
+        if recovering {
+            pipeline.wire_buffer_cache.clear();
+            pipeline.block_geometry.clear();
+            pipeline.gpu_error_epoch = errors_at_entry;
+        }
         let scale = viewport.scale_factor() as f32;
         let instance_ids: Vec<u64> = self.viewports.iter().map(|vp| vp.instance_id).collect();
         let slots = pipeline.resolve_slots(device, queue, &instance_ids);
-        // Compared after the frame's uploads: a move means the device refused
-        // something, which changes how patient the slot release below can be.
-        let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
-
         for (i, vp) in self.viewports.iter().enumerate() {
             let inner = &mut pipeline.inners[slots[i]];
-            // Compared at the end of this viewport's turn. Every "we hold this
-            // now" latch below is stamped after its upload, whether or not the
-            // device accepted it — and the wire latch gates the whole upload
-            // block, so one rejected allocation could leave a slotpermanently empty with
-            // nothing that would ever rebuild it.
+            inner.sync_gpu_error_epoch();
+            // Do not latch rejected uploads as current content.
             let slot_errors_before = crate::scene::pipeline::gpu_errors_seen();
             // Pipeline slots are addressed by list index, but off-canvas
             // viewports are dropped from the list — so a slot can be reused by a
@@ -1216,13 +1216,9 @@ impl shader::Primitive for Primitive {
                 self.viewports.len(),
             );
         }
-        // Give back what nobody is drawing. Gradual while the device is
-        // healthy; immediate once it has refused an allocation, because the
-        // memory a hidden viewport is holding is exactly what the visible one
-        // could not get — and freeing it is what lets the operator close a
-        // viewport or two and carry on instead of restarting.
+        // Memory pressure shortens cold-slot retention without evicting siblings.
         let errors_now = crate::scene::pipeline::gpu_errors_seen();
-        let urgent = errors_now != errors_at_entry;
+        let urgent = recovering || errors_now != errors_at_entry;
         let released = pipeline.release_idle_slots(device, &slots, urgent);
         if released > 0 && crate::perf::enabled() {
             crate::perf_record!(
@@ -1241,6 +1237,7 @@ impl shader::Primitive for Primitive {
         clip: &Rectangle<u32>,
     ) {
         let nav_render_started = iced::time::Instant::now();
+        pipeline.frame_rendered.store(true, std::sync::atomic::Ordering::Relaxed);
         let cw = clip.width as f32;
         let ch = clip.height as f32;
         let clip_right = clip.x + clip.width;

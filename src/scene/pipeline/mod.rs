@@ -74,6 +74,7 @@ struct MeshHighlightDraw {
 }
 
 pub struct Pipeline {
+    gpu_error_epoch: usize,
     background_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     shadow_plain_pipeline: wgpu::RenderPipeline,
@@ -2226,6 +2227,7 @@ impl Pipeline {
             wire_const_bgl,
             block_wire_const_bgl,
             block_wire_mode: wire_mode,
+            gpu_error_epoch: gpu_errors_seen(),
             wipeout_pipeline,
             hatch_gpu,
             image_pipeline,
@@ -3557,9 +3559,12 @@ impl Pipeline {
     fn sync_shadow_target(&mut self, device: &wgpu::Device) {
         match (self.shadow_enabled, self.shadow_full.is_some()) {
             (true, false) => {
+                let errors_before = gpu_errors_seen();
                 let texture = create_shadow_texture(device, SHADOW_MAP_SIZE);
                 let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                self.shadow_full = Some((texture, view));
+                if gpu_errors_seen() == errors_before {
+                    self.shadow_full = Some((texture, view));
+                }
             }
             (false, true) => self.shadow_full = None,
             _ => return,
@@ -3575,7 +3580,11 @@ impl Pipeline {
     ) {
         self.shadow_enabled = uniforms.shadow_params[0] > 0.5;
         self.sync_shadow_target(device);
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(uniforms));
+        let mut uniforms = *uniforms;
+        if self.shadow_full.is_none() {
+            uniforms.shadow_params[0] = 0.0;
+        }
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
 
     pub fn upload_background_images(
@@ -3710,9 +3719,7 @@ impl Pipeline {
         // render rectangle does the clipping).
         let stencil_ref: u32 = if self.clip_boundary.is_some() { 0xFF } else { 0 };
 
-        // `shadow_enabled` says the style wants shadows; the target existing
-        // says the device could give us one. Without the second test a failed
-        // 16 MiB allocation would render the pass into the 1x1 placeholder.
+        // Render shadows only when a full target was allocated.
         if let Some(shadow_target) = self
             .shadow_full
             .as_ref()
@@ -4671,6 +4678,23 @@ impl Pipeline {
         self.render_sig = u64::MAX;
     }
 
+    /// Catch errors delivered after the previous upload/submit completed.
+    pub(crate) fn sync_gpu_error_epoch(&mut self) {
+        let errors = gpu_errors_seen();
+        if errors == self.gpu_error_epoch {
+            return;
+        }
+        self.gpu_error_epoch = errors;
+        self.forget_cached_keys();
+        self.wire_arena = None;
+        self.wire_arena_mesh = None;
+        self.wire_arena_id = u64::MAX;
+        self.alloc_size = Size::new(0, 0);
+        self.shadow_full = None;
+        self.background_source_id = usize::MAX;
+        self.environment_source_id = usize::MAX;
+    }
+
     /// Give this slot's device memory back and forget what it held.
     ///
     /// A slot nobody is drawing still owns its wire arena, its render targets,
@@ -4698,6 +4722,7 @@ impl Pipeline {
         self.gpu_selected_wires.clear();
         self.gpu_selected_block_wires.clear();
         self.gpu_preview_wires.clear();
+        self.hatch_gpu.clear();
         self.gpu_wipeouts.clear();
         self.wipeout_skip_flags.clear();
         self.gpu_images.clear();
@@ -4928,19 +4953,8 @@ impl Pipeline {
 }
 
 impl MultiPipeline {
-    /// Hand back the device memory of slots nobody is drawing.
-    ///
-    /// `reserved` are the slots this frame is about to use; they are never
-    /// touched. Everything else is released once it has been idle for
-    /// `idle_frames` prepare calls — gradually, so an ordinary session pays
-    /// nothing and a layout the user keeps switching back to stays warm.
-    ///
-    /// `urgent` drops that patience: the device has just refused an allocation,
-    /// and holding a viewport nobody can see is what turns a degraded frame
-    /// into a session that never recovers. Releasing early costs one slow frame
-    /// if the slot is wanted again; not releasing costs the drawing.
-    ///
-    /// Returns how many slots were released.
+    /// Release cold slots after 64 frames, or two frames under memory pressure.
+    /// Current and previous frame slots remain reserved for sibling widgets.
     pub(crate) fn release_idle_slots(
         &mut self,
         device: &wgpu::Device,
@@ -4948,7 +4962,9 @@ impl MultiPipeline {
         urgent: bool,
     ) -> usize {
         const IDLE_FRAMES: u64 = 64;
-        let idle_frames = if urgent { 0 } else { IDLE_FRAMES };
+        // Other shader widgets may prepare later in this frame. Keep every
+        // slot used in this or the previous frame, even under memory pressure.
+        let idle_frames = if urgent { 2 } else { IDLE_FRAMES };
         let mut released = 0;
         for index in 0..self.inners.len() {
             if reserved.contains(&index) {
@@ -4969,6 +4985,15 @@ impl MultiPipeline {
             }
             self.inners[index].release_heavy_resources(device);
             released += 1;
+        }
+        if released > 0 {
+            self.wire_buffer_cache.retain(|_, entry| {
+                std::sync::Arc::strong_count(&entry.0) > 1
+                    || std::sync::Arc::strong_count(&entry.1) > 1
+            });
+            self.block_geometry.retain(|_, chunks| {
+                chunks.iter().any(|chunk| std::sync::Arc::strong_count(&chunk.bind_group) > 1)
+            });
         }
         released
     }
@@ -5104,25 +5129,11 @@ pub struct MultiPipeline {
     pub(crate) slot_by_instance: rustc_hash::FxHashMap<u64, usize>,
     slot_last_used: Vec<u64>,
     slot_clock: u64,
-    /// The resident wire batches, keyed by `wire_content_id` and shared across
-    /// every slot (and every pane — one `MultiPipeline` backs all of them) that
-    /// renders the same content. `prepare` builds an entry once on a cache miss
-    /// then hands `Arc` clones to each slot, so N paper viewports / Model tiles
-    /// showing one identical resident set upload the wire vertex buffers exactly
-    /// once between them instead of once per slot. Kept trim by dropping entries
-    /// no slot still references (`Arc::strong_count == 1`) once it grows past a
-    /// small bound.
-    /// Block geometry that survives an edit, keyed by the definition it
-    /// expands rather than by anything a viewport contributes. See
-    /// `wire_gpu::BlockGeometryCache`.
-    ///
-    /// Shared across slots for the same reason `wire_buffer_cache` is: a
-    /// definition's segments are identical in every viewport that draws it, and
-    /// this is the largest upload the renderer makes — 59.5 MiB on the
-    /// reproducer. Held per slot, zooming a paper layout out until four or five
-    /// viewports were on screen uploaded it once each and ran a 2 GB card out
-    /// of memory.
+    pub(crate) frame_rendered: std::sync::atomic::AtomicBool,
+    pub(crate) gpu_error_epoch: usize,
+    /// Definition geometry shared across viewport slots.
     pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
+    /// Shared resident batches, keyed by wire content identity.
     pub(crate) wire_buffer_cache: rustc_hash::FxHashMap<
         u64,
         (
@@ -5134,11 +5145,7 @@ pub struct MultiPipeline {
 }
 
 impl MultiPipeline {
-    /// Ensure at least `n` (≥1) inner pipelines exist, creating any missing
-    /// ones. Grow-only: extra pipelines are NOT dropped, because per-pane Model
-    /// shader widgets share this storage and each only touches its own slot —
-    /// truncating mid-frame would destroy another pane's slot. Stale inners (a
-    /// closed pane, or fewer paper viewports) are harmless idle GPU resources.
+    /// Grow slot storage without disturbing sibling shader widgets.
     pub(crate) fn ensure_len(
         &mut self,
         device: &wgpu::Device,
@@ -5152,12 +5159,7 @@ impl MultiPipeline {
         }
     }
 
-    /// Resolve stable slots for the viewport identities in one primitive.
-    /// Thirty-two hot slots cover ordinary tiled/paper drawings. A cold slot
-    /// is recycled only after several other prepare calls, which prevents
-    /// sibling Model panes prepared in the same frame from evicting each
-    /// other. If every slot is still hot, growing is safer than a visible
-    /// rebuild hitch.
+    /// Preserve viewport slots across frames; recycle only cold slots above the limit.
     pub(crate) fn resolve_slots(
         &mut self,
         device: &wgpu::Device,
@@ -5167,7 +5169,11 @@ impl MultiPipeline {
         const SOFT_LIMIT: usize = 32;
         const HOT_WINDOW: u64 = 8;
 
-        self.slot_clock = self.slot_clock.wrapping_add(1).max(1);
+        if self.frame_rendered.swap(false, std::sync::atomic::Ordering::Relaxed)
+            || self.slot_clock == 0
+        {
+            self.slot_clock = self.slot_clock.wrapping_add(1).max(1);
+        }
         let now = self.slot_clock;
         let reserved: rustc_hash::FxHashSet<u64> = instance_ids.iter().copied().collect();
         // `inner.slot_id` is updated later in `prepare`, after this whole
@@ -5284,6 +5290,8 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
             slot_by_instance: rustc_hash::FxHashMap::default(),
             slot_last_used: vec![0],
             slot_clock: 0,
+            frame_rendered: std::sync::atomic::AtomicBool::new(false),
+            gpu_error_epoch: gpu_errors_seen(),
             wire_buffer_cache: rustc_hash::FxHashMap::default(),
         }
     }

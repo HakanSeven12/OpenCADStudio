@@ -654,6 +654,36 @@ mod tests {
     use crate::app::OpenCADStudio;
 
     #[test]
+    fn layout_notice_skips_grid_camera_and_scene_builds() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
+        assert_eq!(app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#)["ok"], true);
+        let i = app.active_tab;
+        let scene = &mut app.tabs[i].scene;
+        scene.document.add_layout("Review").unwrap();
+        scene.set_current_layout("Review".to_string());
+        let mut viewport = acadrust::entities::Viewport::new();
+        viewport.id = 2;
+        viewport.width = 100.0;
+        viewport.height = 50.0;
+        viewport.status.is_on = true;
+        scene.add_entity(acadrust::EntityType::Viewport(viewport));
+        for entity in scene.document.entities_mut() {
+            if let acadrust::EntityType::Viewport(viewport) = entity {
+                viewport.status.grid_on = true;
+            }
+        }
+        let before = scene.last_tess_wires.get();
+        app.layout_settling = true;
+        drop(app.view_main());
+        assert_eq!(app.tabs[i].scene.last_tess_wires.get(), before);
+        let _ = app.update(crate::app::Message::LayoutSettled);
+        assert!(!app.layout_settling);
+        drop(app.view_main());
+        assert!(app.tabs[i].scene.last_tess_wires.get() > before);
+    }
+
+    #[test]
     fn automation_ops_round_trip() {
         let mut app = OpenCADStudio::new_for_test();
 

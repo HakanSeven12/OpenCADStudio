@@ -36,11 +36,7 @@ pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bo
 
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
 
-/// Base surface directly under the crosshair, selection marquee, and grid overlay.
-/// In paper space, drafting surface context is unconditionally the white sheet (`tab.scene.paper_bg_color`),
-/// matching AutoCAD's model (where crosshairs and overlays adapt per context — model vs. sheet/layout —
-/// rather than per-pixel cursor sampling). This avoids flicker across sheet edges and provides a clean
-/// dark crosshair that maintains ~5.85:1 contrast against the default medium-gray desk margin (#8A8A8A).
+/// Background used by drafting overlays in model or paper space.
 fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
     if !is_paper {
         return tab.scene.bg_color;
@@ -273,10 +269,7 @@ impl OpenCADStudio {
         // borders) and the floating content viewports blit on top.
         mark("viewport_3d");
         let viewport_3d: Element<'_, Message> = if self.layout_settling && !tab.is_start {
-            // One cheap frame between the switch and the rebuild. No shader
-            // widget means no scene primitive, so `prepare` has nothing to do
-            // and the event loop turns — which is what stops the compositor
-            // deciding the application has stopped responding.
+            // Omit the shader and drafting overlays for the notice frame.
             let bg = crosshair_background(tab, is_paper);
             let lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
             let ink = if lum > 0.5 {
@@ -376,7 +369,7 @@ impl OpenCADStudio {
         // above the crosshair overlay so it actually receives mouse events, and
         // it owns the divider resize. Only built for the Model layout.
         mark("model_input");
-        let model_input_layer: Option<Element<'_, Message>> = if is_paper || tab.is_start {
+        let model_input_layer: Option<Element<'_, Message>> = if is_paper || tab.is_start || self.layout_settling {
             None
         } else {
             let scene = &tab.scene;
@@ -394,7 +387,9 @@ impl OpenCADStudio {
         };
 
         mark("grid");
-        let grid_overlay = {
+        let grid_overlay = if self.layout_settling || tab.is_start {
+            Space::new().into()
+        } else {
             let (vw, vh) = tab.scene.selection.borrow().vp_size;
             let model_basis = {
                 let (o, ux, uy, uz) = tab.ucs_xform().axes();
@@ -479,7 +474,9 @@ bg={bg_ms:.1}ms n={view_count}"
         };
 
         mark("selection_overlay");
-        let selection_overlay = {
+        let selection_overlay = if self.layout_settling || tab.is_start {
+            Space::new().into()
+        } else {
             // Hold a single `Ref<'_, SelectionState>` for the whole overlay
             // block. The `vp_size` and `last_move_pos` reads below become
             // field accesses on `sel_ref` (no redundant `borrow()`s), and
@@ -996,7 +993,7 @@ bg={bg_ms:.1}ms n={view_count}"
             };
 
         mark("viewport_stack");
-        let mut viewport_stack = if tab.is_start {
+        let mut viewport_stack = if tab.is_start || self.layout_settling {
             // Start tab: only the welcome widget over a flat background.
             // Skip every drawing-only overlay (selection markers, snap info,
             // mouse-area capturing draw clicks, viewcube, nav toolbar, …).
@@ -1057,7 +1054,7 @@ bg={bg_ms:.1}ms n={view_count}"
             .height(Fill)
         };
 
-        if !thumbnail_capture_clean {
+        if !thumbnail_capture_clean && !self.layout_settling {
         // Per-pane input pane_grid goes ABOVE the crosshair overlay so it
         // receives mouse events (the overlay's `Hidden` cursor would otherwise
         // starve any layer beneath it). The controls bar is pushed on top of it.
@@ -2279,10 +2276,7 @@ impl OpenCADStudio {
         // the mouse perfectly still — `ViewportMove` alone would never
         // fire again. Auto-stops once the hover clears or the popup is
         // already open.
-        // One frame after a layout switch, then stop. `window::frames` fires
-        // once a frame has actually been presented, which is the guarantee this
-        // needs: the notice is on screen and the compositor has been answered
-        // before the expensive frame starts.
+        // Resume scene construction after the notice redraw.
         let layout_settle = if self.layout_settling {
             window::frames().map(|_| Message::LayoutSettled)
         } else {

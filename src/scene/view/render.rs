@@ -1217,6 +1217,7 @@ impl shader::Primitive for Primitive {
                 self.viewports.len(),
             );
         }
+        report_gpu_live(pipeline);
     }
 
     fn render(
@@ -1567,6 +1568,42 @@ fn solar_direction(
 }
 
 // ── Render-style helpers (impl Scene) ────────────────────────────────────
+
+/// Report what the renderer is holding on the device, when it changes.
+///
+/// Only on change: `prepare` runs thousands of times a session and these
+/// numbers move a handful of times. RSS is deliberately not used — the
+/// allocator and the driver both retain high-water memory that RSS cannot tell
+/// apart from live resources.
+fn report_gpu_live(pipeline: &crate::scene::pipeline::MultiPipeline) {
+    use std::cell::Cell;
+    if !crate::perf::enabled() {
+        return;
+    }
+    thread_local! {
+        static LAST: Cell<Option<crate::scene::pipeline::GpuLiveBytes>> = const { Cell::new(None) };
+    }
+    let now = pipeline.gpu_live_bytes();
+    LAST.with(|last| {
+        if last.get() == Some(now) {
+            return;
+        }
+        last.set(Some(now));
+        const MIB: f64 = 1024.0 * 1024.0;
+        let mib = |bytes: u64| bytes as f64 / MIB;
+        crate::perf_record!(
+            "[perf] gpu-live slots={} total={:.1}MiB shadow={:.1} targets={:.1} \
+text_atlas={:.1} wire_arena={:.1} block_geometry={:.1}",
+            now.slots,
+            mib(now.total()),
+            mib(now.shadow),
+            mib(now.render_targets),
+            mib(now.text_atlas),
+            mib(now.wire_arena),
+            mib(now.block_geometry),
+        );
+    });
+}
 
 impl Scene {
     fn model_tile_vport(&self, index: usize) -> Option<&acadrust::tables::VPort> {

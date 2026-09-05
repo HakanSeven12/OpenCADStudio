@@ -221,6 +221,11 @@ pub struct TextAtlasGpu {
 }
 
 impl TextAtlasGpu {
+    /// Device bytes this atlas holds. `R8`, so one byte per texel.
+    pub fn gpu_bytes(&self) -> u64 {
+        u64::from(self._texture.width()) * u64::from(self._texture.height())
+    }
+
     /// Bind-group layout for group 1: `{ R8 atlas texture, linear sampler }`.
     pub fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

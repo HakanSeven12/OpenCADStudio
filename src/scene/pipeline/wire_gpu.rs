@@ -703,6 +703,15 @@ pub struct BlockWireTarget<'a> {
     pub mode: WirePipelineMode,
 }
 
+/// Device bytes held by a whole block-geometry cache.
+pub fn block_geometry_bytes(cache: &BlockGeometryCache) -> u64 {
+    cache
+        .values()
+        .flat_map(|chunks| chunks.iter())
+        .map(|chunk| chunk.gpu_bytes)
+        .sum()
+}
+
 /// `(source_id, mesh_edge, colour bits, base translation bits)`.
 pub type BlockGeometryKey = (u64, bool, [u32; 4], [u64; 3]);
 
@@ -722,6 +731,9 @@ pub struct BlockGeometryChunk {
     pub vertex_buffer: Option<wgpu::Buffer>,
     pub vertex_count: u32,
     pub bind_group: std::sync::Arc<wgpu::BindGroup>,
+    /// Device bytes this chunk holds. Recorded at build because in storage mode
+    /// the buffer is owned by `bind_group` and cannot be measured from here.
+    pub gpu_bytes: u64,
 }
 
 impl BlockWireGpu {
@@ -856,6 +868,7 @@ impl BlockWireGpu {
                         BlockGeometryChunk {
                             vertex_buffer: None,
                             vertex_count: chunk.len() as u32 * 6,
+                            gpu_bytes: std::mem::size_of_val(chunk) as u64,
                             bind_group: std::sync::Arc::new(device.create_bind_group(
                                 &wgpu::BindGroupDescriptor {
                                     label: Some("block_wire.const.bg"),
@@ -897,6 +910,7 @@ impl BlockWireGpu {
                 vertices
                     .chunks(max_verts)
                     .map(|chunk| BlockGeometryChunk {
+                        gpu_bytes: std::mem::size_of_val(chunk) as u64,
                         vertex_buffer: Some(super::gpu_upload::upload_buffer(
                             device,
                             queue,

@@ -4727,6 +4727,80 @@ fn aabb_below_pixel(
     (max_px - min_px).max(max_py - min_py) < threshold_px
 }
 
+/// Device bytes a renderer is holding, counted from the sizes it allocated
+/// rather than from process RSS — the allocator and the driver both keep
+/// high-water memory that RSS cannot distinguish from live resources.
+///
+/// Partial by construction: it covers the categories large enough to decide
+/// where the next fix goes, and says so rather than pretending to be a total.
+#[derive(Default, Clone, Copy, PartialEq)]
+pub(crate) struct GpuLiveBytes {
+    pub slots: usize,
+    pub shadow: u64,
+    pub render_targets: u64,
+    pub text_atlas: u64,
+    pub wire_arena: u64,
+    pub block_geometry: u64,
+}
+
+impl GpuLiveBytes {
+    pub(crate) fn total(&self) -> u64 {
+        self.shadow + self.render_targets + self.text_atlas + self.wire_arena + self.block_geometry
+    }
+}
+
+impl Pipeline {
+    /// This slot's share. `alloc_size` is the real allocation, which is rounded
+    /// up from the requested size and grows only.
+    fn gpu_live_bytes(&self) -> GpuLiveBytes {
+        // 4x MSAA colour (4 B/sample) + 4x MSAA depth-stencil (4 B/sample) +
+        // one single-sample resolve target.
+        const BYTES_PER_PIXEL: u64 = (MSAA_SAMPLES as u64) * 4 + (MSAA_SAMPLES as u64) * 4 + 4;
+        let pixels = u64::from(self.alloc_size.width) * u64::from(self.alloc_size.height);
+        GpuLiveBytes {
+            slots: 1,
+            // Allocated by every slot whether or not shadows are enabled.
+            shadow: u64::from(SHADOW_MAP_SIZE) * u64::from(SHADOW_MAP_SIZE) * 4,
+            render_targets: pixels * BYTES_PER_PIXEL,
+            text_atlas: self
+                .text_atlas_gpu
+                .as_ref()
+                .map(text_gpu::TextAtlasGpu::gpu_bytes)
+                .unwrap_or(0),
+            wire_arena: self
+                .wire_arena
+                .as_ref()
+                .map(wire_arena::PersistentWireArena::gpu_bytes)
+                .unwrap_or(0)
+                + self
+                    .wire_arena_mesh
+                    .as_ref()
+                    .map(wire_arena::PersistentWireArena::gpu_bytes)
+                    .unwrap_or(0),
+            block_geometry: 0,
+        }
+    }
+}
+
+impl MultiPipeline {
+    /// Sum across slots, plus the caches held once for all of them.
+    pub(crate) fn gpu_live_bytes(&self) -> GpuLiveBytes {
+        let mut total = GpuLiveBytes {
+            block_geometry: wire_gpu::block_geometry_bytes(&self.block_geometry),
+            ..Default::default()
+        };
+        for inner in &self.inners {
+            let slot = inner.gpu_live_bytes();
+            total.slots += slot.slots;
+            total.shadow += slot.shadow;
+            total.render_targets += slot.render_targets;
+            total.text_atlas += slot.text_atlas;
+            total.wire_arena += slot.wire_arena;
+        }
+        total
+    }
+}
+
 /// Bind one block-wire batch and draw it.
 ///
 /// The two pipeline modes lay the vertex slots out differently — packed puts

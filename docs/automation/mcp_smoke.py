@@ -52,7 +52,8 @@ def legacy(server: Path) -> None:
     names = set(definitions)
     assert names == TOOLS, names
     execute_request = definitions["ocs_execute"]["inputSchema"]["properties"]["request"]
-    assert len(execute_request["oneOf"]) == 14
+    assert len(execute_request["oneOf"]) == 15
+    assert execute_request["properties"]["steps"]["maxItems"] == 64
     assert execute_request["properties"]["cmd"]["examples"][0] == "LINE 0,0 10,10"
     assert execute_request["properties"]["kind"]["enum"] == [
         "text", "token", "point", "entity", "structure", "selection", "enter"
@@ -86,6 +87,7 @@ def modern(server: Path) -> None:
     assert discovered["result"]["resultType"] == "complete"
     assert discovered["result"]["ttlMs"] >= 0
     assert discovered["result"]["cacheScope"] in {"public", "private"}
+    assert "io.modelcontextprotocol/tasks" in discovered["result"]["capabilities"]["extensions"]
 
     tools = request(process, {
         "jsonrpc": "2.0",
@@ -97,6 +99,9 @@ def modern(server: Path) -> None:
     assert tools["result"]["resultType"] == "complete"
     assert tools["result"]["ttlMs"] >= 0
     assert tools["result"]["cacheScope"] in {"public", "private"}
+    definitions = {tool["name"]: tool for tool in tools["result"]["tools"]}
+    assert definitions["ocs_execute"]["inputSchema"]["properties"]["response_detail"]["default"] == "compact"
+    assert definitions["ocs_capture"]["inputSchema"]["properties"]["scope"]["default"] == "viewport"
 
     missing_cmd = request(process, {
         "jsonrpc": "2.0",

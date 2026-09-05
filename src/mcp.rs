@@ -3,11 +3,11 @@
 //! `OpenCADStudio --mcp` speaks MCP over stdio. All drawing work is forwarded
 //! to the authenticated GUI control bridge; this module contains no geometry.
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::Deserialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fs::{File, OpenOptions},
     io::{self, BufRead, BufReader, Read, Write},
     net::TcpStream,
@@ -22,7 +22,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Call ocs_sessions, then ocs_read state before editing. Preserve session_id, document_id, revision, selection and request_id. Use ocs_read commands with parameters.name for command help. For interactive work, call start and follow state.command.accepts, options and input_example. For batch work, run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OpenCADStudio and its geometry kernel calculate geometry. Verify important results with queries and ocs_capture, and save only to an explicit path.";
+const INSTRUCTIONS: &str = "Call ocs_sessions, then ocs_read state before editing. Preserve session_id, document_id, revision, selection and request_id. Use ocs_read commands with parameters.name for a command manifest. Use ocs_execute batch when several steps are known, and request changed_entities when the resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -39,8 +39,13 @@ const READ_OPS: &[&str] = &[
 ];
 const EXECUTE_OPS: &[&str] = &[
     "new", "open", "activate", "run", "start", "input", "cancel", "undo", "redo", "select",
+    "property", "action", "save", "stop", "batch",
+];
+const BATCH_STEP_OPS: &[&str] = &[
+    "new", "open", "activate", "run", "start", "input", "cancel", "undo", "redo", "select",
     "property", "action", "save", "stop",
 ];
+const MAX_BATCH_STEPS: usize = 64;
 
 #[derive(Clone, Deserialize)]
 struct Descriptor {
@@ -53,12 +58,75 @@ struct GuiClient {
     descriptor: Descriptor,
     state: Value,
     client_id: String,
+    batches: VecDeque<BatchExecution>,
+}
+
+struct BatchExecution {
+    id: String,
+    request: Value,
+    steps: Vec<Value>,
+    next: usize,
+    active: Option<String>,
+    results: Vec<Value>,
+    changes: Vec<Value>,
+    state: Option<Value>,
+    terminal: Option<Value>,
+}
+
+struct McpTask {
+    id: String,
+    name: String,
+    arguments: Value,
+    created_at: String,
+    last_updated_at: String,
+    result: Option<Value>,
+    error: Option<Value>,
+}
+
+#[derive(Default)]
+struct TaskStore {
+    tasks: VecDeque<McpTask>,
+}
+
+impl TaskStore {
+    fn insert(&mut self, task: McpTask) {
+        self.tasks.push_back(task);
+    }
+
+    fn get_mut(&mut self, id: &str) -> Option<&mut McpTask> {
+        self.tasks.iter_mut().find(|task| task.id == id)
+    }
 }
 
 fn random_id() -> Result<String, String> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn iso8601_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days = seconds.div_euclid(86_400);
+    let day_seconds = seconds.rem_euclid(86_400);
+    let shifted = days + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    let hour = day_seconds / 3_600;
+    let minute = day_seconds % 3_600 / 60;
+    let second = day_seconds % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 #[cfg(unix)]
@@ -226,6 +294,7 @@ impl GuiClient {
             descriptor,
             state,
             client_id: random_id()?,
+            batches: VecDeque::new(),
         })
     }
 
@@ -287,6 +356,206 @@ impl GuiClient {
         }
         Ok(response)
     }
+
+    fn execute_batch(&mut self, request: Value, wait_seconds: f64) -> Result<Value, String> {
+        let id = required_string(&request, "request_id")?.to_owned();
+        let mut batch = if let Some(position) = self.batches.iter().position(|batch| batch.id == id)
+        {
+            let batch = self
+                .batches
+                .remove(position)
+                .expect("batch position exists");
+            if batch.request != request {
+                self.batches.push_back(batch);
+                return Err("request_id was already used for a different batch".into());
+            }
+            batch
+        } else {
+            let steps = request["steps"]
+                .as_array()
+                .cloned()
+                .ok_or_else(|| "batch requires a steps array".to_string())?;
+            BatchExecution {
+                id,
+                request,
+                steps,
+                next: 0,
+                active: None,
+                results: Vec::new(),
+                changes: Vec::new(),
+                state: None,
+                terminal: None,
+            }
+        };
+
+        if let Some(result) = batch.terminal.clone() {
+            self.batches.push_back(batch);
+            return Ok(result);
+        }
+
+        let deadline = Instant::now() + Duration::from_secs_f64(wait_seconds.clamp(0.0, 60.0));
+        let mut attempted = false;
+        loop {
+            if batch.next == batch.steps.len() {
+                let waiting = batch
+                    .state
+                    .as_ref()
+                    .is_some_and(|state| !state["command"].is_null());
+                let result = batch_result(
+                    &batch,
+                    if waiting {
+                        "waiting_input"
+                    } else {
+                        "completed"
+                    },
+                    true,
+                );
+                batch.terminal = Some(result.clone());
+                self.batches.push_back(batch);
+                trim_batches(&mut self.batches);
+                return Ok(result);
+            }
+            if attempted && Instant::now() >= deadline {
+                let result = batch_result(&batch, "running", true);
+                self.batches.push_back(batch);
+                trim_batches(&mut self.batches);
+                return Ok(result);
+            }
+            attempted = true;
+
+            let step_id = batch
+                .active
+                .clone()
+                .unwrap_or_else(|| batch_step_id(&batch.id, batch.next));
+            let response = if batch.active.is_some() {
+                self.request(
+                    json!({"op":"operation","request_id":step_id}),
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_secs_f64(),
+                )
+            } else {
+                let mut step = batch.steps[batch.next]
+                    .as_object()
+                    .cloned()
+                    .ok_or_else(|| format!("batch step {} must be an object", batch.next))?;
+                for key in [
+                    "revision",
+                    "geometry_revision",
+                    "camera_revision",
+                    "selection",
+                    "client_id",
+                ] {
+                    step.remove(key);
+                }
+                step.insert("request_id".into(), Value::String(step_id.clone()));
+                self.request(
+                    Value::Object(step),
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_secs_f64(),
+                )
+            };
+            let response = match response {
+                Ok(response) => response,
+                Err(error) => {
+                    batch.active = Some(step_id);
+                    self.batches.push_back(batch);
+                    trim_batches(&mut self.batches);
+                    return Err(error);
+                }
+            };
+
+            if matches!(response["status"].as_str(), Some("accepted" | "running")) {
+                batch.active = Some(step_id);
+                let result = batch_result(&batch, "running", true);
+                self.batches.push_back(batch);
+                trim_batches(&mut self.batches);
+                return Ok(result);
+            }
+
+            batch.active = None;
+            if let Some(state) = response.get("state") {
+                batch.state = Some(state.clone());
+            }
+            if let Some(changes) = response["changes"].as_array() {
+                batch
+                    .changes
+                    .extend(changes.iter().cloned().map(|mut change| {
+                        if let Some(object) = change.as_object_mut() {
+                            object.insert("step".into(), Value::from(batch.next));
+                        }
+                        change
+                    }));
+            }
+            let mut compact = response.clone();
+            if let Some(object) = compact.as_object_mut() {
+                object.remove("state");
+                object.remove("changes");
+                object.insert("step".into(), Value::from(batch.next));
+                object.insert("op".into(), batch.steps[batch.next]["op"].clone());
+            }
+            batch.results.push(compact);
+            batch.next += 1;
+
+            if response["ok"].as_bool() == Some(false)
+                || matches!(response["status"].as_str(), Some("failed" | "cancelled"))
+            {
+                let result = batch_result(
+                    &batch,
+                    response["status"].as_str().unwrap_or("failed"),
+                    false,
+                );
+                batch.terminal = Some(result.clone());
+                self.batches.push_back(batch);
+                trim_batches(&mut self.batches);
+                return Ok(result);
+            }
+            if response["status"] == "waiting_input"
+                && batch
+                    .steps
+                    .get(batch.next)
+                    .and_then(|step| step["op"].as_str())
+                    .is_none_or(|op| !matches!(op, "input" | "cancel"))
+            {
+                let result = batch_result(&batch, "waiting_input", true);
+                batch.terminal = Some(result.clone());
+                self.batches.push_back(batch);
+                trim_batches(&mut self.batches);
+                return Ok(result);
+            }
+        }
+    }
+}
+
+fn batch_step_id(id: &str, step: usize) -> String {
+    let hash = id
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        });
+    format!("batch-{hash:016x}-{step}")
+}
+
+fn batch_result(batch: &BatchExecution, status: &str, ok: bool) -> Value {
+    json!({
+        "ok":ok,
+        "status":status,
+        "request_id":batch.id,
+        "completed_steps":batch.next,
+        "total_steps":batch.steps.len(),
+        "next_step":(batch.next < batch.steps.len()).then_some(batch.next),
+        "results":batch.results,
+        "changes":batch.changes,
+        "state":batch.state
+    })
+}
+
+fn trim_batches(batches: &mut VecDeque<BatchExecution>) {
+    while batches.len() > 64 {
+        batches.pop_front();
+    }
 }
 
 fn client<'a>(
@@ -313,29 +582,59 @@ fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
         ))
     };
     match op {
+        "batch" => {
+            let steps = request["steps"].as_array().ok_or_else(|| {
+                r#"Missing steps for batch. Example request: {"op":"batch","request_id":"draw-1","steps":[{"op":"run","cmd":"LINE 0,0 10,0"}]}"#.to_string()
+            })?;
+            if steps.is_empty() || steps.len() > MAX_BATCH_STEPS {
+                return Err(format!(
+                    "batch steps must contain 1 to {MAX_BATCH_STEPS} operations"
+                ));
+            }
+            for (index, step) in steps.iter().enumerate() {
+                let step = step
+                    .as_object()
+                    .ok_or_else(|| format!("batch step {index} must be an object"))?;
+                if step.contains_key("request_id") {
+                    return Err(format!(
+                        "batch step {index} must omit request_id; the batch assigns idempotency keys"
+                    ));
+                }
+                let step = Value::Object(step.clone());
+                let step_op = step["op"]
+                    .as_str()
+                    .ok_or_else(|| format!("batch step {index} is missing op"))?;
+                if !BATCH_STEP_OPS.contains(&step_op) {
+                    return Err(format!("Unknown operation {step_op} in batch step {index}"));
+                }
+                validate_execute_request(&step, step_op)
+                    .map_err(|error| format!("batch step {index}: {error}"))?;
+            }
+            Ok(())
+        }
         "open" if request["path"].as_str().is_none_or(str::is_empty) => {
             missing("path", r#"{"op":"open","path":"/path/drawing.dxf"}"#)
         }
         "activate" if request["document_id"].as_u64().is_none() => {
             missing("document_id", r#"{"op":"activate","document_id":2}"#)
         }
-        "run" | "start" if request["cmd"].as_str().is_none_or(str::is_empty) => missing(
-            "cmd",
-            r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#,
-        ),
+        "run" | "start" if request["cmd"].as_str().is_none_or(str::is_empty) => {
+            missing("cmd", r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#)
+        }
         "input" => match request["kind"].as_str() {
             Some("text") => Ok(()),
-            Some("token") if request["text"].as_str().is_some_and(|value| !value.is_empty()) => {
+            Some("token")
+                if request["text"]
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty()) =>
+            {
                 Ok(())
             }
-            Some("token") => missing(
-                "text",
-                r#"{"op":"input","kind":"token","text":"C"}"#,
-            ),
+            Some("token") => missing("text", r#"{"op":"input","kind":"token","text":"C"}"#),
             Some("point")
-                if request["point"]
-                    .as_array()
-                    .is_some_and(|values| values.len() == 3 && values.iter().all(Value::is_number)) =>
+                if request["point"].as_array().is_some_and(|values| {
+                    values.len() == 3 && values.iter().all(Value::is_number)
+                }) =>
             {
                 Ok(())
             }
@@ -344,10 +643,12 @@ fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
                 r#"{"op":"input","kind":"point","point":[0,0,0],"space":"wcs"}"#,
             ),
             Some("entity" | "structure")
-                if request["handle"].as_str().is_some_and(|value| !value.is_empty())
-                    && request["point"]
-                        .as_array()
-                        .is_some_and(|values| values.len() == 3 && values.iter().all(Value::is_number)) =>
+                if request["handle"]
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty())
+                    && request["point"].as_array().is_some_and(|values| {
+                        values.len() == 3 && values.iter().all(Value::is_number)
+                    }) =>
             {
                 Ok(())
             }
@@ -359,10 +660,7 @@ fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
             Some(kind) => Err(format!(
                 "Unknown input kind {kind}. Use text, token, point, entity, structure, selection or enter"
             )),
-            None => missing(
-                "kind",
-                r#"{"op":"input","kind":"point","point":[0,0,0]}"#,
-            ),
+            None => missing("kind", r#"{"op":"input","kind":"point","point":[0,0,0]}"#),
         },
         "property"
             if request["field"].as_str().is_none_or(str::is_empty)
@@ -378,13 +676,73 @@ fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
             Some(name) => Err(format!(
                 "Unknown action {name}. Call ocs_read commands to list actions"
             )),
-            None => missing(
-                "name",
-                r#"{"op":"action","name":"zoom_extents"}"#,
-            ),
+            None => missing("name", r#"{"op":"action","name":"zoom_extents"}"#),
         },
         _ => Ok(()),
     }
+}
+
+fn compact_state(state: &Value) -> Value {
+    let mut compact = Map::new();
+    for key in [
+        "session_id",
+        "document_id",
+        "revision",
+        "geometry_revision",
+        "camera_revision",
+        "selection",
+        "command",
+        "modal",
+        "event_cursor",
+        "operation",
+    ] {
+        if let Some(value) = state.get(key) {
+            compact.insert(key.into(), value.clone());
+        }
+    }
+    Value::Object(compact)
+}
+
+fn response_handles(response: &Value) -> Vec<String> {
+    let mut handles = Vec::new();
+    if let Some(changes) = response["changes"].as_array() {
+        for handle in changes
+            .iter()
+            .filter_map(|change| change["handle"].as_str())
+        {
+            if !handles.iter().any(|value| value == handle) {
+                handles.push(handle.to_owned());
+            }
+        }
+    }
+    handles
+}
+
+fn shape_execute_response(
+    mut response: Value,
+    detail: &str,
+    gui: &mut GuiClient,
+) -> Result<Value, String> {
+    if detail == "changed_entities" {
+        let handles = response_handles(&response);
+        if !handles.is_empty() {
+            let entities = gui.request(
+                json!({"op":"query","handles":handles,"detail":"geometry","limit":MAX_BATCH_STEPS * 100}),
+                30.0,
+            )?;
+            if let Some(object) = response.as_object_mut() {
+                object.insert("changed_entities".into(), entities["entities"].clone());
+            }
+        }
+    }
+    if detail != "full" {
+        if let Some(state) = response.get("state").cloned() {
+            if let Some(object) = response.as_object_mut() {
+                object.insert("state".into(), compact_state(&state));
+            }
+        }
+    }
+    Ok(response)
 }
 
 fn call_tool(
@@ -427,13 +785,22 @@ fn call_tool(
             }
             validate_execute_request(&request, op)?;
             let wait = arguments["wait_seconds"].as_f64().unwrap_or(30.0);
-            client(clients, session_id)?.request(request, wait)
+            let detail = arguments["response_detail"].as_str().unwrap_or("compact");
+            let gui = client(clients, session_id)?;
+            let response = if op == "batch" {
+                gui.execute_batch(request, wait)?
+            } else {
+                gui.request(request, wait)?
+            };
+            shape_execute_response(response, detail, gui)
         }
         "ocs_capture" => {
             let session_id = required_string(arguments, "session_id")?;
             let path = std::env::temp_dir().join(format!("ocs-capture-{}.png", random_id()?));
+            let scope = arguments["scope"].as_str().unwrap_or("viewport");
+            let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
             let result = client(clients, session_id)?
-                .request(json!({"op":"capture","path":path.to_string_lossy()}), 30.0)?;
+                .request(json!({"op":"capture","path":path.to_string_lossy(),"scope":scope,"max_dimension":max_dimension}), 30.0)?;
             if result["ok"].as_bool() != Some(true)
                 || result["status"].as_str() != Some("completed")
             {
@@ -445,6 +812,32 @@ fn call_tool(
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
+}
+
+fn batch_step_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "op":{"type":"string","enum":BATCH_STEP_OPS},
+            "document_id":{"type":"integer","minimum":0},
+            "cmd":{"type":"string","minLength":1},
+            "path":{"type":"string","minLength":1},
+            "kind":{"type":"string","enum":["text","token","point","entity","structure","selection","enter"]},
+            "text":{"type":"string"},
+            "point":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},
+            "space":{"type":"string","enum":["wcs","ucs","relative"]},
+            "handle":{"type":"string"},
+            "handles":{"type":"array","items":{"type":"string"}},
+            "type":{"type":"string"},
+            "layer":{"type":"string"},
+            "clear":{"type":"boolean"},
+            "field":{"type":"string"},
+            "value":{"description":"New property value; its JSON type must match the property kind.","anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"},{"type":"object"},{"type":"array"},{"type":"null"}]},
+            "name":{"type":"string","enum":crate::app::automation_action_names()}
+        },
+        "required":["op"],
+        "additionalProperties":false
+    })
 }
 
 fn execute_request_schema() -> Value {
@@ -480,7 +873,8 @@ fn execute_request_schema() -> Value {
             "clear":{"type":"boolean","description":"Clear the current selection before applying select filters."},
             "field":{"type":"string","minLength":1,"description":"Property id returned by ocs_read properties."},
             "value":{"description":"New property value; its JSON type must match the property kind.","anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"},{"type":"object"},{"type":"array"},{"type":"null"}]},
-            "name":{"type":"string","enum":crate::app::automation_action_names(),"description":"UI action returned by ocs_read commands."}
+            "name":{"type":"string","enum":crate::app::automation_action_names(),"description":"UI action returned by ocs_read commands."},
+            "steps":{"type":"array","minItems":1,"maxItems":MAX_BATCH_STEPS,"description":"Sequential editor operations executed with fresh state and idempotency keys. Execution stops at the first failure; completed_steps says what committed.","items":batch_step_schema()}
         },
         "required":["op","request_id"],
         "additionalProperties":false,
@@ -506,7 +900,8 @@ fn execute_request_schema() -> Value {
             {"properties":{"op":{"const":"property"}},"required":["field","value"]},
             {"properties":{"op":{"const":"action"}},"required":["name"]},
             {"properties":{"op":{"const":"save"}}},
-            {"properties":{"op":{"const":"stop"}}}
+            {"properties":{"op":{"const":"stop"}}},
+            {"properties":{"op":{"const":"batch"}},"required":["steps"]}
         ]
     })
 }
@@ -548,22 +943,22 @@ fn tool_definitions() -> Value {
         },
         {
             "name":"ocs_read",
-            "description":"Read state, commands/actions, query, entities, layers, header, properties, measurements, history, events or operation status from a live OCS session. For command help use op commands with parameters.name.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name for detailed commands help."},"document_id":{"type":"integer","minimum":0},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"}},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}},"additionalProperties":true}},"required":["session_id"],"additionalProperties":false},
+            "description":"Read state, command manifests, entities, layers, properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session.",
+            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name for detailed commands help."},"search":{"type":"string","description":"Case-insensitive command-name search."},"document_id":{"type":"integer","minimum":0},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity handles for query or measure."},"type":{"type":"string","description":"Entity type filter for query."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["session_id"],"additionalProperties":false},
             "outputSchema":read_output_schema(),
             "annotations":{"title":"Read OCS state","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_execute",
-            "description":"Execute one semantic OCS action. Use current state fields and a unique request_id. Use run for a complete command line or start plus input for guided steps. accepted, running and waiting_input are not completion.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Time to wait for asynchronous completion before returning."}},"required":["session_id","request"],"additionalProperties":false},
+            "description":"Execute semantic OCS actions. Use current state fields and a unique request_id. Use run for one complete command, batch to remove round trips, or start plus input for guided steps. accepted, running and waiting_input are not completion.",
+            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Total time to wait for completion before returning."},"response_detail":{"type":"string","enum":["compact","changed_entities","full"],"default":"compact","description":"compact returns only state needed for the next edit; changed_entities also returns current geometry for changed handles; full preserves the complete editor state."}},"required":["session_id","request"],"additionalProperties":false},
             "outputSchema":execute_output_schema(),
             "annotations":{"title":"Execute OCS action","readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_capture",
-            "description":"Capture the actual current OpenCADStudio window as PNG for visual verification.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."}},"required":["session_id"],"additionalProperties":false},
+            "description":"Capture the actual current OCS drawing viewport or window as a bounded PNG for visual verification.",
+            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},"max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."}},"required":["session_id"],"additionalProperties":false},
             "annotations":{"title":"Capture OCS window","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
     ])
@@ -607,6 +1002,56 @@ fn modern_request(params: &Value) -> bool {
         == Some(MODERN_PROTOCOL_VERSION)
 }
 
+fn supports_tasks(params: &Value) -> bool {
+    params["_meta"]["io.modelcontextprotocol/clientCapabilities"]["extensions"]
+        ["io.modelcontextprotocol/tasks"]
+        .is_object()
+}
+
+fn task_value(task: &McpTask, status: &str) -> Value {
+    let mut value = json!({
+        "resultType":"complete",
+        "taskId":task.id,
+        "status":status,
+        "createdAt":task.created_at,
+        "lastUpdatedAt":task.last_updated_at,
+        "ttlMs":3_600_000,
+        "pollIntervalMs":250
+    });
+    if let Some(result) = &task.result {
+        value["result"] = result.clone();
+    }
+    if let Some(error) = &task.error {
+        value["error"] = error.clone();
+    }
+    value
+}
+
+fn poll_task(task: &mut McpTask, clients: &mut HashMap<String, GuiClient>) -> Value {
+    if task.result.is_some() {
+        return task_value(task, "completed");
+    }
+    if task.error.is_some() {
+        return task_value(task, "failed");
+    }
+    task.last_updated_at = iso8601_now();
+    let mut arguments = task.arguments.clone();
+    arguments["wait_seconds"] = Value::from(0);
+    match call_tool(&task.name, &arguments, clients) {
+        Ok(value) if matches!(value["status"].as_str(), Some("accepted" | "running")) => {
+            task_value(task, "working")
+        }
+        Ok(value) => {
+            task.result = Some(tool_result(value));
+            task_value(task, "completed")
+        }
+        Err(error) => {
+            task.error = Some(json!({"code":-32000,"message":error}));
+            task_value(task, "failed")
+        }
+    }
+}
+
 fn protocol_result(mut result: Value, modern: bool, cacheable: bool) -> Value {
     if modern {
         let object = result
@@ -643,7 +1088,11 @@ fn unsupported_protocol(id: Value, requested: &str) -> Value {
     })
 }
 
-fn handle_message(message: Value, clients: &mut HashMap<String, GuiClient>) -> Option<Value> {
+fn handle_message(
+    message: Value,
+    clients: &mut HashMap<String, GuiClient>,
+    tasks: &mut TaskStore,
+) -> Option<Value> {
     let id = message.get("id").cloned();
     let method = message.get("method").and_then(Value::as_str)?;
     if id.is_none() {
@@ -684,7 +1133,7 @@ fn handle_message(message: Value, clients: &mut HashMap<String, GuiClient>) -> O
             protocol_result(
                 json!({
                     "supportedVersions":[MODERN_PROTOCOL_VERSION,PROTOCOL_VERSION],
-                    "capabilities":{"tools":{}},
+                    "capabilities":{"tools":{},"extensions":{"io.modelcontextprotocol/tasks":{}}},
                     "instructions":INSTRUCTIONS
                 }),
                 true,
@@ -704,10 +1153,71 @@ fn handle_message(message: Value, clients: &mut HashMap<String, GuiClient>) -> O
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let result = call_tool(name, &arguments, clients)
-                .map(tool_result)
-                .unwrap_or_else(error_result);
+            let called = call_tool(name, &arguments, clients);
+            if modern && supports_tasks(&params) {
+                if let Ok(value) = &called {
+                    if matches!(value["status"].as_str(), Some("accepted" | "running")) {
+                        let task_id =
+                            random_id().unwrap_or_else(|_| format!("task-{}", iso8601_now()));
+                        let now = iso8601_now();
+                        tasks.insert(McpTask {
+                            id: task_id.clone(),
+                            name: name.to_owned(),
+                            arguments,
+                            created_at: now.clone(),
+                            last_updated_at: now,
+                            result: None,
+                            error: None,
+                        });
+                        return Some(response(
+                            id,
+                            protocol_result(
+                                json!({
+                                    "resultType":"task",
+                                    "taskId":task_id,
+                                    "status":"working",
+                                    "statusMessage":"OCS operation is running.",
+                                    "createdAt":tasks.tasks.back().unwrap().created_at,
+                                    "lastUpdatedAt":tasks.tasks.back().unwrap().last_updated_at,
+                                    "ttlMs":3_600_000,
+                                    "pollIntervalMs":250
+                                }),
+                                true,
+                                false,
+                            ),
+                        ));
+                    }
+                }
+            }
+            let result = called.map(tool_result).unwrap_or_else(error_result);
             response(id, protocol_result(result, modern, false))
+        }
+        "tasks/get" if modern && supports_tasks(&params) => {
+            let Some(task_id) = params["taskId"].as_str() else {
+                return Some(rpc_error(id, -32602, "Missing taskId"));
+            };
+            let Some(task) = tasks.get_mut(task_id) else {
+                return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
+            };
+            response(id, protocol_result(poll_task(task, clients), true, false))
+        }
+        "tasks/update" if modern && supports_tasks(&params) => {
+            let Some(task_id) = params["taskId"].as_str() else {
+                return Some(rpc_error(id, -32602, "Missing taskId"));
+            };
+            if tasks.get_mut(task_id).is_none() {
+                return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
+            }
+            response(id, protocol_result(json!({}), true, false))
+        }
+        "tasks/cancel" if modern && supports_tasks(&params) => {
+            let Some(task_id) = params["taskId"].as_str() else {
+                return Some(rpc_error(id, -32602, "Missing taskId"));
+            };
+            if tasks.get_mut(task_id).is_none() {
+                return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
+            }
+            response(id, protocol_result(json!({}), true, false))
         }
         _ => rpc_error(id, -32601, format!("Method not found: {method}")),
     })
@@ -719,10 +1229,11 @@ pub fn run() {
     let stdout = io::stdout();
     let mut output = stdout.lock();
     let mut clients = HashMap::new();
+    let mut tasks = TaskStore::default();
     for line in stdin.lock().lines() {
         let response = match line {
             Ok(line) if !line.trim().is_empty() => match serde_json::from_str::<Value>(&line) {
-                Ok(message) => handle_message(message, &mut clients),
+                Ok(message) => handle_message(message, &mut clients, &mut tasks),
                 Err(error) => Some(rpc_error(Value::Null, -32700, error)),
             },
             Ok(_) => None,
@@ -772,6 +1283,18 @@ mod tests {
             EXECUTE_OPS.len()
         );
         assert_eq!(
+            tools[2]["inputSchema"]["properties"]["request"]["properties"]["steps"]["maxItems"],
+            MAX_BATCH_STEPS
+        );
+        assert_eq!(
+            tools[2]["inputSchema"]["properties"]["response_detail"]["default"],
+            "compact"
+        );
+        assert_eq!(
+            tools[3]["inputSchema"]["properties"]["scope"]["default"],
+            "viewport"
+        );
+        assert_eq!(
             tools[2]["inputSchema"]["properties"]["request"]["properties"]["cmd"]["examples"][0],
             "LINE 0,0 10,10"
         );
@@ -786,17 +1309,21 @@ mod tests {
         let initialized = handle_message(
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}),
             &mut clients,
+            &mut TaskStore::default(),
         )
         .unwrap();
         assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
-        assert!(initialized["result"]["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("geometry kernel"));
+        assert!(
+            initialized["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("geometry kernel")
+        );
 
         let listed = handle_message(
             json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
             &mut clients,
+            &mut TaskStore::default(),
         )
         .unwrap();
         assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 4);
@@ -810,12 +1337,17 @@ mod tests {
         let discovered = handle_message(
             json!({"jsonrpc":"2.0","id":"discover","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
             &mut clients,
+            &mut TaskStore::default(),
         )
         .unwrap();
         assert_eq!(discovered["result"]["resultType"], "complete");
         assert_eq!(discovered["result"]["ttlMs"], CACHE_TTL_MS);
         assert_eq!(discovered["result"]["cacheScope"], "public");
         assert_eq!(discovered["result"]["supportedVersions"][0], "2026-07-28");
+        assert!(
+            discovered["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/tasks"]
+                .is_object()
+        );
         assert_eq!(
             discovered["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
             "OpenCADStudio"
@@ -824,6 +1356,7 @@ mod tests {
         let listed = handle_message(
             json!({"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
             &mut clients,
+            &mut TaskStore::default(),
         )
         .unwrap();
         assert_eq!(listed["result"]["resultType"], "complete");
@@ -837,6 +1370,7 @@ mod tests {
         let called = handle_message(
             json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ocs_read","arguments":{"session_id":"missing","op":"save"}}}),
             &mut clients,
+            &mut TaskStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -848,6 +1382,7 @@ mod tests {
         let rejected = handle_message(
             json!({"jsonrpc":"2.0","id":4,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01"}}}),
             &mut clients,
+            &mut TaskStore::default(),
         )
         .unwrap();
         assert_eq!(rejected["error"]["code"], -32022);
@@ -864,13 +1399,16 @@ mod tests {
         let called = handle_message(
             json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"session_id":"missing","request":{"op":"undo"}}}}),
             &mut clients,
+            &mut TaskStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
-        assert!(called["result"]["structuredContent"]["error"]
-            .as_str()
-            .unwrap()
-            .contains("request_id"));
+        assert!(
+            called["result"]["structuredContent"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("request_id")
+        );
     }
 
     #[test]
@@ -879,6 +1417,7 @@ mod tests {
         let called = handle_message(
             json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"session_id":"missing","request":{"op":"run","request_id":"run-1"}}}}),
             &mut clients,
+            &mut TaskStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -891,6 +1430,55 @@ mod tests {
             .unwrap();
         assert!(error.contains("Missing cmd"), "{error}");
         assert!(error.contains("LINE 0,0 10,10"), "{error}");
+    }
+
+    #[test]
+    fn validates_batch_steps_and_compacts_state() {
+        let batch = json!({
+            "op":"batch",
+            "request_id":"draw",
+            "steps":[{"op":"run","cmd":"LINE 0,0 10,0"},{"op":"run","cmd":"CIRCLE 5,5 2"}]
+        });
+        assert!(validate_execute_request(&batch, "batch").is_ok());
+        let invalid = json!({
+            "op":"batch",
+            "request_id":"draw",
+            "steps":[{"op":"run","request_id":"nested","cmd":"LINE 0,0 10,0"}]
+        });
+        assert!(
+            validate_execute_request(&invalid, "batch")
+                .unwrap_err()
+                .contains("omit request_id")
+        );
+
+        let compact = compact_state(&json!({
+            "session_id":"s","document_id":3,"revision":4,"geometry_revision":5,
+            "camera_revision":6,"selection":[],"command":null,"documents":[1,2,3],
+            "camera":{"distance":100.0},"event_cursor":7
+        }));
+        assert_eq!(compact["revision"], 4);
+        assert!(compact.get("camera").is_none());
+        assert!(compact.get("documents").is_none());
+    }
+
+    #[test]
+    fn task_metadata_uses_the_modern_shape() {
+        let now = iso8601_now();
+        assert_eq!(now.len(), 20);
+        assert!(now.ends_with('Z'));
+        let task = McpTask {
+            id: "task".into(),
+            name: "ocs_execute".into(),
+            arguments: json!({}),
+            created_at: now.clone(),
+            last_updated_at: now,
+            result: None,
+            error: None,
+        };
+        let value = task_value(&task, "working");
+        assert_eq!(value["resultType"], "complete");
+        assert_eq!(value["status"], "working");
+        assert_eq!(value["pollIntervalMs"], 250);
     }
 
     #[test]

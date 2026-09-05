@@ -172,7 +172,107 @@ fn command_examples(name: &str) -> &'static [&'static str] {
         "CIRCLE" => &["CIRCLE 5,5 3"],
         "PLINE" => &["PLINE 0,0 10,0 10,10 C"],
         "ZOOM" => &["ZOOM EXTENTS"],
+        "MOVE" => &["MOVE 0,0 100,0"],
+        "ROTATE" => &["ROTATE 0,0 90"],
+        "UCS" => &["UCS Z 90"],
+        "PDMODE" => &["PDMODE 3"],
+        "LTSCALE" => &["LTSCALE 2.5"],
         _ => &[],
+    }
+}
+
+fn command_category(name: &str) -> &'static str {
+    if [
+        "LINE", "CIRCLE", "PLINE", "ARC", "ELLIPSE", "POINT", "SPLINE", "RECT", "RECTANG",
+        "POLYGON", "HATCH", "RAY", "XLINE", "3DPOLY", "MLINE", "TEXT", "MTEXT", "TABLE",
+    ]
+    .contains(&name)
+    {
+        "create"
+    } else if [
+        "MOVE",
+        "COPY",
+        "ROTATE",
+        "SCALE",
+        "MIRROR",
+        "ERASE",
+        "TRIM",
+        "EXTEND",
+        "OFFSET",
+        "FILLET",
+        "CHAMFER",
+        "BREAK",
+        "JOIN",
+        "EXPLODE",
+        "STRETCH",
+        "ARRAY",
+        "PEDIT",
+        "SPLINEDIT",
+        "REVERSE",
+        "ALIGN",
+    ]
+    .contains(&name)
+    {
+        "modify"
+    } else if ["DIST", "ID", "AREA", "MEASURE", "MEASUREGEOM"].contains(&name) {
+        "inspect"
+    } else if ["ZOOM", "PAN", "UCS", "PLAN", "VPORTS", "3DORBIT"].contains(&name) {
+        "view"
+    } else if name.starts_with("DIM") || ["LEADER", "MLEADER", "TOLERANCE"].contains(&name) {
+        "annotate"
+    } else if [
+        "BOX",
+        "CYLINDER",
+        "CONE",
+        "SPHERE",
+        "TORUS",
+        "WEDGE",
+        "EXTRUDE",
+        "REVOLVE",
+        "SWEEP",
+        "LOFT",
+        "UNION",
+        "SUBTRACT",
+        "INTERSECT",
+        "PRESSPULL",
+    ]
+    .contains(&name)
+    {
+        "model"
+    } else {
+        "other"
+    }
+}
+
+fn command_selection_policy(name: &str) -> &'static str {
+    if [
+        "ARRAY",
+        "ARRAYPATH",
+        "ARRAYPOLAR",
+        "ARRAYRECT",
+        "BLOCK",
+        "COPY",
+        "COPYCLIP",
+        "CUTCLIP",
+        "ERASE",
+        "EXPLODE",
+        "GROUP",
+        "LAYFRZ",
+        "LAYLCK",
+        "LAYMCUR",
+        "LAYOFF",
+        "LAYULK",
+        "MIRROR",
+        "MOVE",
+        "ROTATE",
+        "SCALE",
+        "STRETCH",
+    ]
+    .contains(&name)
+    {
+        "current_selection_or_prompt"
+    } else {
+        "command_defined"
     }
 }
 
@@ -261,7 +361,7 @@ impl OpenCADStudio {
             "mtext_editor":self.mtext_editor.as_ref().map(|e|json!({"text":e.content.text(),"height":e.height,"style":e.style})),
             "text_editor":self.text_inline.is_some(),"event_cursor":self.control.serial,
             "operation":self.control.pending.as_ref().map(|p| &p.id),
-            "capabilities":["commands","step_input","entity_pick","structure_pick","selection","properties","layers","history","documents","events","capture","measure"]
+            "capabilities":["commands","command_manifest","step_input","batch","compact_results","entity_pick","structure_pick","selection","properties","layers","history","documents","events","capture","viewport_capture","measure","spatial_query"]
         })
     }
 
@@ -359,6 +459,11 @@ impl OpenCADStudio {
                         "ok":true,
                         "command":{
                             "name":name,
+                            "category":command_category(name),
+                            "preconditions":{
+                                "document":true,
+                                "selection":command_selection_policy(name)
+                            },
                             "batch":{
                                 "op":"run",
                                 "syntax":"Command name followed by prompt answers separated by spaces. Points use x,y or x,y,z; options use their token.",
@@ -368,16 +473,27 @@ impl OpenCADStudio {
                                 "op":"start",
                                 "request":{"op":"start","cmd":name},
                                 "next":"Follow state.command.accepts, options and input_example after every step."
-                            }
+                            },
+                            "completion":"completed is final; waiting_input requires another input step; failed includes the reason."
                         }
                     }),
                     Task::none(),
                 );
             }
+            if let Some(search) = req["search"].as_str().filter(|search| !search.is_empty()) {
+                let search = search.to_ascii_uppercase();
+                names.retain(|name| name.contains(&search));
+            }
+            let count = names.len();
+            let offset = req["offset"].as_u64().unwrap_or(0) as usize;
+            let limit = req["limit"].as_u64().unwrap_or(200).min(1000) as usize;
+            let commands: Vec<String> = names.into_iter().skip(offset).take(limit).collect();
             return (
                 json!({
-                    "ok":true,"commands":names,"actions":actions::NAMES,
-                    "detail_parameters":{"name":"LINE"},
+                    "ok":true,"count":count,"returned":commands.len(),
+                    "next_offset":(offset + commands.len() < count).then_some(offset + commands.len()),
+                    "commands":commands,"actions":actions::NAMES,
+                    "detail_parameters":{"name":"LINE"},"search_parameter":{"search":"LINE"},
                     "guidance":"Request one command by name for batch examples and interactive input guidance."
                 }),
                 Task::none(),
@@ -857,7 +973,16 @@ impl OpenCADStudio {
                         h.isolines.max(0) as usize,
                     )
                 });
-            out.push(json!({"handle":format!("{:X}",handle.value()),"type":crate::entities::names::ui_name(entity),"bounds":{"min":[bb.min.x,bb.min.y,bb.min.z],"max":[bb.max.x,bb.max.y,bb.max.z]},"mesh":metrics.map(|m|json!({"vertices":m.metrics.vertices,"triangles":m.metrics.triangles,"surface_area":m.metrics.surface_area,"volume":m.metrics.volume,"centroid":m.metrics.centroid}))}));
+            let curve = crate::entities::curve::entity_curve(entity).map(|planar| {
+                let length = planar.curve.length();
+                json!({
+                    "bounded":length.is_finite(),
+                    "closed":planar.curve.is_closed(),
+                    "length":length.is_finite().then_some(length),
+                    "area":planar.curve.is_closed().then(|| planar.curve.enclosed_area().abs())
+                })
+            });
+            out.push(json!({"handle":format!("{:X}",handle.value()),"type":crate::entities::names::ui_name(entity),"bounds":{"min":[bb.min.x,bb.min.y,bb.min.z],"max":[bb.max.x,bb.max.y,bb.max.z]},"curve":curve,"mesh":metrics.map(|m|json!({"vertices":m.metrics.vertices,"triangles":m.metrics.triangles,"surface_area":m.metrics.surface_area,"volume":m.metrics.volume,"centroid":m.metrics.centroid}))}));
         }
         json!({"ok":true,"document_id":tab.id,"geometry_revision":tab.scene.geometry_epoch,"measurements":out})
     }
@@ -869,17 +994,66 @@ impl OpenCADStudio {
     ) {
         let result = (|| -> Result<Value, String> {
             let s = screenshot.ok_or("Renderer did not return an image")?;
-            image::save_buffer_with_format(
-                &path,
-                &s.rgba,
-                s.size.width,
-                s.size.height,
-                image::ColorType::Rgba8,
-                image::ImageFormat::Png,
-            )
-            .map_err(|e| e.to_string())?;
+            let requested_scope = self
+                .control
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.request["scope"].as_str())
+                .unwrap_or("window");
+            let max_dimension = self
+                .control
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.request["max_dimension"].as_u64())
+                .unwrap_or(1600)
+                .clamp(256, 4096) as u32;
+            let mut image =
+                image::RgbaImage::from_raw(s.size.width, s.size.height, s.rgba.to_vec())
+                    .ok_or("Renderer returned malformed image data")?;
+            let mut actual_scope = "window";
+            if requested_scope == "viewport" {
+                if let Some(bounds) = crate::ui::wrap_bar::dropdown_bounds(
+                    crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,
+                ) {
+                    let scale = s.scale_factor;
+                    let left = (bounds.x * scale).floor().clamp(0.0, image.width() as f32) as u32;
+                    let top = (bounds.y * scale).floor().clamp(0.0, image.height() as f32) as u32;
+                    let right = ((bounds.x + bounds.width) * scale)
+                        .ceil()
+                        .clamp(0.0, image.width() as f32) as u32;
+                    let bottom = ((bounds.y + bounds.height) * scale)
+                        .ceil()
+                        .clamp(0.0, image.height() as f32) as u32;
+                    if right > left && bottom > top {
+                        image = image::imageops::crop_imm(
+                            &image,
+                            left,
+                            top,
+                            right - left,
+                            bottom - top,
+                        )
+                        .to_image();
+                        actual_scope = "viewport";
+                    }
+                }
+            }
+            let longest = image.width().max(image.height());
+            if longest > max_dimension {
+                let scale = max_dimension as f64 / longest as f64;
+                let width = ((image.width() as f64 * scale).round() as u32).max(1);
+                let height = ((image.height() as f64 * scale).round() as u32).max(1);
+                image = image::imageops::resize(
+                    &image,
+                    width,
+                    height,
+                    image::imageops::FilterType::Triangle,
+                );
+            }
+            image
+                .save_with_format(&path, image::ImageFormat::Png)
+                .map_err(|e| e.to_string())?;
             Ok(
-                json!({"path":path,"width":s.size.width,"height":s.size.height,"scale_factor":s.scale_factor,"document_id":self.tabs[self.active_tab].id,"revision":self.tabs[self.active_tab].edit_revision,"camera_revision":self.tabs[self.active_tab].scene.camera_generation}),
+                json!({"path":path,"scope":actual_scope,"width":image.width(),"height":image.height(),"scale_factor":s.scale_factor,"document_id":self.tabs[self.active_tab].id,"revision":self.tabs[self.active_tab].edit_revision,"camera_revision":self.tabs[self.active_tab].scene.camera_generation}),
             )
         })();
         match result {
@@ -990,11 +1164,63 @@ mod tests {
             "PLINE 0,0 10,0 10,10 C"
         );
         assert_eq!(detail["command"]["interactive"]["op"], "start");
+        assert_eq!(detail["command"]["category"], "create");
+        assert_eq!(detail["command"]["preconditions"]["document"], true);
         assert_eq!(
             app.control_request(json!({"op":"commands","name":"NOT_A_COMMAND"}))
                 .0["code"],
             "unknown_command"
         );
+    }
+    #[test]
+    fn control_queries_exact_curve_relationships_and_metrics() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE -5,0 5,0"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,-5 0,5"}));
+        request(&mut app, json!({"op":"run","cmd":"CIRCLE 20,0 2"}));
+
+        let lines = app.control_request(json!({"op":"query","type":"Line"})).0;
+        let first = lines["entities"][0]["handle"].as_str().unwrap();
+        let second = lines["entities"][1]["handle"].as_str().unwrap();
+        let intersections = app
+            .control_request(json!({"op":"query","intersections":[first,second]}))
+            .0;
+        assert_eq!(intersections["count"], 1, "{intersections}");
+        assert_eq!(
+            intersections["intersections"][0]["point"],
+            json!([0.0, 0.0])
+        );
+
+        let nearest = app
+            .control_request(json!({"op":"query","near":[20.0,0.0],"limit":1}))
+            .0;
+        assert_eq!(nearest["entities"][0]["type"], "Circle");
+        assert_eq!(nearest["entities"][0]["distance"], 2.0);
+        let circle = nearest["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let contains = app
+            .control_request(json!({"op":"query","contains_point":[20.0,0.0]}))
+            .0;
+        assert_eq!(contains["count"], 1, "{contains}");
+        assert_eq!(contains["entities"][0]["handle"], circle);
+
+        let projected = app
+            .control_request(
+                json!({"op":"query","handle":circle,"detail":"full","fields":["type"]}),
+            )
+            .0;
+        assert_eq!(projected["entities"][0].as_object().unwrap().len(), 2);
+
+        let measured = app
+            .control_request(json!({"op":"measure","handles":[circle]}))
+            .0;
+        let curve = &measured["measurements"][0]["curve"];
+        assert!((curve["length"].as_f64().unwrap() - std::f64::consts::TAU * 2.0).abs() < 1e-9);
+        assert!((curve["area"].as_f64().unwrap() - std::f64::consts::PI * 4.0).abs() < 1e-9);
     }
     #[test]
     fn control_retry_is_idempotent_and_stale_state_rejected() {

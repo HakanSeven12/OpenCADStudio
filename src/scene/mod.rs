@@ -1495,6 +1495,9 @@ pub enum ViewportRefreshScope {
     All,
 }
 
+/// `(geometry_epoch, entities per block, entities no block claims)`.
+type BlockMembers = (u64, HashMap<Handle, Vec<Handle>>, Vec<Handle>);
+
 pub struct Scene {
     pub camera: Rc<RefCell<Camera>>,
     /// View saved immediately before the latest navigation operation. ZOOM
@@ -1833,6 +1836,18 @@ pub struct Scene {
     /// Reverse map: entity_handle → block_record_handle, built from entity_handles lists.
     /// Keyed by geometry_epoch. Eliminates the O(B) fallback scan in belongs_to_visible_block.
     entity_block_map_cache: RefCell<Option<(u64, HashMap<Handle, Handle>)>>,
+    /// Candidate entities per block, keyed by `geometry_epoch`.
+    ///
+    /// Selecting a block's contents used to walk every entity in the document
+    /// and ask `belongs_to_visible_block` about each: 313 ms of a 334 ms
+    /// resident build for a paper sheet holding 43 entities, on a drawing with
+    /// 1.17 M. The membership rules only depend on owner handles and the block
+    /// records, so one pass answers them for every block at once.
+    ///
+    /// The second field holds entities no block claims, which
+    /// `belongs_to_visible_block` treats as belonging to everything — but only
+    /// when no block record enumerates its contents at all.
+    block_members_cache: RefCell<Option<BlockMembers>>,
     /// Distinct entity type names present in a layout, keyed by
     /// (geometry_epoch, layout block). The status bar asks for this on every
     /// frame to populate the selection-filter menu, but the answer only
@@ -2077,6 +2092,7 @@ impl Scene {
             annotation_affects_wires: std::cell::Cell::new(None),
             model_extents_cache: RefCell::new(None),
             entity_block_map_cache: RefCell::new(None),
+            block_members_cache: RefCell::new(None),
             layout_type_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
             associative_hatch_source_cache: RefCell::new(None),
@@ -8929,11 +8945,36 @@ impl Scene {
                 }
             }
             out
-        } else {
+        } else if block_handle.is_null() || self.entity_block_map().is_empty() {
+            // Either every entity qualifies, or the drawing declares no block
+            // contents anywhere and `belongs_to_visible_block` turns permissive
+            // — the legacy-DXF case. Both need the full walk, and both must
+            // keep document order, which is draw order for the wire pass.
             self.document
                 .entities()
                 .filter(|e| visibility_ok(e))
                 .collect()
+        } else {
+            // Ask the per-epoch membership index for this block's candidates
+            // instead of testing every entity in the document. For a paper
+            // sheet holding 43 entities in a 1.17 M-entity drawing that is the
+            // difference between 313 ms and nothing measurable.
+            //
+            // The index is filled by walking `document.entities()`, so each
+            // block's list is already in document order and the wires come out
+            // in exactly the order the full scan produced.
+            let members = self.block_members();
+            let (_, by_block, _) = &*members;
+            let claimed = by_block.get(&block_handle).map(Vec::as_slice).unwrap_or(&[]);
+            let mut out: Vec<&EntityType> = Vec::with_capacity(claimed.len());
+            for &handle in claimed {
+                if let Some(entity) = self.document.get_entity(handle) {
+                    if visibility_ok(entity) {
+                        out.push(entity);
+                    }
+                }
+            }
+            out
         };
 
         let visible_ms = crate::perf::elapsed_ms(t_visible);
@@ -9182,6 +9223,48 @@ entities={} memo_hit={} memo_miss={} wires={} memo={}",
     }
 
     /// Decide whether an entity should be drawn as direct content of `block_handle`.
+    /// Entities each block may contain, and the ones no block claims.
+    ///
+    /// Mirrors `belongs_to_visible_block` exactly, resolved once per
+    /// `geometry_epoch` for every block instead of per entity per query:
+    ///
+    ///   * a non-null owner *is* the block, so the entity is that block's;
+    ///   * a null owner falls back to the reverse map built from the block
+    ///     records' `entity_handles`;
+    ///   * an entity neither names nor is named by any block is "unowned", and
+    ///     counts towards every block only when no block record enumerates its
+    ///     contents at all — the legacy-DXF case that predicate allows.
+    fn block_members(&self) -> std::cell::Ref<'_, BlockMembers> {
+        {
+            let cache = self.block_members_cache.borrow();
+            if cache.as_ref().is_some_and(|(epoch, _, _)| *epoch == self.geometry_epoch) {
+                drop(cache);
+                return std::cell::Ref::map(self.block_members_cache.borrow(), |c| {
+                    c.as_ref().unwrap()
+                });
+            }
+        }
+        let mut members: HashMap<Handle, Vec<Handle>> = HashMap::default();
+        let mut unowned: Vec<Handle> = Vec::new();
+        {
+            let map = self.entity_block_map();
+            for entity in self.document.entities() {
+                let common = entity.common();
+                let owner = common.owner_handle;
+                if !owner.is_null() {
+                    members.entry(owner).or_default().push(common.handle);
+                } else if let Some(&block) = map.get(&common.handle) {
+                    members.entry(block).or_default().push(common.handle);
+                } else {
+                    unowned.push(common.handle);
+                }
+            }
+        }
+        *self.block_members_cache.borrow_mut() =
+            Some((self.geometry_epoch, members, unowned));
+        std::cell::Ref::map(self.block_members_cache.borrow(), |c| c.as_ref().unwrap())
+    }
+
     fn belongs_to_visible_block(
         &self,
         entity_handle: Handle,
@@ -10397,6 +10480,58 @@ mod journal_tests {
 
     // Differential oracle: the incrementally-patched entity index must always
     // equal a from-scratch rebuild after any add / move / erase.
+    #[test]
+    fn block_member_index_matches_the_full_scan() {
+        use acadrust::entities::Line;
+        use acadrust::types::Vector3;
+
+        fn line(a: (f64, f64), b: (f64, f64)) -> EntityType {
+            EntityType::Line(Line::from_points(
+                Vector3::new(a.0, a.1, 0.0),
+                Vector3::new(b.0, b.1, 0.0),
+            ))
+        }
+
+        // What the membership index reports for `block`, in order.
+        fn indexed(s: &Scene, block: Handle) -> Vec<Handle> {
+            let members = s.block_members();
+            let (_, by_block, _) = &*members;
+            by_block.get(&block).cloned().unwrap_or_default()
+        }
+
+        // What testing every entity the old way reports, in document order.
+        fn scanned(s: &Scene, block: Handle) -> Vec<Handle> {
+            s.document
+                .entities()
+                .filter(|entity| {
+                    let common = entity.common();
+                    s.belongs_to_visible_block(common.handle, common.owner_handle, block)
+                })
+                .map(|entity| entity.common().handle)
+                .collect()
+        }
+
+        let mut s = Scene::new();
+        let block = s.model_space_block_handle();
+        let h1 = s.add_entity(line((0.0, 0.0), (10.0, 10.0)));
+        let h2 = s.add_entity(line((5.0, 5.0), (20.0, 3.0)));
+        let _ = (h1, h2);
+
+        // Order matters: it is the wire pass's draw order.
+        assert_eq!(indexed(&s, block), scanned(&s, block), "after adds");
+
+        let h3 = s.add_entity(line((100.0, 100.0), (140.0, 90.0)));
+        assert_eq!(indexed(&s, block), scanned(&s, block), "after another add");
+
+        // A modify must not reorder the block's contents either.
+        {
+            let mut moved = line((900.0, 900.0), (950.0, 970.0));
+            moved.common_mut().handle = h3;
+            s.update_entity(moved);
+        }
+        assert_eq!(indexed(&s, block), scanned(&s, block), "after modify");
+    }
+
     #[test]
     fn entity_index_incremental_matches_full_rebuild() {
         use acadrust::entities::Line;

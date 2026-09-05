@@ -2340,6 +2340,29 @@ impl Pipeline {
     /// copy across every slot that renders that content (see
     /// `MultiPipeline::wire_buffer_cache`). Takes `&self` (reads only the const
     /// bind-group layout) so the shared cache — not the slot — owns the result.
+    /// Batches for the instanced (block-reference) wires alone.
+    ///
+    /// The arena serves the non-instanced wires and patches them in place;
+    /// block references are a different batch type and still rebuild, but
+    /// their geometry is cached by `source_id`, so that is cheap.
+    pub fn upload_block_wires(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[&WireModel],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+    ) -> Vec<BlockWireGpu> {
+        BlockWireGpu::from_wires(
+            device,
+            queue,
+            wires,
+            depth_map,
+            None,
+            &self.block_wire_const_bgl,
+            Some(&mut self.block_geometry),
+        )
+    }
+
     pub fn build_wire_buffers(
         &mut self,
         device: &wgpu::Device,

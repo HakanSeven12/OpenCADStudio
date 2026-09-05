@@ -655,7 +655,14 @@ impl shader::Primitive for Primitive {
                         || ((vp.wire_patch.is_some()
                             || inner.wire_arena_id != u64::MAX)
                             && packed_arena_owner))
-                    && !vp_wires.iter().any(|wire| wire.render_instance.is_some());
+                    ;
+                // Instanced wires used to disable the arena outright, and with
+                // it incremental patching: one block reference in the drawing
+                // meant every edit re-uploaded every wire, ~96 ms of the
+                // ~122 ms a click cost. They are simply a different batch type
+                // with their own pipeline, so the arena takes the rest and
+                // `BlockWireGpu` keeps them -- cheaply now that its geometry is
+                // cached by `source_id`.
                 if use_wire_arena {
                     use crate::scene::pipeline::wire_arena::{
                         self, PersistentWireArena as WireArena,
@@ -767,12 +774,16 @@ impl shader::Primitive for Primitive {
                             .iter()
                             .filter(|w| {
                                 !w.points.is_empty()
+                                    && w.render_instance.is_none()
                                     && !wire_arena::is_mesh_edge(w, &mesh_names)
                             })
                             .collect();
                         let mesh: Vec<&crate::scene::WireModel> = vp_wires
                             .iter()
-                            .filter(|w| wire_arena::is_mesh_edge(w, &mesh_names))
+                            .filter(|w| {
+                                w.render_instance.is_none()
+                                    && wire_arena::is_mesh_edge(w, &mesh_names)
+                            })
                             .collect();
                         if !reg_ok {
                             inner.wire_arena = WireArena::build(
@@ -874,7 +885,23 @@ impl shader::Primitive for Primitive {
                             gpus.extend(arena.wire_gpus());
                         }
                         inner.gpu_wires = std::sync::Arc::new(gpus);
-                        inner.gpu_block_wires = std::sync::Arc::new(Vec::new());
+                        // The arena holds only the non-instanced wires;
+                        // block references keep their own batch type. Their
+                        // geometry is cached by `source_id`, so rebuilding them
+                        // here is cheap against the ~96 ms of regular wires the
+                        // arena now patches instead of re-uploading.
+                        let instanced: Vec<&crate::scene::WireModel> = vp_wires
+                            .iter()
+                            .filter(|w| w.render_instance.is_some())
+                            .collect();
+                        inner.gpu_block_wires = std::sync::Arc::new(
+                            inner.upload_block_wires(
+                                device,
+                                queue,
+                                &instanced,
+                                &draw_depths,
+                            ),
+                        );
                         if _patched {
                             wire_arena::patch_handle_index(
                                 &mut inner.wire_handle_index,

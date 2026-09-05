@@ -1,13 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Intersect">
-  <g fill="#A9BFCE" fill-opacity=".12" stroke="#B4B6B9" stroke-opacity=".65" stroke-width="1" stroke-linejoin="round">
-    <path d="M3 15 11 10 20 15V25L12 30 3 25Z"/>
-    <path d="m3 15 9 5 8-5m-8 5v10" fill="none"/>
-    <path d="M13 6 21 2 30 7V18L22 23 13 18Z"/>
-    <path d="m13 6 9 5 8-4m-8 4v12" fill="none"/>
+  <g fill="none" stroke="#B4B6B9" stroke-opacity=".55" stroke-width="1" stroke-linejoin="round">
+    <path d="M3 12 11 8 23 14V23L15 27 3 21Z"/>
+    <path d="m3 12 12 6 8-4m-8 4v9"/>
+    <path d="M9 12 17 8 29 14V23L21 27 9 21Z"/>
+    <path d="m9 12 12 6 8-4m-8 4v9"/>
   </g>
   <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
-    <path d="M13 14 17 12 22 15 18 17Z" fill="#6DB7ED"/>
-    <path d="M13 14 18 17V23L13 20Z" fill="#6DB7ED"/>
-    <path d="M18 17 22 15V21L18 23Z" fill="#1565C0"/>
+    <path d="M9 12 18 16.5V25.5L9 21Z" fill="#6DB7ED"/>
+    <path d="M18 16.5 23 14V23L18 25.5Z" fill="#1565C0"/>
+    <path d="M9 12 14 9.5 23 14 18 16.5Z" fill="#6DB7ED"/>
   </g>
+  <path d="m10 12 8 4 4-2" fill="none" stroke="#F4F8FC" stroke-width=".8" stroke-opacity=".65"/>
 </svg>

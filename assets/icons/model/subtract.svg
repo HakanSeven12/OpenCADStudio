@@ -1,12 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Subtract">
   <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
-    <path d="M3 14 12 9 25 15 16 20Z" fill="#6DB7ED"/>
-    <path d="M3 14 16 20V29L3 23Z" fill="#6DB7ED"/>
-    <path d="M16 20 25 15V24L16 29Z" fill="#718C9E"/>
-    <path d="M10 17V22L16 25 21 22V17L16 20Z" fill="#526B80"/>
-    <path d="M14 6 21 2 29 6 22 10Z" fill="#DCE7F0"/>
-    <path d="M14 6 22 10V17L14 13Z" fill="#A9BFCE"/>
-    <path d="M22 10 29 6V13L22 17Z" fill="#718C9E"/>
+    <path d="M10 16 16 13V17L10 20Z" fill="#1565C0"/>
+    <path d="M16 13 22 16V20L16 17Z" fill="#6DB7ED"/>
+    <path d="M10 20 16 17 22 20 16 23Z" fill="#6DB7ED"/>
+    <path d="M4 13 10 16V20L16 23V27L4 21Z" fill="#6DB7ED"/>
+    <path d="M16 23 22 20V16L28 13V21L16 27Z" fill="#1565C0"/>
+    <path d="M4 13 16 7 28 13 22 16 16 13 10 16Z" fill="#6DB7ED"/>
   </g>
-  <path d="M25 25h5" stroke="#6DB7ED" stroke-width="2" stroke-linecap="round"/>
+  <path d="m5 13 5 2.5 6-3 6 3 5-2.5" fill="none" stroke="#F4F8FC" stroke-width=".8" stroke-opacity=".65"/>
 </svg>

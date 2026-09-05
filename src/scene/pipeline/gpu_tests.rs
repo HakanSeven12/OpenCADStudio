@@ -30,19 +30,20 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     let depth = rustc_hash::FxHashMap::from_iter([(1, [0.1, 0.01]), (2, [0.2, 0.01])]);
     let original = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
     let unchanged = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
-    assert_eq!(original[0].vertex_buffer, unchanged[0].vertex_buffer);
+    assert_eq!(original[0].geometry_id(), unchanged[0].geometry_id());
     assert_eq!(original[0].instance_count, 2);
 
     let removed = pipeline.upload_block_wires(&device, &queue, &[&second], &depth);
     assert_ne!(
-        original[0].vertex_buffer, removed[0].vertex_buffer,
+        original[0].geometry_id(),
+        removed[0].geometry_id(),
         "removing the base instance must replace vertices baked at its old position"
     );
     let moved = block(2, 30.0);
     let moved_gpu = pipeline.upload_block_wires(&device, &queue, &[&moved], &depth);
-    assert_ne!(removed[0].vertex_buffer, moved_gpu[0].vertex_buffer);
+    assert_ne!(removed[0].geometry_id(), moved_gpu[0].geometry_id());
     let restored = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
-    assert_ne!(moved_gpu[0].vertex_buffer, restored[0].vertex_buffer);
+    assert_ne!(moved_gpu[0].geometry_id(), restored[0].geometry_id());
     assert_eq!(restored[0].instance_count, 2);
     assert_eq!(
         pipeline.block_geometry.len(),

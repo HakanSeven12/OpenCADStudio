@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Wedge">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M4 11 14 5 28 21 18 27Z" fill="#DCE7F0"/>
+    <path d="M4 11 18 27 4 23Z" fill="#A9BFCE"/>
+  </g>
+  <path d="m5 11 13 15" stroke="#F4F8FC" stroke-width="1"/>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Sweep">
+  <defs><linearGradient id="body" x2="1" y2="1"><stop stop-color="#DCE7F0"/><stop offset=".55" stop-color="#A9BFCE"/><stop offset="1" stop-color="#718C9E"/></linearGradient></defs>
+  <path d="M5 24C5 10 12 5 25 5V13C17 13 13 17 13 24Z" fill="url(#body)" stroke="#526B80" stroke-width="1.1"/>
+  <path d="M9 24C9 12 15 9 25 9" fill="none" stroke="#F4F8FC" stroke-width="1.2"/>
+  <ellipse cx="25" cy="9" rx="2.5" ry="4" fill="#718C9E" stroke="#526B80" stroke-width="1.1"/>
+  <ellipse cx="9" cy="24" rx="4" ry="2.7" fill="#6DB7ED" stroke="#526B80" stroke-width="1.1"/>
+  <path d="M17 26c0-7 4-9 11-9m-3-3 3 3-3 3" fill="none" stroke="#6DB7ED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

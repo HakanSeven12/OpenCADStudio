@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Pyramid">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M15 3 3 22 16 28Z" fill="#DCE7F0"/>
+    <path d="M15 3 16 28 29 21Z" fill="#A9BFCE"/>
+    <path d="M15 3 29 21 24 12Z" fill="#718C9E"/>
+  </g>
+  <path d="m15 4 1 23" stroke="#F4F8FC" stroke-width="1"/>
+</svg>

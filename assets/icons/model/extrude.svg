@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Extrude">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M4 13 13 8 23 13 14 18Z" fill="#6DB7ED"/>
+    <path d="M4 13 14 18V28L4 23Z" fill="#A9BFCE"/>
+    <path d="M14 18 23 13V23L14 28Z" fill="#718C9E"/>
+  </g>
+  <path d="m4 23 10 5 9-5" fill="none" stroke="#6DB7ED" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M26 13V3m-3 3 3-3 3 3" fill="none" stroke="#6DB7ED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Subtract">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M3 14 12 9 25 15 16 20Z" fill="#6DB7ED"/>
+    <path d="M3 14 16 20V29L3 23Z" fill="#6DB7ED"/>
+    <path d="M16 20 25 15V24L16 29Z" fill="#718C9E"/>
+    <path d="M10 17V22L16 25 21 22V17L16 20Z" fill="#526B80"/>
+    <path d="M14 6 21 2 29 6 22 10Z" fill="#DCE7F0"/>
+    <path d="M14 6 22 10V17L14 13Z" fill="#A9BFCE"/>
+    <path d="M22 10 29 6V13L22 17Z" fill="#718C9E"/>
+  </g>
+  <path d="M25 25h5" stroke="#6DB7ED" stroke-width="2" stroke-linecap="round"/>
+</svg>

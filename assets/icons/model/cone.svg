@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Cone">
+  <defs><linearGradient id="body"><stop stop-color="#DCE7F0"/><stop offset=".5" stop-color="#C5D5E1"/><stop offset="1" stop-color="#718C9E"/></linearGradient></defs>
+  <path d="M16 3 4.5 23C4.5 29 27.5 29 27.5 23Z" fill="url(#body)" stroke="#526B80" stroke-width="1.1" stroke-linejoin="round"/>
+  <path d="M16 4C17 12 20 21 22 26" fill="none" stroke="#526B80" stroke-opacity=".35" stroke-width="1"/>
+  <path d="M6 24Q14 28 23 25.5" fill="none" stroke="#F4F8FC" stroke-width="1"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Solid chamfer">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M5 12 14 6H21L28 13V21L19 27H5Z" fill="#DCE7F0"/>
+    <path d="M19 19 28 13V21L19 27Z" fill="#718C9E"/>
+    <path d="M5 12H12L19 19V27H5Z" fill="#A9BFCE"/>
+    <path d="M12 12 21 6 28 13 19 19Z" fill="#6DB7ED"/>
+  </g>
+  <path d="m12 12 7 7" fill="none" stroke="#F4F8FC" stroke-width="1.2"/>
+</svg>

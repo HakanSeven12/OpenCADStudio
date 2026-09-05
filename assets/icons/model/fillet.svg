@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Solid fillet">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M5 12 14 6H21Q28 6 28 13V21L19 27H5Z" fill="#DCE7F0"/>
+    <path d="M19 19 28 13V21L19 27Z" fill="#718C9E"/>
+    <path d="M5 12H12Q19 12 19 19V27H5Z" fill="#A9BFCE"/>
+    <path d="M12 12 21 6Q28 6 28 13L19 19Q19 12 12 12Z" fill="#6DB7ED"/>
+  </g>
+  <path d="M12 12Q19 12 19 19" fill="none" stroke="#F4F8FC" stroke-width="1.2"/>
+</svg>

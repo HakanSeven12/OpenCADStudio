@@ -62,13 +62,11 @@ fixed = { primitive = "Wedge" }
 name = "extrude"
 args = [{ name = "profile", ty = "EntityRef" }, { name = "direction", ty = "[f64; 3]" }]
 op = "Extrude"
-status = "unsupported"
 
 [[family.constructor]]
 name = "revolve"
 args = [{ name = "profile", ty = "EntityRef" }, { name = "pivot", ty = "[f64; 3]" }, { name = "axis", ty = "[f64; 3]" }, { name = "angle", ty = "f64" }]
 op = "Revolve"
-status = "unsupported"
 
 [[family.method]]
 name = "intersect"
@@ -158,7 +156,6 @@ kind = "op"
 op = "AddVertex"
 args = [{ name = "at", ty = "usize" }, { name = "point", ty = "[f64; 3]" }]
 returns = "()"
-status = "unsupported"
 
 [[family]]
 name = "Point"
@@ -179,6 +176,66 @@ op = "CreateMany"
 fixed = { curve = "Point" }
 bulk = true
 returns = "Vec<Point>"
+
+[[family]]
+name = "Arc"
+acadrust_variant = "Arc"
+handle = "ArcCurve"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_arc"
+args = [{ name = "centre", ty = "[f64; 3]" }, { name = "radius", ty = "f64" }, { name = "start_angle", ty = "f64" }, { name = "end_angle", ty = "f64" }]
+op = "CreateCurve"
+fixed = { curve = "Arc" }
+
+[[family]]
+name = "Ellipse"
+acadrust_variant = "Ellipse"
+handle = "Ellipse"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_ellipse"
+args = [{ name = "centre", ty = "[f64; 3]" }, { name = "major_axis", ty = "[f64; 3]" }, { name = "ratio", ty = "f64" }, { name = "start", ty = "f64" }, { name = "end", ty = "f64" }]
+op = "CreateCurve"
+fixed = { curve = "Ellipse" }
+
+[[family]]
+name = "Spline"
+acadrust_variant = "Spline"
+handle = "Spline"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_spline"
+args = [{ name = "degree", ty = "i32" }, { name = "control_points", ty = "&[[f64; 3]]" }, { name = "knots", ty = "&[f64]" }, { name = "weights", ty = "&[f64]" }]
+op = "CreateCurve"
+fixed = { curve = "Spline" }
+
+[[family]]
+name = "Ray"
+acadrust_variant = "Ray"
+handle = "Ray"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_ray"
+args = [{ name = "origin", ty = "[f64; 3]" }, { name = "direction", ty = "[f64; 3]" }]
+op = "CreateCurve"
+fixed = { curve = "Ray" }
+
+[[family]]
+name = "XLine"
+acadrust_variant = "XLine"
+handle = "XLine"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_xline"
+args = [{ name = "origin", ty = "[f64; 3]" }, { name = "direction", ty = "[f64; 3]" }]
+op = "CreateCurve"
+fixed = { curve = "XLine" }
 
 # ============================================================================
 # Cross-cutting ops (generic handles + bulk) — documented in build.rs

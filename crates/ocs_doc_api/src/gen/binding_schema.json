@@ -152,6 +152,41 @@
       "handle": "Point",
       "methods": [],
       "name": "Point"
+    },
+    {
+      "acadrust_variant": "Arc",
+      "collection": "curves",
+      "handle": "ArcCurve",
+      "methods": [],
+      "name": "Arc"
+    },
+    {
+      "acadrust_variant": "Ellipse",
+      "collection": "curves",
+      "handle": "Ellipse",
+      "methods": [],
+      "name": "Ellipse"
+    },
+    {
+      "acadrust_variant": "Spline",
+      "collection": "curves",
+      "handle": "Spline",
+      "methods": [],
+      "name": "Spline"
+    },
+    {
+      "acadrust_variant": "Ray",
+      "collection": "curves",
+      "handle": "Ray",
+      "methods": [],
+      "name": "Ray"
+    },
+    {
+      "acadrust_variant": "XLine",
+      "collection": "curves",
+      "handle": "XLine",
+      "methods": [],
+      "name": "XLine"
     }
   ],
   "layouts": {

@@ -11,8 +11,9 @@ content).
 | Capability | Method / op | Notes |
 |---|---|---|
 | Primitives | `create_cuboid` / `create_sphere` / `create_cylinder` / `create_cone` / `create_torus` / `create_wedge` | `CreateSolid(SolidPrimitive)` → `brep::make::*` |
+| Sweep | `extrude(profile, dir)` / `revolve(profile, pivot, axis, angle)` | `Extrude`/`Revolve` → `brep::extrude`/`brep::revolve`; profile = Line/Circle/Arc/LwPolyline |
 | Booleans | `intersect` / `union` / `subtract` | `SolidBoolean{op, a, b, erase_sources:true}` → `brep::combine` |
-| Transform | `transform(placement)` (in-place) | `Transform{id, placement}` → `brep::transform`; solids only |
+| Transform | `transform(placement)` (in-place) | `Transform{id, placement}` → `brep::transform`; solids |
 | Bounds | `bounds()` | `GetBounds` → `brep::body_bounds` (lift-on-miss) |
 | Volume | `volume()` | `GetVolume` → `meshes.metrics` cache, mesh-divergence fallback |
 | Centroid | `centroid()` | `GetCentroid` → `meshes.metrics` cache, mesh-divergence fallback |
@@ -21,17 +22,19 @@ content).
 ### Minimal 2D (phase-1 set, used as profiles/inputs)
 | Capability | Method / op | Notes |
 |---|---|---|
-| Line | `create_line` → bounds | `CreateCurve(Line)` |
-| Circle | `create_circle` → bounds | `CreateCurve(Circle)` |
-| Polyline | `create_polyline` → bounds | `CreateCurve(Polyline)` |
-| Point | `create_point` / `create_points` (bulk) | `CreateCurve(Point)` / `CreateMany` |
+| Line | `create_line` → bounds, transform | `CreateCurve(Line)` |
+| Circle | `create_circle` → bounds, transform | `CreateCurve(Circle)` |
+| Arc | (create via host) → transform, profile | usable as sweep profile |
+| Polyline | `create_polyline` → bounds, transform, `add_vertex` | `CreateCurve(Polyline)`; `AddVertex` inserts a vertex |
+| Point | `create_point` / `create_points` (bulk) → transform | `CreateCurve(Point)` / `CreateMany` |
+| Transform (2D) | `transform(placement)` / `transform_many` | `Line`/`Circle`/`Arc`/`Point`/`LwPolyline` via acadrust |
 
 ### Cross-cutting
 | Capability | Method | Notes |
 |---|---|---|
 | Lookup / downcast | `entities().get(id)` → `Entity`; `as_solid()` | generic, any family |
 | Bulk create | `create_points(&[..])`, `CreateMany` | all-or-nothing, one undo step |
-| Bulk transform | `transform_many(&ids, placement)` | all-or-nothing, solids only (v1) |
+| Bulk transform | `transform_many(&ids, placement)` | all-or-nothing, solids + 2D families |
 | Bulk delete | `delete_many(&ids)` | all-or-nothing; `OpGroup::compensate` uses it |
 | Read batch | `query_batch(\|q\| …)` | read-only, one round-trip, no bump |
 | Revision guard | `revision()` / `assert_revision(rev)` | read-modify-write guard |
@@ -47,12 +50,15 @@ Phases are **spec-additive**: each is a `[[family]]`/`[[family.method]]` block i
 variants append at enum end.
 
 ### Phase 2 — full 2D + annotations
-- **Entities:** ellipse, spline, xline/ray, arc (typed), text, mtext, dimension,
-  hatch.
-- **Methods:** boundary/vertex actions (`add_vertex` on polyline — currently
-  `Unsupported`), hatch boundary query, text content get/set.
-- **Blocked by:** `AddVertex` backend impl (currently returns `Unsupported`);
-  curve → `geom2d::Curve` conversion for non-trivial curves.
+- **Done (2a):** typed curve families `ArcCurve`/`Ellipse`/`Spline`/`Ray`/`XLine` —
+  `create_arc`/`create_ellipse`/`create_spline`/`create_ray`/`create_xline`, bounds
+  (Arc coarse full-circle, Ellipse major-axis radius, Spline control-point bbox;
+  Ray/XLine unbounded → `Unsupported`), and transform (all five + the phase-1 set)
+  via acadrust. Covered by `phase2_*` tests.
+- **Remaining (2b):** annotations `Text`/`MText` (create + content get/set), `Hatch`
+  (create + boundary query), `Dimension` (typed sub-types).
+- **Unblocked:** `add_vertex` (polyline) and sweep profiles (Line/Circle/Arc/LwPolyline)
+  are supported (Phase 0).
 
 ### Phase 3 — containers
 - **Entities:** insert/block references, attribute definitions/entities.
@@ -75,12 +81,13 @@ variants append at enum end.
 
 | Method | Family | Status | Blocker |
 |---|---|---|---|
-| `extrude(profile, dir)` | Solid | stub | `profile_curves` backend returns `Unsupported`; needs entity → `geom2d::Curve` conversion |
-| `revolve(profile, pivot, axis, angle)` | Solid | stub | same `profile_curves` blocker |
 | `loft(sections)` | Solid | not started | multi-profile kernel op + spec |
-| `add_vertex(at, pt)` | Polyline | stub | backend `add_vertex` returns `Unsupported` |
-| `transform` (non-solid) | 2D entities | `Unsupported` | per-family transform via acadrust (not kernel) |
+| Bulge-arc polyline profiles | Solid sweep | partial | `entity_to_profile_curves` emits straight segments; bulge arcs need arc-segment conversion |
 | `GetCentroid`/`GetVolume` accuracy | Solid | mesh approx | render-mesh LOD tolerance vs query tolerance |
+
+**Completed (Phase 0):** `extrude`, `revolve` (profiles: Line/Circle/Arc/LwPolyline),
+`add_vertex` (polyline), non-solid `transform` + `transform_many` (Line/Circle/Arc/
+Point/LwPolyline). Covered by `phase0_*` tests in `src/app/doc_api.rs`.
 
 ## Design invariants to preserve when extending
 

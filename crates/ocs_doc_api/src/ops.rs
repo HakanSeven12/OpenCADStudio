@@ -34,6 +34,17 @@ pub enum Curve2Spec {
     Circle { centre: [f64; 3], radius: f64 },
     Polyline { points: Vec<[f64; 3]>, closed: bool },
     Point { position: [f64; 3] },
+    /// Circular arc, counter-clockwise from `start_angle` to `end_angle` (radians).
+    Arc { centre: [f64; 3], radius: f64, start_angle: f64, end_angle: f64 },
+    /// Ellipse: `major_axis` is the major-axis endpoint relative to `centre`;
+    /// `ratio` = minor/major. `start`/`end` parameters 0..2π (full ellipse = 0..2π).
+    Ellipse { centre: [f64; 3], major_axis: [f64; 3], ratio: f64, start: f64, end: f64 },
+    /// NURBS spline (control points + knots + weights; `degree` typically 3).
+    Spline { degree: i32, control_points: Vec<[f64; 3]>, knots: Vec<f64>, weights: Vec<f64> },
+    /// A ray from `origin` along `direction` (bounded at origin only).
+    Ray { origin: [f64; 3], direction: [f64; 3] },
+    /// An infinite construction line through `origin` along `direction`.
+    XLine { origin: [f64; 3], direction: [f64; 3] },
 }
 
 /// A generic entity-construction payload used by the bulk op

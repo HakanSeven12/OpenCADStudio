@@ -262,6 +262,11 @@ handle!(Line);
 handle!(Circle);
 handle!(Polyline);
 handle!(Point);
+handle!(ArcCurve);
+handle!(Ellipse);
+handle!(Spline);
+handle!(Ray);
+handle!(XLine);
 
 impl Entity {
     pub fn view(&self) -> ApiResult<EntityView> {
@@ -411,6 +416,31 @@ impl CurveCollection {
     pub fn create_point(&self, position: [f64; 3]) -> ApiResult<Point> {
         let (s, id) = self.create_curve(Curve2Spec::Point { position })?;
         Ok(Point::new(s, id))
+    }
+    pub fn create_arc(&self, centre: [f64; 3], radius: f64, start_angle: f64, end_angle: f64) -> ApiResult<ArcCurve> {
+        let (s, id) = self.create_curve(Curve2Spec::Arc { centre, radius, start_angle, end_angle })?;
+        Ok(ArcCurve::new(s, id))
+    }
+    pub fn create_ellipse(&self, centre: [f64; 3], major_axis: [f64; 3], ratio: f64, start: f64, end: f64) -> ApiResult<Ellipse> {
+        let (s, id) = self.create_curve(Curve2Spec::Ellipse { centre, major_axis, ratio, start, end })?;
+        Ok(Ellipse::new(s, id))
+    }
+    pub fn create_spline(&self, degree: i32, control_points: &[[f64; 3]], knots: &[f64], weights: &[f64]) -> ApiResult<Spline> {
+        let (s, id) = self.create_curve(Curve2Spec::Spline {
+            degree,
+            control_points: control_points.to_vec(),
+            knots: knots.to_vec(),
+            weights: weights.to_vec(),
+        })?;
+        Ok(Spline::new(s, id))
+    }
+    pub fn create_ray(&self, origin: [f64; 3], direction: [f64; 3]) -> ApiResult<Ray> {
+        let (s, id) = self.create_curve(Curve2Spec::Ray { origin, direction })?;
+        Ok(Ray::new(s, id))
+    }
+    pub fn create_xline(&self, origin: [f64; 3], direction: [f64; 3]) -> ApiResult<XLine> {
+        let (s, id) = self.create_curve(Curve2Spec::XLine { origin, direction })?;
+        Ok(XLine::new(s, id))
     }
     /// Bulk-create many points in ONE op (plan §5.3): all-or-nothing, one undo step.
     pub fn create_points(&self, positions: &[[f64; 3]]) -> ApiResult<Vec<Point>> {

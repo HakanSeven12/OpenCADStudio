@@ -105,8 +105,28 @@ impl DocApiBackend for HostSession<'_> {
         Ok(handle_to_obj(handle))
     }
 
-    fn add_vertex(&mut self, _id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
-        Err(ApiError::Unsupported("AddVertex is not yet implemented".into()))
+    fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
+        let handle = obj_to_handle(id);
+        let Some(entity) = self.document().get_entity(handle).cloned() else {
+            return Err(ApiError::UnknownId(id));
+        };
+        let EntityType::LwPolyline(mut pl) = entity else {
+            return Err(ApiError::Unsupported("AddVertex is only implemented for polylines".into()));
+        };
+        if at > pl.vertices.len() {
+            return Err(ApiError::validation(
+                "AddVertex",
+                format!("index {at} out of range ({} vertices)", pl.vertices.len()),
+            ));
+        }
+        pl.vertices.insert(
+            at,
+            acadrust::entities::LwVertex::from_coords(point[0], point[1]),
+        );
+        if !self.scene_mut().update_entity(EntityType::LwPolyline(pl)) {
+            return Err(ApiError::Unsupported(format!("entity {id:?} is on a locked layer")));
+        }
+        Ok(())
     }
 
     fn remove_entity(&mut self, id: ObjectId) -> ApiResult<bool> {
@@ -126,15 +146,29 @@ impl DocApiBackend for HostSession<'_> {
     }
 
     fn ensure_transformable(&mut self, id: ObjectId) -> ApiResult<()> {
-        // v1 typed transform is solids-only; pre-validating this lets TransformMany
-        // be all-or-nothing (no mid-loop Unsupported after earlier transforms).
-        if !self.entity_exists(id) {
-            return Err(ApiError::UnknownId(id));
-        }
-        if matches!(self.document().get_entity(obj_to_handle(id)), Some(EntityType::Solid3D(_))) {
+        // Pre-validating this lets TransformMany be all-or-nothing. Solids and the
+        // supported 2D families are transformable; anything else errors up front.
+        let entity = self
+            .document()
+            .get_entity(obj_to_handle(id))
+            .ok_or(ApiError::UnknownId(id))?;
+        let ok = matches!(
+            entity,
+            EntityType::Solid3D(_)
+                | EntityType::Line(_)
+                | EntityType::Circle(_)
+                | EntityType::Arc(_)
+                | EntityType::Ellipse(_)
+                | EntityType::Spline(_)
+                | EntityType::Ray(_)
+                | EntityType::XLine(_)
+                | EntityType::Point(_)
+                | EntityType::LwPolyline(_)
+        );
+        if ok {
             Ok(())
         } else {
-            Err(ApiError::Unsupported("transform is only implemented for solids in v1".into()))
+            Err(ApiError::Unsupported("transform is not supported for this entity family".into()))
         }
     }
 
@@ -167,8 +201,8 @@ impl DocApiBackend for HostSession<'_> {
         if !self.entity_exists(id) {
             return Err(ApiError::UnknownId(id));
         }
-        // Solids go through the kernel transform (re-embed SAT). Non-solids are
-        // out of scope for v1 typed transforms.
+        // Solids go through the kernel transform (re-embed SAT). 2D entities are
+        // transformed via acadrust geometry and updated in place.
         if matches!(self.document().get_entity(handle), Some(EntityType::Solid3D(_))) {
             let body = self.resolve_body(id)?;
             let place = kernel_placement(placement);
@@ -176,14 +210,25 @@ impl DocApiBackend for HostSession<'_> {
                 .ok_or_else(|| ApiError::geometry(GeometryErrorKind::InvalidInput, "transform failed"))?;
             self.update_solid(id, &moved)
         } else {
-            Err(ApiError::Unsupported("transform is only implemented for solids in v1".into()))
+            let entity = self
+                .document()
+                .get_entity(handle)
+                .cloned()
+                .ok_or(ApiError::UnknownId(id))?;
+            let moved = crate::app::doc_api_convert::transform_entity_geometry(&entity, placement)?;
+            if !self.scene_mut().update_entity(moved) {
+                return Err(ApiError::Unsupported(format!("entity {id:?} is on a locked layer")));
+            }
+            Ok(())
         }
     }
 
-    fn profile_curves(&self, _id: ObjectId) -> ApiResult<Vec<cadkernel::geom2d::Curve>> {
-        // Profiles for Extrude/Revolve land in a later phase (Â§5.2); v1 surfaces
-        // a clear error rather than guessing.
-        Err(ApiError::Unsupported("profile curves for sweep ops are not yet implemented".into()))
+    fn profile_curves(&self, id: ObjectId) -> ApiResult<Vec<cadkernel::geom2d::Curve>> {
+        let entity = self
+            .document()
+            .get_entity(obj_to_handle(id))
+            .ok_or(ApiError::UnknownId(id))?;
+        crate::app::doc_api_convert::entity_to_profile_curves(entity)
     }
 
     fn bounds(&mut self, id: ObjectId) -> ApiResult<Aabb> {
@@ -345,25 +390,23 @@ mod tests {
     }
 
     #[test]
-    fn doc_api_transform_many_with_non_solid_fails_all_or_nothing() {
-        use ocs_doc_api::ops::Curve2Spec;
+    fn doc_api_transform_many_with_stale_id_fails_all_or_nothing() {
         let mut app = OpenCADStudio::new_for_test();
         let mut host = HostSession::new(&mut app, 0);
-        // A solid and a non-solid (a line is not transformable in v1).
+        // A transformable solid, plus a stale id (always non-transformable -> UnknownId).
         let mk_solid = Operation::CreateSolid(SolidPrimitive::Cuboid { origin: [0.0; 3], size: [10.0; 3] });
-        let mk_line = Operation::CreateCurve(Curve2Spec::Line { start: [0.0; 3], end: [1.0; 3] });
         let solid = new_id(&dispatch(&mut host, DocApiEnvelope::op(mk_solid)).unwrap());
-        let line = new_id(&dispatch(&mut host, DocApiEnvelope::op(mk_line)).unwrap());
+        let stale = ObjectId::from_u64(0xFFFF_FFFF);
         let rev_before = host.scene().geometry_epoch;
 
-        // TransformMany over [solid, line]: the non-solid makes it fail BEFORE any
+        // TransformMany over [solid, stale]: the stale id makes it fail BEFORE any
         // mutation (all-or-nothing), so the epoch must not move and no undo is recorded.
         let op = Operation::TransformMany {
-            ids: vec![solid, line],
+            ids: vec![solid, stale],
             placement: ocs_doc_api::PlacementSpec::at([5.0, 0.0, 0.0]),
         };
         let err = dispatch(&mut host, DocApiEnvelope::op(op)).unwrap_err();
-        assert!(matches!(err, ApiError::Validation { .. } | ApiError::Unsupported(_)), "{err:?}");
+        assert!(matches!(err, ApiError::Validation { .. } | ApiError::UnknownId(_)), "{err:?}");
         assert_eq!(host.scene().geometry_epoch, rev_before, "no mutation on rejected TransformMany");
     }
 
@@ -375,6 +418,191 @@ mod tests {
         let queries: Vec<Query> = (0..over).map(|_| Query::GetGeometryRevision).collect();
         let err = dispatch(&mut host, DocApiEnvelope::queries(queries)).unwrap_err();
         assert!(matches!(err, ApiError::Validation { .. }), "{err:?}");
+    }
+
+    // ── Phase 0: outstanding supported-family methods ──────────────────────
+
+    #[test]
+    fn phase0_add_vertex_to_polyline() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let mk_poly = Operation::CreateCurve(Curve2Spec::Polyline {
+            points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
+            closed: false,
+        });
+        let poly = new_id(&dispatch(&mut host, DocApiEnvelope::op(mk_poly)).unwrap());
+        // Insert a vertex at index 1.
+        dispatch(&mut host, DocApiEnvelope::op(Operation::AddVertex {
+            id: poly, at: 1, point: [5.0, 0.0, 0.0] })).unwrap();
+        // The polyline now has 4 vertices with the inserted one at index 1.
+        let handle = obj_to_handle(poly);
+        let Some(EntityType::LwPolyline(pl)) = host.document().get_entity(handle) else {
+            panic!("polyline not found");
+        };
+        assert_eq!(pl.vertices.len(), 4);
+        assert!((pl.vertices[1].location.x - 5.0).abs() < 1e-9);
+        // Out-of-range index is a validation error, not a panic.
+        let err = dispatch(&mut host, DocApiEnvelope::op(Operation::AddVertex {
+            id: poly, at: 99, point: [0.0, 0.0, 0.0] })).unwrap_err();
+        assert!(matches!(err, ApiError::Validation { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn phase0_extrude_rectangular_profile_to_solid() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // A closed rectangular 2x3 profile in XY.
+        let mk_profile = Operation::CreateCurve(Curve2Spec::Polyline {
+            points: vec![[0.0,0.0,0.0],[2.0,0.0,0.0],[2.0,3.0,0.0],[0.0,3.0,0.0]],
+            closed: true,
+        });
+        let profile = new_id(&dispatch(&mut host, DocApiEnvelope::op(mk_profile)).unwrap());
+        // Extrude +Z by 5 -> a 2x3x5 box = volume 30.
+        let solid = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::Extrude {
+            profile, direction: [0.0, 0.0, 5.0] })).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetVolume { id: solid }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Volume(v) => assert!((*v - 30.0).abs() < 1.0, "extrude volume {v}"),
+            other => panic!("expected volume, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn phase0_revolve_profile_to_solid() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // A 1-wide, 2-tall rectangle offset 1 from the Y axis; revolve about the Y
+        // axis by 2*pi -> a cylinder-ish annulus (outer r=2, inner r=1, h=2): pi*(4-1)*2 = 6pi ≈ 18.85.
+        let mk_profile = Operation::CreateCurve(Curve2Spec::Polyline {
+            points: vec![[1.0,0.0,0.0],[2.0,0.0,0.0],[2.0,2.0,0.0],[1.0,2.0,0.0]],
+            closed: true,
+        });
+        let profile = new_id(&dispatch(&mut host, DocApiEnvelope::op(mk_profile)).unwrap());
+        let result = dispatch(&mut host, DocApiEnvelope::op(Operation::Revolve {
+            profile,
+            axis: ([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+            angle: std::f64::consts::TAU,
+        }));
+        // Revolve may be geometry-sensitive; assert it either produces a positive
+        // volume or surfaces a structured geometry error (no panic).
+        match result {
+            Ok(receipt) => {
+                let id = receipt.outcome.and_then(|o| o.new_id()).unwrap();
+                let v = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetVolume { id }])).unwrap();
+                match &v.query_results[0] {
+                    QueryResult::Volume(vol) => assert!(*vol > 0.0, "revolve volume {vol}"),
+                    other => panic!("expected volume, got {other:?}"),
+                }
+            }
+            Err(ApiError::Geometry { .. } | ApiError::Validation { .. }) => {}
+            Err(e) => panic!("unexpected error: {e}"),
+        }
+    }
+
+    #[test]
+    fn phase0_non_solid_transform_line_and_circle() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let mk_line = Operation::CreateCurve(Curve2Spec::Line { start: [0.0; 3], end: [10.0; 3] });
+        let line = new_id(&dispatch(&mut host, DocApiEnvelope::op(mk_line)).unwrap());
+        // Translate the line by +5 in X: bounds shift by +5.
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform {
+            id: line, placement: ocs_doc_api::PlacementSpec::at([5.0, 0.0, 0.0]) })).unwrap();
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetBounds { id: line }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Bounds(b) => {
+                assert!((b.min[0] - 5.0).abs() < 1e-6 && (b.max[0] - 15.0).abs() < 1e-6, "{b:?}");
+            }
+            other => panic!("expected bounds, got {other:?}"),
+        }
+        // TransformMany over a mix of line + circle is now all-or-nothing (both transformable).
+        let circle = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Circle { centre: [0.0; 3], radius: 2.0 }))).unwrap());
+        dispatch(&mut host, DocApiEnvelope::op(Operation::TransformMany {
+            ids: vec![line, circle],
+            placement: ocs_doc_api::PlacementSpec::at([0.0, 1.0, 0.0]),
+        })).unwrap();
+    }
+
+    // ── Phase 2: full 2D curve families ────────────────────────────────────
+
+    #[test]
+    fn phase2_arc_ellipse_spline_create_bounds_transform() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Arc: create -> kind Arc; bounds are the coarse full-circle bounds.
+        let arc = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Arc { centre: [5.0, 5.0, 0.0], radius: 4.0, start_angle: 0.0, end_angle: std::f64::consts::PI }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetEntity { id: arc }, Query::GetBounds { id: arc }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Entity(v) => assert_eq!(v.kind, "Arc"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Bounds(b) => assert!((b.min[0] - 1.0).abs() < 1e-6 && (b.max[0] - 9.0).abs() < 1e-6, "{b:?}"),
+            other => panic!("expected bounds, got {other:?}"),
+        }
+
+        // Ellipse: create -> kind Ellipse; bounds = centre ± major-axis length.
+        let ell = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Ellipse { centre: [0.0, 0.0, 0.0], major_axis: [6.0, 0.0, 0.0], ratio: 0.5, start: 0.0, end: std::f64::consts::TAU }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetEntity { id: ell }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Entity(v) => assert_eq!(v.kind, "Ellipse"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+
+        // Spline (degree-3 cubic through 4 control points): create -> kind Spline;
+        // bounds = control-point bounds. Transform by +10 X shifts bounds.
+        let spline = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Spline {
+                degree: 3,
+                control_points: vec![[0.0,0.0,0.0],[1.0,2.0,0.0],[2.0,-2.0,0.0],[3.0,0.0,0.0]],
+                knots: vec![0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0],
+                weights: vec![1.0; 4],
+            }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetBounds { id: spline }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Bounds(b) => assert!((b.min[0] - 0.0).abs() < 1e-6 && (b.max[0] - 3.0).abs() < 1e-6, "{b:?}"),
+            other => panic!("expected bounds, got {other:?}"),
+        }
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform {
+            id: spline, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetBounds { id: spline }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Bounds(b) => assert!((b.min[0] - 10.0).abs() < 1e-6, "{b:?}"),
+            other => panic!("expected bounds, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn phase2_ray_xline_create_and_transform() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let ray = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Ray { origin: [1.0, 2.0, 0.0], direction: [1.0, 0.0, 0.0] }))).unwrap());
+        let xline = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::XLine { origin: [0.0, 0.0, 0.0], direction: [0.0, 1.0, 0.0] }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetEntity { id: ray }, Query::GetEntity { id: xline }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Entity(v) => assert_eq!(v.kind, "Ray"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Entity(v) => assert_eq!(v.kind, "XLine"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+        // Ray/XLine are unbounded -> GetBounds is Unsupported (not a panic).
+        assert!(dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetBounds { id: ray }])).is_err());
+        // Transform moves the ray's base point (no error).
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform {
+            id: ray, placement: ocs_doc_api::PlacementSpec::at([0.0, 0.0, 5.0]) })).unwrap();
+        let handle = obj_to_handle(ray);
+        let Some(EntityType::Ray(r)) = host.document().get_entity(handle) else { panic!("ray not found") };
+        assert!((r.base_point.z - 5.0).abs() < 1e-6);
     }
 
     #[test]

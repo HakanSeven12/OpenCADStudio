@@ -16,8 +16,8 @@ B-rep solid. Host resolves bodies via the solid_models cache (lift-on-miss from 
 - **create_cone**(`base: [f64; 3], radius: f64, height: f64`) -> `Solid`
 - **create_torus**(`centre: [f64; 3], major_radius: f64, minor_radius: f64`) -> `Solid`
 - **create_wedge**(`origin: [f64; 3], size: [f64; 3]`) -> `Solid`
-- **extrude**(`profile: EntityRef, direction: [f64; 3]`) -> `Solid` — **not yet supported** (returns `ApiError::Unsupported`)
-- **revolve**(`profile: EntityRef, pivot: [f64; 3], axis: [f64; 3], angle: f64`) -> `Solid` — **not yet supported** (returns `ApiError::Unsupported`)
+- **extrude**(`profile: EntityRef, direction: [f64; 3]`) -> `Solid`
+- **revolve**(`profile: EntityRef, pivot: [f64; 3], axis: [f64; 3], angle: f64`) -> `Solid`
 
 ### Methods
 
@@ -48,7 +48,7 @@ B-rep solid. Host resolves bodies via the solid_models cache (lift-on-miss from 
 
 ### Methods
 
-- **add_vertex**(`at: usize, point: [f64; 3]`) -> `()` — op `AddVertex` — **not yet supported** (returns `ApiError::Unsupported`)
+- **add_vertex**(`at: usize, point: [f64; 3]`) -> `()` — op `AddVertex`
 
 ## `Point` (acadrust `Point`, collection `curves`)
 
@@ -56,6 +56,36 @@ B-rep solid. Host resolves bodies via the solid_models cache (lift-on-miss from 
 
 - **create_point**(`position: [f64; 3]`) -> `Point`
 - **create_points**(`positions: &[[f64; 3]]`) -> `Vec<Point>` *(bulk op)*
+
+## `ArcCurve` (acadrust `Arc`, collection `curves`)
+
+### Constructors (`doc.curves()`)
+
+- **create_arc**(`centre: [f64; 3], radius: f64, start_angle: f64, end_angle: f64`) -> `ArcCurve`
+
+## `Ellipse` (acadrust `Ellipse`, collection `curves`)
+
+### Constructors (`doc.curves()`)
+
+- **create_ellipse**(`centre: [f64; 3], major_axis: [f64; 3], ratio: f64, start: f64, end: f64`) -> `Ellipse`
+
+## `Spline` (acadrust `Spline`, collection `curves`)
+
+### Constructors (`doc.curves()`)
+
+- **create_spline**(`degree: i32, control_points: &[[f64; 3]], knots: &[f64], weights: &[f64]`) -> `Spline`
+
+## `Ray` (acadrust `Ray`, collection `curves`)
+
+### Constructors (`doc.curves()`)
+
+- **create_ray**(`origin: [f64; 3], direction: [f64; 3]`) -> `Ray`
+
+## `XLine` (acadrust `XLine`, collection `curves`)
+
+### Constructors (`doc.curves()`)
+
+- **create_xline**(`origin: [f64; 3], direction: [f64; 3]`) -> `XLine`
 
 ## Generic methods (every handle)
 

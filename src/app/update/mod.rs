@@ -3045,6 +3045,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::LayoutSettled => {
+                // The notice frame has been presented, so the compositor has
+                // had its answer. Let the next frame build the real thing.
+                self.layout_settling = false;
+                Task::none()
+            }
             Message::GripDwellTick => {
                 let i = self.active_tab;
                 // Reuse the move-time logic — `p` is the last cursor

@@ -272,7 +272,33 @@ impl OpenCADStudio {
         // viewport draws the layout's own geometry (white sheet + entities +
         // borders) and the floating content viewports blit on top.
         mark("viewport_3d");
-        let viewport_3d: Element<'_, Message> = if tab.is_start {
+        let viewport_3d: Element<'_, Message> = if self.layout_settling && !tab.is_start {
+            // One cheap frame between the switch and the rebuild. No shader
+            // widget means no scene primitive, so `prepare` has nothing to do
+            // and the event loop turns — which is what stops the compositor
+            // deciding the application has stopped responding.
+            let bg = crosshair_background(tab, is_paper);
+            let lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
+            let ink = if lum > 0.5 {
+                Color::from_rgba(0.0, 0.0, 0.0, 0.55)
+            } else {
+                Color::from_rgba(1.0, 1.0, 1.0, 0.55)
+            };
+            container(
+                text(crate::tr!("viewport", "preparing-layout"))
+                    .size(15)
+                    .color(ink),
+            )
+            .width(Fill)
+            .height(Fill)
+            .center_x(Fill)
+            .center_y(Fill)
+            .style(move |_| container::Style {
+                background: Some(Color::from_rgba(bg[0], bg[1], bg[2], bg[3]).into()),
+                ..container::Style::default()
+            })
+            .into()
+        } else if tab.is_start {
             start_page_view(
                 &self.patrons,
                 &self.videos,
@@ -2253,6 +2279,15 @@ impl OpenCADStudio {
         // the mouse perfectly still — `ViewportMove` alone would never
         // fire again. Auto-stops once the hover clears or the popup is
         // already open.
+        // One frame after a layout switch, then stop. `window::frames` fires
+        // once a frame has actually been presented, which is the guarantee this
+        // needs: the notice is on screen and the compositor has been answered
+        // before the expensive frame starts.
+        let layout_settle = if self.layout_settling {
+            window::frames().map(|_| Message::LayoutSettled)
+        } else {
+            Subscription::none()
+        };
         let grip_dwell = if self.grip_hover.is_some() && self.grip_popup.is_none() {
             window::frames().map(|_| Message::GripDwellTick)
         } else {
@@ -2478,6 +2513,7 @@ impl OpenCADStudio {
             control,
             frames,
             history_tick,
+            layout_settle,
             grip_dwell,
             hover_dwell,
             nav_settle,

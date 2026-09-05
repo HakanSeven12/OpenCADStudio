@@ -1055,6 +1055,15 @@ pub(super) struct OpenCADStudio {
     /// `Some` while a CAD file is loading — drives the modal overlay.
     /// Cleared when the load finishes, errors, or the user cancels.
     pub(super) opening: Option<OpenProgress>,
+    /// Set the moment a layout switch changes `current_layout`, cleared on the
+    /// next presented frame.
+    ///
+    /// The switch itself costs about 10 ms; the frame after it rebuilds the
+    /// whole wire set and can block the main thread for seconds. While this is
+    /// set the viewport is replaced by a notice, so that frame is cheap — which
+    /// gives the compositor an answer, and the user something other than a
+    /// stale window, immediately before the expensive one.
+    pub(super) layout_settling: bool,
     open_job_serial: u64,
     /// Last repair or failed-open report shown in the recovery modal.
     recovery_report: Option<crate::io::recovery::RecoveryReport>,
@@ -2283,6 +2292,9 @@ pub enum Message {
     /// Timer pulse while the cursor is dwelling on a grip; drives the
     /// dwell-to-popup transition without requiring further mouse motion.
     GripDwellTick,
+    /// One frame has been presented since a layout switch; the next may do the
+    /// expensive rebuild.
+    LayoutSettled,
     /// Timer pulse while a rollover hit-test is queued; fires when the
     /// cursor has been still long enough to safely run the pick.
     HoverDwellTick,
@@ -3484,6 +3496,7 @@ impl OpenCADStudio {
             print_all_plot_window_prev: None,
             print_all_plot_setup_prev: None,
             opening: None,
+            layout_settling: false,
             open_job_serial: 0,
             recovery_report: None,
             pending_opens: std::collections::VecDeque::new(),

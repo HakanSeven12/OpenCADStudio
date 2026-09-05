@@ -167,6 +167,7 @@ clipboard =
     .paste-to-original-coordinates = Paste to Original Coordinates
 
 viewport =
+    .preparing-layout = Preparing layout…
     .split-vertical = Split Viewport Vertically
     .split-horizontal = Split Viewport Horizontally
     .move = Move Viewport

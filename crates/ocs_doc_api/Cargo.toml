@@ -1,0 +1,42 @@
+[package]
+name = "ocs_doc_api"
+version = "0.1.0"
+edition = "2021"
+description = "Object-oriented, transport-agnostic CAD entity API for OpenCADStudio plugins and hosts (v2)."
+license = "MIT"
+build = "build.rs"
+
+# Dependency wiring (plan §2 decision #2): pin the SAME cadkernel/acadrust git revs
+# as the host so `Body`/`EntityType` types are ABI-identical.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+bincode = "1.3"
+thiserror = "1"
+
+# acadrust is needed by the core DTOs (ObjectId = acadrust::Handle) and by the
+# executor (EntityType). cadkernel is needed for solid geometry (host feature).
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "5b56571a190e7a17c8f12d36390d2938b0fb72f7", features = ["serde"], optional = true }
+cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "67f2427282d28922d9263e37b0136b6632e929b3", features = ["acis", "offset"], optional = true }
+ocs_plugin_api = { path = "../ocs_plugin_api", optional = true, features = ["host"] }
+
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+[dev-dependencies]
+serde_json = "1"
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "5b56571a190e7a17c8f12d36390d2938b0fb72f7", features = ["serde"] }
+cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "67f2427282d28922d9263e37b0136b6632e929b3", features = ["acis", "offset"] }
+
+[features]
+# default: pure data types + spec (no heavy deps), per plan §14 open Q1.
+default = []
+# host: pull acadrust + cadkernel + the executor/backend trait (in-process side).
+host = ["acadrust", "cadkernel"]
+# ipc: pull ocs_plugin_api for the IPC transport adapter (plugin side).
+ipc = ["acadrust", "ocs_plugin_api"]
+
+[lib]
+name = "ocs_doc_api"
+path = "src/lib.rs"

@@ -1,0 +1,224 @@
+# Curated source of truth for ocs_doc_api codegen (plan §10, decision #6).
+# Maps entity families + their construction ops, geometric actions, and queries
+# to kernel fns / acadrust variants. build.rs regenerates src/gen/* from this;
+# CI fails on drift. New op/query variants append at the END only (bincode
+# discriminant stability).
+#
+# `status` values: "supported" (default), "unsupported" (present but errors),
+# "planned" (roadmap; no callable surface). Generic handle methods
+# (bounds/transform/delete) are documented once in build.rs and apply to every
+# family unless overridden here.
+
+[meta]
+envelope_version = 1
+
+# ============================================================================
+# SOLID FAMILY (phase 1) — B-rep solids via cadkernel
+# ============================================================================
+[[family]]
+name = "Solid"
+acadrust_variant = "Solid3D"
+handle = "Solid"
+collection = "solids"
+description = "B-rep solid. Host resolves bodies via the solid_models cache (lift-on-miss from ACIS SAT)."
+
+[[family.constructor]]
+name = "create_cuboid"
+args = [{ name = "origin", ty = "[f64; 3]" }, { name = "size", ty = "[f64; 3]" }]
+op = "CreateSolid"
+fixed = { primitive = "Cuboid" }
+
+[[family.constructor]]
+name = "create_sphere"
+args = [{ name = "centre", ty = "[f64; 3]" }, { name = "radius", ty = "f64" }]
+op = "CreateSolid"
+fixed = { primitive = "Sphere" }
+
+[[family.constructor]]
+name = "create_cylinder"
+args = [{ name = "base", ty = "[f64; 3]" }, { name = "radius", ty = "f64" }, { name = "height", ty = "f64" }]
+op = "CreateSolid"
+fixed = { primitive = "Cylinder" }
+
+[[family.constructor]]
+name = "create_cone"
+args = [{ name = "base", ty = "[f64; 3]" }, { name = "radius", ty = "f64" }, { name = "height", ty = "f64" }]
+op = "CreateSolid"
+fixed = { primitive = "Cone" }
+
+[[family.constructor]]
+name = "create_torus"
+args = [{ name = "centre", ty = "[f64; 3]" }, { name = "major_radius", ty = "f64" }, { name = "minor_radius", ty = "f64" }]
+op = "CreateSolid"
+fixed = { primitive = "Torus" }
+
+[[family.constructor]]
+name = "create_wedge"
+args = [{ name = "origin", ty = "[f64; 3]" }, { name = "size", ty = "[f64; 3]" }]
+op = "CreateSolid"
+fixed = { primitive = "Wedge" }
+
+[[family.constructor]]
+name = "extrude"
+args = [{ name = "profile", ty = "EntityRef" }, { name = "direction", ty = "[f64; 3]" }]
+op = "Extrude"
+status = "unsupported"
+
+[[family.constructor]]
+name = "revolve"
+args = [{ name = "profile", ty = "EntityRef" }, { name = "pivot", ty = "[f64; 3]" }, { name = "axis", ty = "[f64; 3]" }, { name = "angle", ty = "f64" }]
+op = "Revolve"
+status = "unsupported"
+
+[[family.method]]
+name = "intersect"
+kind = "op"
+op = "SolidBoolean"
+args = [{ name = "other", ty = "Solid" }]
+returns = "Solid"
+fixed = { op = "Intersection", erase_sources = true }
+
+[[family.method]]
+name = "union"
+kind = "op"
+op = "SolidBoolean"
+args = [{ name = "other", ty = "Solid" }]
+returns = "Solid"
+fixed = { op = "Union", erase_sources = true }
+
+[[family.method]]
+name = "subtract"
+kind = "op"
+op = "SolidBoolean"
+args = [{ name = "other", ty = "Solid" }]
+returns = "Solid"
+fixed = { op = "Difference", erase_sources = true }
+
+[[family.method]]
+name = "volume"
+kind = "query"
+query = "GetVolume"
+returns = "f64"
+
+[[family.method]]
+name = "centroid"
+kind = "query"
+query = "GetCentroid"
+returns = "[f64; 3]"
+
+[[family.method]]
+name = "intersects"
+kind = "query"
+query = "GetIntersects"
+args = [{ name = "other", ty = "Solid" }]
+returns = "bool"
+
+# ============================================================================
+# CURVE FAMILY (phase 1, minimal 2D)
+# ============================================================================
+[[family]]
+name = "Line"
+acadrust_variant = "Line"
+handle = "Line"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_line"
+args = [{ name = "start", ty = "[f64; 3]" }, { name = "end", ty = "[f64; 3]" }]
+op = "CreateCurve"
+fixed = { curve = "Line" }
+
+[[family]]
+name = "Circle"
+acadrust_variant = "Circle"
+handle = "Circle"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_circle"
+args = [{ name = "centre", ty = "[f64; 3]" }, { name = "radius", ty = "f64" }]
+op = "CreateCurve"
+fixed = { curve = "Circle" }
+
+[[family]]
+name = "Polyline"
+acadrust_variant = "LwPolyline"
+handle = "Polyline"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_polyline"
+args = [{ name = "points", ty = "&[[f64; 3]]" }, { name = "closed", ty = "bool" }]
+op = "CreateCurve"
+fixed = { curve = "Polyline" }
+
+[[family.method]]
+name = "add_vertex"
+kind = "op"
+op = "AddVertex"
+args = [{ name = "at", ty = "usize" }, { name = "point", ty = "[f64; 3]" }]
+returns = "()"
+status = "unsupported"
+
+[[family]]
+name = "Point"
+acadrust_variant = "Point"
+handle = "Point"
+collection = "curves"
+
+[[family.constructor]]
+name = "create_point"
+args = [{ name = "position", ty = "[f64; 3]" }]
+op = "CreateCurve"
+fixed = { curve = "Point" }
+
+[[family.constructor]]
+name = "create_points"
+args = [{ name = "positions", ty = "&[[f64; 3]]" }]
+op = "CreateMany"
+fixed = { curve = "Point" }
+bulk = true
+returns = "Vec<Point>"
+
+# ============================================================================
+# Cross-cutting ops (generic handles + bulk) — documented in build.rs
+# ============================================================================
+# - Generic handle methods on EVERY handle: bounds() -> Aabb, transform(placement),
+#   delete(), id() -> ObjectId. (transform is solids-only in v1.)
+# - EntityCollection: get(id) -> Entity, delete(id), transform_many(&ids, pl),
+#   delete_many(&ids).
+# - Bulk ops (CreateMany / TransformMany / DeleteMany): single op, all-or-nothing
+#   via upfront validation, item-capped (BULK_ITEM_CAP).
+# - Read-only batching: query_batch(|q| ...) — one round-trip, no revision bump.
+# - OpGroup: best-effort client-side failure cleanup (NOT a transaction).
+
+# ---- Kernel/op mapping (reference for the executor + docs) ----
+[[kernel_map]]
+op = "CreateSolid.Cuboid"
+kernel = "cadkernel::brep::make::cuboid"
+returns = "Option<Body>"
+
+[[kernel_map]]
+op = "CreateSolid.Sphere"
+kernel = "cadkernel::brep::make::sphere"
+returns = "Option<Body>"
+
+[[kernel_map]]
+op = "SolidBoolean"
+kernel = "cadkernel::brep::combine"
+returns = "Result<Body, Snag>"
+
+[[kernel_map]]
+op = "Transform"
+kernel = "cadkernel::brep::transform"
+returns = "Option<Body>"
+
+[[kernel_map]]
+op = "GetBounds"
+kernel = "cadkernel::brep::body_bounds"
+returns = "Option<Aabb>"
+
+[[kernel_map]]
+op = "GetVolume"
+kernel = "cadkernel::brep::mesh_body + divergence"
+returns = "computed"

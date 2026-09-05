@@ -11,6 +11,10 @@ pub(crate) mod expr_eval;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
+#[cfg(not(target_arch = "wasm32"))]
+mod doc_api;
+#[cfg(not(target_arch = "wasm32"))]
+mod doc_api_convert;
 mod layers;
 mod model_ops;
 mod mtext_editor;

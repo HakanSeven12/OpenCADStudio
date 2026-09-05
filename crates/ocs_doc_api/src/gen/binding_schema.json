@@ -201,6 +201,20 @@
       "handle": "Entity",
       "methods": [],
       "name": "Viewport"
+    },
+    {
+      "acadrust_variant": "RasterImage",
+      "collection": "entities",
+      "handle": "Entity",
+      "methods": [],
+      "name": "RasterImage"
+    },
+    {
+      "acadrust_variant": "Table",
+      "collection": "entities",
+      "handle": "Entity",
+      "methods": [],
+      "name": "Table"
     }
   ],
   "layouts": {

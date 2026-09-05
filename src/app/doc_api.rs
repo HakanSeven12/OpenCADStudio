@@ -679,6 +679,43 @@ mod tests {
         assert!((v.center.x - 60.0).abs() < 1e-6);
     }
 
+    // ── Phase 5: media & misc (read-mostly) ──────────────────────────────────
+
+    #[test]
+    fn phase5_media_entities_read_kind_and_bounds() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Insert a RasterImage directly (read-mostly: DocApi reads kind + bounds).
+        let img = {
+            use acadrust::entities::RasterImage;
+            use acadrust::types::{Vector2, Vector3};
+            let mut img = RasterImage::default();
+            img.insertion_point = Vector3::new(10.0, 20.0, 0.0);
+            img.u_vector = Vector3::new(0.5, 0.0, 0.0); // 0.5 world-units/pixel in X
+            img.v_vector = Vector3::new(0.0, 0.5, 0.0);
+            img.size = Vector2::new(100.0, 50.0);
+            host.document_mut().add_entity(EntityType::RasterImage(img)).unwrap()
+        };
+        let img_id = handle_to_obj(img);
+        // GetEntity reports kind "RasterImage"; bounds = insertion + u*100 + v*50 = (60, 45).
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetEntity { id: img_id }, Query::GetBounds { id: img_id }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Entity(e) => assert_eq!(e.kind, "RasterImage"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Bounds(b) => {
+                assert!((b.min[0] - 10.0).abs() < 1e-6 && (b.max[0] - 60.0).abs() < 1e-6, "{b:?}");
+                assert!((b.min[1] - 20.0).abs() < 1e-6 && (b.max[1] - 45.0).abs() < 1e-6, "{b:?}");
+            }
+            other => panic!("expected bounds, got {other:?}"),
+        }
+        // Generic delete works on media entities (read-mostly, but deletable).
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Delete { id: img_id })).unwrap();
+        assert!(host.document().get_entity(img).is_none());
+    }
+
     // ── Phase 3: containers (block references) ───────────────────────────────
 
     #[test]

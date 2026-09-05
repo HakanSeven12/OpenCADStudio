@@ -250,6 +250,20 @@ pub fn entity_kind_name(entity: &EntityType) -> &'static str {
         EntityType::Viewport(_) => "Viewport",
         EntityType::Text(_) => "Text",
         EntityType::MText(_) => "MText",
+        // Media & misc (phase 5, read-mostly): named so GetEntity reports a real kind.
+        EntityType::RasterImage(_) => "RasterImage",
+        EntityType::Table(_) => "Table",
+        EntityType::Leader(_) => "Leader",
+        EntityType::MultiLeader(_) => "MultiLeader",
+        EntityType::MLine(_) => "MLine",
+        EntityType::Mesh(_) => "Mesh",
+        EntityType::Helix(_) => "Helix",
+        EntityType::Region(_) => "Region",
+        EntityType::Body(_) => "Body",
+        EntityType::Surface(_) => "Surface",
+        EntityType::Face3D(_) => "Face3D",
+        EntityType::Dimension(_) => "Dimension",
+        EntityType::Hatch(_) => "Hatch",
         _ => "Other",
     }
 }
@@ -329,6 +343,16 @@ pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aab
                 vp.center.z,
             ],
         },
+        EntityType::RasterImage(img) => {
+            // Coarse image rect: origin + u*width + v*height (in world units).
+            let w = img.u_vector.x * img.size.x + img.v_vector.x * img.size.y;
+            let h = img.u_vector.y * img.size.x + img.v_vector.y * img.size.y;
+            let (x0, y0) = (img.insertion_point.x, img.insertion_point.y);
+            Aabb {
+                min: [x0.min(x0 + w), y0.min(y0 + h), img.insertion_point.z],
+                max: [x0.max(x0 + w), y0.max(y0 + h), img.insertion_point.z],
+            }
+        }
         // Ray/XLine are unbounded by definition — no finite bounds.
         _ => return Err(ApiError::Unsupported("bounds for this entity family is not yet implemented".into())),
     };

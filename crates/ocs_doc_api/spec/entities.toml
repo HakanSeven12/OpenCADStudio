@@ -268,6 +268,25 @@ args = [{ name = "center", ty = "[f64; 3]" }, { name = "width", ty = "f64" }, { 
 op = "CreateViewport"
 
 # ============================================================================
+# MEDIA & MISC (phase 5, read-mostly) — read-only EntityView, no typed create.
+# These families report a real `kind` via GetEntity and coarse bounds where
+# computable; they have no typed construction/geometric ops in v1.
+# ============================================================================
+[[family]]
+name = "RasterImage"
+acadrust_variant = "RasterImage"
+handle = "Entity"
+collection = "entities"
+description = "Raster image (read-mostly): GetEntity kind + coarse bounds (insertion + u*width + v*height); generic delete. No typed create in v1."
+
+[[family]]
+name = "Table"
+acadrust_variant = "Table"
+handle = "Entity"
+collection = "entities"
+description = "Table (read-only): GetEntity kind; generic delete. No typed create/bounds in v1."
+
+# ============================================================================
 # Cross-cutting ops (generic handles + bulk) — documented in build.rs
 # ============================================================================
 # - Generic handle methods on EVERY handle: bounds() -> Aabb, transform(placement),

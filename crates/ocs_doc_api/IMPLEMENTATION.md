@@ -75,10 +75,14 @@ variants append at enum end.
   viewport-view query (view target/center/scale DTOs).
 
 ### Phase 5 — media & misc (read-mostly)
-- **Entities:** raster image, underlay, table, light.
-- **Methods:** CRUD + property queries; few/no geometric actions. These families
-  largely stay read-only `EntityView` DTOs — typed ops only where the spec
-  declares an action mapping.
+- **Done:** media/misc families report a **real `kind`** via `GetEntity`
+  (`RasterImage`, `Table`, `Leader`, `MultiLeader`, `MLine`, `Mesh`, `Helix`,
+  `Region`, `Body`, `Surface`, `Face3D`, `Dimension`, `Hatch`) instead of "Other";
+  `RasterImage` has coarse bounds (insertion + u·width + v·height); generic
+  `delete` works on all. Covered by `phase5_*` test.
+- **Remaining:** typed create/property ops for `RasterImage`/`Table`/light;
+  these largely stay read-only `EntityView` DTOs (typed ops only where the spec
+  declares an action mapping).
 
 ## 🔧 Outstanding methods on supported families
 

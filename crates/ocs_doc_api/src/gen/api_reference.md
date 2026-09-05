@@ -103,6 +103,14 @@ Paper-space viewport: a width×height window at center looking at view_target wi
 
 - **create_viewport**(`center: [f64; 3], width: f64, height: f64, view_target: [f64; 3], view_height: f64`) -> `Entity`
 
+## `Entity` (acadrust `RasterImage`, collection `entities`)
+
+Raster image (read-mostly): GetEntity kind + coarse bounds (insertion + u*width + v*height); generic delete. No typed create in v1.
+
+## `Entity` (acadrust `Table`, collection `entities`)
+
+Table (read-only): GetEntity kind; generic delete. No typed create/bounds in v1.
+
 ## Generic methods (every handle)
 
 Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `Entity`) is a

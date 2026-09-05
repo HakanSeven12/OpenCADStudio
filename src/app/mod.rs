@@ -1,6 +1,9 @@
 mod alias;
 mod automation;
 mod control;
+pub(crate) fn automation_action_names() -> &'static [&'static str] {
+    control::action_names()
+}
 pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub use automation::{export_headless, serve};

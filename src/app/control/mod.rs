@@ -1,6 +1,6 @@
 //! Semantic control shared by the GUI, headless client and web adapter.
 use super::{Message, OpenCADStudio};
-use crate::command::StepInput;
+use crate::command::{InputKind, StepInput};
 use iced::Task;
 use serde_json::{json, Value};
 use std::{collections::VecDeque, sync::OnceLock};
@@ -166,6 +166,78 @@ fn point(req: &Value) -> Result<glam::DVec3, Value> {
     Ok(glam::DVec3::from_array(p))
 }
 
+fn command_examples(name: &str) -> &'static [&'static str] {
+    match name {
+        "LINE" => &["LINE 0,0 10,10"],
+        "CIRCLE" => &["CIRCLE 5,5 3"],
+        "PLINE" => &["PLINE 0,0 10,0 10,10 C"],
+        "ZOOM" => &["ZOOM EXTENTS"],
+        _ => &[],
+    }
+}
+
+fn active_command_metadata(command: &dyn crate::command::CadCommand) -> Value {
+    let options = command.options();
+    let mut accepts = Vec::new();
+    if command.is_selection_gathering() {
+        accepts.push("selection");
+    }
+    if command.needs_structure_point_pick() {
+        accepts.push("structure");
+    }
+    if command.needs_entity_pick() {
+        accepts.push("entity");
+    }
+    if accepts.is_empty() && !command.needs_tangent_pick() {
+        accepts.push(match command.input_kind() {
+            InputKind::Point => "point",
+            InputKind::SingleToken => "token",
+            InputKind::FreeText => "text",
+        });
+    }
+    if options.iter().any(|option| !option.keyword.is_empty()) && !accepts.contains(&"token") {
+        accepts.push("token");
+    }
+    accepts.push("enter");
+
+    let input_example = if accepts.contains(&"point") {
+        json!({"op":"input","kind":"point","point":[0,0,0],"space":"wcs"})
+    } else if accepts.contains(&"entity") {
+        json!({"op":"input","kind":"entity","handle":"HANDLE","point":[0,0,0]})
+    } else if accepts.contains(&"structure") {
+        json!({"op":"input","kind":"structure","handle":"HANDLE","point":[0,0,0]})
+    } else if accepts.contains(&"selection") {
+        json!({"op":"input","kind":"selection"})
+    } else if accepts.contains(&"text") {
+        json!({"op":"input","kind":"text","text":"value"})
+    } else if accepts.contains(&"token") {
+        let token = options
+            .iter()
+            .find(|option| !option.keyword.is_empty())
+            .map_or("VALUE", |option| option.keyword.as_str());
+        json!({"op":"input","kind":"token","text":token})
+    } else {
+        json!({"op":"input","kind":"enter"})
+    };
+
+    json!({
+        "name":command.name(),
+        "prompt":command.prompt(),
+        "accepts":accepts,
+        "input_example":input_example,
+        "options":options.iter().map(|option| json!({
+            "label":option.label,
+            "keyword":option.keyword,
+            "kind":if option.keyword.is_empty(){"enter"}else{"token"}
+        })).collect::<Vec<_>>(),
+        "entity_pick":command.needs_entity_pick(),
+        "structure_pick":command.needs_structure_point_pick(),
+        "selection":command.is_selection_gathering(),
+        "tangent_pick":command.needs_tangent_pick(),
+        "free_text":command.is_free_text_step()
+    })
+}
+
 impl OpenCADStudio {
     pub(super) fn control_busy(&self) -> bool {
         self.control.pending.is_some()
@@ -173,10 +245,7 @@ impl OpenCADStudio {
 
     pub(super) fn control_state(&self) -> Value {
         let tab = &self.tabs[self.active_tab];
-        let command = tab.active_cmd.as_ref().map(|c| json!({
-            "name":c.name(),"prompt":c.prompt(),"options":c.options().iter().map(|o|json!({"label":o.label,"keyword":o.keyword})).collect::<Vec<_>>(),
-            "entity_pick":c.needs_entity_pick(),"structure_pick":c.needs_structure_point_pick(),"selection":c.is_selection_gathering(),"tangent_pick":c.needs_tangent_pick(),"free_text":c.is_free_text_step()
-        }));
+        let command = tab.active_cmd.as_deref().map(active_command_metadata);
         json!({"ok":true,"protocol":1,"session_id":session_id(),"version":env!("OCS_APP_VERSION"),
             "mode":if self.main_window.is_some(){"gui"}else{"headless"},"enabled":self.control.enabled,
             "document_id":tab.id,"revision":tab.edit_revision,"geometry_revision":tab.scene.geometry_epoch,"camera_revision":tab.scene.camera_generation,
@@ -272,8 +341,45 @@ impl OpenCADStudio {
             names.extend(self.command_line.dynamic_commands.iter().cloned());
             names.sort_unstable();
             names.dedup();
+            if let Some(requested) = req["name"].as_str() {
+                let Some(name) = names
+                    .iter()
+                    .find(|name| name.eq_ignore_ascii_case(requested))
+                else {
+                    return (
+                        failure(
+                            "unknown_command",
+                            format!("Unknown command {requested}; call commands without name to list commands"),
+                        ),
+                        Task::none(),
+                    );
+                };
+                return (
+                    json!({
+                        "ok":true,
+                        "command":{
+                            "name":name,
+                            "batch":{
+                                "op":"run",
+                                "syntax":"Command name followed by prompt answers separated by spaces. Points use x,y or x,y,z; options use their token.",
+                                "examples":command_examples(name)
+                            },
+                            "interactive":{
+                                "op":"start",
+                                "request":{"op":"start","cmd":name},
+                                "next":"Follow state.command.accepts, options and input_example after every step."
+                            }
+                        }
+                    }),
+                    Task::none(),
+                );
+            }
             return (
-                json!({"ok":true,"commands":names,"actions":actions::NAMES}),
+                json!({
+                    "ok":true,"commands":names,"actions":actions::NAMES,
+                    "detail_parameters":{"name":"LINE"},
+                    "guidance":"Request one command by name for batch examples and interactive input guidance."
+                }),
                 Task::none(),
             );
         }
@@ -787,6 +893,9 @@ impl OpenCADStudio {
     }
 }
 mod actions;
+pub(super) fn action_names() -> &'static [&'static str] {
+    actions::NAMES
+}
 
 #[cfg(test)]
 mod tests {
@@ -816,9 +925,15 @@ mod tests {
             request(&mut app, json!({"op":"new"}))["status"],
             "completed"
         );
+        let started = request(&mut app, json!({"op":"start","cmd":"LINE"}));
+        assert_eq!(started["status"], "waiting_input");
+        assert!(started["state"]["command"]["accepts"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("point")));
         assert_eq!(
-            request(&mut app, json!({"op":"start","cmd":"LINE"}))["status"],
-            "waiting_input"
+            started["state"]["command"]["input_example"]["kind"],
+            "point"
         );
         assert_eq!(
             request(
@@ -862,6 +977,24 @@ mod tests {
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 1);
         request(&mut app, json!({"op":"undo"}));
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 0);
+    }
+    #[test]
+    fn command_discovery_explains_batch_and_interactive_use() {
+        let mut app = OpenCADStudio::new_for_test();
+        let detail = app
+            .control_request(json!({"op":"commands","name":"pline"}))
+            .0;
+        assert_eq!(detail["command"]["name"], "PLINE");
+        assert_eq!(
+            detail["command"]["batch"]["examples"][0],
+            "PLINE 0,0 10,0 10,10 C"
+        );
+        assert_eq!(detail["command"]["interactive"]["op"], "start");
+        assert_eq!(
+            app.control_request(json!({"op":"commands","name":"NOT_A_COMMAND"}))
+                .0["code"],
+            "unknown_command"
+        );
     }
     #[test]
     fn control_retry_is_idempotent_and_stale_state_rejected() {

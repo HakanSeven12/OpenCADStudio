@@ -22,7 +22,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Use ocs_sessions first; it opens OpenCADStudio when needed. Read state and commands before editing. Preserve session_id, document_id, revision, selection and request_id. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OpenCADStudio and its geometry kernel calculate geometry. Verify important results with queries and ocs_capture, and save only to an explicit path.";
+const INSTRUCTIONS: &str = "Call ocs_sessions, then ocs_read state before editing. Preserve session_id, document_id, revision, selection and request_id. Use ocs_read commands with parameters.name for command help. For interactive work, call start and follow state.command.accepts, options and input_example. For batch work, run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OpenCADStudio and its geometry kernel calculate geometry. Verify important results with queries and ocs_capture, and save only to an explicit path.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -306,6 +306,87 @@ fn required_string<'a>(arguments: &'a Value, key: &str) -> Result<&'a str, Strin
         .ok_or_else(|| format!("Missing {key}"))
 }
 
+fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
+    let missing = |field: &str, example: &str| {
+        Err(format!(
+            "Missing {field} for {op}. Example request: {example}"
+        ))
+    };
+    match op {
+        "open" if request["path"].as_str().is_none_or(str::is_empty) => {
+            missing("path", r#"{"op":"open","path":"/path/drawing.dxf"}"#)
+        }
+        "activate" if request["document_id"].as_u64().is_none() => {
+            missing("document_id", r#"{"op":"activate","document_id":2}"#)
+        }
+        "run" | "start" if request["cmd"].as_str().is_none_or(str::is_empty) => missing(
+            "cmd",
+            r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#,
+        ),
+        "input" => match request["kind"].as_str() {
+            Some("text") => Ok(()),
+            Some("token") if request["text"].as_str().is_some_and(|value| !value.is_empty()) => {
+                Ok(())
+            }
+            Some("token") => missing(
+                "text",
+                r#"{"op":"input","kind":"token","text":"C"}"#,
+            ),
+            Some("point")
+                if request["point"]
+                    .as_array()
+                    .is_some_and(|values| values.len() == 3 && values.iter().all(Value::is_number)) =>
+            {
+                Ok(())
+            }
+            Some("point") => missing(
+                "point",
+                r#"{"op":"input","kind":"point","point":[0,0,0],"space":"wcs"}"#,
+            ),
+            Some("entity" | "structure")
+                if request["handle"].as_str().is_some_and(|value| !value.is_empty())
+                    && request["point"]
+                        .as_array()
+                        .is_some_and(|values| values.len() == 3 && values.iter().all(Value::is_number)) =>
+            {
+                Ok(())
+            }
+            Some("entity" | "structure") => missing(
+                "handle and point",
+                r#"{"op":"input","kind":"entity","handle":"2A","point":[0,0,0]}"#,
+            ),
+            Some("selection" | "enter") => Ok(()),
+            Some(kind) => Err(format!(
+                "Unknown input kind {kind}. Use text, token, point, entity, structure, selection or enter"
+            )),
+            None => missing(
+                "kind",
+                r#"{"op":"input","kind":"point","point":[0,0,0]}"#,
+            ),
+        },
+        "property"
+            if request["field"].as_str().is_none_or(str::is_empty)
+                || request.get("value").is_none() =>
+        {
+            missing(
+                "field or value",
+                r#"{"op":"property","field":"color","value":1}"#,
+            )
+        }
+        "action" => match request["name"].as_str() {
+            Some(name) if crate::app::automation_action_names().contains(&name) => Ok(()),
+            Some(name) => Err(format!(
+                "Unknown action {name}. Call ocs_read commands to list actions"
+            )),
+            None => missing(
+                "name",
+                r#"{"op":"action","name":"zoom_extents"}"#,
+            ),
+        },
+        _ => Ok(()),
+    }
+}
+
 fn call_tool(
     name: &str,
     arguments: &Value,
@@ -344,6 +425,7 @@ fn call_tool(
             if request_id.len() > 128 {
                 return Err("request_id must not exceed 128 bytes".into());
             }
+            validate_execute_request(&request, op)?;
             let wait = arguments["wait_seconds"].as_f64().unwrap_or(30.0);
             client(clients, session_id)?.request(request, wait)
         }
@@ -365,24 +447,117 @@ fn call_tool(
     }
 }
 
+fn execute_request_schema() -> Value {
+    let handle = json!({
+        "type":"string",
+        "pattern":"^(0[xX])?[0-9A-Fa-f]+$",
+        "description":"Entity handle returned by ocs_read entities or state selection."
+    });
+    let point = json!({
+        "type":"array","items":{"type":"number"},"minItems":3,"maxItems":3,
+        "description":"Finite [x,y,z] coordinates."
+    });
+    json!({
+        "type":"object",
+        "properties":{
+            "op":{"type":"string","enum":EXECUTE_OPS,"description":"Semantic editor operation."},
+            "request_id":{"type":"string","minLength":1,"maxLength":128,"description":"Caller-generated idempotency key. Reuse it only when retrying the identical request."},
+            "document_id":{"type":"integer","minimum":0,"description":"Target document from current state."},
+            "revision":{"type":"integer","minimum":0,"description":"Expected edit revision from current state."},
+            "geometry_revision":{"type":"integer","minimum":0,"description":"Expected geometry revision when geometry state matters."},
+            "camera_revision":{"type":"integer","minimum":0,"description":"Expected camera revision when view state matters."},
+            "selection":{"type":"array","items":handle.clone(),"description":"Expected selected handles from current state."},
+            "cmd":{"type":"string","minLength":1,"description":"Command name followed by its prompt answers separated by spaces. Points use x,y or x,y,z; option answers use their token. Read command details first when unsure.","examples":["LINE 0,0 10,10","CIRCLE 5,5 3","PLINE 0,0 10,0 10,10 C"]},
+            "path":{"type":"string","minLength":1,"description":"Absolute drawing path for open or save."},
+            "kind":{"type":"string","enum":["text","token","point","entity","structure","selection","enter"],"description":"Input kind listed in state.command.accepts."},
+            "text":{"type":"string","description":"Free text or one option/value token."},
+            "point":point,
+            "space":{"type":"string","enum":["wcs","ucs","relative"],"default":"wcs","description":"Coordinate space for point input."},
+            "handle":handle.clone(),
+            "handles":{"type":"array","items":handle,"description":"Entity handles to select."},
+            "type":{"type":"string","description":"Entity type filter for select."},
+            "layer":{"type":"string","description":"Layer filter for select."},
+            "clear":{"type":"boolean","description":"Clear the current selection before applying select filters."},
+            "field":{"type":"string","minLength":1,"description":"Property id returned by ocs_read properties."},
+            "value":{"description":"New property value; its JSON type must match the property kind.","anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"},{"type":"object"},{"type":"array"},{"type":"null"}]},
+            "name":{"type":"string","enum":crate::app::automation_action_names(),"description":"UI action returned by ocs_read commands."}
+        },
+        "required":["op","request_id"],
+        "additionalProperties":false,
+        "oneOf":[
+            {"properties":{"op":{"const":"new"}}},
+            {"properties":{"op":{"const":"open"}},"required":["path"]},
+            {"properties":{"op":{"const":"activate"}},"required":["document_id"]},
+            {"properties":{"op":{"const":"run"}},"required":["cmd"]},
+            {"properties":{"op":{"const":"start"}},"required":["cmd"]},
+            {"properties":{"op":{"const":"input"}},"required":["kind"],"oneOf":[
+                {"properties":{"kind":{"const":"text"}}},
+                {"properties":{"kind":{"const":"token"}},"required":["text"]},
+                {"properties":{"kind":{"const":"point"}},"required":["point"]},
+                {"properties":{"kind":{"const":"entity"}},"required":["handle","point"]},
+                {"properties":{"kind":{"const":"structure"}},"required":["handle","point"]},
+                {"properties":{"kind":{"const":"selection"}}},
+                {"properties":{"kind":{"const":"enter"}}}
+            ]},
+            {"properties":{"op":{"const":"cancel"}}},
+            {"properties":{"op":{"const":"undo"}}},
+            {"properties":{"op":{"const":"redo"}}},
+            {"properties":{"op":{"const":"select"}}},
+            {"properties":{"op":{"const":"property"}},"required":["field","value"]},
+            {"properties":{"op":{"const":"action"}},"required":["name"]},
+            {"properties":{"op":{"const":"save"}}},
+            {"properties":{"op":{"const":"stop"}}}
+        ]
+    })
+}
+
+fn read_output_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "ok":{"type":"boolean"},"status":{"type":"string"},"code":{"type":"string"},
+            "error":{"anyOf":[{"type":"string"},{"type":"null"}]},"document_id":{"type":"integer"},
+            "revision":{"type":"integer"},"geometry_revision":{"type":"integer"},
+            "camera_revision":{"type":"integer"}
+        },
+        "required":["ok"],"additionalProperties":true
+    })
+}
+
+fn execute_output_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "ok":{"type":"boolean"},
+            "status":{"type":"string","enum":["accepted","running","waiting_input","completed","cancelled","failed"]},
+            "request_id":{"type":"string"},"code":{"type":"string"},"error":{"anyOf":[{"type":"string"},{"type":"null"}]},
+            "result":{"type":"object"},"changes":{"anyOf":[{"type":"array"},{"type":"null"}]},"state":{"type":"object"}
+        },
+        "required":["ok"],"additionalProperties":true
+    })
+}
+
 fn tool_definitions() -> Value {
     json!([
         {
             "name":"ocs_sessions",
             "description":"List real OpenCADStudio GUI sessions and documents. Launch the installed editor if none is running.",
             "inputSchema":{"type":"object","properties":{"launch_if_none":{"type":"boolean","default":true,"description":"Launch OpenCADStudio when no live session exists."}},"additionalProperties":false},
+            "outputSchema":{"type":"object","properties":{"result":{"type":"array","items":{"type":"object","properties":{"ok":{"const":true},"session_id":{"type":"string"},"document_id":{"type":"integer"},"revision":{"type":"integer"},"selection":{"type":"array","items":{"type":"string"}},"documents":{"type":"array"}},"required":["ok","session_id","document_id","revision","selection","documents"],"additionalProperties":true}}},"required":["result"],"additionalProperties":false},
             "annotations":{"title":"List OCS sessions","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_read",
-            "description":"Read state, commands/actions, query, entities, layers, header, properties, measurements, history, events or operation status from a live OCS session.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters such as document_id, handles, after, or request_id."}},"required":["session_id"],"additionalProperties":false},
+            "description":"Read state, commands/actions, query, entities, layers, header, properties, measurements, history, events or operation status from a live OCS session. For command help use op commands with parameters.name.",
+            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name for detailed commands help."},"document_id":{"type":"integer","minimum":0},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"}},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}},"additionalProperties":true}},"required":["session_id"],"additionalProperties":false},
+            "outputSchema":read_output_schema(),
             "annotations":{"title":"Read OCS state","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_execute",
-            "description":"Execute one semantic OCS action. Use state document_id and revision. request_id is the idempotency key. Accepted, running and waiting_input are not completion.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"request":{"type":"object","properties":{"op":{"type":"string","enum":EXECUTE_OPS,"description":"Semantic editor operation."},"request_id":{"type":"string","minLength":1,"maxLength":128,"description":"Caller-generated idempotency key. Reuse it only when retrying the identical request."},"document_id":{"type":"integer","minimum":0,"description":"Target document from current state."},"revision":{"type":"integer","minimum":0,"description":"Expected edit revision from current state."},"geometry_revision":{"type":"integer","minimum":0,"description":"Expected geometry revision when geometry state matters."},"camera_revision":{"type":"integer","minimum":0,"description":"Expected camera revision when view state matters."},"selection":{"type":"array","items":{"type":"string"},"description":"Expected selected handles from current state."}},"required":["op","request_id"]},"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30}},"required":["session_id","request"],"additionalProperties":false},
+            "description":"Execute one semantic OCS action. Use current state fields and a unique request_id. Use run for a complete command line or start plus input for guided steps. accepted, running and waiting_input are not completion.",
+            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Time to wait for asynchronous completion before returning."}},"required":["session_id","request"],"additionalProperties":false},
+            "outputSchema":execute_output_schema(),
             "annotations":{"title":"Execute OCS action","readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
         },
         {
@@ -414,7 +589,7 @@ fn error_result(message: impl ToString) -> Value {
     let message = message.to_string();
     json!({
         "content":[{"type":"text","text":message.clone()}],
-        "structuredContent":{"ok":false,"error":message},
+        "structuredContent":{"ok":false,"status":"failed","code":"invalid_arguments","error":message,"retryable":false},
         "isError":true
     })
 }
@@ -589,6 +764,20 @@ mod tests {
             tools[2]["inputSchema"]["properties"]["request"]["required"],
             json!(["op", "request_id"])
         );
+        assert_eq!(
+            tools[2]["inputSchema"]["properties"]["request"]["oneOf"]
+                .as_array()
+                .unwrap()
+                .len(),
+            EXECUTE_OPS.len()
+        );
+        assert_eq!(
+            tools[2]["inputSchema"]["properties"]["request"]["properties"]["cmd"]["examples"][0],
+            "LINE 0,0 10,10"
+        );
+        assert!(tools[0].get("outputSchema").is_some());
+        assert!(tools[1].get("outputSchema").is_some());
+        assert!(tools[2].get("outputSchema").is_some());
     }
 
     #[test]
@@ -682,6 +871,26 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("request_id"));
+    }
+
+    #[test]
+    fn execute_errors_explain_missing_operation_fields() {
+        let mut clients = HashMap::new();
+        let called = handle_message(
+            json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"session_id":"missing","request":{"op":"run","request_id":"run-1"}}}}),
+            &mut clients,
+        )
+        .unwrap();
+        assert_eq!(called["result"]["isError"], true);
+        assert_eq!(
+            called["result"]["structuredContent"]["code"],
+            "invalid_arguments"
+        );
+        let error = called["result"]["structuredContent"]["error"]
+            .as_str()
+            .unwrap();
+        assert!(error.contains("Missing cmd"), "{error}");
+        assert!(error.contains("LINE 0,0 10,10"), "{error}");
     }
 
     #[test]

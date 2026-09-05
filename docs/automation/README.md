@@ -31,9 +31,28 @@ The normal flow is to call `ocs_sessions`, read the chosen session with `ocs_rea
 }
 ```
 
+To discover command syntax without reading application source, call `ocs_read` with `op: "commands"`. The unfiltered response lists commands and actions. Add `parameters: {"name": "PLINE"}` for a command's batch examples and interactive guidance.
+
+A complete command can be sent with `run`. Prompt answers are separated by spaces, points use `x,y` or `x,y,z`, and option answers use their displayed token:
+
+```json
+{
+  "session_id": "SESSION_FROM_OCS_SESSIONS",
+  "request": {
+    "op": "run",
+    "request_id": "polyline-1",
+    "document_id": 1,
+    "revision": 12,
+    "cmd": "PLINE 0,0 10,0 10,10 C"
+  }
+}
+```
+
+For unfamiliar or conditional commands, use `start`, then inspect `state.command` in every response. Its `accepts` array gives the valid MCP input kinds, `options` gives the current tokens, and `input_example` gives the next request shape. Add the current state fields and a new `request_id` to each step.
+
 Every `ocs_execute` request requires a caller-generated `request_id`. Reuse that ID only to retry the identical request after a timeout, together with the same session ID, document ID, expected revision, and selection. Commands report `waiting_input` while more input is required and asynchronous work remains `running` until its real callback finishes. Geometry stays in OpenCADStudio and its geometry kernel.
 
-The source-tree protocol smoke test uses only the Python standard library:
+The source-tree protocol smoke test treats the executable as a black box and uses only the Python standard library. It checks both supported protocol styles, the published schemas, structured errors, and the four-tool surface:
 
 ```sh
 cargo build

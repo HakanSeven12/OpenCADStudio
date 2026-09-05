@@ -473,3 +473,15 @@ impl Scene {
         candidates.len()
     }
 }
+
+/// Whether `entity` carries a center mark association.
+///
+/// Used to keep the drawing-wide scan off the edit path: only an entity that
+/// actually carries one can make the scan necessary.
+pub(crate) fn entity_has_center_association(entity: &EntityType) -> bool {
+    let EntityType::Line(line) = entity else {
+        return false;
+    };
+    CenterMarkAssociation::read(&line.common.extended_data)
+        .is_some_and(|association| association.associated)
+}

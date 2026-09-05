@@ -435,3 +435,15 @@ pub(crate) fn center_measure_is_relative(specification: &str) -> bool {
     let text = specification.trim();
     text.eq_ignore_ascii_case("ByLineType") || text.ends_with(['x', 'X'])
 }
+
+/// Whether `entity` carries a centerline association.
+///
+/// Used to keep the drawing-wide scan off the edit path: only an entity that
+/// actually carries one can make the scan necessary.
+pub(crate) fn entity_has_center_association(entity: &EntityType) -> bool {
+    let EntityType::Line(line) = entity else {
+        return false;
+    };
+    CenterLineAssociation::read(&line.common.extended_data)
+        .is_some_and(|association| association.associated)
+}

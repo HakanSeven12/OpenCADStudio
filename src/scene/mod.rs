@@ -1859,6 +1859,15 @@ pub struct Scene {
     /// Boundary source → associative hatch handles. Source edits reuse this
     /// index instead of scanning the document during every drag step.
     associative_hatch_source_cache: RefCell<Option<HashMap<Handle, Vec<Handle>>>>,
+    /// Whether the drawing contains any associative centerline or center mark.
+    ///
+    /// Refreshing those means scanning every entity and parsing its extended
+    /// data — 1.17 M entities and ~30 ms each on the reproducer, run twice on
+    /// every edit, to find none at all. `None` means not yet determined; the
+    /// first scan records the answer, and later edits only re-examine the
+    /// handles they actually changed. Staying `true` after the last one is
+    /// deleted is merely slower, never wrong.
+    has_associative_centers: std::cell::Cell<Option<bool>>,
     /// Tessellated block definitions in block-local coords, keyed by render
     /// background and block epoch. Model and Paper adapt black/white colours
     /// differently; retaining both variants prevents a full block rebuild on
@@ -2089,6 +2098,7 @@ impl Scene {
             layout_type_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
             associative_hatch_source_cache: RefCell::new(None),
+            has_associative_centers: std::cell::Cell::new(None),
             block_defn_cache: RefCell::new(HashMap::default()),
             entity_index_cache: RefCell::new(None),
             last_render_aspect: std::cell::Cell::new(16.0 / 9.0),
@@ -2579,6 +2589,35 @@ impl Scene {
         changes
     }
 
+    /// Whether the associative centerline / center-mark scans can be skipped.
+    ///
+    /// Answers from the cached hint when it is known, and otherwise from the
+    /// changed entities alone: if any of them carries an association the hint
+    /// flips to `true` and the scans run from then on. Only an undetermined
+    /// hint costs a full pass, and that happens once.
+    fn associative_centers_possible(&self, changes: &[(Handle, ChangeKind)]) -> bool {
+        if changes.iter().any(|(handle, _)| {
+            self.document.get_entity(*handle).is_some_and(|entity| {
+                crate::scene::centerline::entity_has_center_association(entity)
+                    || crate::scene::centermark::entity_has_center_association(entity)
+            })
+        }) {
+            self.has_associative_centers.set(Some(true));
+            return true;
+        }
+        if let Some(known) = self.has_associative_centers.get() {
+            return known;
+        }
+        // Undetermined: settle it with one pass over the drawing, then never
+        // again for this document.
+        let any = self.document.entities().any(|entity| {
+            crate::scene::centerline::entity_has_center_association(entity)
+                || crate::scene::centermark::entity_has_center_association(entity)
+        });
+        self.has_associative_centers.set(Some(any));
+        any
+    }
+
     pub fn bump_entities(&mut self, changes: &[(Handle, ChangeKind)]) {
         if changes.iter().any(|(handle, kind)| {
             matches!(kind, ChangeKind::Removed)
@@ -2590,14 +2629,16 @@ impl Scene {
             self.associative_hatch_source_cache.borrow_mut().take();
         }
         let mut changes = changes.to_vec();
-        for change in self.refresh_associative_centerlines(&changes) {
-            if !changes.iter().any(|(handle, _)| *handle == change.0) {
-                changes.push(change);
+        if self.associative_centers_possible(&changes) {
+            for change in self.refresh_associative_centerlines(&changes) {
+                if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                    changes.push(change);
+                }
             }
-        }
-        for change in self.refresh_associative_center_marks(&changes) {
-            if !changes.iter().any(|(handle, _)| *handle == change.0) {
-                changes.push(change);
+            for change in self.refresh_associative_center_marks(&changes) {
+                if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                    changes.push(change);
+                }
             }
         }
         for change in self.refresh_associative_dimensions(&changes) {
@@ -2710,6 +2751,9 @@ impl Scene {
         // Default: also invalidate block definitions. Safe for every caller;
         // operations that know blocks are untouched use `bump_geometry_no_blocks`.
         self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+        // A change this coarse can carry a new document; re-determine whether
+        // it holds associative centerlines or center marks.
+        self.has_associative_centers.set(None);
         // Structural change — drop both per-entity tessellation memos.
         self.tess_memo.borrow_mut().clear();
         self.resident_tess_memo.borrow_mut().clear();

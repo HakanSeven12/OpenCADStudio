@@ -8910,7 +8910,10 @@ impl Scene {
         let sort_cache_ms = crate::perf::elapsed_ms(t_fn);
         let t_visible = perf.then(iced::time::Instant::now);
         // Which path the selection took, and how many candidates it looked at.
-        let mut visible_path = "quadtree+index";
+        // Left uninitialised on purpose: every branch below must set it, and
+        // the compiler enforces that. A default here is what made the first
+        // version of this diagnostic report a constant.
+        let visible_path: &str;
         let mut visible_candidates = 0usize;
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
@@ -8920,6 +8923,7 @@ impl Scene {
         // Paper space and the first-frame "settle" path fall back to the
         // full doc scan — preserving prior behaviour.
         let visible: Vec<&EntityType> = if let Some(local_view) = view_aabb {
+            visible_path = "quadtree";
             let view_wcs: [f64; 4] = [
                 local_view[0] as f64,
                 local_view[1] as f64,
@@ -8932,6 +8936,7 @@ impl Scene {
             };
             let mut out: Vec<&EntityType> =
                 Vec::with_capacity(candidates.len() + unbounded.len() + 16);
+            visible_candidates = candidates.len() + unbounded.len();
             for h in candidates {
                 if let Some(e) = self.document.get_entity(h) {
                     if visibility_ok(e) {
@@ -8955,7 +8960,7 @@ impl Scene {
             // way.
             {
                 let unindexable = self.unindexable_handles();
-                visible_candidates = unindexable.1.len();
+                visible_candidates += unindexable.1.len();
                 for &h in &unindexable.1 {
                     if let Some(e) = self.document.get_entity(h) {
                         if visibility_ok(e) {
@@ -8970,6 +8975,7 @@ impl Scene {
             // contents anywhere and `belongs_to_visible_block` turns permissive
             // — the legacy-DXF case. Both need the full walk, and both must
             // keep document order, which is draw order for the wire pass.
+            visible_path = "full-scan";
             self.document
                 .entities()
                 .filter(|e| visibility_ok(e))
@@ -8983,9 +8989,11 @@ impl Scene {
             // The index is filled by walking `document.entities()`, so each
             // block's list is already in document order and the wires come out
             // in exactly the order the full scan produced.
+            visible_path = "block-index";
             let members = self.block_members();
             let (_, by_block, _) = &*members;
             let claimed = by_block.get(&block_handle).map(Vec::as_slice).unwrap_or(&[]);
+            visible_candidates = claimed.len();
             let mut out: Vec<&EntityType> = Vec::with_capacity(claimed.len());
             for &handle in claimed {
                 if let Some(entity) = self.document.get_entity(handle) {

@@ -515,11 +515,13 @@ impl OpenCADStudio {
                 self.open_attedit_dialog();
             }
 
+            "PDFATTACH" => {
+                return Some(Task::done(Message::PdfAttachPick));
+            }
             "XATTACH" => {
                 // Launch the file picker; XAttachPickResult will start the command.
                 return Some(Task::done(Message::XAttachPick));
             }
-
             cmd if cmd == "WBLOCK" || cmd == "WB" || cmd.starts_with("WBLOCK ") => {
                 let arg = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
                 if arg.is_empty() {

@@ -3189,6 +3189,12 @@ pub enum Message {
     ImagePick,
     /// Result of the image file picker + pixel dimension decode.
     ImagePickResult(Result<(std::path::PathBuf, u32, u32), String>),
+    // ── PDF Underlay ──────────────────────────────────────────────────────
+    /// Open file-picker dialog for PDFATTACH command (async).
+    PdfAttachPick,
+    /// Result of the PDFATTACH file picker.
+    PdfAttachPickResult(Result<std::path::PathBuf, String>),
+
     // ── XREF ──────────────────────────────────────────────────────────────
     /// Open file-picker dialog for XATTACH command (async).
     XAttachPick,

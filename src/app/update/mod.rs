@@ -902,7 +902,60 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::PdfAttachPick => Task::perform(
+                async {
+                    let handle = crate::sys::file_dialog()
+                        .set_title("Select PDF Underlay")
+                        .add_filter("PDF Files", &["pdf", "PDF"])
+                        .pick_file()
+                        .await;
 
+                    match handle {
+                        Some(h) => Ok(crate::sys::handle_path(&h)),
+                        None => Err("Cancelled".to_string()),
+                    }
+                },
+                Message::PdfAttachPickResult,
+            ),
+
+            Message::PdfAttachPickResult(Ok(path)) => {
+                use acadrust::objects::{ObjectType, UnderlayDefinition};
+                use crate::command::CadCommand;
+                use crate::modules::insert::pdf_attach::PdfAttachCommand;
+
+                let i = self.active_tab;
+                let path_str = path.to_string_lossy().into_owned();
+
+                let definition_handle = self.tabs[i].scene.document.allocate_handle();
+
+                let mut definition = UnderlayDefinition::pdf(&path_str, "1");
+                definition.handle = definition_handle;
+
+                self.tabs[i]
+                    .scene
+                    .document
+                    .objects
+                    .insert(
+                        definition_handle,
+                        ObjectType::UnderlayDefinition(definition),
+                    );
+
+                let cmd = PdfAttachCommand::new(definition_handle);
+
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+
+                Task::none()
+            }
+
+            Message::PdfAttachPickResult(Err(e)) => {
+                if e != "Cancelled" {
+                    self.command_line
+                        .push_error(crate::tf!("PDFATTACH: {e}").as_ref());
+                }
+
+                Task::none()
+            }
             Message::XAttachPick => Task::perform(
                 async {
                     let handle = crate::sys::file_dialog()

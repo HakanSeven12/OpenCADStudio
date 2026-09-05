@@ -74,6 +74,7 @@ struct MeshHighlightDraw {
 }
 
 pub struct Pipeline {
+    gpu_error_epoch: usize,
     background_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     shadow_plain_pipeline: wgpu::RenderPipeline,
@@ -94,6 +95,10 @@ pub struct Pipeline {
     /// compatibility mode. Passed to `WireGpu::from_run` / `from_batch`.
     pub(crate) wire_const_bgl: Option<wgpu::BindGroupLayout>,
     block_wire_const_bgl: wgpu::BindGroupLayout,
+    /// Which block-wire pipeline was built. Decides whether a definition's
+    /// segments go to a vertex buffer six times over or to a storage buffer
+    /// once.
+    block_wire_mode: wire_gpu::WirePipelineMode,
     wipeout_pipeline: wgpu::RenderPipeline,
     /// Capability-selected hatch renderer. Storage and texture transports are
     /// private backends behind one upload/LOD/draw lifecycle.
@@ -146,8 +151,16 @@ pub struct Pipeline {
     background_sampler: wgpu::Sampler,
     background_source_id: usize,
     environment_source_id: usize,
-    _shadow_texture: wgpu::Texture,
-    shadow_view: wgpu::TextureView,
+    /// The shadow depth target, allocated only while this viewport actually
+    /// casts shadows. `SHADOW_MAP_SIZE` squared at `Depth32Float` is 16 MiB,
+    /// and every slot used to hold one whether or not its visual style enabled
+    /// shadows — 128 MiB across eight viewports, none of it ever sampled.
+    shadow_full: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Bound at the frame group's shadow slot while `shadow_full` is `None`.
+    /// The binding must be filled for the layout to be satisfied, but nothing
+    /// samples it when shadows are off, so 1x1 is the whole requirement.
+    _shadow_fallback_texture: wgpu::Texture,
+    shadow_fallback_view: wgpu::TextureView,
     shadow_sampler: wgpu::Sampler,
     shadow_enabled: bool,
     wipeout_bgl1: wgpu::BindGroupLayout,
@@ -213,9 +226,6 @@ pub struct Pipeline {
     /// shared resident buffer.
     pub(crate) gpu_wires: std::sync::Arc<Vec<WireGpu>>,
     pub(crate) gpu_block_wires: std::sync::Arc<Vec<BlockWireGpu>>,
-    /// Block geometry that survives an edit, keyed by the definition it
-    /// expands. See `wire_gpu::BlockGeometryCache`.
-    pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
     /// Persistent per-entity wire instance arena (capability-selected format).
     /// When active, `gpu_wires` is a thin wrapper over this arena's buffers and an
     /// edit patches one entity's slab in place instead of rebuilding every wire.
@@ -488,21 +498,9 @@ impl Pipeline {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
-        let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("shadow.texture"),
-            size: wgpu::Extent3d {
-                width: SHADOW_MAP_SIZE,
-                height: SHADOW_MAP_SIZE,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shadow_fallback_texture = create_shadow_texture(device, 1);
+        let shadow_fallback_view =
+            shadow_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow.sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -541,7 +539,7 @@ impl Pipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                    resource: wgpu::BindingResource::TextureView(&shadow_fallback_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 6,
@@ -581,7 +579,8 @@ impl Pipeline {
             bind_group_layouts: &wire_bgls,
             immediate_size: 0,
         });
-        let block_wire_const_bgl = wire_gpu::block_const_bind_group_layout(device);
+        let block_wire_const_bgl =
+            wire_gpu::block_const_bind_group_layout(device, wire_mode.uses_storage());
         let block_wire_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("block_wire.pipeline_layout"),
             bind_group_layouts: &[Some(&frame_bgl), Some(&block_wire_const_bgl)],
@@ -602,9 +601,13 @@ impl Pipeline {
         });
         let block_wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("block_wire.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/block_wire.wgsl"
-            ))),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
+                if wire_mode.uses_storage() {
+                    include_str!("../../shaders/block_wire_storage.wgsl")
+                } else {
+                    include_str!("../../shaders/block_wire.wgsl")
+                },
+            )),
         });
 
         // Stencil test shared by every paper content pipeline: draw only where
@@ -880,6 +883,14 @@ impl Pipeline {
             multiview_mask: None,
             cache: None,
         });
+        let block_wire_buffers: &[wgpu::VertexBufferLayout<'_>] = if wire_mode.uses_storage() {
+            &[wire_gpu::BlockWireInstance::layout()]
+        } else {
+            &[
+                wire_gpu::BlockWireVertex::layout(),
+                wire_gpu::BlockWireInstance::layout(),
+            ]
+        };
         let make_block_wire_pipeline = |
             label: &'static str,
             fragment: &'static str,
@@ -892,10 +903,10 @@ impl Pipeline {
                 vertex: wgpu::VertexState {
                     module: &block_wire_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[
-                        wire_gpu::BlockWireVertex::layout(),
-                        wire_gpu::BlockWireInstance::layout(),
-                    ],
+                    // Storage mode has no geometry vertex buffer: the
+                    // instances become slot 0 and the segments arrive through
+                    // the bind group.
+                    buffers: block_wire_buffers,
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 primitive: wgpu::PrimitiveState {
@@ -2215,6 +2226,8 @@ impl Pipeline {
             block_wire_xray_pipeline,
             wire_const_bgl,
             block_wire_const_bgl,
+            block_wire_mode: wire_mode,
+            gpu_error_epoch: gpu_errors_seen(),
             wipeout_pipeline,
             hatch_gpu,
             image_pipeline,
@@ -2261,8 +2274,9 @@ impl Pipeline {
             background_sampler,
             background_source_id: 0,
             environment_source_id: 0,
-            _shadow_texture: shadow_texture,
-            shadow_view,
+            shadow_full: None,
+            _shadow_fallback_texture: shadow_fallback_texture,
+            shadow_fallback_view,
             shadow_sampler,
             shadow_enabled: false,
             wipeout_bgl1,
@@ -2282,7 +2296,6 @@ impl Pipeline {
             surface_format: format,
             gpu_wires: std::sync::Arc::new(vec![]),
             gpu_block_wires: std::sync::Arc::new(vec![]),
-            block_geometry: Default::default(),
             wire_arena: None,
             wire_arena_mesh: None,
             wire_arena_fallback: std::sync::Arc::new(Vec::new()),
@@ -2342,6 +2355,7 @@ impl Pipeline {
         queue: &wgpu::Queue,
         wires: &[&WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        block_geometry: &mut wire_gpu::BlockGeometryCache,
     ) -> Vec<BlockWireGpu> {
         BlockWireGpu::from_wires(
             device,
@@ -2349,8 +2363,11 @@ impl Pipeline {
             wires,
             depth_map,
             None,
-            &self.block_wire_const_bgl,
-            Some(&mut self.block_geometry),
+            wire_gpu::BlockWireTarget {
+                const_bgl: &self.block_wire_const_bgl,
+                mode: self.block_wire_mode,
+            },
+            Some(block_geometry),
         )
     }
 
@@ -2361,6 +2378,7 @@ impl Pipeline {
         queue: &wgpu::Queue,
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        block_geometry: &mut wire_gpu::BlockGeometryCache,
     ) -> (
         std::sync::Arc<Vec<WireGpu>>,
         std::sync::Arc<Vec<BlockWireGpu>>,
@@ -2415,8 +2433,11 @@ impl Pipeline {
             &block_wires,
             depth_map,
             None,
-            &self.block_wire_const_bgl,
-            Some(&mut self.block_geometry),
+            wire_gpu::BlockWireTarget {
+                const_bgl: &self.block_wire_const_bgl,
+                mode: self.block_wire_mode,
+            },
+            Some(block_geometry),
         );
 
         // Parse handles in parallel, preserving wire order for hover slot lists.
@@ -2554,7 +2575,10 @@ impl Pipeline {
                 &selected_blocks,
                 depth_map,
                 Some(tint),
-                &self.block_wire_const_bgl,
+                wire_gpu::BlockWireTarget {
+                    const_bgl: &self.block_wire_const_bgl,
+                    mode: self.block_wire_mode,
+                },
                 None,
             )
         } else {
@@ -2566,7 +2590,10 @@ impl Pipeline {
             &hover_blocks,
             depth_map,
             Some(WireModel::HOVER),
-            &self.block_wire_const_bgl,
+            wire_gpu::BlockWireTarget {
+                const_bgl: &self.block_wire_const_bgl,
+                mode: self.block_wire_mode,
+            },
             None,
         ));
         self.gpu_selected_block_wires = block_gpu;
@@ -3466,9 +3493,98 @@ impl Pipeline {
         }
     }
 
-    pub fn upload_uniforms(&mut self, queue: &wgpu::Queue, uniforms: &Uniforms) {
+    /// Whatever is bound at the frame group's shadow slot: the real depth
+    /// target when this viewport casts shadows, the 1x1 placeholder otherwise.
+    fn shadow_view(&self) -> &wgpu::TextureView {
+        match &self.shadow_full {
+            Some((_, view)) => view,
+            None => &self.shadow_fallback_view,
+        }
+    }
+
+    /// Rebuild the frame bind group from whatever this slot currently holds.
+    ///
+    /// Three things can change what belongs in it — a background image, an
+    /// environment image, and whether the shadow target exists — and it used to
+    /// be assembled inline at each. One builder means a shadow transition
+    /// cannot forget the background the slot already had.
+    fn rebuild_frame_bind_group(&mut self, device: &wgpu::Device) {
+        let background_view = self
+            .background_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let environment_view = self
+            .environment_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewer.bind_group"),
+            layout: &self.frame_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&background_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&environment_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(self.shadow_view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
+                },
+            ],
+        });
+    }
+
+    /// Allocate or drop the shadow target to match `shadow_enabled`.
+    ///
+    /// Only on a transition: the frame bind group has to be rebuilt with the
+    /// new view, and a viewport that keeps its shadow setting should not pay
+    /// for that every frame.
+    fn sync_shadow_target(&mut self, device: &wgpu::Device) {
+        match (self.shadow_enabled, self.shadow_full.is_some()) {
+            (true, false) => {
+                let errors_before = gpu_errors_seen();
+                let texture = create_shadow_texture(device, SHADOW_MAP_SIZE);
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                if gpu_errors_seen() == errors_before {
+                    self.shadow_full = Some((texture, view));
+                }
+            }
+            (false, true) => self.shadow_full = None,
+            _ => return,
+        }
+        self.rebuild_frame_bind_group(device);
+    }
+
+    pub fn upload_uniforms(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        uniforms: &Uniforms,
+    ) {
         self.shadow_enabled = uniforms.shadow_params[0] > 0.5;
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(uniforms));
+        self.sync_shadow_target(device);
+        let mut uniforms = *uniforms;
+        if self.shadow_full.is_none() {
+            uniforms.shadow_params[0] = 0.0;
+        }
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
 
     pub fn upload_background_images(
@@ -3534,46 +3650,7 @@ impl Pipeline {
             environment,
             [128, 128, 128, 255],
         );
-        let background_view = self
-            .background_texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let environment_view = self
-            .environment_texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        self.uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewer.bind_group"),
-            layout: &self.frame_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&background_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&environment_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&self.shadow_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
-                },
-            ],
-        });
+        self.rebuild_frame_bind_group(device);
         self.background_source_id = background_id;
         self.environment_source_id = environment_id;
     }
@@ -3642,12 +3719,18 @@ impl Pipeline {
         // render rectangle does the clipping).
         let stencil_ref: u32 = if self.clip_boundary.is_some() { 0xFF } else { 0 };
 
-        if self.shadow_enabled && !self.skip_geometry && !mesh_wireframe {
+        // Render shadows only when a full target was allocated.
+        if let Some(shadow_target) = self
+            .shadow_full
+            .as_ref()
+            .map(|(_, view)| view)
+            .filter(|_| self.shadow_enabled && !self.skip_geometry && !mesh_wireframe)
+        {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow.render_pass"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.shadow_view,
+                    view: shadow_target,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -4288,10 +4371,7 @@ impl Pipeline {
                     });
                     block_black_active = use_black;
                 }
-                pass.set_bind_group(1, wire.const_bind_group.as_ref(), &[]);
-                pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, wire.instance_buffer.slice(..));
-                pass.draw(0..wire.vertex_count, 0..wire.instance_count);
+                bind_and_draw_block_wire(&mut pass, wire);
             }
             // Live overlay wires (command preview / interim / grip drag) always
             // on top: the xray pipeline (depth_compare=Always, no depth write)
@@ -4480,10 +4560,7 @@ impl Pipeline {
                     if wire.instance_count == 0 {
                         continue;
                     }
-                    pass.set_bind_group(1, wire.const_bind_group.as_ref(), &[]);
-                    pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, wire.instance_buffer.slice(..));
-                    pass.draw(0..wire.vertex_count, 0..wire.instance_count);
+                    bind_and_draw_block_wire(&mut pass, wire);
                 }
             }
             if let Some(atlas) = &self.text_atlas_gpu {
@@ -4569,6 +4646,117 @@ impl Pipeline {
             pass.set_bind_group(0, &self.blit_bind_group, &[]);
             pass.draw(0..6, 0..1);
         }
+    }
+
+    /// Forget every cache key that describes this slot's uploaded content.
+    ///
+    /// Shared by slot reuse and by [`Self::release_heavy_resources`] so the two
+    /// cannot disagree about what "this slot holds nothing you can trust"
+    /// means. Keys only — the buffers themselves are dropped by the caller that
+    /// wants the memory back.
+    pub(crate) fn forget_cached_keys(&mut self) {
+        self.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
+        self.cached_wire_id = u64::MAX;
+        self.cached_selection = (u64::MAX, u64::MAX);
+        self.cached_highlight_key = (u64::MAX, u64::MAX);
+        self.cached_mesh_content_id = u64::MAX;
+        self.cached_face3d_key = (u64::MAX, false, false, u64::MAX);
+        self.cached_solid_visibility = (u64::MAX, [u32::MAX; 3], u64::MAX);
+        self.cached_hatch_source = None;
+        self.cached_preview_hatch_source = None;
+        self.cached_wipeout_source = None;
+        self.cached_image_source = None;
+        self.cached_text_source = None;
+        self.cached_mesh_source = None;
+        self.cached_face3d_source = None;
+        self.cached_face3d_depth_source = None;
+        self.wire_cull_key = (u64::MAX, u64::MAX, 0, 0);
+        self.hatch_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
+        self.wipeout_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
+        self.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
+        self.silhouette_source_key = (usize::MAX, usize::MAX, u64::MAX);
+        self.render_sig = u64::MAX;
+    }
+
+    /// Catch errors delivered after the previous upload/submit completed.
+    pub(crate) fn sync_gpu_error_epoch(&mut self) {
+        let errors = gpu_errors_seen();
+        if errors == self.gpu_error_epoch {
+            return;
+        }
+        self.gpu_error_epoch = errors;
+        self.forget_cached_keys();
+        self.wire_arena = None;
+        self.wire_arena_mesh = None;
+        self.wire_arena_id = u64::MAX;
+        self.alloc_size = Size::new(0, 0);
+        self.shadow_full = None;
+        self.background_source_id = usize::MAX;
+        self.environment_source_id = usize::MAX;
+    }
+
+    /// Give this slot's device memory back and forget what it held.
+    ///
+    /// A slot nobody is drawing still owns its wire arena, its render targets,
+    /// its text atlas and every category buffer — tens of megabytes each. Held
+    /// while another viewport is asking for an allocation, that is the
+    /// difference between a degraded frame and a session that cannot recover.
+    ///
+    /// Everything released here is derived state with a rebuild path guarded by
+    /// a cache key, and every one of those keys is reset, so the next frame that
+    /// needs this slot builds it again. The cost of releasing a slot that turns
+    /// out to be needed is one slow frame.
+    pub(crate) fn release_heavy_resources(&mut self, device: &wgpu::Device) {
+        self.forget_cached_keys();
+
+        self.gpu_wires = std::sync::Arc::new(Vec::new());
+        self.gpu_block_wires = std::sync::Arc::new(Vec::new());
+        self.wire_handle_index = std::sync::Arc::new(rustc_hash::FxHashMap::default());
+        self.wire_arena = None;
+        self.wire_arena_mesh = None;
+        self.wire_arena_fallback = std::sync::Arc::new(Vec::new());
+        self.wire_arena_fallback_kind = None;
+        self.wire_arena_fallback_handles.clear();
+        self.wire_arena_id = u64::MAX;
+
+        self.gpu_selected_wires.clear();
+        self.gpu_selected_block_wires.clear();
+        self.gpu_preview_wires.clear();
+        self.hatch_gpu.clear();
+        self.gpu_wipeouts.clear();
+        self.wipeout_skip_flags.clear();
+        self.gpu_images.clear();
+        self.gpu_mesh_batch.clear();
+        self.gpu_mesh_dynamic.clear();
+        self.mesh_disabled_chunks.clear();
+        self.mesh_dynamic_handles.clear();
+        self.mesh_ranges_by_handle.clear();
+        self.mesh_highlight_draws.clear();
+        self.silhouette_chunks.clear();
+        self.silhouette_source_groups.clear();
+        self.clip_boundary = None;
+
+        // A cold slot's shadow target goes back too. `shadow_enabled` is left
+        // alone, so `sync_shadow_target` reallocates on the next frame that
+        // still wants shadows.
+        if self.shadow_full.take().is_some() {
+            self.rebuild_frame_bind_group(device);
+        }
+
+        self.text_atlas_gpu = None;
+        self.text_gpu.clear();
+        self.block_text_gpu.clear();
+        self.block_text_highlight_gpu.clear();
+        self.text_highlight_gpu.clear();
+        self.text_preview_gpu.clear();
+
+        // Back to the smallest allocation the rounding allows (128x128, about
+        // 0.6 MiB against the ~70 MiB a full-canvas slot holds). Going through
+        // `ensure_depth_texture` rather than reaching for the textures directly
+        // keeps the blit bind group consistent with the views it samples.
+        self.ensure_depth_texture(device, Size::new(1, 1));
+        // ...and make the next real size a mismatch, so it reallocates.
+        self.alloc_size = Size::new(0, 0);
     }
 
     pub fn ensure_depth_texture(&mut self, device: &wgpu::Device, size: Size<u32>) {
@@ -4705,6 +4893,167 @@ fn aabb_below_pixel(
     (max_px - min_px).max(max_py - min_py) < threshold_px
 }
 
+/// Device bytes a renderer is holding, counted from the sizes it allocated
+/// rather than from process RSS — the allocator and the driver both keep
+/// high-water memory that RSS cannot distinguish from live resources.
+///
+/// Partial by construction: it covers the categories large enough to decide
+/// where the next fix goes, and says so rather than pretending to be a total.
+#[derive(Default, Clone, Copy, PartialEq)]
+pub(crate) struct GpuLiveBytes {
+    pub slots: usize,
+    pub shadow: u64,
+    pub render_targets: u64,
+    pub text_atlas: u64,
+    pub wire_arena: u64,
+    pub block_geometry: u64,
+}
+
+impl GpuLiveBytes {
+    pub(crate) fn total(&self) -> u64 {
+        self.shadow + self.render_targets + self.text_atlas + self.wire_arena + self.block_geometry
+    }
+}
+
+impl Pipeline {
+    /// This slot's share. `alloc_size` is the real allocation, which is rounded
+    /// up from the requested size and grows only.
+    fn gpu_live_bytes(&self) -> GpuLiveBytes {
+        // 4x MSAA colour (4 B/sample) + 4x MSAA depth-stencil (4 B/sample) +
+        // one single-sample resolve target.
+        const BYTES_PER_PIXEL: u64 = (MSAA_SAMPLES as u64) * 4 + (MSAA_SAMPLES as u64) * 4 + 4;
+        let pixels = u64::from(self.alloc_size.width) * u64::from(self.alloc_size.height);
+        GpuLiveBytes {
+            slots: 1,
+            // Only while this viewport casts shadows; the placeholder that
+            // stands in otherwise is 4 bytes.
+            shadow: match &self.shadow_full {
+                Some(_) => u64::from(SHADOW_MAP_SIZE) * u64::from(SHADOW_MAP_SIZE) * 4,
+                None => 4,
+            },
+            render_targets: pixels * BYTES_PER_PIXEL,
+            text_atlas: self
+                .text_atlas_gpu
+                .as_ref()
+                .map(text_gpu::TextAtlasGpu::gpu_bytes)
+                .unwrap_or(0),
+            wire_arena: self
+                .wire_arena
+                .as_ref()
+                .map(wire_arena::PersistentWireArena::gpu_bytes)
+                .unwrap_or(0)
+                + self
+                    .wire_arena_mesh
+                    .as_ref()
+                    .map(wire_arena::PersistentWireArena::gpu_bytes)
+                    .unwrap_or(0),
+            block_geometry: 0,
+        }
+    }
+}
+
+impl MultiPipeline {
+    /// Release cold slots after 64 frames, or two frames under memory pressure.
+    /// Current and previous frame slots remain reserved for sibling widgets.
+    pub(crate) fn release_idle_slots(
+        &mut self,
+        device: &wgpu::Device,
+        reserved: &[usize],
+        urgent: bool,
+    ) -> usize {
+        const IDLE_FRAMES: u64 = 64;
+        // Other shader widgets may prepare later in this frame. Keep every
+        // slot used in this or the previous frame, even under memory pressure.
+        let idle_frames = if urgent { 2 } else { IDLE_FRAMES };
+        let mut released = 0;
+        for index in 0..self.inners.len() {
+            if reserved.contains(&index) {
+                continue;
+            }
+            let idle = self.slot_clock.saturating_sub(self.slot_last_used[index]);
+            if idle < idle_frames {
+                continue;
+            }
+            // Nothing to give back — releasing again would only churn the
+            // render targets it just rebuilt at their smallest size.
+            let held = self.inners[index].gpu_live_bytes();
+            if held.wire_arena == 0
+                && held.shadow <= 4
+                && self.inners[index].alloc_size == Size::new(0, 0)
+            {
+                continue;
+            }
+            self.inners[index].release_heavy_resources(device);
+            released += 1;
+        }
+        if released > 0 {
+            self.wire_buffer_cache.retain(|_, entry| {
+                std::sync::Arc::strong_count(&entry.0) > 1
+                    || std::sync::Arc::strong_count(&entry.1) > 1
+            });
+            self.block_geometry.retain(|_, chunks| {
+                chunks.iter().any(|chunk| std::sync::Arc::strong_count(&chunk.bind_group) > 1)
+            });
+        }
+        released
+    }
+
+    /// Sum across slots, plus the caches held once for all of them.
+    pub(crate) fn gpu_live_bytes(&self) -> GpuLiveBytes {
+        let mut total = GpuLiveBytes {
+            block_geometry: wire_gpu::block_geometry_bytes(&self.block_geometry),
+            ..Default::default()
+        };
+        for inner in &self.inners {
+            let slot = inner.gpu_live_bytes();
+            total.slots += slot.slots;
+            total.shadow += slot.shadow;
+            total.render_targets += slot.render_targets;
+            total.text_atlas += slot.text_atlas;
+            total.wire_arena += slot.wire_arena;
+        }
+        total
+    }
+}
+
+/// Bind one block-wire batch and draw it.
+///
+/// The two pipeline modes lay the vertex slots out differently — packed puts
+/// the six-per-segment geometry in slot 0 and the placements in slot 1, while
+/// storage has no geometry vertex buffer at all and the placements become slot
+/// 0. Both draw loops go through here so they cannot drift apart.
+fn bind_and_draw_block_wire(pass: &mut wgpu::RenderPass<'_>, wire: &wire_gpu::BlockWireGpu) {
+    pass.set_bind_group(1, wire.const_bind_group.as_ref(), &[]);
+    match &wire.vertex_buffer {
+        Some(vertices) => {
+            pass.set_vertex_buffer(0, vertices.slice(..));
+            pass.set_vertex_buffer(1, wire.instance_buffer.slice(..));
+        }
+        None => pass.set_vertex_buffer(0, wire.instance_buffer.slice(..)),
+    }
+    pass.draw(0..wire.vertex_count, 0..wire.instance_count);
+}
+
+/// A square `Depth32Float` render target for the shadow pass. `side` is 1 for
+/// the placeholder that keeps the frame bind group satisfied while shadows are
+/// off, and `SHADOW_MAP_SIZE` for the real thing.
+fn create_shadow_texture(device: &wgpu::Device, side: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow.texture"),
+        size: wgpu::Extent3d {
+            width: side,
+            height: side,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
 fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.depth_texture"),
@@ -4780,14 +5129,11 @@ pub struct MultiPipeline {
     pub(crate) slot_by_instance: rustc_hash::FxHashMap<u64, usize>,
     slot_last_used: Vec<u64>,
     slot_clock: u64,
-    /// The resident wire batches, keyed by `wire_content_id` and shared across
-    /// every slot (and every pane — one `MultiPipeline` backs all of them) that
-    /// renders the same content. `prepare` builds an entry once on a cache miss
-    /// then hands `Arc` clones to each slot, so N paper viewports / Model tiles
-    /// showing one identical resident set upload the wire vertex buffers exactly
-    /// once between them instead of once per slot. Kept trim by dropping entries
-    /// no slot still references (`Arc::strong_count == 1`) once it grows past a
-    /// small bound.
+    pub(crate) frame_rendered: std::sync::atomic::AtomicBool,
+    pub(crate) gpu_error_epoch: usize,
+    /// Definition geometry shared across viewport slots.
+    pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
+    /// Shared resident batches, keyed by wire content identity.
     pub(crate) wire_buffer_cache: rustc_hash::FxHashMap<
         u64,
         (
@@ -4799,11 +5145,7 @@ pub struct MultiPipeline {
 }
 
 impl MultiPipeline {
-    /// Ensure at least `n` (≥1) inner pipelines exist, creating any missing
-    /// ones. Grow-only: extra pipelines are NOT dropped, because per-pane Model
-    /// shader widgets share this storage and each only touches its own slot —
-    /// truncating mid-frame would destroy another pane's slot. Stale inners (a
-    /// closed pane, or fewer paper viewports) are harmless idle GPU resources.
+    /// Grow slot storage without disturbing sibling shader widgets.
     pub(crate) fn ensure_len(
         &mut self,
         device: &wgpu::Device,
@@ -4817,12 +5159,7 @@ impl MultiPipeline {
         }
     }
 
-    /// Resolve stable slots for the viewport identities in one primitive.
-    /// Thirty-two hot slots cover ordinary tiled/paper drawings. A cold slot
-    /// is recycled only after several other prepare calls, which prevents
-    /// sibling Model panes prepared in the same frame from evicting each
-    /// other. If every slot is still hot, growing is safer than a visible
-    /// rebuild hitch.
+    /// Preserve viewport slots across frames; recycle only cold slots above the limit.
     pub(crate) fn resolve_slots(
         &mut self,
         device: &wgpu::Device,
@@ -4832,7 +5169,11 @@ impl MultiPipeline {
         const SOFT_LIMIT: usize = 32;
         const HOT_WINDOW: u64 = 8;
 
-        self.slot_clock = self.slot_clock.wrapping_add(1).max(1);
+        if self.frame_rendered.swap(false, std::sync::atomic::Ordering::Relaxed)
+            || self.slot_clock == 0
+        {
+            self.slot_clock = self.slot_clock.wrapping_add(1).max(1);
+        }
         let now = self.slot_clock;
         let reserved: rustc_hash::FxHashSet<u64> = instance_ids.iter().copied().collect();
         // `inner.slot_id` is updated later in `prepare`, after this whole
@@ -4914,12 +5255,25 @@ impl MultiPipeline {
 /// `Pipeline::new`, which runs again for every pane `ensure_len` adds. If iced
 /// ever rebuilds the device it builds a new `MultiPipeline` too, so the fresh
 /// device is covered (and the throttle restarts with it).
+static GPU_ERRORS_SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many uncaptured device errors have been reported since this device was
+/// created.
+///
+/// Callers snapshot it around an allocation to find out whether what they just
+/// built is usable. Best effort: wgpu surfaces some errors asynchronously, so a
+/// move means "something failed", while no move is not proof that nothing did.
+/// That is the right asymmetry here — the cost of believing a bad buffer is a
+/// frozen viewport, the cost of rebuilding a good one is a frame.
+pub(crate) fn gpu_errors_seen() -> usize {
+    GPU_ERRORS_SEEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn install_gpu_error_handler(device: &wgpu::Device) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static SEEN: AtomicUsize = AtomicUsize::new(0);
-    SEEN.store(0, Ordering::Relaxed);
+    use std::sync::atomic::Ordering;
+    GPU_ERRORS_SEEN.store(0, Ordering::Relaxed);
     device.on_uncaptured_error(std::sync::Arc::new(|e: wgpu::Error| {
-        let n = SEEN.fetch_add(1, Ordering::Relaxed) + 1;
+        let n = GPU_ERRORS_SEEN.fetch_add(1, Ordering::Relaxed) + 1;
         if n.is_power_of_two() {
             eprintln!("[gpu] uncaptured wgpu error #{n} (frame degraded, session kept alive): {e}");
         }
@@ -4930,11 +5284,14 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         install_gpu_error_handler(device);
         Self {
+            block_geometry: Default::default(),
             inners: vec![Pipeline::new(device, queue, format)],
             format,
             slot_by_instance: rustc_hash::FxHashMap::default(),
             slot_last_used: vec![0],
             slot_clock: 0,
+            frame_rendered: std::sync::atomic::AtomicBool::new(false),
+            gpu_error_epoch: gpu_errors_seen(),
             wire_buffer_cache: rustc_hash::FxHashMap::default(),
         }
     }

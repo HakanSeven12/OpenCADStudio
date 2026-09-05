@@ -10,24 +10,24 @@ use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, 
 
 pub struct ModelModule;
 
-const BOX_ICON: &[u8] = include_bytes!("../../../assets/icons/box3d.svg");
-const CYLINDER_ICON: &[u8] = include_bytes!("../../../assets/icons/cylinder3d.svg");
-const CONE_ICON: &[u8] = include_bytes!("../../../assets/icons/cone3d.svg");
-const SPHERE_ICON: &[u8] = include_bytes!("../../../assets/icons/sphere3d.svg");
-const PYRAMID_ICON: &[u8] = include_bytes!("../../../assets/icons/pyramid3d.svg");
-const WEDGE_ICON: &[u8] = include_bytes!("../../../assets/icons/wedge3d.svg");
-const TORUS_ICON: &[u8] = include_bytes!("../../../assets/icons/torus3d.svg");
-const POLYSOLID_ICON: &[u8] = include_bytes!("../../../assets/icons/polysolid.svg");
-const EXTRUDE_ICON: &[u8] = include_bytes!("../../../assets/icons/extrude.svg");
-const REVOLVE_ICON: &[u8] = include_bytes!("../../../assets/icons/revolve.svg");
-const LOFT_ICON: &[u8] = include_bytes!("../../../assets/icons/loft.svg");
-const SWEEP_ICON: &[u8] = include_bytes!("../../../assets/icons/sweep.svg");
-const PRESSPULL_ICON: &[u8] = include_bytes!("../../../assets/icons/presspull.svg");
-const UNION_ICON: &[u8] = include_bytes!("../../../assets/icons/union.svg");
-const SUBTRACT_ICON: &[u8] = include_bytes!("../../../assets/icons/subtract.svg");
-const INTERSECT_ICON: &[u8] = include_bytes!("../../../assets/icons/intersect.svg");
-const FILLET_ICON: &[u8] = include_bytes!("../../../assets/icons/fillet.svg");
-const CHAMFER_ICON: &[u8] = include_bytes!("../../../assets/icons/chamfer.svg");
+const BOX_ICON: &[u8] = include_bytes!("../../../assets/icons/model/box.svg");
+const CYLINDER_ICON: &[u8] = include_bytes!("../../../assets/icons/model/cylinder.svg");
+const CONE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/cone.svg");
+const SPHERE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/sphere.svg");
+const PYRAMID_ICON: &[u8] = include_bytes!("../../../assets/icons/model/pyramid.svg");
+const WEDGE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/wedge.svg");
+const TORUS_ICON: &[u8] = include_bytes!("../../../assets/icons/model/torus.svg");
+const POLYSOLID_ICON: &[u8] = include_bytes!("../../../assets/icons/model/polysolid.svg");
+const EXTRUDE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/extrude.svg");
+const REVOLVE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/revolve.svg");
+const LOFT_ICON: &[u8] = include_bytes!("../../../assets/icons/model/loft.svg");
+const SWEEP_ICON: &[u8] = include_bytes!("../../../assets/icons/model/sweep.svg");
+const PRESSPULL_ICON: &[u8] = include_bytes!("../../../assets/icons/model/presspull.svg");
+const UNION_ICON: &[u8] = include_bytes!("../../../assets/icons/model/union.svg");
+const SUBTRACT_ICON: &[u8] = include_bytes!("../../../assets/icons/model/subtract.svg");
+const INTERSECT_ICON: &[u8] = include_bytes!("../../../assets/icons/model/intersect.svg");
+const FILLET_ICON: &[u8] = include_bytes!("../../../assets/icons/model/fillet.svg");
+const CHAMFER_ICON: &[u8] = include_bytes!("../../../assets/icons/model/chamfer.svg");
 
 /// Helper to declare a ribbon tool that fires a named command.
 fn tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> ToolDef {

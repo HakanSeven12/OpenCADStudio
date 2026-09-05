@@ -103,6 +103,7 @@ impl CadCommand for DimTeditCommand {
         }
         let d = 0.2_f32;
         Some(WireModel {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),

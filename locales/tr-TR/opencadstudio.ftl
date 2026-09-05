@@ -165,6 +165,7 @@ clipboard =
     .paste-to-original-coordinates = Özgün Koordinatlara Yapıştır
 
 viewport =
+    .preparing-layout = Yerleşim hazırlanıyor…
     .split-vertical = Görünüm Penceresini Dikey Böl
     .split-horizontal = Görünüm Penceresini Yatay Böl
     .move = Görünüm Penceresini Taşı

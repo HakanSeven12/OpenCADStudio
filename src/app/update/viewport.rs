@@ -2407,6 +2407,7 @@ impl OpenCADStudio {
                         let far_pos = base + dir * far;
                         let far_neg = base - dir * far;
                         let guide = crate::scene::WireModel {
+                            bg_adapt: None,
                             point_marker: None,
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
@@ -5534,6 +5535,8 @@ impl OpenCADStudio {
             .layers
             .sync_with_viewports(&doc_layers, vp_info);
         let layers_ms = perf_phase.elapsed().as_secs_f64() * 1000.0;
+        // Give the layout rebuild a visible notice first.
+        self.layout_settling = true;
         if perf {
             crate::perf_record!(
                 "[perf] layout-switch from={} to={} total={:.2}ms sync={:.2}ms switch={:.2}ms restore={:.2}ms layers={:.2}ms epoch={}",

@@ -220,6 +220,7 @@ fn point_cloud_wires(
     };
     let (points, points_low) = points_to_ds(body_points);
     let mut wires = vec![WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),
@@ -474,6 +475,7 @@ pub fn tessellate(
                     }
                 };
                 out.push(WireModel {
+                    bg_adapt: None,
                     point_marker: None,
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
@@ -637,6 +639,7 @@ pub fn tessellate(
                     None
                 };
                 elem_wires.push(WireModel {
+                    bg_adapt: None,
                     point_marker: None,
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
@@ -1026,6 +1029,7 @@ pub fn tessellate(
                                         }
                                     }
                                     wires.push(WireModel {
+                                        bg_adapt: None,
                                         point_marker: None,
                                         taper_widths: Vec::new(),
                                         pattern_stations: Vec::new(),
@@ -1082,6 +1086,7 @@ pub fn tessellate(
                                         }
                                     }
                                     wires.push(WireModel {
+                                        bg_adapt: None,
                                         point_marker: None,
                                         taper_widths: Vec::new(),
                                         pattern_stations: Vec::new(),
@@ -1135,6 +1140,7 @@ pub fn tessellate(
                             low.push(ll);
                         }
                         wires.push(WireModel {
+                            bg_adapt: None,
                             point_marker: None,
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
@@ -1169,6 +1175,7 @@ pub fn tessellate(
                         });
                     }
                     wires.push(WireModel {
+                        bg_adapt: None,
                         point_marker: None,
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
@@ -1233,6 +1240,7 @@ pub fn tessellate(
                             (Vec::new(), Vec::new(), Vec::new())
                         };
                         out.push(WireModel {
+                            bg_adapt: None,
                             point_marker: None,
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
@@ -1279,6 +1287,7 @@ pub fn tessellate(
                             (Vec::new(), Vec::new(), Vec::new())
                         };
                         out.push(WireModel {
+                            bg_adapt: None,
                             point_marker: None,
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
@@ -1322,6 +1331,7 @@ pub fn tessellate(
                 // are empty → the early-return path above).
                 if !sdf_verts.is_empty() {
                     out.push(WireModel {
+                        bg_adapt: None,
                         point_marker: None,
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
@@ -1358,6 +1368,7 @@ pub fn tessellate(
 
                 if out.is_empty() {
                     out.push(WireModel {
+                        bg_adapt: None,
                         point_marker: None,
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
@@ -1428,6 +1439,7 @@ pub fn tessellate(
                             .map(|[kx, ky, kz]| [kx, ky, kz])
                             .collect();
                         return vec![WireModel {
+                            bg_adapt: None,
                             point_marker: None,
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
@@ -1556,6 +1568,7 @@ pub fn tessellate(
                     let point_marker =
                         crate::entities::point::relative_marker_spec(entity, document);
                     out.push(WireModel {
+                        bg_adapt: None,
                         point_marker,
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
@@ -1601,6 +1614,7 @@ pub fn tessellate(
                         (Vec::new(), Vec::new(), Vec::new())
                     };
                     out.push(WireModel {
+                        bg_adapt: None,
                         point_marker: None,
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
@@ -1637,6 +1651,7 @@ pub fn tessellate(
 
                 if out.is_empty() {
                     out.push(WireModel {
+                        bg_adapt: None,
                         point_marker: None,
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
@@ -1695,6 +1710,7 @@ pub fn tessellate(
                     &station_pieces,
                 );
                 return vec![WireModel {
+                    bg_adapt: None,
                     point_marker: None,
                     taper_widths: Vec::new(),
                     pattern_stations: station_data,
@@ -1741,6 +1757,7 @@ pub fn tessellate(
                 // treatment as the Contour arm, restarting the dash per segment.
                 let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
                 return vec![WireModel {
+                    bg_adapt: None,
                     point_marker: None,
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
@@ -1791,6 +1808,7 @@ pub fn tessellate(
                 let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
                 let world_width = widths.iter().copied().fold(0.0f32, f32::max);
                 return vec![WireModel {
+                    bg_adapt: None,
                     point_marker: None,
                     taper_widths: widths,
                     pattern_stations: Vec::new(),
@@ -1899,6 +1917,7 @@ pub fn tessellate(
         _ => (Vec::new(), Vec::new()),
     };
     vec![WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

@@ -1369,6 +1369,18 @@ impl PersistentWireArena {
         }
     }
 
+    /// Device bytes this arena holds. The instance buffer is reserved with
+    /// headroom, so this is the allocation, not the occupied prefix — which is
+    /// what a memory budget has to answer for.
+    pub fn gpu_bytes(&self) -> u64 {
+        match &self.inner {
+            PersistentWireArenaKind::Indexed(arena) => {
+                arena.inst_buf.size() + arena.const_buf.size()
+            }
+            PersistentWireArenaKind::Packed(arena) => arena.inst_buf.size(),
+        }
+    }
+
     pub fn wire_gpus_visible(
         &self,
         view_rot: glam::Mat4,

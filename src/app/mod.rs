@@ -1,6 +1,9 @@
 mod alias;
 mod automation;
 mod control;
+pub(crate) fn automation_action_names() -> &'static [&'static str] {
+    control::action_names()
+}
 pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub use automation::{export_headless, serve};
@@ -1052,6 +1055,8 @@ pub(super) struct OpenCADStudio {
     /// `Some` while a CAD file is loading — drives the modal overlay.
     /// Cleared when the load finishes, errors, or the user cancels.
     pub(super) opening: Option<OpenProgress>,
+    /// Show a lightweight notice until the next layout redraw.
+    pub(super) layout_settling: bool,
     open_job_serial: u64,
     /// Last repair or failed-open report shown in the recovery modal.
     recovery_report: Option<crate::io::recovery::RecoveryReport>,
@@ -2280,6 +2285,8 @@ pub enum Message {
     /// Timer pulse while the cursor is dwelling on a grip; drives the
     /// dwell-to-popup transition without requiring further mouse motion.
     GripDwellTick,
+    /// The notice redraw allows the next frame to build the scene.
+    LayoutSettled,
     /// Timer pulse while a rollover hit-test is queued; fires when the
     /// cursor has been still long enough to safely run the pick.
     HoverDwellTick,
@@ -3481,6 +3488,7 @@ impl OpenCADStudio {
             print_all_plot_window_prev: None,
             print_all_plot_setup_prev: None,
             opening: None,
+            layout_settling: false,
             open_job_serial: 0,
             recovery_report: None,
             pending_opens: std::collections::VecDeque::new(),

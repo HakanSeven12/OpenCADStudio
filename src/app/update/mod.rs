@@ -3045,6 +3045,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::LayoutSettled => {
+                // Restore the scene after the notice redraw.
+                self.layout_settling = false;
+                Task::none()
+            }
             Message::GripDwellTick => {
                 let i = self.active_tab;
                 // Reuse the move-time logic — `p` is the last cursor

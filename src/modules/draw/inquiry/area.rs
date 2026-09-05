@@ -365,6 +365,7 @@ impl CadCommand for AreaCommand {
         points.push(to_render(point));
         points.push(to_render(self.points[0]));
         Some(WireModel {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Revolve">
+  <defs><linearGradient id="body"><stop stop-color="#718C9E"/><stop offset=".4" stop-color="#DCE7F0"/><stop offset="1" stop-color="#A9BFCE"/></linearGradient></defs>
+  <path d="M10 7c0 6-5 7-5 13 0 7 18 7 18 0 0-6-5-7-5-13Z" fill="url(#body)" stroke="#526B80" stroke-width="1.1"/>
+  <ellipse cx="14" cy="7" rx="4" ry="2" fill="#DCE7F0" stroke="#526B80" stroke-width="1.1"/>
+  <path d="M14 2v26" fill="none" stroke="#526B80" stroke-width="1" stroke-dasharray="2 2"/>
+  <path d="M25 13c7 6 2 16-9 16M20 26l-4 3 5 1" fill="none" stroke="#6DB7ED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M18 7c0 6 5 7 5 13" fill="none" stroke="#6DB7ED" stroke-width="2"/>
+</svg>

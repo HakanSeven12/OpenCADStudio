@@ -159,6 +159,19 @@ impl HatchGpu {
         }
     }
 
+    pub(super) fn clear(&mut self) {
+        match &mut self.backend {
+            HatchBackend::Storage { resident, preview } => {
+                resident.clear();
+                preview.clear();
+            }
+            HatchBackend::Texture { resident, preview } => {
+                resident.clear();
+                preview.clear();
+            }
+        }
+    }
+
     pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hatches: &[HatchModel]) {
         match &mut self.backend {
             HatchBackend::Storage { resident, .. } => {

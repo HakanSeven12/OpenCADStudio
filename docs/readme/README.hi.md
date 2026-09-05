@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
+  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.el.md">Ελληνικά</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center"><img src="../../assets/logo.svg" width="112" alt="Open CAD Studio लोगो"></p>
@@ -91,9 +91,9 @@ chmod +x OpenCADStudio-*-linux-x86_64.AppImage
 
 ## भाषाएँ
 
-Open CAD Studio सिस्टम भाषा का अनुसरण कर सकता है या इन 20 इंटरफ़ेस भाषाओं में से किसी एक का उपयोग कर सकता है:
+Open CAD Studio सिस्टम भाषा का अनुसरण कर सकता है या इन 21 इंटरफ़ेस भाषाओं में से किसी एक का उपयोग कर सकता है:
 
-> अरबी · ब्राज़ीलियाई पुर्तगाली · बुल्गारियाई · चेक · डच · अंग्रेज़ी · फ़िनिश · फ़्रेंच · जर्मन · हिन्दी · हंगेरियन · इतालवी · जापानी · कोरियाई · पोलिश · रूसी · सरलीकृत चीनी · स्पैनिश · पारंपरिक चीनी · तुर्की
+> अरबी · ब्राज़ीलियाई पुर्तगाली · बुल्गारियाई · चेक · डच · अंग्रेज़ी · फ़िनिश · फ़्रेंच · जर्मन · यूनानी · हिन्दी · हंगेरियन · इतालवी · जापानी · कोरियाई · पोलिश · रूसी · सरलीकृत चीनी · स्पैनिश · पारंपरिक चीनी · तुर्की
 
 अनुप्रयोग सेटिंग में भाषा बदलें। **सिस्टम** चुने जाने पर ब्राउज़र संस्करण भी ब्राउज़र की पसंदीदा लोकेल का उपयोग करता है।
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Cylinder">
+  <defs><linearGradient id="body"><stop stop-color="#A9BFCE"/><stop offset=".4" stop-color="#DCE7F0"/><stop offset="1" stop-color="#718C9E"/></linearGradient></defs>
+  <g stroke="#526B80" stroke-width="1.1">
+    <path d="M5.5 8.5V23.5C5.5 29.5 26.5 29.5 26.5 23.5V8.5Z" fill="url(#body)"/>
+    <ellipse cx="16" cy="8.5" rx="10.5" ry="4.5" fill="#DCE7F0"/>
+  </g>
+  <path d="M7 10Q16 16 25 10" fill="none" stroke="#F4F8FC" stroke-width="1"/>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Presspull">
+  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
+    <path d="M3 19 14 13 29 20 18 26Z" fill="#DCE7F0"/>
+    <path d="M3 19 18 26V30L3 23Z" fill="#A9BFCE"/>
+    <path d="M18 26 29 20V24L18 30Z" fill="#718C9E"/>
+    <path d="M9 13 16 9 23 13 16 17Z" fill="#6DB7ED"/>
+    <path d="M9 13 16 17V23L9 19Z" fill="#A9BFCE"/>
+    <path d="M16 17 23 13V19L16 23Z" fill="#718C9E"/>
+  </g>
+  <path d="M16 12V2m-3 3 3-3 3 3" fill="none" stroke="#6DB7ED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

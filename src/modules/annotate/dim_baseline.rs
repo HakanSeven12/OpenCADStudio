@@ -709,6 +709,7 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
         _ => {}
     }
     WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

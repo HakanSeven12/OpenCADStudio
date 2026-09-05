@@ -364,12 +364,21 @@ impl shader::Primitive for Primitive {
         viewport: &Viewport,
     ) {
         let nav_prepare_started = iced::time::Instant::now();
+        let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
+        let recovering = pipeline.gpu_error_epoch != errors_at_entry;
+        if recovering {
+            pipeline.wire_buffer_cache.clear();
+            pipeline.block_geometry.clear();
+            pipeline.gpu_error_epoch = errors_at_entry;
+        }
         let scale = viewport.scale_factor() as f32;
         let instance_ids: Vec<u64> = self.viewports.iter().map(|vp| vp.instance_id).collect();
         let slots = pipeline.resolve_slots(device, queue, &instance_ids);
-
         for (i, vp) in self.viewports.iter().enumerate() {
             let inner = &mut pipeline.inners[slots[i]];
+            inner.sync_gpu_error_epoch();
+            // Do not latch rejected uploads as current content.
+            let slot_errors_before = crate::scene::pipeline::gpu_errors_seen();
             // Pipeline slots are addressed by list index, but off-canvas
             // viewports are dropped from the list — so a slot can be reused by a
             // DIFFERENT viewport across frames (e.g. the first viewport scrolls
@@ -381,26 +390,7 @@ impl shader::Primitive for Primitive {
             // the surviving viewport's text/geometry vanish.
             if inner.slot_id != vp.instance_id {
                 inner.slot_id = vp.instance_id;
-                inner.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
-                inner.cached_wire_id = u64::MAX;
-                inner.cached_selection = (u64::MAX, u64::MAX);
-                inner.cached_mesh_content_id = u64::MAX;
-                inner.cached_face3d_key = (u64::MAX, false, false, u64::MAX);
-                inner.cached_solid_visibility =
-                    (u64::MAX, [u32::MAX; 3], u64::MAX);
-                inner.cached_hatch_source = None;
-                inner.cached_preview_hatch_source = None;
-                inner.cached_wipeout_source = None;
-                inner.cached_image_source = None;
-                inner.cached_text_source = None;
-                inner.cached_mesh_source = None;
-                inner.cached_face3d_source = None;
-                inner.cached_face3d_depth_source = None;
-                inner.wire_cull_key = (u64::MAX, u64::MAX, 0, 0);
-                inner.hatch_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
-                inner.wipeout_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
-                inner.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
-                inner.render_sig = u64::MAX;
+                inner.forget_cached_keys();
             }
             // The MSAA / depth / resolve textures are always sized to the
             // FULL viewport rectangle (not the on-canvas-visible portion)
@@ -434,7 +424,7 @@ impl shader::Primitive for Primitive {
                 vp.background_image.as_ref(),
                 vp.environment_image.as_ref(),
             );
-            inner.upload_uniforms(queue, &vp.uniforms);
+            inner.upload_uniforms(device, queue, &vp.uniforms);
 
             // ── Scene-render cache ────────────────────────────────────────
             // A pure cursor move — or any frame where the view, geometry,
@@ -714,6 +704,9 @@ impl shader::Primitive for Primitive {
                             })
                         })
                     };
+                    // Snapshot before any arena allocation, so a rejected
+                    // upload cannot claim this content id below.
+                    let arena_errors_before = crate::scene::pipeline::gpu_errors_seen();
                     let reg_ok = base_ok
                         && if let Some(arena) = inner.wire_arena.as_mut() {
                             let patch = patch.unwrap();
@@ -857,6 +850,7 @@ impl shader::Primitive for Primitive {
                                 queue,
                                 &instanced,
                                 &draw_depths,
+                                &mut pipeline.block_geometry,
                             ),
                         );
                         if _patched {
@@ -868,7 +862,15 @@ impl shader::Primitive for Primitive {
                             inner.wire_handle_index =
                                 wire_arena::build_handle_index(&vp_wires[..]);
                         }
-                        inner.wire_arena_id = vp.wire_content_id;
+                        // Only claim the content id when the device accepted
+                        // the upload; otherwise the slot believes it holds this
+                        // content and never rebuilds it.
+                        inner.wire_arena_id =
+                            if crate::scene::pipeline::gpu_errors_seen() == arena_errors_before {
+                                vp.wire_content_id
+                            } else {
+                                u64::MAX
+                            };
                         arena_served = true;
                     } else {
                         inner.wire_arena = None;
@@ -922,8 +924,16 @@ impl shader::Primitive for Primitive {
                                 );
                             }
                             let t_upload = _perf.then(iced::time::Instant::now);
+                            let errors_before =
+                                crate::scene::pipeline::gpu_errors_seen();
                             let entry =
-                                inner.build_wire_buffers(device, queue, &vp_wires[..], &draw_depths);
+                                inner.build_wire_buffers(
+                                    device,
+                                    queue,
+                                    &vp_wires[..],
+                                    &draw_depths,
+                                    &mut pipeline.block_geometry,
+                                );
                             if let Some(start) = t_upload {
                                 crate::perf_record!(
                                     "[perf] wire-upload {:.1}ms wires={} content_id={}",
@@ -933,9 +943,16 @@ impl shader::Primitive for Primitive {
                                 );
                             }
 
-                            pipeline
-                                .wire_buffer_cache
-                                .insert(vp.wire_content_id, entry.clone());
+                            // Buffers the device rejected are still `Buffer`s.
+                            // Cached under a content id that keeps matching,
+                            // they render nothing for the rest of the session
+                            // and nothing ever rebuilds them. Draw the degraded
+                            // frame, but let the next one try again.
+                            if crate::scene::pipeline::gpu_errors_seen() == errors_before {
+                                pipeline
+                                    .wire_buffer_cache
+                                    .insert(vp.wire_content_id, entry.clone());
+                            }
                             entry
                         }
                     };
@@ -1169,6 +1186,15 @@ impl shader::Primitive for Primitive {
                     self.viewcube_text_color,
                 );
             }
+
+            // A rejected allocation leaves buffers that are invalid but
+            // indistinguishable from good ones at every cache key. Forget
+            // them all, so the next frame rebuilds this slot instead of
+            // drawing nothing for the rest of the session — which is what
+            // sent a user to REGENALL to get the model back.
+            if crate::scene::pipeline::gpu_errors_seen() != slot_errors_before {
+                inner.forget_cached_keys();
+            }
         }
         let prepare_ms = nav_prepare_started.elapsed().as_secs_f64() * 1000.0;
         if let Some(sample) = self.nav_perf {
@@ -1190,6 +1216,17 @@ impl shader::Primitive for Primitive {
                 self.viewports.len(),
             );
         }
+        // Memory pressure shortens cold-slot retention without evicting siblings.
+        let errors_now = crate::scene::pipeline::gpu_errors_seen();
+        let urgent = recovering || errors_now != errors_at_entry;
+        let released = pipeline.release_idle_slots(device, &slots, urgent);
+        if released > 0 && crate::perf::enabled() {
+            crate::perf_record!(
+                "[perf] slots-released n={released} urgent={urgent} slots={}",
+                pipeline.inners.len(),
+            );
+        }
+        report_gpu_live(pipeline);
     }
 
     fn render(
@@ -1200,6 +1237,7 @@ impl shader::Primitive for Primitive {
         clip: &Rectangle<u32>,
     ) {
         let nav_render_started = iced::time::Instant::now();
+        pipeline.frame_rendered.store(true, std::sync::atomic::Ordering::Relaxed);
         let cw = clip.width as f32;
         let ch = clip.height as f32;
         let clip_right = clip.x + clip.width;
@@ -1540,6 +1578,42 @@ fn solar_direction(
 }
 
 // ── Render-style helpers (impl Scene) ────────────────────────────────────
+
+/// Report what the renderer is holding on the device, when it changes.
+///
+/// Only on change: `prepare` runs thousands of times a session and these
+/// numbers move a handful of times. RSS is deliberately not used — the
+/// allocator and the driver both retain high-water memory that RSS cannot tell
+/// apart from live resources.
+fn report_gpu_live(pipeline: &crate::scene::pipeline::MultiPipeline) {
+    use std::cell::Cell;
+    if !crate::perf::enabled() {
+        return;
+    }
+    thread_local! {
+        static LAST: Cell<Option<crate::scene::pipeline::GpuLiveBytes>> = const { Cell::new(None) };
+    }
+    let now = pipeline.gpu_live_bytes();
+    LAST.with(|last| {
+        if last.get() == Some(now) {
+            return;
+        }
+        last.set(Some(now));
+        const MIB: f64 = 1024.0 * 1024.0;
+        let mib = |bytes: u64| bytes as f64 / MIB;
+        crate::perf_record!(
+            "[perf] gpu-live slots={} total={:.1}MiB shadow={:.1} targets={:.1} \
+text_atlas={:.1} wire_arena={:.1} block_geometry={:.1}",
+            now.slots,
+            mib(now.total()),
+            mib(now.shadow),
+            mib(now.render_targets),
+            mib(now.text_atlas),
+            mib(now.wire_arena),
+            mib(now.block_geometry),
+        );
+    });
+}
 
 impl Scene {
     fn model_tile_vport(&self, index: usize) -> Option<&acadrust::tables::VPort> {
@@ -3142,6 +3216,43 @@ pub(crate) fn adapt_to_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
         [1.0, 1.0, 1.0, color[3]]
     } else {
         color
+    }
+}
+
+/// Re-resolve display colours for `bg`, for wires that recorded what their
+/// resolution consumed.
+///
+/// This is what lets a set tessellated under one background be shown under
+/// another without rebuilding it: the geometry never depended on the
+/// background, only the colours did — see the `let _ = bg_color;` in
+/// `block_cache::local_wires_for`.
+///
+/// Every colour is recomputed from `raw_color`, never from the current
+/// `color`, so the pass is idempotent and safe over a set that mixes memoized
+/// wires with freshly tessellated ones. Recomputing from `color` would not be:
+/// `adapt_to_bg` maps a near-white colour to pure black, and pure black back
+/// to pure *white*, so a second application loses the original tint.
+///
+/// Wires with `bg_adapt: None` — everything not built by `Batches::finalize` —
+/// are left alone.
+pub(crate) fn resolve_colors_for_bg(wires: &mut [WireModel], bg: [f32; 4]) {
+    for wire in wires {
+        let Some(adapt) = wire.bg_adapt.as_deref() else {
+            continue;
+        };
+        let contrast = adapt.contrast_bg.unwrap_or(bg);
+        wire.color = if adapt.canvas_color {
+            bg
+        } else if adapt.preserve_color {
+            adapt.raw_color
+        } else {
+            adapt_to_bg(adapt.raw_color, contrast)
+        };
+        if !adapt.preserve_color {
+            for (vertex, raw) in wire.text_verts.iter_mut().zip(&adapt.text_raw_colors) {
+                vertex.color = adapt_to_bg(*raw, contrast);
+            }
+        }
     }
 }
 

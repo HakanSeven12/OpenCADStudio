@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
+  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.el.md">Ελληνικά</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center"><img src="../../assets/logo.svg" width="112" alt="Open CAD Studio 標誌"></p>
@@ -91,9 +91,9 @@ chmod +x OpenCADStudio-*-linux-x86_64.AppImage
 
 ## 語言
 
-Open CAD Studio 可以跟隨系統語言，也可以使用以下 20 種介面語言：
+Open CAD Studio 可以跟隨系統語言，也可以使用以下 21 種介面語言：
 
-> 阿拉伯文 · 巴西葡萄牙文 · 保加利亞文 · 捷克文 · 荷蘭文 · 英文 · 芬蘭文 · 法文 · 德文 · 北印度文 · 匈牙利文 · 義大利文 · 日文 · 韓文 · 波蘭文 · 俄文 · 簡體中文 · 西班牙文 · 繁體中文 · 土耳其文
+> 阿拉伯文 · 巴西葡萄牙文 · 保加利亞文 · 捷克文 · 荷蘭文 · 英文 · 芬蘭文 · 法文 · 德文 · 希臘文 · 北印度文 · 匈牙利文 · 義大利文 · 日文 · 韓文 · 波蘭文 · 俄文 · 簡體中文 · 西班牙文 · 繁體中文 · 土耳其文
 
 可在應用程式設定中變更語言。選擇**系統**時，瀏覽器版也會使用瀏覽器的偏好地區設定。
 

@@ -16,6 +16,9 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     .expect("GPU device");
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+    // Definition geometry is shared across viewport slots, so it lives on the
+    // MultiPipeline; a single-slot test supplies its own.
+    let mut block_geometry = wire_gpu::BlockGeometryCache::default();
     let block = |handle: u64, x: f64| WireModel {
         name: handle.to_string(),
         points: vec![[x as f32, 0.0, 0.0], [x as f32 + 1.0, 0.0, 0.0]],
@@ -28,24 +31,25 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     let first = block(1, 10.0);
     let second = block(2, 20.0);
     let depth = rustc_hash::FxHashMap::from_iter([(1, [0.1, 0.01]), (2, [0.2, 0.01])]);
-    let original = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
-    let unchanged = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
-    assert_eq!(original[0].vertex_buffer, unchanged[0].vertex_buffer);
+    let original = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
+    let unchanged = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
+    assert_eq!(original[0].geometry_id(), unchanged[0].geometry_id());
     assert_eq!(original[0].instance_count, 2);
 
-    let removed = pipeline.upload_block_wires(&device, &queue, &[&second], &depth);
+    let removed = pipeline.upload_block_wires(&device, &queue, &[&second], &depth, &mut block_geometry);
     assert_ne!(
-        original[0].vertex_buffer, removed[0].vertex_buffer,
+        original[0].geometry_id(),
+        removed[0].geometry_id(),
         "removing the base instance must replace vertices baked at its old position"
     );
     let moved = block(2, 30.0);
-    let moved_gpu = pipeline.upload_block_wires(&device, &queue, &[&moved], &depth);
-    assert_ne!(removed[0].vertex_buffer, moved_gpu[0].vertex_buffer);
-    let restored = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
-    assert_ne!(moved_gpu[0].vertex_buffer, restored[0].vertex_buffer);
+    let moved_gpu = pipeline.upload_block_wires(&device, &queue, &[&moved], &depth, &mut block_geometry);
+    assert_ne!(removed[0].geometry_id(), moved_gpu[0].geometry_id());
+    let restored = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
+    assert_ne!(moved_gpu[0].geometry_id(), restored[0].geometry_id());
     assert_eq!(restored[0].instance_count, 2);
     assert_eq!(
-        pipeline.block_geometry.len(),
+        block_geometry.len(),
         1,
         "discard obsolete geometry"
     );
@@ -262,5 +266,145 @@ fn bounded_gpu_uploads_preserve_geometry_and_instancing() {
     assert!(
         block_on(validation.pop()).is_none(),
         "GPU validation failed"
+    );
+}
+
+/// The shadow map is 16 MiB and every slot used to hold one whether or not its
+/// visual style enabled shadows. Now it is allocated on the transition, which
+/// means the frame bind group is rebuilt while the device is watching — the one
+/// path the other GPU tests never take.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn toggling_shadows_reallocates_without_upsetting_the_device() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+
+    assert!(
+        pipeline.shadow_full.is_none(),
+        "a fresh slot must not hold a shadow map"
+    );
+    let camera = crate::scene::view::camera::Camera::default();
+    let bounds = iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(64.0, 64.0));
+    let with_shadows = |on: bool| {
+        let mut u = Uniforms::new(&camera, bounds, false);
+        u.shadow_params[0] = if on { 1.0 } else { 0.0 };
+        u
+    };
+
+    // Off → on → off → on, so both transitions are exercised twice and the
+    // second `on` proves the release did not leave the bind group stale.
+    for expected in [true, false, true] {
+        pipeline.upload_uniforms(&device, &queue, &with_shadows(expected));
+        assert_eq!(
+            pipeline.shadow_full.is_some(),
+            expected,
+            "shadow target should follow shadow_params[0]"
+        );
+    }
+    // Releasing a cold slot gives it back and must rebuild the bind group too.
+    pipeline.release_heavy_resources(&device);
+    assert!(pipeline.shadow_full.is_none(), "a released slot holds none");
+
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(
+        block_on(validation.pop()).is_none(),
+        "GPU validation failed"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn urgent_release_preserves_visible_panes_and_frees_cold_slots() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter =
+        block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).unwrap();
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .unwrap();
+    let mut pipeline = <MultiPipeline as iced::widget::shader::Pipeline>::new(
+        &device,
+        &queue,
+        wgpu::TextureFormat::Bgra8UnormSrgb,
+    );
+    let first = pipeline.resolve_slots(&device, &queue, &[10])[0];
+    pipeline.inners[first].slot_id = 10;
+    pipeline.inners[first].ensure_depth_texture(&device, Size::new(512, 512));
+    let second = pipeline.resolve_slots(&device, &queue, &[20])[0];
+    pipeline.inners[second].slot_id = 20;
+    pipeline.inners[second].ensure_depth_texture(&device, Size::new(512, 512));
+    pipeline.release_idle_slots(&device, &[second], true);
+    assert_eq!(
+        pipeline.inners[first].alloc_size,
+        Size::new(512, 512),
+        "a sibling pane prepared immediately before this pane is still visible"
+    );
+
+    pipeline
+        .frame_rendered
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let next = pipeline.resolve_slots(&device, &queue, &[20]);
+    assert_eq!(
+        pipeline.release_idle_slots(&device, &next, true),
+        0,
+        "a previous-frame pane may still be prepared later in this frame"
+    );
+    pipeline
+        .frame_rendered
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let next = pipeline.resolve_slots(&device, &queue, &[20]);
+    assert_eq!(pipeline.release_idle_slots(&device, &next, true), 1);
+    assert_eq!(pipeline.inners[first].alloc_size, Size::new(0, 0));
+    assert_eq!(pipeline.inners[second].alloc_size, Size::new(512, 512));
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn late_device_errors_invalidate_uploaded_content_and_targets() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter =
+        block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).unwrap();
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .unwrap();
+    let mut pipeline = <MultiPipeline as iced::widget::shader::Pipeline>::new(
+        &device,
+        &queue,
+        wgpu::TextureFormat::Bgra8UnormSrgb,
+    );
+    let inner = &mut pipeline.inners[0];
+    inner.cached_wire_id = 7;
+    inner.wire_arena_id = 7;
+    inner.ensure_depth_texture(&device, Size::new(512, 512));
+    let before = gpu_errors_seen();
+    let _rejected = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("rejected test allocation"),
+        size: device.limits().max_buffer_size + 4,
+        usage: wgpu::BufferUsages::VERTEX,
+        mapped_at_creation: false,
+    });
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(gpu_errors_seen() > before);
+    inner.sync_gpu_error_epoch();
+    assert_eq!(inner.cached_wire_id, u64::MAX);
+    assert_eq!(inner.wire_arena_id, u64::MAX);
+    assert_eq!(inner.alloc_size, Size::new(0, 0));
+    assert_eq!(inner.background_source_id, usize::MAX);
+    inner.cached_wire_id = 8;
+    inner.sync_gpu_error_epoch();
+    assert_eq!(
+        inner.cached_wire_id, 8,
+        "the same error must not invalidate twice"
     );
 }

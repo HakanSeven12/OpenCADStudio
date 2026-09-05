@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Sphere">
+  <defs><radialGradient id="body" cx=".3" cy=".25" r=".8"><stop stop-color="#F4F8FC"/><stop offset=".4" stop-color="#DCE7F0"/><stop offset=".75" stop-color="#A9BFCE"/><stop offset="1" stop-color="#718C9E"/></radialGradient></defs>
+  <circle cx="16" cy="16" r="12" fill="url(#body)" stroke="#526B80" stroke-width="1.1"/>
+  <path d="M5 14C9 21 23 24 27 18M13 4.5C8 10 13 24 22 26" fill="none" stroke="#526B80" stroke-opacity=".5" stroke-width="1"/>
+  <path d="M8 11a9 9 0 0 1 6-5" fill="none" stroke="#F4F8FC" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

@@ -44,12 +44,22 @@ def legacy(server: Path) -> None:
         "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "smoke", "version": "1"}},
     })
     assert initialized["result"]["serverInfo"]["name"] == "OpenCADStudio"
-    assert initialized["result"]["instructions"]
+    assert "state.command.accepts" in initialized["result"]["instructions"]
     process.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
     process.stdin.flush()
     tools = request(process, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
-    names = {tool["name"] for tool in tools["result"]["tools"]}
+    definitions = {tool["name"]: tool for tool in tools["result"]["tools"]}
+    names = set(definitions)
     assert names == TOOLS, names
+    execute_request = definitions["ocs_execute"]["inputSchema"]["properties"]["request"]
+    assert len(execute_request["oneOf"]) == 15
+    assert execute_request["properties"]["steps"]["maxItems"] == 64
+    assert execute_request["properties"]["cmd"]["examples"][0] == "LINE 0,0 10,10"
+    assert execute_request["properties"]["kind"]["enum"] == [
+        "text", "token", "point", "entity", "structure", "selection", "enter"
+    ]
+    for name in {"ocs_sessions", "ocs_read", "ocs_execute"}:
+        assert definitions[name]["outputSchema"]["type"] == "object"
     assert "resultType" not in tools["result"]
     sessions = request(process, {
         "jsonrpc": "2.0",
@@ -77,6 +87,7 @@ def modern(server: Path) -> None:
     assert discovered["result"]["resultType"] == "complete"
     assert discovered["result"]["ttlMs"] >= 0
     assert discovered["result"]["cacheScope"] in {"public", "private"}
+    assert "io.modelcontextprotocol/tasks" in discovered["result"]["capabilities"]["extensions"]
 
     tools = request(process, {
         "jsonrpc": "2.0",
@@ -88,6 +99,26 @@ def modern(server: Path) -> None:
     assert tools["result"]["resultType"] == "complete"
     assert tools["result"]["ttlMs"] >= 0
     assert tools["result"]["cacheScope"] in {"public", "private"}
+    definitions = {tool["name"]: tool for tool in tools["result"]["tools"]}
+    assert definitions["ocs_execute"]["inputSchema"]["properties"]["response_detail"]["default"] == "compact"
+    assert definitions["ocs_capture"]["inputSchema"]["properties"]["scope"]["default"] == "viewport"
+
+    missing_cmd = request(process, {
+        "jsonrpc": "2.0",
+        "id": "missing-cmd",
+        "method": "tools/call",
+        "params": {
+            "name": "ocs_execute",
+            "arguments": {
+                "session_id": "missing",
+                "request": {"op": "run", "request_id": "run-1"},
+            },
+            "_meta": meta,
+        },
+    })
+    error = missing_cmd["result"]["structuredContent"]
+    assert error["code"] == "invalid_arguments"
+    assert "LINE 0,0 10,10" in error["error"]
 
     invalid_mutation = request(process, {
         "jsonrpc": "2.0",

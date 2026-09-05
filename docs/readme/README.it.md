@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
+  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.el.md">Ελληνικά</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center"><img src="../../assets/logo.svg" width="112" alt="Logo di Open CAD Studio"></p>
@@ -91,9 +91,9 @@ L’applicazione è firmata ad hoc, ma attualmente non è autenticata da Apple.
 
 ## Lingue
 
-Open CAD Studio può seguire la lingua di sistema o usare una di queste 20 lingue dell’interfaccia:
+Open CAD Studio può seguire la lingua di sistema o usare una di queste 21 lingue dell’interfaccia:
 
-> Arabo · Portoghese brasiliano · Bulgaro · Ceco · Olandese · Inglese · Finlandese · Francese · Tedesco · Hindi · Ungherese · Italiano · Giapponese · Coreano · Polacco · Russo · Cinese semplificato · Spagnolo · Cinese tradizionale · Turco
+> Arabo · Portoghese brasiliano · Bulgaro · Ceco · Olandese · Inglese · Finlandese · Francese · Tedesco · Greco · Hindi · Ungherese · Italiano · Giapponese · Coreano · Polacco · Russo · Cinese semplificato · Spagnolo · Cinese tradizionale · Turco
 
 Cambia la lingua nelle impostazioni dell’applicazione. La versione browser usa anche la lingua preferita del browser quando è selezionato **Sistema**.
 

@@ -56,6 +56,17 @@ pub enum EntitySpec {
     Solid(SolidPrimitive),
 }
 
+/// Construction spec for a block reference (`INSERT`): place the block
+/// `block_name` (must exist as a BlockRecord) at `insert_point` with uniform
+/// `scale` and `rotation` (radians, about Z).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InsertSpec {
+    pub block_name: String,
+    pub insert_point: [f64; 3],
+    pub scale: f64,
+    pub rotation: f64,
+}
+
 /// A rigid similarity (rotation + translation + optional uniform scale/reflection)
 /// as a plain-data mirror of `cadkernel::brep::transform`'s `Placement`
 /// (non-serde). Columns are the new basis axes; `origin` is the translation.
@@ -103,6 +114,7 @@ impl crate::gen::Operation {
             CreateMany(_) => "CreateMany",
             TransformMany { .. } => "TransformMany",
             DeleteMany(_) => "DeleteMany",
+            CreateInsert(_) => "CreateInsert",
         }
     }
 }

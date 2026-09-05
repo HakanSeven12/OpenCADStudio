@@ -176,6 +176,13 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::Deleted(ids.clone())
         }
+        Operation::CreateInsert(spec) => {
+            // Validate the block name exists before committing (no rollback needed).
+            b.push_undo(name);
+            let id = b.add_insert(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),

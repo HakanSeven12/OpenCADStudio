@@ -61,9 +61,11 @@ variants append at enum end.
   are supported (Phase 0).
 
 ### Phase 3 — containers
-- **Entities:** insert/block references, attribute definitions/entities.
-- **Methods:** `create_insert`, placement, attribute get/set.
-- **Read-only:** nested block content traversal (nested ≠ first-level).
+- **Done:** `create_insert(block_name, point, scale, rotation)` → `Operation::CreateInsert`
+  (validates the BlockRecord exists; unknown block → `Validation`, no mutation).
+  Insert `transform` moves its `insert_point`. Covered by `phase3_*` test.
+- **Remaining:** `AttributeDefinition`/`AttributeEntity` typed create + attribute
+  get/set; read-only nested block-content traversal.
 
 ### Phase 4 — paper-space & viewports
 - **Entities:** viewport entities.

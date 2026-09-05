@@ -464,6 +464,21 @@ pub struct EntityCollection {
 }
 
 impl EntityCollection {
+    /// Place a block reference (`INSERT`) for `block_name` (must exist).
+    pub fn create_insert(&self, block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateInsert(crate::ops::InsertSpec {
+            block_name: block_name.to_string(),
+            insert_point,
+            scale,
+            rotation,
+        }))?;
+        let id = receipt
+            .outcome
+            .and_then(|o| o.new_id())
+            .ok_or_else(|| ApiError::Transport("create_insert returned no id".into()))?;
+        Ok(Entity::new(self.session.clone(), id))
+    }
+
     /// Generic lookup by id (any family) → `Entity` (downcast via `as_solid()`, …).
     pub fn get(&self, id: ObjectId) -> ApiResult<Entity> {
         // Validate existence eagerly so `get` errors surface as `UnknownId`.

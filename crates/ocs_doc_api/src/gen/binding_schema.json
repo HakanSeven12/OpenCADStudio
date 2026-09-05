@@ -187,6 +187,13 @@
       "handle": "XLine",
       "methods": [],
       "name": "XLine"
+    },
+    {
+      "acadrust_variant": "Insert",
+      "collection": "entities",
+      "handle": "Entity",
+      "methods": [],
+      "name": "Insert"
     }
   ],
   "layouts": {

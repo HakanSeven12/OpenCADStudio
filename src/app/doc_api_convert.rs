@@ -124,6 +124,11 @@ pub fn transform_entity_geometry(
             x.base_point = apply(x.base_point);
             EntityType::XLine(x)
         }
+        EntityType::Insert(ins) => {
+            let mut ins = ins.clone();
+            ins.insert_point = apply(ins.insert_point);
+            EntityType::Insert(ins)
+        }
         EntityType::Point(pt) => {
             let mut pt = pt.clone();
             pt.location = apply(pt.location);
@@ -236,9 +241,9 @@ pub fn entity_kind_name(entity: &EntityType) -> &'static str {
         EntityType::Spline(_) => "Spline",
         EntityType::Ray(_) => "Ray",
         EntityType::XLine(_) => "XLine",
+        EntityType::Insert(_) => "Insert",
         EntityType::Text(_) => "Text",
         EntityType::MText(_) => "MText",
-        EntityType::Insert(_) => "Insert",
         _ => "Other",
     }
 }

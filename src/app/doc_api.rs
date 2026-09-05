@@ -105,6 +105,26 @@ impl DocApiBackend for HostSession<'_> {
         Ok(handle_to_obj(handle))
     }
 
+    fn add_insert(&mut self, spec: &ocs_doc_api::ops::InsertSpec) -> ApiResult<ObjectId> {
+        // Validate the referenced block exists before committing.
+        if self.document().block_records.get(&spec.block_name).is_none() {
+            return Err(ApiError::validation(
+                "CreateInsert",
+                format!("unknown block {:?}", spec.block_name),
+            ));
+        }
+        let mut ins = acadrust::entities::Insert::new(
+            spec.block_name.clone(),
+            acadrust::types::Vector3::new(spec.insert_point[0], spec.insert_point[1], spec.insert_point[2]),
+        );
+        ins.rotation = spec.rotation;
+        ins.set_x_scale(spec.scale);
+        ins.set_y_scale(spec.scale);
+        ins.set_z_scale(spec.scale);
+        let handle = self.scene_mut().add_entity(EntityType::Insert(ins));
+        Ok(handle_to_obj(handle))
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -162,6 +182,7 @@ impl DocApiBackend for HostSession<'_> {
                 | EntityType::Spline(_)
                 | EntityType::Ray(_)
                 | EntityType::XLine(_)
+                | EntityType::Insert(_)
                 | EntityType::Point(_)
                 | EntityType::LwPolyline(_)
         );
@@ -603,6 +624,37 @@ mod tests {
         let handle = obj_to_handle(ray);
         let Some(EntityType::Ray(r)) = host.document().get_entity(handle) else { panic!("ray not found") };
         assert!((r.base_point.z - 5.0).abs() < 1e-6);
+    }
+
+    // ── Phase 3: containers (block references) ───────────────────────────────
+
+    #[test]
+    fn phase3_create_insert_and_transform() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Register a block record so the insert can reference it.
+        host.document_mut().block_records.add(acadrust::tables::BlockRecord::new("MyBlock")).unwrap();
+
+        // Insert the block at (10,20,0) scale 2, rotation 0.
+        let ins = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateInsert(
+            ocs_doc_api::ops::InsertSpec { block_name: "MyBlock".into(), insert_point: [10.0, 20.0, 0.0], scale: 2.0, rotation: 0.0 }))).unwrap());
+        let handle = obj_to_handle(ins);
+        let Some(EntityType::Insert(i)) = host.document().get_entity(handle) else { panic!("insert not found") };
+        assert_eq!(i.block_name, "MyBlock");
+        assert!((i.insert_point.x - 10.0).abs() < 1e-9 && (i.x_scale() - 2.0).abs() < 1e-9);
+
+        // Transform the insert by +5 in X.
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform {
+            id: ins, placement: ocs_doc_api::PlacementSpec::at([5.0, 0.0, 0.0]) })).unwrap();
+        let Some(EntityType::Insert(i)) = host.document().get_entity(handle) else { panic!("insert not found") };
+        assert!((i.insert_point.x - 15.0).abs() < 1e-6);
+
+        // Inserting a non-existent block is a Validation error, no entity created.
+        let before = host.scene().geometry_epoch;
+        let err = dispatch(&mut host, DocApiEnvelope::op(Operation::CreateInsert(
+            ocs_doc_api::ops::InsertSpec { block_name: "NoSuchBlock".into(), insert_point: [0.0; 3], scale: 1.0, rotation: 0.0 }))).unwrap_err();
+        assert!(matches!(err, ApiError::Validation { .. }), "{err:?}");
+        assert_eq!(host.scene().geometry_epoch, before, "no entity on unknown block");
     }
 
     #[test]

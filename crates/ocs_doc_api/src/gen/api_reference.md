@@ -87,6 +87,14 @@ B-rep solid. Host resolves bodies via the solid_models cache (lift-on-miss from 
 
 - **create_xline**(`origin: [f64; 3], direction: [f64; 3]`) -> `XLine`
 
+## `Entity` (acadrust `Insert`, collection `entities`)
+
+Block reference. Place an existing BlockRecord by name; transform moves its insert point.
+
+### Constructors (`doc.entities()`)
+
+- **create_insert**(`block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64`) -> `Entity`
+
 ## Generic methods (every handle)
 
 Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `Entity`) is a

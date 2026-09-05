@@ -59,6 +59,12 @@ impl DocApiBackend for MockBackend {
         };
         Ok(self.alloc(kind))
     }
+    fn add_insert(&mut self, spec: &ocs_doc_api::ops::InsertSpec) -> ApiResult<ObjectId> {
+        if spec.block_name.is_empty() {
+            return Err(ApiError::validation("CreateInsert", "empty block name"));
+        }
+        Ok(self.alloc("Insert"))
+    }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {
             Ok(())

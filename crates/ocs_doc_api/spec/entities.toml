@@ -238,6 +238,21 @@ op = "CreateCurve"
 fixed = { curve = "XLine" }
 
 # ============================================================================
+# CONTAINER FAMILY (phase 3) — block references
+# ============================================================================
+[[family]]
+name = "Insert"
+acadrust_variant = "Insert"
+handle = "Entity"
+collection = "entities"
+description = "Block reference. Place an existing BlockRecord by name; transform moves its insert point."
+
+[[family.constructor]]
+name = "create_insert"
+args = [{ name = "block_name", ty = "&str" }, { name = "insert_point", ty = "[f64; 3]" }, { name = "scale", ty = "f64" }, { name = "rotation", ty = "f64" }]
+op = "CreateInsert"
+
+# ============================================================================
 # Cross-cutting ops (generic handles + bulk) — documented in build.rs
 # ============================================================================
 # - Generic handle methods on EVERY handle: bounds() -> Aabb, transform(placement),

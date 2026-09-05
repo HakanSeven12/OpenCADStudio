@@ -35,6 +35,10 @@ pub trait DocApiBackend {
     /// Add a 2D curve entity; returns the fresh `ObjectId`.
     fn add_curve(&mut self, spec: &Curve2Spec) -> ApiResult<ObjectId>;
 
+    /// Add a block reference (`INSERT`). Validates `block_name` exists; returns
+    /// the fresh `ObjectId`. `Validation` if the block is unknown.
+    fn add_insert(&mut self, spec: &crate::ops::InsertSpec) -> ApiResult<ObjectId>;
+
     /// Remove any first-level entity by id. Returns `false` if absent; returns
     /// `Err` if the entity exists but cannot be removed (e.g. locked layer).
     fn remove_entity(&mut self, id: ObjectId) -> ApiResult<bool>;

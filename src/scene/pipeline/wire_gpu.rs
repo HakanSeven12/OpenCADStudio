@@ -778,6 +778,8 @@ impl BlockWireGpu {
         // path's saving is visible rather than assumed.
         let mut uploaded_bytes = 0usize;
         let mut uploaded_segments = 0usize;
+        // Definitions whose upload the device rejected, so they were not cached.
+        let mut poisoned = 0usize;
         for (mesh_edge, group) in groups {
             let Some(&source) = group.first() else {
                 continue;
@@ -803,6 +805,12 @@ impl BlockWireGpu {
                 push_block_batches(&mut out, device, queue, &chunks, &instances, mesh_edge);
                 continue;
             }
+            // A failed allocation still produces a `Buffer`; it is simply
+            // invalid, and every later use of it reports again. Cached, it
+            // freezes the viewport for the rest of the session because the key
+            // keeps hitting and nothing ever rebuilds. Watch the device's error
+            // count across the build and refuse to cache what it condemns.
+            let errors_before = super::gpu_errors_seen();
             let (segments, mut constant) = emit_wire_native(source, 0, color, 0.0);
             if segments.is_empty() {
                 continue;
@@ -906,8 +914,17 @@ impl BlockWireGpu {
                 * std::mem::size_of::<BlockWireVertex>()
                 * if mode.uses_storage() { 1 } else { 6 };
             let chunks = std::sync::Arc::new(chunks);
-            if let Some(cache) = cache.as_deref_mut() {
-                cache.insert(cache_key, std::sync::Arc::clone(&chunks));
+            let built_clean = super::gpu_errors_seen() == errors_before;
+            if built_clean {
+                if let Some(cache) = cache.as_deref_mut() {
+                    cache.insert(cache_key, std::sync::Arc::clone(&chunks));
+                }
+            } else {
+                // Draw this frame with what we have — a degraded frame beats a
+                // blank one — but leave the cache clean so the next frame tries
+                // again. `live_keys` still holds the key, so the retain below
+                // does not evict a good entry from an earlier frame.
+                poisoned += 1;
             }
             let instances = block_instances(&group, base, mesh_edge, depth_map);
             push_block_batches(&mut out, device, queue, &chunks, &instances, mesh_edge);
@@ -919,12 +936,13 @@ impl BlockWireGpu {
         if crate::perf::enabled() && uploaded_segments > 0 {
             crate::perf_record!(
                 "[perf] block-wire-geometry mode={} definitions={} segments={} bytes={} \
-bytes_if_packed={}",
+bytes_if_packed={} poisoned={}",
                 if mode.uses_storage() { "storage" } else { "packed" },
                 live_keys.len(),
                 uploaded_segments,
                 uploaded_bytes,
                 uploaded_segments * std::mem::size_of::<BlockWireVertex>() * 6,
+                poisoned,
             );
         }
         out

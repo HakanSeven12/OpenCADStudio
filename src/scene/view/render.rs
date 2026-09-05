@@ -367,9 +367,18 @@ impl shader::Primitive for Primitive {
         let scale = viewport.scale_factor() as f32;
         let instance_ids: Vec<u64> = self.viewports.iter().map(|vp| vp.instance_id).collect();
         let slots = pipeline.resolve_slots(device, queue, &instance_ids);
+        // Compared after the frame's uploads: a move means the device refused
+        // something, which changes how patient the slot release below can be.
+        let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
 
         for (i, vp) in self.viewports.iter().enumerate() {
             let inner = &mut pipeline.inners[slots[i]];
+            // Compared at the end of this viewport's turn. Every "we hold this
+            // now" latch below is stamped after its upload, whether or not the
+            // device accepted it — and the wire latch gates the whole upload
+            // block, so one rejected allocation could leave a slotpermanently empty with
+            // nothing that would ever rebuild it.
+            let slot_errors_before = crate::scene::pipeline::gpu_errors_seen();
             // Pipeline slots are addressed by list index, but off-canvas
             // viewports are dropped from the list — so a slot can be reused by a
             // DIFFERENT viewport across frames (e.g. the first viewport scrolls
@@ -381,26 +390,7 @@ impl shader::Primitive for Primitive {
             // the surviving viewport's text/geometry vanish.
             if inner.slot_id != vp.instance_id {
                 inner.slot_id = vp.instance_id;
-                inner.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
-                inner.cached_wire_id = u64::MAX;
-                inner.cached_selection = (u64::MAX, u64::MAX);
-                inner.cached_mesh_content_id = u64::MAX;
-                inner.cached_face3d_key = (u64::MAX, false, false, u64::MAX);
-                inner.cached_solid_visibility =
-                    (u64::MAX, [u32::MAX; 3], u64::MAX);
-                inner.cached_hatch_source = None;
-                inner.cached_preview_hatch_source = None;
-                inner.cached_wipeout_source = None;
-                inner.cached_image_source = None;
-                inner.cached_text_source = None;
-                inner.cached_mesh_source = None;
-                inner.cached_face3d_source = None;
-                inner.cached_face3d_depth_source = None;
-                inner.wire_cull_key = (u64::MAX, u64::MAX, 0, 0);
-                inner.hatch_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
-                inner.wipeout_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
-                inner.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
-                inner.render_sig = u64::MAX;
+                inner.forget_cached_keys();
             }
             // The MSAA / depth / resolve textures are always sized to the
             // FULL viewport rectangle (not the on-canvas-visible portion)
@@ -434,7 +424,7 @@ impl shader::Primitive for Primitive {
                 vp.background_image.as_ref(),
                 vp.environment_image.as_ref(),
             );
-            inner.upload_uniforms(queue, &vp.uniforms);
+            inner.upload_uniforms(device, queue, &vp.uniforms);
 
             // ── Scene-render cache ────────────────────────────────────────
             // A pure cursor move — or any frame where the view, geometry,
@@ -860,6 +850,7 @@ impl shader::Primitive for Primitive {
                                 queue,
                                 &instanced,
                                 &draw_depths,
+                                &mut pipeline.block_geometry,
                             ),
                         );
                         if _patched {
@@ -936,7 +927,13 @@ impl shader::Primitive for Primitive {
                             let errors_before =
                                 crate::scene::pipeline::gpu_errors_seen();
                             let entry =
-                                inner.build_wire_buffers(device, queue, &vp_wires[..], &draw_depths);
+                                inner.build_wire_buffers(
+                                    device,
+                                    queue,
+                                    &vp_wires[..],
+                                    &draw_depths,
+                                    &mut pipeline.block_geometry,
+                                );
                             if let Some(start) = t_upload {
                                 crate::perf_record!(
                                     "[perf] wire-upload {:.1}ms wires={} content_id={}",
@@ -1189,6 +1186,15 @@ impl shader::Primitive for Primitive {
                     self.viewcube_text_color,
                 );
             }
+
+            // A rejected allocation leaves buffers that are invalid but
+            // indistinguishable from good ones at every cache key. Forget
+            // them all, so the next frame rebuilds this slot instead of
+            // drawing nothing for the rest of the session — which is what
+            // sent a user to REGENALL to get the model back.
+            if crate::scene::pipeline::gpu_errors_seen() != slot_errors_before {
+                inner.forget_cached_keys();
+            }
         }
         let prepare_ms = nav_prepare_started.elapsed().as_secs_f64() * 1000.0;
         if let Some(sample) = self.nav_perf {
@@ -1210,6 +1216,21 @@ impl shader::Primitive for Primitive {
                 self.viewports.len(),
             );
         }
+        // Give back what nobody is drawing. Gradual while the device is
+        // healthy; immediate once it has refused an allocation, because the
+        // memory a hidden viewport is holding is exactly what the visible one
+        // could not get — and freeing it is what lets the operator close a
+        // viewport or two and carry on instead of restarting.
+        let errors_now = crate::scene::pipeline::gpu_errors_seen();
+        let urgent = errors_now != errors_at_entry;
+        let released = pipeline.release_idle_slots(device, &slots, urgent);
+        if released > 0 && crate::perf::enabled() {
+            crate::perf_record!(
+                "[perf] slots-released n={released} urgent={urgent} slots={}",
+                pipeline.inners.len(),
+            );
+        }
+        report_gpu_live(pipeline);
     }
 
     fn render(
@@ -1560,6 +1581,42 @@ fn solar_direction(
 }
 
 // ── Render-style helpers (impl Scene) ────────────────────────────────────
+
+/// Report what the renderer is holding on the device, when it changes.
+///
+/// Only on change: `prepare` runs thousands of times a session and these
+/// numbers move a handful of times. RSS is deliberately not used — the
+/// allocator and the driver both retain high-water memory that RSS cannot tell
+/// apart from live resources.
+fn report_gpu_live(pipeline: &crate::scene::pipeline::MultiPipeline) {
+    use std::cell::Cell;
+    if !crate::perf::enabled() {
+        return;
+    }
+    thread_local! {
+        static LAST: Cell<Option<crate::scene::pipeline::GpuLiveBytes>> = const { Cell::new(None) };
+    }
+    let now = pipeline.gpu_live_bytes();
+    LAST.with(|last| {
+        if last.get() == Some(now) {
+            return;
+        }
+        last.set(Some(now));
+        const MIB: f64 = 1024.0 * 1024.0;
+        let mib = |bytes: u64| bytes as f64 / MIB;
+        crate::perf_record!(
+            "[perf] gpu-live slots={} total={:.1}MiB shadow={:.1} targets={:.1} \
+text_atlas={:.1} wire_arena={:.1} block_geometry={:.1}",
+            now.slots,
+            mib(now.total()),
+            mib(now.shadow),
+            mib(now.render_targets),
+            mib(now.text_atlas),
+            mib(now.wire_arena),
+            mib(now.block_geometry),
+        );
+    });
+}
 
 impl Scene {
     fn model_tile_vport(&self, index: usize) -> Option<&acadrust::tables::VPort> {

@@ -197,6 +197,20 @@ impl OpenCADStudio {
     /// `view` so the single-window web build can render it directly, bypassing
     /// the multi-window id dispatch above (the web build has no extra windows).
     pub fn view_main(&self) -> Element<'_, Message> {
+        // Section marks for `view-detail`. A closure over a RefCell rather
+        // than one binding per section: two of these sections sit inside a
+        // nested block and would otherwise be out of scope at the report.
+        let view_t0 = crate::perf::enabled().then(iced::time::Instant::now);
+        let view_marks: std::cell::RefCell<Vec<(&'static str, f64)>> =
+            std::cell::RefCell::new(Vec::with_capacity(8));
+        let mark = |name: &'static str| {
+            if let Some(t0) = view_t0 {
+                view_marks
+                    .borrow_mut()
+                    .push((name, t0.elapsed().as_secs_f64() * 1000.0));
+            }
+        };
+
         let i = self.active_tab;
         let tab = &self.tabs[i];
         let thumbnail_capture_clean = self.thumbnail_capture_clean;
@@ -257,6 +271,7 @@ impl OpenCADStudio {
         // the same shader as model space: a full-canvas top-locked "sheet"
         // viewport draws the layout's own geometry (white sheet + entities +
         // borders) and the floating content viewports blit on top.
+        mark("viewport_3d");
         let viewport_3d: Element<'_, Message> = if tab.is_start {
             start_page_view(
                 &self.patrons,
@@ -334,6 +349,7 @@ impl OpenCADStudio {
         // the shader pane_grid (same `model_panes` → identical layout). Layered
         // above the crosshair overlay so it actually receives mouse events, and
         // it owns the divider resize. Only built for the Model layout.
+        mark("model_input");
         let model_input_layer: Option<Element<'_, Message>> = if is_paper || tab.is_start {
             None
         } else {
@@ -351,6 +367,7 @@ impl OpenCADStudio {
             )
         };
 
+        mark("grid");
         let grid_overlay = {
             let (vw, vh) = tab.scene.selection.borrow().vp_size;
             let model_basis = {
@@ -420,6 +437,7 @@ impl OpenCADStudio {
             crate::ui::overlay::grid_overlay(grid, grid_style)
         };
 
+        mark("selection_overlay");
         let selection_overlay = {
             // Hold a single `Ref<'_, SelectionState>` for the whole overlay
             // block. The `vp_size` and `last_move_pos` reads below become
@@ -790,6 +808,7 @@ impl OpenCADStudio {
             )
         };
 
+        mark("viewport_mouse");
         let viewport_mouse = mouse_area(container(
             iced::widget::Space::new().width(Fill).height(Fill),
         ))
@@ -935,6 +954,7 @@ impl OpenCADStudio {
                 None
             };
 
+        mark("viewport_stack");
         let mut viewport_stack = if tab.is_start {
             // Start tab: only the welcome widget over a flat background.
             // Skip every drawing-only overlay (selection markers, snap info,
@@ -1053,6 +1073,7 @@ impl OpenCADStudio {
         // both layered ABOVE the viewport mouse_area so they receive
         // clicks (the shader viewport sits below it). Positioned with
         // leading Spaces sized to the viewport's screen rectangle.
+        mark("active_vp_rect");
         let active_vp_rect: Option<(acadrust::Handle, iced::Rectangle)> =
             if is_paper && !tab.is_start {
                 tab.scene.active_viewport.and_then(|h| {
@@ -1383,6 +1404,7 @@ impl OpenCADStudio {
         }
 
         // Reserve the overlaid command line when placing cursor-anchored panels.
+        mark("chrome");
         let command_line_inset = if self.command_line.history_open {
             self.command_line.history_height.clamp(
                 crate::ui::command_line::HISTORY_HEIGHT_MIN,
@@ -2102,6 +2124,34 @@ impl OpenCADStudio {
         };
         // Shared CAD colour picker. Indexed ACI colours use OpenCADStudio's own
         // dialog; True Color keeps the existing iced_aw gradient picker.
+        // Which part of the widget tree the frame went into. Reported as a
+        // breakdown rather than one number, because a first switch to a paper
+        // layout spends seconds here and `view` alone cannot say where.
+        if let Some(t0) = view_t0 {
+            mark("end");
+            let total = t0.elapsed().as_secs_f64() * 1000.0;
+            if total >= 1.0 {
+                let marks = view_marks.borrow();
+                // A mark opens a section; the following mark closes it, so a
+                // section's cost is the gap to its successor. The first mark
+                // is preceded by the preamble, reported as `head`.
+                let mut detail = String::new();
+                if let Some((_, first)) = marks.first() {
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut detail,
+                        format_args!(" head={first:.1}"),
+                    );
+                }
+                for pair in marks.windows(2) {
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut detail,
+                        format_args!(" {}={:.1}", pair[0].0, pair[1].1 - pair[0].1),
+                    );
+                }
+                crate::perf_record!("[perf] view-detail total={total:.1}ms{detail}");
+            }
+        }
+
         if let Some((_, current)) = self.color_pick_target.as_ref() {
             match self.color_picker_tab {
                 super::ColorPickerTab::Index => {

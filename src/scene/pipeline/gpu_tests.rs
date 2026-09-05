@@ -3,6 +3,95 @@ use crate::scene::model::{mesh_model::MeshLodSet, mesh_model::MeshModel, wire_mo
 use acadrust::{types::Transform, Handle};
 use iced::futures::executor::block_on;
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn block_edits_preserve_cache_coordinates_and_arena_partition() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+    let block = |handle: u64, x: f64| WireModel {
+        name: handle.to_string(),
+        points: vec![[x as f32, 0.0, 0.0], [x as f32 + 1.0, 0.0, 0.0]],
+        render_instance: Some(crate::scene::model::instance_model::RenderInstance {
+            source_id: 1,
+            translation: [x, 0.0, 0.0],
+        }),
+        ..Default::default()
+    };
+    let first = block(1, 10.0);
+    let second = block(2, 20.0);
+    let depth = rustc_hash::FxHashMap::from_iter([(1, [0.1, 0.01]), (2, [0.2, 0.01])]);
+    let original = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
+    let unchanged = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
+    assert_eq!(original[0].vertex_buffer, unchanged[0].vertex_buffer);
+    assert_eq!(original[0].instance_count, 2);
+
+    let removed = pipeline.upload_block_wires(&device, &queue, &[&second], &depth);
+    assert_ne!(
+        original[0].vertex_buffer, removed[0].vertex_buffer,
+        "removing the base instance must replace vertices baked at its old position"
+    );
+    let moved = block(2, 30.0);
+    let moved_gpu = pipeline.upload_block_wires(&device, &queue, &[&moved], &depth);
+    assert_ne!(removed[0].vertex_buffer, moved_gpu[0].vertex_buffer);
+    let restored = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
+    assert_ne!(moved_gpu[0].vertex_buffer, restored[0].vertex_buffer);
+    assert_eq!(restored[0].instance_count, 2);
+    assert_eq!(
+        pipeline.block_geometry.len(),
+        1,
+        "discard obsolete geometry"
+    );
+
+    let line = WireModel {
+        render_instance: None,
+        ..first.clone()
+    };
+    let changed = [second];
+    let (regular, _) = wire_arena::split_wires(&changed);
+    let runs = rustc_hash::FxHashMap::from_iter([(Handle::new(2), regular)]);
+    for layout in [pipeline.wire_const_bgl.as_ref(), None] {
+        let mut arena = wire_arena::PersistentWireArena::build(
+            &device,
+            &queue,
+            &[&line],
+            &depth,
+            layout,
+            false,
+        )
+        .unwrap();
+        assert!(arena.patch(
+            &queue,
+            &[(Handle::new(2), crate::scene::ChangeKind::Added)],
+            &runs,
+            true,
+            &depth
+        ));
+        assert_eq!(
+            arena
+                .wire_gpus()
+                .iter()
+                .map(|gpu| gpu.instance_count)
+                .sum::<u32>(),
+            1,
+            "the block must not also enter the regular arena"
+        );
+    }
+    queue.submit([]);
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(
+        block_on(validation.pop()).is_none(),
+        "GPU validation failed"
+    );
+}
+
 // OCS_GPU_CHUNK_MIB=1 cargo test --lib bounded_gpu_uploads -- --ignored --nocapture
 #[test]
 #[ignore = "requires a GPU adapter and OCS_GPU_CHUNK_MIB=1"]

@@ -213,6 +213,9 @@ pub struct Pipeline {
     /// shared resident buffer.
     pub(crate) gpu_wires: std::sync::Arc<Vec<WireGpu>>,
     pub(crate) gpu_block_wires: std::sync::Arc<Vec<BlockWireGpu>>,
+    /// Block geometry that survives an edit, keyed by the definition it
+    /// expands. See `wire_gpu::BlockGeometryCache`.
+    pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
     /// Persistent per-entity wire instance arena (capability-selected format).
     /// When active, `gpu_wires` is a thin wrapper over this arena's buffers and an
     /// edit patches one entity's slab in place instead of rebuilding every wire.
@@ -2279,6 +2282,7 @@ impl Pipeline {
             surface_format: format,
             gpu_wires: std::sync::Arc::new(vec![]),
             gpu_block_wires: std::sync::Arc::new(vec![]),
+            block_geometry: Default::default(),
             wire_arena: None,
             wire_arena_mesh: None,
             wire_arena_fallback: std::sync::Arc::new(Vec::new()),
@@ -2331,13 +2335,28 @@ impl Pipeline {
         }
     }
 
-    /// Build the resident wire batches + handle index for `wires`, wrapped in
-    /// `Arc` so the caller can cache them by `wire_content_id` and share one
-    /// copy across every slot that renders that content (see
-    /// `MultiPipeline::wire_buffer_cache`). Takes `&self` (reads only the const
-    /// bind-group layout) so the shared cache — not the slot — owns the result.
+    /// Upload block placements while reusing unchanged geometry.
+    pub fn upload_block_wires(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[&WireModel],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+    ) -> Vec<BlockWireGpu> {
+        BlockWireGpu::from_wires(
+            device,
+            queue,
+            wires,
+            depth_map,
+            None,
+            &self.block_wire_const_bgl,
+            Some(&mut self.block_geometry),
+        )
+    }
+
+    /// Build resident batches and a handle index shared across viewport slots.
     pub fn build_wire_buffers(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         wires: &[WireModel],
@@ -2397,6 +2416,7 @@ impl Pipeline {
             depth_map,
             None,
             &self.block_wire_const_bgl,
+            Some(&mut self.block_geometry),
         );
 
         // Index handle → wire slots once, here, so the per-hover selection
@@ -2523,6 +2543,7 @@ impl Pipeline {
                 depth_map,
                 Some(tint),
                 &self.block_wire_const_bgl,
+                None,
             )
         } else {
             Vec::new()
@@ -2534,6 +2555,7 @@ impl Pipeline {
             depth_map,
             Some(WireModel::HOVER),
             &self.block_wire_const_bgl,
+            None,
         ));
         self.gpu_selected_block_wires = block_gpu;
         if let Some(started) = perf_started {

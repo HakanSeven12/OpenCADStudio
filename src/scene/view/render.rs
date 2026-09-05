@@ -654,8 +654,7 @@ impl shader::Primitive for Primitive {
                     && (inner.wire_const_bgl.is_some()
                         || ((vp.wire_patch.is_some()
                             || inner.wire_arena_id != u64::MAX)
-                            && packed_arena_owner))
-                    && !vp_wires.iter().any(|wire| wire.render_instance.is_some());
+                            && packed_arena_owner));
                 if use_wire_arena {
                     use crate::scene::pipeline::wire_arena::{
                         self, PersistentWireArena as WireArena,
@@ -696,21 +695,9 @@ impl shader::Primitive for Primitive {
                                 .get(&handle)
                                 .map(|wires| wires.as_slice())
                                 .unwrap_or(&[]);
-                            let mesh_entity = run
-                                .iter()
-                                .any(|w| !w.fill_tris.is_empty() && !w.fill_tris_low.is_empty());
-                            regular_changed.insert(
-                                handle,
-                                run.iter()
-                                    .filter(|w| !w.points.is_empty() && !mesh_entity)
-                                    .collect(),
-                            );
-                            mesh_changed.insert(
-                                handle,
-                                run.iter()
-                                    .filter(|w| !w.points.is_empty() && mesh_entity)
-                                    .collect(),
-                            );
+                            let (regular, mesh) = wire_arena::split_wires(run);
+                            regular_changed.insert(handle, regular);
+                            mesh_changed.insert(handle, mesh);
                         }
                     }
                     let fallback_touched = |mesh_edge: bool| {
@@ -758,22 +745,7 @@ impl shader::Primitive for Primitive {
                     if !reg_ok || !mesh_ok {
                         // Initial upload or a patch that outgrew arena capacity:
                         // only then pay the full regular/mesh split.
-                        let mesh_names: rustc_hash::FxHashSet<u64> = vp_wires
-                            .iter()
-                            .filter(|w| !w.fill_tris.is_empty() && !w.fill_tris_low.is_empty())
-                            .filter_map(|w| w.name.parse::<u64>().ok())
-                            .collect();
-                        let regular: Vec<&crate::scene::WireModel> = vp_wires
-                            .iter()
-                            .filter(|w| {
-                                !w.points.is_empty()
-                                    && !wire_arena::is_mesh_edge(w, &mesh_names)
-                            })
-                            .collect();
-                        let mesh: Vec<&crate::scene::WireModel> = vp_wires
-                            .iter()
-                            .filter(|w| wire_arena::is_mesh_edge(w, &mesh_names))
-                            .collect();
+                        let (regular, mesh) = wire_arena::split_wires(&vp_wires);
                         if !reg_ok {
                             inner.wire_arena = WireArena::build(
                                 device,
@@ -874,7 +846,19 @@ impl shader::Primitive for Primitive {
                             gpus.extend(arena.wire_gpus());
                         }
                         inner.gpu_wires = std::sync::Arc::new(gpus);
-                        inner.gpu_block_wires = std::sync::Arc::new(Vec::new());
+                        // Blocks keep their own cached geometry and placements.
+                        let instanced: Vec<&crate::scene::WireModel> = vp_wires
+                            .iter()
+                            .filter(|w| w.render_instance.is_some())
+                            .collect();
+                        inner.gpu_block_wires = std::sync::Arc::new(
+                            inner.upload_block_wires(
+                                device,
+                                queue,
+                                &instanced,
+                                &draw_depths,
+                            ),
+                        );
                         if _patched {
                             wire_arena::patch_handle_index(
                                 &mut inner.wire_handle_index,

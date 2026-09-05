@@ -120,9 +120,15 @@ fn handle_of(w: &WireModel) -> Option<Handle> {
     crate::scene::Scene::handle_from_wire_name(&w.name)
 }
 
-/// True when `w` needs the shaded-mode edge treatment.
-pub fn is_mesh_edge(w: &WireModel, _mesh_names: &rustc_hash::FxHashSet<u64>) -> bool {
-    !w.points.is_empty() && w.fill_is_3d
+/// Use the same regular/mesh partition for full uploads and changed runs.
+/// Instanced blocks are uploaded separately by `BlockWireGpu`.
+pub fn split_wires(wires: &[WireModel]) -> (Vec<&WireModel>, Vec<&WireModel>) {
+    wires
+        .iter()
+        .filter(|wire| {
+            wire.display_visible && !wire.points.is_empty() && wire.render_instance.is_none()
+        })
+        .partition(|wire| !wire.fill_is_3d)
 }
 
 /// True when appending a new entity at the tail could change the image, so the
@@ -1384,6 +1390,45 @@ impl PersistentWireArena {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wire_partition_excludes_blocks_and_preserves_mixed_run_edges() {
+        let line = WireModel {
+            name: "line".into(),
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+            ..Default::default()
+        };
+        let mesh = WireModel {
+            name: "mesh".into(),
+            fill_is_3d: true,
+            ..line.clone()
+        };
+        let block = WireModel {
+            render_instance: Some(crate::scene::model::instance_model::RenderInstance {
+                source_id: 1,
+                translation: [0.0; 3],
+            }),
+            ..line.clone()
+        };
+        let block_mesh = WireModel {
+            fill_is_3d: true,
+            ..block.clone()
+        };
+        let hidden = WireModel {
+            display_visible: false,
+            ..line.clone()
+        };
+        let wires = [block, line, block_mesh, mesh, hidden, WireModel::default()];
+        let (regular, edges) = split_wires(&wires);
+        assert_eq!(
+            regular.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(),
+            ["line"]
+        );
+        assert_eq!(
+            edges.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(),
+            ["mesh"]
+        );
+    }
 
     fn slab() -> Slab {
         Slab {

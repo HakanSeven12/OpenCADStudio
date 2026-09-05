@@ -1438,6 +1438,8 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 if let Some(prepared) = prepared_geometry {
                     self.tabs[i].scene.install_prepared_open_geometry(prepared);
                 }
+                // Pay for the interaction index here, not on the first hover.
+                self.tabs[i].scene.warm_interaction_caches();
                 self.tabs[i]
                     .scene
                     .replace_selection(rustc_hash::FxHashSet::default());

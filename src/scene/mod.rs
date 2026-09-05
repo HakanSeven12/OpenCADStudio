@@ -432,6 +432,25 @@ struct ResidentWireLayout {
 pub struct PreparedOpenGeometry {
     pub wires: Arc<Vec<WireModel>>,
     pub interaction_index: Option<Arc<crate::scene::pick::interaction_index::InteractionIndex>>,
+    /// The per-entity tessellation memo the loader thread filled while building
+    /// `wires`, with the guard hash it was valid under.
+    ///
+    /// `prepare_open_geometry` works on a throwaway `Scene`, so this used to be
+    /// dropped with it and the first geometry edit re-tessellated all 186 455
+    /// entities from cold — 1.3 s of work the loader had already done. The
+    /// guard travels with it because the memo is only usable under the state it
+    /// was built for; a mismatch on the receiving side clears it, which is
+    /// exactly the old behaviour.
+    pub tess_memo: HashMap<Handle, Arc<Vec<WireModel>>>,
+    pub tess_guard: u64,
+    /// Block definitions the loader thread built while tessellating, keyed as
+    /// `block_defn_cache` keys them but without an epoch — the receiving scene
+    /// stamps its own.
+    ///
+    /// Dropped with the throwaway scene before, which is why the first edit
+    /// spent 1147 ms rebuilding definitions the loader had just built from the
+    /// same, unmodified document.
+    pub block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)>,
 }
 
 impl std::fmt::Debug for PreparedOpenGeometry {
@@ -439,6 +458,8 @@ impl std::fmt::Debug for PreparedOpenGeometry {
         f.debug_struct("PreparedOpenGeometry")
             .field("wires", &self.wires.len())
             .field("interaction_index", &self.interaction_index.is_some())
+            .field("tess_memo", &self.tess_memo.len())
+            .field("block_defns", &self.block_defns.len())
             .finish()
     }
 }
@@ -1016,12 +1037,23 @@ pub fn prepare_open_geometry(
             wires.len(),
         );
     }
+    // Taken, not cloned: the scene is discarded on the next line.
+    let tess_memo = std::mem::take(&mut *scene.resident_tess_memo.borrow_mut());
+    let tess_guard = scene.resident_tess_guard.get();
+    let block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)> =
+        std::mem::take(&mut *scene.block_defn_cache.borrow_mut())
+            .into_iter()
+            .map(|(key, (_epoch, cache))| (key, cache))
+            .collect();
     let doc = std::mem::replace(&mut scene.document, CadDocument::new());
     (
         doc,
         PreparedOpenGeometry {
             wires,
             interaction_index,
+            tess_memo,
+            tess_guard,
+            block_defns,
         },
     )
 }
@@ -2206,6 +2238,22 @@ impl Scene {
                 layout: None,
             },
         );
+        // Adopt the loader thread's tessellation memo so the first edit patches
+        // the entities it touched instead of rebuilding every one of them.
+        if !prepared.tess_memo.is_empty() {
+            *self.resident_tess_memo.borrow_mut() = prepared.tess_memo;
+            self.resident_tess_guard.set(prepared.tess_guard);
+        }
+        // Same for the block definitions, stamped with this scene's block
+        // epoch: the document has not been touched between the loader
+        // finishing and this call, so they describe it exactly.
+        if !prepared.block_defns.is_empty() {
+            let epoch = self.block_epoch;
+            let mut cache = self.block_defn_cache.borrow_mut();
+            for (key, defns) in prepared.block_defns {
+                cache.insert(key, (epoch, defns));
+            }
+        }
         if let Some(index) = prepared.interaction_index {
             self.cache_interaction_index(self.geometry_epoch, prepared.wires, index);
         }
@@ -7851,6 +7899,27 @@ impl Scene {
         }
     }
 
+    /// Build the interaction handle index and the insert-hatch map now, while
+    /// the drawing is still opening.
+    ///
+    /// Both are built lazily on first use, and first use is the user's first
+    /// hover over the canvas — where the cold build cost 992 ms mid-gesture
+    /// (`hover-detail ... handles=986.1`). They cannot move to the loader
+    /// thread: they read `hatches` / `meshes` / `block_meshes`, which are
+    /// installed on the real `Scene` after the loader is done.
+    ///
+    /// This does not make the work cheaper, it moves it to where the user is
+    /// already waiting. A second on an open that is already seconds long reads
+    /// very differently from a second-long freeze on a mouse move.
+    pub(crate) fn warm_interaction_caches(&self) {
+        // Both indexes on the hover path, not just one. The handle index alone
+        // left `hover-detail ... handles=384.6` on the first hover: the same
+        // stage also builds the entity quadtree, which is keyed on
+        // `geometry_epoch` and equally cold at that point.
+        let _ = self.entity_index();
+        let _ = self.interaction_handle_index();
+    }
+
     fn interaction_handle_index(
         &self,
     ) -> Arc<crate::scene::pick::interaction_index::InteractionHandleIndex> {
@@ -9066,7 +9135,12 @@ impl Scene {
             if let Some((_, ref idx)) = *cache {
                 if let Some(sort_map) = idx.get(&block_handle) {
                     sorted = true;
-                    wires.sort_by_key(|w| {
+                    // `sort_by_cached_key`, not `sort_by_key`: the key parses
+                    // the wire's name out of a `String`, and `sort_by_key` calls
+                    // it O(n log n) times. On the resident set that is ~198 k
+                    // wires parsed eighteen times over — 295 ms on every rebuild,
+                    // including rebuilds where nothing was re-tessellated.
+                    wires.sort_by_cached_key(|w| {
                         let key = Self::handle_from_wire_name(&w.name)
                             .map(|h| h.value())
                             .unwrap_or(u64::MAX);

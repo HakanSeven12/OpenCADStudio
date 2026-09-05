@@ -4956,12 +4956,25 @@ impl MultiPipeline {
 /// `Pipeline::new`, which runs again for every pane `ensure_len` adds. If iced
 /// ever rebuilds the device it builds a new `MultiPipeline` too, so the fresh
 /// device is covered (and the throttle restarts with it).
+static GPU_ERRORS_SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many uncaptured device errors have been reported since this device was
+/// created.
+///
+/// Callers snapshot it around an allocation to find out whether what they just
+/// built is usable. Best effort: wgpu surfaces some errors asynchronously, so a
+/// move means "something failed", while no move is not proof that nothing did.
+/// That is the right asymmetry here — the cost of believing a bad buffer is a
+/// frozen viewport, the cost of rebuilding a good one is a frame.
+pub(crate) fn gpu_errors_seen() -> usize {
+    GPU_ERRORS_SEEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn install_gpu_error_handler(device: &wgpu::Device) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static SEEN: AtomicUsize = AtomicUsize::new(0);
-    SEEN.store(0, Ordering::Relaxed);
+    use std::sync::atomic::Ordering;
+    GPU_ERRORS_SEEN.store(0, Ordering::Relaxed);
     device.on_uncaptured_error(std::sync::Arc::new(|e: wgpu::Error| {
-        let n = SEEN.fetch_add(1, Ordering::Relaxed) + 1;
+        let n = GPU_ERRORS_SEEN.fetch_add(1, Ordering::Relaxed) + 1;
         if n.is_power_of_two() {
             eprintln!("[gpu] uncaptured wgpu error #{n} (frame degraded, session kept alive): {e}");
         }

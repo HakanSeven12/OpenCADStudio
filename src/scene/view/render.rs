@@ -714,6 +714,9 @@ impl shader::Primitive for Primitive {
                             })
                         })
                     };
+                    // Snapshot before any arena allocation, so a rejected
+                    // upload cannot claim this content id below.
+                    let arena_errors_before = crate::scene::pipeline::gpu_errors_seen();
                     let reg_ok = base_ok
                         && if let Some(arena) = inner.wire_arena.as_mut() {
                             let patch = patch.unwrap();
@@ -868,7 +871,15 @@ impl shader::Primitive for Primitive {
                             inner.wire_handle_index =
                                 wire_arena::build_handle_index(&vp_wires[..]);
                         }
-                        inner.wire_arena_id = vp.wire_content_id;
+                        // Only claim the content id when the device accepted
+                        // the upload; otherwise the slot believes it holds this
+                        // content and never rebuilds it.
+                        inner.wire_arena_id =
+                            if crate::scene::pipeline::gpu_errors_seen() == arena_errors_before {
+                                vp.wire_content_id
+                            } else {
+                                u64::MAX
+                            };
                         arena_served = true;
                     } else {
                         inner.wire_arena = None;
@@ -922,6 +933,8 @@ impl shader::Primitive for Primitive {
                                 );
                             }
                             let t_upload = _perf.then(iced::time::Instant::now);
+                            let errors_before =
+                                crate::scene::pipeline::gpu_errors_seen();
                             let entry =
                                 inner.build_wire_buffers(device, queue, &vp_wires[..], &draw_depths);
                             if let Some(start) = t_upload {
@@ -933,9 +946,16 @@ impl shader::Primitive for Primitive {
                                 );
                             }
 
-                            pipeline
-                                .wire_buffer_cache
-                                .insert(vp.wire_content_id, entry.clone());
+                            // Buffers the device rejected are still `Buffer`s.
+                            // Cached under a content id that keeps matching,
+                            // they render nothing for the rest of the session
+                            // and nothing ever rebuilds them. Draw the degraded
+                            // frame, but let the next one try again.
+                            if crate::scene::pipeline::gpu_errors_seen() == errors_before {
+                                pipeline
+                                    .wire_buffer_cache
+                                    .insert(vp.wire_content_id, entry.clone());
+                            }
                             entry
                         }
                     };

@@ -665,6 +665,26 @@ pub(crate) fn wire_draw_depth(
     }
 }
 
+/// Per-definition block geometry that survives an edit.
+///
+/// A block group's vertex buffers and constants depend only on the definition
+/// it expands, identified by `source_id` — minted once when the block cache
+/// expands a definition, and unchanged for as long as that expansion is
+/// cached. Adding an unrelated entity changes neither, yet the whole block
+/// half of the upload was rebuilt every time: 240 ms of the 350 ms an edit
+/// cost on a drawing with 11 380 block wires, all of it identical to the
+/// previous frame.
+///
+/// Keyed by `(source_id, mesh_edge, colour)` because a highlight tint changes
+/// the constants while leaving the vertices alone.
+pub type BlockGeometryCache = rustc_hash::FxHashMap<
+    (u64, bool, u32),
+    (
+        std::sync::Arc<Vec<(wgpu::Buffer, u32)>>,
+        std::sync::Arc<wgpu::BindGroup>,
+    ),
+>;
+
 impl BlockWireGpu {
     pub fn from_wires(
         device: &wgpu::Device,
@@ -673,8 +693,8 @@ impl BlockWireGpu {
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         color_override: Option<[f32; 4]>,
         const_bgl: &wgpu::BindGroupLayout,
+        mut cache: Option<&mut BlockGeometryCache>,
     ) -> Vec<Self> {
-
         let mut slots: rustc_hash::FxHashMap<(u64, bool), usize> =
             rustc_hash::FxHashMap::default();
         let mut groups: Vec<(bool, Vec<&WireModel>)> = Vec::new();
@@ -699,6 +719,8 @@ impl BlockWireGpu {
         }
 
         let mut out = Vec::new();
+        let mut live_keys: rustc_hash::FxHashSet<(u64, bool, u32)> =
+            rustc_hash::FxHashSet::default();
         for (mesh_edge, group) in groups {
             let Some(&source) = group.first() else {
                 continue;
@@ -707,6 +729,30 @@ impl BlockWireGpu {
                 continue;
             };
             let color = color_override.unwrap_or(source.color);
+            let cache_key = (
+                base.source_id,
+                mesh_edge,
+                color.iter().fold(0u32, |acc, c| acc.rotate_left(8) ^ c.to_bits()),
+            );
+            live_keys.insert(cache_key);
+            // Reuse this definition's geometry when it is already on the GPU.
+            if let Some((chunks, bind_group)) = cache
+                .as_deref()
+                .and_then(|c| c.get(&cache_key))
+                .map(|(v, b)| (std::sync::Arc::clone(v), std::sync::Arc::clone(b)))
+            {
+                let instances = block_instances(&group, base, mesh_edge, depth_map);
+                push_block_batches(
+                    &mut out,
+                    device,
+                    queue,
+                    &chunks,
+                    &instances,
+                    mesh_edge,
+                    &bind_group,
+                );
+                continue;
+            }
             let (segments, mut constant) = emit_wire_native(source, 0, color, 0.0);
             if segments.is_empty() {
                 continue;
@@ -770,60 +816,109 @@ impl BlockWireGpu {
                     }],
                 },
             ));
-            let instances: Vec<BlockWireInstance> = group
-                .iter()
-                .filter_map(|wire| {
-                    let instance = wire.render_instance?;
-                    let delta = [
-                        instance.translation[0] - base.translation[0],
-                        instance.translation[1] - base.translation[1],
-                        instance.translation[2] - base.translation[2],
-                    ];
-                    let high = delta.map(|value| value as f32);
-                    Some(BlockWireInstance {
-                        translation: high,
-                        translation_low: [
-                            (delta[0] - high[0] as f64) as f32,
-                            (delta[1] - high[1] as f64) as f32,
-                            (delta[2] - high[2] as f64) as f32,
-                        ],
-                        depth: [
-                            if mesh_edge {
-                                0.0
-                            } else {
-                                wire_draw_depth(wire, depth_map)
-                            },
-                            0.0,
-                        ],
-                    })
-                })
-                .collect();
-            let max_instances = super::gpu_budget::max_elements::<BlockWireInstance>(device);
-            // Build each instance buffer once and reuse it across vertex
-            // chunks, rather than re-uploading it per chunk.
-            let instance_chunks: Vec<(wgpu::Buffer, u32)> = instances
-                .chunks(max_instances)
-                .map(|chunk| {
+            let vertex_chunks = std::sync::Arc::new(vertex_chunks);
+            if let Some(cache) = cache.as_deref_mut() {
+                cache.insert(
+                    cache_key,
                     (
-                        instance_buffer(device, queue, "block_wire.instances", chunk),
-                        chunk.len() as u32,
-                    )
-                })
-                .collect();
-            for (vertex_buffer, vertex_count) in &vertex_chunks {
-                for (instance_buffer, instance_count) in &instance_chunks {
-                    out.push(Self {
-                        vertex_buffer: vertex_buffer.clone(),
-                        instance_buffer: instance_buffer.clone(),
-                        vertex_count: *vertex_count,
-                        instance_count: *instance_count,
-                        is_3d_mesh_edge: mesh_edge,
-                        const_bind_group: const_bind_group.clone(),
-                    });
-                }
+                        std::sync::Arc::clone(&vertex_chunks),
+                        std::sync::Arc::clone(&const_bind_group),
+                    ),
+                );
             }
+            let instances = block_instances(&group, base, mesh_edge, depth_map);
+            push_block_batches(
+                &mut out,
+                device,
+                queue,
+                &vertex_chunks,
+                &instances,
+                mesh_edge,
+                &const_bind_group,
+            );
+        }
+        // Definitions that are gone — the block cache was rebuilt and minted
+        // fresh source ids — would otherwise hold their vertex buffers on the
+        // GPU forever.
+        if let Some(cache) = cache {
+            cache.retain(|key, _| live_keys.contains(key));
         }
         out
+    }
+}
+
+/// Per-instance placements for one block group. Rebuilt even when the geometry
+/// is reused: each instance carries its own draw depth, and the draw-depth map
+/// shifts whenever anything is added or removed. They are also small — a few
+/// thousand placements against millions of vertices.
+fn block_instances(
+    group: &[&WireModel],
+    base: crate::scene::model::instance_model::RenderInstance,
+    mesh_edge: bool,
+    depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+) -> Vec<BlockWireInstance> {
+    group
+        .iter()
+        .filter_map(|wire| {
+            let instance = wire.render_instance?;
+            let delta = [
+                instance.translation[0] - base.translation[0],
+                instance.translation[1] - base.translation[1],
+                instance.translation[2] - base.translation[2],
+            ];
+            let high = delta.map(|value| value as f32);
+            Some(BlockWireInstance {
+                translation: high,
+                translation_low: [
+                    (delta[0] - high[0] as f64) as f32,
+                    (delta[1] - high[1] as f64) as f32,
+                    (delta[2] - high[2] as f64) as f32,
+                ],
+                depth: [
+                    if mesh_edge {
+                        0.0
+                    } else {
+                        wire_draw_depth(wire, depth_map)
+                    },
+                    0.0,
+                ],
+            })
+        })
+        .collect()
+}
+
+/// One batch per (vertex chunk × instance chunk). Instance buffers are built
+/// once and shared across vertex chunks rather than re-uploaded per chunk.
+fn push_block_batches(
+    out: &mut Vec<BlockWireGpu>,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    vertex_chunks: &[(wgpu::Buffer, u32)],
+    instances: &[BlockWireInstance],
+    mesh_edge: bool,
+    const_bind_group: &std::sync::Arc<wgpu::BindGroup>,
+) {
+    let max_instances = super::gpu_budget::max_elements::<BlockWireInstance>(device);
+    let instance_chunks: Vec<(wgpu::Buffer, u32)> = instances
+        .chunks(max_instances)
+        .map(|chunk| {
+            (
+                instance_buffer(device, queue, "block_wire.instances", chunk),
+                chunk.len() as u32,
+            )
+        })
+        .collect();
+    for (vertex_buffer, vertex_count) in vertex_chunks {
+        for (instance_buffer, instance_count) in &instance_chunks {
+            out.push(BlockWireGpu {
+                vertex_buffer: vertex_buffer.clone(),
+                instance_buffer: instance_buffer.clone(),
+                vertex_count: *vertex_count,
+                instance_count: *instance_count,
+                is_3d_mesh_edge: mesh_edge,
+                const_bind_group: const_bind_group.clone(),
+            });
+        }
     }
 }
 

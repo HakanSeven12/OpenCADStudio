@@ -16,6 +16,7 @@ pub mod minsert;
 mod mview_block;
 mod open_obj;
 mod pc_attach;
+pub(crate) mod pdf_attach;
 mod snap_underlays;
 pub(crate) mod solid3d_cmds;
 mod underlay_layers;
@@ -45,6 +46,7 @@ impl CadModule for InsertModule {
                     title: "Reference",
                     tools: vec![
                         RibbonItem::LargeTool(xattach::tool()),
+                        RibbonItem::LargeTool(pdf_attach::tool()),
                         RibbonItem::LargeTool(xclip::tool()),
                         RibbonItem::LargeTool(xadjust::tool()),
                         RibbonItem::Tool(underlay_layers::tool()),

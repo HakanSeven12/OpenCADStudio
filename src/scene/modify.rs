@@ -1308,5 +1308,29 @@ impl Scene {
             _ => {}
         }
         // The grip-drag caller refreshes changed resident meshes per move.
+        // Raster images, OLE frames and PDF underlays keep a derived ImageModel
+        // with their textured quad geometry. A grip edit mutates the entity directly,
+        // so rebuild that cache as well or only the wire frame follows the grip.
+        let image_bearing = self.document.get_entity(handle).is_some_and(|entity| {
+            matches!(
+                entity,
+                EntityType::RasterImage(_)
+                    | EntityType::Ole2Frame(_)
+                    | EntityType::Underlay(_)
+            )
+        });
+
+        if image_bearing {
+            let model = self
+                .document
+                .get_entity(handle)
+                .and_then(|entity| self.image_seed_for(entity));
+
+            self.images.remove(&handle);
+
+            if let Some(model) = model {
+                self.images.insert(handle, model);
+            }
+        }
     }
 }

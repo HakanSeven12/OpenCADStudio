@@ -1848,6 +1848,13 @@ pub struct Scene {
     /// `belongs_to_visible_block` treats as belonging to everything — but only
     /// when no block record enumerates its contents at all.
     block_members_cache: RefCell<Option<BlockMembers>>,
+    /// Handles of entities the quadtree cannot index — Insert, Viewport, Block,
+    /// BlockEnd — in document order, keyed by `geometry_epoch`.
+    ///
+    /// The quadtree path has to append these regardless of the view, and did so
+    /// by walking every entity in the document: ~300 ms of every resident
+    /// rebuild on a 1.17 M-entity drawing, to find a few thousand.
+    unindexable_cache: RefCell<Option<(u64, Vec<Handle>)>>,
     /// Distinct entity type names present in a layout, keyed by
     /// (geometry_epoch, layout block). The status bar asks for this on every
     /// frame to populate the selection-filter menu, but the answer only
@@ -2093,6 +2100,7 @@ impl Scene {
             model_extents_cache: RefCell::new(None),
             entity_block_map_cache: RefCell::new(None),
             block_members_cache: RefCell::new(None),
+            unindexable_cache: RefCell::new(None),
             layout_type_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
             associative_hatch_source_cache: RefCell::new(None),
@@ -8902,7 +8910,7 @@ impl Scene {
         let sort_cache_ms = crate::perf::elapsed_ms(t_fn);
         let t_visible = perf.then(iced::time::Instant::now);
         // Which path the selection took, and how many candidates it looked at.
-        let mut visible_path = "quadtree";
+        let mut visible_path = "quadtree+index";
         let mut visible_candidates = 0usize;
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
@@ -8941,10 +8949,19 @@ impl Scene {
                 }
             }
             // Inserts/Viewports/Block/BlockEnd — handled by their own paths
-            // (block expansion, viewport rendering); always candidates.
-            for e in self.document.entities() {
-                if is_unindexable_entity(e) && visibility_ok(e) {
-                    out.push(e);
+            // (block expansion, viewport rendering); always candidates. Taken
+            // from the per-epoch list rather than by walking the document,
+            // which preserves document order because the list is built that
+            // way.
+            {
+                let unindexable = self.unindexable_handles();
+                visible_candidates = unindexable.1.len();
+                for &h in &unindexable.1 {
+                    if let Some(e) = self.document.get_entity(h) {
+                        if visibility_ok(e) {
+                            out.push(e);
+                        }
+                    }
                 }
             }
             out
@@ -9239,6 +9256,29 @@ entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates
     ///   * an entity neither names nor is named by any block is "unowned", and
     ///     counts towards every block only when no block record enumerates its
     ///     contents at all — the legacy-DXF case that predicate allows.
+    /// Entities the quadtree cannot index, in document order, resolved once per
+    /// `geometry_epoch`. Membership depends only on the entity's type, so an
+    /// edit that does not add or remove one leaves the list unchanged.
+    fn unindexable_handles(&self) -> std::cell::Ref<'_, (u64, Vec<Handle>)> {
+        {
+            let cache = self.unindexable_cache.borrow();
+            if cache.as_ref().is_some_and(|(epoch, _)| *epoch == self.geometry_epoch) {
+                drop(cache);
+                return std::cell::Ref::map(self.unindexable_cache.borrow(), |c| {
+                    c.as_ref().unwrap()
+                });
+            }
+        }
+        let handles: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|entity| is_unindexable_entity(entity))
+            .map(|entity| entity.common().handle)
+            .collect();
+        *self.unindexable_cache.borrow_mut() = Some((self.geometry_epoch, handles));
+        std::cell::Ref::map(self.unindexable_cache.borrow(), |c| c.as_ref().unwrap())
+    }
+
     fn block_members(&self) -> std::cell::Ref<'_, BlockMembers> {
         {
             let cache = self.block_members_cache.borrow();

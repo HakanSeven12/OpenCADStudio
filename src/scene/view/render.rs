@@ -860,6 +860,7 @@ impl shader::Primitive for Primitive {
                                 queue,
                                 &instanced,
                                 &draw_depths,
+                                &mut pipeline.block_geometry,
                             ),
                         );
                         if _patched {
@@ -936,7 +937,13 @@ impl shader::Primitive for Primitive {
                             let errors_before =
                                 crate::scene::pipeline::gpu_errors_seen();
                             let entry =
-                                inner.build_wire_buffers(device, queue, &vp_wires[..], &draw_depths);
+                                inner.build_wire_buffers(
+                                    device,
+                                    queue,
+                                    &vp_wires[..],
+                                    &draw_depths,
+                                    &mut pipeline.block_geometry,
+                                );
                             if let Some(start) = t_upload {
                                 crate::perf_record!(
                                     "[perf] wire-upload {:.1}ms wires={} content_id={}",

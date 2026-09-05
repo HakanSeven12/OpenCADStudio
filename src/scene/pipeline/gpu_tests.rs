@@ -16,6 +16,9 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     .expect("GPU device");
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+    // Definition geometry is shared across viewport slots, so it lives on the
+    // MultiPipeline; a single-slot test supplies its own.
+    let mut block_geometry = wire_gpu::BlockGeometryCache::default();
     let block = |handle: u64, x: f64| WireModel {
         name: handle.to_string(),
         points: vec![[x as f32, 0.0, 0.0], [x as f32 + 1.0, 0.0, 0.0]],
@@ -28,25 +31,25 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     let first = block(1, 10.0);
     let second = block(2, 20.0);
     let depth = rustc_hash::FxHashMap::from_iter([(1, [0.1, 0.01]), (2, [0.2, 0.01])]);
-    let original = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
-    let unchanged = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
+    let original = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
+    let unchanged = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
     assert_eq!(original[0].geometry_id(), unchanged[0].geometry_id());
     assert_eq!(original[0].instance_count, 2);
 
-    let removed = pipeline.upload_block_wires(&device, &queue, &[&second], &depth);
+    let removed = pipeline.upload_block_wires(&device, &queue, &[&second], &depth, &mut block_geometry);
     assert_ne!(
         original[0].geometry_id(),
         removed[0].geometry_id(),
         "removing the base instance must replace vertices baked at its old position"
     );
     let moved = block(2, 30.0);
-    let moved_gpu = pipeline.upload_block_wires(&device, &queue, &[&moved], &depth);
+    let moved_gpu = pipeline.upload_block_wires(&device, &queue, &[&moved], &depth, &mut block_geometry);
     assert_ne!(removed[0].geometry_id(), moved_gpu[0].geometry_id());
-    let restored = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth);
+    let restored = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
     assert_ne!(moved_gpu[0].geometry_id(), restored[0].geometry_id());
     assert_eq!(restored[0].instance_count, 2);
     assert_eq!(
-        pipeline.block_geometry.len(),
+        block_geometry.len(),
         1,
         "discard obsolete geometry"
     );

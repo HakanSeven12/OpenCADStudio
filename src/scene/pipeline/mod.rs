@@ -217,9 +217,6 @@ pub struct Pipeline {
     /// shared resident buffer.
     pub(crate) gpu_wires: std::sync::Arc<Vec<WireGpu>>,
     pub(crate) gpu_block_wires: std::sync::Arc<Vec<BlockWireGpu>>,
-    /// Block geometry that survives an edit, keyed by the definition it
-    /// expands. See `wire_gpu::BlockGeometryCache`.
-    pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
     /// Persistent per-entity wire instance arena (capability-selected format).
     /// When active, `gpu_wires` is a thin wrapper over this arena's buffers and an
     /// edit patches one entity's slab in place instead of rebuilding every wire.
@@ -2300,7 +2297,6 @@ impl Pipeline {
             surface_format: format,
             gpu_wires: std::sync::Arc::new(vec![]),
             gpu_block_wires: std::sync::Arc::new(vec![]),
-            block_geometry: Default::default(),
             wire_arena: None,
             wire_arena_mesh: None,
             wire_arena_fallback: std::sync::Arc::new(Vec::new()),
@@ -2360,6 +2356,7 @@ impl Pipeline {
         queue: &wgpu::Queue,
         wires: &[&WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        block_geometry: &mut wire_gpu::BlockGeometryCache,
     ) -> Vec<BlockWireGpu> {
         BlockWireGpu::from_wires(
             device,
@@ -2371,7 +2368,7 @@ impl Pipeline {
                 const_bgl: &self.block_wire_const_bgl,
                 mode: self.block_wire_mode,
             },
-            Some(&mut self.block_geometry),
+            Some(block_geometry),
         )
     }
 
@@ -2382,6 +2379,7 @@ impl Pipeline {
         queue: &wgpu::Queue,
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        block_geometry: &mut wire_gpu::BlockGeometryCache,
     ) -> (
         std::sync::Arc<Vec<WireGpu>>,
         std::sync::Arc<Vec<BlockWireGpu>>,
@@ -2440,7 +2438,7 @@ impl Pipeline {
                 const_bgl: &self.block_wire_const_bgl,
                 mode: self.block_wire_mode,
             },
-            Some(&mut self.block_geometry),
+            Some(block_geometry),
         );
 
         // Parse handles in parallel, preserving wire order for hover slot lists.
@@ -4830,6 +4828,17 @@ pub struct MultiPipeline {
     /// once between them instead of once per slot. Kept trim by dropping entries
     /// no slot still references (`Arc::strong_count == 1`) once it grows past a
     /// small bound.
+    /// Block geometry that survives an edit, keyed by the definition it
+    /// expands rather than by anything a viewport contributes. See
+    /// `wire_gpu::BlockGeometryCache`.
+    ///
+    /// Shared across slots for the same reason `wire_buffer_cache` is: a
+    /// definition's segments are identical in every viewport that draws it, and
+    /// this is the largest upload the renderer makes — 59.5 MiB on the
+    /// reproducer. Held per slot, zooming a paper layout out until four or five
+    /// viewports were on screen uploaded it once each and ran a 2 GB card out
+    /// of memory.
+    pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
     pub(crate) wire_buffer_cache: rustc_hash::FxHashMap<
         u64,
         (
@@ -4985,6 +4994,7 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         install_gpu_error_handler(device);
         Self {
+            block_geometry: Default::default(),
             inners: vec![Pipeline::new(device, queue, format)],
             format,
             slot_by_instance: rustc_hash::FxHashMap::default(),

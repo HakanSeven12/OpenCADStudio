@@ -313,8 +313,10 @@ impl WireArena {
         const_bgl: &wgpu::BindGroupLayout,
         mesh_edge: bool,
     ) -> Option<Self> {
-        let instance_limit = super::gpu_budget::max_elements::<WireInstance>(device) as u64;
-        let constant_limit = super::gpu_budget::max_storage_elements::<WireConst>(device) as u64;
+        let instance_limit =
+            super::gpu_budget::max_arena_elements::<WireInstance>(device) as u64;
+        let constant_limit =
+            super::gpu_budget::max_arena_storage_elements::<WireConst>(device) as u64;
         let ranges = handle_ranges(wires)?;
         let perf = crate::perf::enabled();
         let total_started = iced::time::Instant::now();
@@ -971,7 +973,8 @@ impl PackedWireArena {
         depth_map: &FxHashMap<u64, [f32; 2]>,
         mesh_edge: bool,
     ) -> Option<Self> {
-        let packed_limit = super::gpu_budget::max_elements::<PackedWireInstance>(device) as u64;
+        let packed_limit =
+            super::gpu_budget::max_arena_elements::<PackedWireInstance>(device) as u64;
         let ranges = handle_ranges(wires)?;
         let max_instances: usize = wires
             .iter()

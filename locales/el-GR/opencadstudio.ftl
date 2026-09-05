@@ -167,6 +167,7 @@ clipboard =
     .paste-to-original-coordinates = Επικόλληση στις αρχικές συντεταγμένες
 
 viewport =
+    .preparing-layout = Προετοιμασία διάταξης…
     .split-vertical = Κατακόρυφος διαχωρισμός θύρας προβολής
     .split-horizontal = Οριζόντιος διαχωρισμός θύρας προβολής
     .move = Μετακίνηση θύρας προβολής

@@ -42,12 +42,18 @@ content).
 | Binding handover | `binding_schema_json()` | merged object-model + wire-layout schema |
 | DWG round-trip | — | verified: intersected solids survive write→reload with valid ACIS (test) |
 
-## 🚧 Outstanding — by phase
+## 🚧 Roadmap — phase status
 
 Phases are **spec-additive**: each is a `[[family]]`/`[[family.method]]` block in
 `spec/entities.toml` + a codegen bump + facade/backend wiring (see
 `ARCHITECTURE.md` § Workflow). No protocol change; new `Operation`/`Query`
 variants append at enum end.
+
+**Status:** Phase 0 (supported-family methods), Phase 2a (full 2D curves),
+Phase 3 (block references), Phase 4 (viewports), Phase 5 (media read-mostly) are
+**done** (all tested; 601 host lib + 8 crate unit tests green). Remaining sub-items:
+Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
+(P3), set_view + view query (P4), typed media ops (P5).
 
 ### Phase 2 — full 2D + annotations
 - **Done (2a):** typed curve families `ArcCurve`/`Ellipse`/`Spline`/`Ray`/`XLine` —

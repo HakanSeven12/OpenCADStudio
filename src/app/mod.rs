@@ -538,8 +538,6 @@ pub(super) struct OpenCADStudio {
     /// Last time block-usage was flushed to disk (debounce per 2.4).
     #[cfg(not(target_arch = "wasm32"))]
     block_usage_last_persist: Option<std::time::Instant>,
-    #[cfg(target_arch = "wasm32")]
-    block_usage_last_persist: Option<()>,
     /// `true` after a bare `VPORTS` in model space — the next command-line
     /// entry is treated as the tiled-config option (SIngle/2H/2V/4).
     awaiting_vports: bool,
@@ -3354,6 +3352,7 @@ impl OpenCADStudio {
             cliprompt_lines: 3,
             block_mru: Vec::new(),
             block_freq: std::collections::HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             block_usage_last_persist: None,
             awaiting_vports: false,
             pending_setvar: None,

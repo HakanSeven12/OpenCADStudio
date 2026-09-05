@@ -20,6 +20,7 @@ jobs:
           cargo test --lib app::control::tests
           cargo test --lib io::update_check::tests
           cargo test --lib scene::pipeline::wire_arena::tests
+          cargo check --all-targets
       - name: Validate MCP smoke script
         if: runner.os != 'Windows'
         run: python3 -m py_compile docs/automation/mcp_smoke.py
@@ -40,4 +41,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - run: cargo check --lib --target wasm32-unknown-unknown
+      - run: cargo check --lib --bins --target wasm32-unknown-unknown

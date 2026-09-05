@@ -14,6 +14,7 @@
 //! - `{"op":"save","path":"out.dwg"}`        — write the document (path optional
 //!                                             once opened/saved)
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
@@ -24,6 +25,7 @@ use super::OpenCADStudio;
 /// Run the headless JSON server. Default transport is stdin/stdout; with
 /// `--port <N>` it instead listens on `127.0.0.1:<N>` and serves one client at
 /// a time (the document session persists across reconnects).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn serve() {
     let mut app = OpenCADStudio::new();
     match port_arg() {
@@ -35,6 +37,7 @@ pub fn serve() {
 /// Headless one-shot format conversion (`--export IN OUT`). Loads `input`,
 /// writes `output` (format chosen from `output`'s extension), and returns a
 /// process exit code (0 on success). No window is created.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn export_headless(input: &std::path::Path, output: &std::path::Path) -> i32 {
     let doc = match crate::io::load_file(input) {
         Ok(doc) => doc,
@@ -56,6 +59,7 @@ pub fn export_headless(input: &std::path::Path, output: &std::path::Path) -> i32
 }
 
 /// `--port <N>` if present on the command line.
+#[cfg(not(target_arch = "wasm32"))]
 fn port_arg() -> Option<u16> {
     let mut args = std::env::args();
     while let Some(a) = args.next() {
@@ -66,10 +70,12 @@ fn port_arg() -> Option<u16> {
     None
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn ready() -> Value {
     json!({ "ok": true, "ready": true, "version": env!("OCS_APP_VERSION") })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn serve_stdio(app: &mut OpenCADStudio) {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -91,6 +97,7 @@ fn serve_stdio(app: &mut OpenCADStudio) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn serve_socket(app: &mut OpenCADStudio, port: u16) {
     let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
@@ -192,6 +199,7 @@ fn entity_json(e: &acadrust::EntityType) -> Value {
 
 impl OpenCADStudio {
     /// Handle one JSON request line and return the JSON response.
+    #[cfg(any(test, not(target_arch = "wasm32")))]
     pub(crate) fn automation_op(&mut self, line: &str) -> Value {
         if let Ok(req) = serde_json::from_str::<Value>(line) {
             if req["protocol"].is_number() {

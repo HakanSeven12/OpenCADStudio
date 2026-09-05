@@ -129,12 +129,6 @@ impl BlockPicker {
         );
     }
 
-    /// Test helper: simulate typing without exact-match handling.
-    #[cfg(test)]
-    pub fn set_needle_for_test(&mut self, needle: &str) {
-        self.set_needle(needle.to_string());
-    }
-
     fn filter_ranked_inner(
         available: &[String],
         lower_cache: &[String],

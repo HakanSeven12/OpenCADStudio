@@ -3695,7 +3695,6 @@ mod apply_property_op_tests {
     use acadrust::types::{Color, Vector3};
 
     fn line_handle(app: &mut OpenCADStudio) -> acadrust::Handle {
-        let i = app.active_tab;
         let mut line = Line::new();
         line.start = Vector3::ZERO;
         line.end = Vector3::new(1.0, 0.0, 0.0);
@@ -3798,7 +3797,6 @@ mod chprop_integration_tests {
     use acadrust::types::{Color, LineWeight, Vector3};
 
     fn line_handle(app: &mut OpenCADStudio) -> acadrust::Handle {
-        let i = app.active_tab;
         let mut line = Line::new();
         line.start = Vector3::ZERO;
         line.end = Vector3::new(1.0, 0.0, 0.0);
@@ -3957,7 +3955,6 @@ mod chprop_integration_tests {
     #[test]
     fn ribbon_lineweight_updates_after_change() {
         let mut app = OpenCADStudio::new_for_test();
-        let i = app.active_tab;
         let _h = line_handle(&mut app);
         let _ = app.automation_op(r#"{"op":"select","type":"Line"}"#);
 

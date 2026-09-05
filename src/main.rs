@@ -4,29 +4,11 @@
 // attached so eprintln! / panics stay visible while developing.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-mod app;
-mod config;
+use OpenCADStudio::app;
 #[cfg(not(target_arch = "wasm32"))]
-mod cli;
-mod command;
-mod entities;
-mod i18n;
-mod io;
-#[cfg(not(target_arch = "wasm32"))]
-mod network;
-#[cfg(not(target_arch = "wasm32"))]
-mod mcp;
-mod modules;
-mod patreon;
-mod discussions;
-mod videos;
-mod plugin;
-mod perf;
-mod scene;
-mod snap;
-mod ui;
-mod par;
-mod sys;
+use OpenCADStudio::{cli, io, mcp};
+#[cfg(target_arch = "wasm32")]
+use OpenCADStudio::sys;
 
 fn main() -> iced::Result {
     // Web (wasm) uses the single-window entry; native uses the multi-window

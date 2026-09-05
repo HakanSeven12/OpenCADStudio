@@ -1632,6 +1632,7 @@ pub struct Scene {
     /// `geometry_epoch` and re-tessellating the whole model.
     pub selection_generation: u64,
     /// Cached fingerprint of `selected`, recomputed lazily after mutations.
+    #[cfg(any(test, not(target_arch = "wasm32")))]
     selection_fingerprint_cache: u64,
     selection_fingerprint_dirty: bool,
     /// Cached tessellation of all visible entity wires for the current layout.
@@ -2026,6 +2027,7 @@ impl Scene {
             projection_bounds_epoch: std::cell::Cell::new(0),
             block_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             selection_generation: 0,
+            #[cfg(any(test, not(target_arch = "wasm32")))]
             selection_fingerprint_cache: 0,
             selection_fingerprint_dirty: false,
             wire_cache: RefCell::new(None),

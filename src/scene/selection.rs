@@ -1,8 +1,4 @@
-// Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
 use super::*;
-
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 impl Scene {
     // ── Selection ─────────────────────────────────────────────────────────
@@ -102,7 +98,11 @@ impl Scene {
         self.selected.len()
     }
 
+    #[cfg(any(test, not(target_arch = "wasm32")))]
     pub(crate) fn selection_fingerprint(&mut self) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
         if self.selection_fingerprint_dirty {
             let mut fingerprint = self.selected.len() as u64;
             for handle in &self.selected {

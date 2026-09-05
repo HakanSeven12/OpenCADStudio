@@ -367,6 +367,9 @@ impl shader::Primitive for Primitive {
         let scale = viewport.scale_factor() as f32;
         let instance_ids: Vec<u64> = self.viewports.iter().map(|vp| vp.instance_id).collect();
         let slots = pipeline.resolve_slots(device, queue, &instance_ids);
+        // Compared after the frame's uploads: a move means the device refused
+        // something, which changes how patient the slot release below can be.
+        let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
 
         for (i, vp) in self.viewports.iter().enumerate() {
             let inner = &mut pipeline.inners[slots[i]];
@@ -381,26 +384,7 @@ impl shader::Primitive for Primitive {
             // the surviving viewport's text/geometry vanish.
             if inner.slot_id != vp.instance_id {
                 inner.slot_id = vp.instance_id;
-                inner.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
-                inner.cached_wire_id = u64::MAX;
-                inner.cached_selection = (u64::MAX, u64::MAX);
-                inner.cached_mesh_content_id = u64::MAX;
-                inner.cached_face3d_key = (u64::MAX, false, false, u64::MAX);
-                inner.cached_solid_visibility =
-                    (u64::MAX, [u32::MAX; 3], u64::MAX);
-                inner.cached_hatch_source = None;
-                inner.cached_preview_hatch_source = None;
-                inner.cached_wipeout_source = None;
-                inner.cached_image_source = None;
-                inner.cached_text_source = None;
-                inner.cached_mesh_source = None;
-                inner.cached_face3d_source = None;
-                inner.cached_face3d_depth_source = None;
-                inner.wire_cull_key = (u64::MAX, u64::MAX, 0, 0);
-                inner.hatch_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
-                inner.wipeout_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
-                inner.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
-                inner.render_sig = u64::MAX;
+                inner.forget_cached_keys();
             }
             // The MSAA / depth / resolve textures are always sized to the
             // FULL viewport rectangle (not the on-canvas-visible portion)
@@ -1215,6 +1199,20 @@ impl shader::Primitive for Primitive {
                 "[perf] frame-prepare {:>7.1}ms viewports={}",
                 prepare_ms,
                 self.viewports.len(),
+            );
+        }
+        // Give back what nobody is drawing. Gradual while the device is
+        // healthy; immediate once it has refused an allocation, because the
+        // memory a hidden viewport is holding is exactly what the visible one
+        // could not get — and freeing it is what lets the operator close a
+        // viewport or two and carry on instead of restarting.
+        let errors_now = crate::scene::pipeline::gpu_errors_seen();
+        let urgent = errors_now != errors_at_entry;
+        let released = pipeline.release_idle_slots(device, &slots, urgent);
+        if released > 0 && crate::perf::enabled() {
+            crate::perf_record!(
+                "[perf] slots-released n={released} urgent={urgent} slots={}",
+                pipeline.inners.len(),
             );
         }
         report_gpu_live(pipeline);

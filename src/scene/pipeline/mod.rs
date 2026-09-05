@@ -4593,6 +4593,92 @@ impl Pipeline {
         }
     }
 
+    /// Forget every cache key that describes this slot's uploaded content.
+    ///
+    /// Shared by slot reuse and by [`Self::release_heavy_resources`] so the two
+    /// cannot disagree about what "this slot holds nothing you can trust"
+    /// means. Keys only — the buffers themselves are dropped by the caller that
+    /// wants the memory back.
+    pub(crate) fn forget_cached_keys(&mut self) {
+        self.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
+        self.cached_wire_id = u64::MAX;
+        self.cached_selection = (u64::MAX, u64::MAX);
+        self.cached_highlight_key = (u64::MAX, u64::MAX);
+        self.cached_mesh_content_id = u64::MAX;
+        self.cached_face3d_key = (u64::MAX, false, false, u64::MAX);
+        self.cached_solid_visibility = (u64::MAX, [u32::MAX; 3], u64::MAX);
+        self.cached_hatch_source = None;
+        self.cached_preview_hatch_source = None;
+        self.cached_wipeout_source = None;
+        self.cached_image_source = None;
+        self.cached_text_source = None;
+        self.cached_mesh_source = None;
+        self.cached_face3d_source = None;
+        self.cached_face3d_depth_source = None;
+        self.wire_cull_key = (u64::MAX, u64::MAX, 0, 0);
+        self.hatch_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
+        self.wipeout_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
+        self.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
+        self.silhouette_source_key = (usize::MAX, usize::MAX, u64::MAX);
+        self.render_sig = u64::MAX;
+    }
+
+    /// Give this slot's device memory back and forget what it held.
+    ///
+    /// A slot nobody is drawing still owns its wire arena, its render targets,
+    /// its text atlas and every category buffer — tens of megabytes each. Held
+    /// while another viewport is asking for an allocation, that is the
+    /// difference between a degraded frame and a session that cannot recover.
+    ///
+    /// Everything released here is derived state with a rebuild path guarded by
+    /// a cache key, and every one of those keys is reset, so the next frame that
+    /// needs this slot builds it again. The cost of releasing a slot that turns
+    /// out to be needed is one slow frame.
+    pub(crate) fn release_heavy_resources(&mut self, device: &wgpu::Device) {
+        self.forget_cached_keys();
+
+        self.gpu_wires = std::sync::Arc::new(Vec::new());
+        self.gpu_block_wires = std::sync::Arc::new(Vec::new());
+        self.wire_handle_index = std::sync::Arc::new(rustc_hash::FxHashMap::default());
+        self.wire_arena = None;
+        self.wire_arena_mesh = None;
+        self.wire_arena_fallback = std::sync::Arc::new(Vec::new());
+        self.wire_arena_fallback_kind = None;
+        self.wire_arena_fallback_handles.clear();
+        self.wire_arena_id = u64::MAX;
+
+        self.gpu_selected_wires.clear();
+        self.gpu_selected_block_wires.clear();
+        self.gpu_preview_wires.clear();
+        self.gpu_wipeouts.clear();
+        self.wipeout_skip_flags.clear();
+        self.gpu_images.clear();
+        self.gpu_mesh_batch.clear();
+        self.gpu_mesh_dynamic.clear();
+        self.mesh_disabled_chunks.clear();
+        self.mesh_dynamic_handles.clear();
+        self.mesh_ranges_by_handle.clear();
+        self.mesh_highlight_draws.clear();
+        self.silhouette_chunks.clear();
+        self.silhouette_source_groups.clear();
+        self.clip_boundary = None;
+
+        self.text_atlas_gpu = None;
+        self.text_gpu.clear();
+        self.block_text_gpu.clear();
+        self.block_text_highlight_gpu.clear();
+        self.text_highlight_gpu.clear();
+        self.text_preview_gpu.clear();
+
+        // Back to the smallest allocation the rounding allows (128x128, about
+        // 0.6 MiB against the ~70 MiB a full-canvas slot holds). Going through
+        // `ensure_depth_texture` rather than reaching for the textures directly
+        // keeps the blit bind group consistent with the views it samples.
+        self.ensure_depth_texture(device, Size::new(1, 1));
+        // ...and make the next real size a mismatch, so it reallocates.
+        self.alloc_size = Size::new(0, 0);
+    }
+
     pub fn ensure_depth_texture(&mut self, device: &wgpu::Device, size: Size<u32>) {
         // Record the requested render size every frame (the blit UV scale reads
         // it); only reallocate the textures when the *rounded* size changes.
@@ -4783,6 +4869,49 @@ impl Pipeline {
 }
 
 impl MultiPipeline {
+    /// Hand back the device memory of slots nobody is drawing.
+    ///
+    /// `reserved` are the slots this frame is about to use; they are never
+    /// touched. Everything else is released once it has been idle for
+    /// `idle_frames` prepare calls — gradually, so an ordinary session pays
+    /// nothing and a layout the user keeps switching back to stays warm.
+    ///
+    /// `urgent` drops that patience: the device has just refused an allocation,
+    /// and holding a viewport nobody can see is what turns a degraded frame
+    /// into a session that never recovers. Releasing early costs one slow frame
+    /// if the slot is wanted again; not releasing costs the drawing.
+    ///
+    /// Returns how many slots were released.
+    pub(crate) fn release_idle_slots(
+        &mut self,
+        device: &wgpu::Device,
+        reserved: &[usize],
+        urgent: bool,
+    ) -> usize {
+        const IDLE_FRAMES: u64 = 64;
+        let idle_frames = if urgent { 0 } else { IDLE_FRAMES };
+        let mut released = 0;
+        for index in 0..self.inners.len() {
+            if reserved.contains(&index) {
+                continue;
+            }
+            let idle = self.slot_clock.saturating_sub(self.slot_last_used[index]);
+            if idle < idle_frames {
+                continue;
+            }
+            // Nothing to give back — releasing again would only churn the
+            // render targets it just rebuilt at their smallest size.
+            if self.inners[index].gpu_live_bytes().wire_arena == 0
+                && self.inners[index].alloc_size == Size::new(0, 0)
+            {
+                continue;
+            }
+            self.inners[index].release_heavy_resources(device);
+            released += 1;
+        }
+        released
+    }
+
     /// Sum across slots, plus the caches held once for all of them.
     pub(crate) fn gpu_live_bytes(&self) -> GpuLiveBytes {
         let mut total = GpuLiveBytes {

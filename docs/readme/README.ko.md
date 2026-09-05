@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
+  <a href="../../README.md">English</a> · <a href="README.bg.md">Български</a> · <a href="README.pt-BR.md">Português (Brasil)</a> · <a href="README.cs.md">Čeština</a> · <a href="README.nl.md">Nederlands</a> · <a href="README.fr.md">Français</a> · <a href="README.fi.md">Suomi</a> · <a href="README.de.md">Deutsch</a> · <a href="README.el.md">Ελληνικά</a> · <a href="README.hu.md">Magyar</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.pl.md">Polski</a> · <a href="README.ru.md">Русский</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.es.md">Español</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.tr.md">Türkçe</a> · <a href="README.hi.md">हिन्दी</a> · <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center"><img src="../../assets/logo.svg" width="112" alt="Open CAD Studio 로고"></p>
@@ -91,9 +91,9 @@ chmod +x OpenCADStudio-*-linux-x86_64.AppImage
 
 ## 언어
 
-Open CAD Studio는 시스템 언어를 따르거나 다음 19개 인터페이스 언어 중 하나를 사용할 수 있습니다.
+Open CAD Studio는 시스템 언어를 따르거나 다음 21개 인터페이스 언어 중 하나를 사용할 수 있습니다.
 
-> 아랍어 · 브라질 포르투갈어 · 불가리아어 · 체코어 · 네덜란드어 · 영어 · 핀란드어 · 프랑스어 · 독일어 · 힌디어 · 헝가리어 · 이탈리아어 · 일본어 · 한국어 · 폴란드어 · 러시아어 · 중국어 간체 · 스페인어 · 중국어 번체 · 터키어
+> 아랍어 · 브라질 포르투갈어 · 불가리아어 · 체코어 · 네덜란드어 · 영어 · 핀란드어 · 프랑스어 · 독일어 · 그리스어 · 힌디어 · 헝가리어 · 이탈리아어 · 일본어 · 한국어 · 폴란드어 · 러시아어 · 중국어 간체 · 스페인어 · 중국어 번체 · 터키어
 
 애플리케이션 설정에서 언어를 변경할 수 있습니다. **시스템**을 선택하면 브라우저 버전도 브라우저의 기본 로캘을 사용합니다.
 

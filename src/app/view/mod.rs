@@ -382,9 +382,15 @@ impl OpenCADStudio {
                 );
                 (o, (ux.as_vec3(), uy.as_vec3(), uz.as_vec3()))
             };
-            let grid: Vec<crate::ui::overlay::GridParams> = tab
-                .scene
-                .grid_views(vw, vh)
+            // The first paper frame spends seconds in this block and `grid`
+            // alone cannot say which part. Reported only when it costs
+            // something, so ordinary frames stay quiet.
+            let t_grid = crate::perf::enabled().then(iced::time::Instant::now);
+            let views = tab.scene.grid_views(vw, vh);
+            let views_ms = crate::perf::elapsed_ms(t_grid);
+            let view_count = views.len();
+            let t_params = crate::perf::enabled().then(iced::time::Instant::now);
+            let grid: Vec<crate::ui::overlay::GridParams> = views
                 .into_iter()
                 .map(|(bounds, cam, handle)| {
                     let (origin, mut axes): (glam::DVec3, _) = if is_paper {
@@ -428,7 +434,16 @@ impl OpenCADStudio {
                     }
                 })
                 .collect();
+            let params_ms = crate::perf::elapsed_ms(t_params);
+            let t_bg = crate::perf::enabled().then(iced::time::Instant::now);
             let bg = crosshair_background(tab, is_paper);
+            let bg_ms = crate::perf::elapsed_ms(t_bg);
+            if views_ms + params_ms + bg_ms >= 1.0 {
+                crate::perf_record!(
+                    "[perf] grid-detail views={views_ms:.1}ms params={params_ms:.1}ms \
+bg={bg_ms:.1}ms n={view_count}"
+                );
+            }
             let bg_lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
             let grid_style = crate::ui::overlay::GridStyle {
                 opacity: self.model_space.grid_opacity,

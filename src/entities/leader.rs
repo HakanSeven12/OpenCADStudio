@@ -672,6 +672,7 @@ impl LeaderTess for Leader {
 
         if verts.len() < 2 {
             return WireModel {
+                bg_adapt: None,
                 point_marker: None,
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
@@ -852,6 +853,7 @@ impl LeaderTess for Leader {
             crate::scene::convert::tessellate::points_to_ds(fill_tris);
 
         WireModel {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),

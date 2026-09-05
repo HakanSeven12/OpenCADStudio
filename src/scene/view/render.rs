@@ -3145,6 +3145,43 @@ pub(crate) fn adapt_to_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
     }
 }
 
+/// Re-resolve display colours for `bg`, for wires that recorded what their
+/// resolution consumed.
+///
+/// This is what lets a set tessellated under one background be shown under
+/// another without rebuilding it: the geometry never depended on the
+/// background, only the colours did — see the `let _ = bg_color;` in
+/// `block_cache::local_wires_for`.
+///
+/// Every colour is recomputed from `raw_color`, never from the current
+/// `color`, so the pass is idempotent and safe over a set that mixes memoized
+/// wires with freshly tessellated ones. Recomputing from `color` would not be:
+/// `adapt_to_bg` maps a near-white colour to pure black, and pure black back
+/// to pure *white*, so a second application loses the original tint.
+///
+/// Wires with `bg_adapt: None` — everything not built by `Batches::finalize` —
+/// are left alone.
+pub(crate) fn resolve_colors_for_bg(wires: &mut [WireModel], bg: [f32; 4]) {
+    for wire in wires {
+        let Some(adapt) = wire.bg_adapt.as_deref() else {
+            continue;
+        };
+        let contrast = adapt.contrast_bg.unwrap_or(bg);
+        wire.color = if adapt.canvas_color {
+            bg
+        } else if adapt.preserve_color {
+            adapt.raw_color
+        } else {
+            adapt_to_bg(adapt.raw_color, contrast)
+        };
+        if !adapt.preserve_color {
+            for (vertex, raw) in wire.text_verts.iter_mut().zip(&adapt.text_raw_colors) {
+                vertex.color = adapt_to_bg(*raw, contrast);
+            }
+        }
+    }
+}
+
 // ── Primitive builder helpers (called by ViewportPane's shader::Program impl) ──
 
 impl Scene {

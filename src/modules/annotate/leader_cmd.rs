@@ -300,6 +300,7 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         points.push([w2.x, w2.y, w2.z]);
     }
     WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

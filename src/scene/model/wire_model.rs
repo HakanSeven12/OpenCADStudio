@@ -140,6 +140,40 @@ impl PointMarker {
 ///
 /// Linetype is encoded as a GPU-side dash pattern so the CPU never needs to
 /// split wires into per-dash segments.  `pattern_length = 0.0` means solid.
+/// Everything needed to resolve a wire's display colour against a background,
+/// kept so the resolution can be redone for another background without
+/// re-tessellating.
+///
+/// `None` — the default — means the wire did not record its inputs and a
+/// resolution pass must leave it alone. Only `Batches::finalize` fills it in.
+pub type BgAdapt = Option<Box<BgAdaptInputs>>;
+
+/// The inputs `Batches::finalize` consumes when it resolves a colour.
+///
+/// The flags are independent — a wire can paint the background itself while
+/// its glyphs still adapt — so this mirrors that code's branches rather than
+/// collapsing them into one enum.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BgAdaptInputs {
+    /// Colour before adaptation. Resolution always recomputes from here rather
+    /// than from `WireModel::color`, so it is idempotent and safe over a set
+    /// mixing memo hits with freshly tessellated wires. `adapt_to_bg` is
+    /// **not** re-appliable: a near-white colour snaps to pure black on a
+    /// light background, and pure black comes back pure *white* on a dark one,
+    /// losing the tint.
+    pub raw_color: [f32; 4],
+    /// Glyph colours before adaptation, parallel to `WireModel::text_verts`.
+    /// Empty when the wire has no glyphs or their colour never adapts.
+    pub text_raw_colors: Vec<[f32; 4]>,
+    /// Adapt against this instead of the live background: an MTEXT carrying
+    /// its own background fill.
+    pub contrast_bg: Option<[f32; 4]>,
+    /// The wire paints the background; its colour *is* the live background.
+    pub canvas_color: bool,
+    /// Authored colour. The background must not touch it, glyphs included.
+    pub preserve_color: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct WireModel {
     /// Unique identifier — the handle value as a decimal string.
@@ -156,6 +190,9 @@ pub struct WireModel {
     pub point_marker: Option<PointMarker>,
     /// RGBA colour in [0, 1].
     pub color: [f32; 4],
+    /// How `color` and `text_verts` follow the background, or `None` when this
+    /// wire's colour must not be re-resolved.
+    pub bg_adapt: BgAdapt,
     /// Whether this wire is currently selected.
     #[allow(dead_code)]
     pub selected: bool,
@@ -315,6 +352,7 @@ impl WireModel {
     /// Create a solid wire (no dash pattern, 1px weight).
     pub fn solid(name: String, points: Vec<[f32; 3]>, color: [f32; 4], selected: bool) -> Self {
         Self {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
@@ -688,6 +726,7 @@ impl Default for WireModel {
             points: Vec::new(),
             points_low: Vec::new(),
             color: Self::WHITE,
+            bg_adapt: None,
             selected: false,
             pattern_length: 0.0,
             pattern: [0.0; 8],

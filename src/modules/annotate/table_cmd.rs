@@ -212,6 +212,7 @@ impl TableCommand {
             );
         }
         WireModel {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),

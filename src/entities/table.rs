@@ -1990,6 +1990,7 @@ pub fn tessellate_table(
     let mk =
         |color: [f32; 4], points: Vec<[f32; 3]>, fill_tris: Vec<[f32; 3]>, lw: f32| -> WireModel {
             WireModel {
+                bg_adapt: None,
                 point_marker: None,
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),

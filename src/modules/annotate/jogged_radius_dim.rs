@@ -442,6 +442,7 @@ fn dvec(point: Vector3) -> DVec3 {
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {
     WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

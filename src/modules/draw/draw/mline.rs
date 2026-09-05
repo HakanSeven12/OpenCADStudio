@@ -180,6 +180,7 @@ impl MlineCommand {
         let (fill_tris, fill_tris_low) =
             crate::scene::convert::tessellate::points_to_ds(fill_tris);
         Some(WireModel {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),

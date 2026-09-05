@@ -272,6 +272,7 @@ fn dvec(point: Vector3) -> DVec3 {
 fn preview_line(far_chord: Vec3, chord: Vec3, text: Vec3) -> WireModel {
     let separator = [f32::NAN; 3];
     WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

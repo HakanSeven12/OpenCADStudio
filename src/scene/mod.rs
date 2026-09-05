@@ -1939,12 +1939,14 @@ pub struct Scene {
     /// Per-entity memo for the **resident** model wire set (`model_tile_wires_arc`,
     /// the one the main GPU render holds). Kept separate from `tess_memo` because
     /// the resident set is camera-INDEPENDENT (no view cull, no zoom LOD), so its
-    /// guard depends only on anno-scale / background — it survives pan/zoom, and a
+    /// guard depends only on anno-scale — it survives pan/zoom and layout switches, and a
     /// single-entity edit re-tessellates just the changed entity instead of the
     /// whole model. Sharing `tess_memo` would let the camera-dependent culled path
     /// thrash it on every zoom. (#perf)
     resident_tess_memo: RefCell<HashMap<Handle, Arc<Vec<WireModel>>>>,
-    /// Guard hash for `resident_tess_memo` (anno-scale / bg only).
+    /// Guard hash for `resident_tess_memo` (anno-scale only). The background
+    /// is not part of it: it changes colours, not geometry, and
+    /// `resolve_colors_for_bg` reapplies it to the assembled set.
     resident_tess_guard: std::cell::Cell<u64>,
     /// Per-mutation delta journal: which handles changed on each `geometry_epoch`
     /// bump. Bounded ring ([`GEOMETRY_JOURNAL_CAP`]); a derived cache replays the
@@ -9013,10 +9015,11 @@ impl Scene {
         let memo_misses;
         let t_build = perf.then(iced::time::Instant::now);
         let mut wires: Vec<WireModel> = if memo_active {
-            // Guard hash of everything tessellate_entity output depends on
+            // Guard hash of everything tessellate_entity's GEOMETRY depends on
             // besides the entity itself. A mismatch (zoom/tol, view, anno,
-            // offset, bg, entered viewport) means the memo is stale. For the
-            // resident path wpp/view_aabb are None, so this collapses to anno/bg.
+            // offset, entered viewport) means the memo is stale. For the
+            // resident path wpp/view_aabb are None, so this collapses to anno.
+            // The background is excluded on purpose — see the note below.
             let guard = {
                 let mut g: u64 = 0xcbf2_9ce4_8422_2325;
                 let mut mix = |x: u64| g = g.rotate_left(13) ^ x;
@@ -9029,9 +9032,13 @@ impl Scene {
                 mix(anno.to_bits() as u64);
                 mix(annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0));
                 mix(all_visible as u64);
-                for c in bg {
-                    mix(c.to_bits() as u64);
-                }
+                // The background is deliberately NOT mixed in. It changes
+                // colours, never geometry — `local_wires_for` discards it with
+                // `let _ = bg_color;` and `Batches::finalize` applies it last —
+                // so a memo entry built under one background serves any other
+                // once `resolve_colors_for_bg` has run over the assembled set
+                // below. Keying on it made a layout switch re-tessellate the
+                // whole model to arrive at identical points.
                 mix(avp.map(|h| h.value()).unwrap_or(0));
                 // SDF glyph quads bake the atlas UV of each tile, so a growth or
                 // a re-bake (which rescale / rewind every UV) makes memoized text
@@ -9133,6 +9140,14 @@ impl Scene {
         };
         let build_ms = crate::perf::elapsed_ms(t_build);
 
+        // Resolve display colours for the live background. Memo hits were
+        // built under whatever background was current then, misses under this
+        // one; the pass recomputes both from their recorded raw colour, so a
+        // mixed set lands in the same place either way.
+        let t_colors = perf.then(iced::time::Instant::now);
+        crate::scene::view::render::resolve_colors_for_bg(&mut wires, bg);
+        let colors_ms = crate::perf::elapsed_ms(t_colors);
+
         // Apply draw order via the cached index (O(1) block lookup).
         let t_sort = perf.then(iced::time::Instant::now);
         let mut sorted = false;
@@ -9157,13 +9172,14 @@ impl Scene {
         }
         if perf {
             crate::perf_record!(
-                "[perf] wires-build total={:.1}ms sort_cache={:.1} visible={:.1} blk_cache={:.1} \
+                "[perf] wires-build total={:.1}ms sort_cache={:.1} visible={:.1} blk_cache={:.1} colors={:.1} \
 build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
 entities={} memo_hit={} memo_miss={} wires={} memo={}",
                 crate::perf::elapsed_ms(t_fn),
                 sort_cache_ms,
                 visible_ms,
                 blk_ms,
+                colors_ms,
                 build_ms,
                 classify_ms,
                 hits_ms,

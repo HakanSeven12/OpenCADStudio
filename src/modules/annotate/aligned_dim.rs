@@ -286,6 +286,7 @@ impl CadCommand for AlignedDimensionCommand {
         let p1 = p1.as_vec3();
         let p2 = p2.as_vec3();
         Some(WireModel {
+            bg_adapt: None,
             point_marker: None,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
@@ -348,6 +349,7 @@ fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
     let half_height = 0.16;
     let to_point = |point: DVec3| point.as_vec3().to_array();
     WireModel {
+        bg_adapt: None,
         point_marker: None,
         taper_widths: Vec::new(),
         pattern_stations: Vec::new(),

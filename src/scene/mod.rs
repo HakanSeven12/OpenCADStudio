@@ -9080,6 +9080,11 @@ impl Scene {
         let mut materialize_ms = 0.0f64;
         let mut memo_hits = 0usize;
         let memo_misses;
+        // Two consecutive identical resident builds both missed every entry,
+        // which a stable guard cannot explain — the memo is being cleared
+        // between them. Report the guard and the inputs that can move it.
+        let mut guard_dbg = 0u64;
+        let mut guard_was_stale = false;
         let t_build = perf.then(iced::time::Instant::now);
         let mut wires: Vec<WireModel> = if memo_active {
             // Guard hash of everything tessellate_entity output depends on
@@ -9114,7 +9119,9 @@ impl Scene {
             } else {
                 (&self.tess_memo, &self.tess_memo_guard)
             };
-            if guard_cell.get() != guard {
+            guard_dbg = guard;
+            guard_was_stale = guard_cell.get() != guard;
+            if guard_was_stale {
                 memo_cell.borrow_mut().clear();
                 guard_cell.set(guard);
             }
@@ -9228,7 +9235,8 @@ impl Scene {
             crate::perf_record!(
                 "[perf] wires-build total={:.1}ms sort_cache={:.1} visible={:.1} blk_cache={:.1} \
 build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
-entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates={}",
+entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates={} \
+guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
                 crate::perf::elapsed_ms(t_fn),
                 sort_cache_ms,
                 visible_ms,
@@ -9247,6 +9255,13 @@ entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates
                 if memo_active { "on" } else { "off" },
                 visible_path,
                 visible_candidates,
+                guard_dbg,
+                guard_was_stale,
+                avp.map(|h| h.value()).unwrap_or(0),
+                anno,
+                annotation_scale_handle.map(|h| h.value()).unwrap_or(0),
+                all_visible,
+                crate::scene::text::sdf_atlas::generation(),
             );
         }
         wires
@@ -10014,20 +10029,31 @@ entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates
     }
 
     /// Full tessellation pipeline for one entity.
-    fn tessellate_one(&self, e: &EntityType) -> Vec<WireModel> {
-        let bg = if self.current_layout == "Model" {
+    /// The document-wide inputs `tessellate_entity` takes, resolved from the
+    /// current layout and viewport.
+    ///
+    /// Every entity in a walk gets the same four, and resolving them per entity
+    /// is not free — `block_cache_arc_for` takes a `RefCell` borrow and a cache
+    /// lookup. Callers that tessellate more than one entity resolve them once
+    /// and pass them down; sharing the resolution keeps those callers from
+    /// drifting away from `tessellate_one`.
+    fn tessellation_context(
+        &self,
+    ) -> ([f32; 4], f32, Option<Handle>, Arc<cache::block_cache::BlockCache>, bool) {
+        let is_model = self.current_layout == "Model";
+        let bg = if is_model {
             self.bg_color
         } else {
             self.paper_bg_color
         };
-        let anno = if self.current_layout == "Model" {
+        let anno = if is_model {
             self.annotation_scale
         } else if let Some(viewport) = self.active_viewport {
             self.viewport_annotation_multiplier(viewport)
         } else {
             1.0
         };
-        let annotation_scale_handle = if self.current_layout == "Model" {
+        let annotation_scale_handle = if is_model {
             crate::scene::annotative::scale_handle_by_name(
                 &self.document,
                 &self.document.header.current_annotation_scale,
@@ -10042,6 +10068,12 @@ entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates
             self.annotation_all_visible(),
             self.active_viewport,
         );
+        (bg, anno, annotation_scale_handle, blk_cache, !is_model)
+    }
+
+    fn tessellate_one(&self, e: &EntityType) -> Vec<WireModel> {
+        let (bg, anno, annotation_scale_handle, blk_cache, paper) =
+            self.tessellation_context();
         // tessellate_one is used for one-off lookups (hit test, properties).
         // Skip culling here so the caller always gets the full geometry.
         tessellate_entity(
@@ -10055,7 +10087,7 @@ entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates
             Some(&blk_cache),
             None,
             None,
-            self.current_layout != "Model",
+            paper,
         )
     }
 
@@ -10240,27 +10272,80 @@ entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates
         // offset-rel coords there silently double-subtracts world_offset
         // inside `camera_for_viewport` and points the viewport at the
         // wrong location on UTM-scale drawings.
-        for entity in self.document.entities() {
-            let c = entity.common();
-            if c.owner_handle != model_block
-                || c.invisible
-                || self.entity_temporarily_hidden(c.handle)
-            {
-                continue;
-            }
-            for wire in self.tessellate_one(entity) {
-                for &[x, y, z] in &wire.key_vertices {
-                    let v = glam::Vec3::new(x as f32, y as f32, z as f32);
-                    // Check finiteness *after* the f32 cast: a ray/xline endpoint
-                    // is a huge-but-finite f64 that overflows to inf in f32, which
-                    // the f64 `is_finite` test would have let through.
-                    if v.is_finite() {
-                        min = min.min(v);
-                        max = max.max(v);
-                        any = true;
+        //
+        // `tessellate_one` resolves the background, annotation scale and block
+        // cache from `&self` on every call, and this walk calls it once per
+        // model entity — 186 k times on a large drawing, each one taking a
+        // `RefCell` borrow for a block cache that is the same every time. Those
+        // inputs do not vary across the loop, so they are resolved once and the
+        // shared tessellator is called directly, which also lets the walk run
+        // in parallel the way the wire builder's own tessellation pass does.
+        // Same arguments, same output: only who computes them changed.
+        let (bg_for_tess, anno_for_tess, anno_handle_for_tess, blk_for_tess, paper_for_tess) =
+            self.tessellation_context();
+        let subjects: Vec<&EntityType> = self
+            .document
+            .entities()
+            .filter(|entity| {
+                let c = entity.common();
+                c.owner_handle == model_block
+                    && !c.invisible
+                    && !self.entity_temporarily_hidden(c.handle)
+            })
+            .collect();
+        let doc = &self.document;
+        let sel = &self.selected;
+        let avp = self.active_viewport;
+        let blk_ref: &cache::block_cache::BlockCache = &blk_for_tess;
+        use rayon::iter::{IntoParallelIterator, ParallelIterator};
+        let reduced = subjects
+            .into_par_iter()
+            .map(|entity| {
+                let mut lo = glam::Vec3::splat(f32::INFINITY);
+                let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
+                let mut hit = false;
+                for wire in tessellate_entity(
+                    doc,
+                    sel,
+                    avp,
+                    bg_for_tess,
+                    anno_for_tess,
+                    anno_handle_for_tess,
+                    entity,
+                    Some(blk_ref),
+                    None,
+                    None,
+                    paper_for_tess,
+                ) {
+                    for &[x, y, z] in &wire.key_vertices {
+                        let v = glam::Vec3::new(x as f32, y as f32, z as f32);
+                        // Check finiteness *after* the f32 cast: a ray/xline
+                        // endpoint is a huge-but-finite f64 that overflows to
+                        // inf in f32, which the f64 `is_finite` test would have
+                        // let through.
+                        if v.is_finite() {
+                            lo = lo.min(v);
+                            hi = hi.max(v);
+                            hit = true;
+                        }
                     }
                 }
-            }
+                (lo, hi, hit)
+            })
+            .reduce(
+                || {
+                    (
+                        glam::Vec3::splat(f32::INFINITY),
+                        glam::Vec3::splat(f32::NEG_INFINITY),
+                        false,
+                    )
+                },
+                |a, b| (a.0.min(b.0), a.1.max(b.1), a.2 || b.2),
+            );
+        if reduced.2 {
+            min = min.min(reduced.0);
+            max = max.max(reduced.1);
+            any = true;
         }
         // Same mesh inclusion for the tessellate fallback path.
         for (&handle, set) in &self.meshes {

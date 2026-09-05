@@ -125,6 +125,20 @@ impl DocApiBackend for HostSession<'_> {
         Ok(handle_to_obj(handle))
     }
 
+    fn add_viewport(&mut self, spec: &ocs_doc_api::ops::ViewportSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::Viewport;
+        use acadrust::types::Vector3;
+        let v3 = |p: [f64; 3]| Vector3::new(p[0], p[1], p[2]);
+        let mut vp = Viewport::new();
+        vp.center = v3(spec.center);
+        vp.width = spec.width;
+        vp.height = spec.height;
+        vp.view_target = v3(spec.view_target);
+        vp.view_height = spec.view_height;
+        let handle = self.scene_mut().add_entity(EntityType::Viewport(vp));
+        Ok(handle_to_obj(handle))
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -183,6 +197,7 @@ impl DocApiBackend for HostSession<'_> {
                 | EntityType::Ray(_)
                 | EntityType::XLine(_)
                 | EntityType::Insert(_)
+                | EntityType::Viewport(_)
                 | EntityType::Point(_)
                 | EntityType::LwPolyline(_)
         );
@@ -624,6 +639,44 @@ mod tests {
         let handle = obj_to_handle(ray);
         let Some(EntityType::Ray(r)) = host.document().get_entity(handle) else { panic!("ray not found") };
         assert!((r.base_point.z - 5.0).abs() < 1e-6);
+    }
+
+    // ── Phase 4: paper-space viewports ───────────────────────────────────────
+
+    #[test]
+    fn phase4_create_viewport_bounds_transform() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // A 40x30 paper-space viewport at (50,50,0) looking at model origin.
+        let vp = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateViewport(
+            ocs_doc_api::ops::ViewportSpec {
+                center: [50.0, 50.0, 0.0], width: 40.0, height: 30.0,
+                view_target: [0.0, 0.0, 0.0], view_height: 100.0,
+            }))).unwrap());
+        let handle = obj_to_handle(vp);
+        let Some(EntityType::Viewport(v)) = host.document().get_entity(handle) else { panic!("viewport not found") };
+        assert!((v.width - 40.0).abs() < 1e-9 && (v.view_height - 100.0).abs() < 1e-9);
+
+        // Bounds = center ± width/2, height/2.
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetEntity { id: vp }, Query::GetBounds { id: vp }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Entity(e) => assert_eq!(e.kind, "Viewport"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Bounds(b) => {
+                assert!((b.min[0] - 30.0).abs() < 1e-6 && (b.max[0] - 70.0).abs() < 1e-6, "{b:?}");
+                assert!((b.min[1] - 35.0).abs() < 1e-6 && (b.max[1] - 65.0).abs() < 1e-6, "{b:?}");
+            }
+            other => panic!("expected bounds, got {other:?}"),
+        }
+
+        // Transform moves the viewport's paper-space center.
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform {
+            id: vp, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
+        let Some(EntityType::Viewport(v)) = host.document().get_entity(handle) else { panic!("viewport not found") };
+        assert!((v.center.x - 60.0).abs() < 1e-6);
     }
 
     // ── Phase 3: containers (block references) ───────────────────────────────

@@ -65,6 +65,9 @@ impl DocApiBackend for MockBackend {
         }
         Ok(self.alloc("Insert"))
     }
+    fn add_viewport(&mut self, _spec: &ocs_doc_api::ops::ViewportSpec) -> ApiResult<ObjectId> {
+        Ok(self.alloc("Viewport"))
+    }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {
             Ok(())

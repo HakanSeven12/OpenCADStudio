@@ -67,6 +67,18 @@ pub struct InsertSpec {
     pub rotation: f64,
 }
 
+/// Construction spec for a paper-space `VIEWPORT`: a `width`×`height` viewport
+/// centered at `center` (paper space), looking at `view_target` (model space,
+/// WCS) with `view_height` (model-space height visible; the viewport's zoom).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ViewportSpec {
+    pub center: [f64; 3],
+    pub width: f64,
+    pub height: f64,
+    pub view_target: [f64; 3],
+    pub view_height: f64,
+}
+
 /// A rigid similarity (rotation + translation + optional uniform scale/reflection)
 /// as a plain-data mirror of `cadkernel::brep::transform`'s `Placement`
 /// (non-serde). Columns are the new basis axes; `origin` is the translation.
@@ -115,6 +127,7 @@ impl crate::gen::Operation {
             TransformMany { .. } => "TransformMany",
             DeleteMany(_) => "DeleteMany",
             CreateInsert(_) => "CreateInsert",
+            CreateViewport(_) => "CreateViewport",
         }
     }
 }

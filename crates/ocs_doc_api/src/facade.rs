@@ -464,6 +464,19 @@ pub struct EntityCollection {
 }
 
 impl EntityCollection {
+    /// Create a paper-space `VIEWPORT` (a `width`×`height` viewport at `center`
+    /// looking at `view_target` with `view_height` zoom).
+    pub fn create_viewport(&self, center: [f64; 3], width: f64, height: f64, view_target: [f64; 3], view_height: f64) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateViewport(crate::ops::ViewportSpec {
+            center, width, height, view_target, view_height,
+        }))?;
+        let id = receipt
+            .outcome
+            .and_then(|o| o.new_id())
+            .ok_or_else(|| ApiError::Transport("create_viewport returned no id".into()))?;
+        Ok(Entity::new(self.session.clone(), id))
+    }
+
     /// Place a block reference (`INSERT`) for `block_name` (must exist).
     pub fn create_insert(&self, block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64) -> ApiResult<Entity> {
         let receipt = self.session.apply_op(Operation::CreateInsert(crate::ops::InsertSpec {

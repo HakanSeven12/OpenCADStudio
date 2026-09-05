@@ -95,6 +95,14 @@ Block reference. Place an existing BlockRecord by name; transform moves its inse
 
 - **create_insert**(`block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64`) -> `Entity`
 
+## `Entity` (acadrust `Viewport`, collection `entities`)
+
+Paper-space viewport: a width×height window at center looking at view_target with view_height zoom. bounds = center ± w/2,h/2; transform moves center.
+
+### Constructors (`doc.entities()`)
+
+- **create_viewport**(`center: [f64; 3], width: f64, height: f64, view_target: [f64; 3], view_height: f64`) -> `Entity`
+
 ## Generic methods (every handle)
 
 Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `Entity`) is a

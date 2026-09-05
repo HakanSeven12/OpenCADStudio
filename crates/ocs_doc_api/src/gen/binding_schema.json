@@ -194,6 +194,13 @@
       "handle": "Entity",
       "methods": [],
       "name": "Insert"
+    },
+    {
+      "acadrust_variant": "Viewport",
+      "collection": "entities",
+      "handle": "Entity",
+      "methods": [],
+      "name": "Viewport"
     }
   ],
   "layouts": {

@@ -253,6 +253,21 @@ args = [{ name = "block_name", ty = "&str" }, { name = "insert_point", ty = "[f6
 op = "CreateInsert"
 
 # ============================================================================
+# PAPER-SPACE FAMILY (phase 4) — viewports
+# ============================================================================
+[[family]]
+name = "Viewport"
+acadrust_variant = "Viewport"
+handle = "Entity"
+collection = "entities"
+description = "Paper-space viewport: a width×height window at center looking at view_target with view_height zoom. bounds = center ± w/2,h/2; transform moves center."
+
+[[family.constructor]]
+name = "create_viewport"
+args = [{ name = "center", ty = "[f64; 3]" }, { name = "width", ty = "f64" }, { name = "height", ty = "f64" }, { name = "view_target", ty = "[f64; 3]" }, { name = "view_height", ty = "f64" }]
+op = "CreateViewport"
+
+# ============================================================================
 # Cross-cutting ops (generic handles + bulk) — documented in build.rs
 # ============================================================================
 # - Generic handle methods on EVERY handle: bounds() -> Aabb, transform(placement),

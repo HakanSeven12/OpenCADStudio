@@ -68,10 +68,11 @@ variants append at enum end.
   get/set; read-only nested block-content traversal.
 
 ### Phase 4 — paper-space & viewports
-- **Entities:** viewport entities.
-- **Methods:** `create_viewport`, set-view (target, center, scale), layout
-  queries.
-- **Blocked by:** a viewport query model (view target/center/scale DTOs).
+- **Done:** `create_viewport(center, width, height, view_target, view_height)` →
+  `Operation::CreateViewport`; `bounds()` = center ± width/2,height/2; `transform`
+  moves the paper-space center. Covered by `phase4_*` test.
+- **Remaining:** `set_view` (retarget/re-zoom an existing viewport) and a
+  viewport-view query (view target/center/scale DTOs).
 
 ### Phase 5 — media & misc (read-mostly)
 - **Entities:** raster image, underlay, table, light.

@@ -39,6 +39,9 @@ pub trait DocApiBackend {
     /// the fresh `ObjectId`. `Validation` if the block is unknown.
     fn add_insert(&mut self, spec: &crate::ops::InsertSpec) -> ApiResult<ObjectId>;
 
+    /// Add a paper-space `VIEWPORT`; returns the fresh `ObjectId`.
+    fn add_viewport(&mut self, spec: &crate::ops::ViewportSpec) -> ApiResult<ObjectId>;
+
     /// Remove any first-level entity by id. Returns `false` if absent; returns
     /// `Err` if the entity exists but cannot be removed (e.g. locked layer).
     fn remove_entity(&mut self, id: ObjectId) -> ApiResult<bool>;

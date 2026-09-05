@@ -56,6 +56,11 @@ impl DocApiBackend for MockBackend {
             Curve2Spec::Circle { .. } => "Circle",
             Curve2Spec::Polyline { .. } => "LwPolyline",
             Curve2Spec::Point { .. } => "Point",
+            Curve2Spec::Arc { .. } => "Arc",
+            Curve2Spec::Ellipse { .. } => "Ellipse",
+            Curve2Spec::Spline { .. } => "Spline",
+            Curve2Spec::Ray { .. } => "Ray",
+            Curve2Spec::XLine { .. } => "XLine",
         };
         Ok(self.alloc(kind))
     }

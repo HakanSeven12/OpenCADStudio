@@ -70,6 +70,26 @@ fn curve_bounds(spec: &Curve2Spec) -> Aabb {
             }
             Aabb { min, max }
         }
+        Curve2Spec::Arc { centre, radius, .. } => Aabb {
+            min: [centre[0] - radius, centre[1] - radius, centre[2]],
+            max: [centre[0] + radius, centre[1] + radius, centre[2]],
+        },
+        Curve2Spec::Ellipse { centre, major_axis, .. } => {
+            let r = (major_axis[0] * major_axis[0] + major_axis[1] * major_axis[1] + major_axis[2] * major_axis[2]).sqrt();
+            Aabb { min: [centre[0] - r, centre[1] - r, centre[2] - r], max: [centre[0] + r, centre[1] + r, centre[2] + r] }
+        }
+        Curve2Spec::Spline { control_points, .. } => {
+            let mut min = [f64::INFINITY; 3];
+            let mut max = [f64::NEG_INFINITY; 3];
+            for p in control_points {
+                for i in 0..3 {
+                    min[i] = min[i].min(p[i]);
+                    max[i] = max[i].max(p[i]);
+                }
+            }
+            Aabb { min, max }
+        }
+        Curve2Spec::Ray { origin, .. } | Curve2Spec::XLine { origin, .. } => Aabb { min: *origin, max: *origin },
     }
 }
 
@@ -94,6 +114,11 @@ impl DocApiBackend for MockBackend {
             Curve2Spec::Circle { .. } => "Circle",
             Curve2Spec::Polyline { .. } => "LwPolyline",
             Curve2Spec::Point { .. } => "Point",
+            Curve2Spec::Arc { .. } => "Arc",
+            Curve2Spec::Ellipse { .. } => "Ellipse",
+            Curve2Spec::Spline { .. } => "Spline",
+            Curve2Spec::Ray { .. } => "Ray",
+            Curve2Spec::XLine { .. } => "XLine",
         };
         let id = self.alloc(kind);
         self.curves.insert(id, spec.clone());

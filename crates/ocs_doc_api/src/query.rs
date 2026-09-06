@@ -49,6 +49,10 @@ pub enum QueryResult {
     HatchBoundary(Vec<Vec<[f64; 2]>>),
     /// A dimension's measured value (distance for linear/radius, degrees for angular).
     DimensionMeasurement(f64),
+    /// An insert's attributes as (tag, value) pairs.
+    Attributes(Vec<(String, String)>),
+    /// The entities inside a block definition (read-only traversal).
+    BlockEntities(Vec<EntityView>),
 }
 
 /// Convenience: the query name for diagnostics.
@@ -65,6 +69,8 @@ impl crate::gen::Query {
             GetTextContent { .. } => "GetTextContent",
             GetHatchBoundary { .. } => "GetHatchBoundary",
             GetDimensionMeasurement { .. } => "GetDimensionMeasurement",
+            GetAttributes { .. } => "GetAttributes",
+            GetBlockEntities { .. } => "GetBlockEntities",
         }
     }
 }

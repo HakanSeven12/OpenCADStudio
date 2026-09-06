@@ -79,8 +79,13 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
 - **Done:** `create_insert(block_name, point, scale, rotation)` → `Operation::CreateInsert`
   (validates the BlockRecord exists; unknown block → `Validation`, no mutation).
   Insert `transform` moves its `insert_point`. Covered by `phase3_*` test.
-- **Remaining:** `AttributeDefinition`/`AttributeEntity` typed create + attribute
-  get/set; read-only nested block-content traversal.
+- **Done (attributes + traversal):** `set_attribute(tag, value)` (adds/updates an
+  attribute on an insert, `SetAttribute` op), `attributes()` → (tag, value) pairs
+  (`GetAttributes`), and `block_entities(block_name)` → read-only nested traversal
+  of a block definition's entities (`GetBlockEntities`). Covered by
+  `phase3_attributes_and_block_traversal` test.
+- **Remaining:** typed `AttributeDefinition` (in-block attribute-definition)
+  create.
 
 ### Phase 4 — paper-space & viewports
 - **Done:** `create_viewport(center, width, height, view_target, view_height)` →

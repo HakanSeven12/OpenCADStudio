@@ -9,7 +9,8 @@ use crate::id::ObjectId;
 
 /// A typed read query (plan §5). Read-only: no mutation, no undo, no revision
 /// bump. Safe to batch (`EnvelopeBody::Queries`). Append new variants at the END only.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// (Not `Copy`: some variants carry owned data like a block name.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Query {
     GetEntity { id: ObjectId },
@@ -25,4 +26,8 @@ pub enum Query {
     GetHatchBoundary { id: ObjectId },
     /// The measured value of a Dimension (distance or angle).
     GetDimensionMeasurement { id: ObjectId },
+    /// An insert's attributes as (tag, value) pairs.
+    GetAttributes { id: ObjectId },
+    /// The entity ids + kinds inside a block definition (read-only traversal).
+    GetBlockEntities { block_name: String },
 }

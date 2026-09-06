@@ -145,6 +145,11 @@ Block reference. Place an existing BlockRecord by name; transform moves its inse
 
 - **create_insert**(`block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64`) -> `Entity`
 
+### Methods
+
+- **attributes**(``) -> `Vec<(String, String)>` — query `GetAttributes`
+- **set_attribute**(`tag: &str, value: &str`) -> `()` — op `SetAttribute`
+
 ## `Entity` (acadrust `Viewport`, collection `entities`)
 
 Paper-space viewport: a width×height window at center looking at view_target with view_height zoom. bounds = center ± w/2,h/2; transform moves center.

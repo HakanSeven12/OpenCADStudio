@@ -66,6 +66,15 @@ pub trait DocApiBackend {
     /// A dimension's measured value (distance for linear/radius, degrees for angular).
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64>;
 
+    /// Set an attribute `value` for `tag` on an insert (adds if absent). Insert-only.
+    fn set_attribute(&mut self, id: ObjectId, tag: &str, value: &str) -> ApiResult<()>;
+
+    /// An insert's attributes as (tag, value) pairs. Insert-only.
+    fn attributes(&self, id: ObjectId) -> ApiResult<Vec<(String, String)>>;
+
+    /// The entities inside a block definition (read-only traversal), as views.
+    fn block_entities(&self, block_name: &str) -> ApiResult<Vec<EntityView>>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

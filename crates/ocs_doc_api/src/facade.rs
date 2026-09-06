@@ -128,6 +128,14 @@ impl Document {
         }
     }
 
+    /// Read-only traversal of a block definition's entities (ids + kinds + bounds).
+    pub fn block_entities(&self, block_name: &str) -> ApiResult<Vec<EntityView>> {
+        match self.session.one_query(Query::GetBlockEntities { block_name: block_name.to_string() })? {
+            QueryResult::BlockEntities(v) => Ok(v),
+            _ => Err(ApiError::Transport("unexpected block-entities result".into())),
+        }
+    }
+
     /// Batch of read-only queries in ONE round-trip (safe: no mutation/undo).
     /// The closure records queries on a [`QueryBatch`]; the results are returned
     /// in the same order as a [`QueryResults`] view the caller destructures.
@@ -288,6 +296,18 @@ impl Entity {
             QueryResult::Entity(v) => Ok(v),
             _ => Err(ApiError::Transport("unexpected entity result".into())),
         }
+    }
+    /// This insert's attributes as (tag, value) pairs. Insert-only.
+    pub fn attributes(&self) -> ApiResult<Vec<(String, String)>> {
+        match self.session.one_query(Query::GetAttributes { id: self.id })? {
+            QueryResult::Attributes(v) => Ok(v),
+            _ => Err(ApiError::Transport("unexpected attributes result".into())),
+        }
+    }
+    /// Set an attribute `value` for `tag` on this insert (adds if absent). One undo step.
+    pub fn set_attribute(&self, tag: &str, value: &str) -> ApiResult<()> {
+        self.session.apply_op(Operation::SetAttribute { id: self.id, tag: tag.to_string(), value: value.to_string() })?;
+        Ok(())
     }
     pub fn as_solid(&self) -> Option<Solid> {
         // Typed downcast is validated by the view's kind.

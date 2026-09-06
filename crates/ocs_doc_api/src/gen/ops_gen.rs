@@ -40,4 +40,6 @@ pub enum Operation {
     CreateHatch(HatchSpec),
     // dimensions
     CreateDimensionLinear(DimensionSpec),
+    // attributes
+    SetAttribute { id: ObjectId, tag: String, value: String },
 }

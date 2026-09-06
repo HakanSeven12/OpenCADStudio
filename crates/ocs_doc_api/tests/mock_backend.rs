@@ -27,6 +27,8 @@ struct MockBackend {
     hatch_boundaries: HashMap<ObjectId, Vec<Vec<[f64; 2]>>>,
     /// Stored dimension measurements.
     dimension_measurements: HashMap<ObjectId, f64>,
+    /// Stored insert attributes.
+    attributes_store: HashMap<ObjectId, Vec<(String, String)>>,
 }
 
 impl MockBackend {
@@ -120,6 +122,25 @@ impl DocApiBackend for MockBackend {
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64> {
         self.dimension_measurements.get(&id).copied().ok_or(ApiError::UnknownId(id))
     }
+    fn set_attribute(&mut self, id: ObjectId, tag: &str, value: &str) -> ApiResult<()> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        let attrs = self.attributes_store.entry(id).or_default();
+        if let Some(a) = attrs.iter_mut().find(|(t, _)| t == tag) {
+            a.1 = value.to_string();
+        } else {
+            attrs.push((tag.to_string(), value.to_string()));
+        }
+        Ok(())
+    }
+    fn attributes(&self, id: ObjectId) -> ApiResult<Vec<(String, String)>> {
+        self.attributes_store.get(&id).cloned().ok_or(ApiError::UnknownId(id))
+    }
+    fn block_entities(&self, _block_name: &str) -> ApiResult<Vec<EntityView>> {
+        Ok(Vec::new())
+    }
+}
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {
             Ok(())

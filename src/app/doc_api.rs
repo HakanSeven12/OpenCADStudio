@@ -262,6 +262,55 @@ impl DocApiBackend for HostSession<'_> {
         })
     }
 
+    fn set_attribute(&mut self, id: ObjectId, tag: &str, value: &str) -> ApiResult<()> {
+        let handle = obj_to_handle(id);
+        let entity = self.document().get_entity(handle).cloned().ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Insert(mut ins) = entity else {
+            return Err(ApiError::Unsupported("SetAttribute is only for Insert entities".into()));
+        };
+        if let Some(attr) = ins.attributes.iter_mut().find(|a| a.tag == tag) {
+            attr.value = value.to_string();
+        } else {
+            let mut attr = acadrust::entities::AttributeEntity::default();
+            attr.tag = tag.to_string();
+            attr.value = value.to_string();
+            attr.insertion_point = ins.insert_point;
+            ins.attributes.push(attr);
+        }
+        if !self.scene_mut().update_entity(EntityType::Insert(ins)) {
+            return Err(ApiError::Unsupported(format!("entity {id:?} is on a locked layer")));
+        }
+        Ok(())
+    }
+
+    fn attributes(&self, id: ObjectId) -> ApiResult<Vec<(String, String)>> {
+        let entity = self.document().get_entity(obj_to_handle(id)).ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Insert(ins) = entity else {
+            return Err(ApiError::Unsupported("GetAttributes is only for Insert entities".into()));
+        };
+        Ok(ins.attributes.iter().map(|a| (a.tag.clone(), a.value.clone())).collect())
+    }
+
+    fn block_entities(&self, block_name: &str) -> ApiResult<Vec<EntityView>> {
+        let br = self
+            .document()
+            .block_records
+            .get(block_name)
+            .ok_or_else(|| ApiError::validation("GetBlockEntities", format!("unknown block {block_name:?}")))?;
+        // Read-only traversal of the block definition's entities (handle lookups).
+        let mut out = Vec::with_capacity(br.entity_handles.len());
+        for h in &br.entity_handles {
+            let id = handle_to_obj(*h);
+            let (kind, bounds) = match self.document().get_entity(*h) {
+                Some(e) => (crate::app::doc_api_convert::entity_kind_name(e).to_string(),
+                            crate::app::doc_api_convert::entity_bounds(Some(e), id).ok()),
+                None => ("Missing".to_string(), None),
+            };
+            out.push(EntityView { id, kind, bounds });
+        }
+        Ok(out)
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -927,6 +976,52 @@ mod tests {
             id: mtext, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
         let Some(EntityType::MText(t)) = host.document().get_entity(obj_to_handle(mtext)) else { panic!("mtext not found") };
         assert!((t.insertion_point.x - 15.0).abs() < 1e-6);
+    }
+
+    // ── Phase 3 remaining: attributes + nested block traversal ──────────────
+
+    #[test]
+    fn phase3_attributes_and_block_traversal() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // A block "Door" containing a line; insert it, then set/read attributes.
+        host.document_mut().block_records.add(acadrust::tables::BlockRecord::new("Door")).unwrap();
+        let line = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Line { start: [0.0; 3], end: [10.0; 3] }))).unwrap());
+        host.document_mut().block_records.get_mut("Door").unwrap().entity_handles.push(obj_to_handle(line));
+
+        let ins = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateInsert(
+            ocs_doc_api::ops::InsertSpec { block_name: "Door".into(), insert_point: [0.0; 3], scale: 1.0, rotation: 0.0 }))).unwrap());
+
+        // set_attribute adds a new attribute; get_attributes reads it back.
+        dispatch(&mut host, DocApiEnvelope::op(Operation::SetAttribute { id: ins, tag: "HANDLE".into(), value: "A-1".into() })).unwrap();
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetAttributes { id: ins }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Attributes(attrs) => {
+                assert_eq!(attrs.len(), 1);
+                assert_eq!(attrs[0], ("HANDLE".to_string(), "A-1".to_string()));
+            }
+            other => panic!("expected attributes, got {other:?}"),
+        }
+        // set_attribute on an existing tag updates it.
+        dispatch(&mut host, DocApiEnvelope::op(Operation::SetAttribute { id: ins, tag: "HANDLE".into(), value: "A-2".into() })).unwrap();
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetAttributes { id: ins }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Attributes(attrs) => assert_eq!(attrs[0].1, "A-2"),
+            other => panic!("expected attributes, got {other:?}"),
+        }
+
+        // Nested traversal: GetBlockEntities("Door") returns the line.
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetBlockEntities { block_name: "Door".into() }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::BlockEntities(v) => {
+                assert_eq!(v.len(), 1);
+                assert_eq!(v[0].kind, "Line");
+            }
+            other => panic!("expected block entities, got {other:?}"),
+        }
+        // Unknown block -> validation error.
+        assert!(dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetBlockEntities { block_name: "Nope".into() }])).is_err());
     }
 
     // ── Phase 2b-c: dimension ─────────────────────────────────────────────────

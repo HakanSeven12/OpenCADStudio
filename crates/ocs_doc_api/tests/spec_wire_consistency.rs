@@ -58,6 +58,7 @@ fn operation_variants() -> Vec<String> {
         Operation::SetTextContent { id: ObjectId::from_u64(0), value: String::new() },
         Operation::CreateHatch(ocs_doc_api::ops::HatchSpec { boundary: vec![], solid: true }),
         Operation::CreateDimensionLinear(ocs_doc_api::ops::DimensionSpec { first_point: [0.0; 3], second_point: [0.0; 3], definition_point: [0.0; 3] }),
+        Operation::SetAttribute { id: ObjectId::from_u64(0), tag: String::new(), value: String::new() },
     ];
     // Derive the variant names by serializing a probe of each and reading the
     // bincode variant index -> name map is not available; instead match by
@@ -85,6 +86,8 @@ fn query_variants() -> Vec<String> {
         Query::GetTextContent { id: ObjectId::from_u64(0) },
         Query::GetHatchBoundary { id: ObjectId::from_u64(0) },
         Query::GetDimensionMeasurement { id: ObjectId::from_u64(0) },
+        Query::GetAttributes { id: ObjectId::from_u64(0) },
+        Query::GetBlockEntities { block_name: String::new() },
     ];
     marker
         .iter()
@@ -140,6 +143,7 @@ const OPERATION_BASELINE: &[&str] = &[
     "SetTextContent",
     "CreateHatch",
     "CreateDimensionLinear",
+    "SetAttribute",
 ];
 
 /// Recorded baseline of the `Query` variant order.
@@ -153,6 +157,8 @@ const QUERY_BASELINE: &[&str] = &[
     "GetTextContent",
     "GetHatchBoundary",
     "GetDimensionMeasurement",
+    "GetAttributes",
+    "GetBlockEntities",
 ];
 
 #[test]

@@ -227,6 +227,16 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::SetAttribute { id, tag, value } => {
+            b.can_modify(*id).map_err(|e| match e {
+                ApiError::UnknownId(_) => ApiError::validation(name, format!("unknown ObjectId {id:?}")),
+                other => other,
+            })?;
+            b.push_undo(name);
+            b.set_attribute(*id, tag, value)?;
+            b.finalize_op();
+            OpOutcome::Updated(*id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),
@@ -253,20 +263,22 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
     }
     let mut results = Vec::with_capacity(queries.len());
     for q in &queries {
-        let r = match *q {
-            Query::GetEntity { id } => QueryResult::Entity(b.get_entity(id)?),
-            Query::GetBounds { id } => QueryResult::Bounds(b.bounds(id)?),
-            Query::GetCentroid { id } => QueryResult::Centroid(b.centroid(id)?),
-            Query::GetVolume { id } => QueryResult::Volume(b.volume(id)?),
+        let r = match q {
+            Query::GetEntity { id } => QueryResult::Entity(b.get_entity(*id)?),
+            Query::GetBounds { id } => QueryResult::Bounds(b.bounds(*id)?),
+            Query::GetCentroid { id } => QueryResult::Centroid(b.centroid(*id)?),
+            Query::GetVolume { id } => QueryResult::Volume(b.volume(*id)?),
             Query::GetIntersects { a, b: bid } => {
-                let ba = b.bounds(a)?;
-                let bb = b.bounds(bid)?;
+                let ba = b.bounds(*a)?;
+                let bb = b.bounds(*bid)?;
                 QueryResult::Intersects(ba.overlaps(&bb))
             }
             Query::GetGeometryRevision => QueryResult::Revision(b.revision()),
-            Query::GetTextContent { id } => QueryResult::TextContent(b.text_content(id)?),
-            Query::GetHatchBoundary { id } => QueryResult::HatchBoundary(b.hatch_boundary(id)?),
-            Query::GetDimensionMeasurement { id } => QueryResult::DimensionMeasurement(b.dimension_measurement(id)?),
+            Query::GetTextContent { id } => QueryResult::TextContent(b.text_content(*id)?),
+            Query::GetHatchBoundary { id } => QueryResult::HatchBoundary(b.hatch_boundary(*id)?),
+            Query::GetDimensionMeasurement { id } => QueryResult::DimensionMeasurement(b.dimension_measurement(*id)?),
+            Query::GetAttributes { id } => QueryResult::Attributes(b.attributes(*id)?),
+            Query::GetBlockEntities { block_name } => QueryResult::BlockEntities(b.block_entities(block_name)?),
         };
         results.push(r);
     }

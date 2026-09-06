@@ -300,7 +300,39 @@
       "acadrust_variant": "Insert",
       "collection": "entities",
       "handle": "Entity",
-      "methods": [],
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "attributes",
+          "op": null,
+          "query": "GetAttributes",
+          "read_only": true,
+          "returns": "Vec<(String, String)>"
+        },
+        {
+          "args": [
+            {
+              "name": "tag",
+              "ty": "&str"
+            },
+            {
+              "name": "value",
+              "ty": "&str"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "set_attribute",
+          "op": "SetAttribute",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        }
+      ],
       "name": "Insert"
     },
     {

@@ -347,6 +347,19 @@ name = "create_insert"
 args = [{ name = "block_name", ty = "&str" }, { name = "insert_point", ty = "[f64; 3]" }, { name = "scale", ty = "f64" }, { name = "rotation", ty = "f64" }]
 op = "CreateInsert"
 
+[[family.method]]
+name = "attributes"
+kind = "query"
+query = "GetAttributes"
+returns = "Vec<(String, String)>"
+
+[[family.method]]
+name = "set_attribute"
+kind = "op"
+op = "SetAttribute"
+args = [{ name = "tag", ty = "&str" }, { name = "value", ty = "&str" }]
+returns = "()"
+
 # ============================================================================
 # PAPER-SPACE FAMILY (phase 4) — viewports
 # ============================================================================

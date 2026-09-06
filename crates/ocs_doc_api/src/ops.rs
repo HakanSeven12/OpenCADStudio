@@ -169,6 +169,7 @@ impl crate::gen::Operation {
             SetTextContent { .. } => "SetTextContent",
             CreateHatch(_) => "CreateHatch",
             CreateDimensionLinear(_) => "CreateDimensionLinear",
+            SetAttribute { .. } => "SetAttribute",
         }
     }
 }

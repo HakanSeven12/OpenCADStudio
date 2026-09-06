@@ -76,13 +76,15 @@ img { display: block; max-width: 100%; }
 .button-quiet:hover { background: var(--panel-2); border-color: rgba(89,195,255,.5); }
 
 .hero { display: grid; grid-template-columns: 1fr; gap: 60px; padding-block: 92px 78px; }
-.hero-copy { position: relative; z-index: 2; max-width: 760px; }
+.hero-copy { position: relative; z-index: 2; width: 100%; max-width: 1040px; margin-inline: auto; text-align: center; }
+.hero-copy .eyebrow, .hero-actions, .hero-notes { justify-content: center; }
+.hero-copy h1 { text-wrap: balance; }
 .eyebrow { display: flex; align-items: center; gap: 11px; margin: 0 0 22px; color: var(--cyan); font-size: .875rem; font-weight: 760; letter-spacing: .14em; text-transform: uppercase; }
 .eyebrow span { width: 28px; height: 1px; background: var(--cyan); }
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 26px; font-size: clamp(48px, 5.15vw, 76px); line-height: .99; letter-spacing: -.055em; font-weight: 720; }
 h1 em { color: var(--cyan); font-style: normal; }
-.hero-lead { max-width: 650px; margin-bottom: 32px; color: var(--muted); font-size: 18px; line-height: 1.72; }
+.hero-lead { max-width: 780px; margin-inline: auto; margin-bottom: 32px; color: var(--muted); font-size: 18px; line-height: 1.72; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
 .hero-notes { display: flex; flex-wrap: wrap; gap: 14px 26px; margin: 0; padding: 0; list-style: none; color: var(--quiet); font-size: .875rem; }
 .hero-notes li { position: relative; }

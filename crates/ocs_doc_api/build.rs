@@ -1,7 +1,11 @@
 //! Codegen driver (plan §10): reads `spec/entities.toml` and regenerates the
-//! committed snapshots in `src/gen/` (ops/query enums, api_reference.md,
-//! binding_schema.json). CI runs `cargo build` and fails on drift (the committed
-//! files are the reviewable truth; build.rs rewrites them deterministically).
+//! derived snapshots in `src/gen/` (`api_reference.md`, `binding_schema.json`).
+//! CI runs `cargo build` and fails on drift for those two (the committed files
+//! are the reviewable truth; build.rs rewrites them deterministically).
+//!
+//! NOTE: the `Operation`/`Query` wire enums (`ops_gen.rs`/`query_gen.rs`) are
+//! HAND-MAINTAINED, append-only, and NOT derived here — the spec's `op`/`query`
+//! names must map to enum variants (asserted by a test), never the reverse.
 //!
 //! The wire-layout tracing for `binding_schema.json` uses serde-reflection on the
 //! DTO payload types (same mechanism as `ocs_plugin_api`'s `type_registry.json`),
@@ -264,6 +268,19 @@ fn api_reference_md(spec: &Spec) -> String {
 
 /// The merged, self-contained binding handover schema (§10.2). Object model +
 /// method signatures + op/query mapping + traced wire layouts inlined per node.
+/// The handle types for the binding schema, derived from the spec's families
+/// ("Entity" always first, then the deduped family handles in spec order).
+fn handles_for_schema(spec: &Spec) -> Vec<String> {
+    let mut out = vec!["Entity".to_string()];
+    for fam in &spec.family {
+        let h = fam.handle.as_deref().unwrap_or(&fam.name);
+        if h != "Entity" && !out.iter().any(|x| x == h) {
+            out.push(h.to_string());
+        }
+    }
+    out
+}
+
 fn binding_schema_json(spec: &Spec) -> String {
     // Trace the wire layouts of the DTO payload types via serde-reflection so
     // the inlined layouts are mechanically correct (mirrors the wire types).
@@ -307,7 +324,9 @@ fn binding_schema_json(spec: &Spec) -> String {
             "root": "DocApi",
             "document": "Document",
             "collections": ["solids", "curves", "entities"],
-            "handles": ["Entity", "Solid", "Line", "Circle", "Polyline", "Point"],
+            // Derived from the spec's family handles (deduped, "Entity" first) so
+            // new handle families appear in the handover automatically.
+            "handles": handles_for_schema(spec),
         },
         "families": families,
         // Traced wire layouts for every Operation/Query/payload DTO (inlined).

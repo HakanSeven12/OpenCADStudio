@@ -13,6 +13,31 @@ fn geom_err(kind: GeometryErrorKind, msg: impl Into<String>) -> ApiError {
     ApiError::geometry(kind, msg)
 }
 
+/// Signed volume and centroid of a closed triangle mesh via the divergence
+/// theorem: V = Σ v0·(v1×v2)/6, C = Σ (v0+v1+v2)·tetra_vol / (4V). Single source
+/// of truth shared by the host backend and the test/example mock backends.
+pub fn mesh_volume_centroid(mesh: &cadkernel::brep::Mesh) -> (f64, [f64; 3]) {
+    let mut vol = 0.0;
+    let mut c = [0.0; 3];
+    for t in &mesh.triangles {
+        let (v0, v1, v2) = (mesh.positions[t[0]], mesh.positions[t[1]], mesh.positions[t[2]]);
+        let cross = [
+            v1[1] * v2[2] - v1[2] * v2[1],
+            v1[2] * v2[0] - v1[0] * v2[2],
+            v1[0] * v2[1] - v1[1] * v2[0],
+        ];
+        let tet = (v0[0] * cross[0] + v0[1] * cross[1] + v0[2] * cross[2]) / 6.0;
+        vol += tet;
+        for i in 0..3 {
+            c[i] += (v0[i] + v1[i] + v2[i]) * tet;
+        }
+    }
+    if vol.abs() < 1e-12 {
+        return (0.0, [0.0; 3]);
+    }
+    (vol, [c[0] / (4.0 * vol), c[1] / (4.0 * vol), c[2] / (4.0 * vol)])
+}
+
 /// The XY work plane (origin at 0, X=(1,0,0), normal=(0,0,1)).
 fn xy_plane() -> ApiResult<Plane> {
     Plane::orthonormal([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0])

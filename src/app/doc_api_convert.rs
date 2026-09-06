@@ -30,8 +30,14 @@ pub fn entity_to_profile_curves(entity: &EntityType) -> ApiResult<Vec<cadkernel:
             if pl.vertices.len() < 2 {
                 return Err(ApiError::validation("profile", "polyline profile needs >= 2 vertices"));
             }
-            // Build a straight-segment polyline chain (bulge arcs land in a later
-            // phase; straight segments cover the common rectangular profile case).
+            // Fail explicitly on bulge arcs rather than silently producing a
+            // chord-substituted (wrong-shape) profile for Extrude/Revolve.
+            if pl.vertices.iter().any(|v| v.bulge != 0.0) {
+                return Err(ApiError::Unsupported(
+                    "polyline profiles with bulge (arc) segments are not yet supported for sweep ops".into(),
+                ));
+            }
+            // Build a straight-segment polyline chain.
             let pts: Vec<[f64; 2]> = pl.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
             let mut segs = Vec::with_capacity(pts.len());
             for i in 0..pts.len() {
@@ -64,16 +70,26 @@ pub fn transform_entity_geometry(
     entity: &EntityType,
     p: &ocs_doc_api::PlacementSpec,
 ) -> ApiResult<EntityType> {
-    // Affine point transform: out = R * (s * v) + t. Uniform scale s = |x_axis|.
+    // Placement = R·S·v + t where the axis COLUMNS carry rotation AND uniform
+    // scale (|x_axis| = s). A point maps v -> axes·v + origin (axes already embed
+    // s — do NOT pre-multiply by s or scale is applied twice). A direction maps
+    // v -> axes·v (no origin). Scalar fields (radius) scale by s = |x_axis|.
     let s = (p.x_axis[0] * p.x_axis[0] + p.x_axis[1] * p.x_axis[1] + p.x_axis[2] * p.x_axis[2]).sqrt();
+    // Z-rotation of the placement in the XY plane (for arc angles / insert rotation).
+    let rot_z = p.x_axis[1].atan2(p.x_axis[0]);
     let apply = |v: Vector3| -> Vector3 {
-        let x = v.x * s;
-        let y = v.y * s;
-        let z = v.z * s;
         Vector3::new(
-            p.x_axis[0] * x + p.y_axis[0] * y + p.z_axis[0] * z + p.origin[0],
-            p.x_axis[1] * x + p.y_axis[1] * y + p.z_axis[1] * z + p.origin[1],
-            p.x_axis[2] * x + p.y_axis[2] * y + p.z_axis[2] * z + p.origin[2],
+            p.x_axis[0] * v.x + p.y_axis[0] * v.y + p.z_axis[0] * v.z + p.origin[0],
+            p.x_axis[1] * v.x + p.y_axis[1] * v.y + p.z_axis[1] * v.z + p.origin[1],
+            p.x_axis[2] * v.x + p.y_axis[2] * v.y + p.z_axis[2] * v.z + p.origin[2],
+        )
+    };
+    // Direction/vector transform: rotation+scale only, NO translation.
+    let apply_dir = |v: Vector3| -> Vector3 {
+        Vector3::new(
+            p.x_axis[0] * v.x + p.y_axis[0] * v.y + p.z_axis[0] * v.z,
+            p.x_axis[1] * v.x + p.y_axis[1] * v.y + p.z_axis[1] * v.z,
+            p.x_axis[2] * v.x + p.y_axis[2] * v.y + p.z_axis[2] * v.z,
         )
     };
     let entity = match entity {
@@ -93,15 +109,16 @@ pub fn transform_entity_geometry(
             let mut a = a.clone();
             a.center = apply(a.center);
             a.radius *= s;
+            // A Z-rotation shifts both angles by the placement's XY rotation.
+            a.start_angle += rot_z;
+            a.end_angle += rot_z;
             EntityType::Arc(a)
         }
         EntityType::Ellipse(e) => {
             let mut e = e.clone();
             e.center = apply(e.center);
-            // Scale the major-axis vector by the uniform scale (rigid similarity).
-            e.major_axis = Vector3::new(
-                e.major_axis.x * s, e.major_axis.y * s, e.major_axis.z * s,
-            );
+            // The major-axis is a direction+length vector: rotate+scale it (no origin).
+            e.major_axis = apply_dir(e.major_axis);
             EntityType::Ellipse(e)
         }
         EntityType::Spline(sp) => {
@@ -117,16 +134,20 @@ pub fn transform_entity_geometry(
         EntityType::Ray(r) => {
             let mut r = r.clone();
             r.base_point = apply(r.base_point);
+            r.direction = apply_dir(r.direction);
             EntityType::Ray(r)
         }
         EntityType::XLine(x) => {
             let mut x = x.clone();
             x.base_point = apply(x.base_point);
+            x.direction = apply_dir(x.direction);
             EntityType::XLine(x)
         }
         EntityType::Insert(ins) => {
             let mut ins = ins.clone();
             ins.insert_point = apply(ins.insert_point);
+            // Compose the block rotation with the placement's Z-rotation.
+            ins.rotation += rot_z;
             EntityType::Insert(ins)
         }
         EntityType::Viewport(vp) => {
@@ -206,6 +227,14 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             EntityType::Arc(e)
         }
         Curve2Spec::Ellipse { centre, major_axis, ratio, start, end } => {
+            // Validate the minor/major ratio so the (major-axis) bounds never
+            // under-bound: ratio must be in (0, 1].
+            if !(*ratio > 0.0 && *ratio <= 1.0) {
+                return Err(ApiError::validation(
+                    "CreateCurve",
+                    format!("ellipse minor_axis_ratio must be in (0, 1], got {ratio}"),
+                ));
+            }
             let mut e = Ellipse::new();
             e.center = v3(*centre);
             e.major_axis = v3(*major_axis);
@@ -344,13 +373,24 @@ pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aab
             ],
         },
         EntityType::RasterImage(img) => {
-            // Coarse image rect: origin + u*width + v*height (in world units).
-            let w = img.u_vector.x * img.size.x + img.v_vector.x * img.size.y;
-            let h = img.u_vector.y * img.size.x + img.v_vector.y * img.size.y;
-            let (x0, y0) = (img.insertion_point.x, img.insertion_point.y);
+            // Bracket ALL FOUR image corners (origin, +u*W, +v*H, +u*W+v*H) per
+            // axis so rotated/flipped images are not under-bounded.
+            let (w, h) = (img.size.x, img.size.y);
+            let ux = img.u_vector.x * w;
+            let uy = img.u_vector.y * w;
+            let vx = img.v_vector.x * h;
+            let vy = img.v_vector.y * h;
+            let x0 = img.insertion_point.x;
+            let y0 = img.insertion_point.y;
+            let xs = [x0, x0 + ux, x0 + vx, x0 + ux + vx];
+            let ys = [y0, y0 + uy, y0 + vy, y0 + uy + vy];
+            let min_x = xs.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max_x = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let min_y = ys.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max_y = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             Aabb {
-                min: [x0.min(x0 + w), y0.min(y0 + h), img.insertion_point.z],
-                max: [x0.max(x0 + w), y0.max(y0 + h), img.insertion_point.z],
+                min: [min_x, min_y, img.insertion_point.z],
+                max: [max_x, max_y, img.insertion_point.z],
             }
         }
         // Ray/XLine are unbounded by definition — no finite bounds.

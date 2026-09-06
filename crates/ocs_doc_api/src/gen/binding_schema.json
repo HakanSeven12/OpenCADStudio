@@ -265,7 +265,12 @@
       "Line",
       "Circle",
       "Polyline",
-      "Point"
+      "Point",
+      "ArcCurve",
+      "Ellipse",
+      "Spline",
+      "Ray",
+      "XLine"
     ],
     "root": "DocApi"
   },

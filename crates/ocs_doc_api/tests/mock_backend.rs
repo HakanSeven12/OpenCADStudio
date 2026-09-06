@@ -1,5 +1,5 @@
-//! Unit tests over an in-memory mock `DocApiBackend` (plan §11.1): no host.
-//! Covers the §9 examples: per-op atomicity, boolean erase_sources, OpGroup
+﻿//! Unit tests over an in-memory mock `DocApiBackend` (plan Â§11.1): no host.
+//! Covers the Â§9 examples: per-op atomicity, boolean erase_sources, OpGroup
 //! compensation, bulk all-or-nothing, revision bumps, read-only query batching,
 //! and stale-handle `UnknownId` semantics.
 
@@ -119,11 +119,11 @@ impl DocApiBackend for MockBackend {
     }
     fn centroid(&mut self, id: ObjectId) -> ApiResult<[f64; 3]> {
         let body = self.body(id)?;
-        Ok(cadkernel::brep::mesh_body(body, 0.5, 1e-3).centroid_approx())
+        Ok(ocs_doc_api::geom::mesh_volume_centroid(&cadkernel::brep::mesh_body(body, 0.5, 1e-3)).1)
     }
     fn volume(&mut self, id: ObjectId) -> ApiResult<f64> {
         let body = self.body(id)?;
-        Ok(cadkernel::brep::mesh_body(body, 0.5, 1e-3).volume_approx())
+        Ok(ocs_doc_api::geom::mesh_volume_centroid(&cadkernel::brep::mesh_body(body, 0.5, 1e-3)).0)
     }
     fn entity_exists(&self, id: ObjectId) -> bool {
         self.kinds.contains_key(&id)
@@ -138,51 +138,6 @@ impl DocApiBackend for MockBackend {
     }
 }
 
-/// Approximate mesh volume/centroid for the mock (divergence over triangles).
-trait MeshApprox {
-    fn volume_approx(&self) -> f64;
-    fn centroid_approx(&self) -> [f64; 3];
-}
-impl MeshApprox for cadkernel::brep::Mesh {
-    fn volume_approx(&self) -> f64 {
-        let mut vol = 0.0;
-        for t in &self.triangles {
-            let v0 = self.positions[t[0]];
-            let v1 = self.positions[t[1]];
-            let v2 = self.positions[t[2]];
-            let cross = [
-                v1[1] * v2[2] - v1[2] * v2[1],
-                v1[2] * v2[0] - v1[0] * v2[2],
-                v1[0] * v2[1] - v1[1] * v2[0],
-            ];
-            vol += (v0[0] * cross[0] + v0[1] * cross[1] + v0[2] * cross[2]) / 6.0;
-        }
-        vol
-    }
-    fn centroid_approx(&self) -> [f64; 3] {
-        let mut vol = 0.0;
-        let mut c = [0.0; 3];
-        for t in &self.triangles {
-            let v0 = self.positions[t[0]];
-            let v1 = self.positions[t[1]];
-            let v2 = self.positions[t[2]];
-            let cross = [
-                v1[1] * v2[2] - v1[2] * v2[1],
-                v1[2] * v2[0] - v1[0] * v2[2],
-                v1[0] * v2[1] - v1[1] * v2[0],
-            ];
-            let tet = (v0[0] * cross[0] + v0[1] * cross[1] + v0[2] * cross[2]) / 6.0;
-            vol += tet;
-            for i in 0..3 {
-                c[i] += (v0[i] + v1[i] + v2[i]) * tet;
-            }
-        }
-        if vol.abs() < 1e-12 {
-            return [0.0; 3];
-        }
-        [c[0] / (4.0 * vol), c[1] / (4.0 * vol), c[2] / (4.0 * vol)]
-    }
-}
 
 fn api() -> (DocApi, Arc<ocs_doc_api::transport::InProcess<MockBackend>>) {
     let tp = Arc::new(ocs_doc_api::transport::InProcess::new(MockBackend::default()));
@@ -196,7 +151,7 @@ fn cuboid_intersect_cuboid_atomic_ops_and_revision() {
     let mut grp = ocs_doc_api::OpGroup::new();
 
     let rev0 = doc.revision().unwrap();
-    // Two overlapping boxes — the kernel's own boolean test case (boolean.rs pair()).
+    // Two overlapping boxes â€” the kernel's own boolean test case (boolean.rs pair()).
     let block = grp.track(doc.solids().create_cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])).unwrap();
     let other = grp.track(doc.solids().create_cuboid([5.0, 5.0, 5.0], [10.0, 10.0, 10.0])).unwrap();
     assert_eq!(doc.revision().unwrap().as_u64(), rev0.as_u64() + 2);
@@ -215,7 +170,7 @@ fn cuboid_intersect_cuboid_atomic_ops_and_revision() {
         .unwrap();
     let bb = res.bounds(0).unwrap();
     let vol = res.volume(1).unwrap();
-    // Intersection of [0,10]³ ∩ [5,15]³ = [5,10]³ → bounds + volume 125.
+    // Intersection of [0,10]Â³ âˆ© [5,15]Â³ = [5,10]Â³ â†’ bounds + volume 125.
     assert!((bb.min[0] - 5.0).abs() < 1e-6 && (bb.max[0] - 10.0).abs() < 1e-6, "bounds {bb:?}");
     assert!(vol > 0.0, "intersection volume must be positive");
 }

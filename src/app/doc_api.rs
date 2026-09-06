@@ -180,11 +180,14 @@ impl DocApiBackend for HostSession<'_> {
     }
 
     fn ensure_transformable(&mut self, id: ObjectId) -> ApiResult<()> {
-        // Pre-validating this lets TransformMany be all-or-nothing. Solids and the
-        // supported 2D families are transformable; anything else errors up front.
+        // Pre-validating everything the apply loop can actually fail on is what makes
+        // TransformMany all-or-nothing (no mid-loop failure after earlier mutations).
+        // This must check more than the entity TYPE: layer-lock (update_entity returns
+        // false) and, for solids, that the body resolves.
+        let handle = obj_to_handle(id);
         let entity = self
             .document()
-            .get_entity(obj_to_handle(id))
+            .get_entity(handle)
             .ok_or(ApiError::UnknownId(id))?;
         let ok = matches!(
             entity,
@@ -201,11 +204,19 @@ impl DocApiBackend for HostSession<'_> {
                 | EntityType::Point(_)
                 | EntityType::LwPolyline(_)
         );
-        if ok {
-            Ok(())
-        } else {
-            Err(ApiError::Unsupported("transform is not supported for this entity family".into()))
+        if !ok {
+            return Err(ApiError::Unsupported("transform is not supported for this entity family".into()));
         }
+        // Locked layer -> update_entity would return false mid-loop.
+        if self.scene().is_layer_locked(handle) {
+            return Err(ApiError::Unsupported(format!("entity {id:?} is on a locked layer")));
+        }
+        // Solid: the body must resolve (kernel transform/display-prep can still fail
+        // at apply time, but resolution is the checkable precondition).
+        if matches!(entity, EntityType::Solid3D(_)) {
+            self.resolve_body(id)?;
+        }
+        Ok(())
     }
 
     fn can_remove(&self, id: ObjectId) -> ApiResult<()> {
@@ -283,30 +294,11 @@ impl DocApiBackend for HostSession<'_> {
     }
 
     fn centroid(&mut self, id: ObjectId) -> ApiResult<[f64; 3]> {
-        let handle = obj_to_handle(id);
-        // Serve from the scene's render-mesh metrics cache when present (avoids a
-        // full body tessellation + B-rep clone per query, plan review); fall back
-        // to the kernel mesh when the cache is cold.
-        if let Some(metrics) = self.scene().meshes.get(&handle).map(|m| m.metrics) {
-            if metrics.volume.abs() > 0.0 {
-                return Ok(metrics.centroid);
-            }
-        }
-        let body = self.resolve_body(id)?;
-        let mesh = cadkernel::brep::mesh_body(&body, 0.5, 1e-3);
-        Ok(mesh_volume_centroid(&mesh).1)
+        Ok(self.mass_properties(id)?.1)
     }
 
     fn volume(&mut self, id: ObjectId) -> ApiResult<f64> {
-        let handle = obj_to_handle(id);
-        if let Some(metrics) = self.scene().meshes.get(&handle).map(|m| m.metrics) {
-            if metrics.volume.abs() > 0.0 {
-                return Ok(metrics.volume);
-            }
-        }
-        let body = self.resolve_body(id)?;
-        let mesh = cadkernel::brep::mesh_body(&body, 0.5, 1e-3);
-        Ok(mesh_volume_centroid(&mesh).0)
+        Ok(self.mass_properties(id)?.0)
     }
 
     fn entity_exists(&self, id: ObjectId) -> bool {
@@ -331,6 +323,43 @@ impl DocApiBackend for HostSession<'_> {
 
 // â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+impl HostSession<'_> {
+    /// Volume + centroid for a solid, memoized per (handle, geometry_epoch) so
+    /// repeated queries on the SAME solid are O(1) (the common query-batch DoS).
+    /// Served from the render-mesh metrics cache when present; otherwise tessellates
+    /// the body ONCE per epoch and caches it. A per-session cold-tessellation
+    /// budget bounds pathological batches of many distinct cold solids.
+    fn mass_properties(&mut self, id: ObjectId) -> ApiResult<(f64, [f64; 3])> {
+        let handle = obj_to_handle(id);
+        let epoch = self.scene().geometry_epoch;
+        if let Some(&(cached_epoch, v, c)) = self.mass_cache.get(&handle) {
+            if cached_epoch == epoch {
+                return Ok((v, c));
+            }
+        }
+        // Render-mesh metrics cache (avoids re-tessellation + B-rep clone).
+        if let Some(metrics) = self.scene().meshes.get(&handle).map(|m| m.metrics) {
+            if metrics.volume.abs() > 0.0 {
+                self.mass_cache.insert(handle, (epoch, metrics.volume, metrics.centroid));
+                return Ok((metrics.volume, metrics.centroid));
+            }
+        }
+        // Cold-cache fallback: bounded full tessellation.
+        const COLD_TESS_BUDGET: usize = 256;
+        if self.cold_tess_used >= COLD_TESS_BUDGET {
+            return Err(ApiError::Unsupported(
+                "volume/centroid cold-tessellation budget exceeded for this session; regenerate the mesh or query fewer distinct solids".into(),
+            ));
+        }
+        self.cold_tess_used += 1;
+        let body = self.resolve_body(id)?;
+        let mesh = cadkernel::brep::mesh_body(&body, 0.5, 1e-3);
+        let (v, c) = mesh_volume_centroid(&mesh);
+        self.mass_cache.insert(handle, (epoch, v, c));
+        Ok((v, c))
+    }
+}
+
 fn kernel_placement(p: &PlacementSpec) -> cadkernel::brep::Placement {
     cadkernel::brep::Placement {
         x_axis: p.x_axis,
@@ -344,25 +373,8 @@ fn kernel_placement(p: &PlacementSpec) -> cadkernel::brep::Placement {
 /// theorem: V = Σ v0·(v1×v2)/6, C = Σ (v0+v1+v2)·tetra_vol / (4V). Single source
 /// of truth for both (used by the cold-cache `volume`/`centroid` fallback).
 fn mesh_volume_centroid(mesh: &cadkernel::brep::Mesh) -> (f64, [f64; 3]) {
-    let mut vol = 0.0;
-    let mut c = [0.0; 3];
-    for t in &mesh.triangles {
-        let (v0, v1, v2) = (mesh.positions[t[0]], mesh.positions[t[1]], mesh.positions[t[2]]);
-        let cross = [
-            v1[1] * v2[2] - v1[2] * v2[1],
-            v1[2] * v2[0] - v1[0] * v2[2],
-            v1[0] * v2[1] - v1[1] * v2[0],
-        ];
-        let tet = (v0[0] * cross[0] + v0[1] * cross[1] + v0[2] * cross[2]) / 6.0;
-        vol += tet;
-        for i in 0..3 {
-            c[i] += (v0[i] + v1[i] + v2[i]) * tet;
-        }
-    }
-    if vol.abs() < 1e-12 {
-        return (0.0, [0.0; 3]);
-    }
-    (vol, [c[0] / (4.0 * vol), c[1] / (4.0 * vol), c[2] / (4.0 * vol)])
+    // Delegate to the crate's single source of truth (divergence theorem).
+    ocs_doc_api::geom::mesh_volume_centroid(mesh)
 }
 
 #[cfg(test)]
@@ -677,6 +689,81 @@ mod tests {
             id: vp, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
         let Some(EntityType::Viewport(v)) = host.document().get_entity(handle) else { panic!("viewport not found") };
         assert!((v.center.x - 60.0).abs() < 1e-6);
+    }
+
+    // ── Regression tests for review fixes (s^2 scale, rotation, all-or-nothing) ──
+
+    #[test]
+    fn fix_uniform_scale_applied_once_not_squared() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let circle = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Circle { centre: [0.0, 0.0, 0.0], radius: 1.0 }))).unwrap());
+        // Uniform scale by 2 (x_axis=(2,0,0) etc). Radius must become 2 (s), not 4 (s^2).
+        let placement = ocs_doc_api::PlacementSpec {
+            x_axis: [2.0, 0.0, 0.0], y_axis: [0.0, 2.0, 0.0], z_axis: [0.0, 0.0, 2.0], origin: [0.0; 3],
+        };
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform { id: circle, placement })).unwrap();
+        let handle = obj_to_handle(circle);
+        let Some(EntityType::Circle(c)) = host.document().get_entity(handle) else { panic!("circle not found") };
+        assert!((c.radius - 2.0).abs() < 1e-9, "radius {} (must be 2.0, not 4.0)", c.radius);
+    }
+
+    #[test]
+    fn fix_rotation_rotates_ellipse_ray_and_insert() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // 90-degree Z-rotation: x_axis=(0,1,0), y_axis=(-1,0,0).
+        let rot90 = ocs_doc_api::PlacementSpec {
+            x_axis: [0.0, 1.0, 0.0], y_axis: [-1.0, 0.0, 0.0], z_axis: [0.0, 0.0, 1.0], origin: [0.0; 3],
+        };
+        // Ray along +X must become along +Y after a 90° rotation.
+        let ray = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Ray { origin: [0.0, 0.0, 0.0], direction: [1.0, 0.0, 0.0] }))).unwrap());
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform { id: ray, placement: rot90 })).unwrap();
+        let Some(EntityType::Ray(r)) = host.document().get_entity(obj_to_handle(ray)) else { panic!("ray not found") };
+        assert!((r.direction.y - 1.0).abs() < 1e-6 && r.direction.x.abs() < 1e-6, "ray dir {:?}", r.direction);
+
+        // Ellipse major_axis along +X must rotate to +Y (length preserved).
+        let ell = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Ellipse { centre: [0.0; 3], major_axis: [4.0, 0.0, 0.0], ratio: 0.5, start: 0.0, end: std::f64::consts::TAU }))).unwrap());
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform { id: ell, placement: rot90 })).unwrap();
+        let Some(EntityType::Ellipse(e)) = host.document().get_entity(obj_to_handle(ell)) else { panic!("ellipse not found") };
+        assert!((e.major_axis.y - 4.0).abs() < 1e-6 && e.major_axis.x.abs() < 1e-6, "ellipse axis {:?}", e.major_axis);
+
+        // Arc angles offset by +90° (π/2).
+        let arc = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Arc { centre: [0.0; 3], radius: 2.0, start_angle: 0.0, end_angle: 1.0 }))).unwrap());
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform { id: arc, placement: rot90 })).unwrap();
+        let Some(EntityType::Arc(a)) = host.document().get_entity(obj_to_handle(arc)) else { panic!("arc not found") };
+        let half_pi = std::f64::consts::FRAC_PI_2;
+        assert!((a.start_angle - half_pi).abs() < 1e-6, "arc start {} (expected {})", a.start_angle, half_pi);
+    }
+
+    #[test]
+    fn fix_transform_many_locked_layer_fails_all_or_nothing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let a = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Point { position: [0.0; 3] }))).unwrap());
+        let b = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Point { position: [1.0; 3] }))).unwrap());
+        // Lock the layer holding `b`.
+        let bh = obj_to_handle(b);
+        let layer = host.document().get_entity(bh).unwrap().common().layer.clone();
+        host.document_mut().layers.get_mut(&layer).unwrap().lock();
+        let rev_before = host.scene().geometry_epoch;
+
+        // TransformMany [a, b] must fail all-or-nothing (b is locked) BEFORE mutating a.
+        let err = dispatch(&mut host, DocApiEnvelope::op(Operation::TransformMany {
+            ids: vec![a, b],
+            placement: ocs_doc_api::PlacementSpec::at([5.0, 0.0, 0.0]),
+        })).unwrap_err();
+        assert!(matches!(err, ApiError::Validation { .. } | ApiError::Unsupported(_) | ApiError::UnknownId(_)), "{err:?}");
+        // `a` was NOT transformed (all-or-nothing): its location is unchanged.
+        let Some(EntityType::Point(pa)) = host.document().get_entity(obj_to_handle(a)) else { panic!("point a not found") };
+        assert!((pa.location.x - 0.0).abs() < 1e-9, "a moved despite locked batch member");
+        assert_eq!(host.scene().geometry_epoch, rev_before, "no mutation on rejected TransformMany");
     }
 
     // ── Phase 5: media & misc (read-mostly) ──────────────────────────────────

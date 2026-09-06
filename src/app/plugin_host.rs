@@ -18,6 +18,10 @@ pub(crate) struct HostSession<'a> {
     doc_store: Option<DocumentSnapshotStore<DocumentViewData>>,
     /// In-flight DocApi v2 undo delta (between `push_undo` and `finalize_op`).
     doc_api_pending: Option<super::history::PendingDelta>,
+    /// Memoized volume/centroid per (handle, geometry_epoch) for DocApi mass queries.
+    pub(crate) mass_cache: std::collections::HashMap<Handle, (u64, f64, [f64; 3])>,
+    /// Per-session count of cold-cache mass tessellations (budget for query DoS).
+    pub(crate) cold_tess_used: usize,
 }
 
 impl<'a> HostSession<'a> {
@@ -27,6 +31,8 @@ impl<'a> HostSession<'a> {
             tab,
             doc_store: None,
             doc_api_pending: None,
+            mass_cache: std::collections::HashMap::new(),
+            cold_tess_used: 0,
         }
     }
 

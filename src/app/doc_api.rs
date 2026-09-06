@@ -333,6 +333,20 @@ impl DocApiBackend for HostSession<'_> {
         Ok(([vp.view_target.x, vp.view_target.y, vp.view_target.z], vp.view_height))
     }
 
+    fn add_raster_image(&mut self, spec: &ocs_doc_api::ops::RasterImageSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::RasterImage;
+        use acadrust::types::{Vector2, Vector3};
+        let mut img = RasterImage::default();
+        img.file_path = spec.file_path.clone();
+        img.insertion_point = Vector3::new(spec.insertion_point[0], spec.insertion_point[1], spec.insertion_point[2]);
+        img.u_vector = Vector3::new(spec.u_vector[0], spec.u_vector[1], spec.u_vector[2]);
+        img.v_vector = Vector3::new(spec.v_vector[0], spec.v_vector[1], spec.v_vector[2]);
+        img.size = Vector2::new(spec.size[0], spec.size[1]);
+        // add_entity auto-registers the ImageDefinition (scene/entity.rs).
+        let handle = self.scene_mut().add_entity(EntityType::RasterImage(img));
+        Ok(handle_to_obj(handle))
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -998,6 +1012,36 @@ mod tests {
             id: mtext, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
         let Some(EntityType::MText(t)) = host.document().get_entity(obj_to_handle(mtext)) else { panic!("mtext not found") };
         assert!((t.insertion_point.x - 15.0).abs() < 1e-6);
+    }
+
+    // ── Phase 5 remaining: typed raster image create ─────────────────────────
+
+    #[test]
+    fn phase5_create_raster_image_registers_definition() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let img = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateRasterImage(
+            ocs_doc_api::ops::RasterImageSpec {
+                file_path: "C:/img/photo.png".into(),
+                insertion_point: [10.0, 20.0, 0.0],
+                u_vector: [0.5, 0.0, 0.0],
+                v_vector: [0.0, 0.5, 0.0],
+                size: [100.0, 50.0],
+            }))).unwrap());
+        let handle = obj_to_handle(img);
+        let Some(EntityType::RasterImage(i)) = host.document().get_entity(handle) else { panic!("image not found") };
+        assert_eq!(i.file_path, "C:/img/photo.png");
+        // The host auto-registered an ImageDefinition (definition_handle set).
+        assert!(i.definition_handle.is_some(), "ImageDefinition was auto-registered");
+        // Bounds = insertion + u*100 + v*50 = (60, 45) (4-corner bracket).
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetBounds { id: img }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Bounds(b) => {
+                assert!((b.min[0] - 10.0).abs() < 1e-6 && (b.max[0] - 60.0).abs() < 1e-6, "{b:?}");
+                assert!((b.min[1] - 20.0).abs() < 1e-6 && (b.max[1] - 45.0).abs() < 1e-6, "{b:?}");
+            }
+            other => panic!("expected bounds, got {other:?}"),
+        }
     }
 
     // ── Phase 4 remaining: set_view + viewport-view query ────────────────────

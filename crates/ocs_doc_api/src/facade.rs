@@ -509,6 +509,19 @@ impl CurveCollection {
         let (s, id) = self.create_curve(Curve2Spec::XLine { origin, direction })?;
         Ok(XLine::new(s, id))
     }
+    /// A RASTER_IMAGE placed at `insertion_point` (host auto-registers the image definition).
+    pub fn create_raster_image(&self, file_path: &str, insertion_point: [f64; 3], u_vector: [f64; 3], v_vector: [f64; 3], size: [f64; 2]) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateRasterImage(crate::ops::RasterImageSpec {
+            file_path: file_path.to_string(),
+            insertion_point,
+            u_vector,
+            v_vector,
+            size,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_raster_image returned no id".into()))?;
+        Ok(Entity::new(self.session.clone(), id))
+    }
+
     /// A solid (or pattern) HATCH over a single closed polyline boundary.
     pub fn create_hatch(&self, boundary: &[[f64; 2]], solid: bool) -> ApiResult<Entity> {
         let receipt = self.session.apply_op(Operation::CreateHatch(crate::ops::HatchSpec {

@@ -81,6 +81,9 @@ pub trait DocApiBackend {
     /// A viewport's view (target WCS + zoom height). Viewport-only.
     fn viewport_view(&self, id: ObjectId) -> ApiResult<([f64; 3], f64)>;
 
+    /// Add a `RASTER_IMAGE` (host auto-registers the ImageDefinition).
+    fn add_raster_image(&mut self, spec: &crate::ops::RasterImageSpec) -> ApiResult<ObjectId>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

@@ -247,6 +247,12 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::Updated(*id)
         }
+        Operation::CreateRasterImage(spec) => {
+            b.push_undo(name);
+            let id = b.add_raster_image(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),

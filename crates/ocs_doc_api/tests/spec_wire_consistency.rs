@@ -60,6 +60,9 @@ fn operation_variants() -> Vec<String> {
         Operation::CreateDimensionLinear(ocs_doc_api::ops::DimensionSpec { first_point: [0.0; 3], second_point: [0.0; 3], definition_point: [0.0; 3] }),
         Operation::SetAttribute { id: ObjectId::from_u64(0), tag: String::new(), value: String::new() },
         Operation::SetViewportView { id: ObjectId::from_u64(0), view_target: [0.0; 3], view_height: 0.0 },
+        Operation::CreateRasterImage(ocs_doc_api::ops::RasterImageSpec {
+            file_path: String::new(), insertion_point: [0.0; 3], u_vector: [0.0; 3], v_vector: [0.0; 3], size: [0.0; 2],
+        }),
     ];
     // Derive the variant names by serializing a probe of each and reading the
     // bincode variant index -> name map is not available; instead match by
@@ -147,6 +150,7 @@ const OPERATION_BASELINE: &[&str] = &[
     "CreateDimensionLinear",
     "SetAttribute",
     "SetViewportView",
+    "CreateRasterImage",
 ];
 
 /// Recorded baseline of the `Query` variant order.

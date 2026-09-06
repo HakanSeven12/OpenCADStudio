@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::ObjectId;
-use crate::ops::{BoolOp, Curve2Spec, DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, SolidPrimitive, TextSpec, ViewportSpec};
+use crate::ops::{BoolOp, Curve2Spec, DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, RasterImageSpec, SolidPrimitive, TextSpec, ViewportSpec};
 
 /// A typed write operation (plan §5). Each variant is ONE atomic host call = one
 /// undo step. Append new variants at the END only.
@@ -44,4 +44,6 @@ pub enum Operation {
     SetAttribute { id: ObjectId, tag: String, value: String },
     // viewport view
     SetViewportView { id: ObjectId, view_target: [f64; 3], view_height: f64 },
+    // media
+    CreateRasterImage(RasterImageSpec),
 }

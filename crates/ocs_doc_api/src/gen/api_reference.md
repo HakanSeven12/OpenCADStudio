@@ -165,7 +165,11 @@ Paper-space viewport: a width×height window at center looking at view_target wi
 
 ## `Entity` (acadrust `RasterImage`, collection `entities`)
 
-Raster image (read-mostly): GetEntity kind + coarse bounds (insertion + u*width + v*height); generic delete. No typed create in v1.
+Raster image: create_raster_image(file_path, insertion, u, v, size) places an image (host auto-registers the ImageDefinition); bounds (4-corner bracket); delete.
+
+### Constructors (`doc.entities()`)
+
+- **create_raster_image**(`file_path: &str, insertion_point: [f64; 3], u_vector: [f64; 3], v_vector: [f64; 3], size: [f64; 2]`) -> `Entity`
 
 ## `Entity` (acadrust `Table`, collection `entities`)
 

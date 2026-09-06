@@ -204,6 +204,9 @@ impl DocApiBackend for MockBackend {
     fn block_entities(&self, _block_name: &str) -> ApiResult<Vec<EntityView>> {
         Ok(Vec::new())
     }
+    fn add_raster_image(&mut self, _spec: &ocs_doc_api::ops::RasterImageSpec) -> ApiResult<ObjectId> {
+        Ok(self.alloc("RasterImage"))
+    }
     fn set_viewport_view(&mut self, id: ObjectId, view_target: [f64; 3], view_height: f64) -> ApiResult<()> {
         if !self.entity_exists(id) {
             return Err(ApiError::UnknownId(id));

@@ -115,6 +115,19 @@ pub struct DimensionSpec {
     pub definition_point: [f64; 3],
 }
 
+/// Construction spec for a `RASTER_IMAGE`: an image file placed at
+/// `insertion_point` with per-pixel world-unit vectors `u_vector`/`v_vector` and
+/// pixel `size` (width, height). The host auto-registers the ImageDefinition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RasterImageSpec {
+    pub file_path: String,
+    pub insertion_point: [f64; 3],
+    pub u_vector: [f64; 3],
+    pub v_vector: [f64; 3],
+    /// Pixel size (width, height).
+    pub size: [f64; 2],
+}
+
 /// A rigid similarity (rotation + translation + optional uniform scale/reflection)
 /// as a plain-data mirror of `cadkernel::brep::transform`'s `Placement`
 /// (non-serde). Columns are the new basis axes; `origin` is the translation.
@@ -171,6 +184,7 @@ impl crate::gen::Operation {
             CreateDimensionLinear(_) => "CreateDimensionLinear",
             SetAttribute { .. } => "SetAttribute",
             SetViewportView { .. } => "SetViewportView",
+            CreateRasterImage(_) => "CreateRasterImage",
         }
     }
 }

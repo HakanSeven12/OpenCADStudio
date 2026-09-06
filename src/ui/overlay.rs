@@ -69,6 +69,7 @@ pub struct CrosshairOptions {
     pub isometric: bool,
     pub iso_plane: IsoPlane,
     pub snap_angle_deg: f32,
+    pub point_mode: bool,
 }
 
 /// Rendering style for the viewport grid.
@@ -1469,7 +1470,12 @@ impl canvas::Program<Message> for SelectionCanvas {
                     style: canvas::Style::Solid(color),
                     ..Default::default()
                 };
-                let sq = pick_box_half_px(self.crosshair.pick_box);
+                let point_mode = self.crosshair.point_mode;
+                let sq = if point_mode {
+                    0.0
+                } else {
+                    pick_box_half_px(self.crosshair.pick_box)
+                };
                 let arm = crosshair_arm_px(bounds, self.crosshair.size_percent);
                 let base_angles: [f64; 2] = if self.crosshair.isometric {
                     self.crosshair.iso_plane.angles()
@@ -1479,7 +1485,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                 for angle in base_angles {
                     let rad = (angle + self.crosshair.snap_angle_deg as f64).to_radians();
                     let dir = Point::new(rad.cos() as f32, -rad.sin() as f32);
-                    let gap = if sq > 0.0 {
+                    let gap = if point_mode {
+                        9.0
+                    } else if sq > 0.0 {
                         sq / dir.x.abs().max(dir.y.abs()).max(1e-6)
                     } else {
                         0.0
@@ -1492,7 +1500,10 @@ impl canvas::Program<Message> for SelectionCanvas {
                     });
                     frame.stroke(&arms, stroke.clone());
                 }
-                if sq > 0.0 {
+                if point_mode {
+                    let dot = canvas::Path::circle(cp, 1.75);
+                    frame.fill(&dot, color);
+                } else if sq > 0.0 {
                     let square = canvas::Path::rectangle(
                         Point::new(cp.x - sq, cp.y - sq),
                         Size::new(sq * 2.0, sq * 2.0),

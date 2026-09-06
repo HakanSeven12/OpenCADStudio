@@ -802,6 +802,9 @@ bg={bg_ms:.1}ms n={view_count}"
                 .hover_highlight
                 .map(|h| tab.scene.is_layer_locked(h))
                 .unwrap_or(false);
+            let point_cursor = tab.active_cmd.as_ref().is_some_and(|cmd| {
+                !cmd.needs_entity_pick() && !cmd.is_selection_gathering()
+            });
             crate::ui::overlay::selection_overlay(
                 std::sync::Arc::clone(&tab.scene.selection),
                 snap_info,
@@ -827,6 +830,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     size_percent: self.cursor_size,
                     pick_box: self.pick_box,
                     cursor_type: self.cursor_type,
+                    point_mode: point_cursor,
                     color: self.crosshair_color,
                     isometric: self.isometric_drafting,
                     iso_plane: self.iso_plane,

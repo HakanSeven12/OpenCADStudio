@@ -907,8 +907,8 @@ impl OpenCADStudio {
             Message::PdfAttachPick => Task::perform(
                 async {
                     let handle = crate::sys::file_dialog()
-                        .set_title("Select PDF Underlay")
-                        .add_filter("PDF Files", &["pdf", "PDF"])
+                        .set_title(crate::t!("Select PDF Underlay").as_ref())
+                        .add_filter(crate::t!("PDF Files").as_ref(), &["pdf", "PDF"])
                         .pick_file()
                         .await;
 
@@ -961,11 +961,11 @@ impl OpenCADStudio {
             Message::XAttachPick => Task::perform(
                 async {
                     let handle = crate::sys::file_dialog()
-                        .set_title("Select External Reference File")
-                        .add_filter("CAD Files", &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"])
-                        .add_filter("DWG Files", &["dwg", "DWG"])
-                        .add_filter("DXF Files", &["dxf", "DXF"])
-                        .add_filter("Backup Files", &["bak", "BAK"])
+                        .set_title(crate::t!("Select External Reference File").as_ref())
+                        .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"])
+                        .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
+                        .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
+                        .add_filter(crate::t!("Backup Files").as_ref(), &["bak", "BAK"])
                         .pick_file()
                         .await;
                     match handle {
@@ -999,9 +999,9 @@ impl OpenCADStudio {
                 Task::perform(
                     async move {
                         let path = crate::sys::file_dialog()
-                            .set_title("Save Block As")
+                            .set_title(crate::t!("Save Block As").as_ref())
                             .set_file_name("block.dwg")
-                            .add_filter("DWG Files", &["dwg"])
+                            .add_filter(crate::t!("DWG Files").as_ref(), &["dwg"])
                             .save_file()
                             .await
                             .map(|h| crate::sys::handle_path(&h));
@@ -1035,10 +1035,10 @@ impl OpenCADStudio {
                 Task::perform(
                     async move {
                         let path = crate::sys::file_dialog()
-                            .set_title("Save Data Extraction")
+                            .set_title(crate::t!("Save Data Extraction").as_ref())
                             .set_file_name("extraction.csv")
-                            .add_filter("CSV", &["csv"])
-                            .add_filter("All Files", &["*"])
+                            .add_filter(crate::t!("CSV").as_ref(), &["csv"])
+                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
                             .save_file()
                             .await
                             .map(|h| crate::sys::handle_path(&h));
@@ -1078,10 +1078,10 @@ impl OpenCADStudio {
                 Task::perform(
                     async {
                         crate::sys::file_dialog()
-                            .set_title("Export STL")
+                            .set_title(crate::t!("Export STL").as_ref())
                             .set_file_name("export.stl")
-                            .add_filter("STL Files", &["stl"])
-                            .add_filter("All Files", &["*"])
+                            .add_filter(crate::t!("STL Files").as_ref(), &["stl"])
+                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
                             .save_file()
                             .await
                             .map(|h| crate::sys::handle_path(&h))
@@ -1115,10 +1115,10 @@ impl OpenCADStudio {
                 Task::perform(
                     async {
                         crate::sys::file_dialog()
-                            .set_title("Export STEP AP203")
+                            .set_title(crate::t!("Export STEP AP203").as_ref())
                             .set_file_name("export.step")
-                            .add_filter("STEP Files", &["step", "stp"])
-                            .add_filter("All Files", &["*"])
+                            .add_filter(crate::t!("STEP Files").as_ref(), &["step", "stp"])
+                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
                             .save_file()
                             .await
                             .map(|h| crate::sys::handle_path(&h))
@@ -1145,9 +1145,9 @@ impl OpenCADStudio {
             Message::ObjImport => Task::perform(
                 async {
                     crate::sys::file_dialog()
-                        .set_title("Import OBJ Mesh")
-                        .add_filter("Wavefront OBJ", &["obj", "OBJ"])
-                        .add_filter("All Files", &["*"])
+                        .set_title(crate::t!("Import OBJ Mesh").as_ref())
+                        .add_filter(crate::t!("Wavefront OBJ").as_ref(), &["obj", "OBJ"])
+                        .add_filter(crate::t!("All Files").as_ref(), &["*"])
                         .pick_file()
                         .await
                         .map(|h| crate::sys::handle_path(&h))
@@ -1286,11 +1286,11 @@ impl OpenCADStudio {
                     .scene
                     .set_projection_preserving_frame(proj);
                 self.ribbon.set_ortho(ortho);
-                self.command_line.push_output(if ortho {
+                self.command_line.push_output(crate::t!(if ortho {
                     "Projection: Orthographic"
                 } else {
                     "Projection: Perspective"
-                });
+                }).as_ref());
                 Task::none()
             }
 
@@ -6613,13 +6613,13 @@ impl OpenCADStudio {
                     crate::plugin::external::normalize_repository(&self.plugin_repo_input)
                 else {
                     self.marketplace_status =
-                        "Enter a GitHub URL or repository in owner/repo format.".to_string();
+                        crate::t!("Enter a GitHub URL or repository in owner/repo format.").into_owned();
                     return Task::none();
                 };
                 if self.plugin_repos.contains(&repo)
                     || self.plugin_registry.iter().any(|entry| entry.repo == repo)
                 {
-                    self.marketplace_status = format!("{repo} is already in the catalog.");
+                    self.marketplace_status = crate::tf!("{repo} is already in the catalog.").into_owned();
                     self.selected_plugin_repo = Some(repo.clone());
                     if !self.plugin_readmes.contains_key(&repo)
                         && self.plugin_readme_loading.insert(repo.clone())
@@ -6633,7 +6633,7 @@ impl OpenCADStudio {
                     .iter()
                     .any(|plugin| plugin.repository.as_deref() == Some(repo.as_str()))
                 {
-                    self.marketplace_status = format!("{repo} is already installed.");
+                    self.marketplace_status = crate::tf!("{repo} is already installed.").into_owned();
                     self.selected_plugin_repo = Some(repo.clone());
                     if !self.plugin_readmes.contains_key(&repo)
                         && self.plugin_readme_loading.insert(repo.clone())
@@ -6645,7 +6645,7 @@ impl OpenCADStudio {
                 self.plugin_repos.push(repo.clone());
                 self.plugin_repo_input.clear();
                 self.persist_settings_if_changed();
-                self.marketplace_status = format!("Fetching releases for {repo}…");
+                self.marketplace_status = crate::tf!("Fetching releases for {repo}…").into_owned();
                 self.selected_plugin_repo = Some(repo.clone());
                 self.plugin_readmes.remove(&repo);
                 self.plugin_readme_loading.insert(repo.clone());
@@ -6791,12 +6791,12 @@ impl OpenCADStudio {
                         .entry(repo.clone())
                         .or_insert_with(|| first.tag.clone());
                 }
-                if self.marketplace_status == format!("Fetching releases for {repo}…") {
+                if self.marketplace_status == crate::tf!("Fetching releases for {repo}…").into_owned() {
                     self.marketplace_status =
-                        format!(
+                        crate::tf!(
                             "Repository added. {} installable release(s) found.",
                             releases.len()
-                        );
+                        ).into_owned();
                 }
                 self.repo_release_tags.insert(repo, releases);
                 Task::none()
@@ -6834,15 +6834,15 @@ impl OpenCADStudio {
                 let Some(tag) = self.repo_selected_tag.get(&repo).cloned() else {
                     return Task::none();
                 };
-                self.marketplace_status = format!("Installing {repo} {tag}…");
+                self.marketplace_status = crate::tf!("Installing {repo} {tag}…").into_owned();
                 self.install_task(repo, tag)
             }
             Message::PluginUpdate(repo, tag) => {
-                self.marketplace_status = format!("Updating {repo} to {tag}…");
+                self.marketplace_status = crate::tf!("Updating {repo} to {tag}…").into_owned();
                 self.install_task(repo, tag)
             }
             Message::PluginInstalled(Ok(id)) => {
-                self.marketplace_status = format!("Installed '{id}'. Restart to load it.");
+                self.marketplace_status = crate::tf!("Installed '{id}'. Restart to load it.").into_owned();
                 self.plugin_load_errors.remove(&id);
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -6851,7 +6851,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginInstalled(Err(e)) => {
-                self.marketplace_status = format!("Install failed: {e}");
+                self.marketplace_status = crate::tf!("Install failed: {e}").into_owned();
                 Task::none()
             }
             Message::PluginUninstall(id) => {
@@ -6861,20 +6861,20 @@ impl OpenCADStudio {
                     // and allows the package directory to be deleted.
                     if !crate::plugin::external::remove_plugin(&id) {
                         self.marketplace_status =
-                            format!("Uninstall failed: plugin '{id}' did not stop in time");
+                            crate::tf!("Uninstall failed: plugin '{id}' did not stop in time").into_owned();
                         return Task::none();
                     }
                     match crate::plugin::external::uninstall(&id) {
                         Ok(()) => {
                             self.marketplace_status =
-                                format!("Uninstalled '{id}'.");
+                                crate::tf!("Uninstalled '{id}'.").into_owned();
                             self.plugin_load_errors.remove(&id);
                             self.loaded_plugin_ids.remove(&id);
                             self.rebuild_ribbon_modules();
                             self.external_plugins = crate::plugin::external::discover();
                         }
                         Err(e) => {
-                            self.marketplace_status = format!("Uninstall failed: {e}");
+                            self.marketplace_status = crate::tf!("Uninstall failed: {e}").into_owned();
                         }
                     }
                 }
@@ -7344,7 +7344,7 @@ impl OpenCADStudio {
             Message::PlotStyleLoaded(Some(table)) => {
                 if table.is_stb {
                     self.command_line.push_error(
-                        "Named plot style tables are not supported by the vector plotter.",
+                        crate::t!("Named plot style tables are not supported by the vector plotter.").as_ref(),
                     );
                     return Task::none();
                 }

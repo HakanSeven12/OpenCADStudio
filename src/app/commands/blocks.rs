@@ -529,7 +529,7 @@ impl OpenCADStudio {
                     let sel: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
                     if sel.is_empty() {
                         self.command_line.push_error(
-                            "WBLOCK  Select entities first, or: WBLOCK <block name>  or  WBLOCK *",
+                            crate::t!("WBLOCK  Select entities first, or: WBLOCK <block name>  or  WBLOCK *").as_ref(),
                         );
                     } else {
                         return Some(Task::done(Message::WblockSave("*".to_string())));

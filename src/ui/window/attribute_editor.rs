@@ -118,7 +118,7 @@ pub fn color_label(c: AcadColor) -> String {
         AcadColor::Index(5) => "Blue".into(),
         AcadColor::Index(6) => "Magenta".into(),
         AcadColor::Index(7) => "White".into(),
-        AcadColor::Index(n) => format!("Color {n}"),
+        AcadColor::Index(n) => crate::tf!("Color {n}").into_owned(),
         AcadColor::Rgb { r, g, b } => format!("{r},{g},{b}"),
     }
 }

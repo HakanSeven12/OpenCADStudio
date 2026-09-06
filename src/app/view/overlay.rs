@@ -69,7 +69,7 @@ pub(super) fn text_inline_overlay(
     position_canvas_overlay(anchor, panel.into())
 }
 
-// Stroke-font families the renderer ships (LibreCAD LFF; see scene/lff.rs).
+// Stroke-font families bundled with the renderer; see scene/lff.rs.
 const MTEXT_FONTS: [&str; 10] = [
     "[Style default]",
     "Standard",
@@ -465,7 +465,7 @@ fn mtext_editor_content<'a>(
             .iter()
             .map(|s| s.to_string())
             .collect::<Vec<_>>(),
-        |value| value.to_string(),
+        |value| t!(value).into_owned(),
     )
     .on_select(Message::MTextFont)
     .text_size(11)
@@ -626,7 +626,7 @@ fn mtext_editor_content<'a>(
             .into_iter()
             .map(str::to_string)
             .collect::<Vec<_>>(),
-        |value| value.to_string(),
+        |value| t!(value).into_owned(),
     )
     .on_select(Message::MTextColumnMode)
     .text_size(11)
@@ -703,7 +703,7 @@ fn mtext_editor_content<'a>(
     .width(width);
     let row4 = row![
         lbl("Find"),
-        text_input("Find", &ed.find_text)
+        text_input(&t!("Find"), &ed.find_text)
             .on_input(Message::MTextFindText)
             .width(iced::Length::Fixed(140.0))
             .padding(3)
@@ -713,7 +713,7 @@ fn mtext_editor_content<'a>(
             .padding(3)
             .style(btn_style),
         lbl("Replace"),
-        text_input("Replace", &ed.replace_text)
+        text_input(&t!("Replace"), &ed.replace_text)
             .on_input(Message::MTextReplaceText)
             .width(iced::Length::Fixed(140.0))
             .padding(3)
@@ -1409,7 +1409,7 @@ fn qselect_content<'a>(
     let mut prop_options: Vec<crate::app::QSelectPropertyChoice> =
         vec![crate::app::QSelectPropertyChoice {
             field: String::new(),
-            label: QSELECT_ANY_PROP.to_string(),
+            label: t!(QSELECT_ANY_PROP).into_owned(),
             editor: crate::app::QSelectValueEditor::Text,
         }];
     prop_options.extend(properties.iter().cloned());
@@ -1436,7 +1436,7 @@ fn qselect_content<'a>(
         .clone()
         .unwrap_or(crate::app::QSelectPropertyChoice {
             field: String::new(),
-            label: QSELECT_ANY_PROP.to_string(),
+            label: t!(QSELECT_ANY_PROP).into_owned(),
             editor: crate::app::QSelectValueEditor::Text,
         });
 
@@ -1552,7 +1552,7 @@ fn qselect_content<'a>(
             .spacing(8)
             .width(sizing.width),
         Space::new().height(4),
-        text(format!("{} candidate object(s)", candidate_count))
+        text(crate::tf!("{} candidate object(s)", candidate_count))
             .size(11)
             .style(|theme: &Theme| iced::widget::text::Style {
                 color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
@@ -1567,7 +1567,7 @@ fn qselect_content<'a>(
             iced::widget::pick_list(
                 Some(type_sel),
                 type_options,
-                |value| value.to_string(),
+                |value| t!(value).into_owned(),
             )
             .on_select(|s: String| {
                 if s == QSELECT_ANY_TYPE {

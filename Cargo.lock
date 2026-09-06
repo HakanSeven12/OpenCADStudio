@@ -18,6 +18,7 @@ dependencies = [
  "dwg-thumbnailer",
  "env_logger",
  "flate2",
+ "fluent-syntax",
  "fontdb",
  "getrandom 0.3.4",
  "glam",

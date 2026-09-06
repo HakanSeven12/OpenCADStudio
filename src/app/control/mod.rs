@@ -836,7 +836,7 @@ impl OpenCADStudio {
         if let Some(doc) = target {
             let Some(i) = self.tabs.iter().position(|t| t.id == doc) else {
                 self.command_line
-                    .push_error("Automation target document closed");
+                    .push_error(crate::t!("Automation target document closed").as_ref());
                 return Task::none();
             };
             self.active_tab = i;

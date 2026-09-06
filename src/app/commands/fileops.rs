@@ -54,7 +54,7 @@ impl OpenCADStudio {
                     self.command_line.push_output(crate::tf!(
                         "SAVEALL: saved {saved} drawing(s){}.",
                         if skipped > 0 {
-                            format!("; {skipped} need SAVEAS (no file path yet)")
+                            crate::tf!("; {skipped} need SAVEAS (no file path yet)").into_owned()
                         } else {
                             String::new()
                         }
@@ -130,10 +130,10 @@ impl OpenCADStudio {
                 let style = cmd.split_whitespace().nth(1).unwrap_or("");
                 let Some(mode) = visual_style::mode_for_keyword(style) else {
                     self.command_line
-                        .push_error(visual_style::keyword_prompt());
+                        .push_error(crate::t!(visual_style::keyword_prompt()).as_ref());
                     return Some(Task::none());
                 };
-                let label = visual_style::label_for(mode);
+                let label = crate::t!(visual_style::label_for(mode));
                 self.command_line
                     .push_output(crate::tf!("Visual style: {label}.").as_ref());
                 return Some(Task::done(Message::SetRenderMode(mode)));
@@ -220,11 +220,11 @@ impl OpenCADStudio {
             "PERF" => {
                 self.perf_hud = !self.perf_hud;
                 crate::perf::set_ui_enabled(self.perf_hud);
-                self.command_line.push_info(if self.perf_hud {
+                self.command_line.push_info(crate::t!(if self.perf_hud {
                     "PERF panel on — tracing render and interaction costs"
                 } else {
                     "PERF panel off"
-                });
+                }).as_ref());
                 return Some(Task::none());
             }
 
@@ -299,7 +299,7 @@ impl OpenCADStudio {
                             rgb[2]
                         ).as_ref());
                     } else {
-                        self.command_line.push_info("Usage: BACKGROUND DESK <r> <g> <b> | DEFAULT");
+                        self.command_line.push_info(crate::t!("Usage: BACKGROUND DESK <r> <g> <b> | DEFAULT").as_ref());
                     }
                 } else if let Some(rgba) = parse_background_color(&args) {
                     let [r, g, b, _] = rgba;
@@ -322,7 +322,7 @@ impl OpenCADStudio {
                     ).as_ref());
                 } else {
                     self.command_line.push_info(
-                        "Usage: BACKGROUND <r> <g> <b> (0–255) | THEME|CLASSIC|DEFAULT|DESK|BLACK|DARKGRAY|GRAY|LIGHTGRAY|WHITE",
+                        crate::t!("Usage: BACKGROUND <r> <g> <b> (0–255) | THEME|CLASSIC|DEFAULT|DESK|BLACK|DARKGRAY|GRAY|LIGHTGRAY|WHITE").as_ref(),
                     );
                 }
             }

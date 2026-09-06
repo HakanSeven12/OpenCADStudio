@@ -169,7 +169,7 @@ pub fn color_selector_varies<'a>(
     on_toggle: Message,
     on_more: Message,
 ) -> Element<'a, Message> {
-    let indicator = container(text("?").size(10))
+    let indicator = container(text(crate::t!("?")).size(10))
         .style(|theme: &Theme| {
             let palette = theme.palette();
             container::Style {
@@ -434,7 +434,7 @@ pub fn index_color_page<'a>(
     }
 
     let recent: Element<'a, Message> = if recent_colors.is_empty() {
-        text("No recent colors yet")
+        text(crate::t!("No recent colors yet"))
             .size(10)
             .style(|theme: &Theme| iced::widget::text::Style {
                 color: Some(
@@ -464,18 +464,18 @@ pub fn index_color_page<'a>(
             format!("ACI {i}    RGB {r}, {g}, {b}")
         }
         AcadColor::Rgb { r, g, b } => {
-            format!("True Color    RGB {r}, {g}, {b}")
+            crate::tf!("True Color    RGB {r}, {g}, {b}").into_owned()
         }
-        AcadColor::ByLayer => "ByLayer".to_string(),
-        AcadColor::ByBlock => "ByBlock".to_string(),
-        AcadColor::None => "None".to_string(),
+        AcadColor::ByLayer => t!("ByLayer").into_owned(),
+        AcadColor::ByBlock => t!("ByBlock").into_owned(),
+        AcadColor::None => t!("None").into_owned(),
     };
 
     let tabs = row![
-        button(text("Index Color").size(12))
+        button(text(crate::t!("Index Color")).size(12))
             .style(button::primary)
             .padding([5, 14]),
-        button(text("True Color").size(12))
+        button(text(crate::t!("True Color")).size(12))
             .on_press(Message::ColorPickerTabChanged(
                 crate::app::ColorPickerTab::TrueColor
             ))
@@ -486,11 +486,11 @@ pub fn index_color_page<'a>(
 
     let actions = container(
         row![
-            button(text("Cancel").size(11))
+            button(text(crate::t!("Cancel")).size(11))
                 .on_press(Message::CloseColorPicker)
                 .style(button::secondary)
                 .padding([5, 14]),
-            button(text("OK").size(11))
+            button(text(crate::t!("OK")).size(11))
                 .on_press(Message::ColorWindowPick(current))
                 .style(button::primary)
                 .padding([5, 18]),
@@ -503,11 +503,11 @@ pub fn index_color_page<'a>(
     container(
         column![
             tabs,
-            text("Standard colors").size(11),
+            text(crate::t!("Standard colors")).size(11),
             standard,
-            text("CAD Color Index (ACI) 10–249").size(11),
+            text(crate::t!("CAD Color Index (ACI) 10–249")).size(11),
 
-            text("Color family  →    ·    Shade / intensity  ↓")
+            text(crate::t!("Color family  →    ·    Shade / intensity  ↓"))
                 .size(9)
                 .style(|theme: &Theme| iced::widget::text::Style {
                     color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
@@ -527,11 +527,11 @@ pub fn index_color_page<'a>(
                     ..Default::default()
                 }),
 
-            text("Grayscale 250–255").size(11),
+            text(crate::t!("Grayscale 250–255")).size(11),
 
             grayscale,
 
-            text("Recently used").size(11),
+            text(crate::t!("Recently used")).size(11),
 
             recent,
 

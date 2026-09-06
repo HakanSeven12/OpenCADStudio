@@ -249,7 +249,7 @@ impl CadCommand for TextCommand {
                     "TEXT  Current style: {}, Height: {}, Annotative: {}",
                     self.style_name,
                     self.height,
-                    if self.annotative { "Yes" } else { "No" }
+                    if self.annotative { t!("Yes") } else { t!("No") }
                 ),
                 t!("TEXT  Specify start point or [Justify/Style]:")
             ),

@@ -8,8 +8,6 @@
 // command at all). Naming each style once, next to the command that applies it,
 // is what keeps the three in step. (#621)
 
-use std::sync::OnceLock;
-
 use acadrust::entities::ViewportRenderMode as Mode;
 
 use crate::modules::IconKind;
@@ -95,16 +93,9 @@ pub fn keyword_choices() -> Vec<(&'static str, &'static str, Option<&'static str
         .collect()
 }
 
-/// The prompt those choices are announced with. Built once from the table so
-/// the line the user reads cannot list something the picker does not offer.
+/// Stable source used by the shared command prompt translator.
 pub fn keyword_prompt() -> &'static str {
-    static PROMPT: OnceLock<String> = OnceLock::new();
-    PROMPT
-        .get_or_init(|| {
-            let listed: Vec<&str> = VISUAL_STYLES.iter().map(|style| style.label).collect();
-            format!("Visual style  [{}]:", listed.join(" / "))
-        })
-        .as_str()
+    "Visual style [Wireframe 2D/Wireframe 3D/Hidden Line/Flat Shaded/Gouraud Shaded/Flat Shaded + Edges/Gouraud Shaded + Edges]:"
 }
 
 pub fn label_for(mode: Mode) -> &'static str {

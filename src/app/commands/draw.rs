@@ -526,7 +526,7 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                 }
                 self.command_line
-                    .push_output(&format!("CENTERRESET: {count} center object(s) updated."));
+                    .push_output(&crate::tf!("CENTERRESET: {count} center object(s) updated."));
             }
 
             "CENTERREASSOCIATE" => {
@@ -549,7 +549,7 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                 }
                 self.command_line
-                    .push_output(&format!("CENTERREASSOCIATE: {count} center object(s) associated."));
+                    .push_output(&crate::tf!("CENTERREASSOCIATE: {count} center object(s) associated."));
             }
 
             "CENTERDISASSOCIATE" => {
@@ -561,7 +561,7 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                 }
                 self.command_line
-                    .push_output(&format!("CENTERDISASSOCIATE: {count} center object(s) detached."));
+                    .push_output(&crate::tf!("CENTERDISASSOCIATE: {count} center object(s) detached."));
             }
 
             "DIMCENTER" => {
@@ -1159,7 +1159,7 @@ impl OpenCADStudio {
                 match parts.get(val_idx).and_then(|s| s.parse::<f64>().ok()) {
                     Some(v) => return Some(self.solid_section(axis, v)),
                     None => self.command_line.push_info(
-                        "Usage: SECTION [X|Y|Z] <value>   (cross-sections the selected solid)",
+                        crate::t!("Usage: SECTION [X|Y|Z] <value>   (cross-sections the selected solid)").as_ref(),
                     ),
                 }
             }
@@ -1185,7 +1185,7 @@ impl OpenCADStudio {
                     return Some(self.solid_align3d(src, dst));
                 }
                 self.command_line.push_info(
-                    "Usage: 3DALIGN <sx1 sy1 sz1 … sx3 sy3 sz3  dx1 dy1 dz1 … dx3 dy3 dz3>  (18 numbers: 3 source then 3 destination points)",
+                    crate::t!("Usage: 3DALIGN <sx1 sy1 sz1 … sx3 sy3 sz3  dx1 dy1 dz1 … dx3 dy3 dz3>  (18 numbers: 3 source then 3 destination points)").as_ref(),
                 );
             }
 
@@ -1214,7 +1214,7 @@ impl OpenCADStudio {
                     Some("Z") => 2,
                     _ => {
                         self.command_line.push_info(
-                            "Usage: 3DMIRROR [X|Y|Z]   (mirrors the selected solid across that plane)",
+                            crate::t!("Usage: 3DMIRROR [X|Y|Z]   (mirrors the selected solid across that plane)").as_ref(),
                         );
                         return None;
                     }
@@ -1254,7 +1254,7 @@ impl OpenCADStudio {
                 match angle {
                     Some(a) => return Some(self.solid_rotate3d(axis, a)),
                     None => self.command_line.push_info(
-                        "Usage: 3DROTATE [X|Y|Z] <angle>   (rotates the selected solid)",
+                        crate::t!("Usage: 3DROTATE [X|Y|Z] <angle>   (rotates the selected solid)").as_ref(),
                     ),
                 }
             }
@@ -1294,7 +1294,7 @@ impl OpenCADStudio {
                 match value {
                     Some(v) => return Some(self.solid_slice(axis, v, keep_low)),
                     None => self.command_line.push_info(
-                        "Usage: SLICE [X|Y|Z] <value> [TOP|BOTTOM]   (cuts the selected solid)",
+                        crate::t!("Usage: SLICE [X|Y|Z] <value> [TOP|BOTTOM]   (cuts the selected solid)").as_ref(),
                     ),
                 }
             }

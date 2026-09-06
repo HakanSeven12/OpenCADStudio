@@ -769,7 +769,7 @@ impl CommandLine {
                 style
             })
             .padding([2, 6]);
-        let mcp_tip = container(text(mcp_tooltip).size(11))
+        let mcp_tip = container(text(t!(mcp_tooltip)).size(11))
             .padding([3, 6])
             .style(container::bordered_box);
         let mcp_btn = container(tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4))

@@ -555,11 +555,11 @@ impl OpenCADStudio {
             _ => return None,
         };
         if add.is_empty() {
-            self.command_line.push_info(match kw.as_str() {
+            self.command_line.push_info(crate::t!(match kw.as_str() {
                 "P" | "PREVIOUS" => "No previous selection set.",
                 "ALL" => "Nothing to select.",
                 _ => "No last object.",
-            });
+            }).as_ref());
             return Some(Task::none());
         }
         let count = add.len();
@@ -1103,7 +1103,7 @@ impl OpenCADStudio {
                         });
                     if !valid {
                         self.command_line.push_error(
-                            "MVIEW Object: select a closed paper-space circle, ellipse, or polyline.",
+                            crate::t!("MVIEW Object: select a closed paper-space circle, ellipse, or polyline.").as_ref(),
                         );
                         if let Some(prompt) =
                             self.tabs[i].active_cmd.as_ref().map(|command| command.prompt())
@@ -2140,11 +2140,11 @@ impl OpenCADStudio {
                 if self.tabs[i].scene.reassociate_center_mark(target, source, point) {
                     self.tabs[i].dirty = true;
                     self.command_line.push_output(
-                        "CENTERREASSOCIATE: center mark associated.",
+                        crate::t!("CENTERREASSOCIATE: center mark associated.").as_ref(),
                     );
                 } else {
                     self.command_line.push_error(
-                        "CENTERREASSOCIATE: the selected source is not circular.",
+                        crate::t!("CENTERREASSOCIATE: the selected source is not circular.").as_ref(),
                     );
                 }
                 self.tabs[i].active_cmd = None;
@@ -2414,11 +2414,11 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.restore_pre_cmd_tangent();
-                self.command_line.push_info(if space_changed {
+                self.command_line.push_info(crate::t!(if space_changed {
                     "Command cancelled because the active drawing space changed."
                 } else {
                     "Command cancelled."
-                });
+                }).as_ref());
             }
             CmdResult::SelectByPath {
                 path,
@@ -3200,7 +3200,7 @@ impl OpenCADStudio {
                         self.tabs[i].scene.clear_preview_wire();
                         self.restore_pre_cmd_tangent();
                         self.command_line.push_error(
-                            "JOIN: objects don't form a single connected chain, or contain an unsupported type / tilted arc.",
+                            crate::t!("JOIN: objects don't form a single connected chain, or contain an unsupported type / tilted arc.").as_ref(),
                         );
                     }
                 }

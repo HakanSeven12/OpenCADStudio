@@ -322,16 +322,15 @@ impl CadCommand for DimContinueCommand {
 
     fn prompt(&self) -> String {
         if self.base.is_none() {
-            "DIMCONTINUE  Select continued dimension:".to_string()
+            crate::t!("DIMCONTINUE  Select continued dimension:").into_owned()
         } else if self
             .base
             .as_ref()
             .is_some_and(|base| matches!(&base.kind, ContinueKind::Ordinate { .. }))
         {
-            "DIMCONTINUE  Specify feature location [Undo/Select] <Select>:".to_string()
+            crate::t!("DIMCONTINUE  Specify feature location [Undo/Select] <Select>:").into_owned()
         } else {
-            "DIMCONTINUE  Specify second extension line origin [Select/Undo] <Select>:"
-                .to_string()
+            crate::t!("DIMCONTINUE  Specify second extension line origin [Select/Undo] <Select>:").into_owned()
         }
     }
 

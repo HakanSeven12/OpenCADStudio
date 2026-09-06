@@ -1485,7 +1485,7 @@ bg={bg_ms:.1}ms n={view_count}"
             );
             let trace = crate::perf::snapshot_tail_text(80);
             let trace = if trace.is_empty() {
-                "No samples yet".to_string()
+                t!("No samples yet").into_owned()
             } else {
                 trace
             };
@@ -2204,7 +2204,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
                     crate::ui::modal::modal(
                         base,
-                        "Select Color",
+                        t!("Select Color"),
                         content,
                         Message::CloseColorPicker,
                         self.modal_offset,
@@ -2713,7 +2713,7 @@ fn doc_tab_context_menu(
     let item = |label: &'static str, msg: Option<Message>| -> Element<'static, Message> {
         let enabled = msg.is_some();
 
-        let content = container(text(label).size(12))
+        let content = container(text(t!(label)).size(12))
             .padding([4, 12])
             .width(Fill)
             .style(move |theme: &Theme| {
@@ -3233,7 +3233,7 @@ fn start_page_content<'a>(
     {
         // Filled with the active theme's primary colour.
         secondary_items.push(
-            button(text("OCS Web").size(14))
+                    button(text(crate::t!("OCS Web")).size(14))
                 .on_press(Message::RibbonToolClick {
                     tool_id: "WEBVERSION".to_string(),
                     event: crate::modules::ModuleEvent::Command("WEBVERSION".to_string()),
@@ -3245,7 +3245,7 @@ fn start_page_content<'a>(
     }
     #[cfg(target_arch = "wasm32")]
     secondary_items.push(
-        button(text("OCS Desktop").size(14))
+                    button(text(crate::t!("OCS Desktop")).size(14))
             .on_press(Message::OpenUrl(
                 "https://github.com/HakanSeven12/OpenCADStudio/releases/latest".to_string(),
             ))

@@ -385,16 +385,15 @@ impl CadCommand for DimBaselineCommand {
 
     fn prompt(&self) -> String {
         if self.base.is_none() {
-            "DIMBASELINE  Select base dimension:".to_string()
+            crate::t!("DIMBASELINE  Select base dimension:").into_owned()
         } else if self
             .base
             .as_ref()
             .is_some_and(|base| matches!(&base.kind, BaselineKind::Ordinate { .. }))
         {
-            "DIMBASELINE  Specify feature location [Undo/Select] <Select>:".to_string()
+            crate::t!("DIMBASELINE  Specify feature location [Undo/Select] <Select>:").into_owned()
         } else {
-            "DIMBASELINE  Specify second extension line origin [Select/Undo] <Select>:"
-                .to_string()
+            crate::t!("DIMBASELINE  Specify second extension line origin [Select/Undo] <Select>:").into_owned()
         }
     }
 

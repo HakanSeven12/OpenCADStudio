@@ -161,7 +161,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                                     crate::tf!("Unknown visual style \"{name}\".").as_ref(),
                                 );
                                 self.command_line
-                                    .push_info(visual_style::keyword_prompt());
+                                    .push_info(crate::t!(visual_style::keyword_prompt()).as_ref());
                             }
                         }
                     }
@@ -181,7 +181,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                                 let path = crate::sys::file_dialog()
                                     .set_title(title)
                                     .add_filter(filter_name, &exts)
-                                    .add_filter("All Files", &["*"])
+                                    .add_filter(crate::t!("All Files").as_ref(), &["*"])
                                     .pick_file()
                                     .await
                                     .map(|h| crate::sys::handle_path(&h));
@@ -520,8 +520,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
             BlockPaletteMsg::PickFile => iced::Task::perform(
                 async {
                     let handle = rfd::AsyncFileDialog::new()
-                        .set_title("Select Drawing to Insert as Block")
-                        .add_filter("DWG/DXF Files", &["dwg", "dxf", "DWG", "DXF"])
+                        .set_title(crate::t!("Select Drawing to Insert as Block").as_ref())
+                        .add_filter(crate::t!("DWG/DXF Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
                         .pick_file()
                         .await;
                     match handle {
@@ -535,12 +535,12 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 match self.import_file_as_block(path) {
                     Ok(name) => {
                         self.command_line
-                            .push_output(&format!("Inserting \"{name}\" from file."));
+                            .push_output(&crate::tf!("Inserting \"{name}\" from file."));
                         self.refresh_block_palette();
                         self.start_block_placement(&name);
                     }
                     Err(e) if e != "Cancelled" => {
-                        self.command_line.push_error(&format!("INSERT FILE: {e}"));
+                        self.command_line.push_error(&crate::tf!("INSERT FILE: {e}"));
                     }
                     Err(_) => {}
                 }

@@ -163,12 +163,12 @@ impl From<&str> for OpenLoadError {
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn pick_open_path() -> Option<(PathBuf, u64)> {
     let handle = crate::sys::file_dialog()
-        .set_title("Open CAD file")
-        .add_filter("CAD Files", &["dwg", "dxf", "bak", "sv$", "DWG", "DXF", "BAK"])
-        .add_filter("DWG Files", &["dwg", "DWG"])
-        .add_filter("DXF Files", &["dxf", "DXF"])
-        .add_filter("Backup / Autosave", &["bak", "sv$", "BAK"])
-        .add_filter("All Files", &["*"])
+        .set_title(crate::t!("Open CAD file").as_ref())
+        .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "bak", "sv$", "DWG", "DXF", "BAK"])
+        .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
+        .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
+        .add_filter(crate::t!("Backup / Autosave").as_ref(), &["bak", "sv$", "BAK"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .pick_file()
         .await?;
     let path = crate::sys::handle_path(&handle);
@@ -181,12 +181,12 @@ pub async fn pick_open_path() -> Option<(PathBuf, u64)> {
 /// rather than needing anything of their own. (#624)
 pub async fn pick_layer_standard_path() -> Option<PathBuf> {
     let handle = crate::sys::file_dialog()
-        .set_title("Load layer standard")
+        .set_title(crate::t!("Load layer standard").as_ref())
         .add_filter(
-            "Drawings and standards",
+            crate::t!("Drawings and standards").as_ref(),
             &["dwg", "dws", "dwt", "dxf", "DWG", "DWS", "DWT", "DXF"],
         )
-        .add_filter("All Files", &["*"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .pick_file()
         .await?;
     Some(crate::sys::handle_path(&handle))
@@ -195,13 +195,13 @@ pub async fn pick_layer_standard_path() -> Option<PathBuf> {
 /// Pick where a set of layer mappings is written, or read back from.
 pub async fn pick_layer_mapping_path(save: bool) -> Option<PathBuf> {
     let dialog = crate::sys::file_dialog()
-        .set_title(if save {
+        .set_title(crate::t!(if save {
             "Save layer mappings"
         } else {
             "Load layer mappings"
-        })
-        .add_filter("Layer mappings", &["ocslmap"])
-        .add_filter("All Files", &["*"]);
+        }).as_ref())
+        .add_filter(crate::t!("Layer mappings").as_ref(), &["ocslmap"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"]);
     let handle = if save {
         dialog.set_file_name("layers.ocslmap").save_file().await?
     } else {
@@ -504,9 +504,9 @@ pub async fn pick_and_load_web(
     progress: Arc<OpenProgressState>,
 ) -> WebOpenOutcome {
     let Some(handle) = crate::sys::file_dialog()
-        .set_title("Open CAD file")
-        .add_filter("CAD Files", &["dwg", "dxf", "DWG", "DXF"])
-        .add_filter("All Files", &["*"])
+        .set_title(crate::t!("Open CAD file").as_ref())
+        .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .pick_file()
         .await
     else {
@@ -1506,10 +1506,10 @@ mod save_failure_tests {
 /// Show a file-open dialog and load the selected CTB or STB file.
 pub async fn pick_plot_style() -> Option<plot_style::PlotStyleTable> {
     let dialog = crate::sys::file_dialog()
-        .set_title("Load Plot Style Table")
-        .add_filter("Plot Style Tables", &["ctb", "CTB"])
-        .add_filter("CTB Files", &["ctb", "CTB"])
-        .add_filter("All Files", &["*"]);
+        .set_title(crate::t!("Load Plot Style Table").as_ref())
+        .add_filter(crate::t!("Plot Style Tables").as_ref(), &["ctb", "CTB"])
+        .add_filter(crate::t!("CTB Files").as_ref(), &["ctb", "CTB"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"]);
     #[cfg(not(target_arch = "wasm32"))]
     let dialog = match plot_style::ensure_plot_styles_dir() {
         Ok(dir) => dialog.set_directory(dir),
@@ -1525,11 +1525,11 @@ pub async fn pick_plot_style() -> Option<plot_style::PlotStyleTable> {
 /// Returns `(path, pixel_width, pixel_height)` or an error string.
 pub async fn pick_image_file() -> Result<(PathBuf, u32, u32), String> {
     let handle = crate::sys::file_dialog()
-        .set_title("Select Image File")
-        .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "tiff", "tif"])
-        .add_filter("PNG", &["png"])
-        .add_filter("JPEG", &["jpg", "jpeg"])
-        .add_filter("All Files", &["*"])
+        .set_title(crate::t!("Select Image File").as_ref())
+        .add_filter(crate::t!("Images").as_ref(), &["png", "jpg", "jpeg", "bmp", "tiff", "tif"])
+        .add_filter(crate::t!("PNG").as_ref(), &["png"])
+        .add_filter(crate::t!("JPEG").as_ref(), &["jpg", "jpeg"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .pick_file()
         .await
         .ok_or_else(|| "Cancelled".to_string())?;

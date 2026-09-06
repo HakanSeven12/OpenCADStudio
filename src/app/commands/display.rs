@@ -429,11 +429,11 @@ impl OpenCADStudio {
                     self.tabs[i].scene.set_drawing_limit_check(enabled);
                     self.tabs[i].dirty = true;
                 }
-                self.command_line.push_output(if enabled {
+                self.command_line.push_output(crate::t!(if enabled {
                     "Limits checking ON."
                 } else {
                     "Limits checking OFF."
-                });
+                }).as_ref());
             }
             cmd if cmd.starts_with("LIMITS SET ") => {
                 let tokens: Vec<&str> = cmd["LIMITS SET ".len()..].split_whitespace().collect();
@@ -492,14 +492,14 @@ impl OpenCADStudio {
             "REDRAW" => {
                 use crate::scene::ViewportRefreshScope;
                 self.tabs[i].scene.request_refresh(ViewportRefreshScope::Active);
-                self.command_line.push_output("REDRAW: viewport refreshed.");
+                self.command_line.push_output(crate::t!("REDRAW: viewport refreshed.").as_ref());
                 return Some(Task::none());
             }
             // REDRAWALL — force re-rasterize of every generated viewport.
             "REDRAWALL" => {
                 use crate::scene::ViewportRefreshScope;
                 self.tabs[i].scene.request_refresh(ViewportRefreshScope::All);
-                self.command_line.push_output("REDRAWALL: viewports refreshed.");
+                self.command_line.push_output(crate::t!("REDRAWALL: viewports refreshed.").as_ref());
                 return Some(Task::none());
             }
             // REGEN — full model regeneration (bump_geometry: geometry_epoch AND
@@ -509,7 +509,7 @@ impl OpenCADStudio {
             // REGENALL is functionally identical (C5).
             "REGEN" | "REGENALL" => {
                 self.tabs[i].scene.bump_geometry();
-                self.command_line.push_output("REGEN: regenerated model.");
+                self.command_line.push_output(crate::t!("REGEN: regenerated model.").as_ref());
                 return Some(Task::none());
             }
 
@@ -877,8 +877,8 @@ impl OpenCADStudio {
                         let active = self
                             .active_plot_style
                             .as_ref()
-                            .map(|t| format!("Active: {}", t.name))
-                            .unwrap_or_else(|| "No plot style loaded.".into());
+                            .map(|t| crate::tf!("Active: {}", t.name).into_owned())
+                            .unwrap_or_else(|| crate::t!("No plot style loaded.").into_owned());
                         self.command_line.push_info(&active);
                         return Some(Task::done(Message::PlotStyleLoad));
                     }
@@ -887,13 +887,13 @@ impl OpenCADStudio {
                             .active_plot_style
                             .as_ref()
                             .map(|t| {
-                                format!(
+                                crate::tf!(
                                     "Plot style: {}  ({} color overrides)",
                                     t.name,
                                     t.aci_entries.iter().filter(|e| e.color.is_some()).count()
-                                )
+                                ).into_owned()
                             })
-                            .unwrap_or_else(|| "No plot style table loaded.".into());
+                            .unwrap_or_else(|| crate::t!("No plot style table loaded.").into_owned());
                         self.command_line.push_output(&msg);
                     }
                     _ => {
@@ -1215,7 +1215,7 @@ impl OpenCADStudio {
                             .push_output(crate::tf!("ADJUST: {action} = {v} on {changed} image(s).").as_ref());
                     } else {
                         self.command_line.push_error(
-                            "ADJUST: no raster images selected, or unknown property (use BRIGHTNESS|CONTRAST|FADE).",
+                            crate::t!("ADJUST: no raster images selected, or unknown property (use BRIGHTNESS|CONTRAST|FADE).").as_ref(),
                         );
                     }
                 } else {
@@ -1274,7 +1274,7 @@ impl OpenCADStudio {
                 match value.parse::<i8>() {
                     Ok(mode @ -4..=4) => self.annotation_auto_scale = mode,
                     _ => self.command_line.push_error(
-                        "ANNOAUTOSCALE: enter an integer from -4 through 4.",
+                        crate::t!("ANNOAUTOSCALE: enter an integer from -4 through 4.").as_ref(),
                     ),
                 }
             }
@@ -1461,7 +1461,7 @@ impl OpenCADStudio {
                 let path = cmd.trim_start_matches("DATALINK").trim();
                 if path.is_empty() {
                     self.command_line.push_info(
-                        "Usage: DATALINK <path-to-.csv>",
+                        crate::t!("Usage: DATALINK <path-to-.csv>").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -1574,7 +1574,7 @@ impl OpenCADStudio {
                 }
                 if jobs.is_empty() {
                     self.command_line
-                        .push_error("DATALINKUPDATE: no linked tables found.");
+                        .push_error(crate::t!("DATALINKUPDATE: no linked tables found.").as_ref());
                     return Some(Task::none());
                 }
                 if write_back {
@@ -1606,7 +1606,7 @@ impl OpenCADStudio {
                     .collect();
                 if updates.is_empty() {
                     self.command_line
-                        .push_error("DATALINKUPDATE: linked sources could not be read.");
+                        .push_error(crate::t!("DATALINKUPDATE: linked sources could not be read.").as_ref());
                     return Some(Task::none());
                 }
                 self.push_undo_snapshot(i, "DATALINKUPDATE");
@@ -1675,7 +1675,7 @@ impl OpenCADStudio {
                 let path = cmd.trim_start_matches("LANDXMLIMPORT").trim();
                 if path.is_empty() {
                     self.command_line.push_info(
-                        "Usage: LANDXMLIMPORT <path-to-.xml>  (imports CgPoint survey points)",
+                        crate::t!("Usage: LANDXMLIMPORT <path-to-.xml>  (imports CgPoint survey points)").as_ref(),
                     );
                     return Some(Task::none());
                 }

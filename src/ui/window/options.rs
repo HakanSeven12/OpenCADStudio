@@ -288,7 +288,7 @@ pub fn view_window<'a>(
     .into_iter()
     .map(|(value, label)| Labelled {
         value,
-        label: label.to_string(),
+        label: crate::t!(label).into_owned(),
     })
     .collect::<Vec<_>>();
 

@@ -91,21 +91,10 @@ impl OpenCADStudio {
                     .filter(|&(code, _)| code != 0)
                     .map(|(code, label)| (label, units::short(code), None))
                     .collect();
-                // Built once: the table it comes from never changes, and
-                // `KeywordCommand` wants a `&'static str`.
-                static PROMPT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-                let prompt = PROMPT.get_or_init(|| {
-                    let listed = units::all()
-                        .filter(|&(code, _)| code != 0)
-                        .map(|(code, label)| format!("{label}({})", units::short(code)))
-                        .collect::<Vec<_>>()
-                        .join(" / ");
-                    format!("DWGUNITS  convert to  [{listed}]:")
-                });
-                let current = units::label(self.tabs[i].scene.document.header.insertion_units);
+                let current = crate::t!(units::label(self.tabs[i].scene.document.header.insertion_units));
                 self.command_line
                     .push_info(crate::tf!("DWGUNITS  current unit: {current}").as_ref());
-                let c = KeywordCommand::new("DWGUNITS", prompt.as_str(), choices);
+                let c = KeywordCommand::new("DWGUNITS", "DWGUNITS  Convert drawing to:", choices);
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
@@ -157,7 +146,7 @@ impl OpenCADStudio {
                 }
                 if layer.eq_ignore_ascii_case(&self.tabs[i].active_layer) {
                     self.command_line.push_error(
-                        "LAYDEL: cannot delete the current layer. Make another layer current first.",
+                        crate::t!("LAYDEL: cannot delete the current layer. Make another layer current first.").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -234,7 +223,7 @@ impl OpenCADStudio {
                 }
                 if src.eq_ignore_ascii_case(&self.tabs[i].active_layer) {
                     self.command_line.push_error(
-                        "LAYMRG: cannot merge the current layer. Make another layer current first.",
+                        crate::t!("LAYMRG: cannot merge the current layer. Make another layer current first.").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -280,7 +269,7 @@ impl OpenCADStudio {
                         let states = self.tabs[i].scene.document.layer_states();
                         if states.is_empty() {
                             self.command_line.push_info(
-                                "LAYERSTATE: no saved states. Use LAYERSTATE SAVE <name>.",
+                                crate::t!("LAYERSTATE: no saved states. Use LAYERSTATE SAVE <name>.").as_ref(),
                             );
                         } else {
                             let mut names: Vec<&str> =

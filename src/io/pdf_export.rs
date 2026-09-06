@@ -206,10 +206,10 @@ pub fn pick_pdf_path_owned(
 ) -> Option<std::path::PathBuf> {
     let path = crate::sys::blocking_file_dialog()
         .set_parent(parent)
-        .set_title("Export as PDF")
+        .set_title(crate::t!("Export as PDF").as_ref())
         .set_file_name(&format!("{stem}.pdf"))
-        .add_filter("PDF Files", &["pdf"])
-        .add_filter("All Files", &["*"])
+        .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .save_file()
         ?;
     crate::config::remember_dialog_dir(&path);

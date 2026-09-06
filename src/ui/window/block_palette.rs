@@ -210,18 +210,18 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
             style
         })
         .padding([3, 5]);
-    let pin = tooltip(pin, text("Auto").size(10), tooltip::Position::Bottom).gap(4);
+    let pin = tooltip(pin, text(crate::t!("Auto")).size(10), tooltip::Position::Bottom).gap(4);
 
     let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
         .on_press(Message::Dock(DockMsg::Close(PanelId::BlockPalette)))
         .style(button::subtle)
         .padding([3, 5]);
-    let close = tooltip(close, text("Close").size(10), tooltip::Position::Bottom).gap(4);
+    let close = tooltip(close, text(crate::t!("Close")).size(10), tooltip::Position::Bottom).gap(4);
 
     let title_bar = mouse_area(
         container(
             row![
-                text("Block Palette").size(12),
+                text(crate::t!("Block Palette")).size(12),
                 iced::widget::Space::new().width(Fill),
                 pin,
                 close,
@@ -239,7 +239,7 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
     .on_press(Message::Dock(DockMsg::DockGrab(PanelId::BlockPalette)))
     .interaction(iced::mouse::Interaction::Grab);
 
-    let search_input = text_input("Search blocks…", &palette.search)
+    let search_input = text_input(&crate::t!("Search blocks…"), &palette.search)
         .on_input(|v| Message::BlockPalette(BlockPaletteMsg::Search(v)))
         .padding([4, 8])
         .size(12);
@@ -264,7 +264,7 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
         } else {
             "No matches"
         };
-        container(text(msg).size(12).color(iced::Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 }))
+        container(text(crate::t!(msg)).size(12).color(iced::Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 }))
             .center_x(Fill)
             .center_y(Fill)
             .width(Fill)

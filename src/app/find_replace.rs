@@ -60,12 +60,12 @@ impl OpenCADStudio {
             }
 
             self.find_replace.current_match = Some(target);
-            self.find_replace.status = format!(
+            self.find_replace.status = crate::tf!(
                 "{} of {} — {}",
                 index + 1,
                 matches.len(),
                 match_label(target)
-            );
+            ).into_owned();
             self.tabs[i].scene.deselect_all();
             self.tabs[i]
                 .scene
@@ -99,7 +99,7 @@ impl OpenCADStudio {
         let search = self.find_replace.search.clone();
         let replacement = self.find_replace.replacement.clone();
         if match_is_locked(&self.tabs[i].scene, target) {
-            self.find_replace.status = "The matching object is on a locked layer.".to_string();
+            self.find_replace.status = crate::t!("The matching object is on a locked layer.").into_owned();
             return;
         }
         self.push_undo_snapshot(i, "FIND/REPLACE");
@@ -131,10 +131,10 @@ impl OpenCADStudio {
         self.tabs[i].dirty = true;
         self.find_replace.current_match = None;
         let remaining = self.find_text_matches(i).len();
-        self.find_replace.status = format!(
+        self.find_replace.status = crate::tf!(
             "Replaced 1 occurrence in {}; {remaining} matching object(s) remain.",
             match_label(target)
-        );
+        ).into_owned();
         self.command_line.push_output(crate::tf!(
             "FIND/REPLACE: replaced 1 occurrence of \"{search}\"."
         ).as_ref());
@@ -192,10 +192,10 @@ impl OpenCADStudio {
         }
         self.tabs[i].dirty = true;
         self.find_replace.current_match = None;
-        self.find_replace.status = format!(
+        self.find_replace.status = crate::tf!(
             "Replaced {replaced} occurrence(s) in {} object(s).",
             changed.len()
-        );
+        ).into_owned();
         self.command_line.push_output(crate::tf!(
             "FIND/REPLACE: replaced {replaced} occurrence(s) of \"{search}\"."
         ).as_ref());
@@ -286,9 +286,9 @@ impl OpenCADStudio {
 
 fn no_match_status(search: &str) -> String {
     if search.trim().is_empty() {
-        "Enter text to find.".to_string()
+        crate::t!("Enter text to find.").into_owned()
     } else {
-        format!("\"{search}\" was not found.")
+        crate::tf!("\"{search}\" was not found.").into_owned()
     }
 }
 
@@ -372,16 +372,16 @@ fn match_is_locked(scene: &crate::scene::Scene, target: FindMatchKey) -> bool {
 
 fn match_label(target: FindMatchKey) -> String {
     match target {
-        FindMatchKey::Entity(handle) => format!("handle {:X}", handle.value()),
+        FindMatchKey::Entity(handle) => crate::tf!("handle {:X}", handle.value()).into_owned(),
         FindMatchKey::BlockEntityInInsert { entity, insert } => {
-            format!(
+            crate::tf!(
                 "block {:X}, text {:X}",
                 insert.value(),
                 entity.value()
-            )
+            ).into_owned()
         }
         FindMatchKey::InsertAttribute { insert, index } => {
-            format!("block {:X}, attribute {}", insert.value(), index + 1)
+            crate::tf!("block {:X}, attribute {}", insert.value(), index + 1).into_owned()
         }
     }
 }

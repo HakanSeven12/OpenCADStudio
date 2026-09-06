@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<WixLocalization xmlns="http://schemas.microsoft.com/wix/2006/localization" Culture="en-US" Codepage="1252">
+  <String Id="Launch">Launch Open CAD Studio</String>
+  <String Id="InstallerDescription">Open CAD Studio Installer</String>
+  <String Id="Installer">Installer</String>
+  <String Id="DwgDrawing">DWG Drawing</String>
+  <String Id="DxfDrawing">DXF Drawing</String>
+  <String Id="DesktopShortcut">Desktop shortcut</String>
+  <String Id="DesktopShortcutDescription">Add a shortcut to Open CAD Studio on the desktop.</String>
+  <String Id="DowngradeError">A newer version of [ProductName] is already installed. Setup will now exit.</String>
+  <String Id="Open">Open</String>
+  <String Id="Desktop">Desktop</String>
+  <String Id="ApplicationDescription">2D/3D CAD application for DWG and DXF drawings</String>
+</WixLocalization>

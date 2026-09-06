@@ -12,6 +12,9 @@ from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
+subprocess.run(['python3', 'scripts/test_locales.py'], cwd=ROOT, check=True)
+subprocess.run(['python3', 'scripts/export-locales.py', '--check'], cwd=ROOT, check=True)
+subprocess.run(['node', 'scripts/test_web_locales.cjs'], cwd=ROOT, check=True)
 
 
 class Page(HTMLParser):

@@ -383,27 +383,27 @@ impl CadCommand for PolysolidCommand {
 
     fn prompt(&self) -> String {
         match self.step {
-            Step::Start => format!(
+            Step::Start => crate::tf!(
                 "POLYSOLID  Height = {:.4}, Width = {:.4}, Justification = {}\n{}",
                 self.height,
                 self.width,
                 match self.justification {
-                    PolysolidJustification::Left => "Left",
-                    PolysolidJustification::Center => "Center",
-                    PolysolidJustification::Right => "Right",
+                    PolysolidJustification::Left => crate::t!("Left"),
+                    PolysolidJustification::Center => crate::t!("Center"),
+                    PolysolidJustification::Right => crate::t!("Right"),
                 },
                 t!("Specify start point or [Object/Height/Width/Justify] <Object>:")
-            ),
-            Step::Height => format!("Specify height <{:.4}>:", self.height),
-            Step::Width => format!("Specify width <{:.4}>:", self.width),
-            Step::Justify => format!(
+            ).into_owned(),
+            Step::Height => crate::tf!("Specify height <{:.4}>:", self.height).into_owned(),
+            Step::Width => crate::tf!("Specify width <{:.4}>:", self.width).into_owned(),
+            Step::Justify => crate::tf!(
                 "Enter justification [Left/Center/Right] <{}>:",
                 match self.justification {
-                    PolysolidJustification::Left => "Left",
-                    PolysolidJustification::Center => "Center",
-                    PolysolidJustification::Right => "Right",
+                    PolysolidJustification::Left => crate::t!("Left"),
+                    PolysolidJustification::Center => crate::t!("Center"),
+                    PolysolidJustification::Right => crate::t!("Right"),
                 }
-            ),
+            ).into_owned(),
             Step::Object => t!("Select object:").into_owned(),
             Step::Line if self.vertices.len() >= 3 => {
                 t!("Specify next point or [Arc/Close/Undo]:").into_owned()

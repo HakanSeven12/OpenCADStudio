@@ -53,14 +53,14 @@ impl Report {
         self.translated.iter().map(|(_, _, n)| n).sum()
     }
 
-    /// The transaction log AutoCAD writes beside the drawing, as text.
+    /// Layer translation log stored beside the drawing.
     pub fn to_log(&self) -> String {
         let mut out = String::new();
         for (from, to, moved) in &self.translated {
-            out.push_str(&format!("{from} -> {to}  ({moved} object(s))\n"));
+            out.push_str(&crate::tf!("{from} -> {to}  ({moved} object(s))\n").into_owned());
         }
         for (layer, reason) in &self.skipped {
-            out.push_str(&format!("{layer}: skipped — {reason}\n"));
+            out.push_str(&crate::tf!("{layer}: skipped — {reason}\n").into_owned());
         }
         out
     }
@@ -85,7 +85,7 @@ pub fn load_targets(path: &Path) -> Result<Vec<TargetLayer>, String> {
         .collect();
     targets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     if targets.is_empty() {
-        return Err("no layers found in that file".into());
+        return Err(crate::t!("no layers found in that file").into_owned());
     }
     Ok(targets)
 }
@@ -143,20 +143,20 @@ pub fn translate(
         if mapping.from == "0" {
             report
                 .skipped
-                .push((mapping.from.clone(), "layer \"0\" cannot be translated".into()));
+                .push((mapping.from.clone(), crate::t!("layer \"0\" cannot be translated").into_owned()));
             continue;
         }
         if mapping.from.eq_ignore_ascii_case(current_layer) {
             report.skipped.push((
                 mapping.from.clone(),
-                "it is the current layer".into(),
+                crate::t!("it is the current layer").into_owned(),
             ));
             continue;
         }
         if !scene.document.layers.contains(&mapping.from) {
             report
                 .skipped
-                .push((mapping.from.clone(), "no such layer in this drawing".into()));
+                .push((mapping.from.clone(), crate::t!("no such layer in this drawing").into_owned()));
             continue;
         }
         // Bring the target in with the standard's own properties. An existing
@@ -170,7 +170,7 @@ pub fn translate(
             else {
                 report
                     .skipped
-                    .push((mapping.from.clone(), "target layer is not in the loaded set".into()));
+                    .push((mapping.from.clone(), crate::t!("target layer is not in the loaded set").into_owned()));
                 continue;
             };
             let mut layer = target.layer.clone();

@@ -28,7 +28,7 @@ iced_aw = { git = "https://github.com/HakanSeven12/iced_aw.git", branch = "agent
 bytemuck = { version = "1.25", features = ["derive"] }
 glam = { version = "0.33", features = ["bytemuck"] }
 rfd = "0.17"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "5b56571a190e7a17c8f12d36390d2938b0fb72f7", features = ["serde"] }
 cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "6a5e6fc2822f6af6b2611cd605b44437b35158f0", features = ["acis", "offset"] }
@@ -51,6 +51,7 @@ cosmic-text = "0.15"
 lyon_tessellation = "1.0.20"
 
 [dev-dependencies]
+fluent-syntax = "0.12"
 naga = { version = "27", features = ["wgsl-in"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

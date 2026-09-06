@@ -130,7 +130,7 @@ impl OpenCADStudio {
                 }
                 if opt.is_empty() {
                     self.command_line.push_info(
-                        "Usage: JUSTIFYTEXT <Left|Center|Right|Middle|TL|TC|TR|ML|MC|MR|BL|BC|BR>",
+                        crate::t!("Usage: JUSTIFYTEXT <Left|Center|Right|Middle|TL|TC|TR|ML|MC|MR|BL|BC|BR>").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -401,7 +401,7 @@ impl OpenCADStudio {
                     Some(v) if v > 0.0 => v,
                     _ => {
                         self.command_line.push_info(
-                            "Usage: TEXTFIT <target width>   (fits selected text to that width)",
+                            crate::t!("Usage: TEXTFIT <target width>   (fits selected text to that width)").as_ref(),
                         );
                         return Some(Task::none());
                     }
@@ -1311,7 +1311,7 @@ impl OpenCADStudio {
                 let text = cmd.strip_prefix("ARCTEXT").unwrap_or("").trim().to_string();
                 if text.is_empty() {
                     self.command_line.push_info(
-                        "Usage: ARCTEXT <text>   (select an arc first; the text follows it)",
+                        crate::t!("Usage: ARCTEXT <text>   (select an arc first; the text follows it)").as_ref(),
                     );
                     return None;
                 }

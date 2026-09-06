@@ -160,7 +160,7 @@ impl std::fmt::Display for QSelectOp {
             QSelectOp::Gt => "> Greater than",
             QSelectOp::Lt => "< Less than",
         };
-        f.write_str(s)
+        f.write_str(crate::t!(s).as_ref())
     }
 }
 

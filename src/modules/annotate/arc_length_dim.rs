@@ -280,14 +280,14 @@ impl CadCommand for ArcLengthDimensionCommand {
 
     fn prompt(&self) -> String {
         if self.awaiting_text {
-            return "DIMARC  Enter dimension text (blank = measured value):".to_string();
+            return crate::t!("DIMARC  Enter dimension text (blank = measured value):").into_owned();
         }
         if self.awaiting_angle {
-            return "DIMARC  Specify text angle (degrees):".to_string();
+            return crate::t!("DIMARC  Specify text angle (degrees):").into_owned();
         }
         match self.step {
             Step::SelectObject => {
-                "DIMARC  Select arc or polyline arc segment:".to_string()
+                crate::t!("DIMARC  Select arc or polyline arc segment:").into_owned()
             }
             Step::DimLine(selection) => {
                 let leader_option = if selection.sweep() > std::f64::consts::FRAC_PI_2 {
@@ -295,15 +295,15 @@ impl CadCommand for ArcLengthDimensionCommand {
                 } else {
                     ""
                 };
-                format!(
+                crate::tf!(
                     "DIMARC  Specify arc length dimension location [Mtext/Text/Angle/Partial{leader_option}]:"
-                )
+                ).into_owned()
             }
             Step::PartialFirst(_) => {
-                "DIMARC  Specify first point of partial arc:".to_string()
+                crate::t!("DIMARC  Specify first point of partial arc:").into_owned()
             }
             Step::PartialSecond { .. } => {
-                "DIMARC  Specify second point of partial arc:".to_string()
+                crate::t!("DIMARC  Specify second point of partial arc:").into_owned()
             }
         }
     }

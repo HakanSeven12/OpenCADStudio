@@ -257,7 +257,7 @@ impl OpenCADStudio {
                 let path = cmd.trim_start_matches("CUIEXPORT").trim();
                 if path.is_empty() {
                     self.command_line.push_info(
-                        "Usage: CUIEXPORT <path> — save the keyboard shortcuts to a file.",
+                        crate::t!("Usage: CUIEXPORT <path> — save the keyboard shortcuts to a file.").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -290,7 +290,7 @@ impl OpenCADStudio {
                     .trim();
                 if path.is_empty() {
                     self.command_line.push_info(
-                        "Usage: CUIIMPORT <path> — load keyboard shortcuts from a file.",
+                        crate::t!("Usage: CUIIMPORT <path> — load keyboard shortcuts from a file.").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -381,12 +381,12 @@ impl OpenCADStudio {
                     "COLORSCHEME",
                     "COLORSCHEME  Enter theme name (or ? to list):",
                 );
-                self.command_line.push_output(
-                    "Available themes: DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
+                self.command_line.push_output(&crate::tf!("Available themes: {}",
+                    "DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
                      GRUVBOX_LIGHT GRUVBOX_DARK TOKYONIGHT TOKYONIGHTSTORM TOKYONIGHTLIGHT \
                      KANAGAWAWAVE KANAGAWADRAGON KANAGAWALOTUS MOONFLY NIGHTFLY OXOCARBON FERRA",
-                );
-                self.command_line.push_info(&format!(
+                ));
+                self.command_line.push_info(&crate::tf!(
                     "Current color scheme: <{}>",
                     self.ui_theme.name
                 ));
@@ -398,23 +398,23 @@ impl OpenCADStudio {
                 let sub = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let upper_sub = sub.to_ascii_uppercase();
                 if upper_sub.is_empty() {
-                    self.command_line.push_output(&format!(
+                    self.command_line.push_output(&crate::tf!(
                         "Current color scheme: <{}>",
                         self.ui_theme.name
                     ));
                     return Some(Task::none());
                 }
                 if upper_sub == "LIST" || upper_sub == "?" {
-                    self.command_line.push_output(
-                        "Available themes: DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
+                    self.command_line.push_output(&crate::tf!("Available themes: {}",
+                        "DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
                          GRUVBOX_LIGHT GRUVBOX_DARK TOKYONIGHT TOKYONIGHTSTORM TOKYONIGHTLIGHT \
                          KANAGAWAWAVE KANAGAWADRAGON KANAGAWALOTUS MOONFLY NIGHTFLY OXOCARBON FERRA",
-                    );
+                    ));
                     return Some(Task::none());
                 }
                 if sub == "0" || sub == "1" {
                     self.command_line.push_error(
-                        "COLORSCHEME: 0 and 1 are COLORTHEME options. Enter a theme name (e.g. DARK, LIGHT, DRACULA) or use COLORTHEME.",
+                        crate::t!("COLORSCHEME: 0 and 1 are COLORTHEME options. Enter a theme name (e.g. DARK, LIGHT, DRACULA) or use COLORTHEME.").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -630,7 +630,7 @@ impl OpenCADStudio {
                         }
                         _ => {
                             self.command_line.push_error(
-                                "VPORTS: unknown option. Use VPORTS 2H | 2V | 4 | SINGLE",
+                                crate::t!("VPORTS: unknown option. Use VPORTS 2H | 2V | 4 | SINGLE").as_ref(),
                             );
                             vec![]
                         }
@@ -1161,7 +1161,7 @@ impl OpenCADStudio {
                     .collect();
                 if vps.len() < 2 {
                     self.command_line.push_error(
-                        "SYNCPVIEWPORTS: select two or more viewports (the first is the master).",
+                        crate::t!("SYNCPVIEWPORTS: select two or more viewports (the first is the master).").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -1215,7 +1215,7 @@ impl OpenCADStudio {
                     // that work.
                     None => self
                         .command_line
-                        .push_info(visual_style::keyword_prompt()),
+                        .push_info(crate::t!(visual_style::keyword_prompt()).as_ref()),
                 }
             }
 

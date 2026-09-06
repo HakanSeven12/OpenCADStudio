@@ -254,11 +254,11 @@ impl canvas::Program<Message> for TablePreviewCanvas {
         let active = &self.rows[self.active_row.min(2)];
         frame.fill_text(canvas::Text {
             content: format!(
-                "{} · {} · type {} / unit {}{}{}",
+                "{} · {} · {} {} / {} {}{}{}",
                 active.text_style,
                 if self.annotative { t!("Annotative") } else { t!("Drawing units") },
-                active.data_type,
-                active.unit_type,
+                t!("Type"), active.data_type,
+                t!("Unit"), active.unit_type,
                 if self.description.trim().is_empty() { "" } else { " · " },
                 self.description,
             ),

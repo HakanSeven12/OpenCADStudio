@@ -270,7 +270,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "candle failed" }
           $mainObj = Join-Path $objDir "main.wixobj"
           $uiObj   = Join-Path $objDir "ui.wixobj"
-          & $light $mainObj $uiObj -ext WixUIExtension -out $msiPath
+          & $light $mainObj $uiObj -ext WixUIExtension -cultures:en-us -loc packaging/windows/strings.en-US.wxl -out $msiPath
           if ($LASTEXITCODE -ne 0) { throw "light failed" }
 
       - name: Sign MSI installer (Azure Trusted Signing)

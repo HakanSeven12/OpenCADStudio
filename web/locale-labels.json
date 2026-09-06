@@ -1,0 +1,86 @@
+{
+  "ar-SA": {
+    "title": "Open CAD Studio — الويب",
+    "loading": "جارٍ التحميل…"
+  },
+  "bg-BG": {
+    "title": "Open CAD Studio — Уеб",
+    "loading": "Зареждане…"
+  },
+  "cs-CZ": {
+    "title": "Open CAD Studio — Web",
+    "loading": "Načítání…"
+  },
+  "de-DE": {
+    "title": "Open CAD Studio — Web",
+    "loading": "Wird geladen…"
+  },
+  "el-GR": {
+    "title": "Open CAD Studio — Ιστός",
+    "loading": "Φόρτωση…"
+  },
+  "en-US": {
+    "title": "Open CAD Studio Web App",
+    "loading": "Loading…"
+  },
+  "es-ES": {
+    "title": "Open CAD Studio — Web",
+    "loading": "Cargando…"
+  },
+  "fi-FI": {
+    "title": "Open CAD Studio — Web",
+    "loading": "Ladataan…"
+  },
+  "fr-FR": {
+    "title": "Open CAD Studio — Site Web",
+    "loading": "Chargement…"
+  },
+  "hi-IN": {
+    "title": "Open CAD Studio — वेब",
+    "loading": "लोड हो रहा है…"
+  },
+  "hu-HU": {
+    "title": "Open CAD Studio — Web",
+    "loading": "Betöltés…"
+  },
+  "it-IT": {
+    "title": "Open CAD Studio — Rete",
+    "loading": "Caricamento…"
+  },
+  "ja-JP": {
+    "title": "Open CAD Studio — Web",
+    "loading": "読み込み中…"
+  },
+  "ko-KR": {
+    "title": "Open CAD Studio — 웹",
+    "loading": "로드 중…"
+  },
+  "nl-NL": {
+    "title": "Open CAD Studio — Web",
+    "loading": "Laden…"
+  },
+  "pl-PL": {
+    "title": "Open CAD Studio — Sieć",
+    "loading": "Ładowanie…"
+  },
+  "pt-BR": {
+    "title": "Open CAD Studio — Web",
+    "loading": "Carregando…"
+  },
+  "ru-RU": {
+    "title": "Open CAD Studio — Веб-сайт",
+    "loading": "Загрузка…"
+  },
+  "tr-TR": {
+    "title": "Open CAD Studio — Web",
+    "loading": "Yükleniyor…"
+  },
+  "zh-CN": {
+    "title": "Open CAD Studio — Web",
+    "loading": "正在加载…"
+  },
+  "zh-TW": {
+    "title": "Open CAD Studio — Web",
+    "loading": "載入中…"
+  }
+}

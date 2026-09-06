@@ -573,7 +573,7 @@ impl CadCommand for HatchCommand {
                         "D",
                     ),
                     CmdOption::new(
-                        &format!("Island style: {}", self.island_style_label()),
+                        &crate::tf!("Island style: {}", self.island_style_label()),
                         "Y",
                     ),
                 ];
@@ -603,7 +603,7 @@ impl CadCommand for HatchCommand {
                         "D",
                     ),
                     CmdOption::new(
-                        &format!("Island style: {}", self.island_style_label()),
+                        &crate::tf!("Island style: {}", self.island_style_label()),
                         "Y",
                     ),
                 ];

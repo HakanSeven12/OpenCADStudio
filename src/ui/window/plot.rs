@@ -47,10 +47,28 @@ impl PlotChoice {
 impl fmt::Display for PlotChoice {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.localized {
-            formatter.write_str(crate::i18n::translate(&self.raw).as_ref())
+            if let Some(name) = self.raw.strip_prefix("View: ") {
+                formatter.write_str(crate::tf!("View: {name}").as_ref())
+            } else {
+                formatter.write_str(crate::i18n::translate(&self.raw).as_ref())
+            }
         } else {
             formatter.write_str(&self.raw)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PlotChoice;
+
+    #[test]
+    fn named_view_display_preserves_the_saved_plot_area() {
+        let name = "Plan: north";
+        let choice = PlotChoice::localized(format!("View: {name}"));
+        assert_eq!(choice.to_string(), crate::tf!("View: {name}").as_ref());
+        assert_eq!(choice.raw.strip_prefix("View: "), Some(name));
+        assert_eq!(PlotChoice::raw("View: PDF printer").to_string(), "View: PDF printer");
     }
 }
 
@@ -716,7 +734,7 @@ pub fn view_window(
         area_options.extend(
             s.plot_views
                 .iter()
-                .map(|name| PlotChoice::raw(format!("View: {name}"))),
+                .map(|name| PlotChoice::localized(format!("View: {name}"))),
         );
     }
     let mut area_row = row![

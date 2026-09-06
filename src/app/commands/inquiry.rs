@@ -119,9 +119,9 @@ impl OpenCADStudio {
                 } else {
                     use std::collections::BTreeMap;
                     let space = if scene.current_layout == "Model" {
-                        "Model space".to_string()
+                        crate::t!("Model space").into_owned()
                     } else {
-                        format!("Paper space '{}'", scene.current_layout)
+                        crate::tf!("Paper space '{}'", scene.current_layout).into_owned()
                     };
                     let mut handles: Vec<u64> = Vec::with_capacity(selected.len());
                     let mut type_counts: BTreeMap<&'static str, usize> = BTreeMap::new();
@@ -139,18 +139,18 @@ impl OpenCADStudio {
                     let types: Vec<String> =
                         type_counts.iter().map(|(t, n)| format!("{t}×{n}")).collect();
                     let list: Vec<String> = handles.iter().map(|h| format!("{:X}", h)).collect();
-                    let mut msg = format!(
+                    let mut msg = crate::tf!(
                         "SELHANDLES: {} selected in {}\n  Types: {}",
                         handles.len(),
                         space,
                         types.join(", ")
-                    );
+                    ).into_owned();
                     if !block_counts.is_empty() {
                         let blocks: Vec<String> =
                             block_counts.iter().map(|(b, n)| format!("{b}×{n}")).collect();
-                        msg.push_str(&format!("\n  Blocks: {}", blocks.join(", ")));
+                        msg.push_str(&crate::tf!("\n  Blocks: {}", blocks.join(", ")).into_owned());
                     }
-                    msg.push_str(&format!("\n  Handles: {}", list.join(",")));
+                    msg.push_str(&crate::tf!("\n  Handles: {}", list.join(",")).into_owned());
                     self.command_line.push_output(&msg);
                 }
             }
@@ -180,10 +180,10 @@ impl OpenCADStudio {
                         };
                         let details = entity_list_details(entity);
                         format!(
-                            "{type_name}  Handle:{:X}  Layer:{}  Color:{}  LT:{}{}",
-                            common.handle.value(),
-                            common.layer,
-                            color_str,
+                            "{type_name}  {}:{:X}  {}:{}  {}:{}  LT:{}{}",
+                            crate::t!("Handle"), common.handle.value(),
+                            crate::t!("Layer"), common.layer,
+                            crate::t!("Color"), color_str,
                             linetype,
                             if details.is_empty() {
                                 String::new()
@@ -1360,7 +1360,7 @@ impl OpenCADStudio {
         // Use the first selected object as the template.
         let Some(handle) = self.tabs[i].scene.selected.iter().next().copied() else {
             self.command_line.push_info(
-                "ADDSELECTED: select an object first, then run ADDSELECTED to draw a new one like it.",
+                crate::t!("ADDSELECTED: select an object first, then run ADDSELECTED to draw a new one like it.").as_ref(),
             );
             return Task::none();
         };
@@ -1558,7 +1558,7 @@ fn add_selected_verb(entity: &acadrust::EntityType) -> Option<&'static str> {
 fn entity_list_details(entity: &acadrust::EntityType) -> String {
     use std::f64::consts::PI;
     match entity {
-        acadrust::EntityType::Line(l) => format!(
+        acadrust::EntityType::Line(l) => crate::tf!(
             "from ({:.4},{:.4},{:.4}) to ({:.4},{:.4},{:.4})  len={:.4}",
             l.start.x,
             l.start.y,
@@ -1570,16 +1570,16 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
                 + (l.end.y - l.start.y).powi(2)
                 + (l.end.z - l.start.z).powi(2))
             .sqrt()
-        ),
-        acadrust::EntityType::Circle(c) => format!(
+        ).into_owned(),
+        acadrust::EntityType::Circle(c) => crate::tf!(
             "center ({:.4},{:.4},{:.4})  r={:.4}  area={:.4}",
             c.center.x,
             c.center.y,
             c.center.z,
             c.radius,
             PI * c.radius * c.radius
-        ),
-        acadrust::EntityType::Arc(a) => format!(
+        ).into_owned(),
+        acadrust::EntityType::Arc(a) => crate::tf!(
             "center ({:.4},{:.4},{:.4})  r={:.4}  start={:.2}° end={:.2}°",
             a.center.x,
             a.center.y,
@@ -1587,25 +1587,25 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
             a.radius,
             a.start_angle.to_degrees(),
             a.end_angle.to_degrees()
-        ),
-        acadrust::EntityType::LwPolyline(p) => format!(
+        ).into_owned(),
+        acadrust::EntityType::LwPolyline(p) => crate::tf!(
             "{} vertices  closed={}  elevation={:.4}",
             p.vertices.len(),
             p.is_closed,
             p.elevation
-        ),
-        acadrust::EntityType::Text(t) => format!(
+        ).into_owned(),
+        acadrust::EntityType::Text(t) => crate::tf!(
             "\"{}\"  h={:.4}  at ({:.4},{:.4})",
             t.value, t.height, t.insertion_point.x, t.insertion_point.y
-        ),
-        acadrust::EntityType::MText(t) => format!(
+        ).into_owned(),
+        acadrust::EntityType::MText(t) => crate::tf!(
             "\"{}\"  h={:.4}  at ({:.4},{:.4})",
             t.value.chars().take(40).collect::<String>(),
             t.height,
             t.insertion_point.x,
             t.insertion_point.y
-        ),
-        acadrust::EntityType::Insert(ins) => format!(
+        ).into_owned(),
+        acadrust::EntityType::Insert(ins) => crate::tf!(
             "block=\"{}\"  at ({:.4},{:.4},{:.4})  scale=({:.4},{:.4},{:.4})  rot={:.2}°",
             ins.block_name,
             ins.insert_point.x,
@@ -1615,20 +1615,20 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
             ins.y_scale(),
             ins.z_scale(),
             ins.rotation.to_degrees()
-        ),
-        acadrust::EntityType::Spline(s) => format!(
+        ).into_owned(),
+        acadrust::EntityType::Spline(s) => crate::tf!(
             "{} ctrl pts  degree={}  closed={}",
             s.control_points.len(),
             s.degree,
             s.flags.closed
-        ),
-        acadrust::EntityType::Ellipse(e) => format!(
+        ).into_owned(),
+        acadrust::EntityType::Ellipse(e) => crate::tf!(
             "center ({:.4},{:.4})  major_len={:.4}  ratio={:.4}",
             e.center.x,
             e.center.y,
             e.major_axis_length(),
             e.minor_axis_ratio
-        ),
+        ).into_owned(),
         _ => String::new(),
     }
 }
@@ -1967,13 +1967,13 @@ fn entity_extra_info(entity: &acadrust::EntityType) -> String {
             "BLK={} @({:.3},{:.3})",
             e.block_name, e.insert_point.x, e.insert_point.y
         ),
-        EntityType::LwPolyline(e) => format!("{} vertices", e.vertices.len()),
-        EntityType::Polyline(e) => format!("{} vertices", e.vertices.len()),
-        EntityType::Polyline2D(e) => format!("{} vertices", e.vertices.len()),
-        EntityType::Polyline3D(e) => format!("{} vertices", e.vertices.len()),
+        EntityType::LwPolyline(e) => crate::tf!("{} vertices", e.vertices.len()).into_owned(),
+        EntityType::Polyline(e) => crate::tf!("{} vertices", e.vertices.len()).into_owned(),
+        EntityType::Polyline2D(e) => crate::tf!("{} vertices", e.vertices.len()).into_owned(),
+        EntityType::Polyline3D(e) => crate::tf!("{} vertices", e.vertices.len()).into_owned(),
         EntityType::Hatch(e) => format!("PAT={}", e.pattern.name),
         EntityType::Dimension(e) => format!("{:.3}", e.base().actual_measurement),
-        EntityType::Spline(e) => format!("{} ctrl pts", e.control_points.len()),
+        EntityType::Spline(e) => crate::tf!("{} ctrl pts", e.control_points.len()).into_owned(),
         _ => String::new(),
     }
 }
@@ -1997,7 +1997,7 @@ fn arith_eval(expr: &str) -> Result<f64, String> {
     };
     let v = p.expr()?;
     if p.pos != p.chars.len() {
-        return Err(format!("unexpected '{}'", p.chars[p.pos]));
+        return Err(crate::tf!("unexpected '{}'", p.chars[p.pos]).into_owned());
     }
     Ok(v)
 }
@@ -2101,7 +2101,7 @@ impl ArithParser {
                 Ok(v)
             }
             Some(c) if c.is_ascii_digit() || c == '.' => self.number(),
-            Some(c) => Err(format!("unexpected '{c}'")),
+            Some(c) => Err(crate::tf!("unexpected '{c}'").into_owned()),
             None => Err("unexpected end of expression".into()),
         }
     }
@@ -2116,7 +2116,7 @@ impl ArithParser {
             }
         }
         let s: String = self.chars[start..self.pos].iter().collect();
-        s.parse::<f64>().map_err(|_| format!("bad number '{s}'"))
+        s.parse::<f64>().map_err(|_| crate::tf!("bad number '{s}'").into_owned())
     }
 }
 

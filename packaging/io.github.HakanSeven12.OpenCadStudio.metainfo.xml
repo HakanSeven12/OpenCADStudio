@@ -1,48 +1,132 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- AppStream metadata: integrates the AppImage with Linux software centres
-     (name, summary, icon, categories, screenshots). Installed into
-     /usr/share/metainfo/ inside the AppDir by the release workflow. -->
 <component type="desktop-application">
   <id>io.github.HakanSeven12.OpenCadStudio</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-
   <name>Open CAD Studio</name>
+  <summary xml:lang="ar-SA">تطبيق CAD ثنائي وثلاثي الأبعاد لرسومات DWG وDXF</summary>
+  <summary xml:lang="bg-BG">2D/3D CAD приложение за DWG и DXF чертежи</summary>
+  <summary xml:lang="cs-CZ">2D/3D CAD aplikace pro výkresy DWG a DXF</summary>
+  <summary xml:lang="de-DE">2D/3D-CAD-Anwendung für DWG- und DXF-Zeichnungen</summary>
+  <summary xml:lang="el-GR">Εφαρμογή CAD 2D/3D για σχέδια DWG και DXF</summary>
   <summary>2D/3D CAD application for DWG and DXF drawings</summary>
-
+  <summary xml:lang="es-ES">Aplicación CAD 2D/3D para dibujos DWG y DXF</summary>
+  <summary xml:lang="fi-FI">2D/3D-CAD-sovellus DWG- ja DXF-piirustuksille</summary>
+  <summary xml:lang="fr-FR">Application CAO 2D/3D pour les dessins DWG et DXF</summary>
+  <summary xml:lang="hi-IN">DWG और DXF चित्रों के लिए 2D/3D CAD अनुप्रयोग</summary>
+  <summary xml:lang="hu-HU">2D/3D CAD-alkalmazás DWG és DXF rajzokhoz</summary>
+  <summary xml:lang="it-IT">Applicazione CAD 2D/3D per disegni DWG e DXF</summary>
+  <summary xml:lang="ja-JP">DWGとDXF図面用の2D/3D CADアプリ</summary>
+  <summary xml:lang="ko-KR">DWG 및 DXF 도면용 2D/3D CAD 앱</summary>
+  <summary xml:lang="nl-NL">2D/3D-CAD-toepassing voor DWG- en DXF-tekeningen</summary>
+  <summary xml:lang="pl-PL">Aplikacja CAD 2D/3D do rysunków DWG i DXF</summary>
+  <summary xml:lang="pt-BR">Aplicativo CAD 2D/3D para desenhos DWG e DXF</summary>
+  <summary xml:lang="ru-RU">Приложение 2D/3D CAD для чертежей DWG и DXF</summary>
+  <summary xml:lang="tr-TR">DWG ve DXF çizimleri için 2D/3D CAD uygulaması</summary>
+  <summary xml:lang="zh-CN">用于 DWG 和 DXF 图形的 2D/3D CAD 应用程序</summary>
+  <summary xml:lang="zh-TW">用於 DWG 與 DXF 圖面的 2D/3D CAD 應用程式</summary>
   <description>
-    <p>
-      Open CAD Studio is a 2D/3D CAD application for creating and editing
-      technical drawings. It reads and writes the standard DWG and DXF file
-      formats so drawings stay compatible with other CAD software.
-    </p>
+    <p xml:lang="ar-SA">أنشئ الرسومات الفنية وحررها بتنسيقي DWG وDXF.</p>
+    <p xml:lang="bg-BG">Създавайте и редактирайте технически чертежи във формати DWG и DXF.</p>
+    <p xml:lang="cs-CZ">Vytvářejte a upravujte technické výkresy ve formátech DWG a DXF.</p>
+    <p xml:lang="de-DE">Technische Zeichnungen in DWG- und DXF-Formaten erstellen und bearbeiten.</p>
+    <p xml:lang="el-GR">Δημιουργήστε και επεξεργαστείτε τεχνικά σχέδια σε μορφές DWG και DXF.</p>
+    <p>Create and edit technical drawings in DWG and DXF formats.</p>
+    <p xml:lang="es-ES">Cree y edite dibujos técnicos en formatos DWG y DXF.</p>
+    <p xml:lang="fi-FI">Luo ja muokkaa teknisiä piirustuksia DWG- ja DXF-muodoissa.</p>
+    <p xml:lang="fr-FR">Créez et modifiez des dessins techniques aux formats DWG et DXF.</p>
+    <p xml:lang="hi-IN">DWG और DXF प्रारूपों में तकनीकी चित्र बनाएँ और संपादित करें।</p>
+    <p xml:lang="hu-HU">Műszaki rajzok készítése és szerkesztése DWG és DXF formátumban.</p>
+    <p xml:lang="it-IT">Crea e modifica disegni tecnici nei formati DWG e DXF.</p>
+    <p xml:lang="ja-JP">DWGおよびDXF形式で技術図面を作成・編集できます。</p>
+    <p xml:lang="ko-KR">DWG 및 DXF 형식으로 기술 도면을 만들고 편집하세요.</p>
+    <p xml:lang="nl-NL">Maak en bewerk technische tekeningen in DWG- en DXF-indeling.</p>
+    <p xml:lang="pl-PL">Twórz i edytuj rysunki techniczne w formatach DWG i DXF.</p>
+    <p xml:lang="pt-BR">Crie e edite desenhos técnicos nos formatos DWG e DXF.</p>
+    <p xml:lang="ru-RU">Создавайте и редактируйте технические чертежи в форматах DWG и DXF.</p>
+    <p xml:lang="tr-TR">DWG ve DXF biçimlerinde teknik çizimler oluşturun ve düzenleyin.</p>
+    <p xml:lang="zh-CN">创建和编辑 DWG 与 DXF 格式的技术图形。</p>
+    <p xml:lang="zh-TW">建立及編輯 DWG 與 DXF 格式的技術圖面。</p>
   </description>
-
-  <launchable type="desktop-id">io.github.HakanSeven12.OpenCadStudio.desktop</launchable>
-
-  <categories>
-    <category>Graphics</category>
-    <category>Engineering</category>
-  </categories>
-
   <keywords>
     <keyword>CAD</keyword>
     <keyword>DWG</keyword>
     <keyword>DXF</keyword>
-    <keyword>drawing</keyword>
-    <keyword>design</keyword>
-    <keyword>engineering</keyword>
+    <keyword xml:lang="ar-SA">الرسم</keyword>
+    <keyword xml:lang="ar-SA">تصميم</keyword>
+    <keyword xml:lang="ar-SA">هندسي</keyword>
+    <keyword xml:lang="bg-BG">Чертеж</keyword>
+    <keyword xml:lang="bg-BG">Проектиране</keyword>
+    <keyword xml:lang="bg-BG">Инженерен</keyword>
+    <keyword xml:lang="cs-CZ">Kreslení</keyword>
+    <keyword xml:lang="cs-CZ">Návrh</keyword>
+    <keyword xml:lang="cs-CZ">Strojírenství</keyword>
+    <keyword xml:lang="de-DE">Zeichnung</keyword>
+    <keyword xml:lang="de-DE">Konstruktion</keyword>
+    <keyword xml:lang="de-DE">Technisch</keyword>
+    <keyword xml:lang="el-GR">Σχέδιο</keyword>
+    <keyword xml:lang="el-GR">Σχεδιασμός</keyword>
+    <keyword xml:lang="el-GR">Μηχανολογικές</keyword>
+    <keyword>Drawing</keyword>
+    <keyword>Design</keyword>
+    <keyword>Engineering</keyword>
+    <keyword xml:lang="es-ES">Dibujo</keyword>
+    <keyword xml:lang="es-ES">Diseño</keyword>
+    <keyword xml:lang="es-ES">Ingeniería</keyword>
+    <keyword xml:lang="fi-FI">Piirustus</keyword>
+    <keyword xml:lang="fi-FI">Suunnittelu</keyword>
+    <keyword xml:lang="fi-FI">Tekniikka</keyword>
+    <keyword xml:lang="fr-FR">Dessin</keyword>
+    <keyword xml:lang="fr-FR">Conception</keyword>
+    <keyword xml:lang="fr-FR">Génie mécanique</keyword>
+    <keyword xml:lang="hi-IN">ड्रॉइंग</keyword>
+    <keyword xml:lang="hi-IN">डिज़ाइन</keyword>
+    <keyword xml:lang="hi-IN">इंजीनियरिंग</keyword>
+    <keyword xml:lang="hu-HU">Rajzolás</keyword>
+    <keyword xml:lang="hu-HU">Tervezés</keyword>
+    <keyword xml:lang="hu-HU">Mérnöki</keyword>
+    <keyword xml:lang="it-IT">Disegno</keyword>
+    <keyword xml:lang="it-IT">Progettazione</keyword>
+    <keyword xml:lang="it-IT">Ingegneria</keyword>
+    <keyword xml:lang="ja-JP">図面</keyword>
+    <keyword xml:lang="ja-JP">設計</keyword>
+    <keyword xml:lang="ja-JP">工学表記</keyword>
+    <keyword xml:lang="ko-KR">그리기</keyword>
+    <keyword xml:lang="ko-KR">설계</keyword>
+    <keyword xml:lang="ko-KR">공학</keyword>
+    <keyword xml:lang="nl-NL">Tekening</keyword>
+    <keyword xml:lang="nl-NL">Ontwerp</keyword>
+    <keyword xml:lang="nl-NL">Technisch</keyword>
+    <keyword xml:lang="pl-PL">Rysunek</keyword>
+    <keyword xml:lang="pl-PL">Projektowanie</keyword>
+    <keyword xml:lang="pl-PL">Inżynieria</keyword>
+    <keyword xml:lang="pt-BR">Desenho</keyword>
+    <keyword xml:lang="pt-BR">Projeto</keyword>
+    <keyword xml:lang="pt-BR">Engenharia</keyword>
+    <keyword xml:lang="ru-RU">Чертёж</keyword>
+    <keyword xml:lang="ru-RU">Проектирование</keyword>
+    <keyword xml:lang="ru-RU">Инженерный</keyword>
+    <keyword xml:lang="tr-TR">Çizim</keyword>
+    <keyword xml:lang="tr-TR">Tasarım</keyword>
+    <keyword xml:lang="tr-TR">Mühendislik</keyword>
+    <keyword xml:lang="zh-CN">绘图</keyword>
+    <keyword xml:lang="zh-CN">设计</keyword>
+    <keyword xml:lang="zh-CN">工程学</keyword>
+    <keyword xml:lang="zh-TW">繪圖</keyword>
+    <keyword xml:lang="zh-TW">設計</keyword>
+    <keyword xml:lang="zh-TW">工程學</keyword>
   </keywords>
-
+  <launchable type="desktop-id">io.github.HakanSeven12.OpenCadStudio.desktop</launchable>
+  <categories>
+    <category>Graphics</category>
+    <category>Engineering</category>
+  </categories>
   <url type="homepage">https://github.com/HakanSeven12/OpenCADStudio</url>
   <url type="bugtracker">https://github.com/HakanSeven12/OpenCADStudio/issues</url>
-
   <developer id="io.github.hakanseven12">
     <name>Hakan Seven</name>
   </developer>
-
   <content_rating type="oars-1.1" />
-
   <provides>
     <mediatype>image/vnd.dwg</mediatype>
     <mediatype>image/vnd.dxf</mediatype>

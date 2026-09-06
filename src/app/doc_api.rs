@@ -1301,6 +1301,54 @@ mod tests {
         }
     }
 
+    // ── Read-mostly family bounds (Leader/Mesh/Face3D/MLine/Helix) ──────────
+
+    #[test]
+    fn read_mostly_family_bounds_leader_and_mesh() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Leader with vertices at (0,0,0),(5,5,0),(10,0,0) -> bounds x[0,10] y[0,5].
+        let mut leader = acadrust::entities::Leader::default();
+        leader.vertices = vec![
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(5.0, 5.0, 0.0),
+            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        ];
+        let leader_h = host.document_mut().add_entity(EntityType::Leader(leader)).unwrap();
+        // Mesh with vertices in a unit cube at (2..3, 2..3, 0).
+        let mut mesh = acadrust::entities::Mesh::default();
+        mesh.vertices = vec![
+            acadrust::types::Vector3::new(2.0, 2.0, 0.0),
+            acadrust::types::Vector3::new(3.0, 2.0, 0.0),
+            acadrust::types::Vector3::new(3.0, 3.0, 0.0),
+            acadrust::types::Vector3::new(2.0, 3.0, 0.0),
+        ];
+        let mesh_h = host.document_mut().add_entity(EntityType::Mesh(mesh)).unwrap();
+
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetBounds { id: handle_to_obj(leader_h) },
+            Query::GetBounds { id: handle_to_obj(mesh_h) },
+            Query::GetEntity { id: handle_to_obj(leader_h) },
+        ])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Bounds(b) => {
+                assert!((b.min[0] - 0.0).abs() < 1e-6 && (b.max[0] - 10.0).abs() < 1e-6, "{b:?}");
+                assert!((b.min[1] - 0.0).abs() < 1e-6 && (b.max[1] - 5.0).abs() < 1e-6, "{b:?}");
+            }
+            other => panic!("expected bounds, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Bounds(b) => {
+                assert!((b.min[0] - 2.0).abs() < 1e-6 && (b.max[0] - 3.0).abs() < 1e-6, "{b:?}");
+            }
+            other => panic!("expected bounds, got {other:?}"),
+        }
+        match &receipt.query_results[2] {
+            QueryResult::Entity(e) => assert_eq!(e.kind, "Leader"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+    }
+
     // ── Phase 5 remaining: typed raster image create ─────────────────────────
 
     #[test]

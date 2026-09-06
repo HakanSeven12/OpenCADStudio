@@ -106,8 +106,12 @@ tested: 615 host lib + 8 crate unit + 3 spec↔wire consistency tests green.
 - **Done:** media/misc families report a **real `kind`** via `GetEntity`
   (`RasterImage`, `Table`, `Leader`, `MultiLeader`, `MLine`, `Mesh`, `Helix`,
   `Region`, `Body`, `Surface`, `Face3D`, `Dimension`, `Hatch`) instead of "Other";
-  `RasterImage` has coarse bounds (insertion + u·width + v·height); generic
-  `delete` works on all. Covered by `phase5_*` test.
+  generic `delete` works on all. Covered by `phase5_*` test.
+- **Done (read-mostly bounds):** `bounds()` now works for the vertex/point-carrying
+  families — `Leader`, `Mesh`, `Face3D` (4 corners), `MLine` (vertex positions),
+  `Helix` (start point) — via a points-to-AABB helper (`read_mostly_family_bounds_*`
+  test). `RasterImage` has 4-corner bounds. `Region`/`Body`/`Surface`/`MultiLeader`
+  stay `Unsupported` for bounds (complex/nested geometry).
 - **Done (typed create):** `create_raster_image(file_path, insertion, u, v, size)`
   → `Operation::CreateRasterImage` (host auto-registers the ImageDefinition), and
   `create_table(insertion_point, data[row][col])` → `Operation::CreateTable`

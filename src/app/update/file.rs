@@ -1704,19 +1704,14 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         let Some(pending) = self.pending_web_thumbnail_save.take() else {
             return Task::none();
         };
-        iced::window::latest()
-            .then(|window| match window {
-                Some(window) => iced::window::screenshot(window).map(Some),
-                None => Task::done(None),
-            })
-            .map(move |screenshot| Message::WebSaveScreenshot {
-                tab_id: pending.tab_id,
-                filename: pending.filename.clone(),
-                ext: pending.ext.clone(),
-                version: pending.version,
-                bounds: Some(pending.bounds),
-                screenshot,
-            })
+        Task::done(Message::WebSaveScreenshot {
+            tab_id: pending.tab_id,
+            filename: pending.filename,
+            ext: pending.ext,
+            version: pending.version,
+            bounds: Some(pending.bounds),
+            screenshot: crate::sys::capture_canvas(),
+        })
     }
 
     #[cfg(not(target_arch = "wasm32"))]

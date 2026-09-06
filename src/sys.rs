@@ -170,6 +170,48 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// Copy the rendered web canvas during the frame callback, before the browser
+/// clears its drawing buffer. Canvas readback avoids Iced's synchronous GPU map.
+#[cfg(target_arch = "wasm32")]
+pub fn capture_canvas() -> Option<iced::window::Screenshot> {
+    use wasm_bindgen::JsCast;
+
+    let window = web_sys::window()?;
+    let document = window.document()?;
+    let source = document
+        .query_selector("canvas")
+        .ok()??
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .ok()?;
+    let (width, height) = (source.width(), source.height());
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let copy = document
+        .create_element("canvas")
+        .ok()?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .ok()?;
+    copy.set_width(width);
+    copy.set_height(height);
+    let context = copy
+        .get_context("2d")
+        .ok()??
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .ok()?;
+    context
+        .draw_image_with_html_canvas_element(&source, 0.0, 0.0)
+        .ok()?;
+    let pixels = context
+        .get_image_data(0.0, 0.0, width as f64, height as f64)
+        .ok()?;
+    Some(iced::window::Screenshot::new(
+        pixels.data().0,
+        iced::Size::new(width, height),
+        window.device_pixel_ratio() as f32,
+    ))
+}
+
 /// Web: read text from the system clipboard via the async Clipboard API.
 /// iced's own `clipboard::read` is a no-op on the web (the browser clipboard is
 /// async + permission-gated), so the editor paste paths use this instead. The

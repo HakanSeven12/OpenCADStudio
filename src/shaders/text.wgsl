@@ -59,13 +59,106 @@ fn vs_main(in: VertIn) -> VertOut {
 // ── Fragment stage ────────────────────────────────────────────────────────────
 @fragment
 fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
-    // SDF value: 0.5 at the glyph edge, higher inside the ink.
-    let sd = textureSample(atlas_tex, atlas_samp, in.uv).r;
-    // Antialias over one screen-space texel of field change.
-    let aa = max(fwidth(sd), 1e-4);
-    let a = smoothstep(0.5 - aa, 0.5 + aa, sd);
+    let uv_dx = dpdx(in.uv);
+    let uv_dy = dpdy(in.uv);
+
+    let dims_u = textureDimensions(atlas_tex);
+    let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
+
+    let texel_dx = uv_dx * dims;
+    let texel_dy = uv_dy * dims;
+
+    let footprint = max(length(texel_dx), length(texel_dy));
+
+    let sd_center = textureSampleLevel(
+        atlas_tex,
+        atlas_samp,
+        in.uv,
+        0.0
+    ).r;
+
+    let aa = max(fwidth(sd_center), 1e-4);
+
+    var a: f32;
+
+    if (footprint <= 1.0) {
+        // Large text / approximately 1:1 sampling.
+        a = smoothstep(
+            0.5 - aa,
+            0.5 + aa,
+            sd_center
+        );
+    } else if (footprint <= 4.0) {
+        // Moderate minification: 2x2 sampling.
+        let s0 = textureSampleLevel(
+            atlas_tex,
+            atlas_samp,
+            in.uv - uv_dx * 0.25 - uv_dy * 0.25,
+            0.0
+        ).r;
+
+        let s1 = textureSampleLevel(
+            atlas_tex,
+            atlas_samp,
+            in.uv + uv_dx * 0.25 - uv_dy * 0.25,
+            0.0
+        ).r;
+
+        let s2 = textureSampleLevel(
+            atlas_tex,
+            atlas_samp,
+            in.uv - uv_dx * 0.25 + uv_dy * 0.25,
+            0.0
+        ).r;
+
+        let s3 = textureSampleLevel(
+            atlas_tex,
+            atlas_samp,
+            in.uv + uv_dx * 0.25 + uv_dy * 0.25,
+            0.0
+        ).r;
+
+        let a0 = smoothstep(0.5 - aa, 0.5 + aa, s0);
+        let a1 = smoothstep(0.5 - aa, 0.5 + aa, s1);
+        let a2 = smoothstep(0.5 - aa, 0.5 + aa, s2);
+        let a3 = smoothstep(0.5 - aa, 0.5 + aa, s3);
+
+        a = (a0 + a1 + a2 + a3) * 0.25;
+    } else {
+        // Strong minification: 4x4 sampling over the full screen-pixel
+        // footprint. At this scale the glyph covers very few fragments, so
+        // the additional texture reads remain localized to small text.
+        var sum = 0.0;
+
+        for (var y: i32 = 0; y < 4; y = y + 1) {
+            for (var x: i32 = 0; x < 4; x = x + 1) {
+                let fx = (f32(x) + 0.5) / 4.0 - 0.5;
+                let fy = (f32(y) + 0.5) / 4.0 - 0.5;
+
+                let sd = textureSampleLevel(
+                    atlas_tex,
+                    atlas_samp,
+                    in.uv + uv_dx * fx + uv_dy * fy,
+                    0.0
+                ).r;
+
+                sum = sum + smoothstep(
+                    0.5 - aa,
+                    0.5 + aa,
+                    sd
+                );
+            }
+        }
+
+        a = sum / 16.0;
+    }
+
     if (a <= 0.0) {
         discard;
     }
-    return vec4<f32>(in.color.rgb, in.color.a * a);
+
+    return vec4<f32>(
+        in.color.rgb,
+        in.color.a * a
+    );
 }

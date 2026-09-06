@@ -534,6 +534,8 @@ pub(super) struct OpenCADStudio {
     /// CLIPROMPTLINES: how many temporary prompt lines for a single command
     /// are displayed above the command window (0–50, Registry, default 3).
     cliprompt_lines: i32,
+    /// COMMANDLINEFADETIME: overlay history visible time in ms (0–60000, default 3000).
+    commandline_fade_ms: i32,
     /// MRU list of block names inserted via INSERT, most recent first, capped to 20.
     block_mru: Vec<String>,
     /// Insertion frequency per block name (uppercase key → count), capped.
@@ -3363,6 +3365,7 @@ impl OpenCADStudio {
             default_bg_color: None,
             default_paper_bg_color: None,
             cliprompt_lines: 3,
+            commandline_fade_ms: 3000,
             block_mru: Vec::new(),
             block_freq: std::collections::HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]

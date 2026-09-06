@@ -19,7 +19,13 @@ pub const HISTORY_SCROLL_ID: &str = "command_history_scroll";
 
 /// How long a history entry stays visible on the overlay before fading
 /// out. Picking the full archive happens through the dropdown button.
-const HISTORY_VISIBLE_SECS: f32 = 3.0;
+/// Default for `COMMANDLINEFADETIME` (ms); the live value lives on
+/// [`CommandLine::fade_ms`] so it can be changed via SETVAR.
+pub const DEFAULT_COMMANDLINE_FADE_MS: u32 = 3000;
+/// COMMANDLINEFADETIME bounds in milliseconds: 0 skips the overlay entirely,
+/// 60000 keeps lines for a full minute.
+pub const COMMANDLINE_FADE_MIN_MS: u32 = 0;
+pub const COMMANDLINE_FADE_MAX_MS: u32 = 60000;
 
 /// Resizable full-history editor bounds. The live upper bound also follows the
 /// window height so the command input and a useful drawing area remain visible.
@@ -129,6 +135,10 @@ pub struct CommandLine {
     /// CLIPROMPTLINES: how many temporary prompt lines for a single command
     /// are displayed above the command window (0–50, default 3).
     cliprompt_lines: u8,
+    /// COMMANDLINEFADETIME: how long overlay history lines stay visible,
+    /// in milliseconds (0–60000, default 3000). 0 skips drawing transient
+    /// lines entirely; the pinned step prompt still shows.
+    fade_ms: u32,
 }
 
 impl Default for CommandLine {
@@ -151,6 +161,7 @@ impl Default for CommandLine {
             step_prompt: None,
             step_options: Vec::new(),
             cliprompt_lines: 3,
+            fade_ms: DEFAULT_COMMANDLINE_FADE_MS,
         }
     }
 }
@@ -160,8 +171,8 @@ pub struct HistoryEntry {
     pub kind: EntryKind,
     pub text: String,
     /// When this entry was pushed. Used by the overlay to fade entries
-    /// out after `HISTORY_VISIBLE_SECS`. The dropdown popup ignores it
-    /// and always shows the whole list.
+    /// out after `fade_ms` (`COMMANDLINEFADETIME`). The dropdown popup
+    /// ignores it and always shows the whole list.
     pub created_at: Instant,
     /// The active command step's prompt is pinned so it does not fade
     /// while the user is still working on that step. When the step
@@ -415,17 +426,32 @@ impl CommandLine {
         self.cliprompt_lines = n.min(50);
     }
 
+    /// COMMANDLINEFADETIME mirror (ms, 0–60000). `0` skips transient overlay
+    /// lines entirely; the pinned step prompt still shows.
+    pub fn set_commandline_fade_ms(&mut self, ms: u32) {
+        self.fade_ms = ms.min(COMMANDLINE_FADE_MAX_MS);
+    }
+
+    pub fn commandline_fade_ms(&self) -> u32 {
+        self.fade_ms
+    }
+
+    fn fade_secs(&self) -> f32 {
+        self.fade_ms as f32 / 1000.0
+    }
+
+    fn entry_visible(&self, e: &HistoryEntry) -> bool {
+        e.pinned || (self.fade_ms > 0 && e.created_at.elapsed().as_secs_f32() < self.fade_secs())
+    }
+
     /// Visible overlay count respecting CLIPROMPTLINES (0–50). Used in tests.
     #[cfg(test)]
     pub fn visible_history_count(&self) -> usize {
         if self.cliprompt_lines == 0 {
             return 0;
         }
-        let visible: Vec<&HistoryEntry> = self
-            .history
-            .iter()
-            .filter(|e| e.pinned || e.created_at.elapsed().as_secs_f32() < HISTORY_VISIBLE_SECS)
-            .collect();
+        let visible: Vec<&HistoryEntry> =
+            self.history.iter().filter(|e| self.entry_visible(e)).collect();
         visible.len().min(self.cliprompt_lines as usize)
     }
 
@@ -437,9 +463,7 @@ impl CommandLine {
         if self.cliprompt_lines == 0 {
             return false;
         }
-        self.history
-            .iter()
-            .any(|e| e.pinned || e.created_at.elapsed().as_secs_f32() < HISTORY_VISIBLE_SECS)
+        self.history.iter().any(|e| self.entry_visible(e))
     }
 
     pub fn toggle_history(&mut self) {
@@ -528,14 +552,11 @@ impl CommandLine {
         control_enabled: bool,
         control_busy: bool,
     ) -> Element<'a, Message> {
-        // Only the most recent entries pushed within the last few
-        // seconds show on the overlay. The dropdown button keeps the
-        // full backlog reachable when the user actually wants it.
-        let mut visible: Vec<&HistoryEntry> = self
-            .history
-            .iter()
-            .filter(|e| e.pinned || e.created_at.elapsed().as_secs_f32() < HISTORY_VISIBLE_SECS)
-            .collect();
+        // Only the most recent entries pushed within COMMANDLINEFADETIME
+        // show on the overlay (0 skips transient lines). The dropdown button
+        // keeps the full backlog reachable when the user actually wants it.
+        let mut visible: Vec<&HistoryEntry> =
+            self.history.iter().filter(|e| self.entry_visible(e)).collect();
         // Keep the active prompt/options immediately above the input. Commands
         // may emit informational lines while waiting for the next option; those
         // lines belong above the pinned interaction row, not below it.
@@ -1126,6 +1147,26 @@ mod tests {
             line.cmd_recall.last().map(String::as_str),
             Some("MOVE 0,0 10,0")
         );
+    }
+
+    #[test]
+    fn commandline_fade_defaults_to_3000ms() {
+        let line = CommandLine::new();
+        assert_eq!(line.commandline_fade_ms(), 3000);
+    }
+
+    #[test]
+    fn commandline_fade_zero_hides_unpinned_but_keeps_pinned() {
+        let mut line = CommandLine::new();
+        line.push_info("transient");
+        assert!(line.has_visible_history());
+        line.set_commandline_fade_ms(0);
+        // Non-pinned entries are skipped entirely at 0.
+        assert!(!line.has_visible_history());
+        assert_eq!(line.visible_history_count(), 0);
+        // Pinned step prompt still shows at 0.
+        line.set_step_prompt(Some("Specify point:".to_string()));
+        assert!(line.has_visible_history());
     }
 
     #[test]

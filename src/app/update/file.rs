@@ -397,6 +397,9 @@ impl OpenCADStudio {
             paper_bg_color: None,
             language: self.language,
             cliprompt_lines: crate::app::settings::clamp_clipromptlines(self.cliprompt_lines),
+            commandline_fade_ms: crate::app::settings::clamp_commandline_fade_ms(
+                self.commandline_fade_ms,
+            ),
             block_mru: self.block_mru.clone(),
             block_freq: self.block_freq.clone(),
         }
@@ -462,6 +465,11 @@ impl OpenCADStudio {
         self.cliprompt_lines = crate::app::settings::clamp_clipromptlines(s.cliprompt_lines);
         self.command_line
             .set_cliprompt_lines(self.cliprompt_lines.clamp(0, 50) as u8);
+        self.commandline_fade_ms =
+            crate::app::settings::clamp_commandline_fade_ms(s.commandline_fade_ms);
+        self.command_line.set_commandline_fade_ms(
+            self.commandline_fade_ms.clamp(0, 60000) as u32,
+        );
         // Block usage: clone but cap to sane sizes (MRU 20, freq map 200)
         self.block_mru = s.block_mru.iter().take(20).cloned().collect();
         self.block_freq = s

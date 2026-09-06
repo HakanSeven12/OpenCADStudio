@@ -801,6 +801,20 @@ impl OpenCADStudio {
                 }
             }
 
+            // ── COMMANDLINEFADETIME — command-line history fade time ───
+            // How long history lines stay visible above the command window,
+            // in ms (0–60000, default 3000). Bare form prompts for a value
+            // (Enter reports current); 0 hides transient overlay lines.
+            "COMMANDLINEFADETIME" => {
+                use crate::command::ValuePromptCommand;
+                let c = ValuePromptCommand::new(
+                    "COMMANDLINEFADETIME",
+                    "COMMANDLINEFADETIME  overlay fade time in ms (0-60000, 0 = hide)  <Enter reports>:",
+                );
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+
             // ── SETVAR — read / write system variables ───────────────────
             // SETVAR <name>          → report the value
             // SETVAR <name> <value>  → set it
@@ -821,6 +835,7 @@ impl OpenCADStudio {
                     | "SNAPANG"
                     | "TEXTFILL"
                     | "CLIPROMPTLINES"
+                    | "COMMANDLINEFADETIME"
                     | "ATTREQ"
                     | "ATTDIA"
                     | "DIMASSOC"
@@ -925,7 +940,7 @@ impl OpenCADStudio {
                 let value = it.next().map(|s| s.trim().to_string());
                 if name.is_empty() || name == "?" {
                     self.command_line.push_info(
-                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER | CLAYER CELTYPE TEXTSTYLE (read-only)",
+                        "SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER | CLAYER CELTYPE TEXTSTYLE (read-only)",
                     );
                 } else {
                     if matches!(name.as_str(), "SHOWHIST" | "SOLIDHIST") {
@@ -1500,6 +1515,20 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((
                                     format!("CLIPROMPTLINES = {}", self.cliprompt_lines),
+                                    false,
+                                )),
+                            },
+                            "COMMANDLINEFADETIME" => match &value {
+                                Some(v) => match v.parse::<i32>() {
+                                    Ok(n) if (0..=60000).contains(&n) => {
+                                        self.commandline_fade_ms = n;
+                                        self.command_line.set_commandline_fade_ms(n as u32);
+                                        Ok((format!("COMMANDLINEFADETIME = {n}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 to 60000 required.".into()),
+                                },
+                                None => Ok((
+                                    format!("COMMANDLINEFADETIME = {}", self.commandline_fade_ms),
                                     false,
                                 )),
                             },
@@ -2083,6 +2112,7 @@ impl OpenCADStudio {
                                         | "CURSORTYPE"
                                         | "SNAPANG"
                                         | "CLIPROMPTLINES"
+                                        | "COMMANDLINEFADETIME"
                                         | "COLORTHEME"
                                         | "SELECTIONAREA"
                                         | "SELECTIONAREAOPACITY"
@@ -3120,5 +3150,28 @@ mod tests {
         assert_eq!(app.model_space.grip_color, 0);
         assert_eq!(app.model_space.grip_hot, 0);
         assert_eq!(app.model_space.grip_hover, 0);
+    }
+
+    #[test]
+    fn bare_commandlinefadetime_stays_active_until_value_or_cancel() {
+        let mut app = fresh_app();
+        let _ = app.run_command_line("COMMANDLINEFADETIME");
+        // Like RECTANGLE and PICKADD: bare form installs an active command
+        // whose pinned prompt stays until a value, Enter, or Esc.
+        assert!(
+            app.tabs[app.active_tab].active_cmd.is_some(),
+            "bare COMMANDLINEFADETIME must stay active"
+        );
+        // A value sets the variable and ends the command.
+        let _ = app.run_command_line("COMMANDLINEFADETIME 5000");
+        assert_eq!(app.commandline_fade_ms, 5000);
+        assert_eq!(app.command_line.commandline_fade_ms(), 5000);
+        assert!(app.tabs[app.active_tab].active_cmd.is_none());
+        // Bare again, then Esc cancels without changing the value.
+        let _ = app.run_command_line("COMMANDLINEFADETIME");
+        assert!(app.tabs[app.active_tab].active_cmd.is_some());
+        let _ = app.update(crate::app::Message::CommandEscape);
+        assert!(app.tabs[app.active_tab].active_cmd.is_none());
+        assert_eq!(app.commandline_fade_ms, 5000);
     }
 }

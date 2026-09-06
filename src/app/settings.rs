@@ -243,6 +243,13 @@ pub struct UserSettings {
     /// are displayed above the command window (0–50, Registry, default 3).
     #[serde(default = "default_clipromptlines", deserialize_with = "deserialize_clipromptlines")]
     pub cliprompt_lines: i32,
+    /// COMMANDLINEFADETIME: how long command-line overlay history lines stay
+    /// visible, in milliseconds (0–60000, default 3000). 0 skips transient lines.
+    #[serde(
+        default = "default_commandline_fade_ms",
+        deserialize_with = "deserialize_commandline_fade_ms"
+    )]
+    pub commandline_fade_ms: i32,
     /// Most-recently-inserted block names, most recent first, capped to 20.
     /// Used to rank INSERT suggestions without touching the drawing file.
     #[serde(default)]
@@ -254,6 +261,22 @@ pub struct UserSettings {
 
 fn default_clipromptlines() -> i32 {
     3
+}
+
+fn default_commandline_fade_ms() -> i32 {
+    3000
+}
+
+fn deserialize_commandline_fade_ms<'de, D>(de: D) -> Result<i32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = i32::deserialize(de).unwrap_or(3000);
+    Ok(v.clamp(0, 60000))
+}
+
+pub fn clamp_commandline_fade_ms(v: i32) -> i32 {
+    v.clamp(0, 60000)
 }
 
 fn default_dimension_continue_mode() -> i16 {
@@ -312,6 +335,7 @@ impl Default for UserSettings {
             paper_bg_color: None,
             language: crate::i18n::Language::default(),
             cliprompt_lines: 3,
+            commandline_fade_ms: 3000,
             block_mru: Vec::new(),
             block_freq: std::collections::HashMap::new(),
         }

@@ -141,8 +141,32 @@ fn query_gen_src() -> String {
     include_str!("src/gen/query_gen.rs").to_string()
 }
 
+/// Render a method/constructor's `fixed` fields compactly (e.g.
+/// `, op="Intersection", erase_sources=true`). Empty when no fixed fields.
+fn fmt_fixed(fixed: Option<&toml::Value>) -> String {
+    let Some(fixed) = fixed else { return String::new() };
+    let Some(tbl) = fixed.as_table() else { return String::new() };
+    if tbl.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<String> = tbl.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    format!("; fixed {}", parts.join(", "))
+}
+
 fn fmt_args(args: &[Arg]) -> String {
+    // Renders `(...)` with the args, or `()` for a zero-arg method.
+    if args.is_empty() {
+        return String::new();
+    }
     args.iter().map(|a| format!("{}: {}", a.name, a.ty)).collect::<Vec<_>>().join(", ")
+}
+
+/// The parenthesised argument list: `(a: T, b: U)` or `()` for zero args.
+fn fmt_call_args(args: &[Arg]) -> String {
+    if args.is_empty() {
+        return "()".to_string();
+    }
+    format!("({})", fmt_args(args))
 }
 
 /// The generic handle methods + cross-cutting surface (applies to every handle;
@@ -231,10 +255,12 @@ fn api_reference_md(spec: &Spec) -> String {
             for c in &fam.constructor {
                 let ret = c.returns.as_deref().unwrap_or(handle);
                 let bulk = if c.bulk { " *(bulk op)*" } else { "" };
+                let op = c.op.as_deref().unwrap_or("-");
+                let fixed = fmt_fixed(c.fixed.as_ref());
                 s.push_str(&format!(
-                    "- **{}**(`{}`) -> `{ret}`{bulk}{}\n",
+                    "- **{}**{} -> `{ret}`{bulk} — `{op}`{fixed}{}\n",
                     c.name,
-                    fmt_args(&c.args),
+                    fmt_call_args(&c.args),
                     status_suffix(c.status.as_deref())
                 ));
             }
@@ -245,10 +271,11 @@ fn api_reference_md(spec: &Spec) -> String {
             s.push_str("### Methods\n\n");
             for m in &fam.method {
                 let target = m.op.as_deref().or(m.query.as_deref()).unwrap_or("-");
+                let fixed = fmt_fixed(m.fixed.as_ref());
                 s.push_str(&format!(
-                    "- **{}**(`{}`) -> `{}` — {} `{}`{}\n",
+                    "- **{}**{} -> `{}` — {} `{}`{fixed}{}\n",
                     m.name,
-                    fmt_args(&m.args),
+                    fmt_call_args(&m.args),
                     m.returns.as_deref().unwrap_or("()"),
                     m.kind,
                     target,
@@ -265,7 +292,65 @@ fn api_reference_md(spec: &Spec) -> String {
     for k in &spec.kernel_map {
         s.push_str(&format!("| {} | `{}` | {} |\n", k.op, k.kernel, k.returns));
     }
+    s.push('\n');
+    s.push_str(&wire_vocabulary_md());
+    s.push('\n');
+    s.push_str(&error_and_envelope_md());
     s
+}
+
+/// The wire vocabulary section: every `Operation`/`Query` variant with its payload,
+/// read from `src/gen/layouts.json` (the curated wire-layout snapshot).
+fn wire_vocabulary_md() -> String {
+    let layouts = match fs::read_to_string(layouts_snapshot_path()) {
+        Ok(src) => serde_json::from_str::<serde_json::Value>(&src).unwrap_or_else(|_| serde_json::json!({})),
+        Err(_) => serde_json::json!({}),
+    };
+    let mut s = String::from("## Wire vocabulary\n\nEvery `Operation` is ONE atomic write op (one undo step); every `Query` is read-only (safe to batch). Variants are append-only (bincode discriminant stability). Requests ride `DocApiEnvelope`: `Op(Operation)` for a write, `Queries(Vec<Query>)` for a read batch.\n\n");
+    s.push_str("### `Operation`\n\n");
+    if let Some(variants) = layouts.get("Operation").and_then(|o| o.get("enum")).and_then(|v| v.as_array()) {
+        for v in variants {
+            if let Some(name) = v.as_str() {
+                s.push_str(&format!("- `{name}`\n"));
+            }
+        }
+    }
+    s.push_str("\n### `Query`\n\n");
+    if let Some(variants) = layouts.get("Query").and_then(|o| o.get("enum")).and_then(|v| v.as_array()) {
+        for v in variants {
+            if let Some(name) = v.as_str() {
+                s.push_str(&format!("- `{name}`\n"));
+            }
+        }
+    }
+    s
+}
+
+/// The error model + envelope/transport section.
+fn error_and_envelope_md() -> String {
+    r#"## Errors (`ApiError`)
+
+| Variant | Meaning |
+|---|---|
+| `Validation { op, reason }` | Input rejected **before** any mutation (bulk ops name the failing index). |
+| `Geometry { kind, msg }` | The kernel failed (boolean refused, invalid input, ACIS lift/lower). |
+| `UnknownId(ObjectId)` | The handle is stale / deleted / never existed (never a panic). |
+| `Unsupported(String)` | Capability not implemented (e.g. a later-phase family or sub-type). |
+| `Transport(String)` | The channel failed (disconnected / oversized / timeout). |
+
+`ApiError` is serializable, so IPC returns the same structured error the in-process
+executor produced.
+
+## Envelope & transport
+
+`DocApiEnvelope { version, body }` — `body` is `Op(Operation)` (a single write) or
+`Queries(Vec<Query>)` (a read batch). bincode-serialized; `version` is the crate's
+envelope version (bridges must check it). Transports: `InProcess` (host) and
+`OcsPluginApiIpc` (plugin over `ocs_plugin_api`), both behind the `Transport:
+Send + Sync` trait (`apply(envelope) -> Receipt`, `alive()`). `Receipt` carries
+`outcome` (per-op result), `query_results`, and `new_revision`.
+"#
+    .to_string()
 }
 
 /// The merged, self-contained binding handover schema (§10.2). Object model +

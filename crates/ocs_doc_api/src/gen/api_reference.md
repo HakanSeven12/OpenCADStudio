@@ -10,83 +10,83 @@ B-rep solid. Host resolves bodies via the solid_models cache (lift-on-miss from 
 
 ### Constructors (`doc.solids()`)
 
-- **create_cuboid**(`origin: [f64; 3], size: [f64; 3]`) -> `Solid`
-- **create_sphere**(`centre: [f64; 3], radius: f64`) -> `Solid`
-- **create_cylinder**(`base: [f64; 3], radius: f64, height: f64`) -> `Solid`
-- **create_cone**(`base: [f64; 3], radius: f64, height: f64`) -> `Solid`
-- **create_torus**(`centre: [f64; 3], major_radius: f64, minor_radius: f64`) -> `Solid`
-- **create_wedge**(`origin: [f64; 3], size: [f64; 3]`) -> `Solid`
-- **extrude**(`profile: EntityRef, direction: [f64; 3]`) -> `Solid`
-- **revolve**(`profile: EntityRef, pivot: [f64; 3], axis: [f64; 3], angle: f64`) -> `Solid`
-- **loft**(`profiles: &[EntityRef]`) -> `Solid`
+- **create_cuboid**(origin: [f64; 3], size: [f64; 3]) -> `Solid` — `CreateSolid`; fixed primitive="Cuboid"
+- **create_sphere**(centre: [f64; 3], radius: f64) -> `Solid` — `CreateSolid`; fixed primitive="Sphere"
+- **create_cylinder**(base: [f64; 3], radius: f64, height: f64) -> `Solid` — `CreateSolid`; fixed primitive="Cylinder"
+- **create_cone**(base: [f64; 3], radius: f64, height: f64) -> `Solid` — `CreateSolid`; fixed primitive="Cone"
+- **create_torus**(centre: [f64; 3], major_radius: f64, minor_radius: f64) -> `Solid` — `CreateSolid`; fixed primitive="Torus"
+- **create_wedge**(origin: [f64; 3], size: [f64; 3]) -> `Solid` — `CreateSolid`; fixed primitive="Wedge"
+- **extrude**(profile: EntityRef, direction: [f64; 3]) -> `Solid` — `Extrude`
+- **revolve**(profile: EntityRef, pivot: [f64; 3], axis: [f64; 3], angle: f64) -> `Solid` — `Revolve`
+- **loft**(profiles: &[EntityRef]) -> `Solid` — `Loft`
 
 ### Methods
 
-- **intersect**(`other: Solid`) -> `Solid` — op `SolidBoolean`
-- **union**(`other: Solid`) -> `Solid` — op `SolidBoolean`
-- **subtract**(`other: Solid`) -> `Solid` — op `SolidBoolean`
-- **volume**(``) -> `f64` — query `GetVolume`
-- **centroid**(``) -> `[f64; 3]` — query `GetCentroid`
-- **intersects**(`other: Solid`) -> `bool` — query `GetIntersects`
+- **intersect**(other: Solid) -> `Solid` — op `SolidBoolean`; fixed erase_sources=true, op="Intersection"
+- **union**(other: Solid) -> `Solid` — op `SolidBoolean`; fixed erase_sources=true, op="Union"
+- **subtract**(other: Solid) -> `Solid` — op `SolidBoolean`; fixed erase_sources=true, op="Difference"
+- **volume**() -> `f64` — query `GetVolume`
+- **centroid**() -> `[f64; 3]` — query `GetCentroid`
+- **intersects**(other: Solid) -> `bool` — query `GetIntersects`
 
 ## `Line` (acadrust `Line`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_line**(`start: [f64; 3], end: [f64; 3]`) -> `Line`
+- **create_line**(start: [f64; 3], end: [f64; 3]) -> `Line` — `CreateCurve`; fixed curve="Line"
 
 ## `Circle` (acadrust `Circle`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_circle**(`centre: [f64; 3], radius: f64`) -> `Circle`
+- **create_circle**(centre: [f64; 3], radius: f64) -> `Circle` — `CreateCurve`; fixed curve="Circle"
 
 ## `Polyline` (acadrust `LwPolyline`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_polyline**(`points: &[[f64; 3]], closed: bool`) -> `Polyline`
+- **create_polyline**(points: &[[f64; 3]], closed: bool) -> `Polyline` — `CreateCurve`; fixed curve="Polyline"
 
 ### Methods
 
-- **add_vertex**(`at: usize, point: [f64; 3]`) -> `()` — op `AddVertex`
+- **add_vertex**(at: usize, point: [f64; 3]) -> `()` — op `AddVertex`
 
 ## `Point` (acadrust `Point`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_point**(`position: [f64; 3]`) -> `Point`
-- **create_points**(`positions: &[[f64; 3]]`) -> `Vec<Point>` *(bulk op)*
+- **create_point**(position: [f64; 3]) -> `Point` — `CreateCurve`; fixed curve="Point"
+- **create_points**(positions: &[[f64; 3]]) -> `Vec<Point>` *(bulk op)* — `CreateMany`; fixed curve="Point"
 
 ## `ArcCurve` (acadrust `Arc`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_arc**(`centre: [f64; 3], radius: f64, start_angle: f64, end_angle: f64`) -> `ArcCurve`
+- **create_arc**(centre: [f64; 3], radius: f64, start_angle: f64, end_angle: f64) -> `ArcCurve` — `CreateCurve`; fixed curve="Arc"
 
 ## `Ellipse` (acadrust `Ellipse`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_ellipse**(`centre: [f64; 3], major_axis: [f64; 3], ratio: f64, start: f64, end: f64`) -> `Ellipse`
+- **create_ellipse**(centre: [f64; 3], major_axis: [f64; 3], ratio: f64, start: f64, end: f64) -> `Ellipse` — `CreateCurve`; fixed curve="Ellipse"
 
 ## `Spline` (acadrust `Spline`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_spline**(`degree: i32, control_points: &[[f64; 3]], knots: &[f64], weights: &[f64]`) -> `Spline`
+- **create_spline**(degree: i32, control_points: &[[f64; 3]], knots: &[f64], weights: &[f64]) -> `Spline` — `CreateCurve`; fixed curve="Spline"
 
 ## `Ray` (acadrust `Ray`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_ray**(`origin: [f64; 3], direction: [f64; 3]`) -> `Ray`
+- **create_ray**(origin: [f64; 3], direction: [f64; 3]) -> `Ray` — `CreateCurve`; fixed curve="Ray"
 
 ## `XLine` (acadrust `XLine`, collection `curves`)
 
 ### Constructors (`doc.curves()`)
 
-- **create_xline**(`origin: [f64; 3], direction: [f64; 3]`) -> `XLine`
+- **create_xline**(origin: [f64; 3], direction: [f64; 3]) -> `XLine` — `CreateCurve`; fixed curve="XLine"
 
 ## `Text` (acadrust `Text`, collection `curves`)
 
@@ -94,12 +94,12 @@ Single-line text annotation. content()/set_content() read+replace the value; tra
 
 ### Constructors (`doc.curves()`)
 
-- **create_text**(`value: &str, insertion_point: [f64; 3], height: f64, rotation: f64`) -> `Text`
+- **create_text**(value: &str, insertion_point: [f64; 3], height: f64, rotation: f64) -> `Text` — `CreateText`
 
 ### Methods
 
-- **content**(``) -> `String` — query `GetTextContent`
-- **set_content**(`value: &str`) -> `()` — op `SetTextContent`
+- **content**() -> `String` — query `GetTextContent`
+- **set_content**(value: &str) -> `()` — op `SetTextContent`
 
 ## `MText` (acadrust `MText`, collection `curves`)
 
@@ -107,12 +107,12 @@ Multi-line text annotation. content()/set_content() read+replace the value; tran
 
 ### Constructors (`doc.curves()`)
 
-- **create_mtext**(`value: &str, insertion_point: [f64; 3], height: f64`) -> `MText`
+- **create_mtext**(value: &str, insertion_point: [f64; 3], height: f64) -> `MText` — `CreateMText`
 
 ### Methods
 
-- **content**(``) -> `String` — query `GetTextContent`
-- **set_content**(`value: &str`) -> `()` — op `SetTextContent`
+- **content**() -> `String` — query `GetTextContent`
+- **set_content**(value: &str) -> `()` — op `SetTextContent`
 
 ## `Entity` (acadrust `Hatch`, collection `curves`)
 
@@ -120,11 +120,11 @@ Filled region over a closed polyline boundary. boundary() returns the loops; bou
 
 ### Constructors (`doc.curves()`)
 
-- **create_hatch**(`boundary: &[[f64; 2]], solid: bool`) -> `Entity`
+- **create_hatch**(boundary: &[[f64; 2]], solid: bool) -> `Entity` — `CreateHatch`
 
 ### Methods
 
-- **boundary**(``) -> `Vec<Vec<[f64; 2]>>` — query `GetHatchBoundary`
+- **boundary**() -> `Vec<Vec<[f64; 2]>>` — query `GetHatchBoundary`
 
 ## `Dimension` (acadrust `Dimension`, collection `curves`)
 
@@ -132,11 +132,11 @@ Linear dimension between two measured points. measurement() reads the distance; 
 
 ### Constructors (`doc.curves()`)
 
-- **create_dimension_linear**(`first_point: [f64; 3], second_point: [f64; 3], definition_point: [f64; 3]`) -> `Dimension`
+- **create_dimension_linear**(first_point: [f64; 3], second_point: [f64; 3], definition_point: [f64; 3]) -> `Dimension` — `CreateDimensionLinear`
 
 ### Methods
 
-- **measurement**(``) -> `f64` — query `GetDimensionMeasurement`
+- **measurement**() -> `f64` — query `GetDimensionMeasurement`
 
 ## `Entity` (acadrust `Insert`, collection `entities`)
 
@@ -144,12 +144,12 @@ Block reference. Place an existing BlockRecord by name; transform moves its inse
 
 ### Constructors (`doc.entities()`)
 
-- **create_insert**(`block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64`) -> `Entity`
+- **create_insert**(block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64) -> `Entity` — `CreateInsert`
 
 ### Methods
 
-- **attributes**(``) -> `Vec<(String, String)>` — query `GetAttributes`
-- **set_attribute**(`tag: &str, value: &str`) -> `()` — op `SetAttribute`
+- **attributes**() -> `Vec<(String, String)>` — query `GetAttributes`
+- **set_attribute**(tag: &str, value: &str) -> `()` — op `SetAttribute`
 
 ## `Entity` (acadrust `Viewport`, collection `entities`)
 
@@ -157,12 +157,12 @@ Paper-space viewport: a width×height window at center looking at view_target wi
 
 ### Constructors (`doc.entities()`)
 
-- **create_viewport**(`center: [f64; 3], width: f64, height: f64, view_target: [f64; 3], view_height: f64`) -> `Entity`
+- **create_viewport**(center: [f64; 3], width: f64, height: f64, view_target: [f64; 3], view_height: f64) -> `Entity` — `CreateViewport`
 
 ### Methods
 
-- **viewport_view**(``) -> `([f64; 3], f64)` — query `GetViewportView`
-- **set_view**(`view_target: [f64; 3], view_height: f64`) -> `()` — op `SetViewportView`
+- **viewport_view**() -> `([f64; 3], f64)` — query `GetViewportView`
+- **set_view**(view_target: [f64; 3], view_height: f64) -> `()` — op `SetViewportView`
 
 ## `Entity` (acadrust `RasterImage`, collection `entities`)
 
@@ -170,7 +170,7 @@ Raster image: create_raster_image(file_path, insertion, u, v, size) places an im
 
 ### Constructors (`doc.entities()`)
 
-- **create_raster_image**(`file_path: &str, insertion_point: [f64; 3], u_vector: [f64; 3], v_vector: [f64; 3], size: [f64; 2]`) -> `Entity`
+- **create_raster_image**(file_path: &str, insertion_point: [f64; 3], u_vector: [f64; 3], v_vector: [f64; 3], size: [f64; 2]) -> `Entity` — `CreateRasterImage`
 
 ## `Entity` (acadrust `Table`, collection `entities`)
 
@@ -233,3 +233,69 @@ modeling-scale work.
 | Transform | `cadkernel::brep::transform` | Option<Body> |
 | GetBounds | `cadkernel::brep::body_bounds` | Option<Aabb> |
 | GetVolume | `cadkernel::brep::mesh_body + divergence` | computed |
+
+## Wire vocabulary
+
+Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-only (safe to batch). Variants are append-only (bincode discriminant stability). Requests ride `DocApiEnvelope`: `Op(Operation)` for a write, `Queries(Vec<Query>)` for a read batch.
+
+### `Operation`
+
+- `CreateSolid(SolidPrimitive)`
+- `CreateCurve(Curve2Spec)`
+- `Extrude { profile: ObjectId, direction: [f64; 3] }`
+- `Revolve { profile: ObjectId, axis: ([f64; 3], [f64; 3]), angle: f64 }`
+- `Transform { id: ObjectId, placement: PlacementSpec }`
+- `SolidBoolean { op: BoolOp, a: ObjectId, b: ObjectId, erase_sources: bool }`
+- `AddVertex { id: ObjectId, at: usize, point: [f64; 3] }`
+- `Delete { id: ObjectId }`
+- `CreateMany(Vec<EntitySpec>)`
+- `TransformMany { ids: Vec<ObjectId>, placement: PlacementSpec }`
+- `DeleteMany(Vec<ObjectId>)`
+- `CreateInsert(InsertSpec)`
+- `CreateViewport(ViewportSpec)`
+- `CreateText(TextSpec)`
+- `CreateMText(MTextSpec)`
+- `SetTextContent { id: ObjectId, value: String }`
+- `CreateHatch(HatchSpec)`
+- `CreateDimensionLinear(DimensionSpec)`
+- `SetAttribute { id: ObjectId, tag: String, value: String }`
+- `SetViewportView { id: ObjectId, view_target: [f64; 3], view_height: f64 }`
+- `CreateRasterImage(RasterImageSpec)`
+- `Loft { profiles: Vec<ObjectId> }`
+
+### `Query`
+
+- `GetEntity { id: ObjectId }`
+- `GetBounds { id: ObjectId }`
+- `GetCentroid { id: ObjectId }`
+- `GetVolume { id: ObjectId }`
+- `GetIntersects { a: ObjectId, b: ObjectId }`
+- `GetGeometryRevision`
+- `GetTextContent { id: ObjectId }`
+- `GetHatchBoundary { id: ObjectId }`
+- `GetDimensionMeasurement { id: ObjectId }`
+- `GetAttributes { id: ObjectId }`
+- `GetBlockEntities { block_name: String }`
+- `GetViewportView { id: ObjectId }`
+
+## Errors (`ApiError`)
+
+| Variant | Meaning |
+|---|---|
+| `Validation { op, reason }` | Input rejected **before** any mutation (bulk ops name the failing index). |
+| `Geometry { kind, msg }` | The kernel failed (boolean refused, invalid input, ACIS lift/lower). |
+| `UnknownId(ObjectId)` | The handle is stale / deleted / never existed (never a panic). |
+| `Unsupported(String)` | Capability not implemented (e.g. a later-phase family or sub-type). |
+| `Transport(String)` | The channel failed (disconnected / oversized / timeout). |
+
+`ApiError` is serializable, so IPC returns the same structured error the in-process
+executor produced.
+
+## Envelope & transport
+
+`DocApiEnvelope { version, body }` — `body` is `Op(Operation)` (a single write) or
+`Queries(Vec<Query>)` (a read batch). bincode-serialized; `version` is the crate's
+envelope version (bridges must check it). Transports: `InProcess` (host) and
+`OcsPluginApiIpc` (plugin over `ocs_plugin_api`), both behind the `Transport:
+Send + Sync` trait (`apply(envelope) -> Receipt`, `alive()`). `Receipt` carries
+`outcome` (per-op result), `query_results`, and `new_revision`.

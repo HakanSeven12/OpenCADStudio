@@ -1,6 +1,0 @@
-# Line endings: always LF, never CRLF, on every platform and clone.
-* text=auto eol=lf
-
-# Binary files must never be line-ending normalized.
-*.png binary
-*.ttf binary

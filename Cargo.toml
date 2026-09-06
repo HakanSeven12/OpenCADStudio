@@ -1,129 +1,64 @@
 [package]
-name = "OpenCADStudio"
-version = "2026.36.0"
+name = "ocs_doc_api"
+version = "0.1.0"
 edition = "2021"
+description = "Object-oriented, transport-agnostic CAD entity API for OpenCADStudio plugins and hosts (v2)."
+license = "MIT"
 build = "build.rs"
 
-[workspace]
-members = [
-    "crates/ocs_plugin_api",
-    "crates/ocs_web_worker",
-    "crates/dwg-thumbnailer",
-    "crates/dwg-thumbnailer-win",
-]
-
-[target.'cfg(windows)'.build-dependencies]
-winresource = "0.1"
-
+# Dependency wiring: pin the SAME cadkernel/acadrust git revs
+# as the host so `Body`/`EntityType` types are ABI-identical.
 [dependencies]
-serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-base64 = "0.22"
-semver = "1"
-iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["image", "svg", "advanced", "canvas", "smol", "markdown"] }
-iced_runtime = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-iced_aw = { git = "https://github.com/HakanSeven12/iced_aw.git", branch = "agent/fix-iced-fonts", features = ["menu", "context_menu", "color_picker", "drop_down"] }
-bytemuck = { version = "1.25", features = ["derive"] }
-glam = { version = "0.33", features = ["bytemuck"] }
-rfd = "0.17"
-clap = { version = "4", features = ["derive"] }
-env_logger = "0.11"
-acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "5b56571a190e7a17c8f12d36390d2938b0fb72f7", features = ["serde"] }
-cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "67f2427282d28922d9263e37b0136b6632e929b3", features = ["acis", "offset"] }
-dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
-flate2 = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
-# Rasterises assets/logo.svg into the window icon at startup, so the taskbar
-# icon comes from the same file every other build target does. Already in the
-# tree behind iced's svg feature; named here only to use it directly.
-resvg = { version = "0.45", default-features = false }
-i18n-embed = { version = "0.16", features = ["fluent-system"] }
-i18n-embed-fl = "0.10"
-rust-embed = "8"
-inventory = "0.3"
-rustc-hash = "2"
-sha2 = "0.10"
-fontdb = "0.23"
-ttf-parser = "0.25"
-cosmic-text = "0.15"
-lyon_tessellation = "1.0.20"
+bincode = "1.3"
+thiserror = "1"
+
+# Host adapters convert ObjectId to acadrust handles; kernel handles stay local.
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "5b56571a190e7a17c8f12d36390d2938b0fb72f7", features = ["serde"], optional = true }
+cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "6a5e6fc2822f6af6b2611cd605b44437b35158f0", features = ["acis", "offset"], optional = true }
+ocs_plugin_api = { path = "../ocs_plugin_api", optional = true, features = ["host"] }
+
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
 
 [dev-dependencies]
-naga = { version = "27", features = ["wgsl-in"] }
+serde_json = "1"
+toml = "1"
 
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_Foundation"] }
+[features]
+# Default keeps the facade and DTOs independent of geometry dependencies.
+default = []
+# host: pull acadrust + cadkernel + the executor/backend trait (in-process side).
+host = ["acadrust", "cadkernel"]
+# ipc: pull ocs_plugin_api for the IPC transport adapter (plugin side).
+ipc = ["acadrust", "ocs_plugin_api"]
 
-[target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "wayland"] }
+[lib]
+name = "ocs_doc_api"
+path = "src/lib.rs"
 
-[patch.crates-io]
-iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
+[[test]]
+name = "mock_backend"
+required-features = ["host"]
 
-[patch."https://github.com/HakanSeven12/cadcodec.git"]
-acadrust = { git = "https://git@github.com/HakanSeven12/cadcodec.git", rev = "5b56571a190e7a17c8f12d36390d2938b0fb72f7" }
+[[example]]
+name = "e1_primitives_and_queries"
+required-features = ["host"]
 
+[[example]]
+name = "e2_intersect_two_solids"
+required-features = ["host"]
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = "0.3"
-ocs_plugin_api = { path = "crates/ocs_plugin_api", features = ["host"] }
-meshopt = "0.6.2"
-i18n-embed = { version = "0.16", features = ["desktop-requester"] }
-rayon = "1"
-open = "5"
-printpdf = { version = "0.9.1", default-features = false }
-ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "win-system-proxy"] }
+[[example]]
+name = "e3_transform_and_chain"
+required-features = ["host"]
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-ocs_plugin_api = { path = "crates/ocs_plugin_api" }
-i18n-embed = { version = "0.16", features = ["web-sys-requester"] }
-rust-embed = { version = "8", features = ["debug-embed"] }
-console_error_panic_hook = "0.1"
-log = "0.4"
-getrandom = { version = "0.3", features = ["wasm_js"] }
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
-bincode = "1.3"
-web-sys = { version = "=0.3.85", features = [
-    "Window",
-    "Storage",
-    "StorageManager",
-    "Navigator",
-    "Document",
-    "Element",
-    "HtmlAnchorElement",
-    "Blob",
-    "File",
-    "FileSystemDirectoryHandle",
-    "FileSystemFileHandle",
-    "FileSystemGetDirectoryOptions",
-    "FileSystemGetFileOptions",
-    "FileSystemWritableFileStream",
-    "WritableStream",
-    "Url",
-    "Response",
-    "Worker",
-    "WorkerOptions",
-    "WorkerType",
-    "MessageEvent",
-    "ErrorEvent",
-    "Clipboard",
-    "KeyboardEvent",
-    "KeyboardEventInit",
-    "EventInit",
-    "EventTarget",
-    "BeforeUnloadEvent",
-    "console",
-    "Node",
-    "HtmlElement",
-    "HtmlCanvasElement",
-    "CanvasRenderingContext2d",
-    "ImageData",
-] }
-iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["webgl", "fira-sans"] }
+[[example]]
+name = "e4_2d_entities_and_bulk"
+required-features = ["host"]
 
-[profile.release]
-strip = true
+[[example]]
+name = "e5_failure_and_guards"
+required-features = ["host"]

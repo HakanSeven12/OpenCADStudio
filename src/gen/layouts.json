@@ -1,0 +1,51 @@
+{
+  "ObjectId": { "struct": [ { "name": "0", "type": "u64" } ] },
+  "Operation": {
+    "enum": [
+      "CreateSolid(SolidPrimitive)",
+      "CreateCurve(Curve2Spec)",
+      "Extrude { profile: ObjectId, direction: [f64; 3] }",
+      "Revolve { profile: ObjectId, axis: ([f64; 3], [f64; 3]), angle: f64 }",
+      "Transform { id: ObjectId, placement: PlacementSpec }",
+      "SolidBoolean { op: BoolOp, a: ObjectId, b: ObjectId, erase_sources: bool }",
+      "AddVertex { id: ObjectId, at: usize, point: [f64; 3] }",
+      "Delete { id: ObjectId }",
+      "CreateMany(Vec<EntitySpec>)",
+      "TransformMany { ids: Vec<ObjectId>, placement: PlacementSpec }",
+      "DeleteMany(Vec<ObjectId>)",
+      "CreateInsert(InsertSpec)",
+      "CreateViewport(ViewportSpec)",
+      "CreateText(TextSpec)",
+      "CreateMText(MTextSpec)",
+      "SetTextContent { id: ObjectId, value: String }",
+      "CreateHatch(HatchSpec)",
+      "CreateDimensionLinear(DimensionSpec)",
+      "SetAttribute { id: ObjectId, tag: String, value: String }",
+      "SetViewportView { id: ObjectId, view_target: [f64; 3], view_height: f64 }",
+      "CreateRasterImage(RasterImageSpec)",
+      "Loft { profiles: Vec<ObjectId> }",
+      "CreateDimensionRadius(DimensionRadialSpec)",
+      "CreateDimensionDiameter(DimensionRadialSpec)",
+      "CreateDimensionAngular(DimensionAngularSpec)",
+      "CreateAttributeDefinition(AttributeDefinitionSpec)",
+      "CreateTable(TableSpec)",
+      "CreateDimensionAngular2Ln(DimensionAngularSpec)"
+    ]
+  },
+  "Query": {
+    "enum": [
+      "GetEntity { id: ObjectId }",
+      "GetBounds { id: ObjectId }",
+      "GetCentroid { id: ObjectId }",
+      "GetVolume { id: ObjectId }",
+      "GetIntersects { a: ObjectId, b: ObjectId }",
+      "GetGeometryRevision",
+      "GetTextContent { id: ObjectId }",
+      "GetHatchBoundary { id: ObjectId }",
+      "GetDimensionMeasurement { id: ObjectId }",
+      "GetAttributes { id: ObjectId }",
+      "GetBlockEntities { block_name: String }",
+      "GetViewportView { id: ObjectId }"
+    ]
+  }
+}

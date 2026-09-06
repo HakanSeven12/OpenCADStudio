@@ -19,6 +19,7 @@ acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "c91a1c
 # Runtime IPC and serialization (host feature only).
 interprocess = { version = "2", optional = true }
 bincode = { version = "1", optional = true }
+serde_bytes = { version = "0.11", optional = true }
 thiserror = { version = "1", optional = true }
 libloading = { version = "0.8", optional = true }
 memmap2 = { version = "0.9", optional = true }
@@ -29,7 +30,7 @@ getrandom = { version = "0.2", optional = true }
 # Enables the runtime host surface (`HostApi` trait) and the out-of-process
 # plugin runtime. The OpenCADStudio binary turns this on; pure-data consumers
 # leave it off.
-host = ["dep:acadrust", "dep:interprocess", "dep:bincode", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv", "dep:getrandom"]
+host = ["dep:acadrust", "dep:interprocess", "dep:bincode", "dep:serde_bytes", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv", "dep:getrandom"]
 
 [build-dependencies]
 serde-reflection = "0.6"

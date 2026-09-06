@@ -77,5 +77,9 @@ pub fn handle_plugin_request(
         DocumentPath { tab_id } => PluginResponse::DocumentPath(
             host.document_path(tab_id).map(|path| path.into_os_string()),
         ),
+        DocApiRequest { tab_id, bytes } => match host.doc_api_dispatch(tab_id, &bytes) {
+            Ok(bytes) => PluginResponse::DocApiResponse { bytes },
+            Err(msg) => PluginResponse::Error(msg),
+        },
     }
 }

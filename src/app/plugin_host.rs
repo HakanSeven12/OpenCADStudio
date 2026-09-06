@@ -16,6 +16,8 @@ pub(crate) struct HostSession<'a> {
     app: &'a mut OpenCADStudio,
     tab: usize,
     doc_store: Option<DocumentSnapshotStore<DocumentViewData>>,
+    /// In-flight DocApi v2 undo delta (between `push_undo` and `finalize_op`).
+    doc_api_pending: Option<super::history::PendingDelta>,
 }
 
 impl<'a> HostSession<'a> {
@@ -24,6 +26,7 @@ impl<'a> HostSession<'a> {
             app,
             tab,
             doc_store: None,
+            doc_api_pending: None,
         }
     }
 
@@ -242,6 +245,39 @@ impl<'a> HostSession<'a> {
         self.app.push_undo_snapshot(self.tab, label);
     }
 
+    // ── DocApi v2 accessors (used by `app::doc_api` backend) ───────────────
+
+    pub(crate) fn scene(&self) -> &crate::scene::Scene {
+        &self.app.tabs[self.tab].scene
+    }
+
+    pub(crate) fn scene_mut(&mut self) -> &mut crate::scene::Scene {
+        &mut self.app.tabs[self.tab].scene
+    }
+
+    /// DocApi `push_undo`: capture entity and document-structure changes for one op.
+    pub(crate) fn begin_doc_api_undo(&mut self, label: &str) {
+        self.doc_api_pending = self.app.begin_undo(self.tab, label, 1, false);
+    }
+
+    pub(crate) fn cancel_doc_api_undo(&mut self) {
+        if self.doc_api_pending.take().is_some() {
+            self.scene_mut().take_undo_recording();
+        }
+    }
+
+    /// DocApi `finalize_op`: close the delta + republish the document view.
+    /// The underlying entity op (add/update/remove/register_solid_model) already
+    /// bumped `geometry_epoch`, so we do NOT bump again here — exactly one undo
+    /// step is recorded, and the epoch has advanced for this op.
+    pub(crate) fn commit_doc_api_undo(&mut self) {
+        self.set_dirty();
+        if let Some(pending) = self.doc_api_pending.take() {
+            self.app.commit_undo_delta(self.tab, pending);
+        }
+        self.publish_document_view();
+    }
+
     pub fn set_dirty(&mut self) {
         self.app.tabs[self.tab].dirty = true;
     }
@@ -359,6 +395,10 @@ impl HostApi for HostSession<'_> {
     #[cfg(not(target_arch = "wasm32"))]
     fn close_document_view_v4(&mut self, tab_id: u64) {
         self.close_document_view_v4(tab_id)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn doc_api_dispatch(&mut self, tab_id: u64, bytes: &[u8]) -> Result<Vec<u8>, String> {
+        super::doc_api::execute_doc_api(self, tab_id, bytes)
     }
 }
 

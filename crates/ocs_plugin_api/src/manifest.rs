@@ -19,7 +19,14 @@
 /// vtable so API v2 plugins keep working. v4 adds full-duplex notifications on
 /// a multiplexed socket while leaving the V2/V3 ABI and protocol untouched. v5
 /// adds the `BuiltinPlugin::on_load` lifecycle callback.
-pub const API_VERSION: u32 = 5;
+/// Host ABI major version. Bumped to 6 when the DocApi v2 surface
+/// (`PluginRequest::DocApiRequest` / `PluginResponse::DocApiResponse` +
+/// `HostApi::doc_api_dispatch`) was added: plugins that call DocApi require an
+/// API-6 host and are rejected at handshake by older (API ≤ 5) hosts, instead of
+/// failing at runtime with a bincode-decode transport error. The DocApi wire
+/// changes are append-only and `doc_api_dispatch` is a defaulted method, so
+/// older V2–V5 plugins still load unchanged on an API-6 host.
+pub const API_VERSION: u32 = 6;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

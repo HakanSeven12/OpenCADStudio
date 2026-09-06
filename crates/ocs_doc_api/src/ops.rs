@@ -148,6 +148,15 @@ pub struct AttributeDefinitionSpec {
     pub rotation: f64,
 }
 
+/// Construction spec for a `TABLE`: an insertion point plus a grid of cell
+/// strings (`data[row][column]`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableSpec {
+    pub insertion_point: [f64; 3],
+    /// Grid of cell text values, rows × columns.
+    pub data: Vec<Vec<String>>,
+}
+
 /// Construction spec for a `RASTER_IMAGE`: an image file placed at
 /// `insertion_point` with per-pixel world-unit vectors `u_vector`/`v_vector` and
 /// pixel `size` (width, height). The host auto-registers the ImageDefinition.
@@ -223,6 +232,7 @@ impl crate::gen::Operation {
             CreateDimensionDiameter(_) => "CreateDimensionDiameter",
             CreateDimensionAngular(_) => "CreateDimensionAngular",
             CreateAttributeDefinition(_) => "CreateAttributeDefinition",
+            CreateTable(_) => "CreateTable",
         }
     }
 }

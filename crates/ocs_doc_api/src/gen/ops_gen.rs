@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::ObjectId;
-use crate::ops::{AttributeDefinitionSpec, BoolOp, Curve2Spec, DimensionAngularSpec, DimensionRadialSpec, DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, RasterImageSpec, SolidPrimitive, TextSpec, ViewportSpec};
+use crate::ops::{AttributeDefinitionSpec, BoolOp, Curve2Spec, DimensionAngularSpec, DimensionRadialSpec, DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, RasterImageSpec, SolidPrimitive, TableSpec, TextSpec, ViewportSpec};
 
 /// A typed write operation (plan §5). Each variant is ONE atomic host call = one
 /// undo step. Append new variants at the END only.
@@ -54,4 +54,6 @@ pub enum Operation {
     CreateDimensionAngular(DimensionAngularSpec),
     // attribute definitions
     CreateAttributeDefinition(AttributeDefinitionSpec),
+    // tables
+    CreateTable(TableSpec),
 }

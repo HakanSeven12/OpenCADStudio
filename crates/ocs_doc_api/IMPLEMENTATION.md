@@ -107,10 +107,11 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
   `RasterImage` has coarse bounds (insertion + u·width + v·height); generic
   `delete` works on all. Covered by `phase5_*` test.
 - **Done (typed create):** `create_raster_image(file_path, insertion, u, v, size)`
-  → `Operation::CreateRasterImage`; the host auto-registers the `ImageDefinition`
-  (asserted by `phase5_create_raster_image_registers_definition`). Covered by that
-  test. `Table`/light stay read-only `EntityView` DTOs (typed ops only where the
-  spec declares an action mapping).
+  → `Operation::CreateRasterImage` (host auto-registers the ImageDefinition), and
+  `create_table(insertion_point, data[row][col])` → `Operation::CreateTable`
+  (non-rectangular grid → `Validation`; cells built as text). Covered by
+  `phase5_create_raster_image_*` and `phase5ii_create_table_*` tests. `light` stays
+  read-only (no meaningful geometric action).
 
 ## 🔧 Outstanding methods on supported families
 

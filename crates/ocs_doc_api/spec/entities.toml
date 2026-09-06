@@ -445,7 +445,12 @@ name = "Table"
 acadrust_variant = "Table"
 handle = "Entity"
 collection = "entities"
-description = "Table (read-only): GetEntity kind; generic delete. No typed create/bounds in v1."
+description = "Table: create_table(insertion_point, data[row][col]) builds rows x columns of text cells; non-rectangular grid -> Validation; delete."
+
+[[family.constructor]]
+name = "create_table"
+args = [{ name = "insertion_point", ty = "[f64; 3]" }, { name = "data", ty = "&[Vec<String>]" }]
+op = "CreateTable"
 
 # ============================================================================
 # Cross-cutting ops (generic handles + bulk) — documented in build.rs

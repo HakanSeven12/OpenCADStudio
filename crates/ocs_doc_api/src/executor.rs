@@ -293,6 +293,17 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::CreateTable(spec) => {
+            // Validate a non-empty, rectangular grid before committing.
+            let cols = spec.data.first().map(|r| r.len()).unwrap_or(0);
+            if spec.data.is_empty() || cols == 0 || spec.data.iter().any(|r| r.len() != cols) {
+                return Err(ApiError::validation(name, "table needs a non-empty rectangular grid"));
+            }
+            b.push_undo(name);
+            let id = b.add_table(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),

@@ -185,7 +185,11 @@ Raster image: create_raster_image(file_path, insertion, u, v, size) places an im
 
 ## `Entity` (acadrust `Table`, collection `entities`)
 
-Table (read-only): GetEntity kind; generic delete. No typed create/bounds in v1.
+Table: create_table(insertion_point, data[row][col]) builds rows x columns of text cells; non-rectangular grid -> Validation; delete.
+
+### Constructors (`doc.entities()`)
+
+- **create_table**(insertion_point: [f64; 3], data: &[Vec<String>]) -> `Entity` — `CreateTable`
 
 ## Generic methods (every handle)
 

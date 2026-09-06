@@ -75,6 +75,9 @@ pub trait DocApiBackend {
     /// Add an `ATTDEF` (in-block attribute definition); returns the fresh `ObjectId`.
     fn add_attribute_definition(&mut self, spec: &crate::ops::AttributeDefinitionSpec) -> ApiResult<ObjectId>;
 
+    /// Add a `TABLE` (rows × columns grid); returns the fresh `ObjectId`.
+    fn add_table(&mut self, spec: &crate::ops::TableSpec) -> ApiResult<ObjectId>;
+
     /// A dimension's measured value (distance for linear/radius, degrees for angular).
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64>;
 

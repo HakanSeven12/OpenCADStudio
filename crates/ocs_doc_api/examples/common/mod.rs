@@ -206,6 +206,13 @@ impl DocApiBackend for MockBackend {
         }
         Ok(self.alloc("AttributeDefinition"))
     }
+    fn add_table(&mut self, spec: &ocs_doc_api::ops::TableSpec) -> ApiResult<ObjectId> {
+        let cols = spec.data.first().map(|r| r.len()).unwrap_or(0);
+        if spec.data.is_empty() || cols == 0 || spec.data.iter().any(|r| r.len() != cols) {
+            return Err(ApiError::validation("CreateTable", "table needs a non-empty rectangular grid"));
+        }
+        Ok(self.alloc("Table"))
+    }
     fn set_attribute(&mut self, id: ObjectId, tag: &str, value: &str) -> ApiResult<()> {
         if !self.entity_exists(id) {
             return Err(ApiError::UnknownId(id));

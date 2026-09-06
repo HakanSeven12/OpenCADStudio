@@ -631,6 +631,16 @@ impl EntityCollection {
         Ok(Entity::new(self.session.clone(), id))
     }
 
+    /// Create a TABLE from a grid of cell strings (`data[row][column]`), at a point.
+    pub fn create_table(&self, insertion_point: [f64; 3], data: &[Vec<String>]) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateTable(crate::ops::TableSpec {
+            insertion_point,
+            data: data.to_vec(),
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_table returned no id".into()))?;
+        Ok(Entity::new(self.session.clone(), id))
+    }
+
     /// Create an ATTDEF (in-block attribute definition): tag/prompt/default at a point.
     pub fn create_attribute_definition(&self, tag: &str, prompt: &str, default_value: &str, insertion_point: [f64; 3], height: f64, rotation: f64) -> ApiResult<Entity> {
         let receipt = self.session.apply_op(Operation::CreateAttributeDefinition(crate::ops::AttributeDefinitionSpec {

@@ -306,6 +306,25 @@ impl DocApiBackend for HostSession<'_> {
         Ok(handle_to_obj(handle))
     }
 
+    fn add_table(&mut self, spec: &ocs_doc_api::ops::TableSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::Table;
+        use acadrust::types::Vector3;
+        let cols = spec.data.first().map(|r| r.len()).unwrap_or(0);
+        let mut table = Table::new(
+            Vector3::new(spec.insertion_point[0], spec.insertion_point[1], spec.insertion_point[2]),
+            spec.data.len(),
+            cols,
+        );
+        // Fill cells from the grid (each cell = text).
+        for (r, row) in spec.data.iter().enumerate() {
+            for (c, text) in row.iter().enumerate() {
+                table.set_cell_text(r, c, text);
+            }
+        }
+        let handle = self.scene_mut().add_entity(EntityType::Table(table));
+        Ok(handle_to_obj(handle))
+    }
+
     fn set_attribute(&mut self, id: ObjectId, tag: &str, value: &str) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let entity = self.document().get_entity(handle).cloned().ok_or(ApiError::UnknownId(id))?;
@@ -1182,6 +1201,35 @@ mod tests {
         let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetEntity { id: attdef }])).unwrap();
         match &receipt.query_results[0] {
             QueryResult::Entity(e) => assert_eq!(e.kind, "AttributeDefinition"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+    }
+
+    // ── Phase 5-ii: typed Table create ───────────────────────────────────────
+
+    #[test]
+    fn phase5ii_create_table_from_grid() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let data = vec![
+            vec!["Name".to_string(), "Value".to_string()],
+            vec!["Length".to_string(), "100.0".to_string()],
+            vec!["Width".to_string(), "50.0".to_string()],
+        ];
+        let table = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateTable(
+            ocs_doc_api::ops::TableSpec { insertion_point: [10.0, 10.0, 0.0], data: data.clone() }))).unwrap());
+        let handle = obj_to_handle(table);
+        let Some(EntityType::Table(t)) = host.document().get_entity(handle) else { panic!("table not found") };
+        assert_eq!(t.rows.len(), 3);
+        assert_eq!(t.columns.len(), 2);
+        // Non-rectangular grid is a validation error.
+        let bad = vec![vec!["a".to_string()], vec!["b".to_string(), "c".to_string()]];
+        assert!(dispatch(&mut host, DocApiEnvelope::op(Operation::CreateTable(
+            ocs_doc_api::ops::TableSpec { insertion_point: [0.0; 3], data: bad }))).is_err());
+        // GetEntity reports kind Table.
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetEntity { id: table }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Entity(e) => assert_eq!(e.kind, "Table"),
             other => panic!("expected entity, got {other:?}"),
         }
     }

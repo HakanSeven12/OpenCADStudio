@@ -14,19 +14,19 @@
     <link rel="manifest" href="{{path}}site.webmanifest" />
     <link rel="stylesheet" href="/site.css?v={{css_version}}" />
     <script src="/site.js?v={{js_version}}"></script>
-    <link rel="preload" as="image" href="/assets/workspace.png" fetchpriority="high" />
+    <link rel="preload" as="image" href="{{workspace}}" fetchpriority="high" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Open CAD Studio" />
     <meta property="og:title" content="{{title}}" />
     <meta property="og:description" content="{{description}}" />
     <meta property="og:url" content="{{url}}" />
     <meta property="og:locale" content="{{og_locale}}" />
-    <meta property="og:image" content="https://www.opencadstudio.com/og.png" />
+    <meta property="og:image" content="https://www.opencadstudio.com{{workspace}}" />
     <meta property="og:image:alt" content="{{workspace_alt}}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{{title}}" />
     <meta name="twitter:description" content="{{description}}" />
-    <meta name="twitter:image" content="https://www.opencadstudio.com/og.png" />
+    <meta name="twitter:image" content="https://www.opencadstudio.com{{workspace}}" />
     <script type="application/ld+json">{{schema}}</script>
   </head>
   <body>
@@ -69,7 +69,7 @@
           <div class="visual-toolbar" aria-hidden="true" dir="ltr">
             <span class="window-mark"><i></i><i></i><i></i></span><span>technical-plan.dwg</span><b>2D</b>
           </div>
-          <img src="/assets/workspace.png" width="1920" height="940" alt="{{workspace_alt}}" fetchpriority="high" />
+          <img src="{{workspace}}" width="1920" height="940" alt="{{workspace_alt}}" fetchpriority="high" />
           <div class="visual-badge"><strong>DWG</strong><span>{{native_editing}}</span></div>
         </div>
       </section>
@@ -110,7 +110,7 @@
             <ul class="check-list"><li>{{camera}}</li><li>{{tessellation}}</li><li>{{mesh_workflow}}</li></ul>
           </div>
           <figure class="model-frame">
-            <img src="/assets/modeling.png" width="1920" height="940" alt="{{model_alt}}" loading="lazy" />
+            <img src="{{modeling}}" width="1920" height="940" alt="{{model_alt}}" loading="lazy" />
             <figcaption><span>{{model_space}}</span><strong>{{model_caption}}</strong></figcaption>
           </figure>
         </div>

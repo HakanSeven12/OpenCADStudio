@@ -47,6 +47,8 @@ def build(output):
         return path
 
     logo = asset(ROOT / "assets/logo.svg")
+    workspace = asset(ROOT / "site/workspace.png")
+    modeling = asset(ROOT / "site/modeling.png")
     shutil.copyfile(ROOT / "assets/logo.svg", output / "assets/logo.svg")
     ico = asset(ROOT / "site/favicon.ico")
     touch = asset(ROOT / "site/apple-touch-icon.png")
@@ -86,7 +88,8 @@ def build(output):
         values = {key: escape(value) for key, value in messages.items()}
         values.update(locale=locale, direction="rtl" if locale == "ar-SA" else "ltr",
                       path=path, url=BASE + path, og_locale=locale.replace("-", "_"),
-                      logo=logo, icons=icons, css_version=css_version, js_version=js_version, alternates=alternates,
+                      logo=logo, workspace=workspace, modeling=modeling, icons=icons,
+                      css_version=css_version, js_version=js_version, alternates=alternates,
                       languages=escape(messages["languages"].format(count=len(catalogs))),
                       language_links=language_links,
                       schema=json.dumps(schema, ensure_ascii=False).replace("<", "\\u003c"))

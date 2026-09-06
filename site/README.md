@@ -10,5 +10,8 @@ use explicit locale paths and remember manual choices when browser storage is av
 Arabic uses a right-to-left layout. Icons are exported from `assets/logo.svg`;
 update the PNG/ICO files in this directory when the logo changes.
 
+`workspace.png` and `modeling.png` are shared by the website and all README languages.
+The drawing screenshot also supplies the social preview; website image URLs change with their contents.
+
 GitHub Pages publishes website changes from `main` while building the app from the
 latest release. Each deployment records both sources separately.

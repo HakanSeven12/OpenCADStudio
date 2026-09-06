@@ -13,6 +13,7 @@ use ocs_doc_api::{
 
 use crate::scene::convert::acis_export;
 use crate::scene::model::solid_model;
+use ocs_doc_api::convert;
 
 use super::plugin_host::HostSession;
 
@@ -123,7 +124,7 @@ impl DocApiBackend for HostSession<'_> {
     }
 
     fn add_curve(&mut self, spec: &Curve2Spec) -> ApiResult<ObjectId> {
-        let entity = crate::app::doc_api_convert::curve_spec_to_entity(spec)?;
+        let entity = convert::curve_spec_to_entity(spec)?;
         let handle = self.scene_mut().add_entity(entity);
         Ok(handle_to_obj(handle))
     }
@@ -398,8 +399,8 @@ impl DocApiBackend for HostSession<'_> {
         for h in &br.entity_handles {
             let id = handle_to_obj(*h);
             let (kind, bounds) = match self.document().get_entity(*h) {
-                Some(e) => (crate::app::doc_api_convert::entity_kind_name(e).to_string(),
-                            crate::app::doc_api_convert::entity_bounds(Some(e), id).ok()),
+                Some(e) => (convert::entity_kind_name(e).to_string(),
+                            convert::entity_bounds(Some(e), id).ok()),
                 None => ("Missing".to_string(), None),
             };
             out.push(EntityView { id, kind, bounds });
@@ -559,7 +560,7 @@ impl DocApiBackend for HostSession<'_> {
             .ok_or(ApiError::UnknownId(id))?;
         Ok(EntityView {
             id,
-            kind: crate::app::doc_api_convert::entity_kind_name(entity).to_string(),
+            kind: convert::entity_kind_name(entity).to_string(),
             bounds: self.bounds(id).ok(),
         })
     }
@@ -583,7 +584,7 @@ impl DocApiBackend for HostSession<'_> {
                 .get_entity(handle)
                 .cloned()
                 .ok_or(ApiError::UnknownId(id))?;
-            let moved = crate::app::doc_api_convert::transform_entity_geometry(&entity, placement)?;
+            let moved = convert::transform_entity_geometry(&entity, placement)?;
             if !self.scene_mut().update_entity(moved) {
                 return Err(ApiError::Unsupported(format!("entity {id:?} is on a locked layer")));
             }
@@ -596,7 +597,7 @@ impl DocApiBackend for HostSession<'_> {
             .document()
             .get_entity(obj_to_handle(id))
             .ok_or(ApiError::UnknownId(id))?;
-        crate::app::doc_api_convert::entity_to_profile_curves(entity)
+        convert::entity_to_profile_curves(entity)
     }
 
     fn bounds(&mut self, id: ObjectId) -> ApiResult<Aabb> {
@@ -611,7 +612,7 @@ impl DocApiBackend for HostSession<'_> {
             };
             return self.with_body(id, &mut f);
         }
-        crate::app::doc_api_convert::entity_bounds(self.document().get_entity(handle), id)
+        convert::entity_bounds(self.document().get_entity(handle), id)
     }
 
     fn centroid(&mut self, id: ObjectId) -> ApiResult<[f64; 3]> {
@@ -1219,7 +1220,7 @@ mod tests {
         // Negative (CW) bulge: the center must be on the CW side (mirror of CCW).
         // A single 90° bulge segment start=(0,0), end=(1,0), bulge=-0.4142 (~90° CW):
         // correct center is BELOW the chord; the buggy double-sign put it above.
-        let neg = crate::app::doc_api_convert::bulge_arc_segment([0.0, 0.0], [1.0, 0.0], -0.4142)
+        let neg = convert::bulge_arc_segment([0.0, 0.0], [1.0, 0.0], -0.4142)
             .expect("negative bulge arc");
         if let cadkernel::geom2d::Curve::Arc(arc) = &neg {
             // 90° arc, chord 1: radius = 0.5/sin(45°) ≈ 0.7071; center y must be negative.
@@ -1229,7 +1230,7 @@ mod tests {
             panic!("expected an arc for negative bulge");
         }
         // And the CCW mirror: center above.
-        let pos = crate::app::doc_api_convert::bulge_arc_segment([0.0, 0.0], [1.0, 0.0], 0.4142)
+        let pos = convert::bulge_arc_segment([0.0, 0.0], [1.0, 0.0], 0.4142)
             .expect("positive bulge arc");
         if let cadkernel::geom2d::Curve::Arc(arc) = &pos {
             assert!(arc.centre[1] > 0.0, "CCW arc center y must be above the chord, got {:?}", arc.centre);

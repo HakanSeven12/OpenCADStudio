@@ -5,18 +5,22 @@ const vm = require('node:vm');
 const source = fs.readFileSync(process.argv[2] || 'dist/site.js', 'utf8');
 
 function visit(language, pathname = '/', saved, blocked = false) {
-  let redirected, click;
+  let redirected, menuOpen = true, focused = false;
+  const handlers = {};
+  const picker = { removeAttribute: () => { menuOpen = false; }, querySelector: () => ({ focus: () => { focused = true; } }) };
   const context = {
     navigator: { language },
     location: { pathname, search: '?ref=test', hash: '#formats', replace: url => { redirected = url; } },
-    document: { addEventListener: (type, listener) => { click = listener; } },
+    document: { addEventListener: (type, listener) => { handlers[type] = listener; }, querySelector: () => menuOpen ? picker : null },
     localStorage: {
       getItem: () => { if (blocked) throw new Error('Storage disabled'); return saved; },
       setItem: (key, value) => { if (blocked) throw new Error('Storage disabled'); saved = value; },
     },
   };
   vm.runInNewContext(source, context);
-  return { context, redirected, choose: tag => click({ target: { closest: () => ({ hreflang: tag }) } }), saved: () => saved };
+  return { context, redirected, choose: tag => handlers.click({ target: { closest: () => ({ hreflang: tag }) } }), saved: () => saved,
+    dismiss: () => handlers.click({ target: { closest: () => null } }), escape: () => handlers.keydown({ key: 'Escape' }),
+    menuOpen: () => menuOpen, focused: () => focused };
 }
 
 for (const [language, expected] of Object.entries({
@@ -43,4 +47,11 @@ const choice = visit('en-US');
 choice.choose('tr-TR');
 assert.equal(choice.saved(), 'tr-TR');
 visit('en-US', '/', undefined, true).choose('en-US');
+const outside = visit('en-US');
+outside.dismiss();
+assert.equal(outside.menuOpen(), false);
+const keyboard = visit('en-US');
+keyboard.escape();
+assert.equal(keyboard.menuOpen(), false);
+assert.equal(keyboard.focused(), true);
 console.log('Website language matching, redirects, manual choices and blocked storage passed');

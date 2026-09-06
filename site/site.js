@@ -19,7 +19,18 @@ function preferredLocale(language) {
   }
   document.addEventListener("click", event => {
     const link = event.target.closest(".language-picker a[hreflang]");
-    if (!link) return;
-    try { localStorage.setItem(storageKey, link.hreflang); } catch {}
+    if (link) {
+      try { localStorage.setItem(storageKey, link.hreflang); } catch {}
+    } else if (!event.target.closest(".language-picker")) {
+      document.querySelector(".language-picker[open]")?.removeAttribute("open");
+    }
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    const picker = document.querySelector(".language-picker[open]");
+    if (picker) {
+      picker.removeAttribute("open");
+      picker.querySelector("summary").focus();
+    }
   });
 })();

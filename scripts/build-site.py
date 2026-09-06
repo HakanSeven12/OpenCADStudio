@@ -103,7 +103,7 @@ def build(output):
 
     app = output / "app/index.html"
     if app.exists():
-        html = re.sub(r'<link\b(?=[^>]*\brel=["\'](?:shortcut )?icon["\'])[^>]*>', '', app.read_text())
+        html = re.sub(r'<link\b(?=[^>]*\brel=["\'](?:(?:shortcut )?icon|apple-touch-icon)["\'])[^>]*>', '', app.read_text())
         app.write_text(html.replace('</head>', icons + '\n</head>'), encoding="utf-8")
     print(f"Built {len(catalogs)} website languages and current application icons")
 

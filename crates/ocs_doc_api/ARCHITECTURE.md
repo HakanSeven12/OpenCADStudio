@@ -43,95 +43,73 @@ every entity family, its construction ops, geometric actions, and queries, and
 their kernel/acadrust mapping. Everything downstream derives from it. The full
 flow from spec to a committed document change:
 
-```mermaid
-flowchart TD
-    subgraph SRC["Single source of truth"]
-        SPEC["spec/entities.toml<br/>families · constructors · methods · kernel map"]
-        LAYOUTS["src/gen/layouts.json<br/>Operation/Query wire layouts"]
-    end
-
-    subgraph GEN["build.rs codegen (cargo build, CI drift-checked)"]
-        OPS["src/gen/ops_gen.rs<br/>Operation enum (append-only)"]
-        QRY["src/gen/query_gen.rs<br/>Query enum (append-only)"]
-        APIREF["src/gen/api_reference.md"]
-        SCHEMA["src/gen/binding_schema.json<br/>(object model + layouts inlined)"]
-    end
-
-    subgraph FACADE["Facade (facade.rs) — plugin-facing, object-centric"]
-        API["DocApi (root)"]
-        DOC["Document (per tab)"]
-        COLL["collections: solids() / curves() / entities()"]
-        HND["typed handles: Solid · Line · ArcCurve · Text · ...<br/>methods build ops (intersect, transform, create_*)"]
-    end
-
-    subgraph WIRE["Wire (envelope/ops/query)"]
-        ENV["DocApiEnvelope<br/>Op(Operation) | Queries(Vec)"]
-        REC["Receipt: outcome + query_results + new_revision"]
-    end
-
-    subgraph TRANS["Transport (the only plugin↔host boundary)"]
-        INP["InProcess (host / tests)"]
-        IPC["OcsPluginApiIpc (plugin)<br/>PluginRequest::DocApiRequest{tab_id, bytes}"]
-    end
-
-    subgraph EXEC["Executor (executor.rs) — crate-owned, one impl"]
-        AO["apply_op: validate+compute → push_undo → mutate → finalize_op"]
-        AQ["apply_queries: read-only batch (capped)"]
-    end
-
-    subgraph HOST["Host backend (src/app/doc_api.rs — HostSession)"]
-        BE["DocApiBackend impl<br/>resolve_body · store_solid · transform · add_* · bounds · volume · centroid"]
-        TAB["tab auth: reject tab_id ≠ bound tab"]
-        SCN["Scene (per tab)<br/>solid_models · meshes · erase_entities<br/>geometry_epoch · doc_api_mass_cache · doc_api_cold_tess_used"]
-        CAD["CadDocument (acadrust)<br/>entities · block_records · handles"]
-    end
-
-    SPEC -->|spec → enum names + mapping| OPS
-    SPEC -->|spec → enum names + mapping| QRY
-    SPEC -->|spec → reference| APIREF
-    SPEC -->|spec → schema| SCHEMA
-    LAYOUTS -->|layouts inlined| SCHEMA
-
-    API --> DOC --> COLL --> HND
-    HND -->|method → Operation / Query| ENV
-    ENV --> INP
-    ENV --> IPC
-    INP --> AO
-    IPC -->|bincode → host routes DocApiRequest| AO
-    AO --> TAB
-    AQ --> TAB
-    TAB --> BE
-    BE --> SCN
-    BE --> CAD
-    SCN --> REC
-    CAD --> REC
-    REC -->|deserialized| HND
-
-    classDef truth fill:#1f6feb,stroke:#0b3d91,color:#fff
-    classDef gen fill:#2da44e,stroke:#14532d,color:#fff
-    classDef hot fill:#bf8700,stroke:#7a5200,color:#fff
-    class SPEC,LAYOUTS truth
-    class OPS,QRY,APIREF,SCHEMA gen
-    class AO,AQ,TAB,SCN hot
+```
+SINGLE SOURCE OF TRUTH
+  spec/entities.toml      families · constructors · methods · kernel map
+  src/gen/layouts.json    Operation/Query wire layouts
+        │
+        ▼  (build.rs codegen — cargo build, CI drift-checked)
+CODEGEN OUTPUT
+  src/gen/ops_gen.rs      Operation enum  (append-only)
+  src/gen/query_gen.rs    Query enum      (append-only)
+  src/gen/api_reference.md
+  src/gen/binding_schema.json   (object model + layouts inlined)
+        │
+        ▼
+FACADE  (facade.rs — what a plugin writes)
+  DocApi ──► Document ──► collections (solids()/curves()/entities())
+                              │
+                              ▼
+                     typed handles (Solid · Line · ArcCurve · Text · …)
+                     method call → builds an Operation or Query
+        │
+        ▼
+WIRE  (envelope/ops/query)
+  DocApiEnvelope = Op(Operation) | Queries(Vec<Query>)       ──► request
+  Receipt        = outcome + query_results + new_revision    ◄── response
+        │
+        ▼
+TRANSPORT  (the ONLY plugin↔host boundary)
+  InProcess          (host / built-in plugins / tests)
+  OcsPluginApiIpc    (plugin)  PluginRequest::DocApiRequest{tab_id, bytes}
+        │                                    │
+        └────────────┬───────────────────────┘
+                     ▼
+EXECUTOR  (executor.rs — crate-owned, ONE implementation)
+  apply_op       validate+compute → push_undo → mutate → finalize_op
+  apply_queries  read-only batch (capped)
+        │
+        ▼
+HOST BACKEND  (src/app/doc_api.rs — HostSession)
+  tab authorization   reject tab_id ≠ bound tab
+  DocApiBackend impl  resolve_body · store_solid · transform · add_*
+                      bounds · volume · centroid · can_remove
+        │
+        ├──► Scene (per tab)        solid_models · meshes · erase_entities
+        │                            geometry_epoch · doc_api_mass_cache
+        │                            doc_api_cold_tess_used
+        └──► CadDocument (acadrust) entities · block_records · handles
+                     │
+                     ▼  produce
+                Receipt ──► facade turns it into a typed result (Solid, Aabb, f64, …)
 ```
 
-**How to read it:**
+**How to read it (top to bottom = the path of a request):**
 
-- **Blue (source of truth)** — `spec/entities.toml` + `layouts.json`. Change
+- **SINGLE SOURCE OF TRUTH** — `spec/entities.toml` + `layouts.json`. Change
   *these* to change the API surface; everything else regenerates or maps onto them.
-- **Green (codegen)** — `build.rs` derives the wire enums, the human reference,
+- **CODEGEN OUTPUT** — `build.rs` derives the wire enums, the human reference,
   and the binding handover schema. The `Operation`/`Query` enums are the canonical
   append-only wire vocabulary; the spec's `op`/`query` names must map to them
   (enforced by `spec_wire_consistency` tests).
-- **Facade → wire → transport** — a plugin's `solid.intersect(&other)` becomes an
+- **FACADE → WIRE → TRANSPORT** — a plugin's `solid.intersect(&other)` becomes an
   `Operation`, wrapped in a `DocApiEnvelope`, and shipped via the one `Transport`
   (in-process or IPC). Identical request either way.
-- **Amber (hot paths)** — the executor's per-op invariant and the host's tab
-  authorization + per-tab `Scene` state (solid cache, geometry epoch, the
-  persistent cold-tessellation budget). This is where atomicity and the DoS
-  boundaries live.
-- **Response** — the host produces a `Receipt` (outcome + query results + new
-  geometry revision) that the facade turns back into a typed result (`Solid`,
+- **EXECUTOR + HOST BACKEND** — the hot paths: the executor's per-op invariant,
+  tab authorization, and the per-tab `Scene` state (solid cache, geometry epoch,
+  the persistent cold-tessellation budget). Atomicity and the DoS boundaries live here.
+- **Receipt (response)** — the host produces a `Receipt` (outcome + query results
+  + new geometry revision) that the facade turns back into a typed result (`Solid`,
   `Aabb`, `f64`, …).
 
 ## Per-op execution model (the load-bearing invariant)

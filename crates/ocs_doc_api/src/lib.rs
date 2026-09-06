@@ -21,6 +21,8 @@ pub mod backend;
 pub mod executor;
 #[cfg(feature = "host")]
 pub mod geom;
+#[cfg(feature = "host")]
+pub mod convert;
 
 pub mod envelope;
 pub mod facade;
@@ -52,6 +54,12 @@ pub use facade::{
 };
 pub use ops::{BoolOp, Curve2Spec, EntitySpec, Operation, PlacementSpec, SolidPrimitive};
 pub use query::{Aabb, EntityView, Query, QueryResult};
+
+#[cfg(feature = "host")]
+pub use convert::{
+    bulge_arc_segment, curve_spec_to_entity, entity_bounds, entity_kind_name,
+    entity_to_profile_curves, transform_entity_geometry,
+};
 pub use transport::Transport;
 
 /// The crate's own wire-envelope protocol version (`DocApiEnvelope::version`).

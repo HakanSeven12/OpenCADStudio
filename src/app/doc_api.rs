@@ -631,23 +631,19 @@ impl HostSession<'_> {
                 return Ok((v, c));
             }
         }
-        // Render-mesh metrics cache (avoids re-tessellation + B-rep clone).
-        if let Some(metrics) = self.scene().meshes.get(&handle).map(|m| m.metrics) {
-            if metrics.volume.abs() > 0.0 {
-                self.mass_cache.insert(handle, (epoch, metrics.volume, metrics.centroid));
-                return Ok((metrics.volume, metrics.centroid));
-            }
-        }
-        // Cold-cache fallback: bounded full tessellation.
+        // Accuracy path: fine tessellation so the divergence volume/centroid
+        // converge to near-analytic (the render-mesh metrics cache is the coarse
+        // LOD for display, NOT for query accuracy). Bounded by the cold-tess budget;
+        // memoized per (handle, epoch) so repeated queries on the same solid are O(1).
         const COLD_TESS_BUDGET: usize = 256;
         if self.cold_tess_used >= COLD_TESS_BUDGET {
             return Err(ApiError::Unsupported(
-                "volume/centroid cold-tessellation budget exceeded for this session; regenerate the mesh or query fewer distinct solids".into(),
+                "volume/centroid cold-tessellation budget exceeded for this session; query fewer distinct solids".into(),
             ));
         }
         self.cold_tess_used += 1;
         let body = self.resolve_body(id)?;
-        let mesh = cadkernel::brep::mesh_body(&body, 0.5, 1e-3);
+        let mesh = cadkernel::brep::mesh_body(&body, 0.1, 1e-4);
         let (v, c) = mesh_volume_centroid(&mesh);
         self.mass_cache.insert(handle, (epoch, v, c));
         Ok((v, c))
@@ -1241,6 +1237,42 @@ mod tests {
         match &receipt.query_results[0] {
             QueryResult::Entity(e) => assert_eq!(e.kind, "Table"),
             other => panic!("expected entity, got {other:?}"),
+        }
+    }
+
+    // ── Outstanding method: accurate volume/centroid (fine tessellation) ─────
+
+    #[test]
+    fn accurate_volume_centroid_sphere_and_cube() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Sphere r=5: analytic volume = 4/3 * pi * 125 ≈ 523.599; centroid at centre.
+        let ball = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateSolid(
+            SolidPrimitive::Sphere { centre: [10.0, 20.0, 30.0], radius: 5.0 }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetVolume { id: ball }, Query::GetCentroid { id: ball }])).unwrap();
+        let analytic = 4.0 / 3.0 * std::f64::consts::PI * 125.0;
+        match &receipt.query_results[0] {
+            QueryResult::Volume(v) => {
+                let err = ((*v - analytic) / analytic).abs();
+                assert!(err < 0.005, "sphere volume {v} vs analytic {analytic} (err {err:.4})");
+            }
+            other => panic!("expected volume, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Centroid(c) => {
+                assert!((c[0] - 10.0).abs() < 0.05 && (c[1] - 20.0).abs() < 0.05 && (c[2] - 30.0).abs() < 0.05,
+                        "sphere centroid {c:?}");
+            }
+            other => panic!("expected centroid, got {other:?}"),
+        }
+        // Cube 10^3 is exact (planar faces: divergence is exact regardless of LOD).
+        let cube = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateSolid(
+            SolidPrimitive::Cuboid { origin: [0.0; 3], size: [10.0; 3] }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetVolume { id: cube }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Volume(v) => assert!((*v - 1000.0).abs() < 1.0, "cube volume {v}"),
+            other => panic!("expected volume, got {other:?}"),
         }
     }
 

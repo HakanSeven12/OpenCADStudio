@@ -117,9 +117,12 @@ tested: 615 host lib + 8 crate unit + 3 spec↔wire consistency tests green.
 
 ## 🔧 Outstanding methods on supported families
 
-| Method | Family | Status | Blocker |
-|---|---|---|---|
-| `GetCentroid`/`GetVolume` accuracy | Solid | mesh approx | render-mesh LOD tolerance vs query tolerance |
+**Completed (accuracy):** `GetVolume`/`GetCentroid` now compute via a **fine
+tessellation** (`mesh_body(0.1, 1e-4)`) for near-analytic results — the
+render-mesh metrics cache is the coarse display LOD and no longer shadows query
+accuracy; results memoized per (handle, geometry_epoch). Verified by
+`accurate_volume_centroid_sphere_and_cube` (sphere volume within 0.5% of 4/3πr³,
+centroid at centre, cube exact).
 
 **Completed (outstanding methods):** `loft(profiles)` — `Operation::Loft{profiles}`,
 resolves each profile to curve sets (all-or-nothing), `brep::loft` (`loft_two_profiles_*`

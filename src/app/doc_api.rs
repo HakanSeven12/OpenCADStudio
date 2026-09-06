@@ -633,10 +633,18 @@ impl HostSession<'_> {
         }
         // Accuracy path: fine tessellation so the divergence volume/centroid
         // converge to near-analytic (the render-mesh metrics cache is the coarse
-        // LOD for display, NOT for query accuracy). Bounded by the cold-tess budget;
+        // display LOD, NOT for query accuracy). Bounded by the cold-tess budget;
         // memoized per (handle, epoch) so repeated queries on the same solid are O(1).
         const COLD_TESS_BUDGET: usize = 256;
         if self.cold_tess_used >= COLD_TESS_BUDGET {
+            // Budget exhausted: serve a documented-approximate value from the render
+            // mesh metrics cache rather than failing (large distinct-solid batches
+            // degrade gracefully instead of erroring). Accuracy-first up to the budget.
+            if let Some(metrics) = self.scene().meshes.get(&handle).map(|m| m.metrics) {
+                if metrics.volume.abs() > 0.0 {
+                    return Ok((metrics.volume, metrics.centroid));
+                }
+            }
             return Err(ApiError::Unsupported(
                 "volume/centroid cold-tessellation budget exceeded for this session; query fewer distinct solids".into(),
             ));

@@ -278,6 +278,12 @@ Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-
 - `SetViewportView { id: ObjectId, view_target: [f64; 3], view_height: f64 }`
 - `CreateRasterImage(RasterImageSpec)`
 - `Loft { profiles: Vec<ObjectId> }`
+- `CreateDimensionRadius(DimensionRadialSpec)`
+- `CreateDimensionDiameter(DimensionRadialSpec)`
+- `CreateDimensionAngular(DimensionAngularSpec)`
+- `CreateAttributeDefinition(AttributeDefinitionSpec)`
+- `CreateTable(TableSpec)`
+- `CreateDimensionAngular2Ln(DimensionAngularSpec)`
 
 ### `Query`
 

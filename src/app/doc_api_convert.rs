@@ -5,7 +5,7 @@
 use acadrust::entities::{Arc, Circle, Ellipse, Line, LwPolyline, LwVertex, Point, Ray, Spline, XLine};
 use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;
-use ocs_doc_api::{Aabb, ApiError, ApiResult, Curve2Spec, ObjectId};
+use ocs_doc_api::{Aabb, ApiError, ApiResult, Curve2Spec, GeometryErrorKind, ObjectId};
 
 /// Convert a profile entity (Line/Circle/Arc/LwPolyline) to `geom2d::Curve`s for
 /// sweep ops (`Extrude`/`Revolve`). Z is dropped (profiles lie on the XY plane).
@@ -481,17 +481,26 @@ pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aab
             id,
         )?,
         EntityType::MLine(m) => points_aabb(m.vertices.iter().map(|v| &v.position).collect(), id)?,
-        EntityType::Helix(h) => points_aabb([&h.start_point].into_iter().collect(), id)?,
+        EntityType::Helix(h) => {
+            // Bound the evaluated spline's control polygon (conservative); the
+            // single start_point alone would be a degenerate zero-size box.
+            if h.spline.control_points.is_empty() {
+                points_aabb([&h.start_point].into_iter().collect(), id)?
+            } else {
+                points_aabb(h.spline.control_points.iter().collect(), id)?
+            }
+        }
         // Ray/XLine are unbounded by definition — no finite bounds.
         _ => return Err(ApiError::Unsupported("bounds for this entity family is not yet implemented".into())),
     };
     Ok(bb)
 }
 
-/// AABB over a set of 3D points. `UnknownId` if empty (no points to bound).
-fn points_aabb(pts: Vec<&Vector3>, id: ObjectId) -> ApiResult<Aabb> {
+/// AABB over a set of 3D points. A geometry-Empty error if there are no points
+/// to bound (the entity exists — do NOT misclassify as a stale/deleted id).
+fn points_aabb(pts: Vec<&Vector3>, _id: ObjectId) -> ApiResult<Aabb> {
     if pts.is_empty() {
-        return Err(ApiError::UnknownId(id));
+        return Err(ApiError::geometry(GeometryErrorKind::Empty, "entity has no points to bound"));
     }
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];

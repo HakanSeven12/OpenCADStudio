@@ -381,6 +381,21 @@ args = [{ name = "tag", ty = "&str" }, { name = "value", ty = "&str" }]
 returns = "()"
 
 # ============================================================================
+# ATTRIBUTE-DEFINITION FAMILY (phase 3-ii) — in-block attribute definitions
+# ============================================================================
+[[family]]
+name = "AttributeDefinition"
+acadrust_variant = "AttributeDefinition"
+handle = "Entity"
+collection = "entities"
+description = "In-block attribute definition (ATTDEF): tag/prompt/default at an insertion point."
+
+[[family.constructor]]
+name = "create_attribute_definition"
+args = [{ name = "tag", ty = "&str" }, { name = "prompt", ty = "&str" }, { name = "default_value", ty = "&str" }, { name = "insertion_point", ty = "[f64; 3]" }, { name = "height", ty = "f64" }, { name = "rotation", ty = "f64" }]
+op = "CreateAttributeDefinition"
+
+# ============================================================================
 # PAPER-SPACE FAMILY (phase 4) — viewports
 # ============================================================================
 [[family]]

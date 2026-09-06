@@ -72,6 +72,9 @@ pub trait DocApiBackend {
     /// Add a 3-point angular `DIMENSION`; returns the fresh `ObjectId`.
     fn add_dimension_angular(&mut self, spec: &crate::ops::DimensionAngularSpec) -> ApiResult<ObjectId>;
 
+    /// Add an `ATTDEF` (in-block attribute definition); returns the fresh `ObjectId`.
+    fn add_attribute_definition(&mut self, spec: &crate::ops::AttributeDefinitionSpec) -> ApiResult<ObjectId>;
+
     /// A dimension's measured value (distance for linear/radius, degrees for angular).
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64>;
 

@@ -631,6 +631,20 @@ impl EntityCollection {
         Ok(Entity::new(self.session.clone(), id))
     }
 
+    /// Create an ATTDEF (in-block attribute definition): tag/prompt/default at a point.
+    pub fn create_attribute_definition(&self, tag: &str, prompt: &str, default_value: &str, insertion_point: [f64; 3], height: f64, rotation: f64) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateAttributeDefinition(crate::ops::AttributeDefinitionSpec {
+            tag: tag.to_string(),
+            prompt: prompt.to_string(),
+            default_value: default_value.to_string(),
+            insertion_point,
+            height,
+            rotation,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_attribute_definition returned no id".into()))?;
+        Ok(Entity::new(self.session.clone(), id))
+    }
+
     /// Place a block reference (`INSERT`) for `block_name` (must exist).
     pub fn create_insert(&self, block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64) -> ApiResult<Entity> {
         let receipt = self.session.apply_op(Operation::CreateInsert(crate::ops::InsertSpec {

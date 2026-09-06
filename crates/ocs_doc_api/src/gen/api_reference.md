@@ -154,6 +154,14 @@ Block reference. Place an existing BlockRecord by name; transform moves its inse
 - **attributes**() -> `Vec<(String, String)>` — query `GetAttributes`
 - **set_attribute**(tag: &str, value: &str) -> `()` — op `SetAttribute`
 
+## `Entity` (acadrust `AttributeDefinition`, collection `entities`)
+
+In-block attribute definition (ATTDEF): tag/prompt/default at an insertion point.
+
+### Constructors (`doc.entities()`)
+
+- **create_attribute_definition**(tag: &str, prompt: &str, default_value: &str, insertion_point: [f64; 3], height: f64, rotation: f64) -> `Entity` — `CreateAttributeDefinition`
+
 ## `Entity` (acadrust `Viewport`, collection `entities`)
 
 Paper-space viewport: a width×height window at center looking at view_target with view_height zoom. bounds = center ± w/2,h/2; transform moves center.

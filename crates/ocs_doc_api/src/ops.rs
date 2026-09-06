@@ -136,6 +136,18 @@ pub struct DimensionAngularSpec {
     pub arc_location: [f64; 3],
 }
 
+/// Construction spec for an `ATTDEF` (attribute definition): the tag, prompt,
+/// and default value for an in-block attribute, at an insertion point.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AttributeDefinitionSpec {
+    pub tag: String,
+    pub prompt: String,
+    pub default_value: String,
+    pub insertion_point: [f64; 3],
+    pub height: f64,
+    pub rotation: f64,
+}
+
 /// Construction spec for a `RASTER_IMAGE`: an image file placed at
 /// `insertion_point` with per-pixel world-unit vectors `u_vector`/`v_vector` and
 /// pixel `size` (width, height). The host auto-registers the ImageDefinition.
@@ -210,6 +222,7 @@ impl crate::gen::Operation {
             CreateDimensionRadius(_) => "CreateDimensionRadius",
             CreateDimensionDiameter(_) => "CreateDimensionDiameter",
             CreateDimensionAngular(_) => "CreateDimensionAngular",
+            CreateAttributeDefinition(_) => "CreateAttributeDefinition",
         }
     }
 }

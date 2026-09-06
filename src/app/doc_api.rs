@@ -292,6 +292,20 @@ impl DocApiBackend for HostSession<'_> {
         })
     }
 
+    fn add_attribute_definition(&mut self, spec: &ocs_doc_api::ops::AttributeDefinitionSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::AttributeDefinition;
+        use acadrust::types::Vector3;
+        let mut att = AttributeDefinition::default();
+        att.tag = spec.tag.clone();
+        att.prompt = spec.prompt.clone();
+        att.default_value = spec.default_value.clone();
+        att.insertion_point = Vector3::new(spec.insertion_point[0], spec.insertion_point[1], spec.insertion_point[2]);
+        att.height = spec.height;
+        att.rotation = spec.rotation;
+        let handle = self.scene_mut().add_entity(EntityType::AttributeDefinition(att));
+        Ok(handle_to_obj(handle))
+    }
+
     fn set_attribute(&mut self, id: ObjectId, tag: &str, value: &str) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let entity = self.document().get_entity(handle).cloned().ok_or(ApiError::UnknownId(id))?;
@@ -1145,6 +1159,30 @@ mod tests {
         match &receipt.query_results[2] {
             QueryResult::DimensionMeasurement(v) => assert!((*v - 90.0).abs() < 0.1, "angle {v}"),
             other => panic!("expected measurement, got {other:?}"),
+        }
+    }
+
+    // ── Phase 3-ii: typed AttributeDefinition create ──────────────────────────
+
+    #[test]
+    fn phase3ii_create_attribute_definition() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let attdef = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateAttributeDefinition(
+            ocs_doc_api::ops::AttributeDefinitionSpec {
+                tag: "DOOR_NO".into(), prompt: "Door number?".into(), default_value: "D-1".into(),
+                insertion_point: [5.0, 5.0, 0.0], height: 2.5, rotation: 0.0,
+            }))).unwrap());
+        let handle = obj_to_handle(attdef);
+        let Some(EntityType::AttributeDefinition(a)) = host.document().get_entity(handle) else { panic!("attdef not found") };
+        assert_eq!(a.tag, "DOOR_NO");
+        assert_eq!(a.default_value, "D-1");
+        assert!((a.height - 2.5).abs() < 1e-9);
+        // GetEntity reports the AttributeDefinition kind.
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetEntity { id: attdef }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::Entity(e) => assert_eq!(e.kind, "AttributeDefinition"),
+            other => panic!("expected entity, got {other:?}"),
         }
     }
 

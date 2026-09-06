@@ -318,6 +318,8 @@ pub fn entity_kind_name(entity: &EntityType) -> &'static str {
         EntityType::Viewport(_) => "Viewport",
         EntityType::Text(_) => "Text",
         EntityType::MText(_) => "MText",
+        EntityType::AttributeDefinition(_) => "AttributeDefinition",
+        EntityType::AttributeEntity(_) => "AttributeEntity",
         // Media & misc (phase 5, read-mostly): named so GetEntity reports a real kind.
         EntityType::RasterImage(_) => "RasterImage",
         EntityType::Table(_) => "Table",

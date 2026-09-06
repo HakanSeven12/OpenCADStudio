@@ -287,6 +287,12 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::CreateAttributeDefinition(spec) => {
+            b.push_undo(name);
+            let id = b.add_attribute_definition(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),

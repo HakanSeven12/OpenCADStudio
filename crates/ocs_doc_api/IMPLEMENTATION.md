@@ -87,8 +87,9 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
   (`GetAttributes`), and `block_entities(block_name)` → read-only nested traversal
   of a block definition's entities (`GetBlockEntities`). Covered by
   `phase3_attributes_and_block_traversal` test.
-- **Remaining:** typed `AttributeDefinition` (in-block attribute-definition)
-  create.
+- **Done (attribute definitions):** `create_attribute_definition(tag, prompt,
+  default, point, height, rotation)` → `Operation::CreateAttributeDefinition`;
+  reports kind `AttributeDefinition`. Covered by `phase3ii_*` test. Phase 3 is complete.
 
 ### Phase 4 — paper-space & viewports
 - **Done:** `create_viewport(center, width, height, view_target, view_height)` →

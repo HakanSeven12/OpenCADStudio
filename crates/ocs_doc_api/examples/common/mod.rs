@@ -200,6 +200,12 @@ impl DocApiBackend for MockBackend {
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64> {
         self.dimension_measurements.get(&id).copied().ok_or(ApiError::UnknownId(id))
     }
+    fn add_attribute_definition(&mut self, spec: &ocs_doc_api::ops::AttributeDefinitionSpec) -> ApiResult<ObjectId> {
+        if spec.tag.is_empty() {
+            return Err(ApiError::validation("CreateAttributeDefinition", "empty tag"));
+        }
+        Ok(self.alloc("AttributeDefinition"))
+    }
     fn set_attribute(&mut self, id: ObjectId, tag: &str, value: &str) -> ApiResult<()> {
         if !self.entity_exists(id) {
             return Err(ApiError::UnknownId(id));

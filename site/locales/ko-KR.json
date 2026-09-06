@@ -67,7 +67,6 @@
   "growth_title": "열린 개발, 공개된 성장.",
   "growth_text": "GitHub 스타와 릴리스 다운로드로 프로젝트의 성장을 살펴보세요.",
   "stars": "스타",
-  "stars_link": "스타를 누른 사용자 보기",
   "downloads": "릴리스 다운로드",
   "releases_link": "릴리스 보기",
   "chart_updated": "업데이트: {date}",

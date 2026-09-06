@@ -67,7 +67,6 @@
   "growth_title": "Desarrollo abierto. Crecimiento público.",
   "growth_text": "Sigue el proyecto a través de las estrellas de GitHub y las descargas de versiones.",
   "stars": "Estrellas",
-  "stars_link": "Ver estrellas",
   "downloads": "Descargas de versiones",
   "releases_link": "Ver versiones",
   "chart_updated": "Actualizado: {date}",

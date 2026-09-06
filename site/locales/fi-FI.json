@@ -67,7 +67,6 @@
   "growth_title": "Avoin kehitys. Julkinen kasvu.",
   "growth_text": "Seuraa projektia GitHub-tähtien ja versiolatausten avulla.",
   "stars": "Tähdet",
-  "stars_link": "Näytä tähdet",
   "downloads": "Versiolataukset",
   "releases_link": "Näytä julkaisut",
   "chart_updated": "Päivitetty {date}",

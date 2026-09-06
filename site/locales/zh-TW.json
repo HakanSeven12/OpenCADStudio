@@ -67,7 +67,6 @@
   "growth_title": "開放開發，公開成長。",
   "growth_text": "透過 GitHub 星號和版本下載量瞭解專案發展。",
   "stars": "星號",
-  "stars_link": "查看加星號的使用者",
   "downloads": "版本下載量",
   "releases_link": "查看版本",
   "chart_updated": "更新於 {date}",

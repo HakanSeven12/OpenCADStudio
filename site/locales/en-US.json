@@ -67,7 +67,6 @@
   "growth_title": "Built openly. Growing in public.",
   "growth_text": "Follow the project through GitHub stars and release downloads.",
   "stars": "Stars",
-  "stars_link": "View stargazers",
   "downloads": "Release downloads",
   "releases_link": "View releases",
   "chart_updated": "Updated {date}",

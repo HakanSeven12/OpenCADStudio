@@ -67,7 +67,6 @@
   "growth_title": "開かれた開発。公開された成長。",
   "growth_text": "GitHub のスターとリリースのダウンロード数で開発の広がりを確認できます。",
   "stars": "スター",
-  "stars_link": "スターを付けた人を見る",
   "downloads": "リリースのダウンロード",
   "releases_link": "リリースを見る",
   "chart_updated": "更新日：{date}",

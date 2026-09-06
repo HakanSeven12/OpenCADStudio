@@ -67,7 +67,6 @@
   "growth_title": "开放开发，公开成长。",
   "growth_text": "通过 GitHub 星标和版本下载量了解项目发展。",
   "stars": "星标",
-  "stars_link": "查看星标用户",
   "downloads": "版本下载量",
   "releases_link": "查看版本",
   "chart_updated": "更新于 {date}",

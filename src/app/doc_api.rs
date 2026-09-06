@@ -139,6 +139,64 @@ impl DocApiBackend for HostSession<'_> {
         Ok(handle_to_obj(handle))
     }
 
+    fn add_text(&mut self, spec: &ocs_doc_api::ops::TextSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::Text;
+        use acadrust::types::Vector3;
+        let mut t = Text::new();
+        t.value = spec.value.clone();
+        t.insertion_point = Vector3::new(spec.insertion_point[0], spec.insertion_point[1], spec.insertion_point[2]);
+        t.height = spec.height;
+        t.rotation = spec.rotation;
+        let handle = self.scene_mut().add_entity(EntityType::Text(t));
+        Ok(handle_to_obj(handle))
+    }
+
+    fn add_mtext(&mut self, spec: &ocs_doc_api::ops::MTextSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::MText;
+        use acadrust::types::Vector3;
+        let mut t = MText::with_value(
+            spec.value.clone(),
+            Vector3::new(spec.insertion_point[0], spec.insertion_point[1], spec.insertion_point[2]),
+        );
+        t.height = spec.height;
+        let handle = self.scene_mut().add_entity(EntityType::MText(t));
+        Ok(handle_to_obj(handle))
+    }
+
+    fn set_text_content(&mut self, id: ObjectId, value: &str) -> ApiResult<()> {
+        let handle = obj_to_handle(id);
+        let entity = self.document().get_entity(handle).cloned().ok_or(ApiError::UnknownId(id))?;
+        let new_entity = match entity {
+            EntityType::Text(mut t) => { t.value = value.to_string(); EntityType::Text(t) }
+            EntityType::MText(mut t) => { t.value = value.to_string(); EntityType::MText(t) }
+            _ => return Err(ApiError::Unsupported("SetTextContent is only for Text/MText".into())),
+        };
+        if !self.scene_mut().update_entity(new_entity) {
+            return Err(ApiError::Unsupported(format!("entity {id:?} is on a locked layer")));
+        }
+        Ok(())
+    }
+
+    fn text_content(&self, id: ObjectId) -> ApiResult<String> {
+        let entity = self.document().get_entity(obj_to_handle(id)).ok_or(ApiError::UnknownId(id))?;
+        match entity {
+            EntityType::Text(t) => Ok(t.value.clone()),
+            EntityType::MText(t) => Ok(t.value.clone()),
+            _ => Err(ApiError::Unsupported("GetTextContent is only for Text/MText".into())),
+        }
+    }
+
+    fn can_modify(&self, id: ObjectId) -> ApiResult<()> {
+        let handle = obj_to_handle(id);
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        if self.scene().is_layer_locked(handle) {
+            return Err(ApiError::Unsupported(format!("entity {id:?} is on a locked layer")));
+        }
+        Ok(())
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -201,6 +259,8 @@ impl DocApiBackend for HostSession<'_> {
                 | EntityType::XLine(_)
                 | EntityType::Insert(_)
                 | EntityType::Viewport(_)
+                | EntityType::Text(_)
+                | EntityType::MText(_)
                 | EntityType::Point(_)
                 | EntityType::LwPolyline(_)
         );
@@ -764,6 +824,44 @@ mod tests {
         let Some(EntityType::Point(pa)) = host.document().get_entity(obj_to_handle(a)) else { panic!("point a not found") };
         assert!((pa.location.x - 0.0).abs() < 1e-9, "a moved despite locked batch member");
         assert_eq!(host.scene().geometry_epoch, rev_before, "no mutation on rejected TransformMany");
+    }
+
+    // ── Phase 2b-a: annotations (Text/MText) ─────────────────────────────────
+
+    #[test]
+    fn phase2b_text_mtext_create_content_transform() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Create a TEXT, read its content, set it, verify.
+        let text = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateText(
+            ocs_doc_api::ops::TextSpec { value: "hello".into(), insertion_point: [1.0, 2.0, 0.0], height: 2.5, rotation: 0.0 }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetTextContent { id: text }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::TextContent(s) => assert_eq!(s, "hello"),
+            other => panic!("expected content, got {other:?}"),
+        }
+        dispatch(&mut host, DocApiEnvelope::op(Operation::SetTextContent { id: text, value: "world".into() })).unwrap();
+        let Some(EntityType::Text(t)) = host.document().get_entity(obj_to_handle(text)) else { panic!("text not found") };
+        assert_eq!(t.value, "world");
+
+        // SetTextContent on a non-text entity is Unsupported.
+        let line = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Line { start: [0.0; 3], end: [1.0; 3] }))).unwrap());
+        assert!(dispatch(&mut host, DocApiEnvelope::op(Operation::SetTextContent { id: line, value: "x".into() })).is_err());
+
+        // MTEXT create + content + transform (insertion point moves).
+        let mtext = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateMText(
+            ocs_doc_api::ops::MTextSpec { value: "multi\nline".into(), insertion_point: [5.0, 5.0, 0.0], height: 3.0 }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetTextContent { id: mtext }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::TextContent(s) => assert_eq!(s, "multi\nline"),
+            other => panic!("expected content, got {other:?}"),
+        }
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform {
+            id: mtext, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
+        let Some(EntityType::MText(t)) = host.document().get_entity(obj_to_handle(mtext)) else { panic!("mtext not found") };
+        assert!((t.insertion_point.x - 15.0).abs() < 1e-6);
     }
 
     // ── Phase 5: media & misc (read-mostly) ──────────────────────────────────

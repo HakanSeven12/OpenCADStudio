@@ -42,6 +42,29 @@ pub trait DocApiBackend {
     /// Add a paper-space `VIEWPORT`; returns the fresh `ObjectId`.
     fn add_viewport(&mut self, spec: &crate::ops::ViewportSpec) -> ApiResult<ObjectId>;
 
+    /// Add a single-line `TEXT` annotation; returns the fresh `ObjectId`.
+    fn add_text(&mut self, spec: &crate::ops::TextSpec) -> ApiResult<ObjectId>;
+
+    /// Add a multi-line `MTEXT` annotation; returns the fresh `ObjectId`.
+    fn add_mtext(&mut self, spec: &crate::ops::MTextSpec) -> ApiResult<ObjectId>;
+
+    /// Set the text content of a Text/MText annotation in place.
+    fn set_text_content(&mut self, id: ObjectId, value: &str) -> ApiResult<()>;
+
+    /// The text content of a Text/MText annotation. `Unsupported` for other kinds.
+    fn text_content(&self, id: ObjectId) -> ApiResult<String>;
+
+    /// Can `id` be modified in place right now (exists, is the expected family,
+    /// not on a locked layer)? Read-only pre-check used before mutations.
+    /// Default: existence + not-locked (backends narrow the family check).
+    fn can_modify(&self, id: ObjectId) -> ApiResult<()> {
+        if self.entity_exists(id) {
+            Ok(())
+        } else {
+            Err(ApiError::UnknownId(id))
+        }
+    }
+
     /// Remove any first-level entity by id. Returns `false` if absent; returns
     /// `Err` if the entity exists but cannot be removed (e.g. locked layer).
     fn remove_entity(&mut self, id: ObjectId) -> ApiResult<bool>;

@@ -267,6 +267,8 @@ handle!(Ellipse);
 handle!(Spline);
 handle!(Ray);
 handle!(XLine);
+handle!(Text);
+handle!(MText);
 
 impl Entity {
     pub fn view(&self) -> ApiResult<EntityView> {
@@ -330,6 +332,27 @@ impl Polyline {
         Ok(())
     }
 }
+
+macro_rules! text_handle {
+    ($name:ident) => {
+        impl $name {
+            /// The text content of this annotation.
+            pub fn content(&self) -> ApiResult<String> {
+                match self.session.one_query(Query::GetTextContent { id: self.id })? {
+                    QueryResult::TextContent(s) => Ok(s),
+                    _ => Err(ApiError::Transport("unexpected content result".into())),
+                }
+            }
+            /// Replace the text content (one undo step).
+            pub fn set_content(&self, value: &str) -> ApiResult<()> {
+                self.session.apply_op(Operation::SetTextContent { id: self.id, value: value.to_string() })?;
+                Ok(())
+            }
+        }
+    };
+}
+text_handle!(Text);
+text_handle!(MText);
 
 // ── Collections (construction / lookup) ─────────────────────────────────────
 
@@ -441,6 +464,27 @@ impl CurveCollection {
     pub fn create_xline(&self, origin: [f64; 3], direction: [f64; 3]) -> ApiResult<XLine> {
         let (s, id) = self.create_curve(Curve2Spec::XLine { origin, direction })?;
         Ok(XLine::new(s, id))
+    }
+    /// Single-line TEXT annotation.
+    pub fn create_text(&self, value: &str, insertion_point: [f64; 3], height: f64, rotation: f64) -> ApiResult<Text> {
+        let receipt = self.session.apply_op(Operation::CreateText(crate::ops::TextSpec {
+            value: value.to_string(),
+            insertion_point,
+            height,
+            rotation,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_text returned no id".into()))?;
+        Ok(Text::new(self.session.clone(), id))
+    }
+    /// Multi-line MTEXT annotation.
+    pub fn create_mtext(&self, value: &str, insertion_point: [f64; 3], height: f64) -> ApiResult<MText> {
+        let receipt = self.session.apply_op(Operation::CreateMText(crate::ops::MTextSpec {
+            value: value.to_string(),
+            insertion_point,
+            height,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_mtext returned no id".into()))?;
+        Ok(MText::new(self.session.clone(), id))
     }
     /// Bulk-create many points in ONE op (plan §5.3): all-or-nothing, one undo step.
     pub fn create_points(&self, positions: &[[f64; 3]]) -> ApiResult<Vec<Point>> {

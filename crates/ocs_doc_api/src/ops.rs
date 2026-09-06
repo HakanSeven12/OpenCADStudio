@@ -79,6 +79,23 @@ pub struct ViewportSpec {
     pub view_height: f64,
 }
 
+/// Construction spec for a single-line `TEXT` annotation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextSpec {
+    pub value: String,
+    pub insertion_point: [f64; 3],
+    pub height: f64,
+    pub rotation: f64,
+}
+
+/// Construction spec for a multi-line `MTEXT` annotation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MTextSpec {
+    pub value: String,
+    pub insertion_point: [f64; 3],
+    pub height: f64,
+}
+
 /// A rigid similarity (rotation + translation + optional uniform scale/reflection)
 /// as a plain-data mirror of `cadkernel::brep::transform`'s `Placement`
 /// (non-serde). Columns are the new basis axes; `origin` is the translation.
@@ -128,6 +145,9 @@ impl crate::gen::Operation {
             DeleteMany(_) => "DeleteMany",
             CreateInsert(_) => "CreateInsert",
             CreateViewport(_) => "CreateViewport",
+            CreateText(_) => "CreateText",
+            CreateMText(_) => "CreateMText",
+            SetTextContent { .. } => "SetTextContent",
         }
     }
 }

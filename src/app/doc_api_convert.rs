@@ -155,6 +155,16 @@ pub fn transform_entity_geometry(
             vp.center = apply(vp.center);
             EntityType::Viewport(vp)
         }
+        EntityType::Text(t) => {
+            let mut t = t.clone();
+            t.insertion_point = apply(t.insertion_point);
+            EntityType::Text(t)
+        }
+        EntityType::MText(t) => {
+            let mut t = t.clone();
+            t.insertion_point = apply(t.insertion_point);
+            EntityType::MText(t)
+        }
         EntityType::Point(pt) => {
             let mut pt = pt.clone();
             pt.location = apply(pt.location);
@@ -393,6 +403,15 @@ pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aab
                 max: [max_x, max_y, img.insertion_point.z],
             }
         }
+        EntityType::Text(t) => Aabb {
+            // Coarse: a square of side height*N around the insertion point.
+            min: [t.insertion_point.x, t.insertion_point.y - t.height, t.insertion_point.z],
+            max: [t.insertion_point.x + t.height * t.value.len() as f64, t.insertion_point.y, t.insertion_point.z],
+        },
+        EntityType::MText(t) => Aabb {
+            min: [t.insertion_point.x, t.insertion_point.y - t.height, t.insertion_point.z],
+            max: [t.insertion_point.x + t.height * t.value.len() as f64, t.insertion_point.y, t.insertion_point.z],
+        },
         // Ray/XLine are unbounded by definition — no finite bounds.
         _ => return Err(ApiError::Unsupported("bounds for this entity family is not yet implemented".into())),
     };

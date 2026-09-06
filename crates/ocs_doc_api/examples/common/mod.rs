@@ -21,6 +21,8 @@ pub struct MockBackend {
     kinds: HashMap<ObjectId, String>,
     /// Stored 2D curve specs so `bounds()` works on non-solid entities too.
     curves: HashMap<ObjectId, Curve2Spec>,
+    /// Stored text content for Text/MText annotations.
+    text_values: HashMap<ObjectId, String>,
 }
 
 impl MockBackend {
@@ -132,6 +134,27 @@ impl DocApiBackend for MockBackend {
     }
     fn add_viewport(&mut self, _spec: &ocs_doc_api::ops::ViewportSpec) -> ApiResult<ObjectId> {
         Ok(self.alloc("Viewport"))
+    }
+    fn add_text(&mut self, spec: &ocs_doc_api::ops::TextSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("Text");
+        self.text_values.insert(id, spec.value.clone());
+        Ok(id)
+    }
+    fn add_mtext(&mut self, spec: &ocs_doc_api::ops::MTextSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("MText");
+        self.text_values.insert(id, spec.value.clone());
+        Ok(id)
+    }
+    fn set_text_content(&mut self, id: ObjectId, value: &str) -> ApiResult<()> {
+        if let std::collections::hash_map::Entry::Occupied(mut e) = self.text_values.entry(id) {
+            e.insert(value.to_string());
+            Ok(())
+        } else {
+            Err(ApiError::UnknownId(id))
+        }
+    }
+    fn text_content(&self, id: ObjectId) -> ApiResult<String> {
+        self.text_values.get(&id).cloned().ok_or(ApiError::UnknownId(id))
     }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {

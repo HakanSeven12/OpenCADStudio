@@ -61,8 +61,12 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
   (Arc coarse full-circle, Ellipse major-axis radius, Spline control-point bbox;
   Ray/XLine unbounded → `Unsupported`), and transform (all five + the phase-1 set)
   via acadrust. Covered by `phase2_*` tests.
-- **Remaining (2b):** annotations `Text`/`MText` (create + content get/set), `Hatch`
-  (create + boundary query), `Dimension` (typed sub-types).
+- **Done (2b-a):** annotations `Text`/`MText` — `create_text`/`create_mtext`
+  (`CreateText`/`CreateMText` wire ops), `content()`/`set_content()` (new
+  `GetTextContent` query + `SetTextContent` op), transform (insertion point),
+  coarse bounds. Covered by `phase2b_*` test.
+- **Remaining (2b-b/c):** `Hatch` (create + boundary query), `Dimension` (typed
+  sub-types).
 - **Unblocked:** `add_vertex` (polyline) and sweep profiles (Line/Circle/Arc/LwPolyline)
   are supported (Phase 0).
 

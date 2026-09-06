@@ -87,6 +87,32 @@ B-rep solid. Host resolves bodies via the solid_models cache (lift-on-miss from 
 
 - **create_xline**(`origin: [f64; 3], direction: [f64; 3]`) -> `XLine`
 
+## `Text` (acadrust `Text`, collection `curves`)
+
+Single-line text annotation. content()/set_content() read+replace the value; transform moves insertion point.
+
+### Constructors (`doc.curves()`)
+
+- **create_text**(`value: &str, insertion_point: [f64; 3], height: f64, rotation: f64`) -> `Text`
+
+### Methods
+
+- **content**(``) -> `String` — query `GetTextContent`
+- **set_content**(`value: &str`) -> `()` — op `SetTextContent`
+
+## `MText` (acadrust `MText`, collection `curves`)
+
+Multi-line text annotation. content()/set_content() read+replace the value; transform moves insertion point.
+
+### Constructors (`doc.curves()`)
+
+- **create_mtext**(`value: &str, insertion_point: [f64; 3], height: f64`) -> `MText`
+
+### Methods
+
+- **content**(``) -> `String` — query `GetTextContent`
+- **set_content**(`value: &str`) -> `()` — op `SetTextContent`
+
 ## `Entity` (acadrust `Insert`, collection `entities`)
 
 Block reference. Place an existing BlockRecord by name; transform moves its insert point.

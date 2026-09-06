@@ -238,6 +238,59 @@ op = "CreateCurve"
 fixed = { curve = "XLine" }
 
 # ============================================================================
+# ANNOTATION FAMILY (phase 2b) — text annotations
+# ============================================================================
+[[family]]
+name = "Text"
+acadrust_variant = "Text"
+handle = "Text"
+collection = "curves"
+description = "Single-line text annotation. content()/set_content() read+replace the value; transform moves insertion point."
+
+[[family.constructor]]
+name = "create_text"
+args = [{ name = "value", ty = "&str" }, { name = "insertion_point", ty = "[f64; 3]" }, { name = "height", ty = "f64" }, { name = "rotation", ty = "f64" }]
+op = "CreateText"
+
+[[family.method]]
+name = "content"
+kind = "query"
+query = "GetTextContent"
+returns = "String"
+
+[[family.method]]
+name = "set_content"
+kind = "op"
+op = "SetTextContent"
+args = [{ name = "value", ty = "&str" }]
+returns = "()"
+
+[[family]]
+name = "MText"
+acadrust_variant = "MText"
+handle = "MText"
+collection = "curves"
+description = "Multi-line text annotation. content()/set_content() read+replace the value; transform moves insertion point."
+
+[[family.constructor]]
+name = "create_mtext"
+args = [{ name = "value", ty = "&str" }, { name = "insertion_point", ty = "[f64; 3]" }, { name = "height", ty = "f64" }]
+op = "CreateMText"
+
+[[family.method]]
+name = "content"
+kind = "query"
+query = "GetTextContent"
+returns = "String"
+
+[[family.method]]
+name = "set_content"
+kind = "op"
+op = "SetTextContent"
+args = [{ name = "value", ty = "&str" }]
+returns = "()"
+
+# ============================================================================
 # CONTAINER FAMILY (phase 3) — block references
 # ============================================================================
 [[family]]

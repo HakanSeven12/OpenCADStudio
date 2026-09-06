@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::ObjectId;
-use crate::ops::{BoolOp, Curve2Spec, EntitySpec, InsertSpec, PlacementSpec, SolidPrimitive, ViewportSpec};
+use crate::ops::{BoolOp, Curve2Spec, EntitySpec, InsertSpec, MTextSpec, PlacementSpec, SolidPrimitive, TextSpec, ViewportSpec};
 
 /// A typed write operation (plan §5). Each variant is ONE atomic host call = one
 /// undo step. Append new variants at the END only.
@@ -32,4 +32,8 @@ pub enum Operation {
     CreateInsert(InsertSpec),
     // paper-space
     CreateViewport(ViewportSpec),
+    // annotations
+    CreateText(TextSpec),
+    CreateMText(MTextSpec),
+    SetTextContent { id: ObjectId, value: String },
 }

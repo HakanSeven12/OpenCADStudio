@@ -189,6 +189,28 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::CreateText(spec) => {
+            b.push_undo(name);
+            let id = b.add_text(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
+        Operation::CreateMText(spec) => {
+            b.push_undo(name);
+            let id = b.add_mtext(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
+        Operation::SetTextContent { id, value } => {
+            b.can_modify(*id).map_err(|e| match e {
+                ApiError::UnknownId(_) => ApiError::validation(name, format!("unknown ObjectId {id:?}")),
+                other => other,
+            })?;
+            b.push_undo(name);
+            b.set_text_content(*id, value)?;
+            b.finalize_op();
+            OpOutcome::Updated(*id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),
@@ -226,6 +248,7 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
                 QueryResult::Intersects(ba.overlaps(&bb))
             }
             Query::GetGeometryRevision => QueryResult::Revision(b.revision()),
+            Query::GetTextContent { id } => QueryResult::TextContent(b.text_content(id)?),
         };
         results.push(r);
     }

@@ -19,4 +19,6 @@ pub enum Query {
     /// Whether two entities' bounds overlap (two-phase conditional modelling).
     GetIntersects { a: ObjectId, b: ObjectId },
     GetGeometryRevision,
+    /// The text content of a Text/MText annotation.
+    GetTextContent { id: ObjectId },
 }

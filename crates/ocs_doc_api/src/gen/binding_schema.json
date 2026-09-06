@@ -189,6 +189,76 @@
       "name": "XLine"
     },
     {
+      "acadrust_variant": "Text",
+      "collection": "curves",
+      "handle": "Text",
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "content",
+          "op": null,
+          "query": "GetTextContent",
+          "read_only": true,
+          "returns": "String"
+        },
+        {
+          "args": [
+            {
+              "name": "value",
+              "ty": "&str"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "set_content",
+          "op": "SetTextContent",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        }
+      ],
+      "name": "Text"
+    },
+    {
+      "acadrust_variant": "MText",
+      "collection": "curves",
+      "handle": "MText",
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "content",
+          "op": null,
+          "query": "GetTextContent",
+          "read_only": true,
+          "returns": "String"
+        },
+        {
+          "args": [
+            {
+              "name": "value",
+              "ty": "&str"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "set_content",
+          "op": "SetTextContent",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        }
+      ],
+      "name": "MText"
+    },
+    {
       "acadrust_variant": "Insert",
       "collection": "entities",
       "handle": "Entity",
@@ -270,7 +340,9 @@
       "Ellipse",
       "Spline",
       "Ray",
-      "XLine"
+      "XLine",
+      "Text",
+      "MText"
     ],
     "root": "DocApi"
   },

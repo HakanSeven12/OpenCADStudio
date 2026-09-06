@@ -43,6 +43,8 @@ pub enum QueryResult {
     /// Whether two entities' bounds overlap (two-phase conditional modelling).
     Intersects(bool),
     Revision(GeometryRevision),
+    /// The text content of a Text/MText annotation.
+    TextContent(String),
 }
 
 /// Convenience: the query name for diagnostics.
@@ -56,6 +58,7 @@ impl crate::gen::Query {
             GetVolume { .. } => "GetVolume",
             GetIntersects { .. } => "GetIntersects",
             GetGeometryRevision => "GetGeometryRevision",
+            GetTextContent { .. } => "GetTextContent",
         }
     }
 }

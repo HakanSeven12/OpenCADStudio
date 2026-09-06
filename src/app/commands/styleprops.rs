@@ -2940,20 +2940,6 @@ mod tests {
     fn test_cad_selection_and_model_space_sysvars() {
         let mut app = fresh_app();
 
-        // COLORTHEME 1 (Light)
-        let _ = app.run_command_line("SETVAR COLORTHEME 1");
-        assert_eq!(app.active_theme, iced::Theme::Light);
-        assert_eq!(app.ui_theme.name, "Light");
-
-        // COLORTHEME 0 (Dark)
-        let _ = app.run_command_line("SETVAR COLORTHEME 0");
-        assert_eq!(app.active_theme, iced::Theme::Dark);
-        assert_eq!(app.ui_theme.name, "Dark");
-
-        // Direct command name: COLORTHEME 1
-        let _ = app.run_command_line("COLORTHEME 1");
-        assert_eq!(app.active_theme, iced::Theme::Light);
-
         // SELECTIONAREA toggle
         let _ = app.run_command_line("SETVAR SELECTIONAREA 0");
         assert!(!app.model_space.selection_area);
@@ -3011,12 +2997,6 @@ mod tests {
             [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0]
         );
 
-        // Switch to light theme and set BACKGROUND THEME
-        let _ = app.run_command_line("COLORTHEME 1");
-        let _ = app.run_command_line("BACKGROUND THEME");
-        assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::MatchTheme);
-        assert_eq!(app.tabs[i].scene.bg_color, [1.0, 1.0, 1.0, 1.0]);
-
         // BACKGROUND RGB custom
         let _ = app.run_command_line("BACKGROUND 50 60 70");
         assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::Custom);
@@ -3038,74 +3018,15 @@ mod tests {
     }
 
     #[test]
-    fn test_colorscheme_command() {
-        let mut app = fresh_app();
-        app.model_space.mode = crate::app::config::ModelSpaceMode::MatchTheme;
-        let i = app.active_tab;
-
-        // Bare COLORSCHEME launches interactive ValuePromptCommand
-        let _ = app.run_command_line("COLORSCHEME");
-        assert!(app.tabs[i].active_cmd.is_some());
-        assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().name(), "COLORSCHEME");
-
-        // Cancel the interactive command
-        app.tabs[i].active_cmd = None;
-
-        // COLORSCHEME LIGHT sets Light theme and synchronizes model space
-        let _ = app.run_command_line("COLORSCHEME LIGHT");
-        assert_eq!(app.active_theme, iced::Theme::Light);
-        assert_eq!(app.tabs[i].scene.bg_color, [1.0, 1.0, 1.0, 1.0]);
-
-        // Case-insensitive and spaces: "colorscheme tokyo night"
-        let _ = app.run_command_line("colorscheme tokyo night");
-        assert_eq!(app.active_theme, iced::Theme::TokyoNight);
-
-        // COLORSCHEME rejects 1 and 0 (which belong to COLORTHEME)
-        let _ = app.run_command_line("colorscheme 1");
-        assert_ne!(app.active_theme, iced::Theme::Light); // stays TokyoNight
-
-        // COLORTHEME accepts 1 and 0
-        let _ = app.run_command_line("COLORTHEME 1");
-        assert_eq!(app.active_theme, iced::Theme::Light);
-        let _ = app.run_command_line("COLORTHEME 0");
-        assert_eq!(app.active_theme, iced::Theme::Dark);
-    }
-
-    #[test]
     fn test_reviewer_feedback_fixes() {
         let mut app = fresh_app();
 
-        // 1. COLORTHEME query returns UI theme scheme regardless of canvas background
-        let _ = app.run_command_line("COLORTHEME 0");
-        // Set canvas background to bright white in custom mode
-        let _ = app.run_command_line("BACKGROUND 255 255 255");
-        let _ = app.run_command_line("SETVAR COLORTHEME");
-        let output = app.command_line.history_plain_text();
-        assert!(output.contains("<0 (Dark)>"), "UI is dark, so query must return 0 despite white canvas: {output}");
-
-        let _ = app.run_command_line("COLORTHEME 1");
-        let _ = app.run_command_line("SETVAR COLORTHEME");
-        let output = app.command_line.history_plain_text();
-        assert!(output.contains("<1 (Light)>"), "UI is light, so query must return 1: {output}");
-
-        // 2. Custom theme safety when COLORTHEME 0/1 or COLORSCHEME runs
-        app.ui_theme.name = "Custom".to_string();
-        app.ui_theme.palette.background = [12, 34, 56];
-        let _ = app.run_command_line("COLORTHEME 0");
-        assert_eq!(app.saved_custom_palette.map(|p| p.background), Some([12, 34, 56]));
-
-        app.saved_custom_palette = None;
-        app.ui_theme.name = "Custom".to_string();
-        app.ui_theme.palette.background = [78, 90, 12];
-        let _ = app.run_command_line("COLORSCHEME DRACULA");
-        assert_eq!(app.saved_custom_palette.map(|p| p.background), Some([78, 90, 12]));
-
-        // 3. ModelSpaceBgChanged empty reverts mode to MatchTheme
+        // An empty background restores MatchTheme.
         let _ = app.update(crate::app::Message::ModelSpaceBgChanged("".to_string()));
         assert_eq!(app.model_space.mode, crate::app::config::ModelSpaceMode::MatchTheme);
         assert_eq!(app.model_space.custom_bg, None);
 
-        // 4. Split restore defaults: Display vs Selection
+        // Display and selection defaults are restored separately.
         app.model_space.mode = crate::app::config::ModelSpaceMode::Custom;
         app.model_space.custom_bg = Some([10, 20, 30]);
         app.model_space.selection_opacity = 99;

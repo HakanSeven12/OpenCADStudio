@@ -64,6 +64,9 @@ fn operation_variants() -> Vec<String> {
             file_path: String::new(), insertion_point: [0.0; 3], u_vector: [0.0; 3], v_vector: [0.0; 3], size: [0.0; 2],
         }),
         Operation::Loft { profiles: vec![] },
+        Operation::CreateDimensionRadius(ocs_doc_api::ops::DimensionRadialSpec { center: [0.0; 3], point: [0.0; 3] }),
+        Operation::CreateDimensionDiameter(ocs_doc_api::ops::DimensionRadialSpec { center: [0.0; 3], point: [0.0; 3] }),
+        Operation::CreateDimensionAngular(ocs_doc_api::ops::DimensionAngularSpec { vertex: [0.0; 3], first_point: [0.0; 3], second_point: [0.0; 3], arc_location: [0.0; 3] }),
     ];
     // Derive the variant names by serializing a probe of each and reading the
     // bincode variant index -> name map is not available; instead match by
@@ -153,6 +156,9 @@ const OPERATION_BASELINE: &[&str] = &[
     "SetViewportView",
     "CreateRasterImage",
     "Loft",
+    "CreateDimensionRadius",
+    "CreateDimensionDiameter",
+    "CreateDimensionAngular",
 ];
 
 /// Recorded baseline of the `Query` variant order.

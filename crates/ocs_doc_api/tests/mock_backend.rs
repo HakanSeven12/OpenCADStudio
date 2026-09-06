@@ -123,6 +123,20 @@ impl DocApiBackend for MockBackend {
         self.dimension_measurements.insert(id, d);
         Ok(id)
     }
+    fn add_dimension_radius(&mut self, spec: &ocs_doc_api::ops::DimensionRadialSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("Dimension");
+        let d = ((spec.center[0] - spec.point[0]).powi(2) + (spec.center[1] - spec.point[1]).powi(2) + (spec.center[2] - spec.point[2]).powi(2)).sqrt();
+        self.dimension_measurements.insert(id, d);
+        Ok(id)
+    }
+    fn add_dimension_diameter(&mut self, spec: &ocs_doc_api::ops::DimensionRadialSpec) -> ApiResult<ObjectId> {
+        self.add_dimension_radius(spec)
+    }
+    fn add_dimension_angular(&mut self, _spec: &ocs_doc_api::ops::DimensionAngularSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("Dimension");
+        self.dimension_measurements.insert(id, 90.0); // mock: 90 degrees
+        Ok(id)
+    }
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64> {
         self.dimension_measurements.get(&id).copied().ok_or(ApiError::UnknownId(id))
     }

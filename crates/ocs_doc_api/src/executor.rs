@@ -269,6 +269,24 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::CreateDimensionRadius(spec) => {
+            b.push_undo(name);
+            let id = b.add_dimension_radius(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
+        Operation::CreateDimensionDiameter(spec) => {
+            b.push_undo(name);
+            let id = b.add_dimension_diameter(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
+        Operation::CreateDimensionAngular(spec) => {
+            b.push_undo(name);
+            let id = b.add_dimension_angular(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),

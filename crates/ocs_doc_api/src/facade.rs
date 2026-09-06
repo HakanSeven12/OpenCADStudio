@@ -539,6 +539,32 @@ impl CurveCollection {
         Ok(Entity::new(self.session.clone(), id))
     }
 
+    /// A radial DIMENSION for the circle centered at `center` through `point`.
+    pub fn create_dimension_radius(&self, center: [f64; 3], point: [f64; 3]) -> ApiResult<Dimension> {
+        self.create_dim_radial(Operation::CreateDimensionRadius, center, point)
+    }
+    /// A diameter DIMENSION for the circle with chord points `center`/`point`.
+    pub fn create_dimension_diameter(&self, center: [f64; 3], point: [f64; 3]) -> ApiResult<Dimension> {
+        self.create_dim_radial(Operation::CreateDimensionDiameter, center, point)
+    }
+    fn create_dim_radial(
+        &self,
+        op: impl Fn(crate::ops::DimensionRadialSpec) -> Operation,
+        center: [f64; 3],
+        point: [f64; 3],
+    ) -> ApiResult<Dimension> {
+        let receipt = self.session.apply_op(op(crate::ops::DimensionRadialSpec { center, point }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
+        Ok(Dimension::new(self.session.clone(), id))
+    }
+    /// A 3-point angular DIMENSION (vertex + one point on each leg).
+    pub fn create_dimension_angular(&self, vertex: [f64; 3], first_point: [f64; 3], second_point: [f64; 3], arc_location: [f64; 3]) -> ApiResult<Dimension> {
+        let receipt = self.session.apply_op(Operation::CreateDimensionAngular(crate::ops::DimensionAngularSpec {
+            vertex, first_point, second_point, arc_location,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
+        Ok(Dimension::new(self.session.clone(), id))
+    }
     /// A linear DIMENSION between `first_point` and `second_point`, with the
     /// dimension line placed at `definition_point`. `measurement()` reads the value.
     pub fn create_dimension_linear(&self, first_point: [f64; 3], second_point: [f64; 3], definition_point: [f64; 3]) -> ApiResult<Dimension> {

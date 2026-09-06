@@ -63,6 +63,15 @@ pub trait DocApiBackend {
     /// Add a linear `DIMENSION`; returns the fresh `ObjectId`.
     fn add_dimension_linear(&mut self, spec: &crate::ops::DimensionSpec) -> ApiResult<ObjectId>;
 
+    /// Add a radial `DIMENSION`; returns the fresh `ObjectId`.
+    fn add_dimension_radius(&mut self, spec: &crate::ops::DimensionRadialSpec) -> ApiResult<ObjectId>;
+
+    /// Add a diameter `DIMENSION`; returns the fresh `ObjectId`.
+    fn add_dimension_diameter(&mut self, spec: &crate::ops::DimensionRadialSpec) -> ApiResult<ObjectId>;
+
+    /// Add a 3-point angular `DIMENSION`; returns the fresh `ObjectId`.
+    fn add_dimension_angular(&mut self, spec: &crate::ops::DimensionAngularSpec) -> ApiResult<ObjectId>;
+
     /// A dimension's measured value (distance for linear/radius, degrees for angular).
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64>;
 

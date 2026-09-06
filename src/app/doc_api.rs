@@ -248,6 +248,34 @@ impl DocApiBackend for HostSession<'_> {
         Ok(handle_to_obj(handle))
     }
 
+    fn add_dimension_radius(&mut self, spec: &ocs_doc_api::ops::DimensionRadialSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::{Dimension, DimensionRadius};
+        use acadrust::types::Vector3;
+        let v3 = |p: [f64; 3]| Vector3::new(p[0], p[1], p[2]);
+        let dim = DimensionRadius::new(v3(spec.center), v3(spec.point));
+        let handle = self.scene_mut().add_entity(EntityType::Dimension(Dimension::Radius(dim)));
+        Ok(handle_to_obj(handle))
+    }
+
+    fn add_dimension_diameter(&mut self, spec: &ocs_doc_api::ops::DimensionRadialSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::{Dimension, DimensionDiameter};
+        use acadrust::types::Vector3;
+        let v3 = |p: [f64; 3]| Vector3::new(p[0], p[1], p[2]);
+        let dim = DimensionDiameter::new(v3(spec.center), v3(spec.point));
+        let handle = self.scene_mut().add_entity(EntityType::Dimension(Dimension::Diameter(dim)));
+        Ok(handle_to_obj(handle))
+    }
+
+    fn add_dimension_angular(&mut self, spec: &ocs_doc_api::ops::DimensionAngularSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::{Dimension, DimensionAngular3Pt};
+        use acadrust::types::Vector3;
+        let v3 = |p: [f64; 3]| Vector3::new(p[0], p[1], p[2]);
+        let mut dim = DimensionAngular3Pt::new(v3(spec.vertex), v3(spec.first_point), v3(spec.second_point));
+        dim.definition_point = v3(spec.arc_location);
+        let handle = self.scene_mut().add_entity(EntityType::Dimension(Dimension::Angular3Pt(dim)));
+        Ok(handle_to_obj(handle))
+    }
+
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64> {
         let entity = self.document().get_entity(obj_to_handle(id)).ok_or(ApiError::UnknownId(id))?;
         let EntityType::Dimension(d) = entity else {
@@ -258,6 +286,8 @@ impl DocApiBackend for HostSession<'_> {
             acadrust::entities::Dimension::Linear(x) => x.measurement(),
             acadrust::entities::Dimension::Radius(x) => x.measurement(),
             acadrust::entities::Dimension::Diameter(x) => x.measurement(),
+            acadrust::entities::Dimension::Angular3Pt(x) => x.measurement_degrees(),
+            acadrust::entities::Dimension::Angular2Ln(x) => x.measurement_degrees(),
             _ => return Err(ApiError::Unsupported("dimension measurement for this sub-type".into())),
         })
     }
@@ -1078,6 +1108,43 @@ mod tests {
         // bulge=1 -> included angle θ = 4·atan(1) = π (a semicircle); radius = chord/2 = 5.
         if let cadkernel::geom2d::Curve::Arc(arc) = &curves[0] {
             assert!((arc.radius - 5.0).abs() < 0.01, "arc radius {} (semicircle)", arc.radius);
+        }
+    }
+
+    // ── Phase 2c-ii: dimension sub-types (radius/diameter/angular) ──────────
+
+    #[test]
+    fn phase2cii_dimension_radius_diameter_angular() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Radius: center (0,0,0), point on circle (4,0,0) -> radius 4.
+        let rad = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateDimensionRadius(
+            ocs_doc_api::ops::DimensionRadialSpec { center: [0.0; 3], point: [4.0, 0.0, 0.0] }))).unwrap());
+        // Diameter: chord points (0,0,0) and (6,0,0) -> diameter 6.
+        let dia = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateDimensionDiameter(
+            ocs_doc_api::ops::DimensionRadialSpec { center: [0.0; 3], point: [6.0, 0.0, 0.0] }))).unwrap());
+        // Angular: vertex (0,0,0), leg points (10,0,0) and (0,10,0) -> 90 degrees.
+        let ang = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateDimensionAngular(
+            ocs_doc_api::ops::DimensionAngularSpec {
+                vertex: [0.0; 3], first_point: [10.0, 0.0, 0.0], second_point: [0.0, 10.0, 0.0], arc_location: [5.0, 5.0, 0.0],
+            }))).unwrap());
+
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetDimensionMeasurement { id: rad },
+            Query::GetDimensionMeasurement { id: dia },
+            Query::GetDimensionMeasurement { id: ang },
+        ])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::DimensionMeasurement(v) => assert!((*v - 4.0).abs() < 1e-4, "radius {v}"),
+            other => panic!("expected measurement, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::DimensionMeasurement(v) => assert!((*v - 6.0).abs() < 1e-4, "diameter {v}"),
+            other => panic!("expected measurement, got {other:?}"),
+        }
+        match &receipt.query_results[2] {
+            QueryResult::DimensionMeasurement(v) => assert!((*v - 90.0).abs() < 0.1, "angle {v}"),
+            other => panic!("expected measurement, got {other:?}"),
         }
     }
 

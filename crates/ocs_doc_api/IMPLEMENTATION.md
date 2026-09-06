@@ -70,8 +70,11 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
   boundary edges, delete. Covered by `phase2b_hatch_*` test.
 - **Done (2b-c):** linear `Dimension` — `create_dimension_linear(first, second,
   definition)` (`CreateDimensionLinear`), `measurement()` → distance
-  (`GetDimensionMeasurement`), bounds. Covered by `phase2c_*` test. Radius/diameter/
-  angular dimension sub-types are a later refinement.
+  (`GetDimensionMeasurement`), bounds. Covered by `phase2c_*` test.
+- **Done (2c-ii, sub-types):** `create_dimension_radius` / `create_dimension_diameter`
+  (radial chord) and `create_dimension_angular` (vertex + 2 legs) → radial/degrees
+  measurements. Covered by `phase2cii_*` test. (`Angular2Ln` variant handled in
+  `measurement`; a dedicated constructor is a later refinement.)
 - **Unblocked:** `add_vertex` (polyline) and sweep profiles (Line/Circle/Arc/LwPolyline)
   are supported (Phase 0).
 

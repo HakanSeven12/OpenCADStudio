@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::ObjectId;
-use crate::ops::{BoolOp, Curve2Spec, DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, RasterImageSpec, SolidPrimitive, TextSpec, ViewportSpec};
+use crate::ops::{BoolOp, Curve2Spec, DimensionAngularSpec, DimensionRadialSpec, DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, RasterImageSpec, SolidPrimitive, TextSpec, ViewportSpec};
 
 /// A typed write operation (plan §5). Each variant is ONE atomic host call = one
 /// undo step. Append new variants at the END only.
@@ -48,4 +48,8 @@ pub enum Operation {
     CreateRasterImage(RasterImageSpec),
     // multi-profile solid
     Loft { profiles: Vec<ObjectId> },
+    // dimension sub-types
+    CreateDimensionRadius(DimensionRadialSpec),
+    CreateDimensionDiameter(DimensionRadialSpec),
+    CreateDimensionAngular(DimensionAngularSpec),
 }

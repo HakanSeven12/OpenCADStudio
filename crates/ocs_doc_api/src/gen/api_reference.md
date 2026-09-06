@@ -133,6 +133,9 @@ Linear dimension between two measured points. measurement() reads the distance; 
 ### Constructors (`doc.curves()`)
 
 - **create_dimension_linear**(first_point: [f64; 3], second_point: [f64; 3], definition_point: [f64; 3]) -> `Dimension` — `CreateDimensionLinear`
+- **create_dimension_radius**(center: [f64; 3], point: [f64; 3]) -> `Dimension` — `CreateDimensionRadius`
+- **create_dimension_diameter**(center: [f64; 3], point: [f64; 3]) -> `Dimension` — `CreateDimensionDiameter`
+- **create_dimension_angular**(vertex: [f64; 3], first_point: [f64; 3], second_point: [f64; 3], arc_location: [f64; 3]) -> `Dimension` — `CreateDimensionAngular`
 
 ### Methods
 

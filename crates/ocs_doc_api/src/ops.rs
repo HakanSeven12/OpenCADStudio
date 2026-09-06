@@ -116,6 +116,26 @@ pub struct DimensionSpec {
     pub definition_point: [f64; 3],
 }
 
+/// Construction spec for a radial/diameter `DIMENSION`: the circle center and a
+/// point on the circle (radius) or a chord point (diameter).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DimensionRadialSpec {
+    /// Center of the arc/circle (radius) or first chord point (diameter).
+    pub center: [f64; 3],
+    /// A point on the arc/circle (radius) or the far chord point (diameter).
+    pub point: [f64; 3],
+}
+
+/// Construction spec for a 3-point angular `DIMENSION`: vertex + one point on
+/// each leg, plus the dimension-arc location.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DimensionAngularSpec {
+    pub vertex: [f64; 3],
+    pub first_point: [f64; 3],
+    pub second_point: [f64; 3],
+    pub arc_location: [f64; 3],
+}
+
 /// Construction spec for a `RASTER_IMAGE`: an image file placed at
 /// `insertion_point` with per-pixel world-unit vectors `u_vector`/`v_vector` and
 /// pixel `size` (width, height). The host auto-registers the ImageDefinition.
@@ -187,6 +207,9 @@ impl crate::gen::Operation {
             SetViewportView { .. } => "SetViewportView",
             CreateRasterImage(_) => "CreateRasterImage",
             Loft { .. } => "Loft",
+            CreateDimensionRadius(_) => "CreateDimensionRadius",
+            CreateDimensionDiameter(_) => "CreateDimensionDiameter",
+            CreateDimensionAngular(_) => "CreateDimensionAngular",
         }
     }
 }

@@ -331,6 +331,21 @@ name = "create_dimension_linear"
 args = [{ name = "first_point", ty = "[f64; 3]" }, { name = "second_point", ty = "[f64; 3]" }, { name = "definition_point", ty = "[f64; 3]" }]
 op = "CreateDimensionLinear"
 
+[[family.constructor]]
+name = "create_dimension_radius"
+args = [{ name = "center", ty = "[f64; 3]" }, { name = "point", ty = "[f64; 3]" }]
+op = "CreateDimensionRadius"
+
+[[family.constructor]]
+name = "create_dimension_diameter"
+args = [{ name = "center", ty = "[f64; 3]" }, { name = "point", ty = "[f64; 3]" }]
+op = "CreateDimensionDiameter"
+
+[[family.constructor]]
+name = "create_dimension_angular"
+args = [{ name = "vertex", ty = "[f64; 3]" }, { name = "first_point", ty = "[f64; 3]" }, { name = "second_point", ty = "[f64; 3]" }, { name = "arc_location", ty = "[f64; 3]" }]
+op = "CreateDimensionAngular"
+
 [[family.method]]
 name = "measurement"
 kind = "query"

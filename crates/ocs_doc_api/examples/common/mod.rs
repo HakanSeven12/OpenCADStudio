@@ -206,6 +206,11 @@ impl DocApiBackend for MockBackend {
         }
         Ok(self.alloc("AttributeDefinition"))
     }
+    fn add_dimension_angular2ln(&mut self, _spec: &ocs_doc_api::ops::DimensionAngularSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("Dimension");
+        self.dimension_measurements.insert(id, 90.0);
+        Ok(id)
+    }
     fn add_table(&mut self, spec: &ocs_doc_api::ops::TableSpec) -> ApiResult<ObjectId> {
         let cols = spec.data.first().map(|r| r.len()).unwrap_or(0);
         if spec.data.is_empty() || cols == 0 || spec.data.iter().any(|r| r.len() != cols) {

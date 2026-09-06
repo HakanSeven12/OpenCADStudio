@@ -306,6 +306,16 @@ impl DocApiBackend for HostSession<'_> {
         Ok(handle_to_obj(handle))
     }
 
+    fn add_dimension_angular2ln(&mut self, spec: &ocs_doc_api::ops::DimensionAngularSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::{Dimension, DimensionAngular2Ln};
+        use acadrust::types::Vector3;
+        let v3 = |p: [f64; 3]| Vector3::new(p[0], p[1], p[2]);
+        let mut dim = DimensionAngular2Ln::new(v3(spec.vertex), v3(spec.first_point), v3(spec.second_point));
+        dim.dimension_arc = v3(spec.arc_location);
+        let handle = self.scene_mut().add_entity(EntityType::Dimension(Dimension::Angular2Ln(dim)));
+        Ok(handle_to_obj(handle))
+    }
+
     fn add_table(&mut self, spec: &ocs_doc_api::ops::TableSpec) -> ApiResult<ObjectId> {
         use acadrust::entities::Table;
         use acadrust::types::Vector3;
@@ -1230,6 +1240,31 @@ mod tests {
         let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetEntity { id: table }])).unwrap();
         match &receipt.query_results[0] {
             QueryResult::Entity(e) => assert_eq!(e.kind, "Table"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+    }
+
+    // ── Phase 2c-iii: 2-line angular dimension ────────────────────────────────
+
+    #[test]
+    fn phase2ciii_dimension_angular2ln() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Angle between line (0,0,0)->(10,0,0) and (0,0,0)->(0,10,0) = 90 degrees.
+        let ang = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateDimensionAngular2Ln(
+            ocs_doc_api::ops::DimensionAngularSpec {
+                vertex: [0.0; 3], first_point: [10.0, 0.0, 0.0], second_point: [0.0, 10.0, 0.0], arc_location: [5.0, 5.0, 0.0],
+            }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetDimensionMeasurement { id: ang },
+            Query::GetEntity { id: ang },
+        ])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::DimensionMeasurement(v) => assert!((*v - 90.0).abs() < 0.1, "angle {v}"),
+            other => panic!("expected measurement, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Entity(e) => assert_eq!(e.kind, "Dimension"),
             other => panic!("expected entity, got {other:?}"),
         }
     }

@@ -233,6 +233,7 @@ impl crate::gen::Operation {
             CreateDimensionAngular(_) => "CreateDimensionAngular",
             CreateAttributeDefinition(_) => "CreateAttributeDefinition",
             CreateTable(_) => "CreateTable",
+            CreateDimensionAngular2Ln(_) => "CreateDimensionAngular2Ln",
         }
     }
 }

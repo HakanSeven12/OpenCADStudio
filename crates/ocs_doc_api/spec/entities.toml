@@ -346,6 +346,11 @@ name = "create_dimension_angular"
 args = [{ name = "vertex", ty = "[f64; 3]" }, { name = "first_point", ty = "[f64; 3]" }, { name = "second_point", ty = "[f64; 3]" }, { name = "arc_location", ty = "[f64; 3]" }]
 op = "CreateDimensionAngular"
 
+[[family.constructor]]
+name = "create_dimension_angular2ln"
+args = [{ name = "vertex", ty = "[f64; 3]" }, { name = "first_point", ty = "[f64; 3]" }, { name = "second_point", ty = "[f64; 3]" }, { name = "arc_location", ty = "[f64; 3]" }]
+op = "CreateDimensionAngular2Ln"
+
 [[family.method]]
 name = "measurement"
 kind = "query"

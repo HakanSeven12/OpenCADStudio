@@ -71,6 +71,7 @@ fn operation_variants() -> Vec<String> {
             tag: String::new(), prompt: String::new(), default_value: String::new(), insertion_point: [0.0; 3], height: 0.0, rotation: 0.0,
         }),
         Operation::CreateTable(ocs_doc_api::ops::TableSpec { insertion_point: [0.0; 3], data: vec![] }),
+        Operation::CreateDimensionAngular2Ln(ocs_doc_api::ops::DimensionAngularSpec { vertex: [0.0; 3], first_point: [0.0; 3], second_point: [0.0; 3], arc_location: [0.0; 3] }),
     ];
     // Derive the variant names by serializing a probe of each and reading the
     // bincode variant index -> name map is not available; instead match by
@@ -165,6 +166,7 @@ const OPERATION_BASELINE: &[&str] = &[
     "CreateDimensionAngular",
     "CreateAttributeDefinition",
     "CreateTable",
+    "CreateDimensionAngular2Ln",
 ];
 
 /// Recorded baseline of the `Query` variant order.

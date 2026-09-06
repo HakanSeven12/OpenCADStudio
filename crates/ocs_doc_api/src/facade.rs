@@ -539,6 +539,14 @@ impl CurveCollection {
         Ok(Entity::new(self.session.clone(), id))
     }
 
+    /// A 2-line angular DIMENSION: angle between lines (vertex→first) and (vertex→second).
+    pub fn create_dimension_angular2ln(&self, vertex: [f64; 3], first_point: [f64; 3], second_point: [f64; 3], arc_location: [f64; 3]) -> ApiResult<Dimension> {
+        let receipt = self.session.apply_op(Operation::CreateDimensionAngular2Ln(crate::ops::DimensionAngularSpec {
+            vertex, first_point, second_point, arc_location,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
+        Ok(Dimension::new(self.session.clone(), id))
+    }
     /// A radial DIMENSION for the circle centered at `center` through `point`.
     pub fn create_dimension_radius(&self, center: [f64; 3], point: [f64; 3]) -> ApiResult<Dimension> {
         self.create_dim_radial(Operation::CreateDimensionRadius, center, point)

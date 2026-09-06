@@ -56,4 +56,6 @@ pub enum Operation {
     CreateAttributeDefinition(AttributeDefinitionSpec),
     // tables
     CreateTable(TableSpec),
+    // dimension sub-types (2-line angular)
+    CreateDimensionAngular2Ln(DimensionAngularSpec),
 }

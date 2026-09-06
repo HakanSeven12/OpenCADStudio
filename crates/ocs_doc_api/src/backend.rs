@@ -78,6 +78,9 @@ pub trait DocApiBackend {
     /// Add a `TABLE` (rows × columns grid); returns the fresh `ObjectId`.
     fn add_table(&mut self, spec: &crate::ops::TableSpec) -> ApiResult<ObjectId>;
 
+    /// Add a 2-line angular `DIMENSION`; returns the fresh `ObjectId`.
+    fn add_dimension_angular2ln(&mut self, spec: &crate::ops::DimensionAngularSpec) -> ApiResult<ObjectId>;
+
     /// A dimension's measured value (distance for linear/radius, degrees for angular).
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64>;
 

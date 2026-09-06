@@ -304,6 +304,12 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::CreateDimensionAngular2Ln(spec) => {
+            b.push_undo(name);
+            let id = b.add_dimension_angular2ln(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),

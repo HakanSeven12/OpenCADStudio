@@ -136,6 +136,7 @@ Linear dimension between two measured points. measurement() reads the distance; 
 - **create_dimension_radius**(center: [f64; 3], point: [f64; 3]) -> `Dimension` — `CreateDimensionRadius`
 - **create_dimension_diameter**(center: [f64; 3], point: [f64; 3]) -> `Dimension` — `CreateDimensionDiameter`
 - **create_dimension_angular**(vertex: [f64; 3], first_point: [f64; 3], second_point: [f64; 3], arc_location: [f64; 3]) -> `Dimension` — `CreateDimensionAngular`
+- **create_dimension_angular2ln**(vertex: [f64; 3], first_point: [f64; 3], second_point: [f64; 3], arc_location: [f64; 3]) -> `Dimension` — `CreateDimensionAngular2Ln`
 
 ### Methods
 

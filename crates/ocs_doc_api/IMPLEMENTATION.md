@@ -49,11 +49,11 @@ Phases are **spec-additive**: each is a `[[family]]`/`[[family.method]]` block i
 `ARCHITECTURE.md` § Workflow). No protocol change; new `Operation`/`Query`
 variants append at enum end.
 
-**Status:** Phase 0 (supported-family methods), Phase 2a (full 2D curves),
-Phase 3 (block references), Phase 4 (viewports), Phase 5 (media read-mostly) are
-**done** (all tested; 601 host lib + 8 crate unit tests green). Remaining sub-items:
-Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
-(P3), set_view + view query (P4), typed media ops (P5).
+**Status:** all five phases complete — Phase 0 (supported-family methods), Phase 2
+(full 2D curves + annotations incl. dimension sub-types), Phase 3 (block references
++ attributes + traversal + attribute definitions), Phase 4 (viewports + set_view +
+view query), Phase 5 (media read-mostly + typed raster image + typed table). All
+tested: 615 host lib + 8 crate unit + 3 spec↔wire consistency tests green.
 
 ### Phase 2 — full 2D + annotations
 - **Done (2a):** typed curve families `ArcCurve`/`Ellipse`/`Spline`/`Ray`/`XLine` —
@@ -73,8 +73,10 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
   (`GetDimensionMeasurement`), bounds. Covered by `phase2c_*` test.
 - **Done (2c-ii, sub-types):** `create_dimension_radius` / `create_dimension_diameter`
   (radial chord) and `create_dimension_angular` (vertex + 2 legs) → radial/degrees
-  measurements. Covered by `phase2cii_*` test. (`Angular2Ln` variant handled in
-  `measurement`; a dedicated constructor is a later refinement.)
+  measurements. Covered by `phase2cii_*` test.
+- **Done (2c-iii):** `create_dimension_angular2ln(vertex, first, second, arc_location)`
+  → `CreateDimensionAngular2Ln` (2-line angular; `DimensionAngular2Ln::new` computes
+  the angle). Covered by `phase2ciii_*` test. All documented dimension sub-types done.
 - **Unblocked:** `add_vertex` (polyline) and sweep profiles (Line/Circle/Arc/LwPolyline)
   are supported (Phase 0).
 

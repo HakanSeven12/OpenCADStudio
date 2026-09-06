@@ -53,7 +53,7 @@ variants append at enum end.
 (full 2D curves + annotations incl. dimension sub-types), Phase 3 (block references
 + attributes + traversal + attribute definitions), Phase 4 (viewports + set_view +
 view query), Phase 5 (media read-mostly + typed raster image + typed table). All
-tested: 618 host lib + 8 crate unit + 3 spec↔wire consistency tests green.
+tested: 623 host lib + 8 crate unit + 3 spec↔wire consistency + 34 ocs_plugin_api tests green.
 
 ### Phase 2 — full 2D + annotations
 - **Done (2a):** typed curve families `ArcCurve`/`Ellipse`/`Spline`/`Ray`/`XLine` —
@@ -124,10 +124,11 @@ tested: 618 host lib + 8 crate unit + 3 spec↔wire consistency tests green.
 **Completed (accuracy):** `GetVolume`/`GetCentroid` compute via a **fine
 tessellation** (`mesh_body(0.1, 1e-4)`) for near-analytic results — the
 render-mesh metrics cache is the coarse display LOD and does not drive queries;
-results memoized per (handle, geometry_epoch); when the cold-tess budget is
-exhausted the path degrades to the approximate `meshes.metrics` value rather than
-failing. Verified by `accurate_volume_centroid_sphere_and_cube` (sphere volume
-within 0.5% of 4/3πr³, centroid at centre, cube exact).
+results memoized per (handle, geometry_epoch) on the per-tab `Scene` (persisting
+across DocApi dispatches); when the cold-tess budget (256/tab) is exhausted the
+path degrades to the approximate `meshes.metrics` value rather than failing.
+Verified by `accurate_volume_centroid_sphere_and_cube` (sphere volume within 0.5%
+of 4/3πr³, centroid at centre, cube exact).
 
 **Completed (outstanding methods):** `loft(profiles)` — `Operation::Loft{profiles}`,
 resolves each profile to curve sets (all-or-nothing), `brep::loft` (`loft_two_profiles_*`

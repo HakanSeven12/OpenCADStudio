@@ -56,8 +56,16 @@ fn intersect_solids(api: &DocApi) -> ApiResult<()> {
   `brep::combine` is pure; `erase_sources` runs only on success.
 - **Bulk ops** (`CreateMany`/`TransformMany`/`DeleteMany`, and read-only query
   batching) are single ops, **all-or-nothing via upfront validation** (no
-  rollback), item-capped — for bulk data (see `ARCHITECTURE.md` § Performance).
-- **Structured errors** — `ApiError::{Validation, Geometry, UnknownId,
+  rollback), item-capped â€” for bulk data (see `ARCHITECTURE.md` Â§ Performance).
+  `Loft` and query batches are item-capped the same way (no unbounded kernel call
+  from one request).
+- **Accurate mass properties.** `volume`/`centroid` use a fine tessellation for
+  near-analytic results, memoized per (handle, geometry_epoch) on the per-tab
+  scene; the cold-tessellation budget (256/tab) persists across dispatches and
+  degrades to the coarse mesh value when exhausted.
+- **Tab authorization.** A request must name the tab the session is bound to;
+  mismatched `tab_id` is rejected (no cross-tab access).
+- **Structured errors** â€” `ApiError::{Validation, Geometry, UnknownId,
   Unsupported, Transport}`, serializable so IPC returns the same error the
   in-process executor produced.
 

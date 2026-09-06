@@ -12,8 +12,9 @@ read `README.md` (the user-facing surface).
 │    Transport::apply. OpGroup (client compensation), query_batch, assert_revision.
 │
 ├─ Wire (envelope/ops/query) DocApiEnvelope = Op(single) | Queries(batch)
-│    bincode + serde. Operation/Query enums are GENERATED (src/gen) from the spec.
-│    Append-only variants → stable discriminants.
+│    bincode + serde. Operation/Query enums are HAND-MAINTAINED (src/gen,
+│    append-only) → stable discriminants; the spec's op/query names must map to
+│    them (asserted by spec_wire_consistency tests).
 │
 ├─ Transport (transport/)    trait Transport: Send+Sync { apply, alive }
 │    InProcess (host) | OcsPluginApiIpc (plugin). The ONLY plugin↔host boundary.
@@ -34,6 +35,104 @@ read `README.md` (the user-facing surface).
 
 The same `executor` runs in-process and over IPC — one implementation, versioned
 in the crate. The host only supplies scene primitives through `DocApiBackend`.
+
+## Flow: from the single source of truth to a committed change
+
+The **single source of truth** for the API surface is `spec/entities.toml` —
+every entity family, its construction ops, geometric actions, and queries, and
+their kernel/acadrust mapping. Everything downstream derives from it. The full
+flow from spec to a committed document change:
+
+```mermaid
+flowchart TD
+    subgraph SRC["Single source of truth"]
+        SPEC["spec/entities.toml<br/>families · constructors · methods · kernel map"]
+        LAYOUTS["src/gen/layouts.json<br/>Operation/Query wire layouts"]
+    end
+
+    subgraph GEN["build.rs codegen (cargo build, CI drift-checked)"]
+        OPS["src/gen/ops_gen.rs<br/>Operation enum (append-only)"]
+        QRY["src/gen/query_gen.rs<br/>Query enum (append-only)"]
+        APIREF["src/gen/api_reference.md"]
+        SCHEMA["src/gen/binding_schema.json<br/>(object model + layouts inlined)"]
+    end
+
+    subgraph FACADE["Facade (facade.rs) — plugin-facing, object-centric"]
+        API["DocApi (root)"]
+        DOC["Document (per tab)"]
+        COLL["collections: solids() / curves() / entities()"]
+        HND["typed handles: Solid · Line · ArcCurve · Text · ...<br/>methods build ops (intersect, transform, create_*)"]
+    end
+
+    subgraph WIRE["Wire (envelope/ops/query)"]
+        ENV["DocApiEnvelope<br/>Op(Operation) | Queries(Vec)"]
+        REC["Receipt: outcome + query_results + new_revision"]
+    end
+
+    subgraph TRANS["Transport (the only plugin↔host boundary)"]
+        INP["InProcess (host / tests)"]
+        IPC["OcsPluginApiIpc (plugin)<br/>PluginRequest::DocApiRequest{tab_id, bytes}"]
+    end
+
+    subgraph EXEC["Executor (executor.rs) — crate-owned, one impl"]
+        AO["apply_op: validate+compute → push_undo → mutate → finalize_op"]
+        AQ["apply_queries: read-only batch (capped)"]
+    end
+
+    subgraph HOST["Host backend (src/app/doc_api.rs — HostSession)"]
+        BE["DocApiBackend impl<br/>resolve_body · store_solid · transform · add_* · bounds · volume · centroid"]
+        TAB["tab auth: reject tab_id ≠ bound tab"]
+        SCN["Scene (per tab)<br/>solid_models · meshes · erase_entities<br/>geometry_epoch · doc_api_mass_cache · doc_api_cold_tess_used"]
+        CAD["CadDocument (acadrust)<br/>entities · block_records · handles"]
+    end
+
+    SPEC -->|spec → enum names + mapping| OPS
+    SPEC -->|spec → enum names + mapping| QRY
+    SPEC -->|spec → reference| APIREF
+    SPEC -->|spec → schema| SCHEMA
+    LAYOUTS -->|layouts inlined| SCHEMA
+
+    API --> DOC --> COLL --> HND
+    HND -->|method → Operation / Query| ENV
+    ENV --> INP
+    ENV --> IPC
+    INP --> AO
+    IPC -->|bincode → host routes DocApiRequest| AO
+    AO --> TAB
+    AQ --> TAB
+    TAB --> BE
+    BE --> SCN
+    BE --> CAD
+    SCN --> REC
+    CAD --> REC
+    REC -->|deserialized| HND
+
+    classDef truth fill:#1f6feb,stroke:#0b3d91,color:#fff
+    classDef gen fill:#2da44e,stroke:#14532d,color:#fff
+    classDef hot fill:#bf8700,stroke:#7a5200,color:#fff
+    class SPEC,LAYOUTS truth
+    class OPS,QRY,APIREF,SCHEMA gen
+    class AO,AQ,TAB,SCN hot
+```
+
+**How to read it:**
+
+- **Blue (source of truth)** — `spec/entities.toml` + `layouts.json`. Change
+  *these* to change the API surface; everything else regenerates or maps onto them.
+- **Green (codegen)** — `build.rs` derives the wire enums, the human reference,
+  and the binding handover schema. The `Operation`/`Query` enums are the canonical
+  append-only wire vocabulary; the spec's `op`/`query` names must map to them
+  (enforced by `spec_wire_consistency` tests).
+- **Facade → wire → transport** — a plugin's `solid.intersect(&other)` becomes an
+  `Operation`, wrapped in a `DocApiEnvelope`, and shipped via the one `Transport`
+  (in-process or IPC). Identical request either way.
+- **Amber (hot paths)** — the executor's per-op invariant and the host's tab
+  authorization + per-tab `Scene` state (solid cache, geometry epoch, the
+  persistent cold-tessellation budget). This is where atomicity and the DoS
+  boundaries live.
+- **Response** — the host produces a `Receipt` (outcome + query results + new
+  geometry revision) that the facade turns back into a typed result (`Solid`,
+  `Aabb`, `f64`, …).
 
 ## Per-op execution model (the load-bearing invariant)
 
@@ -168,11 +267,19 @@ return `UnknownId` (structured), never a panic.
   documented trade of per-op autocommit and the reason bulk ops exist.
   Measured estimate: ~10⁵ sequential creates+transforms ≈ minutes; the same as
   one `CreateMany`+`TransformMany` ≈ ~1 s. Use bulk ops for N ≳ a few hundred.
-- **`volume`/`centroid`** serve from `scene.meshes[handle].metrics` when cached;
-  the kernel-mesh divergence is a cold-cache fallback.
-- **`resolve_body` lift-on-miss** is cheap when the cache is warm (no-op).
+- **`volume`/`centroid`** are **accuracy-first**: a fine tessellation
+  (`mesh_body(0.1, 1e-4)`) for near-analytic results, memoized per
+  (handle, geometry_epoch) on the per-tab `Scene`. The cold-tessellation budget
+  (256/tab) bounds the DoS surface and **persists across DocApi dispatches**;
+  when exhausted the path degrades to the approximate `meshes.metrics` value
+  rather than failing.
+- **`resolve_body` lift-on-miss** is cheap when the cache is warm (no-op). The
+  read-only `with_body` accessor borrows the cache in place (O(1)) instead of
+  deep-cloning the B-rep — `bounds()` uses it.
 - **IPC** serializes the envelope once; the `bytes` fields use `serde_bytes` so
   the outer frame is a single length-prefixed copy.
+- **Tab authorization**: `execute_doc_api` rejects a request whose `tab_id`
+  doesn't match the bound tab, so a plugin can't reach tabs it isn't bound to.
 
 ---
 
@@ -273,11 +380,14 @@ Two CRITICAL and six WARNING findings were fixed:
    resolves solids through `resolve_body` (lift-on-miss), consistent with
    `volume`/`centroid`.
 
-6. **`volume`/`centroid` use the metrics cache** (was WARNING / perf). They
+6. **`volume`/`centroid` accuracy + budget** (was WARNING / perf). They
    re-tessellated the full body (`mesh_body`) + cloned the B-rep per query. Now
-   they serve from `scene.meshes[handle].metrics` when cached (refreshed on
-   store/update), with the kernel-mesh divergence as a cold-cache fallback. The
-   duplicated divergence loops were also merged into one `mesh_volume_centroid`.
+   they compute via a **fine tessellation** (`mesh_body(0.1, 1e-4)`) for
+   near-analytic accuracy, memoized per (handle, geometry_epoch); the cold-tess
+   budget lives on the per-tab `Scene` (persists across dispatches) and degrades
+   to the `meshes.metrics` value when exhausted. The duplicated divergence loops
+   were merged into one `mesh_volume_centroid` (single source of truth, shared
+   by the host + both mock backends).
 
 7. **Double revision bump documented** (was WARNING). Solid write ops bump
    `geometry_epoch` twice (the entity add/update path + `register_prepared_solid_model`).
@@ -325,13 +435,46 @@ Two CRITICAL and six WARNING findings were fixed:
   roundtrip proving an intersected solid survives with valid ACIS and re-lifts to
   the expected volume.
 
+### Review round 3 — branch review fixes (tab auth, geometry, budget, caps)
+
+A full branch review (all six tracks) found 3 CRITICAL + 5 WARNING + suggestions,
+all fixed with regression tests:
+
+1. **Tab authorization (confused deputy)** — `execute_doc_api` ignored `tab_id`,
+   so any plugin could reach any open tab. Now rejects `tab_id != host.tab_id()`
+   before dispatch (`doc_api_tab_mismatch_is_rejected`).
+2. **Negative-bulge arc center mirrored** — `bulge_arc_segment` used signed
+   `tan(half)` AND a sign flip, double-counting so CW arcs got the center on the
+   wrong side. Now apothem magnitude + sign-picks-side (CW below / CCW above).
+3. **Cold-tess budget ineffective** — the 256-tessellation budget lived on
+   `HostSession` (rebuilt per dispatch → reset every request). Moved `mass_cache`/
+   `cold_tess_used` to the per-tab `Scene` so budget + memoization persist; when
+   exhausted it degrades to the approximate `meshes.metrics` value (no hard-fail).
+4. **Loft uncapped** — added `BULK_ITEM_CAP` (was the only uncapped multi-item op
+   → unbounded kernel call from one request). Regression test.
+5. **CreateMany not all-or-nothing** — Curve specs are pre-validated (ellipse ratio)
+   in the prepare phase before `push_undo`. Regression test.
+6. **Partial-ellipse rotation** — `start`/`end_parameter` now offset by `rot_z`
+   (the Arc arm already did). Regression test.
+7. **`resolve_body` deep-clone** — added `with_body` borrow accessor; the host
+   borrows the cache in place (O(1)) and `bounds()` uses it (no per-query B-rep copy).
+8. **`add_raster_image` unvalidated path** — now validates non-empty + image
+   extension and rejects UNC/network + parent-traversal paths. Regression test.
+9. **Deploy capability gate** — `API_VERSION` 5→6 so DocApi plugins are rejected
+   at handshake by old hosts (clean refusal, not a runtime decode error); append-only
+   wire + defaulted `doc_api_dispatch` keep older V2–V5 plugins loading unchanged.
+10. **Dead code** — `query_name` wired into `apply_queries` error labels; the host
+    uses the crate's `ObjectId::from_handle`/`to_handle` (dropped local duplicates);
+    deleted `is_null`/`backend_mut`; test mock now stores curve specs + computes
+    curve bounds (aligned with the example mock); Spline/Dimension bounds delegate
+    to `points_aabb`.
+
 ### Known deviations (documented, not bugs)
 
-- **Two `geometry_epoch` bumps per solid write op** (see #7) — host-internal,
+- **Two `geometry_epoch` bumps per solid write op** (see #7 above) — host-internal,
   shared with native commands; monotonic and one-undo-step-per-op are guaranteed.
-- **`extrude`/`revolve`/`add_vertex`/non-solid `transform`** return
-  `ApiError::Unsupported` in v1 (profile conversion + per-family transform land in
-  later phases — see `IMPLEMENTATION.md`).
-- **`volume`/`centroid`** are mesh-approximate (render-mesh LOD tolerance), not
-  exact analytic values.
+- **`volume`/`centroid`** are fine-mesh-approximate (`mesh_body(0.1, 1e-4)`), not
+  exact analytic values; the render-mesh `meshes.metrics` is the coarse display LOD.
+- **`Angular2Ln` constructor** exists; `Radius`/`Diameter`/`Angular3Pt`/`Linear`
+  are the supported dimension sub-types.
 

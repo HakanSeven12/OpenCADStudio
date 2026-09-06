@@ -197,6 +197,47 @@ impl DocApiBackend for HostSession<'_> {
         Ok(())
     }
 
+    fn add_hatch(&mut self, spec: &ocs_doc_api::ops::HatchSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch, LineEdge};
+        use acadrust::types::Vector2;
+        let mut hatch = if spec.solid { Hatch::solid() } else { Hatch::default() };
+        // Build a BoundaryPath of Line edges around the closed polyline.
+        let n = spec.boundary.len();
+        let mut path = BoundaryPath::new();
+        for i in 0..n {
+            let start = spec.boundary[i];
+            let end = spec.boundary[(i + 1) % n];
+            path.edges.push(BoundaryEdge::Line(LineEdge {
+                start: Vector2::new(start[0], start[1]),
+                end: Vector2::new(end[0], end[1]),
+            }));
+        }
+        hatch.paths.push(path);
+        let handle = self.scene_mut().add_entity(EntityType::Hatch(hatch));
+        Ok(handle_to_obj(handle))
+    }
+
+    fn hatch_boundary(&self, id: ObjectId) -> ApiResult<Vec<Vec<[f64; 2]>>> {
+        let entity = self.document().get_entity(obj_to_handle(id)).ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Hatch(h) = entity else {
+            return Err(ApiError::Unsupported("GetHatchBoundary is only for Hatch".into()));
+        };
+        // Reconstruct each boundary loop's vertices from its Line edges.
+        let mut loops = Vec::with_capacity(h.paths.len());
+        for path in &h.paths {
+            let mut pts = Vec::with_capacity(path.edges.len());
+            for edge in &path.edges {
+                match edge {
+                    acadrust::entities::BoundaryEdge::Line(le) => pts.push([le.start.x, le.start.y]),
+                    // Arc/ellipse boundary edges are a later refinement (no vertex list).
+                    _ => return Err(ApiError::Unsupported("hatch boundary contains non-line edges".into())),
+                }
+            }
+            loops.push(pts);
+        }
+        Ok(loops)
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -862,6 +903,42 @@ mod tests {
             id: mtext, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
         let Some(EntityType::MText(t)) = host.document().get_entity(obj_to_handle(mtext)) else { panic!("mtext not found") };
         assert!((t.insertion_point.x - 15.0).abs() < 1e-6);
+    }
+
+    // ── Phase 2b-b: hatch ────────────────────────────────────────────────────
+
+    #[test]
+    fn phase2b_hatch_create_boundary_bounds_delete() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Solid hatch over a unit square boundary.
+        let sq = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        let hatch = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateHatch(
+            ocs_doc_api::ops::HatchSpec { boundary: sq.clone(), solid: true }))).unwrap());
+
+        // Boundary round-trips (one loop, 4 vertices).
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetHatchBoundary { id: hatch }, Query::GetBounds { id: hatch }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::HatchBoundary(loops) => {
+                assert_eq!(loops.len(), 1);
+                assert_eq!(loops[0].len(), 4);
+                assert!((loops[0][0][0] - 0.0).abs() < 1e-9 && (loops[0][2][0] - 10.0).abs() < 1e-9);
+            }
+            other => panic!("expected boundary, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Bounds(b) => assert!((b.min[0] - 0.0).abs() < 1e-6 && (b.max[1] - 10.0).abs() < 1e-6, "{b:?}"),
+            other => panic!("expected bounds, got {other:?}"),
+        }
+
+        // Boundary with < 3 points is a validation error.
+        assert!(dispatch(&mut host, DocApiEnvelope::op(Operation::CreateHatch(
+            ocs_doc_api::ops::HatchSpec { boundary: vec![[0.0, 0.0], [1.0, 1.0]], solid: true }))).is_err());
+
+        // Generic delete works.
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Delete { id: hatch })).unwrap();
+        assert!(host.document().get_entity(obj_to_handle(hatch)).is_none());
     }
 
     // ── Phase 5: media & misc (read-mostly) ──────────────────────────────────

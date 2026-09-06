@@ -113,6 +113,18 @@ Multi-line text annotation. content()/set_content() read+replace the value; tran
 - **content**(``) -> `String` — query `GetTextContent`
 - **set_content**(`value: &str`) -> `()` — op `SetTextContent`
 
+## `Entity` (acadrust `Hatch`, collection `curves`)
+
+Filled region over a closed polyline boundary. boundary() returns the loops; bounds from boundary; generic delete.
+
+### Constructors (`doc.curves()`)
+
+- **create_hatch**(`boundary: &[[f64; 2]], solid: bool`) -> `Entity`
+
+### Methods
+
+- **boundary**(``) -> `Vec<Vec<[f64; 2]>>` — query `GetHatchBoundary`
+
 ## `Entity` (acadrust `Insert`, collection `entities`)
 
 Block reference. Place an existing BlockRecord by name; transform moves its insert point.

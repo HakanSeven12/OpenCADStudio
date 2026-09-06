@@ -45,6 +45,8 @@ pub enum QueryResult {
     Revision(GeometryRevision),
     /// The text content of a Text/MText annotation.
     TextContent(String),
+    /// A hatch's boundary loops (outer + islands), each a closed polyline.
+    HatchBoundary(Vec<Vec<[f64; 2]>>),
 }
 
 /// Convenience: the query name for diagnostics.
@@ -59,6 +61,7 @@ impl crate::gen::Query {
             GetIntersects { .. } => "GetIntersects",
             GetGeometryRevision => "GetGeometryRevision",
             GetTextContent { .. } => "GetTextContent",
+            GetHatchBoundary { .. } => "GetHatchBoundary",
         }
     }
 }

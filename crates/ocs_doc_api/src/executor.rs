@@ -211,6 +211,16 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::Updated(*id)
         }
+        Operation::CreateHatch(spec) => {
+            // Validate the boundary (>= 3 points) before committing.
+            if spec.boundary.len() < 3 {
+                return Err(ApiError::validation(name, "hatch boundary needs >= 3 points"));
+            }
+            b.push_undo(name);
+            let id = b.add_hatch(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),
@@ -249,6 +259,7 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
             }
             Query::GetGeometryRevision => QueryResult::Revision(b.revision()),
             Query::GetTextContent { id } => QueryResult::TextContent(b.text_content(id)?),
+            Query::GetHatchBoundary { id } => QueryResult::HatchBoundary(b.hatch_boundary(id)?),
         };
         results.push(r);
     }

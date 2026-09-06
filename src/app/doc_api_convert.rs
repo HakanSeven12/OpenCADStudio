@@ -412,6 +412,26 @@ pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aab
             min: [t.insertion_point.x, t.insertion_point.y - t.height, t.insertion_point.z],
             max: [t.insertion_point.x + t.height * t.value.len() as f64, t.insertion_point.y, t.insertion_point.z],
         },
+        EntityType::Hatch(h) => {
+            let mut min = [f64::INFINITY; 3];
+            let mut max = [f64::NEG_INFINITY; 3];
+            let mut any = false;
+            for path in &h.paths {
+                for edge in &path.edges {
+                    if let acadrust::entities::BoundaryEdge::Line(le) = edge {
+                        for (x, y) in [(le.start.x, le.start.y), (le.end.x, le.end.y)] {
+                            min = [min[0].min(x), min[1].min(y), min[2].min(0.0)];
+                            max = [max[0].max(x), max[1].max(y), max[2].max(0.0)];
+                            any = true;
+                        }
+                    }
+                }
+            }
+            if !any {
+                return Err(ApiError::Unsupported("hatch has no line-edge boundary".into()));
+            }
+            Aabb { min, max }
+        }
         // Ray/XLine are unbounded by definition — no finite bounds.
         _ => return Err(ApiError::Unsupported("bounds for this entity family is not yet implemented".into())),
     };

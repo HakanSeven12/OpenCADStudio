@@ -21,4 +21,6 @@ pub enum Query {
     GetGeometryRevision,
     /// The text content of a Text/MText annotation.
     GetTextContent { id: ObjectId },
+    /// The boundary loops of a Hatch (outer + islands) as polylines.
+    GetHatchBoundary { id: ObjectId },
 }

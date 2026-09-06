@@ -65,8 +65,10 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
   (`CreateText`/`CreateMText` wire ops), `content()`/`set_content()` (new
   `GetTextContent` query + `SetTextContent` op), transform (insertion point),
   coarse bounds. Covered by `phase2b_*` test.
-- **Remaining (2b-b/c):** `Hatch` (create + boundary query), `Dimension` (typed
-  sub-types).
+- **Done (2b-b):** `Hatch` — `create_hatch(boundary, solid)` (`CreateHatch`,
+  validates ≥3 points), `boundary()` → loops (`GetHatchBoundary`), bounds from
+  boundary edges, delete. Covered by `phase2b_hatch_*` test.
+- **Remaining (2b-c):** `Dimension` (typed sub-types).
 - **Unblocked:** `add_vertex` (polyline) and sweep profiles (Line/Circle/Arc/LwPolyline)
   are supported (Phase 0).
 

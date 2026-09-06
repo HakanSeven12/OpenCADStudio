@@ -96,6 +96,16 @@ pub struct MTextSpec {
     pub height: f64,
 }
 
+/// Construction spec for a `HATCH` with a single closed polyline boundary
+/// (straight segments). `solid` selects solid fill vs a pattern (pattern naming
+/// is a later refinement).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HatchSpec {
+    /// Closed boundary as an ordered polyline (first==last implied; closed).
+    pub boundary: Vec<[f64; 2]>,
+    pub solid: bool,
+}
+
 /// A rigid similarity (rotation + translation + optional uniform scale/reflection)
 /// as a plain-data mirror of `cadkernel::brep::transform`'s `Placement`
 /// (non-serde). Columns are the new basis axes; `origin` is the translation.
@@ -148,6 +158,7 @@ impl crate::gen::Operation {
             CreateText(_) => "CreateText",
             CreateMText(_) => "CreateMText",
             SetTextContent { .. } => "SetTextContent",
+            CreateHatch(_) => "CreateHatch",
         }
     }
 }

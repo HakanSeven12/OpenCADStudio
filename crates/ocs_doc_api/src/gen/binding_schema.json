@@ -259,6 +259,25 @@
       "name": "MText"
     },
     {
+      "acadrust_variant": "Hatch",
+      "collection": "curves",
+      "handle": "Entity",
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "boundary",
+          "op": null,
+          "query": "GetHatchBoundary",
+          "read_only": true,
+          "returns": "Vec<Vec<[f64; 2]>>"
+        }
+      ],
+      "name": "Hatch"
+    },
+    {
       "acadrust_variant": "Insert",
       "collection": "entities",
       "handle": "Entity",

@@ -465,6 +465,16 @@ impl CurveCollection {
         let (s, id) = self.create_curve(Curve2Spec::XLine { origin, direction })?;
         Ok(XLine::new(s, id))
     }
+    /// A solid (or pattern) HATCH over a single closed polyline boundary.
+    pub fn create_hatch(&self, boundary: &[[f64; 2]], solid: bool) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateHatch(crate::ops::HatchSpec {
+            boundary: boundary.to_vec(),
+            solid,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_hatch returned no id".into()))?;
+        Ok(Entity::new(self.session.clone(), id))
+    }
+
     /// Single-line TEXT annotation.
     pub fn create_text(&self, value: &str, insertion_point: [f64; 3], height: f64, rotation: f64) -> ApiResult<Text> {
         let receipt = self.session.apply_op(Operation::CreateText(crate::ops::TextSpec {

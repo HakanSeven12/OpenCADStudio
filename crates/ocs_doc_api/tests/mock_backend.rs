@@ -23,6 +23,8 @@ struct MockBackend {
     kinds: HashMap<ObjectId, String>,
     /// Stored text content for Text/MText annotations.
     text_values: HashMap<ObjectId, String>,
+    /// Stored hatch boundary loops.
+    hatch_boundaries: HashMap<ObjectId, Vec<Vec<[f64; 2]>>>,
 }
 
 impl MockBackend {
@@ -95,6 +97,14 @@ impl DocApiBackend for MockBackend {
     }
     fn text_content(&self, id: ObjectId) -> ApiResult<String> {
         self.text_values.get(&id).cloned().ok_or(ApiError::UnknownId(id))
+    }
+    fn add_hatch(&mut self, spec: &ocs_doc_api::ops::HatchSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("Hatch");
+        self.hatch_boundaries.insert(id, vec![spec.boundary.clone()]);
+        Ok(id)
+    }
+    fn hatch_boundary(&self, id: ObjectId) -> ApiResult<Vec<Vec<[f64; 2]>>> {
+        self.hatch_boundaries.get(&id).cloned().ok_or(ApiError::UnknownId(id))
     }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {

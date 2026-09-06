@@ -291,6 +291,27 @@ args = [{ name = "value", ty = "&str" }]
 returns = "()"
 
 # ============================================================================
+# HATCH FAMILY (phase 2b) — filled regions
+# ============================================================================
+[[family]]
+name = "Hatch"
+acadrust_variant = "Hatch"
+handle = "Entity"
+collection = "curves"
+description = "Filled region over a closed polyline boundary. boundary() returns the loops; bounds from boundary; generic delete."
+
+[[family.constructor]]
+name = "create_hatch"
+args = [{ name = "boundary", ty = "&[[f64; 2]]" }, { name = "solid", ty = "bool" }]
+op = "CreateHatch"
+
+[[family.method]]
+name = "boundary"
+kind = "query"
+query = "GetHatchBoundary"
+returns = "Vec<Vec<[f64; 2]>>"
+
+# ============================================================================
 # CONTAINER FAMILY (phase 3) — block references
 # ============================================================================
 [[family]]

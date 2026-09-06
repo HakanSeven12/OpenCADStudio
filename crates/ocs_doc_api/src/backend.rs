@@ -54,6 +54,12 @@ pub trait DocApiBackend {
     /// The text content of a Text/MText annotation. `Unsupported` for other kinds.
     fn text_content(&self, id: ObjectId) -> ApiResult<String>;
 
+    /// Add a `HATCH` (single closed polyline boundary); returns the fresh `ObjectId`.
+    fn add_hatch(&mut self, spec: &crate::ops::HatchSpec) -> ApiResult<ObjectId>;
+
+    /// A hatch's boundary loops (outer + islands) as closed polylines.
+    fn hatch_boundary(&self, id: ObjectId) -> ApiResult<Vec<Vec<[f64; 2]>>>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

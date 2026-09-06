@@ -56,6 +56,7 @@ fn operation_variants() -> Vec<String> {
         Operation::CreateText(ocs_doc_api::ops::TextSpec { value: String::new(), insertion_point: [0.0; 3], height: 0.0, rotation: 0.0 }),
         Operation::CreateMText(ocs_doc_api::ops::MTextSpec { value: String::new(), insertion_point: [0.0; 3], height: 0.0 }),
         Operation::SetTextContent { id: ObjectId::from_u64(0), value: String::new() },
+        Operation::CreateHatch(ocs_doc_api::ops::HatchSpec { boundary: vec![], solid: true }),
     ];
     // Derive the variant names by serializing a probe of each and reading the
     // bincode variant index -> name map is not available; instead match by
@@ -81,6 +82,7 @@ fn query_variants() -> Vec<String> {
         Query::GetIntersects { a: ObjectId::from_u64(0), b: ObjectId::from_u64(0) },
         Query::GetGeometryRevision,
         Query::GetTextContent { id: ObjectId::from_u64(0) },
+        Query::GetHatchBoundary { id: ObjectId::from_u64(0) },
     ];
     marker
         .iter()
@@ -134,6 +136,7 @@ const OPERATION_BASELINE: &[&str] = &[
     "CreateText",
     "CreateMText",
     "SetTextContent",
+    "CreateHatch",
 ];
 
 /// Recorded baseline of the `Query` variant order.
@@ -145,6 +148,7 @@ const QUERY_BASELINE: &[&str] = &[
     "GetIntersects",
     "GetGeometryRevision",
     "GetTextContent",
+    "GetHatchBoundary",
 ];
 
 #[test]

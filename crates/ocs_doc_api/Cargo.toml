@@ -26,6 +26,7 @@ toml = "0.8"
 
 [dev-dependencies]
 serde_json = "1"
+toml = "0.8"
 acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "5b56571a190e7a17c8f12d36390d2938b0fb72f7", features = ["serde"] }
 cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "67f2427282d28922d9263e37b0136b6632e929b3", features = ["acis", "offset"] }
 

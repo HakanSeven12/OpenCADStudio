@@ -2,6 +2,18 @@ name: Deploy web (GitHub Pages)
 run-name: ${{ github.event.release.tag_name || github.ref_name }} Web
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - index.html
+      - site/**
+      - assets/logo.svg
+      - scripts/assemble-site.sh
+      - scripts/build-site.py
+      - scripts/test_site.py
+      - scripts/test_site.cjs
+      - scripts/generate-star-history.py
+      - .github/workflows/pages.yml
   release:
     types: [published]
   workflow_call:
@@ -92,8 +104,23 @@ jobs:
       - name: Build web bundle
         run: trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
 
+      - name: Check out current website
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: website
+
+      - name: Validate website
+        working-directory: website
+        run: python3 scripts/test_site.py
+
       - name: Assemble landing page
-        run: sh scripts/assemble-site.sh
+        working-directory: website
+        run: sh scripts/assemble-site.sh "$GITHUB_WORKSPACE/dist"
+
+      - name: Record website source
+        working-directory: website
+        run: git rev-parse HEAD > "$GITHUB_WORKSPACE/dist/site-version.txt"
 
       - name: Record release version and source
         env:
@@ -229,7 +256,7 @@ jobs:
       - name: Generate project growth charts
         env:
           GITHUB_TOKEN: ${{ secrets.OCS_GITHUB_TOKEN }}
-        run: python3 scripts/generate-star-history.py --output-dir dist
+        run: python3 website/scripts/generate-star-history.py --output-dir dist
 
       # Browsers cannot reliably fetch YouTube playlist/oEmbed responses because
       # of CORS. Build a same-origin listing and thumbnail directory for the

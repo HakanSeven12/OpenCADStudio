@@ -163,6 +163,7 @@ def render_svg(
     releases: list[tuple[str, datetime, int]],
     theme: str,
     chart: str,
+    labels: dict | None = None,
 ) -> str:
     colors = THEMES[theme]
     now = datetime.now(timezone.utc)
@@ -189,6 +190,17 @@ def render_svg(
         line_color = colors["download_line"]
         point_color = colors["download_point"]
         last_label = f"{releases[-1][0]} · {releases[-1][2]}"
+
+    if labels:
+        title = labels["stars" if stars else "downloads"]
+        legend = title
+        axis_label = labels["stars" if stars else "chart_downloads"]
+        subtitle = labels["chart_updated"].format(date=now.strftime("%Y-%m-%d"))
+        if stars:
+            subtitle = f"{len(dates)} · {subtitle}"
+            last_label = str(len(dates))
+        else:
+            subtitle = labels["chart_totals"].format(count=f"{total_downloads:,}", releases=len(releases)) + " · " + subtitle
 
     start = points[0][0] - timedelta(days=2)
     end = max(now, points[-1][0]) + timedelta(days=2)
@@ -243,7 +255,9 @@ def render_svg(
     for index in range(5):
         moment = start + (end - start) * (index / 4)
         x = x_position(moment)
-        if index in (0, 4):
+        if labels:
+            label = moment.strftime("%Y-%m")
+        elif index in (0, 4):
             label = moment.strftime("%b %Y")
         else:
             label = moment.strftime("%b")
@@ -281,8 +295,8 @@ def render_svg(
     <text x="{PLOT_LEFT}" y="34" fill="{colors["text"]}" font-size="21" font-weight="700">{escape(title)}</text>
     <text x="{PLOT_LEFT}" y="58" fill="{colors["muted"]}" font-size="13">{escape(subtitle)}</text>
     <line x1="{PLOT_LEFT}" y1="82" x2="{PLOT_LEFT + 24}" y2="82" stroke="{line_color}" stroke-width="3" />
-    <text x="{PLOT_LEFT + 32}" y="86" fill="{colors["text"]}" font-size="12">{legend}</text>
-    <text x="{PLOT_LEFT}" y="{PLOT_TOP - 8}" fill="{line_color}" font-size="12">{axis_label}</text>
+    <text x="{PLOT_LEFT + 32}" y="86" fill="{colors["text"]}" font-size="12">{escape(legend)}</text>
+    <text x="{PLOT_LEFT}" y="{PLOT_TOP - 8}" fill="{line_color}" font-size="12">{escape(axis_label)}</text>
     {''.join(grid)}
     {''.join(x_labels)}
     {area}
@@ -303,6 +317,7 @@ def main() -> None:
     )
     parser.add_argument("--output-dir", type=Path, default=Path("dist"))
     args = parser.parse_args()
+    catalogs = {path.stem: json.loads(path.read_text()) for path in (Path(__file__).resolve().parents[1] / "site/locales").glob("*.json")}
 
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     dates = fetch_star_dates(args.repository, token)
@@ -315,6 +330,10 @@ def main() -> None:
                 render_svg(args.repository, dates, releases, theme, chart),
                 encoding="utf-8",
             )
+            for locale, labels in catalogs.items():
+                localized = args.output_dir / locale / output.name
+                localized.parent.mkdir(parents=True, exist_ok=True)
+                localized.write_text(render_svg(args.repository, dates, releases, theme, chart, labels), encoding="utf-8")
     print(
         f"growth history: {len(dates)} stars, "
         f"{sum(downloads for _, _, downloads in releases)} downloads"

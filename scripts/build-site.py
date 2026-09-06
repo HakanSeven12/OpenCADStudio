@@ -50,16 +50,16 @@ def build(output):
     workspace = asset(ROOT / "site/workspace.png")
     modeling = asset(ROOT / "site/modeling.png")
     shutil.copyfile(ROOT / "assets/logo.svg", output / "assets/logo.svg")
-    ico = asset(ROOT / "site/favicon.ico")
-    touch = asset(ROOT / "site/apple-touch-icon.png")
-    icons = (f'<link rel="icon" href="{ico}" sizes="16x16 32x32 48x48" />\n'
-             f'<link rel="icon" href="{logo}" type="image/svg+xml" sizes="any" />\n'
-             f'<link rel="apple-touch-icon" href="{touch}" sizes="180x180" />')
+    for filename in ("favicon.ico", "favicon.svg", "favicon.png"):
+        shutil.copyfile(ROOT / "site" / filename, output / filename)
+    icons = ('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48 96x96 256x256" />\n'
+             '<link rel="icon" href="/favicon.png" type="image/png" sizes="96x96" />\n'
+             '<link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />\n'
+             '<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />')
     manifest = json.loads((ROOT / "site/site.webmanifest").read_text())
-    manifest["icons"] = [{"src": logo, "sizes": "any", "type": "image/svg+xml"}]
+    manifest["icons"] = [{"src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml"}]
     for size in (192, 512):
         manifest["icons"].append({"src": asset(ROOT / f"site/icon-{size}.png"), "sizes": f"{size}x{size}", "type": "image/png"})
-    shutil.copyfile(ROOT / "site/favicon.ico", output / "favicon.ico")
     shutil.copyfile(ROOT / "site/apple-touch-icon.png", output / "apple-touch-icon.png")
     css_version = hashlib.sha256((ROOT / "site/site.css").read_bytes()).hexdigest()[:12]
     script = "const SITE_LOCALES = " + json.dumps(list(catalogs)) + ";\n" + (ROOT / "site/site.js").read_text()

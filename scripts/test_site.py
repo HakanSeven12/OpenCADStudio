@@ -55,6 +55,7 @@ with tempfile.TemporaryDirectory() as directory:
         page = Page(html)
         assert ('html', {'lang': locale, 'dir': 'rtl' if locale == 'ar-SA' else 'ltr'}) in page.tags
         links = [attrs for tag, attrs in page.tags if tag == 'link']
+        assert {link['href'] for link in links if link.get('rel') == 'icon'} == {'/favicon.ico', '/favicon.png', '/favicon.svg'}
         assert {link['hreflang'] for link in links if link.get('rel') == 'alternate'} == supported | {'x-default'}
         assert next(link['href'] for link in links if link.get('rel') == 'canonical') == f'https://www.opencadstudio.com/{locale}/'
         choices = [attrs for tag, attrs in page.tags if tag == 'a' and 'hreflang' in attrs]
@@ -82,8 +83,9 @@ with tempfile.TemporaryDirectory() as directory:
                     assert value != catalogs['en-US'][key], (locale, key)
     app = (output / 'app/index.html').read_text()
     assert 'old.svg' not in app and 'integrity="old"' not in app and '>App<' in app
-    logo = next(attrs['href'] for tag, attrs in Page(app).tags if attrs.get('type') == 'image/svg+xml')
-    assert (output / logo.lstrip('/')).read_bytes() == (ROOT / 'assets/logo.svg').read_bytes()
+    icon = next(attrs['href'] for tag, attrs in Page(app).tags if attrs.get('type') == 'image/svg+xml')
+    assert icon == '/favicon.svg'
+    assert (output / icon.lstrip('/')).read_bytes() == (ROOT / 'site/favicon.svg').read_bytes()
     sitemap = ET.parse(output / 'sitemap.xml')
     assert len(sitemap.getroot()) == len(supported) + 1
     assert (output / 'index.html').read_bytes() == (output / 'en-US/index.html').read_bytes()

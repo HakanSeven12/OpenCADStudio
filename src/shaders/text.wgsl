@@ -59,13 +59,31 @@ fn vs_main(in: VertIn) -> VertOut {
 // ── Fragment stage ────────────────────────────────────────────────────────────
 @fragment
 fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
-    // SDF value: 0.5 at the glyph edge, higher inside the ink.
-    let sd = textureSample(atlas_tex, atlas_samp, in.uv).r;
-    // Antialias over one screen-space texel of field change.
-    let aa = max(fwidth(sd), 1e-4);
-    let a = smoothstep(0.5 - aa, 0.5 + aa, sd);
-    if (a <= 0.0) {
+    let uv_dx = dpdx(in.uv);
+    let uv_dy = dpdy(in.uv);
+    let dims = vec2<f32>(textureDimensions(atlas_tex));
+    let footprint = max(length(uv_dx * dims), length(uv_dy * dims));
+    let sd_center = textureSampleLevel(atlas_tex, atlas_samp, in.uv, 0.0).r;
+    let aa = max(fwidth(sd_center), 1e-4);
+    var alpha = smoothstep(0.5 - aa, 0.5 + aa, sd_center);
+
+    if footprint > 1.0 {
+        // Average coverage over the pixel footprint so thin strokes survive minification.
+        let samples = select(4, 2, footprint <= 4.0);
+        var sum = 0.0;
+        for (var y = 0; y < samples; y += 1) {
+            for (var x = 0; x < samples; x += 1) {
+                let offset = (vec2<f32>(f32(x), f32(y)) + 0.5) / f32(samples) - 0.5;
+                let sd = textureSampleLevel(
+                    atlas_tex, atlas_samp, in.uv + uv_dx * offset.x + uv_dy * offset.y, 0.0
+                ).r;
+                sum += smoothstep(0.5 - aa, 0.5 + aa, sd);
+            }
+        }
+        alpha = sum / f32(samples * samples);
+    }
+    if alpha <= 0.0 {
         discard;
     }
-    return vec4<f32>(in.color.rgb, in.color.a * a);
+    return vec4<f32>(in.color.rgb, in.color.a * alpha);
 }

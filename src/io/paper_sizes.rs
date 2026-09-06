@@ -7,15 +7,21 @@ pub enum PaperSize {
     A2,
     A1,
     A0,
+    Letter,
+    Legal,
+    Tabloid,
 }
 
 impl PaperSize {
-    pub const ALL: [PaperSize; 5] = [
+    pub const ALL: [PaperSize; 8] = [
         PaperSize::A4,
         PaperSize::A3,
         PaperSize::A2,
         PaperSize::A1,
         PaperSize::A0,
+        PaperSize::Letter,
+        PaperSize::Legal,
+        PaperSize::Tabloid,
     ];
 
     pub fn label(self) -> &'static str {
@@ -25,6 +31,9 @@ impl PaperSize {
             PaperSize::A2 => "A2",
             PaperSize::A1 => "A1",
             PaperSize::A0 => "A0",
+            PaperSize::Letter => "Letter",
+            PaperSize::Legal => "Legal",
+            PaperSize::Tabloid => "Tabloid",
         }
     }
 
@@ -36,6 +45,9 @@ impl PaperSize {
             PaperSize::A2 => (420.0, 594.0),
             PaperSize::A1 => (594.0, 841.0),
             PaperSize::A0 => (841.0, 1189.0),
+            PaperSize::Letter => (215.9, 279.4),
+            PaperSize::Legal => (215.9, 355.6),
+            PaperSize::Tabloid => (279.4, 431.8),
         }
     }
 }

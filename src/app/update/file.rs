@@ -133,6 +133,9 @@ fn plot_dialog_sheet_mm(d: &crate::ui::window::plot::PlotDialogState) -> (f64, f
         "A1" => Some(PaperSize::A1),
         "A0" => Some(PaperSize::A0),
         "A4" => Some(PaperSize::A4),
+        "Letter" => Some(PaperSize::Letter),
+        "Legal" => Some(PaperSize::Legal),
+        "Tabloid" => Some(PaperSize::Tabloid),
         _ => None,
     };
     if let Some(paper) = standard {
@@ -2576,7 +2579,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     let pick = Task::perform(
                         async move {
                             let mut dlg = crate::sys::file_dialog()
-                                .set_title(crate::t!("Save Drawing As").as_ref())
+                                .set_title("Save Drawing As")
                                 .set_file_name(default_name)
                                 .add_filter(filter_label, &[filter_ext]);
                             if let Some(dir) = seed_dir {
@@ -2934,8 +2937,8 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     plot_style.as_ref(),
                     render_options,
                 )
-                .map(|_| crate::tf!("Exported: {}", worker_path.display()).into_owned())
-                .map_err(|e| crate::tf!("Export failed: {e}").into_owned())
+                .map(|_| format!("Exported: {}", worker_path.display()))
+                .map_err(|e| format!("Export failed: {e}"))
         };
         self.run_plot_work(self.plot_dialog.background, false, work)
     }
@@ -2978,12 +2981,12 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     plot_style.as_ref(),
                     render_options,
                 )
-                .map(|_| {crate::tf!(
+                .map(|_| {format!(
                             "Plotted window to {}",
                         worker_path
                             .file_name().unwrap_or_default().to_string_lossy()
-                        ).into_owned()
-                }).map_err(|e| crate::tf!("Plot failed: {e}").into_owned())
+                        )
+                }).map_err(|e| format!("Plot failed: {e}"))
         };
         self.run_plot_work(self.plot_dialog.background, false, work)
     }
@@ -3071,7 +3074,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 let page_setup = self.tabs[i]
                     .scene
                     .plot_settings_for(&name)
-                    .ok_or_else(|| crate::tf!("Layout '{name}' has no page setup.").into_owned())?;
+                    .ok_or_else(|| format!("Layout '{name}' has no page setup."))?;
                 {
                     let scene = &mut self.tabs[i].scene;
                     scene.current_layout = name.clone();
@@ -3092,10 +3095,10 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     self.tabs[i].scene.restore_saved_camera();
                 }
                 if dialog.style_missing && dialog.apply_plot_styles {
-                    return Err(crate::tf!(
+                    return Err(format!(
                         "Layout '{name}' plot style table '{}' is not loaded.",
                         dialog.style_name
-                    ).into_owned());
+                    ));
                 }
                 let plot_style = self.dialog_plot_style(&dialog);
                 let params = match dialog.area.as_str() {
@@ -3135,7 +3138,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                         rotation_deg,
                         scale,
                         clip,
-                    ) = params.ok_or_else(|| crate::tf!("Layout '{name}' plot area is empty.").into_owned())?;
+                    ) = params.ok_or_else(|| format!("Layout '{name}' plot area is empty."))?;
                     (
                         std::sync::Arc::new(wires),
                         hatches,
@@ -3219,8 +3222,8 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 &worker_path,
                 None,
             )
-            .map(|_| crate::tf!("Exported {} layouts to {}", pages.len(), worker_path.display()).into_owned())
-            .map_err(|error| crate::tf!("Export failed: {error}").into_owned())
+            .map(|_| format!("Exported {} layouts to {}", pages.len(), worker_path.display()))
+            .map_err(|error| format!("Export failed: {error}"))
         };
         self.run_print_all_work(dialog.background, work)
     }
@@ -3269,8 +3272,8 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 .and_then(|_| {
                     crate::io::print_to_printer::print_existing_pdf(&temp_path, &options)
                 })
-                .map(|printer| crate::tf!("Sent {} layouts to printer: {printer}", pages.len()).into_owned())
-                .map_err(|error| crate::tf!("Print failed: {error}").into_owned())
+                .map(|printer| format!("Sent {} layouts to printer: {printer}", pages.len()))
+                .map_err(|error| format!("Print failed: {error}"))
             };
             self.run_print_all_work(true, work)
         }
@@ -4285,7 +4288,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 .as_deref()
                 .is_some_and(|name| name.eq_ignore_ascii_case(&style_name));
         let (mut paper, orient) = paper_label_from_dims(ps.paper_width, ps.paper_height);
-        if !matches!(paper.as_str(), "A4" | "A3" | "A2" | "A1" | "A0")
+        if !matches!(paper.as_str(), "A4" | "A3" | "A2" | "A1" | "A0" | "Letter" | "Legal" | "Tabloid")
             && !ps.paper_size.is_empty()
         {
             paper = ps.paper_size.clone();
@@ -4389,6 +4392,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             "A2" => PaperSize::A2,
             "A1" => PaperSize::A1,
             "A0" => PaperSize::A0,
+            "Letter" => PaperSize::Letter,
+            "Legal" => PaperSize::Legal,
+            "Tabloid" => PaperSize::Tabloid,
             _ => PaperSize::A4,
         };
         let orient = if d.orientation == "Portrait" {
@@ -4480,7 +4486,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     plot_style.as_ref(),
                     render_options,
                 ).and_then(|_| crate::io::print_to_printer::open_in_viewer(&tmp))
-                        .map(|_| crate::t!("Opened plot preview.").into_owned()).map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
+                        .map(|_| "Opened plot preview.".to_string()).map_err(|e| format!("Preview failed: {e}"))
                 };
                 return self.run_plot_work(d.background, true, work);
             }
@@ -4497,8 +4503,8 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 plot_style.as_ref(),
                 render_options,
             ).and_then(|_| crate::io::print_to_printer::print_existing_pdf(&tmp, &opts))
-                    .map(|printer| crate::tf!("Sent to printer: {printer}").into_owned())
-                    .map_err(|e| crate::tf!("Print failed: {e}").into_owned())
+                    .map(|printer| format!("Sent to printer: {printer}"))
+                    .map_err(|e| format!("Print failed: {e}"))
             };
             return self.run_plot_work(true, false, work);
         }
@@ -4525,7 +4531,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 plot_style.as_ref(),
                 render_options,
             ).and_then(|_| crate::io::print_to_printer::open_in_viewer(&tmp))
-                    .map(|_| crate::t!("Opened plot preview.").into_owned()).map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
+                    .map(|_| "Opened plot preview.".to_string()).map_err(|e| format!("Preview failed: {e}"))
             };
             return self.run_plot_work(d.background, true, work);
         }
@@ -4543,8 +4549,8 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     wires, hatches, wipeouts, page_w, page_h, ox, oy, rotation, scale, clip,
                     plot_style, opts,
                 ))
-                .map(|printer| crate::tf!("Sent to printer: {printer}").into_owned())
-                .map_err(|error| crate::tf!("Print failed: {error}").into_owned())
+                .map(|printer| format!("Sent to printer: {printer}"))
+                .map_err(|error| format!("Print failed: {error}"))
         };
         self.run_plot_work(true, false, work)
     }
@@ -4860,10 +4866,10 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 Task::perform(
                     async move {
                         let dialog = crate::sys::file_dialog()
-                            .set_title(crate::t!("Save Plot Style Table").as_ref())
+                            .set_title("Save Plot Style Table")
                             .set_file_name(&default_name)
-                            .add_filter(crate::t!("Plot Style Files").as_ref(), &["ctb", "CTB"])
-                            .add_filter(crate::t!("All Files").as_ref(), &["*"]);
+                            .add_filter("Plot Style Files", &["ctb", "CTB"])
+                            .add_filter("All Files", &["*"]);
                         #[cfg(not(target_arch = "wasm32"))]
                         let dialog = match crate::io::plot_style::ensure_plot_styles_dir() {
                             Ok(dir) => dialog.set_directory(dir),

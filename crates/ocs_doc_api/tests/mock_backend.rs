@@ -166,7 +166,6 @@ impl DocApiBackend for MockBackend {
     fn viewport_view(&self, id: ObjectId) -> ApiResult<([f64; 3], f64)> {
         self.viewport_views.get(&id).copied().ok_or(ApiError::UnknownId(id))
     }
-}
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {
             Ok(())

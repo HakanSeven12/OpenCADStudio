@@ -42,4 +42,6 @@ pub enum Operation {
     CreateDimensionLinear(DimensionSpec),
     // attributes
     SetAttribute { id: ObjectId, tag: String, value: String },
+    // viewport view
+    SetViewportView { id: ObjectId, view_target: [f64; 3], view_height: f64 },
 }

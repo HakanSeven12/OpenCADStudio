@@ -309,6 +309,18 @@ impl Entity {
         self.session.apply_op(Operation::SetAttribute { id: self.id, tag: tag.to_string(), value: value.to_string() })?;
         Ok(())
     }
+    /// This viewport's view (target WCS + zoom height). Viewport-only.
+    pub fn viewport_view(&self) -> ApiResult<([f64; 3], f64)> {
+        match self.session.one_query(Query::GetViewportView { id: self.id })? {
+            QueryResult::ViewportView { target, height } => Ok((target, height)),
+            _ => Err(ApiError::Transport("unexpected viewport-view result".into())),
+        }
+    }
+    /// Retarget / re-zoom this viewport (one undo step). Viewport-only.
+    pub fn set_view(&self, view_target: [f64; 3], view_height: f64) -> ApiResult<()> {
+        self.session.apply_op(Operation::SetViewportView { id: self.id, view_target, view_height })?;
+        Ok(())
+    }
     pub fn as_solid(&self) -> Option<Solid> {
         // Typed downcast is validated by the view's kind.
         matches!(self.view().ok()?.kind.as_str(), "Solid3D").then(|| Solid::new(self.session.clone(), self.id))

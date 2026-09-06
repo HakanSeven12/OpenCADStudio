@@ -29,6 +29,8 @@ pub struct MockBackend {
     dimension_measurements: HashMap<ObjectId, f64>,
     /// Stored insert attributes.
     attributes_store: HashMap<ObjectId, Vec<(String, String)>>,
+    /// Stored viewport views (target, height).
+    viewport_views: HashMap<ObjectId, ([f64; 3], f64)>,
 }
 
 impl MockBackend {
@@ -138,8 +140,10 @@ impl DocApiBackend for MockBackend {
         }
         Ok(self.alloc("Insert"))
     }
-    fn add_viewport(&mut self, _spec: &ocs_doc_api::ops::ViewportSpec) -> ApiResult<ObjectId> {
-        Ok(self.alloc("Viewport"))
+    fn add_viewport(&mut self, spec: &ocs_doc_api::ops::ViewportSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("Viewport");
+        self.viewport_views.insert(id, (spec.view_target, spec.view_height));
+        Ok(id)
     }
     fn add_text(&mut self, spec: &ocs_doc_api::ops::TextSpec) -> ApiResult<ObjectId> {
         let id = self.alloc("Text");
@@ -199,6 +203,16 @@ impl DocApiBackend for MockBackend {
     }
     fn block_entities(&self, _block_name: &str) -> ApiResult<Vec<EntityView>> {
         Ok(Vec::new())
+    }
+    fn set_viewport_view(&mut self, id: ObjectId, view_target: [f64; 3], view_height: f64) -> ApiResult<()> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        self.viewport_views.insert(id, (view_target, view_height));
+        Ok(())
+    }
+    fn viewport_view(&self, id: ObjectId) -> ApiResult<([f64; 3], f64)> {
+        self.viewport_views.get(&id).copied().ok_or(ApiError::UnknownId(id))
     }
 }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {

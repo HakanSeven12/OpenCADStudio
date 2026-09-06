@@ -158,6 +158,11 @@ Paper-space viewport: a width×height window at center looking at view_target wi
 
 - **create_viewport**(`center: [f64; 3], width: f64, height: f64, view_target: [f64; 3], view_height: f64`) -> `Entity`
 
+### Methods
+
+- **viewport_view**(``) -> `([f64; 3], f64)` — query `GetViewportView`
+- **set_view**(`view_target: [f64; 3], view_height: f64`) -> `()` — op `SetViewportView`
+
 ## `Entity` (acadrust `RasterImage`, collection `entities`)
 
 Raster image (read-mostly): GetEntity kind + coarse bounds (insertion + u*width + v*height); generic delete. No typed create in v1.

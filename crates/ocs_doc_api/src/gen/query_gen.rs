@@ -30,4 +30,6 @@ pub enum Query {
     GetAttributes { id: ObjectId },
     /// The entity ids + kinds inside a block definition (read-only traversal).
     GetBlockEntities { block_name: String },
+    /// A viewport's view (target + zoom height).
+    GetViewportView { id: ObjectId },
 }

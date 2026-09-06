@@ -339,7 +339,39 @@
       "acadrust_variant": "Viewport",
       "collection": "entities",
       "handle": "Entity",
-      "methods": [],
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "viewport_view",
+          "op": null,
+          "query": "GetViewportView",
+          "read_only": true,
+          "returns": "([f64; 3], f64)"
+        },
+        {
+          "args": [
+            {
+              "name": "view_target",
+              "ty": "[f64; 3]"
+            },
+            {
+              "name": "view_height",
+              "ty": "f64"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "set_view",
+          "op": "SetViewportView",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        }
+      ],
       "name": "Viewport"
     },
     {

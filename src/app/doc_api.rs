@@ -311,6 +311,28 @@ impl DocApiBackend for HostSession<'_> {
         Ok(out)
     }
 
+    fn set_viewport_view(&mut self, id: ObjectId, view_target: [f64; 3], view_height: f64) -> ApiResult<()> {
+        let handle = obj_to_handle(id);
+        let entity = self.document().get_entity(handle).cloned().ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Viewport(mut vp) = entity else {
+            return Err(ApiError::Unsupported("SetViewportView is only for Viewport".into()));
+        };
+        vp.view_target = acadrust::types::Vector3::new(view_target[0], view_target[1], view_target[2]);
+        vp.view_height = view_height;
+        if !self.scene_mut().update_entity(EntityType::Viewport(vp)) {
+            return Err(ApiError::Unsupported(format!("entity {id:?} is on a locked layer")));
+        }
+        Ok(())
+    }
+
+    fn viewport_view(&self, id: ObjectId) -> ApiResult<([f64; 3], f64)> {
+        let entity = self.document().get_entity(obj_to_handle(id)).ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Viewport(vp) = entity else {
+            return Err(ApiError::Unsupported("GetViewportView is only for Viewport".into()));
+        };
+        Ok(([vp.view_target.x, vp.view_target.y, vp.view_target.z], vp.view_height))
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -976,6 +998,40 @@ mod tests {
             id: mtext, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
         let Some(EntityType::MText(t)) = host.document().get_entity(obj_to_handle(mtext)) else { panic!("mtext not found") };
         assert!((t.insertion_point.x - 15.0).abs() < 1e-6);
+    }
+
+    // ── Phase 4 remaining: set_view + viewport-view query ────────────────────
+
+    #[test]
+    fn phase4_set_view_and_view_query() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let vp = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateViewport(
+            ocs_doc_api::ops::ViewportSpec {
+                center: [50.0, 50.0, 0.0], width: 40.0, height: 30.0,
+                view_target: [0.0, 0.0, 0.0], view_height: 100.0,
+            }))).unwrap());
+
+        // set_view retargets + re-zooms in place.
+        dispatch(&mut host, DocApiEnvelope::op(Operation::SetViewportView {
+            id: vp, view_target: [20.0, 30.0, 0.0], view_height: 50.0 })).unwrap();
+        let Some(EntityType::Viewport(v)) = host.document().get_entity(obj_to_handle(vp)) else { panic!("viewport not found") };
+        assert!((v.view_target.x - 20.0).abs() < 1e-6 && (v.view_height - 50.0).abs() < 1e-6);
+
+        // viewport_view query reads it back.
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetViewportView { id: vp }])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::ViewportView { target, height } => {
+                assert!((target[0] - 20.0).abs() < 1e-6 && (*height - 50.0).abs() < 1e-6);
+            }
+            other => panic!("expected viewport view, got {other:?}"),
+        }
+
+        // set_view on a non-viewport is Unsupported.
+        let line = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Line { start: [0.0; 3], end: [1.0; 3] }))).unwrap());
+        assert!(dispatch(&mut host, DocApiEnvelope::op(Operation::SetViewportView {
+            id: line, view_target: [0.0; 3], view_height: 1.0 })).is_err());
     }
 
     // ── Phase 3 remaining: attributes + nested block traversal ──────────────

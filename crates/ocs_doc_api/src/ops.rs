@@ -170,6 +170,7 @@ impl crate::gen::Operation {
             CreateHatch(_) => "CreateHatch",
             CreateDimensionLinear(_) => "CreateDimensionLinear",
             SetAttribute { .. } => "SetAttribute",
+            SetViewportView { .. } => "SetViewportView",
         }
     }
 }

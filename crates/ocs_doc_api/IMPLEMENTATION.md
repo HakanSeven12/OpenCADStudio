@@ -91,8 +91,10 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
 - **Done:** `create_viewport(center, width, height, view_target, view_height)` →
   `Operation::CreateViewport`; `bounds()` = center ± width/2,height/2; `transform`
   moves the paper-space center. Covered by `phase4_*` test.
-- **Remaining:** `set_view` (retarget/re-zoom an existing viewport) and a
-  viewport-view query (view target/center/scale DTOs).
+- **Done (set_view + view query):** `set_view(view_target, view_height)` retargets/
+  re-zooms in place (`SetViewportView` op), `viewport_view()` reads the view back
+  (`GetViewportView` query → target + zoom height). Covered by
+  `phase4_set_view_and_view_query` test.
 
 ### Phase 5 — media & misc (read-mostly)
 - **Done:** media/misc families report a **real `kind`** via `GetEntity`

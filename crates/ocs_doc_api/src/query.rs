@@ -53,6 +53,8 @@ pub enum QueryResult {
     Attributes(Vec<(String, String)>),
     /// The entities inside a block definition (read-only traversal).
     BlockEntities(Vec<EntityView>),
+    /// A viewport's view: target point (WCS) + zoom height.
+    ViewportView { target: [f64; 3], height: f64 },
 }
 
 /// Convenience: the query name for diagnostics.
@@ -71,6 +73,7 @@ impl crate::gen::Query {
             GetDimensionMeasurement { .. } => "GetDimensionMeasurement",
             GetAttributes { .. } => "GetAttributes",
             GetBlockEntities { .. } => "GetBlockEntities",
+            GetViewportView { .. } => "GetViewportView",
         }
     }
 }

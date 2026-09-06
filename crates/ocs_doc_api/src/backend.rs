@@ -75,6 +75,12 @@ pub trait DocApiBackend {
     /// The entities inside a block definition (read-only traversal), as views.
     fn block_entities(&self, block_name: &str) -> ApiResult<Vec<EntityView>>;
 
+    /// Set a viewport's view target + zoom height in place. Viewport-only.
+    fn set_viewport_view(&mut self, id: ObjectId, view_target: [f64; 3], view_height: f64) -> ApiResult<()>;
+
+    /// A viewport's view (target WCS + zoom height). Viewport-only.
+    fn viewport_view(&self, id: ObjectId) -> ApiResult<([f64; 3], f64)>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

@@ -375,6 +375,19 @@ name = "create_viewport"
 args = [{ name = "center", ty = "[f64; 3]" }, { name = "width", ty = "f64" }, { name = "height", ty = "f64" }, { name = "view_target", ty = "[f64; 3]" }, { name = "view_height", ty = "f64" }]
 op = "CreateViewport"
 
+[[family.method]]
+name = "viewport_view"
+kind = "query"
+query = "GetViewportView"
+returns = "([f64; 3], f64)"
+
+[[family.method]]
+name = "set_view"
+kind = "op"
+op = "SetViewportView"
+args = [{ name = "view_target", ty = "[f64; 3]" }, { name = "view_height", ty = "f64" }]
+returns = "()"
+
 # ============================================================================
 # MEDIA & MISC (phase 5, read-mostly) — read-only EntityView, no typed create.
 # These families report a real `kind` via GetEntity and coarse bounds where

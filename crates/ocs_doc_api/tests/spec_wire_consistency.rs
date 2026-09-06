@@ -63,6 +63,7 @@ fn operation_variants() -> Vec<String> {
         Operation::CreateRasterImage(ocs_doc_api::ops::RasterImageSpec {
             file_path: String::new(), insertion_point: [0.0; 3], u_vector: [0.0; 3], v_vector: [0.0; 3], size: [0.0; 2],
         }),
+        Operation::Loft { profiles: vec![] },
     ];
     // Derive the variant names by serializing a probe of each and reading the
     // bincode variant index -> name map is not available; instead match by
@@ -151,6 +152,7 @@ const OPERATION_BASELINE: &[&str] = &[
     "SetAttribute",
     "SetViewportView",
     "CreateRasterImage",
+    "Loft",
 ];
 
 /// Recorded baseline of the `Query` variant order.

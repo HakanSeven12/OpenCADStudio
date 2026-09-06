@@ -253,6 +253,22 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::Loft { profiles } => {
+            // Resolve every profile to its curve set BEFORE push_undo (all-or-nothing).
+            if profiles.len() < 2 {
+                return Err(ApiError::validation(name, "loft needs >= 2 profiles"));
+            }
+            let mut sections = Vec::with_capacity(profiles.len());
+            for (i, p) in profiles.iter().enumerate() {
+                let curves = profile_curves(b, *p, name)
+                    .map_err(|e| at_index(name, i, e))?;
+                sections.push(curves);
+            }
+            b.push_undo(name);
+            let id = b.loft(&sections)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),

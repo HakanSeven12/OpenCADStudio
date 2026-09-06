@@ -46,4 +46,6 @@ pub enum Operation {
     SetViewportView { id: ObjectId, view_target: [f64; 3], view_height: f64 },
     // media
     CreateRasterImage(RasterImageSpec),
+    // multi-profile solid
+    Loft { profiles: Vec<ObjectId> },
 }

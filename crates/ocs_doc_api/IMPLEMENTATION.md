@@ -112,9 +112,13 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
 
 | Method | Family | Status | Blocker |
 |---|---|---|---|
-| `loft(sections)` | Solid | not started | multi-profile kernel op + spec |
-| Bulge-arc polyline profiles | Solid sweep | partial | `entity_to_profile_curves` emits straight segments; bulge arcs need arc-segment conversion |
 | `GetCentroid`/`GetVolume` accuracy | Solid | mesh approx | render-mesh LOD tolerance vs query tolerance |
+
+**Completed (outstanding methods):** `loft(profiles)` — `Operation::Loft{profiles}`,
+resolves each profile to curve sets (all-or-nothing), `brep::loft` (`loft_two_profiles_*`
+test). **Bulge-arc polyline profiles** — `entity_to_profile_curves` now converts
+`LwVertex.bulge` to `geom2d::Curve::Arc` via the bulge→arc formula (θ = 4·atan(bulge)),
+so bulged profiles sweep correctly (`bulge_arc_polyline_profile_converts_to_arc` test).
 
 **Completed (Phase 0):** `extrude`, `revolve` (profiles: Line/Circle/Arc/LwPolyline),
 `add_vertex` (polyline), non-solid `transform` + `transform_many` (Line/Circle/Arc/

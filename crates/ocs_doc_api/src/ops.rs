@@ -185,6 +185,7 @@ impl crate::gen::Operation {
             SetAttribute { .. } => "SetAttribute",
             SetViewportView { .. } => "SetViewportView",
             CreateRasterImage(_) => "CreateRasterImage",
+            Loft { .. } => "Loft",
         }
     }
 }

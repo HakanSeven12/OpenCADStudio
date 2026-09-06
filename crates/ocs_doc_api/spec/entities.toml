@@ -68,6 +68,11 @@ name = "revolve"
 args = [{ name = "profile", ty = "EntityRef" }, { name = "pivot", ty = "[f64; 3]" }, { name = "axis", ty = "[f64; 3]" }, { name = "angle", ty = "f64" }]
 op = "Revolve"
 
+[[family.constructor]]
+name = "loft"
+args = [{ name = "profiles", ty = "&[EntityRef]" }]
+op = "Loft"
+
 [[family.method]]
 name = "intersect"
 kind = "op"

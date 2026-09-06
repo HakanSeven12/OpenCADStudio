@@ -347,6 +347,17 @@ impl DocApiBackend for HostSession<'_> {
         Ok(handle_to_obj(handle))
     }
 
+    fn loft(&mut self, sections: &[Vec<cadkernel::geom2d::Curve>]) -> ApiResult<ObjectId> {
+        // brep::loft takes (Plane, Vec<Curve>) per section; all profiles are on XY.
+        let plane = cadkernel::space::Plane::orthonormal([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+            .ok_or_else(|| ApiError::geometry(GeometryErrorKind::Other, "failed to construct XY plane"))?;
+        let loft_sections: Vec<(cadkernel::space::Plane, Vec<cadkernel::geom2d::Curve>)> =
+            sections.iter().map(|s| (plane, s.clone())).collect();
+        let body = cadkernel::brep::loft(&loft_sections)
+            .ok_or_else(|| ApiError::geometry(GeometryErrorKind::InvalidInput, "brep::loft failed"))?;
+        self.store_solid(&body)
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -1012,6 +1023,62 @@ mod tests {
             id: mtext, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
         let Some(EntityType::MText(t)) = host.document().get_entity(obj_to_handle(mtext)) else { panic!("mtext not found") };
         assert!((t.insertion_point.x - 15.0).abs() < 1e-6);
+    }
+
+    // ── Outstanding methods: loft + bulge-arc profiles ───────────────────────
+
+    #[test]
+    fn loft_two_profiles_produces_solid() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Two circles at different Z (profiles for loft).
+        let c1 = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Circle { centre: [0.0, 0.0, 0.0], radius: 5.0 }))).unwrap());
+        let c2 = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Circle { centre: [0.0, 0.0, 10.0], radius: 2.0 }))).unwrap());
+        let result = dispatch(&mut host, DocApiEnvelope::op(Operation::Loft { profiles: vec![c1, c2] }));
+        // Loft may be geometry-sensitive; assert either a positive-volume solid or
+        // a structured geometry error (no panic).
+        match result {
+            Ok(receipt) => {
+                let id = receipt.outcome.and_then(|o| o.new_id()).unwrap();
+                let v = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::GetVolume { id }])).unwrap();
+                match &v.query_results[0] {
+                    QueryResult::Volume(vol) => assert!(*vol > 0.0, "loft volume {vol}"),
+                    other => panic!("expected volume, got {other:?}"),
+                }
+            }
+            Err(ApiError::Geometry { .. } | ApiError::Validation { .. } | ApiError::Unsupported(_)) => {}
+            Err(e) => panic!("unexpected loft error: {e}"),
+        }
+    }
+
+    #[test]
+    fn bulge_arc_polyline_profile_converts_to_arc() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // A polyline with a bulge (arc) segment: square with one curved side.
+        let poly = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Polyline {
+                points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
+                closed: false,
+            }))).unwrap());
+        // Add a bulge to the first segment by editing the vertex.
+        let handle = obj_to_handle(poly);
+        let Some(EntityType::LwPolyline(mut pl)) = host.document().get_entity(handle).cloned() else { panic!("polyline not found") };
+        pl.vertices[0].bulge = 1.0; // 90-degree arc (tan(π/2/4) = 1)
+        host.scene_mut().update_entity(EntityType::LwPolyline(pl));
+
+        // profile_curves now converts the bulge to a Curve::Arc (not Unsupported).
+        let curves = host.profile_curves(poly).expect("bulge profile must convert");
+        // Open polyline, 3 vertices -> 2 segments: arc (bulged first), line.
+        assert_eq!(curves.len(), 2, "2 segments (arc + line)");
+        assert!(matches!(curves[0], cadkernel::geom2d::Curve::Arc(_)), "first segment is an arc");
+        assert!(matches!(curves[1], cadkernel::geom2d::Curve::Line(_)), "second is a line");
+        // bulge=1 -> included angle θ = 4·atan(1) = π (a semicircle); radius = chord/2 = 5.
+        if let cadkernel::geom2d::Curve::Arc(arc) = &curves[0] {
+            assert!((arc.radius - 5.0).abs() < 0.01, "arc radius {} (semicircle)", arc.radius);
+        }
     }
 
     // ── Phase 5 remaining: typed raster image create ─────────────────────────

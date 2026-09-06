@@ -207,6 +207,14 @@ impl DocApiBackend for MockBackend {
     fn add_raster_image(&mut self, _spec: &ocs_doc_api::ops::RasterImageSpec) -> ApiResult<ObjectId> {
         Ok(self.alloc("RasterImage"))
     }
+    fn loft(&mut self, sections: &[Vec<cadkernel::geom2d::Curve>]) -> ApiResult<ObjectId> {
+        if sections.len() < 2 {
+            return Err(ApiError::validation("Loft", "loft needs >= 2 profiles"));
+        }
+        let body = cadkernel::brep::make::cuboid([0.0, 0.0, 0.0], [1.0; 3])
+            .ok_or_else(|| ApiError::geometry(GeometryErrorKind::InvalidInput, "make cuboid"))?;
+        self.store_solid(&body)
+    }
     fn set_viewport_view(&mut self, id: ObjectId, view_target: [f64; 3], view_height: f64) -> ApiResult<()> {
         if !self.entity_exists(id) {
             return Err(ApiError::UnknownId(id));

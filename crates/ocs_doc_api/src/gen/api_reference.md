@@ -18,6 +18,7 @@ B-rep solid. Host resolves bodies via the solid_models cache (lift-on-miss from 
 - **create_wedge**(`origin: [f64; 3], size: [f64; 3]`) -> `Solid`
 - **extrude**(`profile: EntityRef, direction: [f64; 3]`) -> `Solid`
 - **revolve**(`profile: EntityRef, pivot: [f64; 3], axis: [f64; 3], angle: f64`) -> `Solid`
+- **loft**(`profiles: &[EntityRef]`) -> `Solid`
 
 ### Methods
 

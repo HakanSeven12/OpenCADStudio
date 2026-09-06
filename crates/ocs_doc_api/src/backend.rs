@@ -84,6 +84,10 @@ pub trait DocApiBackend {
     /// Add a `RASTER_IMAGE` (host auto-registers the ImageDefinition).
     fn add_raster_image(&mut self, spec: &crate::ops::RasterImageSpec) -> ApiResult<ObjectId>;
 
+    /// Loft a solid through >= 2 profile curve sets (each already resolved to
+    /// `geom2d::Curve`s on the XY plane). Returns the fresh `ObjectId`.
+    fn loft(&mut self, sections: &[Vec<cadkernel::geom2d::Curve>]) -> ApiResult<ObjectId>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

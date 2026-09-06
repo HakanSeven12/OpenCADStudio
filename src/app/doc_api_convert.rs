@@ -30,26 +30,22 @@ pub fn entity_to_profile_curves(entity: &EntityType) -> ApiResult<Vec<cadkernel:
             if pl.vertices.len() < 2 {
                 return Err(ApiError::validation("profile", "polyline profile needs >= 2 vertices"));
             }
-            // Fail explicitly on bulge arcs rather than silently producing a
-            // chord-substituted (wrong-shape) profile for Extrude/Revolve.
-            if pl.vertices.iter().any(|v| v.bulge != 0.0) {
-                return Err(ApiError::Unsupported(
-                    "polyline profiles with bulge (arc) segments are not yet supported for sweep ops".into(),
-                ));
-            }
-            // Build a straight-segment polyline chain.
-            let pts: Vec<[f64; 2]> = pl.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
-            let mut segs = Vec::with_capacity(pts.len());
-            for i in 0..pts.len() {
-                let start = pts[i];
-                let end = if i + 1 < pts.len() {
-                    pts[i + 1]
-                } else if pl.is_closed {
-                    pts[0]
+            // Convert each segment: straight for bulge==0, a circular arc for
+            // bulge!=0 (bulge = tan(included_angle/4)). This supports bulged
+            // polyline profiles for Extrude/Revolve instead of rejecting them.
+            let n = pl.vertices.len();
+            let count = if pl.is_closed { n } else { n - 1 };
+            let mut segs = Vec::with_capacity(count);
+            for i in 0..count {
+                let a = pl.vertices[i];
+                let b = pl.vertices[(i + 1) % n];
+                let start = [a.location.x, a.location.y];
+                let end = [b.location.x, b.location.y];
+                if a.bulge.abs() < 1e-12 {
+                    segs.push(KCurve::Line(KLine { start, end }));
                 } else {
-                    break;
-                };
-                segs.push(KCurve::Line(KLine { start, end }));
+                    segs.push(bulge_arc_segment(start, end, a.bulge)?);
+                }
             }
             segs
         }
@@ -191,6 +187,39 @@ pub fn transform_entity_geometry(
 
 fn v3(p: [f64; 3]) -> Vector3 {
     Vector3::new(p[0], p[1], p[2])
+}
+
+/// Convert a polyline bulge segment (start → end, bulge = tan(θ/4)) to a
+/// `geom2d::Curve::Arc`. Positive bulge = counter-clockwise arc; negative = clockwise.
+fn bulge_arc_segment(start: [f64; 2], end: [f64; 2], bulge: f64) -> ApiResult<cadkernel::geom2d::Curve> {
+    use cadkernel::geom2d::{Arc as KArc, Curve as KCurve};
+    let chord_x = end[0] - start[0];
+    let chord_y = end[1] - start[1];
+    let chord_len = (chord_x * chord_x + chord_y * chord_y).sqrt();
+    if chord_len < 1e-12 {
+        return Err(ApiError::validation("profile", "bulge segment with coincident endpoints"));
+    }
+    // Included angle θ = 4·atan(bulge); radius = (chord/2) / sin(θ/2).
+    let theta = 4.0 * bulge.atan();
+    let half = theta / 2.0;
+    let sin_half = half.sin();
+    if sin_half.abs() < 1e-9 {
+        return Err(ApiError::validation("profile", "bulge segment with degenerate angle"));
+    }
+    let radius = (chord_len / 2.0) / sin_half.abs();
+    // Center: chord midpoint + perpendicular offset (chord/2)/tan(θ/2).
+    let mid_x = (start[0] + end[0]) / 2.0;
+    let mid_y = (start[1] + end[1]) / 2.0;
+    let apothem = (chord_len / 2.0) / half.tan();
+    // Perpendicular to chord (rotate chord unit vector by +90° for CCW bulge).
+    let sign = if bulge >= 0.0 { 1.0 } else { -1.0 };
+    let perp_x = -chord_y / chord_len * sign;
+    let perp_y = chord_x / chord_len * sign;
+    let centre = [mid_x + perp_x * apothem, mid_y + perp_y * apothem];
+    // Start/end angles about the centre.
+    let start_angle = (start[1] - centre[1]).atan2(start[0] - centre[0]);
+    let end_angle = (end[1] - centre[1]).atan2(end[0] - centre[0]);
+    Ok(KCurve::Arc(KArc { centre, radius, start_angle, end_angle }))
 }
 
 /// Build an acadrust entity for a 2D curve construction spec.

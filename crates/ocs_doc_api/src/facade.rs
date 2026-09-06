@@ -452,6 +452,13 @@ impl SolidCollection {
             .ok_or_else(|| ApiError::Transport("revolve returned no id".into()))?;
         Ok(Solid::new(self.session.clone(), id))
     }
+    /// Loft a solid through >= 2 profile entities (polylines/circles/arcs).
+    pub fn loft(&self, profiles: &[impl HasId]) -> ApiResult<Solid> {
+        let ids: Vec<ObjectId> = profiles.iter().map(|p| p.id()).collect();
+        let receipt = self.session.apply_op(Operation::Loft { profiles: ids })?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("loft returned no id".into()))?;
+        Ok(Solid::new(self.session.clone(), id))
+    }
 }
 
 #[derive(Clone)]

@@ -90,6 +90,12 @@ start =
     .browser-storage = Úložiště prohlížeče
     .keep-recent-files = Uchovávat nedávné soubory
 
+donation =
+    .title = Žádost o dar
+    .heading = Přispějte na Open CAD Studio
+    .body = Open CAD Studio potřebuje vaši pomoc! Dary financují vývoj a infrastrukturu důležité pro další existenci Open CAD Studio.
+    .decline = Ne, děkuji
+
 modal =
     .about = O aplikaci
     .keyboard-shortcuts = Klávesové zkratky

@@ -90,6 +90,12 @@ start =
     .browser-storage = Αποθηκευτικός χώρος προγράμματος περιήγησης
     .keep-recent-files = Διατήρηση πρόσφατων αρχείων
 
+donation =
+    .title = Έκκληση για δωρεά
+    .heading = Κάντε δωρεά στο Open CAD Studio
+    .body = Το Open CAD Studio χρειάζεται τη βοήθειά σας! Οι δωρεές χρηματοδοτούν την ανάπτυξη και τις υποδομές που είναι σημαντικές για τη συνέχιση της ύπαρξης του Open CAD Studio.
+    .decline = Όχι, ευχαριστώ
+
 modal =
     .about = Σχετικά
     .keyboard-shortcuts = Συντομεύσεις πληκτρολογίου

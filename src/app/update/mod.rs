@@ -124,6 +124,7 @@ impl OpenCADStudio {
     /// old OS window did: a style editor discards its staged (un-applied)
     /// changes, and the ribbon tool that launched the dialog is de-highlighted.
     fn close_active_modal(&mut self) {
+        self.mark_startup_modal_shown();
         use super::ModalKind::*;
         // Plot Style opened from PLOT behaves as a child modal.
         // Closing it restores the parent Plot dialog instead of returning
@@ -282,6 +283,7 @@ impl OpenCADStudio {
             }
         }
         let task = self.update_inner(msg);
+        self.show_next_startup_modal();
         self.sync_open_command_history();
         // Close the document-level first-touch transaction started by
         // push_undo_snapshot at this message boundary.
@@ -6429,6 +6431,7 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 let first_measurement = self.modal_content_size.replace(size).is_none();
+                self.mark_startup_modal_shown();
                 if first_measurement {
                     let initial_width = self.mtext_editor.as_ref().and_then(|editor| {
                         editor.editing.is_none().then(|| {
@@ -7125,8 +7128,14 @@ impl OpenCADStudio {
                 };
                 self.update_notice_version = Some(info.version);
                 self.update_notice_body = Some(info.body);
-                self.active_modal = Some(super::ModalKind::UpdateNotice);
+                self.pending_startup_modals
+                    .push_back(super::ModalKind::UpdateNotice);
                 Task::none()
+            }
+            Message::DonationPromptDonate => {
+                self.close_active_modal();
+                self.dispatch_view("DONATE", self.active_tab)
+                    .unwrap_or_else(Task::none)
             }
             Message::UpdateNoticeClose => {
                 self.close_active_modal();
@@ -7143,8 +7152,7 @@ impl OpenCADStudio {
             Message::AssocPromptYes => {
                 self.file_assoc_enabled = true;
                 self.mark_assoc_prompted();
-                self.active_modal = None;
-                self.reset_modal_geometry();
+                self.close_active_modal();
                 // set_default_app registers the handler first, then makes us the
                 // default — boot no longer does this automatically.
                 Task::perform(
@@ -7155,8 +7163,7 @@ impl OpenCADStudio {
             Message::AssocPromptNo => {
                 self.file_assoc_enabled = false;
                 self.mark_assoc_prompted();
-                self.active_modal = None;
-                self.reset_modal_geometry();
+                self.close_active_modal();
                 Task::none()
             }
             Message::AssocResult(result) => {

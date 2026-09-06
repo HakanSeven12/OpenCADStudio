@@ -90,6 +90,12 @@ start =
     .browser-storage = 瀏覽器儲存空間
     .keep-recent-files = 保留最近檔案
 
+donation =
+    .title = 捐款請求
+    .heading = 捐款給 Open CAD Studio
+    .body = Open CAD Studio 需要您的協助！捐款將用於資助對 Open CAD Studio 持續發展至關重要的開發工作與基礎設施。
+    .decline = 不用，謝謝
+
 modal =
     .about = 關於
     .keyboard-shortcuts = 鍵盤快速鍵

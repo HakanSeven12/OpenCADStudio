@@ -90,7 +90,7 @@ const SNAP_ORDER: &[SnapType] = &[
     // persisted set. (#121)
 ];
 
-/// `$OSMODE` bit for each running object-snap mode (standard AutoCAD bitmask).
+/// `$OSMODE` bit for each running object-snap mode.
 /// `None` for OCS-only snaps (Grid, ObjectPick) that have no standard bit.
 fn snap_bit(s: SnapType) -> Option<i32> {
     Some(match s {
@@ -179,6 +179,8 @@ pub struct UserSettings {
     /// prompt has already been shown. Set once the user answers (either way),
     /// so we never nag again on subsequent launches.
     pub default_assoc_prompted: bool,
+    /// App version whose donation prompt has been displayed.
+    pub donation_prompt_version: String,
     /// Ids of plugins the user turned off in the Plugin Manager. Disabled
     /// plugins keep their manifest listed but drop their ribbon tab and command
     /// dispatch.
@@ -313,6 +315,7 @@ impl Default for UserSettings {
             snap_angle_deg: 0.0,
             otrack: false,
             default_assoc_prompted: false,
+            donation_prompt_version: String::new(),
             disabled_plugins: Vec::new(),
             plugin_repos: Vec::new(),
             literal_spaces: false,

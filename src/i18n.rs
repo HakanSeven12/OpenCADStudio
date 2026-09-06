@@ -409,6 +409,35 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
+    fn donation_text_is_translated_in_every_locale() {
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).expect("Fluent resources must parse");
+            let attributes: BTreeSet<String> = loader.with_message_iter(
+                &language.requested()[0],
+                |messages| {
+                    messages
+                        .filter(|message| message.id.name == "donation")
+                        .flat_map(|message| {
+                            message.attributes.iter().map(|attr| attr.id.name.to_owned())
+                        })
+                        .collect()
+                },
+            );
+            assert_eq!(
+                attributes,
+                BTreeSet::from(["title", "heading", "body", "decline"].map(String::from))
+            );
+            for attribute in attributes {
+                assert!(!loader.get_attr("donation", &attribute).is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn greek_catalog_loads_and_covers_the_source_catalog() {
         let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
         load_language(&loader, Language::ElGr).expect("Greek Fluent resources must parse");

@@ -90,6 +90,12 @@ start =
     .browser-storage = Хранилище браузера
     .keep-recent-files = Хранить недавние файлы
 
+donation =
+    .title = Просьба о пожертвовании
+    .heading = Поддержите Open CAD Studio
+    .body = Open CAD Studio нужна ваша помощь! Пожертвования финансируют разработку и инфраструктуру, важные для дальнейшего существования Open CAD Studio.
+    .decline = Нет, спасибо
+
 modal =
     .about = О программе
     .keyboard-shortcuts = Настройки клавиатуры

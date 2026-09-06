@@ -17,6 +17,7 @@ impl OpenCADStudio {
             Some(K::FindReplace) => crate::tr!("modal", "find-replace"),
             Some(K::PluginManager) => crate::tr!("modal", "plugin-manager"),
             Some(K::UpdateNotice) => crate::tr!("modal", "update-available"),
+            Some(K::DonationPrompt) => crate::tr!("donation", "title"),
             Some(K::Layers) => crate::tr!("modal", "layer-manager"),
             Some(K::LayerStateManager) => crate::tr!("modal", "layer-state-manager"),
             Some(K::LayerTranslator) => crate::t!("Layer Translator").into_owned(),
@@ -1300,6 +1301,9 @@ impl OpenCADStudio {
             super::super::ModalKind::AssocPrompt => {
                 automatic_flow(ex, default_assoc_dialog_window)
             }
+            super::super::ModalKind::DonationPrompt => {
+                sized_flow(ex, 540, 360, donation_dialog_window)
+            }
             super::super::ModalKind::AecDropWarning => {
                 let src_label = self
                     .tabs
@@ -1843,10 +1847,43 @@ fn layer_delete_warning_window(
     .into()
 }
 
-/// First-launch prompt offering to register Open CAD Studio as the default
-/// handler for .dwg / .dxf. "Yes" runs the platform association call; "Not now"
-/// just dismisses. Either answer flips the persisted `default_assoc_prompted`
-/// flag so the dialog never reappears.
+fn donation_dialog_window(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Message> {
+    container(
+        column![
+            text(crate::tr!("donation", "heading")).size(18),
+            row![
+                text(crate::tr!("donation", "body"))
+                    .size(14)
+                    .width(Fill),
+                crate::ui::icons::themed(crate::ui::icons::HEART, 52.0),
+            ]
+            .spacing(20)
+            .align_y(iced::Center),
+            row![
+                Space::new().width(Fill),
+                dialog_button(
+                    crate::tr!("start", "donate"),
+                    Message::DonationPromptDonate,
+                    button::primary,
+                ),
+                dialog_button(
+                    crate::tr!("donation", "decline"),
+                    Message::CloseModal,
+                    button::secondary,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        ]
+        .spacing(18)
+        .width(sizing.width),
+    )
+    .style(dialog_body_style)
+    .padding([24, 28])
+    .into()
+}
+
+/// One-time default application prompt.
 fn default_assoc_dialog_window(
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'static, Message> {

@@ -90,6 +90,12 @@ start =
     .browser-storage = Böngésző tárhelye
     .keep-recent-files = Legutóbbi fájlok megőrzése
 
+donation =
+    .title = Adománykérés
+    .heading = Támogassa az Open CAD Studiót
+    .body = Az Open CAD Studiónak szüksége van a segítségére! Az adományok az Open CAD Studio fennmaradásához fontos fejlesztést és infrastruktúrát finanszírozzák.
+    .decline = Nem, köszönöm
+
 modal =
     .about = Névjegy
     .keyboard-shortcuts = Billentyűparancsok

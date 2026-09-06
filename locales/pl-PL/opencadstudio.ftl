@@ -90,6 +90,12 @@ start =
     .browser-storage = Pamięć przeglądarki
     .keep-recent-files = Zachowuj ostatnie pliki
 
+donation =
+    .title = Prośba o darowiznę
+    .heading = Wesprzyj Open CAD Studio
+    .body = Open CAD Studio potrzebuje Twojej pomocy! Darowizny finansują rozwój i infrastrukturę niezbędne do dalszego istnienia Open CAD Studio.
+    .decline = Nie, dziękuję
+
 modal =
     .about = Informacje
     .keyboard-shortcuts = Skróty klawiaturowe

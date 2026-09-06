@@ -90,6 +90,12 @@ start =
     .browser-storage = 브라우저 저장소
     .keep-recent-files = 최근 파일 유지
 
+donation =
+    .title = 기부 요청
+    .heading = Open CAD Studio에 기부하기
+    .body = Open CAD Studio는 여러분의 도움이 필요합니다! 기부금은 Open CAD Studio의 지속적인 운영에 중요한 개발과 인프라 비용을 지원합니다.
+    .decline = 괜찮습니다
+
 modal =
     .about = 정보
     .keyboard-shortcuts = 키보드 단축키

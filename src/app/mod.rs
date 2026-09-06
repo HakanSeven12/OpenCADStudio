@@ -24,6 +24,7 @@ mod presspull_ops;
 mod recent;
 pub(crate) mod settings;
 mod shortcuts;
+mod startup;
 mod style_ops;
 mod text_inline;
 mod tolerance_dialog;
@@ -691,6 +692,7 @@ pub(super) struct OpenCADStudio {
     /// The open in-canvas modal dialog, if any (Plan B: shared overlay instead
     /// of OS windows).
     active_modal: Option<ModalKind>,
+    pending_startup_modals: std::collections::VecDeque<ModalKind>,
     /// Plot modal geometry preserved while the Plot Style editor is open as
     /// a child dialog. None means Plotstyle was opened directly (e.g. command).
     plotstyle_parent_plot_geometry: Option<(iced::Vector, iced::Vector)>,
@@ -795,13 +797,9 @@ pub(super) struct OpenCADStudio {
     /// Tracked separately from the PDSIZE sign so a size of 0 (sign-less) still
     /// remembers which radio is active.
     point_size_relative: bool,
-    /// New-release notification window — opened on startup when the
-    /// GitHub releases API reports a newer version than this build.
-    /// First-launch "make Open CAD Studio the default for .dwg/.dxf?" prompt
-    /// window. Shown once, gated on `default_assoc_prompted`.
-    /// Whether the one-time default-association prompt has already been shown.
-    /// Persisted via [`settings::UserSettings`] so it survives restarts.
+    /// Whether the default-association prompt has been answered.
     default_assoc_prompted: bool,
+    donation_prompt_version: String,
     /// Read-only session (`--read-only`): editing is allowed but every save
     /// path is refused. Set once at boot from the CLI config.
     read_only: bool,
@@ -1663,6 +1661,7 @@ pub enum ModalKind {
     Shortcuts,
     PluginManager,
     UpdateNotice,
+    DonationPrompt,
     Layers,
     LayerStateManager,
     LayerTranslator,
@@ -2914,6 +2913,7 @@ pub enum Message {
     UpdateCheckResult(Option<crate::io::update_check::UpdateInfo>),
     /// User dismissed the update-notice window.
     UpdateNoticeClose,
+    DonationPromptDonate,
     /// First-launch default-association prompt: user accepted — register this
     /// app as the default handler for .dwg / .dxf.
     AssocPromptYes,
@@ -3421,6 +3421,7 @@ impl OpenCADStudio {
             color_picker_tab: ColorPickerTab::Index,
             recent_colors: Vec::new(),
             active_modal: None,
+            pending_startup_modals: std::collections::VecDeque::new(),
             plotstyle_parent_plot_geometry: None,
             find_replace: FindReplaceState::default(),
             aec_drop_acknowledged: false,
@@ -3461,6 +3462,7 @@ impl OpenCADStudio {
             point_size_buf: String::new(),
             point_size_relative: true,
             default_assoc_prompted: false,
+            donation_prompt_version: String::new(),
             read_only: false,
             update_notice_version: None,
             update_notice_body: None,
@@ -3831,13 +3833,7 @@ impl OpenCADStudio {
                     .map(|line| Task::done(Message::Command(line))),
             )
         };
-        // One-time prompt offering to make Open CAD Studio the default app for
-        // .dwg / .dxf. Shown only on the first launch that hasn't answered it
-        // yet; the flag is persisted so we never ask twice.
-        let assoc_prompt: Task<Message> = Task::none();
-        if !s.default_assoc_prompted {
-            s.active_modal = Some(ModalKind::AssocPrompt);
-        }
+        s.queue_startup_prompts();
         // Fetch the Patreon supporters list once at boot for the Start page.
         #[cfg(not(target_arch = "wasm32"))]
         let patrons_fetch = Task::perform(
@@ -3900,7 +3896,6 @@ impl OpenCADStudio {
                 focus_cmd,
                 cli_open,
                 script,
-                assoc_prompt,
                 patrons_fetch,
                 videos_fetch,
                 discussions_fetch,
@@ -3916,6 +3911,7 @@ impl OpenCADStudio {
     fn boot_web() -> (Self, Task<Message>) {
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut s = Self::new();
+        s.queue_startup_prompts();
         let focus = s.focus_cmd_input();
         let primary_font = crate::scene::text::web_font::preload_language(
             &crate::i18n::active_language_tag(),

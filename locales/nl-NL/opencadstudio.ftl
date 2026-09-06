@@ -90,6 +90,12 @@ start =
     .browser-storage = Browseropslag
     .keep-recent-files = Recente bestanden bewaren
 
+donation =
+    .title = Verzoek om een donatie
+    .heading = Doneer aan Open CAD Studio
+    .body = Open CAD Studio heeft uw hulp nodig! Donaties financieren de ontwikkeling en infrastructuur die belangrijk zijn voor het voortbestaan van Open CAD Studio.
+    .decline = Nee, bedankt
+
 modal =
     .about = Over
     .keyboard-shortcuts = Sneltoetsen

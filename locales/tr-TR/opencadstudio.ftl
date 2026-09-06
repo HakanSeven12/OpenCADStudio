@@ -90,6 +90,12 @@ start =
     .browser-storage = Tarayıcı depolama alanı
     .keep-recent-files = Son dosyaları sakla
 
+donation =
+    .title = Bağış Talebi
+    .heading = Open CAD Studio'ya Bağış Yapın
+    .body = Open CAD Studio'nun yardımınıza ihtiyacı var! Bağışlar, Open CAD Studio'nun varlığını sürdürebilmesi için önemli olan geliştirme çalışmalarını ve altyapıyı finanse eder.
+    .decline = Hayır, Teşekkürler
+
 modal =
     .about = Hakkında
     .keyboard-shortcuts = Klavye Kısayolları

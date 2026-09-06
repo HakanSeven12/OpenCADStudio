@@ -90,6 +90,12 @@ start =
     .browser-storage = ब्राउज़र संग्रहण
     .keep-recent-files = हाल की फ़ाइलें रखें
 
+donation =
+    .title = दान का अनुरोध
+    .heading = Open CAD Studio को दान दें
+    .body = Open CAD Studio को आपकी मदद चाहिए! दान से विकास और बुनियादी ढाँचे का खर्च पूरा होता है, जो Open CAD Studio के अस्तित्व को बनाए रखने के लिए महत्वपूर्ण हैं।
+    .decline = नहीं, धन्यवाद
+
 modal =
     .about = परिचय
     .keyboard-shortcuts = कीबोर्ड शॉर्टकट

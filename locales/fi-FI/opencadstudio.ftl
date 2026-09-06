@@ -90,6 +90,12 @@ start =
     .browser-storage = Selaimen tallennustila
     .keep-recent-files = Säilytä viimeisimmät tiedostot
 
+donation =
+    .title = Lahjoituspyyntö
+    .heading = Lahjoita Open CAD Studiolle
+    .body = Open CAD Studio tarvitsee apuasi! Lahjoituksilla rahoitetaan kehitystyötä ja infrastruktuuria, jotka ovat tärkeitä Open CAD Studion toiminnan jatkumiselle.
+    .decline = Ei kiitos
+
 modal =
     .about = Tietoja
     .keyboard-shortcuts = Pikanäppäimet

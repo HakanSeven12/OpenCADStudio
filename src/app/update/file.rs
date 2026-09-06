@@ -370,6 +370,7 @@ impl OpenCADStudio {
             snap_angle_deg: self.snap_angle_deg,
             otrack: self.snapper.otrack_enabled,
             default_assoc_prompted: self.default_assoc_prompted,
+            donation_prompt_version: self.donation_prompt_version.clone(),
             disabled_plugins: {
                 let mut v: Vec<String> = self.disabled_plugins.iter().cloned().collect();
                 v.sort();
@@ -432,6 +433,7 @@ impl OpenCADStudio {
         // open / tab switch), not app-global, so they are not applied here.
         self.snapper.otrack_enabled = s.otrack;
         self.default_assoc_prompted = s.default_assoc_prompted;
+        self.donation_prompt_version = s.donation_prompt_version.clone();
         self.disabled_plugins = s.disabled_plugins.iter().cloned().collect();
         self.plugin_repos = s.plugin_repos.clone();
         self.command_line.literal_spaces = s.literal_spaces;

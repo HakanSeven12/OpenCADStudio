@@ -90,6 +90,12 @@ start =
     .browser-storage = ブラウザーストレージ
     .keep-recent-files = 最近使ったファイルを保持
 
+donation =
+    .title = 寄付のお願い
+    .heading = Open CAD Studio に寄付する
+    .body = Open CAD Studio は皆さまの支援を必要としています！寄付は、Open CAD Studio の存続に重要な開発とインフラの資金に充てられます。
+    .decline = 今はしない
+
 modal =
     .about = バージョン情報
     .keyboard-shortcuts = キーボードショートカット

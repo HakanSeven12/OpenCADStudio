@@ -269,6 +269,18 @@ handle!(Ray);
 handle!(XLine);
 handle!(Text);
 handle!(MText);
+handle!(Dimension);
+
+impl Dimension {
+    /// The measured value of this dimension (distance for linear/radius, degrees
+    /// for angular).
+    pub fn measurement(&self) -> ApiResult<f64> {
+        match self.session.one_query(Query::GetDimensionMeasurement { id: self.id })? {
+            QueryResult::DimensionMeasurement(v) => Ok(v),
+            _ => Err(ApiError::Transport("unexpected measurement result".into())),
+        }
+    }
+}
 
 impl Entity {
     pub fn view(&self) -> ApiResult<EntityView> {
@@ -473,6 +485,16 @@ impl CurveCollection {
         }))?;
         let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_hatch returned no id".into()))?;
         Ok(Entity::new(self.session.clone(), id))
+    }
+
+    /// A linear DIMENSION between `first_point` and `second_point`, with the
+    /// dimension line placed at `definition_point`. `measurement()` reads the value.
+    pub fn create_dimension_linear(&self, first_point: [f64; 3], second_point: [f64; 3], definition_point: [f64; 3]) -> ApiResult<Dimension> {
+        let receipt = self.session.apply_op(Operation::CreateDimensionLinear(crate::ops::DimensionSpec {
+            first_point, second_point, definition_point,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
+        Ok(Dimension::new(self.session.clone(), id))
     }
 
     /// Single-line TEXT annotation.

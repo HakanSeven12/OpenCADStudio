@@ -106,6 +106,15 @@ pub struct HatchSpec {
     pub solid: bool,
 }
 
+/// Construction spec for a linear `DIMENSION`: the two measured points and the
+/// dimension-line definition point.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DimensionSpec {
+    pub first_point: [f64; 3],
+    pub second_point: [f64; 3],
+    pub definition_point: [f64; 3],
+}
+
 /// A rigid similarity (rotation + translation + optional uniform scale/reflection)
 /// as a plain-data mirror of `cadkernel::brep::transform`'s `Placement`
 /// (non-serde). Columns are the new basis axes; `origin` is the translation.
@@ -159,6 +168,7 @@ impl crate::gen::Operation {
             CreateMText(_) => "CreateMText",
             SetTextContent { .. } => "SetTextContent",
             CreateHatch(_) => "CreateHatch",
+            CreateDimensionLinear(_) => "CreateDimensionLinear",
         }
     }
 }

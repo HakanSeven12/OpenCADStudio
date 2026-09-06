@@ -60,6 +60,12 @@ pub trait DocApiBackend {
     /// A hatch's boundary loops (outer + islands) as closed polylines.
     fn hatch_boundary(&self, id: ObjectId) -> ApiResult<Vec<Vec<[f64; 2]>>>;
 
+    /// Add a linear `DIMENSION`; returns the fresh `ObjectId`.
+    fn add_dimension_linear(&mut self, spec: &crate::ops::DimensionSpec) -> ApiResult<ObjectId>;
+
+    /// A dimension's measured value (distance for linear/radius, degrees for angular).
+    fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

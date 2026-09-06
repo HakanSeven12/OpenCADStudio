@@ -412,6 +412,16 @@ pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aab
             min: [t.insertion_point.x, t.insertion_point.y - t.height, t.insertion_point.z],
             max: [t.insertion_point.x + t.height * t.value.len() as f64, t.insertion_point.y, t.insertion_point.z],
         },
+        EntityType::Dimension(acadrust::entities::Dimension::Linear(d)) => {
+            let pts = [d.first_point, d.second_point, d.definition_point];
+            let mut min = [f64::INFINITY; 3];
+            let mut max = [f64::NEG_INFINITY; 3];
+            for p in pts {
+                min = [min[0].min(p.x), min[1].min(p.y), min[2].min(p.z)];
+                max = [max[0].max(p.x), max[1].max(p.y), max[2].max(p.z)];
+            }
+            Aabb { min, max }
+        }
         EntityType::Hatch(h) => {
             let mut min = [f64::INFINITY; 3];
             let mut max = [f64::NEG_INFINITY; 3];

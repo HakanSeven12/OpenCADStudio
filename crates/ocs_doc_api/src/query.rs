@@ -47,6 +47,8 @@ pub enum QueryResult {
     TextContent(String),
     /// A hatch's boundary loops (outer + islands), each a closed polyline.
     HatchBoundary(Vec<Vec<[f64; 2]>>),
+    /// A dimension's measured value (distance for linear/radius, degrees for angular).
+    DimensionMeasurement(f64),
 }
 
 /// Convenience: the query name for diagnostics.
@@ -62,6 +64,7 @@ impl crate::gen::Query {
             GetGeometryRevision => "GetGeometryRevision",
             GetTextContent { .. } => "GetTextContent",
             GetHatchBoundary { .. } => "GetHatchBoundary",
+            GetDimensionMeasurement { .. } => "GetDimensionMeasurement",
         }
     }
 }

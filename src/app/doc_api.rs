@@ -238,6 +238,30 @@ impl DocApiBackend for HostSession<'_> {
         Ok(loops)
     }
 
+    fn add_dimension_linear(&mut self, spec: &ocs_doc_api::ops::DimensionSpec) -> ApiResult<ObjectId> {
+        use acadrust::entities::{Dimension, DimensionLinear};
+        use acadrust::types::Vector3;
+        let v3 = |p: [f64; 3]| Vector3::new(p[0], p[1], p[2]);
+        let mut dim = DimensionLinear::new(v3(spec.first_point), v3(spec.second_point));
+        dim.definition_point = v3(spec.definition_point);
+        let handle = self.scene_mut().add_entity(EntityType::Dimension(Dimension::Linear(dim)));
+        Ok(handle_to_obj(handle))
+    }
+
+    fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64> {
+        let entity = self.document().get_entity(obj_to_handle(id)).ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Dimension(d) = entity else {
+            return Err(ApiError::Unsupported("GetDimensionMeasurement is only for Dimension".into()));
+        };
+        // Distance for linear/radius/diameter; degrees for angular.
+        Ok(match d {
+            acadrust::entities::Dimension::Linear(x) => x.measurement(),
+            acadrust::entities::Dimension::Radius(x) => x.measurement(),
+            acadrust::entities::Dimension::Diameter(x) => x.measurement(),
+            _ => return Err(ApiError::Unsupported("dimension measurement for this sub-type".into())),
+        })
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -903,6 +927,38 @@ mod tests {
             id: mtext, placement: ocs_doc_api::PlacementSpec::at([10.0, 0.0, 0.0]) })).unwrap();
         let Some(EntityType::MText(t)) = host.document().get_entity(obj_to_handle(mtext)) else { panic!("mtext not found") };
         assert!((t.insertion_point.x - 15.0).abs() < 1e-6);
+    }
+
+    // ── Phase 2b-c: dimension ─────────────────────────────────────────────────
+
+    #[test]
+    fn phase2c_dimension_linear_create_measurement_bounds() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Linear dimension from (0,0,0) to (30,0,0) with the line at (0,5,0).
+        let dim = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateDimensionLinear(
+            ocs_doc_api::ops::DimensionSpec {
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [30.0, 0.0, 0.0],
+                definition_point: [0.0, 5.0, 0.0],
+            }))).unwrap());
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![
+            Query::GetDimensionMeasurement { id: dim },
+            Query::GetEntity { id: dim },
+            Query::GetBounds { id: dim },
+        ])).unwrap();
+        match &receipt.query_results[0] {
+            QueryResult::DimensionMeasurement(v) => assert!((*v - 30.0).abs() < 1e-6, "measurement {v}"),
+            other => panic!("expected measurement, got {other:?}"),
+        }
+        match &receipt.query_results[1] {
+            QueryResult::Entity(e) => assert_eq!(e.kind, "Dimension"),
+            other => panic!("expected entity, got {other:?}"),
+        }
+        match &receipt.query_results[2] {
+            QueryResult::Bounds(b) => assert!((b.min[0] - 0.0).abs() < 1e-6 && (b.max[0] - 30.0).abs() < 1e-6, "{b:?}"),
+            other => panic!("expected bounds, got {other:?}"),
+        }
     }
 
     // ── Phase 2b-b: hatch ────────────────────────────────────────────────────

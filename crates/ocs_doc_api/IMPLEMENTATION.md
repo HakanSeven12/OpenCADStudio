@@ -68,7 +68,10 @@ Phase 2b (annotations/hatch/dimension typed ops), attributes + nested traversal
 - **Done (2b-b):** `Hatch` — `create_hatch(boundary, solid)` (`CreateHatch`,
   validates ≥3 points), `boundary()` → loops (`GetHatchBoundary`), bounds from
   boundary edges, delete. Covered by `phase2b_hatch_*` test.
-- **Remaining (2b-c):** `Dimension` (typed sub-types).
+- **Done (2b-c):** linear `Dimension` — `create_dimension_linear(first, second,
+  definition)` (`CreateDimensionLinear`), `measurement()` → distance
+  (`GetDimensionMeasurement`), bounds. Covered by `phase2c_*` test. Radius/diameter/
+  angular dimension sub-types are a later refinement.
 - **Unblocked:** `add_vertex` (polyline) and sweep profiles (Line/Circle/Arc/LwPolyline)
   are supported (Phase 0).
 

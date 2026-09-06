@@ -312,6 +312,27 @@ query = "GetHatchBoundary"
 returns = "Vec<Vec<[f64; 2]>>"
 
 # ============================================================================
+# DIMENSION FAMILY (phase 2c) — linear dimensions
+# ============================================================================
+[[family]]
+name = "Dimension"
+acadrust_variant = "Dimension"
+handle = "Dimension"
+collection = "curves"
+description = "Linear dimension between two measured points. measurement() reads the distance; bounds from the measured + definition points."
+
+[[family.constructor]]
+name = "create_dimension_linear"
+args = [{ name = "first_point", ty = "[f64; 3]" }, { name = "second_point", ty = "[f64; 3]" }, { name = "definition_point", ty = "[f64; 3]" }]
+op = "CreateDimensionLinear"
+
+[[family.method]]
+name = "measurement"
+kind = "query"
+query = "GetDimensionMeasurement"
+returns = "f64"
+
+# ============================================================================
 # CONTAINER FAMILY (phase 3) — block references
 # ============================================================================
 [[family]]

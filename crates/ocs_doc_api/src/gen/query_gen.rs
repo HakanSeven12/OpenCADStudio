@@ -23,4 +23,6 @@ pub enum Query {
     GetTextContent { id: ObjectId },
     /// The boundary loops of a Hatch (outer + islands) as polylines.
     GetHatchBoundary { id: ObjectId },
+    /// The measured value of a Dimension (distance or angle).
+    GetDimensionMeasurement { id: ObjectId },
 }

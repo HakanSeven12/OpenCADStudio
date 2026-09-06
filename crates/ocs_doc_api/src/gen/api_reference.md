@@ -125,6 +125,18 @@ Filled region over a closed polyline boundary. boundary() returns the loops; bou
 
 - **boundary**(``) -> `Vec<Vec<[f64; 2]>>` — query `GetHatchBoundary`
 
+## `Dimension` (acadrust `Dimension`, collection `curves`)
+
+Linear dimension between two measured points. measurement() reads the distance; bounds from the measured + definition points.
+
+### Constructors (`doc.curves()`)
+
+- **create_dimension_linear**(`first_point: [f64; 3], second_point: [f64; 3], definition_point: [f64; 3]`) -> `Dimension`
+
+### Methods
+
+- **measurement**(``) -> `f64` — query `GetDimensionMeasurement`
+
 ## `Entity` (acadrust `Insert`, collection `entities`)
 
 Block reference. Place an existing BlockRecord by name; transform moves its insert point.

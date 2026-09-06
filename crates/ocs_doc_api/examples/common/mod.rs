@@ -25,6 +25,8 @@ pub struct MockBackend {
     text_values: HashMap<ObjectId, String>,
     /// Stored hatch boundary loops.
     hatch_boundaries: HashMap<ObjectId, Vec<Vec<[f64; 2]>>>,
+    /// Stored dimension measurements.
+    dimension_measurements: HashMap<ObjectId, f64>,
 }
 
 impl MockBackend {
@@ -165,6 +167,18 @@ impl DocApiBackend for MockBackend {
     }
     fn hatch_boundary(&self, id: ObjectId) -> ApiResult<Vec<Vec<[f64; 2]>>> {
         self.hatch_boundaries.get(&id).cloned().ok_or(ApiError::UnknownId(id))
+    }
+    fn add_dimension_linear(&mut self, spec: &ocs_doc_api::ops::DimensionSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("Dimension");
+        let d = ((spec.first_point[0] - spec.second_point[0]).powi(2)
+            + (spec.first_point[1] - spec.second_point[1]).powi(2)
+            + (spec.first_point[2] - spec.second_point[2]).powi(2))
+        .sqrt();
+        self.dimension_measurements.insert(id, d);
+        Ok(id)
+    }
+    fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64> {
+        self.dimension_measurements.get(&id).copied().ok_or(ApiError::UnknownId(id))
     }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {

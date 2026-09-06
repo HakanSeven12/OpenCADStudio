@@ -278,6 +278,25 @@
       "name": "Hatch"
     },
     {
+      "acadrust_variant": "Dimension",
+      "collection": "curves",
+      "handle": "Dimension",
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "measurement",
+          "op": null,
+          "query": "GetDimensionMeasurement",
+          "read_only": true,
+          "returns": "f64"
+        }
+      ],
+      "name": "Dimension"
+    },
+    {
       "acadrust_variant": "Insert",
       "collection": "entities",
       "handle": "Entity",
@@ -361,7 +380,8 @@
       "Ray",
       "XLine",
       "Text",
-      "MText"
+      "MText",
+      "Dimension"
     ],
     "root": "DocApi"
   },

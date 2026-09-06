@@ -221,6 +221,12 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::CreateDimensionLinear(spec) => {
+            b.push_undo(name);
+            let id = b.add_dimension_linear(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),
@@ -260,6 +266,7 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
             Query::GetGeometryRevision => QueryResult::Revision(b.revision()),
             Query::GetTextContent { id } => QueryResult::TextContent(b.text_content(id)?),
             Query::GetHatchBoundary { id } => QueryResult::HatchBoundary(b.hatch_boundary(id)?),
+            Query::GetDimensionMeasurement { id } => QueryResult::DimensionMeasurement(b.dimension_measurement(id)?),
         };
         results.push(r);
     }

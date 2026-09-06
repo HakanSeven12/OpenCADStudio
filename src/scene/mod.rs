@@ -1804,6 +1804,14 @@ pub struct Scene {
     pub block_meshes: HashMap<Handle, MeshLodSet>,
     /// Kernel B-reps used by solid operations and exact-geometry saves.
     pub solid_models: HashMap<Handle, cadkernel::brep::Body>,
+    /// Memoized DocApi volume/centroid per (handle, geometry_epoch) so repeated
+    /// mass queries on the same solid are O(1). Persists across DocApi dispatches.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub doc_api_mass_cache: std::collections::HashMap<Handle, (u64, f64, [f64; 3])>,
+    /// Per-tab cold-tessellation budget for expensive DocApi volume/centroid
+    /// computations (bounded DoS surface). Persists across DocApi dispatches.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub doc_api_cold_tess_used: usize,
     /// GPU render data for raster images (RasterImage entities), keyed by handle.
     pub images: HashMap<Handle, ImageModel>,
     /// The viewport that is currently "entered" (MSPACE mode).
@@ -2067,6 +2075,10 @@ impl Scene {
             material_base_dir: None,
             block_meshes: HashMap::default(),
             solid_models: HashMap::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            doc_api_mass_cache: std::collections::HashMap::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            doc_api_cold_tess_used: 0,
             images: HashMap::default(),
             active_viewport: None,
             bg_color: [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0],

@@ -103,14 +103,19 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
                 return Err(over_cap(name, specs.len()));
             }
             // Upfront validation: compute/validate EVERY payload before any insert
-            // (all-or-nothing without rollback, plan §5.3).
+            // (all-or-nothing without rollback, plan §5.3). This includes validating
+            // the curve spec's fallible conditions (e.g. ellipse ratio) that
+            // `curve_spec_to_entity` would otherwise reject mid-apply-loop.
             let mut prepared = Vec::with_capacity(specs.len());
             for (i, spec) in specs.iter().enumerate() {
                 let prep = match spec {
                     EntitySpec::Solid(p) => {
                         Prepared::Solid(crate::geom::make_solid(p).map_err(|e| at_index(name, i, e))?)
                     }
-                    EntitySpec::Curve(c) => Prepared::Curve(c.clone()),
+                    EntitySpec::Curve(c) => {
+                        validate_curve_spec(c).map_err(|e| at_index(name, i, e))?;
+                        Prepared::Curve(c.clone())
+                    }
                 };
                 prepared.push(prep);
             }
@@ -254,6 +259,11 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
             OpOutcome::NewId(id)
         }
         Operation::Loft { profiles } => {
+            // Bound the section count like the bulk ops (one envelope can carry many
+            // ids; an uncapped loft would be an unbounded kernel call on the UI thread).
+            if profiles.len() > BULK_ITEM_CAP {
+                return Err(over_cap(name, profiles.len()));
+            }
             // Resolve every profile to its curve set BEFORE push_undo (all-or-nothing).
             if profiles.len() < 2 {
                 return Err(ApiError::validation(name, "loft needs >= 2 profiles"));
@@ -336,24 +346,25 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
     }
     let mut results = Vec::with_capacity(queries.len());
     for q in &queries {
+        let qname = q.query_name();
         let r = match q {
-            Query::GetEntity { id } => QueryResult::Entity(b.get_entity(*id)?),
-            Query::GetBounds { id } => QueryResult::Bounds(b.bounds(*id)?),
-            Query::GetCentroid { id } => QueryResult::Centroid(b.centroid(*id)?),
-            Query::GetVolume { id } => QueryResult::Volume(b.volume(*id)?),
+            Query::GetEntity { id } => QueryResult::Entity(b.get_entity(*id).map_err(|e| label(qname, e))?),
+            Query::GetBounds { id } => QueryResult::Bounds(b.bounds(*id).map_err(|e| label(qname, e))?),
+            Query::GetCentroid { id } => QueryResult::Centroid(b.centroid(*id).map_err(|e| label(qname, e))?),
+            Query::GetVolume { id } => QueryResult::Volume(b.volume(*id).map_err(|e| label(qname, e))?),
             Query::GetIntersects { a, b: bid } => {
-                let ba = b.bounds(*a)?;
-                let bb = b.bounds(*bid)?;
+                let ba = b.bounds(*a).map_err(|e| label(qname, e))?;
+                let bb = b.bounds(*bid).map_err(|e| label(qname, e))?;
                 QueryResult::Intersects(ba.overlaps(&bb))
             }
             Query::GetGeometryRevision => QueryResult::Revision(b.revision()),
-            Query::GetTextContent { id } => QueryResult::TextContent(b.text_content(*id)?),
-            Query::GetHatchBoundary { id } => QueryResult::HatchBoundary(b.hatch_boundary(*id)?),
-            Query::GetDimensionMeasurement { id } => QueryResult::DimensionMeasurement(b.dimension_measurement(*id)?),
-            Query::GetAttributes { id } => QueryResult::Attributes(b.attributes(*id)?),
-            Query::GetBlockEntities { block_name } => QueryResult::BlockEntities(b.block_entities(block_name)?),
+            Query::GetTextContent { id } => QueryResult::TextContent(b.text_content(*id).map_err(|e| label(qname, e))?),
+            Query::GetHatchBoundary { id } => QueryResult::HatchBoundary(b.hatch_boundary(*id).map_err(|e| label(qname, e))?),
+            Query::GetDimensionMeasurement { id } => QueryResult::DimensionMeasurement(b.dimension_measurement(*id).map_err(|e| label(qname, e))?),
+            Query::GetAttributes { id } => QueryResult::Attributes(b.attributes(*id).map_err(|e| label(qname, e))?),
+            Query::GetBlockEntities { block_name } => QueryResult::BlockEntities(b.block_entities(block_name).map_err(|e| label(qname, e))?),
             Query::GetViewportView { id } => {
-                let (target, height) = b.viewport_view(*id)?;
+                let (target, height) = b.viewport_view(*id).map_err(|e| label(qname, e))?;
                 QueryResult::ViewportView { target, height }
             }
         };
@@ -366,6 +377,15 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
     })
 }
 
+/// Attach the query name to an error for better diagnostics (uses `query_name`).
+fn label(query: &'static str, e: ApiError) -> ApiError {
+    match e {
+        ApiError::Validation { reason, .. } => ApiError::validation(query, reason),
+        ApiError::UnknownId(id) => ApiError::validation(query, format!("unknown ObjectId {id:?}")),
+        other => other,
+    }
+}
+
 fn profile_curves<B: DocApiBackend>(
     b: &B,
     profile: ObjectId,
@@ -375,6 +395,21 @@ fn profile_curves<B: DocApiBackend>(
         return Err(ApiError::validation(op, format!("unknown ObjectId {profile:?}")));
     }
     b.profile_curves(profile)
+}
+
+/// Validate a `Curve2Spec`'s fallible conditions BEFORE mutation (the same rules
+/// the host's `curve_spec_to_entity` enforces), so `CreateMany` stays all-or-nothing.
+/// Currently: ellipse minor/major ratio must be in (0, 1].
+fn validate_curve_spec(spec: &crate::ops::Curve2Spec) -> ApiResult<()> {
+    if let crate::ops::Curve2Spec::Ellipse { ratio, .. } = spec {
+        if !(*ratio > 0.0 && *ratio <= 1.0) {
+            return Err(ApiError::validation(
+                "CreateMany",
+                format!("ellipse minor_axis_ratio must be in (0, 1], got {ratio}"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn require_exists<B: DocApiBackend>(b: &B, id: ObjectId, op: &'static str) -> ApiResult<()> {

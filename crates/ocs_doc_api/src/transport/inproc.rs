@@ -19,10 +19,6 @@ impl<B: DocApiBackend> InProcess<B> {
     pub fn new(backend: B) -> Self {
         Self { backend: Mutex::new(backend) }
     }
-    /// Borrow the backend mutably (test/introspection helper).
-    pub fn backend_mut(&mut self) -> &mut B {
-        self.backend.get_mut().expect("in-process backend poisoned")
-    }
     /// Borrow the backend immutably (test/introspection helper).
     pub fn backend(&self) -> std::sync::MutexGuard<'_, B> {
         self.backend.lock().expect("in-process backend poisoned")

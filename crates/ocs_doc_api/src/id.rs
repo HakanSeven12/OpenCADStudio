@@ -17,10 +17,6 @@ impl ObjectId {
         self.0
     }
 
-    pub const fn is_null(self) -> bool {
-        self.0 == 0
-    }
-
     /// Build from a raw u64 (e.g. an `acadrust::Handle`'s value).
     pub const fn from_u64(v: u64) -> Self {
         Self(v)

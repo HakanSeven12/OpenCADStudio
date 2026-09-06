@@ -19,8 +19,17 @@ use super::plugin_host::HostSession;
 /// Entry point called by the `HostApi::doc_api_dispatch` override (below) and by
 // the in-process path. Deserializes the envelope, runs the crate executor,
 // serializes the `Receipt` (or `ApiError`) back to bytes.
-pub fn execute_doc_api(host: &mut HostSession<'_>, _tab_id: u64, bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub fn execute_doc_api(host: &mut HostSession<'_>, tab_id: u64, bytes: &[u8]) -> Result<Vec<u8>, String> {
     use ocs_doc_api::{DocApiEnvelope, EnvelopeBody};
+    // Authorization: the request must name the SAME tab the HostSession is bound to.
+    // The HostSession is built per-tab by the dispatch pump; a plugin naming a
+    // different tab_id would otherwise reach a tab it isn't bound to (confused deputy).
+    if tab_id != host.tab_id() {
+        return Err(format!(
+            "DocApi tab mismatch: request names tab {tab_id} but the bound tab is {}",
+            host.tab_id()
+        ));
+    }
     let envelope: DocApiEnvelope = bincode::deserialize(bytes)
         .map_err(|e| format!("DocApiEnvelope deserialize: {e}"))?;
     let result: ApiResult<ocs_doc_api::Receipt> = match envelope.body {
@@ -30,11 +39,13 @@ pub fn execute_doc_api(host: &mut HostSession<'_>, _tab_id: u64, bytes: &[u8]) -
     bincode::serialize(&result).map_err(|e| format!("Receipt serialize: {e}"))
 }
 
+// ObjectId <-> acadrust::Handle converters delegate to the crate's helpers
+// (single source of truth; no local duplicates).
 fn obj_to_handle(id: ObjectId) -> Handle {
-    Handle::new(id.as_u64())
+    id.to_handle()
 }
 fn handle_to_obj(h: Handle) -> ObjectId {
-    ObjectId::from_u64(h.value())
+    ObjectId::from_handle(h)
 }
 
 impl DocApiBackend for HostSession<'_> {
@@ -47,6 +58,18 @@ impl DocApiBackend for HostSession<'_> {
             .get(&handle)
             .cloned()
             .ok_or(ApiError::UnknownId(id))
+    }
+
+    fn with_body<R>(
+        &mut self,
+        id: ObjectId,
+        f: &mut dyn FnMut(&KernelBody) -> ApiResult<R>,
+    ) -> ApiResult<R> {
+        let handle = obj_to_handle(id);
+        // Lift-on-miss, then borrow the cache entry in place — O(1), no deep clone.
+        self.scene_mut().restore_solid_models(&[handle]);
+        let body = self.scene().solid_models.get(&handle).ok_or(ApiError::UnknownId(id))?;
+        f(body)
     }
 
     fn store_solid(&mut self, body: &KernelBody) -> ApiResult<ObjectId> {
@@ -409,6 +432,10 @@ impl DocApiBackend for HostSession<'_> {
     fn add_raster_image(&mut self, spec: &ocs_doc_api::ops::RasterImageSpec) -> ApiResult<ObjectId> {
         use acadrust::entities::RasterImage;
         use acadrust::types::{Vector2, Vector3};
+        // Validate the plugin-supplied path before embedding it in the document:
+        // non-empty, a known image extension, and not a UNC/network path or
+        // parent-traversal (which could point the host at unintended resources).
+        validate_image_path(&spec.file_path)?;
         let mut img = RasterImage::default();
         img.file_path = spec.file_path.clone();
         img.insertion_point = Vector3::new(spec.insertion_point[0], spec.insertion_point[1], spec.insertion_point[2]);
@@ -574,15 +601,15 @@ impl DocApiBackend for HostSession<'_> {
 
     fn bounds(&mut self, id: ObjectId) -> ApiResult<Aabb> {
         let handle = obj_to_handle(id);
-        // Lift-on-miss for solids (consistent with volume/centroid): resolve_body
-        // repopulates a cold solid_models cache from SAT. A solid whose cache entry
-        // was dropped (e.g. by a host-side update_entity) no longer misreports
-        // `Unsupported` (plan review).
+        // Lift-on-miss for solids (consistent with volume/centroid); borrow the cache
+        // read-only via with_body (O(1), no B-rep deep clone).
         if matches!(self.document().get_entity(handle), Some(EntityType::Solid3D(_))) {
-            let body = self.resolve_body(id)?;
-            let bb = cadkernel::brep::body_bounds(&body)
-                .ok_or_else(|| ApiError::geometry(GeometryErrorKind::Empty, "no bounds"))?;
-            return Ok(Aabb { min: bb.min, max: bb.max });
+            let mut f = |body: &KernelBody| -> ApiResult<Aabb> {
+                let bb = cadkernel::brep::body_bounds(body)
+                    .ok_or_else(|| ApiError::geometry(GeometryErrorKind::Empty, "no bounds"))?;
+                Ok(Aabb { min: bb.min, max: bb.max })
+            };
+            return self.with_body(id, &mut f);
         }
         crate::app::doc_api_convert::entity_bounds(self.document().get_entity(handle), id)
     }
@@ -626,7 +653,7 @@ impl HostSession<'_> {
     fn mass_properties(&mut self, id: ObjectId) -> ApiResult<(f64, [f64; 3])> {
         let handle = obj_to_handle(id);
         let epoch = self.scene().geometry_epoch;
-        if let Some(&(cached_epoch, v, c)) = self.mass_cache.get(&handle) {
+        if let Some(&(cached_epoch, v, c)) = self.scene().doc_api_mass_cache.get(&handle) {
             if cached_epoch == epoch {
                 return Ok((v, c));
             }
@@ -635,8 +662,10 @@ impl HostSession<'_> {
         // converge to near-analytic (the render-mesh metrics cache is the coarse
         // display LOD, NOT for query accuracy). Bounded by the cold-tess budget;
         // memoized per (handle, epoch) so repeated queries on the same solid are O(1).
+        // The budget + cache live on the per-tab Scene so they persist across
+        // DocApi dispatches (not reset per request).
         const COLD_TESS_BUDGET: usize = 256;
-        if self.cold_tess_used >= COLD_TESS_BUDGET {
+        if self.scene().doc_api_cold_tess_used >= COLD_TESS_BUDGET {
             // Budget exhausted: serve a documented-approximate value from the render
             // mesh metrics cache rather than failing (large distinct-solid batches
             // degrade gracefully instead of erroring). Accuracy-first up to the budget.
@@ -646,16 +675,45 @@ impl HostSession<'_> {
                 }
             }
             return Err(ApiError::Unsupported(
-                "volume/centroid cold-tessellation budget exceeded for this session; query fewer distinct solids".into(),
+                "volume/centroid cold-tessellation budget exceeded for this tab; query fewer distinct solids".into(),
             ));
         }
-        self.cold_tess_used += 1;
+        self.scene_mut().doc_api_cold_tess_used += 1;
         let body = self.resolve_body(id)?;
         let mesh = cadkernel::brep::mesh_body(&body, 0.1, 1e-4);
         let (v, c) = mesh_volume_centroid(&mesh);
-        self.mass_cache.insert(handle, (epoch, v, c));
+        self.scene_mut().doc_api_mass_cache.insert(handle, (epoch, v, c));
         Ok((v, c))
     }
+}
+
+/// Validate a raster-image file path before embedding it in a document.
+/// Rejects empty paths, UNC/network paths, parent-traversal, and non-image extensions.
+fn validate_image_path(path: &str) -> ApiResult<()> {
+    let p = path.trim();
+    if p.is_empty() {
+        return Err(ApiError::validation("CreateRasterImage", "empty image file path"));
+    }
+    // UNC / network / device paths.
+    if p.starts_with("\\\\") || p.starts_with("//") {
+        return Err(ApiError::Unsupported("network/UNC image paths are not allowed".into()));
+    }
+    // Parent-traversal anywhere in the path.
+    if p.split(['/', '\\']).any(|seg| seg == "..") {
+        return Err(ApiError::Unsupported("parent-traversal ('..') in image path is not allowed".into()));
+    }
+    // Known image extension (last component).
+    let ext_ok = p.rsplit('.').next().map(|ext| {
+        matches!(ext.to_ascii_lowercase().as_str(),
+            "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tif" | "tiff" | "webp" | "tga")
+    }).unwrap_or(false);
+    if !ext_ok {
+        return Err(ApiError::validation(
+            "CreateRasterImage",
+            format!("unsupported image file extension in {path:?}"),
+        ));
+    }
+    Ok(())
 }
 
 fn kernel_placement(p: &PlacementSpec) -> cadkernel::brep::Placement {
@@ -687,7 +745,8 @@ mod tests {
 
     fn dispatch(host: &mut HostSession<'_>, env: DocApiEnvelope) -> ApiResult<Receipt> {
         let bytes = bincode::serialize(&env).unwrap();
-        let out = execute_doc_api(host, 0, &bytes).expect("dispatch failed");
+        let tab_id = host.tab_id();
+        let out = execute_doc_api(host, tab_id, &bytes).expect("dispatch failed");
         bincode::deserialize(&out).expect("receipt deserialize")
     }
 
@@ -1156,6 +1215,25 @@ mod tests {
         if let cadkernel::geom2d::Curve::Arc(arc) = &curves[0] {
             assert!((arc.radius - 5.0).abs() < 0.01, "arc radius {} (semicircle)", arc.radius);
         }
+
+        // Negative (CW) bulge: the center must be on the CW side (mirror of CCW).
+        // A single 90° bulge segment start=(0,0), end=(1,0), bulge=-0.4142 (~90° CW):
+        // correct center is BELOW the chord; the buggy double-sign put it above.
+        let neg = crate::app::doc_api_convert::bulge_arc_segment([0.0, 0.0], [1.0, 0.0], -0.4142)
+            .expect("negative bulge arc");
+        if let cadkernel::geom2d::Curve::Arc(arc) = &neg {
+            // 90° arc, chord 1: radius = 0.5/sin(45°) ≈ 0.7071; center y must be negative.
+            assert!((arc.radius - 0.7071).abs() < 0.01, "cw arc radius {}", arc.radius);
+            assert!(arc.centre[1] < 0.0, "CW arc center y must be below the chord, got {:?}", arc.centre);
+        } else {
+            panic!("expected an arc for negative bulge");
+        }
+        // And the CCW mirror: center above.
+        let pos = crate::app::doc_api_convert::bulge_arc_segment([0.0, 0.0], [1.0, 0.0], 0.4142)
+            .expect("positive bulge arc");
+        if let cadkernel::geom2d::Curve::Arc(arc) = &pos {
+            assert!(arc.centre[1] > 0.0, "CCW arc center y must be above the chord, got {:?}", arc.centre);
+        }
     }
 
     // ── Phase 2c-ii: dimension sub-types (radius/diameter/angular) ──────────
@@ -1307,6 +1385,75 @@ mod tests {
             QueryResult::Entity(e) => assert_eq!(e.kind, "Dimension"),
             other => panic!("expected entity, got {other:?}"),
         }
+    }
+
+    // ── Review-fix regression tests (Loft cap, CreateMany validation, Ellipse
+    //    rotation, raster path validation) ─────────────────────────────────────
+
+    #[test]
+    fn fix_loft_over_cap_is_rejected() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let over = ocs_doc_api::ops::BULK_ITEM_CAP + 1;
+        let profiles: Vec<ObjectId> = (0..over).map(|i| ObjectId::from_u64(i as u64)).collect();
+        let err = dispatch(&mut host, DocApiEnvelope::op(Operation::Loft { profiles })).unwrap_err();
+        assert!(matches!(err, ApiError::Validation { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn fix_create_many_invalid_curve_is_all_or_nothing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let rev_before = host.scene().geometry_epoch;
+        // A valid point + an invalid ellipse (ratio > 1) in one CreateMany batch.
+        let specs = vec![
+            ocs_doc_api::ops::EntitySpec::Curve(Curve2Spec::Point { position: [0.0; 3] }),
+            ocs_doc_api::ops::EntitySpec::Curve(Curve2Spec::Ellipse {
+                centre: [0.0; 3], major_axis: [1.0; 3], ratio: 2.0, start: 0.0, end: std::f64::consts::TAU,
+            }),
+        ];
+        let err = dispatch(&mut host, DocApiEnvelope::op(Operation::CreateMany(specs))).unwrap_err();
+        assert!(matches!(err, ApiError::Validation { .. }), "{err:?}");
+        // All-or-nothing: NO entity was created (the point would have been added first).
+        assert_eq!(host.scene().geometry_epoch, rev_before, "no mutation on rejected CreateMany");
+    }
+
+    #[test]
+    fn fix_partial_ellipse_rotates_sweep() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // Partial ellipse arc start=0,end=pi/2; rotate by +pi/2 -> sweep becomes pi/2..pi.
+        let ell = new_id(&dispatch(&mut host, DocApiEnvelope::op(Operation::CreateCurve(
+            Curve2Spec::Ellipse { centre: [0.0; 3], major_axis: [4.0, 0.0, 0.0], ratio: 0.5, start: 0.0, end: std::f64::consts::FRAC_PI_2 }))).unwrap());
+        let rot90 = ocs_doc_api::PlacementSpec {
+            x_axis: [0.0, 1.0, 0.0], y_axis: [-1.0, 0.0, 0.0], z_axis: [0.0, 0.0, 1.0], origin: [0.0; 3],
+        };
+        dispatch(&mut host, DocApiEnvelope::op(Operation::Transform { id: ell, placement: rot90 })).unwrap();
+        let Some(EntityType::Ellipse(e)) = host.document().get_entity(obj_to_handle(ell)) else { panic!("ellipse not found") };
+        let half_pi = std::f64::consts::FRAC_PI_2;
+        assert!((e.start_parameter - half_pi).abs() < 1e-6, "start {} (expected {})", e.start_parameter, half_pi);
+        assert!((e.end_parameter - std::f64::consts::PI).abs() < 1e-6, "end {} (expected pi)", e.end_parameter);
+        // major_axis rotated from +X to +Y.
+        assert!((e.major_axis.y - 4.0).abs() < 1e-6, "major_axis {:?}", e.major_axis);
+    }
+
+    #[test]
+    fn fix_raster_image_path_validation() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let mk = |path: &str| Operation::CreateRasterImage(ocs_doc_api::ops::RasterImageSpec {
+            file_path: path.into(), insertion_point: [0.0; 3], u_vector: [0.5, 0.0, 0.0], v_vector: [0.0, 0.5, 0.0], size: [10.0, 10.0],
+        });
+        // Valid path succeeds.
+        assert!(dispatch(&mut host, DocApiEnvelope::op(mk("C:/img/photo.png"))).is_ok());
+        // UNC path rejected.
+        assert!(dispatch(&mut host, DocApiEnvelope::op(mk("\\\\server\\share\\x.png"))).is_err());
+        // Parent-traversal rejected.
+        assert!(dispatch(&mut host, DocApiEnvelope::op(mk("C:/img/../../etc/passwd.png"))).is_err());
+        // Non-image extension rejected.
+        assert!(dispatch(&mut host, DocApiEnvelope::op(mk("C:/img/evil.exe"))).is_err());
+        // Empty path rejected.
+        assert!(dispatch(&mut host, DocApiEnvelope::op(mk(""))).is_err());
     }
 
     // ── Read-mostly family bounds (Leader/Mesh/Face3D/MLine/Helix) ──────────
@@ -1601,6 +1748,18 @@ mod tests {
             ocs_doc_api::ops::InsertSpec { block_name: "NoSuchBlock".into(), insert_point: [0.0; 3], scale: 1.0, rotation: 0.0 }))).unwrap_err();
         assert!(matches!(err, ApiError::Validation { .. }), "{err:?}");
         assert_eq!(host.scene().geometry_epoch, before, "no entity on unknown block");
+    }
+
+    #[test]
+    fn doc_api_tab_mismatch_is_rejected() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        // A request naming a DIFFERENT tab than the bound one is rejected.
+        let env = DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point { position: [0.0; 3] }));
+        let bytes = bincode::serialize(&env).unwrap();
+        let wrong_tab = host.tab_id().wrapping_add(999);
+        let err = execute_doc_api(&mut host, wrong_tab, &bytes).unwrap_err();
+        assert!(err.contains("tab mismatch"), "{err}");
     }
 
     #[test]

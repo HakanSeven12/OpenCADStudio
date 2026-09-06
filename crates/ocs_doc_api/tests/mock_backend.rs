@@ -12,6 +12,38 @@ use ocs_doc_api::{
     HasId, ObjectId, PlacementSpec,
 };
 
+/// Coarse bounds for a stored 2D curve spec (mirrors the host's entity_bounds and
+/// the example mock — all three must answer curve bounds identically).
+fn curve_bounds(spec: &Curve2Spec) -> Aabb {
+    match spec {
+        Curve2Spec::Line { start, end } => Aabb {
+            min: [start[0].min(end[0]), start[1].min(end[1]), start[2].min(end[2])],
+            max: [start[0].max(end[0]), start[1].max(end[1]), start[2].max(end[2])],
+        },
+        Curve2Spec::Circle { centre, radius } | Curve2Spec::Arc { centre, radius, .. } => Aabb {
+            min: [centre[0] - radius, centre[1] - radius, centre[2]],
+            max: [centre[0] + radius, centre[1] + radius, centre[2]],
+        },
+        Curve2Spec::Point { position } => Aabb { min: *position, max: *position },
+        Curve2Spec::Polyline { points, .. } | Curve2Spec::Spline { control_points: points, .. } => {
+            let mut min = [f64::INFINITY; 3];
+            let mut max = [f64::NEG_INFINITY; 3];
+            for p in points {
+                for i in 0..3 {
+                    min[i] = min[i].min(p[i]);
+                    max[i] = max[i].max(p[i]);
+                }
+            }
+            Aabb { min, max }
+        }
+        Curve2Spec::Ellipse { centre, major_axis, .. } => {
+            let r = (major_axis[0] * major_axis[0] + major_axis[1] * major_axis[1] + major_axis[2] * major_axis[2]).sqrt();
+            Aabb { min: [centre[0] - r, centre[1] - r, centre[2] - r], max: [centre[0] + r, centre[1] + r, centre[2] + r] }
+        }
+        Curve2Spec::Ray { origin, .. } | Curve2Spec::XLine { origin, .. } => Aabb { min: *origin, max: *origin },
+    }
+}
+
 /// In-memory mock backend: HashMap<ObjectId, Body> + a tiny entity table.
 /// Tracks undo steps + revision bumps to assert per-op semantics.
 #[derive(Default)]
@@ -29,6 +61,9 @@ struct MockBackend {
     dimension_measurements: HashMap<ObjectId, f64>,
     /// Stored insert attributes.
     attributes_store: HashMap<ObjectId, Vec<(String, String)>>,
+    /// Stored 2D curve specs so `bounds()` works on curve entities (aligned with
+    /// the example mock — both mocks must answer curve bounds the same way).
+    curves: HashMap<ObjectId, Curve2Spec>,
     /// Stored viewport views (target, height).
     viewport_views: HashMap<ObjectId, ([f64; 3], f64)>,
 }
@@ -72,7 +107,9 @@ impl DocApiBackend for MockBackend {
             Curve2Spec::Ray { .. } => "Ray",
             Curve2Spec::XLine { .. } => "XLine",
         };
-        Ok(self.alloc(kind))
+        let id = self.alloc(kind);
+        self.curves.insert(id, spec.clone());
+        Ok(id)
     }
     fn add_insert(&mut self, spec: &ocs_doc_api::ops::InsertSpec) -> ApiResult<ObjectId> {
         if spec.block_name.is_empty() {
@@ -237,6 +274,11 @@ impl DocApiBackend for MockBackend {
         Err(ApiError::Unsupported("profiles not mocked".into()))
     }
     fn bounds(&mut self, id: ObjectId) -> ApiResult<Aabb> {
+        // Solids via the kernel body; 2D curves from their stored spec (aligned
+        // with the example mock — both mocks answer curve bounds identically).
+        if let Some(spec) = self.curves.get(&id) {
+            return Ok(curve_bounds(spec));
+        }
         let body = self.body(id)?;
         let bb = cadkernel::brep::body_bounds(body)
             .ok_or_else(|| ApiError::geometry(GeometryErrorKind::Empty, "no bounds"))?;

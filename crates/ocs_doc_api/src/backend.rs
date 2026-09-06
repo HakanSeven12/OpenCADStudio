@@ -19,8 +19,21 @@ pub type KernelBody = cadkernel::brep::Body;
 pub trait DocApiBackend {
     // ── identity / solid lookup ────────────────────────────────────────────
     /// Resolve a live B-rep body for `id` (solid cache; re-lift from AcisData on
-    /// miss). `UnknownId` if `id` is not a live solid.
+    /// miss). `UnknownId` if `id` is not a live solid. NOTE: returns an OWNED body
+    /// (a clone of the cache entry); use `with_body` for read-only queries.
     fn resolve_body(&mut self, id: ObjectId) -> ApiResult<KernelBody>;
+
+    /// Borrow the cached body read-only for a query, avoiding the `resolve_body`
+    /// deep clone. Default: falls back to `resolve_body` (clone). The host overrides
+    /// this to borrow the `solid_models` cache in place (O(1), no copy).
+    fn with_body<R>(
+        &mut self,
+        id: ObjectId,
+        f: &mut dyn FnMut(&KernelBody) -> ApiResult<R>,
+    ) -> ApiResult<R> {
+        let body = self.resolve_body(id)?;
+        f(&body)
+    }
 
     /// Store a new solid body as a `Solid3D` entity; returns the fresh `ObjectId`.
     /// Mirrors host `add_solid_model` (edge wires + `solid_to_sat` +

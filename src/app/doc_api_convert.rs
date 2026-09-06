@@ -115,6 +115,9 @@ pub fn transform_entity_geometry(
             e.center = apply(e.center);
             // The major-axis is a direction+length vector: rotate+scale it (no origin).
             e.major_axis = apply_dir(e.major_axis);
+            // A Z-rotation also shifts the partial-arc sweep (eccentric-anomaly params).
+            e.start_parameter += rot_z;
+            e.end_parameter += rot_z;
             EntityType::Ellipse(e)
         }
         EntityType::Spline(sp) => {
@@ -191,7 +194,7 @@ fn v3(p: [f64; 3]) -> Vector3 {
 
 /// Convert a polyline bulge segment (start → end, bulge = tan(θ/4)) to a
 /// `geom2d::Curve::Arc`. Positive bulge = counter-clockwise arc; negative = clockwise.
-fn bulge_arc_segment(start: [f64; 2], end: [f64; 2], bulge: f64) -> ApiResult<cadkernel::geom2d::Curve> {
+pub(crate) fn bulge_arc_segment(start: [f64; 2], end: [f64; 2], bulge: f64) -> ApiResult<cadkernel::geom2d::Curve> {
     use cadkernel::geom2d::{Arc as KArc, Curve as KCurve};
     let chord_x = end[0] - start[0];
     let chord_y = end[1] - start[1];
@@ -207,11 +210,13 @@ fn bulge_arc_segment(start: [f64; 2], end: [f64; 2], bulge: f64) -> ApiResult<ca
         return Err(ApiError::validation("profile", "bulge segment with degenerate angle"));
     }
     let radius = (chord_len / 2.0) / sin_half.abs();
-    // Center: chord midpoint + perpendicular offset (chord/2)/tan(θ/2).
+    // Center: chord midpoint + perpendicular offset. The apothem MAGNITUDE is
+    // (chord/2)/|tan(θ/2)| (always positive); the SIGN of the bulge alone picks the
+    // side (CCW=+90° perp, CW=-90° perp). Using signed tan(half) AND the sign flip
+    // would double-count and mirror CW arcs to the wrong side.
     let mid_x = (start[0] + end[0]) / 2.0;
     let mid_y = (start[1] + end[1]) / 2.0;
-    let apothem = (chord_len / 2.0) / half.tan();
-    // Perpendicular to chord (rotate chord unit vector by +90° for CCW bulge).
+    let apothem = (chord_len / 2.0) / half.tan().abs();
     let sign = if bulge >= 0.0 { 1.0 } else { -1.0 };
     let perp_x = -chord_y / chord_len * sign;
     let perp_y = chord_x / chord_len * sign;
@@ -392,15 +397,7 @@ pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aab
                 max: [e.center.x + r, e.center.y + r, e.center.z + r],
             }
         }
-        EntityType::Spline(s) if !s.control_points.is_empty() => {
-            let mut min = [f64::INFINITY; 3];
-            let mut max = [f64::NEG_INFINITY; 3];
-            for p in &s.control_points {
-                min = [min[0].min(p.x), min[1].min(p.y), min[2].min(p.z)];
-                max = [max[0].max(p.x), max[1].max(p.y), max[2].max(p.z)];
-            }
-            Aabb { min, max }
-        }
+        EntityType::Spline(s) => points_aabb(s.control_points.iter().collect(), id)?,
         EntityType::Viewport(vp) => Aabb {
             min: [
                 vp.center.x - vp.width / 2.0,
@@ -443,16 +440,10 @@ pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aab
             min: [t.insertion_point.x, t.insertion_point.y - t.height, t.insertion_point.z],
             max: [t.insertion_point.x + t.height * t.value.len() as f64, t.insertion_point.y, t.insertion_point.z],
         },
-        EntityType::Dimension(acadrust::entities::Dimension::Linear(d)) => {
-            let pts = [d.first_point, d.second_point, d.definition_point];
-            let mut min = [f64::INFINITY; 3];
-            let mut max = [f64::NEG_INFINITY; 3];
-            for p in pts {
-                min = [min[0].min(p.x), min[1].min(p.y), min[2].min(p.z)];
-                max = [max[0].max(p.x), max[1].max(p.y), max[2].max(p.z)];
-            }
-            Aabb { min, max }
-        }
+        EntityType::Dimension(acadrust::entities::Dimension::Linear(d)) => points_aabb(
+            [&d.first_point, &d.second_point, &d.definition_point].into_iter().collect(),
+            id,
+        )?,
         EntityType::Hatch(h) => {
             let mut min = [f64::INFINITY; 3];
             let mut max = [f64::NEG_INFINITY; 3];

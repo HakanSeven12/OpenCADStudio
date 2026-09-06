@@ -41,7 +41,7 @@ fn intersect_solids(api: &DocApi) -> ApiResult<()> {
   ([`InProcess`]) or over the `ocs_plugin_api` IPC channel ([`OcsPluginApiIpc`]);
   only the `Transport` differs. The host executes them through one crate-owned
   executor.
-- **Stable across async IPC** — handles are `Copy`, `Send`, `Sync` `{ObjectId,
+- **Stable across async IPC** — handles are `Clone`, `Send`, `Sync` `{ObjectId,
   Arc<Session>}` tokens, safe to share across plugin worker threads. A stale
   handle's methods return `ApiError::UnknownId`, never a panic.
 
@@ -67,10 +67,20 @@ fn intersect_solids(api: &DocApi) -> ApiResult<()> {
   booleans (union/intersect/subtract), transform, and queries
   (bounds/volume/centroid). Host resolves bodies via the `solid_models` cache
   (lift-on-miss from ACIS SAT).
-- **Minimal 2D** — line, circle, polyline, point (construction + bounds); used as
-  boolean/sweep inputs.
-- Not yet: sweep/revolve profiles, `AddVertex`, non-solid transforms, annotations,
-  containers (insert/block), viewports, media. See `IMPLEMENTATION.md`.
+- **Solids** — primitives (cuboid, sphere, cylinder, cone, torus, wedge), sweep
+  (`extrude`/`revolve` from profiles, `loft` multi-profile), booleans
+  (union/intersect/subtract), transform, and queries (bounds/volume/centroid).
+  Host resolves bodies via the `solid_models` cache (lift-on-miss from ACIS SAT).
+- **2D curves** — line, circle, arc, polyline (`add_vertex`), point (incl. bulk),
+  ellipse, spline, ray, xline; construction + bounds + transform (solids & 2D via
+  `transform`/`transform_many`).
+- **Annotations** — `Text`/`MText` (create + `content`/`set_content`), `Hatch`
+  (create + `boundary` query), linear `Dimension` (create + `measurement`).
+- **Containers** — `create_insert` (block references) + `attributes`/`set_attribute`
+  + `block_entities` (read-only nested block traversal).
+- **Paper-space** — `create_viewport` + `set_view` (retarget/re-zoom) + `viewport_view`.
+- **Media** — `create_raster_image`; other media families read-only (`EntityView`).
+- See `IMPLEMENTATION.md` for the full capability matrix and phased roadmap.
 
 ## Features
 

@@ -110,9 +110,10 @@ fn main() {
     let gen_dir = manifest_dir.join("src/gen");
     fs::create_dir_all(&gen_dir).unwrap();
 
-    // 1. Regenerate the ops/query enum snapshots (deterministic; these are the
-    //    curated v1 variants — the spec drives docs/schema, the enums are the
-    //    stable wire vocabulary appended at end only).
+    // 1. Emit the HAND-MAINTAINED ops/query enum snapshots verbatim. The enums are
+    //    NOT derived from the spec here — they are the canonical append-only wire
+    //    vocabulary; the spec's `op`/`query` names must map to variants (asserted
+    //    by a test). `write_if_changed` is effectively a no-op round-trip.
     write_if_changed(&gen_dir.join("ops_gen.rs"), &ops_gen_src());
     write_if_changed(&gen_dir.join("query_gen.rs"), &query_gen_src());
 
@@ -149,8 +150,9 @@ fn fmt_args(args: &[Arg]) -> String {
 fn generic_reference_md() -> String {
     r#"## Generic methods (every handle)
 
-Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `Entity`) is a
-`Copy`, `Send`, `Sync` token `{ ObjectId, session }` and supports:
+Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
+`Ellipse`, `Spline`, `Ray`, `XLine`, `Text`, `MText`, `Dimension`, `Entity`) is a
+`Clone`, `Send`, `Sync` token `{ ObjectId, session }` and supports:
 
 - **`id()` -> `ObjectId`** — the stable entity identity.
 - **`bounds()` -> `Aabb`** — coarse bounding box (solids lift-on-miss; 2D entities

@@ -178,8 +178,9 @@ Table (read-only): GetEntity kind; generic delete. No typed create/bounds in v1.
 
 ## Generic methods (every handle)
 
-Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `Entity`) is a
-`Copy`, `Send`, `Sync` token `{ ObjectId, session }` and supports:
+Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
+`Ellipse`, `Spline`, `Ray`, `XLine`, `Text`, `MText`, `Dimension`, `Entity`) is a
+`Clone`, `Send`, `Sync` token `{ ObjectId, session }` and supports:
 
 - **`id()` -> `ObjectId`** — the stable entity identity.
 - **`bounds()` -> `Aabb`** — coarse bounding box (solids lift-on-miss; 2D entities

@@ -12,7 +12,18 @@
       "Delete { id: ObjectId }",
       "CreateMany(Vec<EntitySpec>)",
       "TransformMany { ids: Vec<ObjectId>, placement: PlacementSpec }",
-      "DeleteMany(Vec<ObjectId>)"
+      "DeleteMany(Vec<ObjectId>)",
+      "CreateInsert(InsertSpec)",
+      "CreateViewport(ViewportSpec)",
+      "CreateText(TextSpec)",
+      "CreateMText(MTextSpec)",
+      "SetTextContent { id: ObjectId, value: String }",
+      "CreateHatch(HatchSpec)",
+      "CreateDimensionLinear(DimensionSpec)",
+      "SetAttribute { id: ObjectId, tag: String, value: String }",
+      "SetViewportView { id: ObjectId, view_target: [f64; 3], view_height: f64 }",
+      "CreateRasterImage(RasterImageSpec)",
+      "Loft { profiles: Vec<ObjectId> }"
     ]
   },
   "Query": {
@@ -22,7 +33,13 @@
       "GetCentroid { id: ObjectId }",
       "GetVolume { id: ObjectId }",
       "GetIntersects { a: ObjectId, b: ObjectId }",
-      "GetGeometryRevision"
+      "GetGeometryRevision",
+      "GetTextContent { id: ObjectId }",
+      "GetHatchBoundary { id: ObjectId }",
+      "GetDimensionMeasurement { id: ObjectId }",
+      "GetAttributes { id: ObjectId }",
+      "GetBlockEntities { block_name: String }",
+      "GetViewportView { id: ObjectId }"
     ]
   }
 }

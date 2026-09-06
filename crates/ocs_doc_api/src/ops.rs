@@ -1,7 +1,8 @@
 //! Write operations — the typed, transport-agnostic vocabulary for changing the
-//! document (plan §5). The `Operation` enum itself is GENERATED into
-//! `crate::gen` by `build.rs` from `spec/entities.toml`; this module re-exports
-//! it and holds the hand-written payload mirrors.
+//! document (plan §5). The `Operation` enum is **hand-maintained** (append-only)
+//! in `src/gen/ops_gen.rs` — it is NOT derived from the spec by build.rs; the
+//! spec's `op` names must each map to a variant here (asserted by a test). This
+//! module re-exports it and holds the hand-written payload mirrors.
 
 use serde::{Deserialize, Serialize};
 

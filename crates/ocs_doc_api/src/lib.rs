@@ -46,8 +46,9 @@ pub use revision::GeometryRevision;
 
 pub use envelope::{DocApiEnvelope, EnvelopeBody, OpOutcome, Receipt};
 pub use facade::{
-    CurveCollection, DocApi, Document, Entity, EntityCollection, HasId, Line, OpGroup, Point,
-    Polyline, QueryBatch, QueryResults, Solid, SolidCollection,
+    ArcCurve, Circle, CurveCollection, Dimension, DocApi, Document, Ellipse, Entity,
+    EntityCollection, HasId, Line, MText, OpGroup, Point, Polyline, QueryBatch, QueryResults, Ray,
+    Solid, SolidCollection, Spline, Text, XLine,
 };
 pub use ops::{BoolOp, Curve2Spec, EntitySpec, Operation, PlacementSpec, SolidPrimitive};
 pub use query::{Aabb, EntityView, Query, QueryResult};

@@ -1,6 +1,8 @@
 //! Read queries — typed, transport-agnostic reads of entity state (plan §5).
-//! The `Query` enum is GENERATED into `crate::gen` by `build.rs`; this module
-//! re-exports it and holds the hand-written result DTOs.
+//! The `Query` enum is **hand-maintained** (append-only) in `src/gen/query_gen.rs`
+//! — NOT derived from the spec by build.rs (the spec's `query` names must map to
+//! a variant here, asserted by a test). This module re-exports it and holds the
+//! hand-written result DTOs.
 
 use serde::{Deserialize, Serialize};
 

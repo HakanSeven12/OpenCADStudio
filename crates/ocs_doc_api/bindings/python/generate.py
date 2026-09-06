@@ -62,8 +62,14 @@ class {handle}:
 PY_TYPES = {
     "Solid": "'Solid'", "Line": "'Line'", "Circle": "'Circle'",
     "Polyline": "'Polyline'", "Point": "'Point'", "Entity": "'Entity'",
-    "f64": "float", "bool": "bool", "usize": "int",
-    "[f64; 3]": "tuple", "ObjectId": "ObjectId", "()": "None", "None": "None",
+    "ArcCurve": "'ArcCurve'", "Ellipse": "'Ellipse'", "Spline": "'Spline'",
+    "Ray": "'Ray'", "XLine": "'XLine'", "Text": "'Text'", "MText": "'MText'",
+    "Dimension": "'Dimension'",
+    "f64": "float", "bool": "bool", "usize": "int", "i32": "int",
+    "[f64; 3]": "tuple", "[f64; 2]": "tuple", "ObjectId": "ObjectId",
+    "String": "str", "&str": "str", "()": "None", "None": "None",
+    "Vec<(String, String)>": "list", "Vec<Vec<[f64; 2]>>": "list",
+    "([f64; 3], f64)": "tuple", "Vec<Point>": "list", "Vec<ObjectId>": "list",
 }
 
 def py_type(rust_ty: str) -> str:
@@ -115,16 +121,17 @@ def render_method(m: Dict[str, Any]) -> str:
         if args:
             body_items.append(f"'b': {args[0]['name']}.id")
         body_items.append(f"'erase_sources': {py_lit((m.get('fixed') or {}).get('erase_sources', True))}")
-    elif variant in ("GetVolume", "GetCentroid", "GetBounds", "GetEntity"):
+    elif variant in ("GetVolume", "GetCentroid", "GetBounds", "GetEntity", "GetTextContent", "GetHatchBoundary", "GetDimensionMeasurement", "GetAttributes", "GetViewportView"):
         body_items.append("'id': self.id")
+    elif variant in ("SetTextContent", "SetAttribute", "SetViewportView", "Transform", "Delete", "AddVertex"):
+        # Op variants that carry the receiver ObjectId: inject it first.
+        body_items.append("'id': self.id")
+        for a in args:
+            body_items.append(f"'{a['name']}': {a['name']}")
     elif variant == "GetIntersects":
         body_items.append("'a': self.id")
         if args:
             body_items.append(f"'b': {args[0]['name']}.id")
-    elif variant == "AddVertex":
-        body_items.append("'id': self.id")
-        for a in args:
-            body_items.append(f"'{a['name']}': {a['name']}")
     else:
         for a in args:
             body_items.append(f"'{a['name']}': {a['name']}")
@@ -151,11 +158,11 @@ class Document:
     _transport: Any
     _tab: int
 
-    def _apply_op(self, op, want):
+    def _apply_op(self, op, want=None):
         env = DocApiEnvelope(ENVELOPE_VERSION, ("Op", op))
         return self._transport.apply(env)
 
-    def _apply_query(self, q, want):
+    def _apply_query(self, q, want=None):
         env = DocApiEnvelope(ENVELOPE_VERSION, ("Queries", [q]))
         return self._transport.apply(env)
 

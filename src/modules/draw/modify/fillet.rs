@@ -77,7 +77,122 @@ fn project_click(click: [f64; 2], p1: [f64; 2], unit: [f64; 2]) -> f64 {
 }
 
 // ── Fillet ─────────────────────────────────────────────────────────────────
+/// Fillet two parallel lines with a semicircle tangent to both.
+///
+/// The current FILLET radius is intentionally ignored for parallel lines:
+/// the effective radius is half the perpendicular distance between them.
+///
+/// The endpoint of the first line nearest its pick determines where the
+/// semicircle is placed. The second line is trimmed or extended to the
+/// corresponding perpendicular tangent point.
+fn fillet_parallel_lines(
+    l1: &LineEnt,
+    click1: [f64; 2],
+    l2: &LineEnt,
+    click2: [f64; 2],
+) -> Option<(EntityType, EntityType, Option<EntityType>)> {
+    let (p1, p2, u1, len1) = line_geom(l1);
+    let (p3, _p4, u2, len2) = line_geom(l2);
 
+    if len1 <= 1.0e-12 || len2 <= 1.0e-12 {
+        return None;
+    }
+
+    // This helper is only for parallel / anti-parallel lines.
+    let cross = u1[0] * u2[1] - u1[1] * u2[0];
+    if cross.abs() > 1.0e-6 {
+        return None;
+    }
+
+    // The pick on the first line determines which end receives the round.
+    let dist_sq = |a: [f64; 2], b: [f64; 2]| {
+        let dx = a[0] - b[0];
+        let dy = a[1] - b[1];
+        dx * dx + dy * dy
+    };
+
+    let (tangent1, other1) = if dist_sq(click1, p1) <= dist_sq(click1, p2) {
+        (p1, p2)
+    } else {
+        (p2, p1)
+    };
+
+    // Unit normal to line 1. Project tangent1 perpendicularly onto line 2.
+    let normal = [-u1[1], u1[0]];
+    let separation =
+        (p3[0] - tangent1[0]) * normal[0] + (p3[1] - tangent1[1]) * normal[1];
+
+    if separation.abs() <= 1.0e-9 {
+        // Coincident lines do not define a useful semicircle.
+        return None;
+    }
+
+    let tangent2 = [
+        tangent1[0] + normal[0] * separation,
+        tangent1[1] + normal[1] * separation,
+    ];
+
+    let centre = [
+        (tangent1[0] + tangent2[0]) * 0.5,
+        (tangent1[1] + tangent2[1]) * 0.5,
+    ];
+
+    let radius = separation.abs() * 0.5;
+
+    // Keep the existing part of each selected line and trim/extend the picked
+    // end to its tangent point.
+    let new_l1 = trim_line_to_point(l1, tangent1, click1)?;
+    let new_l2 = trim_line_to_point(l2, tangent2, click2)?;
+
+    // The semicircle must bulge away from the retained portion of line 1.
+    // `other1 - tangent1` points back into the line, so negate it.
+    let keep = [
+        other1[0] - tangent1[0],
+        other1[1] - tangent1[1],
+    ];
+    let keep_len = (keep[0] * keep[0] + keep[1] * keep[1]).sqrt();
+
+    if keep_len <= 1.0e-12 {
+        return None;
+    }
+
+    let bulge_dir = [-keep[0] / keep_len, -keep[1] / keep_len];
+
+    let a1 = norm_angle(
+        (tangent1[1] - centre[1]).atan2(tangent1[0] - centre[0]),
+    );
+    let a2 = norm_angle(
+        (tangent2[1] - centre[1]).atan2(tangent2[0] - centre[0]),
+    );
+
+    // Between two antipodal points there are two possible semicircles.
+    // Determine which CCW orientation bulges toward the selected end.
+    let midpoint_angle = a1 + std::f64::consts::FRAC_PI_2;
+    let midpoint_dir = [midpoint_angle.cos(), midpoint_angle.sin()];
+
+    let candidate_matches =
+        midpoint_dir[0] * bulge_dir[0] + midpoint_dir[1] * bulge_dir[1] >= 0.0;
+
+    let (start_angle, end_angle) = if candidate_matches {
+        (a1, a2)
+    } else {
+        (a2, a1)
+    };
+
+    let mut arc = ArcEnt::new();
+    arc.common = l1.common.clone();
+    arc.common.handle = Handle::NULL;
+    arc.center = Vector3::new(centre[0], centre[1], l1.start.z);
+    arc.radius = radius;
+    arc.start_angle = start_angle;
+    arc.end_angle = end_angle;
+
+    Some((
+        EntityType::Line(new_l1),
+        EntityType::Line(new_l2),
+        Some(EntityType::Arc(arc)),
+    ))
+}
 /// Compute fillet: trim l1/l2 and insert a tangent arc of `radius`.
 /// Returns (trimmed_l1, trimmed_l2, fillet_arc).
 fn compute_fillet(
@@ -90,8 +205,18 @@ fn compute_fillet(
     let (p1, p2, u1, _len1) = line_geom(l1);
     let (p3, p4, u2, _len2) = line_geom(l2);
 
-    // Intersection of infinite lines
-    let (t_p, _u_p) = ll(p1[0], p1[1], u1[0], u1[1], p3[0], p3[1], u2[0], u2[1])?;
+    // Parallel lines are a special FILLET case: there is no intersection.
+    // Build the tangent semicircle directly, temporarily ignoring the
+    // configured radius.
+    let cross = u1[0] * u2[1] - u1[1] * u2[0];
+
+    if cross.abs() <= 1.0e-6 {
+        return fillet_parallel_lines(l1, click1, l2, click2);
+    }
+
+    // Intersection of infinite non-parallel lines.
+    let (t_p, _u_p) =
+        ll(p1[0], p1[1], u1[0], u1[1], p3[0], p3[1], u2[0], u2[1])?;
 
     // Intersection point
     let px = p1[0] + t_p * u1[0];
@@ -127,10 +252,6 @@ fn compute_fillet(
     let cos_a = (dir1[0] * dir2[0] + dir1[1] * dir2[1]).clamp(-1.0, 1.0);
     let angle = cos_a.acos();
 
-    // Lines are parallel / anti-parallel
-    if angle < 1e-6 || (angle - std::f64::consts::PI).abs() < 1e-6 {
-        return None;
-    }
 
     let z = l1.start.z;
 

@@ -84,6 +84,38 @@ fn entity_curves_on_plane(
     }
 }
 
+fn entity_boundary_source_on_plane(
+    entity: &EntityType,
+    plane: WorkingPlane,
+    tolerance: f64,
+) -> Option<BoundarySource> {
+    let curves = entity_curves_on_plane(entity, plane, tolerance);
+
+    if curves.is_empty() {
+        return None;
+    }
+
+    let segments: Vec<Line> = curves
+        .iter()
+        .flat_map(|curve| {
+            curve
+                .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                .windows(2)
+                .filter_map(|pair| {
+                    let start = pair[0];
+                    let end = pair[1];
+
+                    (start.iter().chain(&end).all(|value| value.is_finite())
+                        && start != end)
+                        .then_some(Line { start, end })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    (!segments.is_empty()).then_some(BoundarySource { segments, curves })
+}
+
 fn hatch_path_seed(path: &acadrust::entities::BoundaryPath) -> Option<[f64; 2]> {
     let mut ring = Vec::new();
     for edge in &path.edges {
@@ -731,10 +763,22 @@ impl Scene {
                     .boundary_handles
                     .iter()
                     .filter_map(|source| {
-                        all_sources
-                            .get(source)
-                            .cloned()
-                            .map(|geometry| (*source, geometry))
+                        // Associative boundaries are explicit document references.
+                        // During a grip drag their display wire can be preview-hidden,
+                        // so prefer the live entity geometry over the resident wire cache.
+                        let geometry = self
+                            .document
+                            .get_entity(*source)
+                            .and_then(|entity| {
+                                entity_boundary_source_on_plane(
+                                    entity,
+                                    plane,
+                                    WELD_TOLERANCE,
+                                )
+                            })
+                            .or_else(|| all_sources.get(source).cloned());
+
+                        geometry.map(|geometry| (*source, geometry))
                     })
                     .collect();
                 let segments: Vec<_> = sources
@@ -817,17 +861,47 @@ impl Scene {
                 .extend(segments);
         }
         for (&handle, source) in &mut sources {
-            source.curves = self
+            let curves = self
                 .document
                 .get_entity(handle)
                 .map(|entity| entity_curves_on_plane(entity, plane, tolerance))
                 .unwrap_or_default();
-            source.curves.retain(|curve| {
-                source.segments.iter().any(|segment| {
-                    distance_to(curve, segment.start).max(distance_to(curve, segment.end))
-                        <= tolerance * 4.0
+
+            // Associative hatch regeneration must use the entity's live geometry,
+            // not a potentially one-frame-old display wire. Grip edits and STRETCH
+            // mutate the document before the resident wire cache catches up.
+            let live_segments: Vec<Line> = curves
+                .iter()
+                .flat_map(|curve| {
+                    curve
+                        .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                        .windows(2)
+                        .filter_map(|pair| {
+                            let start = pair[0];
+                            let end = pair[1];
+
+                            (start.iter().chain(&end).all(|value| value.is_finite())
+                                && start != end)
+                                .then_some(Line { start, end })
+                        })
+                        .collect::<Vec<_>>()
                 })
-            });
+                .collect();
+
+            if !live_segments.is_empty() {
+                source.segments = live_segments;
+                source.curves = curves;
+            } else {
+                // Fallback for entity types that do not expose usable native curves:
+                // retain the existing display-wire geometry.
+                source.curves = curves;
+                source.curves.retain(|curve| {
+                    source.segments.iter().any(|segment| {
+                        distance_to(curve, segment.start).max(distance_to(curve, segment.end))
+                            <= tolerance * 4.0
+                    })
+                });
+            }
         }
         sources
     }

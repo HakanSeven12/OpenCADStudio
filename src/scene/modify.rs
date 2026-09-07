@@ -1387,5 +1387,14 @@ impl Scene {
                 self.images.insert(handle, model);
             }
         }
+        // A grip edit can move geometry used as the boundary of an associative hatch.
+        // The source entity has already been mutated above, so rebuild any dependent
+        // hatch from the live document geometry immediately.
+        let source_change = [(handle, ChangeKind::Modified)];
+        let hatch_changes = self.refresh_associative_hatches(&source_change);
+
+        if !hatch_changes.is_empty() {
+            self.bump_entities(&hatch_changes);
+        }
     }
 }

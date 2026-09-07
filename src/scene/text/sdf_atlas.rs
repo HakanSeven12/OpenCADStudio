@@ -391,8 +391,13 @@ impl GlyphAtlas {
 
         let (fw, fh) = (self.width as f32, self.height as f32);
         Some(AtlasEntry {
-            uv_min: [ox as f32 / fw, oy as f32 / fh],
-            uv_max: [(ox + tile.w) as f32 / fw, (oy + tile.h) as f32 / fh],
+            // Sample the centers of the edge texels rather than the tile boundaries.
+            // This prevents bilinear filtering from bleeding into neighbouring tiles.
+            uv_min: [(ox as f32 + 0.5) / fw, (oy as f32 + 0.5) / fh],
+            uv_max: [
+                ((ox + tile.w) as f32 - 0.5) / fw,
+                ((oy + tile.h) as f32 - 0.5) / fh,
+            ],
             plane_min: tile.plane_min,
             plane_max: tile.plane_max,
             advance: tile.advance,

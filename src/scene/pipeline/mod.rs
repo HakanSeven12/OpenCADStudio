@@ -2407,7 +2407,7 @@ impl Pipeline {
         )
     }
 
-    /// Upload GPU-instanced analytical circles.
+    /// Upload GPU-instanced analytical circles from a wire slice.
     pub fn upload_circles(
         &mut self,
         device: &wgpu::Device,
@@ -2425,6 +2425,16 @@ impl Pipeline {
                 instances.push(inst);
             }
         }
+        self.upload_circles_from_instances(device, queue, &instances)
+    }
+
+    /// Upload GPU-instanced analytical circles from pre-extracted instances.
+    pub fn upload_circles_from_instances(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[CircleInstance],
+    ) -> Vec<CircleGpu> {
         if instances.is_empty() {
             vec![]
         } else {
@@ -2432,12 +2442,12 @@ impl Pipeline {
                 device,
                 queue,
                 "viewer.circles",
-                &instances,
+                instances,
             )]
         }
     }
 
-    /// Upload GPU-instanced analytical ellipses.
+    /// Upload GPU-instanced analytical ellipses from a wire slice.
     pub fn upload_ellipses(
         &mut self,
         device: &wgpu::Device,
@@ -2455,6 +2465,16 @@ impl Pipeline {
                 instances.push(inst);
             }
         }
+        self.upload_ellipses_from_instances(device, queue, &instances)
+    }
+
+    /// Upload GPU-instanced analytical ellipses from pre-extracted instances.
+    pub fn upload_ellipses_from_instances(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[EllipseInstance],
+    ) -> Vec<EllipseGpu> {
         if instances.is_empty() {
             vec![]
         } else {
@@ -2462,7 +2482,7 @@ impl Pipeline {
                 device,
                 queue,
                 "viewer.ellipses",
-                &instances,
+                instances,
             )]
         }
     }
@@ -2490,48 +2510,42 @@ impl Pipeline {
         // wire order — already sorted by draw order — is preserved; depth bias
         // and alpha blending both depend on it. Scissor and mesh-edge stay
         // grouping keys because the draw loop sets one scissor per batch and
-        // skips whole mesh-edge batches in shaded modes.
-        let is_mesh_edge = |w: &WireModel| !w.points.is_empty() && w.fill_is_3d;
         let mut batches: Vec<WireGpu> = Vec::new();
         let mut block_wires: Vec<&WireModel> = Vec::new();
         let mut i = 0;
         while i < wires.len() {
-            if !wires[i].display_visible {
-                i += 1;
-                continue;
+            let kind = wire_arena::classify_wire(&wires[i]);
+            match kind {
+                wire_arena::WireKind::Invisible
+                | wire_arena::WireKind::Circle
+                | wire_arena::WireKind::Ellipse
+                | wire_arena::WireKind::Empty => {
+                    i += 1;
+                    continue;
+                }
+                wire_arena::WireKind::Block => {
+                    block_wires.push(&wires[i]);
+                    i += 1;
+                    continue;
+                }
+                wire_arena::WireKind::Regular | wire_arena::WireKind::MeshEdge => {
+                    let mesh_edge = kind == wire_arena::WireKind::MeshEdge;
+                    let mut j = i + 1;
+                    while j < wires.len() && wire_arena::classify_wire(&wires[j]) == kind {
+                        j += 1;
+                    }
+                    let refs: Vec<&WireModel> = wires[i..j].iter().collect();
+                    batches.extend(WireGpu::from_run_refs(
+                        device,
+                        queue,
+                        &refs,
+                        depth_map,
+                        mesh_edge,
+                        self.wire_const_bgl.as_ref(),
+                    ));
+                    i = j;
+                }
             }
-            if wires[i].render_instance.is_some() {
-                block_wires.push(&wires[i]);
-                i += 1;
-                continue;
-            }
-            if circle_gpu::extract_circle_instance(&wires[i], 0.0).is_some()
-                || ellipse_gpu::extract_ellipse_instance(&wires[i], 0.0).is_some()
-            {
-                i += 1;
-                continue;
-            }
-            let mesh_edge = is_mesh_edge(&wires[i]);
-            let mut j = i + 1;
-            while j < wires.len()
-                && wires[j].display_visible
-                && wires[j].render_instance.is_none()
-                && circle_gpu::extract_circle_instance(&wires[j], 0.0).is_none()
-                && ellipse_gpu::extract_ellipse_instance(&wires[j], 0.0).is_none()
-                && is_mesh_edge(&wires[j]) == mesh_edge
-            {
-                j += 1;
-            }
-            let refs: Vec<&WireModel> = wires[i..j].iter().collect();
-            batches.extend(WireGpu::from_run_refs(
-                device,
-                queue,
-                &refs,
-                depth_map,
-                mesh_edge,
-                self.wire_const_bgl.as_ref(),
-            ));
-            i = j;
         }
         let block_batches = BlockWireGpu::from_wires(
             device,

@@ -839,34 +839,29 @@ impl shader::Primitive for Primitive {
                             gpus.extend(arena.wire_gpus());
                         }
                         inner.gpu_wires = std::sync::Arc::new(gpus);
-                        // Blocks keep their own cached geometry and placements.
-                        let instanced: Vec<&crate::scene::WireModel> = vp_wires
-                            .iter()
-                            .filter(|w| w.render_instance.is_some())
-                            .collect();
+                        let partitioned =
+                            wire_arena::partition_wires(&vp_wires, &draw_depths);
                         inner.gpu_block_wires = std::sync::Arc::new(
                             inner.upload_block_wires(
                                 device,
                                 queue,
-                                &instanced,
+                                &partitioned.instanced,
                                 &draw_depths,
                                 &mut pipeline.block_geometry,
                             ),
                         );
                         inner.gpu_circles = std::sync::Arc::new(
-                            inner.upload_circles(
+                            inner.upload_circles_from_instances(
                                 device,
                                 queue,
-                                &vp_wires,
-                                &draw_depths,
+                                &partitioned.circle_instances,
                             ),
                         );
                         inner.gpu_ellipses = std::sync::Arc::new(
-                            inner.upload_ellipses(
+                            inner.upload_ellipses_from_instances(
                                 device,
                                 queue,
-                                &vp_wires,
-                                &draw_depths,
+                                &partitioned.ellipse_instances,
                             ),
                         );
                         if _patched {

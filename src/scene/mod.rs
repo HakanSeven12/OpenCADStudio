@@ -11325,4 +11325,37 @@ mod layout_cache_tests {
             partitioned.circle_instances.len()
         );
     }
+
+    #[test]
+    fn single_bulge_polyline_extracts_as_analytical_gpu_arc() {
+        let mut s = Scene::new();
+        let mut pline = acadrust::entities::LwPolyline::new();
+        pline.vertices = vec![
+            acadrust::entities::LwVertex {
+                location: acadrust::types::Vector2::new(0.0, 0.0),
+                bulge: 1.0, // semicircle
+                start_width: 0.0,
+                end_width: 0.0,
+                vertex_id: 0,
+            },
+            acadrust::entities::LwVertex {
+                location: acadrust::types::Vector2::new(100.0, 0.0),
+                bulge: 0.0,
+                start_width: 0.0,
+                end_width: 0.0,
+                vertex_id: 0,
+            },
+        ];
+        let _ = s.add_entity(EntityType::LwPolyline(pline));
+
+        let wires = s.model_tile_wires_arc(0, &Camera::default(), 1.0, 1000.0);
+        let depths = rustc_hash::FxHashMap::default();
+        let partitioned = crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths);
+
+        assert_eq!(
+            partitioned.circle_instances.len(),
+            1,
+            "Single bulge arc polyline must be extracted as analytical GPU arc instance"
+        );
+    }
 }

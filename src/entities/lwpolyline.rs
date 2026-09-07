@@ -351,11 +351,7 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
             } else if let Some(arc) =
                 crate::entities::common::BulgeArc::from_bulge([ox0, oy0], [ox1, oy1], bulge)
             {
-                let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
-                tgs.push(TangentGeom::Circle {
-                    center: [wcx as f32, wcy as f32, wcz as f32],
-                    radius: arc.radius as f32,
-                });
+                tgs.push(crate::entities::common::bulge_arc_to_tangent(&arc, &to_wcs, normal));
                 for s in arc
                     .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
                     .into_iter()
@@ -407,11 +403,7 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
                 [v1.location.x, v1.location.y],
                 v0.bulge,
             ) {
-                let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
-                tgs.push(TangentGeom::Circle {
-                    center: [wcx as f32, wcy as f32, wcz as f32],
-                    radius: arc.radius as f32,
-                });
+                tgs.push(crate::entities::common::bulge_arc_to_tangent(&arc, &to_wcs, normal));
             }
         }
         let (pts, widths) = crate::entities::common::tapered_band_points(
@@ -470,11 +462,7 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
                 }
                 let (wx1, wy1, wz1) = to_wcs(ox1, oy1);
                 kv.push([wx1, wy1, wz1]);
-                let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
-                tgs.push(TangentGeom::Circle {
-                    center: [wcx as f32, wcy as f32, wcz as f32],
-                    radius: arc.radius as f32,
-                });
+                tgs.push(crate::entities::common::bulge_arc_to_tangent(&arc, &to_wcs, normal));
             }
             if i + 1 < seg_count {
                 pts.push([f64::NAN; 3]);
@@ -565,11 +553,8 @@ fn centerline_metadata(
             [end.location.x, end.location.y],
             start.bulge,
         ) {
-            let center = to_wcs(arc.center[0], arc.center[1]);
-            tangents.push(TangentGeom::Circle {
-                center: [center.0 as f32, center.1 as f32, center.2 as f32],
-                radius: arc.radius as f32,
-            });
+            let normal = (pline.normal.x, pline.normal.y, pline.normal.z);
+            tangents.push(crate::entities::common::bulge_arc_to_tangent(&arc, to_wcs, normal));
         }
         if index == 0 {
             key_vertices.push([p0.0, p0.1, p0.2]);

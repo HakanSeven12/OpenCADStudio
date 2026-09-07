@@ -103,13 +103,32 @@ fn real_binary_path() -> PathBuf {
 /// running or about to claim it on its own.
 fn deliver_or_launch(files: &[String]) {
     let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
-    if let Some(stream) = single_instance::try_connect_existing() {
-        if single_instance::handoff(stream, &paths) {
-            return;
+    let delivered = single_instance::try_connect_existing()
+        .map(|stream| single_instance::handoff(stream, &paths))
+        .unwrap_or(false);
+    if !delivered {
+        if let Err(err) = std::process::Command::new(real_binary_path()).args(files).spawn() {
+            eprintln!("OpenCADStudio launcher: failed to launch the real binary: {err}");
         }
     }
-    if let Err(err) = std::process::Command::new(real_binary_path()).args(files).spawn() {
-        eprintln!("OpenCADStudio launcher: failed to launch the real binary: {err}");
+    reassert_accessory_policy();
+}
+
+/// AppKit activates this process — promoting it from
+/// NSApplicationActivationPolicyAccessory (no Dock icon, set at startup) to
+/// a normal foreground app with its own Dock icon — as a side effect of
+/// handling an open-document Apple Event, even though nothing here ever
+/// shows a window. Measured via `lsappinfo`, not assumed: the launcher's own
+/// entry flips from type="UIElement" to type="Foreground" the moment it
+/// handles a *second* Apple Event (a fresh cold launch's own first event
+/// doesn't trigger this — the policy is presumably still settling at that
+/// point). Set it back immediately after relaying, so a warm "Open With"
+/// doesn't leave a second, contentless Dock icon sitting next to the real
+/// editor's.
+fn reassert_accessory_policy() {
+    if let Some(mtm) = MainThreadMarker::new() {
+        NSApplication::sharedApplication(mtm)
+            .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
     }
 }
 

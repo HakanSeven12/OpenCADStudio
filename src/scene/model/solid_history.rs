@@ -214,6 +214,21 @@ pub fn has_specialized_primitive_properties(
     )
 }
 
+/// Solid history results whose public Properties palette is fully described by
+/// the common entity rows plus [`primitive_properties`].  A generic B-rep has
+/// no stable primitive dimensions to expose, but it still uses the compact
+/// Solid History palette rather than the internal ACIS/cache diagnostics.
+pub fn has_compact_solid_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> bool {
+    has_specialized_primitive_properties(document, handle)
+        || matches!(
+            document.solid_history_operation(handle),
+            Some(SolidHistoryOperation::Brep(_))
+        )
+}
+
 pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3> {
     match operation {
         SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => world_point(

@@ -440,15 +440,15 @@ impl OpenCADStudio {
                     let display_entity = dispatch::entity_in_working_plane(contextual.as_ref(), plane);
                     let entity = &display_entity;
                     let group_names = self.tabs[i].scene.group_names_for_entity(handle);
-                    let specialized_primitive =
-                        crate::scene::model::solid_history::has_specialized_primitive_properties(
+                    let compact_solid =
+                        crate::scene::model::solid_history::has_compact_solid_properties(
                             &self.tabs[i].scene.document,
                             handle,
                         );
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
-                    if specialized_primitive {
-                        retain_specialized_primitive_sections(&mut sections);
+                    if compact_solid {
+                        retain_compact_solid_sections(&mut sections);
                     }
                     sections.extend(
                         crate::scene::model::solid_history::primitive_properties(
@@ -636,7 +636,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !specialized_primitive && matches!(
+                    if !compact_solid && matches!(
                         entity,
                         acadrust::EntityType::Solid3D(_)
                             | acadrust::EntityType::Region(_)
@@ -710,7 +710,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !specialized_primitive {
+                    if !compact_solid {
                         sections.extend(crate::entities::object_data::sections(
                             &self.tabs[i].scene.document,
                             &self.tabs[i].scene.object_data_cache,
@@ -2068,8 +2068,8 @@ impl OpenCADStudio {
                             });
                         }
                     }
-                    if specialized_primitive {
-                        retain_specialized_primitive_sections(&mut sections);
+                    if compact_solid {
+                        retain_compact_solid_sections(&mut sections);
                     }
                     let title = match entity {
                         acadrust::EntityType::Insert(ins) => {
@@ -2166,7 +2166,7 @@ impl OpenCADStudio {
                         .collect();
                     let mut sections = aggregate_sections(&local_refs, &text_style_names);
                     if local_refs.iter().all(|(handle, _)| {
-                        crate::scene::model::solid_history::has_specialized_primitive_properties(
+                        crate::scene::model::solid_history::has_compact_solid_properties(
                             &self.tabs[i].scene.document,
                             *handle,
                         )
@@ -3077,7 +3077,7 @@ fn aggregate_solid_history_sections(
     merged
 }
 
-fn retain_specialized_primitive_sections(
+fn retain_compact_solid_sections(
     sections: &mut Vec<crate::scene::model::object::PropSection>,
 ) {
     sections.iter_mut().for_each(|section| {

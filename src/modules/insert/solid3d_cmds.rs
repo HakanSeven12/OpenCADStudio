@@ -2211,7 +2211,7 @@ impl LoftCommand {
     fn option_prompt(&self) -> String {
         match self.state.step {
             LoftStep::Sections => format!(
-                "{} ({}):", t!("LOFT  Select cross-sections in order or [Point/Join/Mode/Undo] (Enter to finish)"),
+                "{} ({}):", t!("LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)"),
                 self.state.sections.len(),
             ),
             LoftStep::Join => format!(
@@ -2224,9 +2224,9 @@ impl LoftCommand {
             LoftStep::Options => {
                 let (start, end) = self.point_ends();
                 if start || end {
-                    t!("LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude/Mode/Undo] <Cross sections only>:").into_owned()
+                    t!("LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:").into_owned()
                 } else {
-                    t!("LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Mode/Undo] <Cross sections only>:").into_owned()
+                    t!("LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:").into_owned()
                 }
             }
             LoftStep::Guides => format!("{} ({}):", t!("LOFT  Select guide curves or [Undo] (Enter to finish)"), self.state.guides.len()),
@@ -2272,7 +2272,7 @@ impl CadCommand for LoftCommand {
     }
     fn options(&self) -> Vec<CmdOption> {
         let mut options = match self.state.step {
-            LoftStep::Sections => vec![CmdOption::new("Point", "POINT"), CmdOption::new("Join", "JOIN"), CmdOption::new("Mode", "MODE"), CmdOption::enter("Done")],
+            LoftStep::Sections => vec![CmdOption::new("Point", "POINT"), CmdOption::new("Join", "JOIN"), CmdOption::new("Mode", "MODE")],
             LoftStep::Join | LoftStep::Guides => vec![CmdOption::enter("Done")],
             LoftStep::Mode => vec![CmdOption::new("Solid", "SOLID"), CmdOption::new("Surface", "SURFACE")],
             LoftStep::Options => {
@@ -2282,7 +2282,6 @@ impl CadCommand for LoftCommand {
                     choices.push(CmdOption::new("Continuity", "CONTINUITY"));
                     choices.push(CmdOption::new("Bulge magnitude", "BULGE"));
                 }
-                choices.push(CmdOption::new("Mode", "MODE"));
                 choices
             }
             LoftStep::Settings => {
@@ -2308,7 +2307,9 @@ impl CadCommand for LoftCommand {
             LoftStep::StartContinuity | LoftStep::EndContinuity => vec![CmdOption::new("G0", "G0"), CmdOption::new("G1", "G1")],
             _ => Vec::new(),
         };
-        options.push(CmdOption::new("Undo", "UNDO"));
+        if !matches!(self.state.step, LoftStep::Sections | LoftStep::Options) {
+            options.push(CmdOption::new("Undo", "UNDO"));
+        }
         options
     }
     fn needs_entity_pick(&self) -> bool {

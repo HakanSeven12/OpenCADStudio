@@ -450,10 +450,7 @@ fn profile_curves<B: DocApiBackend>(
     b.profile_curves(profile)
 }
 
-/// Validate a `Curve2Spec`'s fallible conditions BEFORE mutation (the same rules
-/// the host's `curve_spec_to_entity` enforces), so `CreateMany` stays all-or-nothing.
-/// Currently: ellipse minor/major ratio must be in (0, 1].
-
+/// Validate that an entity exists before performing an operation.
 fn require_exists<B: DocApiBackend>(b: &B, id: ObjectId, op: &'static str) -> ApiResult<()> {
     if b.entity_exists(id) {
         Ok(())

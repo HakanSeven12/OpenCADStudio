@@ -1439,21 +1439,7 @@ pub fn primitive_properties(
     handle: acadrust::Handle,
 ) -> Vec<PropSection> {
     let Some(operation) = document.solid_history_operation(handle) else {
-        return vec![PropSection {
-            title: t!("Solid History").into_owned(),
-            props: vec![
-                Property {
-                    label: t!("History").into_owned(),
-                    field: PROP_HISTORY,
-                    value: PropValue::ReadOnly("None".to_string()),
-                },
-                Property {
-                    label: t!("Show History").into_owned(),
-                    field: PROP_SHOW_HISTORY,
-                    value: PropValue::ReadOnly("No".to_string()),
-                },
-            ],
-        }];
+        return brep_properties(document, handle);
     };
     match operation {
         SolidHistoryOperation::Box(value) => {

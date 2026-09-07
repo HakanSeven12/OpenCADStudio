@@ -1046,16 +1046,71 @@ impl Scene {
         value: &str,
     ) -> bool {
         self.record_solid_history_before(handle);
+        let mut created = false;
+        if self.document.solid_history_graph(handle).is_none() {
+            let create = match field {
+                crate::scene::model::solid_history::PROP_HISTORY => {
+                    if value.eq_ignore_ascii_case("Record") {
+                        true
+                    } else if value.eq_ignore_ascii_case("None") {
+                        return false;
+                    } else {
+                        return false;
+                    }
+                }
+                crate::scene::model::solid_history::PROP_SHOW_HISTORY
+                    if self.document.header.show_solid_history.clamp(0, 2) == 1 =>
+                {
+                    if value.eq_ignore_ascii_case("Yes") {
+                        true
+                    } else if value.eq_ignore_ascii_case("No") {
+                        return false;
+                    } else {
+                        return false;
+                    }
+                }
+                _ => return false,
+            };
+            if create {
+                if !matches!(self.document.get_entity(handle), Some(EntityType::Solid3D(_))) {
+                    return false;
+                }
+                self.restore_solid_models(&[handle]);
+                let Some(body) = self.solid_models.get(&handle).cloned() else {
+                    return false;
+                };
+                if self.is_recording_undo() {
+                    let before = self.document.get_entity_arc(handle);
+                    self.record_undo_before(handle, before);
+                }
+                if !self.create_solid_history(
+                    handle,
+                    crate::scene::model::solid_history::brep_op(&body),
+                ) {
+                    return false;
+                }
+                // A solid without a graph was displayed as History=None.
+                // Preserve that object state before applying the requested
+                // choice, independent of the drawing-wide SOLIDHIST setting.
+                crate::scene::model::solid_history::apply_history_choice(
+                    &mut self.document,
+                    handle,
+                    crate::scene::model::solid_history::PROP_HISTORY,
+                    "None",
+                );
+                created = true;
+            }
+        }
         let applied = crate::scene::model::solid_history::apply_history_choice(
             &mut self.document,
             handle,
             field,
             value,
         );
-        if applied {
+        if created || applied {
             self.bump_entities(&[(handle, ChangeKind::Modified)]);
         }
-        applied
+        created || applied
     }
 
     fn apply_solid_history_grip(

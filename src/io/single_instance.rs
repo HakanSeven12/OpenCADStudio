@@ -28,6 +28,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -57,6 +59,25 @@ pub enum Claim {
     Existing(TcpStream),
 }
 
+/// Use the app bundle path on macOS so its launcher and GUI share a port.
+/// Development builds and other platforms remain scoped by executable path.
+fn rendezvous_anchor() -> PathBuf {
+    let exe = std::env::current_exe().unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    {
+        // <bundle>.app/Contents/MacOS/<executable> -> .../MacOS -> .../Contents -> <bundle>.app
+        if let Some(bundle) = exe
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("app"))
+        {
+            return bundle.to_path_buf();
+        }
+    }
+    exe
+}
+
 /// What makes two launches "the same editor, for the same user, right here".
 ///
 /// All three parts are load-bearing:
@@ -64,8 +85,8 @@ pub enum Claim {
 ///     one user's drawing would surface on another user's screen;
 ///   * session — the same user on two seats (or an SSH-forwarded display) must
 ///     not have files delivered to the other display;
-///   * executable path — otherwise `cargo run` silently hands your test file to
-///     an installed copy, which makes this feature hostile to maintain.
+///   * rendezvous anchor — otherwise `cargo run` silently hands your test file
+///     to an installed copy, which makes this feature hostile to maintain.
 fn rendezvous_key() -> String {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
@@ -74,10 +95,8 @@ fn rendezvous_key() -> String {
         .or_else(|_| std::env::var("WAYLAND_DISPLAY"))
         .or_else(|_| std::env::var("DISPLAY"))
         .unwrap_or_default();
-    let exe = std::env::current_exe()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    format!("{user}|{session}|{exe}")
+    let anchor = rendezvous_anchor().to_string_lossy().into_owned();
+    format!("{user}|{session}|{anchor}")
 }
 
 /// Deterministic port for this rendezvous key (FNV-1a, folded into a fixed
@@ -111,14 +130,19 @@ pub fn claim() -> Claim {
             *LISTENER.lock().unwrap_or_else(|e| e.into_inner()) = Some(l);
             Claim::Primary
         }
-        Err(_) => match TcpStream::connect_timeout(&addr(), IO_TIMEOUT) {
-            Ok(s) => Claim::Existing(s),
+        Err(_) => match try_connect_existing() {
+            Some(s) => Claim::Existing(s),
             // Bound a moment ago, gone now: the holder exited between our bind
             // and our connect. We hold no listener, so this window cannot serve
             // — the next launch binds properly. Self-healing.
-            Err(_) => Claim::Primary,
+            None => Claim::Primary,
         },
     }
+}
+
+/// Reach an editor without claiming its port. Used by the macOS launcher.
+pub fn try_connect_existing() -> Option<TcpStream> {
+    TcpStream::connect_timeout(&addr(), IO_TIMEOUT).ok()
 }
 
 /// Hand `paths` to the editor on the other end. `true` once it has acknowledged.
@@ -300,15 +324,15 @@ mod tests {
     }
 
     #[test]
-    fn rendezvous_key_carries_user_session_and_exe() {
+    fn rendezvous_key_carries_user_session_and_anchor() {
         // All three parts must be present, or the isolation the key exists for
         // is silently gone.
         let k = rendezvous_key();
         assert_eq!(k.matches('|').count(), 2, "key shape changed: {k:?}");
-        let exe = std::env::current_exe().unwrap();
+        let anchor = rendezvous_anchor();
         assert!(
-            k.ends_with(&*exe.to_string_lossy()),
-            "key must pin the executable: {k:?}"
+            k.ends_with(&*anchor.to_string_lossy()),
+            "key must pin the rendezvous anchor: {k:?}"
         );
     }
 

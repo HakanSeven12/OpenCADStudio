@@ -30,11 +30,13 @@ fi
 [ -n "$DEVELOPER_ID" ] || { echo "No Developer ID identity found; set DEVELOPER_ID (or '-' for ad-hoc)." >&2; exit 1; }
 echo "==> Version $VERSION, signing as: $DEVELOPER_ID"
 
-echo "==> cargo build (app + thumbnailer staticlib)"
+echo "==> cargo build (app + thumbnailer staticlib + launcher)"
 cargo build --release --target "$TARGET"
 # The staticlib crate-type is only emitted when the crate is built as a
 # target (as a plain dependency cargo produces just the rlib).
 cargo build --release --target "$TARGET" -p dwg-thumbnailer
+# CFBundleExecutable (#1039) — see src/bin/ocs_launcher.rs.
+cargo build --release --target "$TARGET" --bin ocs_launcher
 
 echo "==> icons"
 rm -rf "$DIST" && mkdir -p "$DIST"
@@ -82,8 +84,9 @@ echo "==> assemble .app"
 APP="$DIST/OpenCADStudio.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/PlugIns"
-cp "target/$TARGET/release/OpenCADStudio" "$APP/Contents/MacOS/OpenCADStudio"
-chmod +x "$APP/Contents/MacOS/OpenCADStudio"
+cp "target/$TARGET/release/ocs_launcher" "$APP/Contents/MacOS/OpenCADStudio"
+cp "target/$TARGET/release/OpenCADStudio" "$APP/Contents/MacOS/OpenCADStudio-App"
+chmod +x "$APP/Contents/MacOS/OpenCADStudio" "$APP/Contents/MacOS/OpenCADStudio-App"
 cp "$DIST/AppIcon.icns" "$DIST/DWG.icns" "$DIST/DXF.icns" "$APP/Contents/Resources/"
 cp -R "$EXT" "$APP/Contents/PlugIns/"
 sed "s/__VERSION__/$VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
@@ -93,9 +96,11 @@ if [ "$DEVELOPER_ID" = "-" ]; then
     # CI-parity ad-hoc signature; cannot be notarized.
     codesign --force --deep --sign - --timestamp=none "$APP"
 else
-    # Inside-out: the appex first (sandbox entitlement is REQUIRED for a
-    # QuickLook extension to run), then the outer bundle. Hardened runtime
+    # Sign nested code before the outer bundle. The sandbox entitlement is
+    # required for the QuickLook extension. Use hardened runtime
     # and a secure timestamp on every layer for notarization.
+    codesign --force --timestamp --options runtime \
+        -s "$DEVELOPER_ID" "$APP/Contents/MacOS/OpenCADStudio-App"
     codesign --force --timestamp --options runtime \
         --entitlements crates/dwg-thumbnailer/macos/entitlements.plist \
         -s "$DEVELOPER_ID" "$APP/Contents/PlugIns/DWGThumbnail.appex"

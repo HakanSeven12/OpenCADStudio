@@ -11400,6 +11400,45 @@ mod layout_cache_tests {
     }
 
     #[test]
+    fn mixed_bulge_polyline_splits_into_analytical_arcs_and_straight_lines() {
+        use acadrust::entities::{LwPolyline, LwVertex};
+        use acadrust::types::Vector2;
+
+        let mut scene = Scene::new();
+        let mut pline = LwPolyline::new();
+        // Rounded slot: 2 straight lines and 2 semicircular ends (bulge = 1.0)
+        // Vertex 0: (0, 0), bulge 1.0 (arc from 0,0 to 0,10)
+        // Vertex 1: (0, 10), bulge 0.0 (straight from 0,10 to 50,10)
+        // Vertex 2: (50, 10), bulge 1.0 (arc from 50,10 to 50,0)
+        // Vertex 3: (50, 0), bulge 0.0 (straight from 50,0 to 0,0)
+        let v0 = LwVertex::with_bulge(Vector2::new(0.0, 0.0), 1.0);
+        let v1 = LwVertex::new(Vector2::new(0.0, 10.0));
+        let v2 = LwVertex::with_bulge(Vector2::new(50.0, 10.0), 1.0);
+        let v3 = LwVertex::new(Vector2::new(50.0, 0.0));
+        pline.vertices = vec![v0, v1, v2, v3];
+        pline.is_closed = true;
+
+        let _ = scene.add_entity(EntityType::LwPolyline(pline));
+
+        let camera = Camera::default();
+        let wires = scene.model_tile_wires_arc(0, &camera, 1.0, 1000.0);
+        let depths = rustc_hash::FxHashMap::default();
+        let partitioned = crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths);
+
+        assert_eq!(
+            partitioned.circle_instances.len(),
+            2,
+            "Mixed polyline should have its 2 bulge arcs routed to analytical CircleGpu"
+        );
+        assert_eq!(
+            partitioned.regular.len(),
+            1,
+            "Mixed polyline straight lines should form 1 regular wire"
+        );
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
     fn bench_analytical_rendering() {
         use std::time::Instant;
         use acadrust::entities::{Arc as AcadArc, Circle, Ellipse, LwPolyline, LwVertex};

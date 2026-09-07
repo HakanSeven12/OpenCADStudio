@@ -19,7 +19,7 @@ use acadrust::{CadDocument, EntityType, Handle};
 use glam::Vec3;
 
 use crate::scene::convert::acad_to_render::{convert, RenderObject};
-use crate::scene::model::wire_model::{SnapHint, WireModel};
+use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 
 /// Split an f64 offset-relative coordinate into the double-single (high, low)
 /// f32 pair the renderer consumes. `high + low ≈ value` to ~f64 precision; the
@@ -200,6 +200,150 @@ pub(crate) fn points_to_ds(
         low.push(l);
     }
     (high, low)
+}
+
+fn split_mixed_polyline(
+    tangent_geoms: &[TangentGeom],
+    key_vertices: &[[f64; 3]],
+    name: &str,
+    color: [f32; 4],
+    selected: bool,
+    pattern_length: f32,
+    pattern: [f32; 8],
+    line_weight_px: f32,
+    snap_pts: Vec<(glam::DVec3, SnapHint)>,
+    point_marker: Option<crate::scene::model::wire_model::PointMarker>,
+    plinegen: bool,
+) -> Vec<WireModel> {
+    let mut out = Vec::new();
+
+    // Emit each arc segment as an analytical wire (CircleGpu target)
+    for tg in tangent_geoms {
+        if matches!(tg, TangentGeom::Arc { .. }) {
+            out.push(WireModel {
+                bg_adapt: None,
+                point_marker: None,
+                taper_widths: Vec::new(),
+                pattern_stations: Vec::new(),
+                world_width: 0.0,
+                depth_override: None,
+                display_visible: true,
+                plot_visible: true,
+                fill_is_3d: false,
+                fill_is_2d_solid: false,
+                render_instance: None,
+                pick_tris: Vec::new(),
+                pick_tris_low: Vec::new(),
+                dash_from_start: false,
+                dash_align_end: None,
+                text_verts: Vec::new(),
+                name: name.to_string(),
+                points: Vec::new(),
+                points_low: Vec::new(),
+                color,
+                selected,
+                pattern_length,
+                pattern,
+                line_weight_px,
+                snap_pts: Vec::new(),
+                tangent_geoms: vec![tg.clone()],
+                aci: 0,
+                key_vertices: Vec::new(),
+                aabb: WireModel::UNBOUNDED_AABB,
+                plinegen: true,
+                fill_tris: vec![],
+                fill_tris_low: Vec::new(),
+            });
+        }
+    }
+
+    // Collect straight lines into a line wire
+    let mut straight_pts: Vec<[f64; 3]> = Vec::new();
+    let mut straight_tangents: Vec<TangentGeom> = Vec::new();
+    let mut last_end: Option<[f64; 3]> = None;
+
+    for (i, tg) in tangent_geoms.iter().enumerate() {
+        if let TangentGeom::Line { p1, p2 } = tg {
+            straight_tangents.push(tg.clone());
+            let (p_start, p_end) = if i + 1 < key_vertices.len() {
+                (key_vertices[i], key_vertices[i + 1])
+            } else {
+                (
+                    [p1[0] as f64, p1[1] as f64, p1[2] as f64],
+                    [p2[0] as f64, p2[1] as f64, p2[2] as f64],
+                )
+            };
+            if !plinegen {
+                if !straight_pts.is_empty() {
+                    straight_pts.push([f64::NAN; 3]);
+                }
+                straight_pts.push(p_start);
+                straight_pts.push(p_end);
+            } else {
+                if let Some(prev) = last_end {
+                    if (prev[0] - p_start[0]).abs() < 1e-7
+                        && (prev[1] - p_start[1]).abs() < 1e-7
+                        && (prev[2] - p_start[2]).abs() < 1e-7
+                    {
+                        straight_pts.push(p_end);
+                    } else {
+                        straight_pts.push([f64::NAN; 3]);
+                        straight_pts.push(p_start);
+                        straight_pts.push(p_end);
+                    }
+                } else {
+                    straight_pts.push(p_start);
+                    straight_pts.push(p_end);
+                }
+                last_end = Some(p_end);
+            }
+        } else {
+            last_end = None;
+        }
+    }
+
+    let (line_pts, line_pts_low) = points_to_ds(straight_pts);
+    if !line_pts.is_empty() {
+        out.push(WireModel {
+            bg_adapt: None,
+            point_marker,
+            taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
+            world_width: 0.0,
+            depth_override: None,
+            display_visible: true,
+            plot_visible: true,
+            fill_is_3d: false,
+            fill_is_2d_solid: false,
+            render_instance: None,
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+            dash_from_start: false,
+            dash_align_end: None,
+            text_verts: Vec::new(),
+            name: name.to_string(),
+            points: line_pts,
+            points_low: line_pts_low,
+            color,
+            selected,
+            pattern_length,
+            pattern,
+            line_weight_px,
+            snap_pts,
+            tangent_geoms: straight_tangents,
+            aci: 0,
+            key_vertices: key_vertices.to_vec(),
+            aabb: WireModel::UNBOUNDED_AABB,
+            plinegen,
+            fill_tris: vec![],
+            fill_tris_low: Vec::new(),
+        });
+    } else if let Some(first_arc) = out.first_mut() {
+        first_arc.snap_pts = snap_pts;
+        first_arc.key_vertices = key_vertices.to_vec();
+    }
+
+    out
 }
 
 fn point_cloud_wires(
@@ -1569,40 +1713,71 @@ pub fn tessellate(
                     };
                     let point_marker =
                         crate::entities::point::relative_marker_spec(entity, document);
-                    out.push(WireModel {
-                        bg_adapt: None,
-                        point_marker,
-                        taper_widths: Vec::new(),
-                        pattern_stations: Vec::new(),
-                        world_width: polyline_band_width(entity, document.header.fill_mode),
-                        depth_override: None,
-                        display_visible: true,
-                        plot_visible: true,
-                        fill_is_3d,
-                        fill_is_2d_solid: false,
-                        render_instance: None,
-                        pick_tris,
-                        pick_tris_low,
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
-                        name: name.clone(),
-                        points: local_pts,
-                        points_low: local_pts_low,
-                        color: edge_color,
-                        selected,
-                        pattern_length: edge_pattern_length,
-                        pattern: edge_pattern,
-                        line_weight_px,
-                        snap_pts: snap,
-                        tangent_geoms: tangents,
-                        aci: 0,
-                        key_vertices: keys,
-                        aabb: WireModel::UNBOUNDED_AABB,
-                        plinegen: true,
-                        fill_tris: vec![],
-                        fill_tris_low: Vec::new(),
-                    });
+
+                    let has_arc = te
+                        .tangent_geoms
+                        .iter()
+                        .any(|tg| matches!(tg, TangentGeom::Arc { .. }));
+                    let has_line = te
+                        .tangent_geoms
+                        .iter()
+                        .any(|tg| matches!(tg, TangentGeom::Line { .. }));
+                    let is_thin_polyline = !is_thick_extrusion
+                        && polyline_band_width(entity, document.header.fill_mode) <= 1e-9
+                        && fill_tris.is_empty()
+                        && pick_tris.is_empty()
+                        && matches!(entity, EntityType::LwPolyline(_) | EntityType::Polyline2D(_));
+
+                    if has_arc && has_line && is_thin_polyline {
+                        out.extend(split_mixed_polyline(
+                            &te.tangent_geoms,
+                            &keys,
+                            &name,
+                            edge_color,
+                            selected,
+                            edge_pattern_length,
+                            edge_pattern,
+                            line_weight_px,
+                            snap,
+                            point_marker,
+                            true,
+                        ));
+                    } else {
+                        out.push(WireModel {
+                            bg_adapt: None,
+                            point_marker,
+                            taper_widths: Vec::new(),
+                            pattern_stations: Vec::new(),
+                            world_width: polyline_band_width(entity, document.header.fill_mode),
+                            depth_override: None,
+                            display_visible: true,
+                            plot_visible: true,
+                            fill_is_3d,
+                            fill_is_2d_solid: false,
+                            render_instance: None,
+                            pick_tris,
+                            pick_tris_low,
+                            dash_from_start: false,
+                            dash_align_end: None,
+                            text_verts: Vec::new(),
+                            name: name.clone(),
+                            points: local_pts,
+                            points_low: local_pts_low,
+                            color: edge_color,
+                            selected,
+                            pattern_length: edge_pattern_length,
+                            pattern: edge_pattern,
+                            line_weight_px,
+                            snap_pts: snap,
+                            tangent_geoms: tangents,
+                            aci: 0,
+                            key_vertices: keys,
+                            aabb: WireModel::UNBOUNDED_AABB,
+                            plinegen: true,
+                            fill_tris: vec![],
+                            fill_tris_low: Vec::new(),
+                        });
+                    }
                 }
 
                 if !fill_tris.is_empty() {
@@ -1758,6 +1933,48 @@ pub fn tessellate(
                 // A wide polyline with PLINEGEN=0 arrives here: same shader-band
                 // treatment as the Contour arm, restarting the dash per segment.
                 let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
+                let is_thick_extrusion = matches!(
+                    entity,
+                    EntityType::LwPolyline(p) if p.thickness.abs() > 1e-10
+                ) || matches!(
+                    entity,
+                    EntityType::Polyline2D(p) if p.thickness.abs() > 1e-10
+                );
+                let is_thin_polyline = !is_thick_extrusion
+                    && polyline_band_width(entity, document.header.fill_mode) <= 1e-9
+                    && pick_tris.is_empty()
+                    && matches!(entity, EntityType::LwPolyline(_) | EntityType::Polyline2D(_));
+                let has_arc = te
+                    .tangent_geoms
+                    .iter()
+                    .any(|tg| matches!(tg, TangentGeom::Arc { .. }));
+                let has_line = te
+                    .tangent_geoms
+                    .iter()
+                    .any(|tg| matches!(tg, TangentGeom::Line { .. }));
+
+                if has_arc && has_line && is_thin_polyline {
+                    let edge_color = if is_thick_extrusion {
+                        [0.0, 0.0, 0.0, 1.0]
+                    } else {
+                        color
+                    };
+                    let point_marker =
+                        crate::entities::point::relative_marker_spec(entity, document);
+                    return split_mixed_polyline(
+                        &te.tangent_geoms,
+                        &key_vertices,
+                        &name,
+                        edge_color,
+                        selected,
+                        pattern_length,
+                        pattern,
+                        line_weight_px,
+                        snap_pts,
+                        point_marker,
+                        false,
+                    );
+                }
                 return vec![WireModel {
                     bg_adapt: None,
                     point_marker: None,

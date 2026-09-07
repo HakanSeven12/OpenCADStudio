@@ -63,6 +63,7 @@ fn deliver_or_launch(files: &[String]) {
     let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
     if let Some(stream) = single_instance::try_connect_existing() {
         if single_instance::handoff(stream, &paths) {
+            reassert_accessory_policy();
             return;
         }
     }
@@ -80,6 +81,16 @@ fn deliver_or_launch(files: &[String]) {
         Err(err) => {
             eprintln!("OpenCADStudio launcher: failed to launch the GUI: {err}");
         }
+    }
+    reassert_accessory_policy();
+}
+
+/// Keep the windowless relay out of the Dock after an open event activates it.
+#[cfg(target_os = "macos")]
+fn reassert_accessory_policy() {
+    if let Some(mtm) = MainThreadMarker::new() {
+        NSApplication::sharedApplication(mtm)
+            .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
     }
 }
 
@@ -117,6 +128,15 @@ declare_class!(
                 .map(|path| path.to_string())
                 .collect();
             deliver_or_launch(&files);
+        }
+
+        /// Start or activate the GUI when the bundle is reopened without files.
+        #[method(applicationShouldHandleReopen:hasVisibleWindows:)]
+        fn should_handle_reopen(&self, _sender: &NSApplication, has_visible_windows: bool) -> bool {
+            if !has_visible_windows {
+                deliver_or_launch(&[]);
+            }
+            true
         }
     }
 );

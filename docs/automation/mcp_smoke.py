@@ -110,7 +110,7 @@ def modern(server: Path) -> None:
         "params": {
             "name": "ocs_execute",
             "arguments": {
-                "session_id": "missing",
+                "ocs_session_id": "missing",
                 "request": {"op": "run", "request_id": "run-1"},
             },
             "_meta": meta,
@@ -126,7 +126,7 @@ def modern(server: Path) -> None:
         "method": "tools/call",
         "params": {
             "name": "ocs_execute",
-            "arguments": {"session_id": "missing", "request": {"op": "undo"}},
+            "arguments": {"ocs_session_id": "missing", "request": {"op": "undo"}},
             "_meta": meta,
         },
     })

@@ -17,11 +17,11 @@ The server provides four tools:
 - `ocs_execute` performs one operation or a sequential batch against the real editor.
 - `ocs_capture` returns a bounded PNG of the drawing viewport or complete window.
 
-The normal flow is to call `ocs_sessions`, read the chosen session with `ocs_read`, then pass the returned document state into `ocs_execute`. For example, an undo request has this shape:
+The normal flow is to call `ocs_sessions`, pass its returned `session_id` as `ocs_session_id` to the other tools, read the chosen session with `ocs_read`, then pass the returned document state into `ocs_execute`. For example, an undo request has this shape:
 
 ```json
 {
-  "session_id": "SESSION_FROM_OCS_SESSIONS",
+  "ocs_session_id": "SESSION_FROM_OCS_SESSIONS",
   "request": {
     "op": "undo",
     "request_id": "undo-1",
@@ -37,7 +37,7 @@ A complete command can be sent with `run`. Prompt answers are separated by space
 
 ```json
 {
-  "session_id": "SESSION_FROM_OCS_SESSIONS",
+  "ocs_session_id": "SESSION_FROM_OCS_SESSIONS",
   "request": {
     "op": "run",
     "request_id": "polyline-1",
@@ -52,7 +52,7 @@ Use `batch` when the steps are already known. OCS supplies each step with the st
 
 ```json
 {
-  "session_id": "SESSION_FROM_OCS_SESSIONS",
+  "ocs_session_id": "SESSION_FROM_OCS_SESSIONS",
   "response_detail": "changed_entities",
   "request": {
     "op": "batch",
@@ -71,7 +71,7 @@ Execute responses use `response_detail: "compact"` by default and return only th
 
 ```json
 {
-  "session_id": "SESSION_FROM_OCS_SESSIONS",
+  "ocs_session_id": "SESSION_FROM_OCS_SESSIONS",
   "op": "query",
   "parameters": {"intersections": ["2A", "31"]}
 }

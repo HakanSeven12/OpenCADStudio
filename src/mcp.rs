@@ -22,7 +22,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Call ocs_sessions, then ocs_read state before editing. Preserve session_id, document_id, revision, selection and request_id. Use ocs_read commands with parameters.name for a command manifest. Use ocs_execute batch when several steps are known, and request changed_entities when the resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path.";
+const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Preserve document_id, revision, selection and request_id. Use ocs_read commands with parameters.name for a command manifest. Use ocs_execute batch when several steps are known, and request changed_entities when the resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -756,7 +756,7 @@ fn call_tool(
             Ok(Value::Array(sessions(launch)?))
         }
         "ocs_read" => {
-            let session_id = required_string(arguments, "session_id")?;
+            let session_id = required_string(arguments, "ocs_session_id")?;
             let op = arguments["op"].as_str().unwrap_or("state");
             if !READ_OPS.contains(&op) {
                 return Err("Use ocs_execute for mutations".into());
@@ -769,7 +769,7 @@ fn call_tool(
             client(clients, session_id)?.request(Value::Object(request), 30.0)
         }
         "ocs_execute" => {
-            let session_id = required_string(arguments, "session_id")?;
+            let session_id = required_string(arguments, "ocs_session_id")?;
             let request = arguments["request"]
                 .as_object()
                 .cloned()
@@ -795,7 +795,7 @@ fn call_tool(
             shape_execute_response(response, detail, gui)
         }
         "ocs_capture" => {
-            let session_id = required_string(arguments, "session_id")?;
+            let session_id = required_string(arguments, "ocs_session_id")?;
             let path = std::env::temp_dir().join(format!("ocs-capture-{}.png", random_id()?));
             let scope = arguments["scope"].as_str().unwrap_or("viewport");
             let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
@@ -944,21 +944,21 @@ fn tool_definitions() -> Value {
         {
             "name":"ocs_read",
             "description":"Read state, command manifests, entities, layers, properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name for detailed commands help."},"search":{"type":"string","description":"Case-insensitive command-name search."},"document_id":{"type":"integer","minimum":0},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity handles for query or measure."},"type":{"type":"string","description":"Entity type filter for query."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["session_id"],"additionalProperties":false},
+            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name for detailed commands help."},"search":{"type":"string","description":"Case-insensitive command-name search."},"document_id":{"type":"integer","minimum":0},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity handles for query or measure."},"type":{"type":"string","description":"Entity type filter for query."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["ocs_session_id"],"additionalProperties":false},
             "outputSchema":read_output_schema(),
             "annotations":{"title":"Read OCS state","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_execute",
             "description":"Execute semantic OCS actions. Use current state fields and a unique request_id. Use run for one complete command, batch to remove round trips, or start plus input for guided steps. accepted, running and waiting_input are not completion.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Total time to wait for completion before returning."},"response_detail":{"type":"string","enum":["compact","changed_entities","full"],"default":"compact","description":"compact returns only state needed for the next edit; changed_entities also returns current geometry for changed handles; full preserves the complete editor state."}},"required":["session_id","request"],"additionalProperties":false},
+            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Total time to wait for completion before returning."},"response_detail":{"type":"string","enum":["compact","changed_entities","full"],"default":"compact","description":"compact returns only state needed for the next edit; changed_entities also returns current geometry for changed handles; full preserves the complete editor state."}},"required":["ocs_session_id","request"],"additionalProperties":false},
             "outputSchema":execute_output_schema(),
             "annotations":{"title":"Execute OCS action","readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_capture",
             "description":"Capture the actual current OCS drawing viewport or window as a bounded PNG for visual verification.",
-            "inputSchema":{"type":"object","properties":{"session_id":{"type":"string","minLength":1,"description":"Session returned by ocs_sessions."},"scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},"max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."}},"required":["session_id"],"additionalProperties":false},
+            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},"max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."}},"required":["ocs_session_id"],"additionalProperties":false},
             "annotations":{"title":"Capture OCS window","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
     ])
@@ -1271,6 +1271,15 @@ mod tests {
             ["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"]
         );
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], false);
+        for tool in [&tools[1], &tools[2], &tools[3]] {
+            assert!(tool["inputSchema"]["properties"]
+                .get("session_id")
+                .is_none());
+            assert!(tool["inputSchema"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("ocs_session_id")));
+        }
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["request"]["required"],
             json!(["op", "request_id"])
@@ -1368,7 +1377,7 @@ mod tests {
     fn read_tool_rejects_mutations_before_connecting() {
         let mut clients = HashMap::new();
         let called = handle_message(
-            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ocs_read","arguments":{"session_id":"missing","op":"save"}}}),
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ocs_read","arguments":{"ocs_session_id":"missing","op":"save"}}}),
             &mut clients,
             &mut TaskStore::default(),
         )
@@ -1397,7 +1406,7 @@ mod tests {
     fn execute_requires_a_visible_request_id() {
         let mut clients = HashMap::new();
         let called = handle_message(
-            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"session_id":"missing","request":{"op":"undo"}}}}),
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"ocs_session_id":"missing","request":{"op":"undo"}}}}),
             &mut clients,
             &mut TaskStore::default(),
         )
@@ -1415,7 +1424,7 @@ mod tests {
     fn execute_errors_explain_missing_operation_fields() {
         let mut clients = HashMap::new();
         let called = handle_message(
-            json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"session_id":"missing","request":{"op":"run","request_id":"run-1"}}}}),
+            json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"ocs_session_id":"missing","request":{"op":"run","request_id":"run-1"}}}}),
             &mut clients,
             &mut TaskStore::default(),
         )

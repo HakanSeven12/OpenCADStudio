@@ -159,12 +159,12 @@ pub fn kernel_body(solid: &Solid3D) -> Option<KernelBody> {
     kernel_acis_body(&solid.acis_data)
 }
 
-pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
-    kernel_acis_body(&surface.acis_data)
-}
-
 pub fn kernel_region_body(region: &Region) -> Option<KernelBody> {
     kernel_acis_body(&region.acis_data)
+}
+
+pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
+    kernel_acis_body(&surface.acis_data)
 }
 
 fn kernel_acis_body(acis: &acadrust::entities::AcisData) -> Option<KernelBody> {

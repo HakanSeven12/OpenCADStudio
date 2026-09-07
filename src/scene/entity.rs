@@ -602,11 +602,11 @@ impl Scene {
                     Some(EntityType::Solid3D(solid)) => {
                         crate::scene::convert::solid3d_tess::kernel_body(solid)
                     }
-                    Some(EntityType::Surface(surface)) => {
-                        crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
-                    }
                     Some(EntityType::Region(region)) => {
                         crate::scene::convert::solid3d_tess::kernel_region_body(region)
+                    }
+                    Some(EntityType::Surface(surface)) => {
+                        crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
                     }
                     _ => None,
                 })?;

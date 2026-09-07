@@ -9,6 +9,7 @@ use acadrust::{
 };
 use cadkernel::brep::Body;
 use iced::Task;
+use std::collections::HashMap;
 
 use super::Message;
 use crate::modules::model::boolean_cmd::BoolOp;
@@ -73,6 +74,27 @@ struct PreparedSubtract {
     bases: Vec<Handle>,
     cutters: Vec<Handle>,
     result: Option<(Handle, EntityType, Body, PreparedSolidDisplay)>,
+}
+
+struct IntersectGroup {
+    kind: UnionEntityKind,
+    plane: Option<cadkernel::space::Plane>,
+    handles: Vec<Handle>,
+}
+
+enum PreparedIntersectOutcome {
+    Replace {
+        retained: Handle,
+        entity: EntityType,
+        body: Body,
+        display: PreparedSolidDisplay,
+    },
+    Consume,
+}
+
+struct PreparedIntersect {
+    handles: Vec<Handle>,
+    outcome: PreparedIntersectOutcome,
 }
 
 fn inherited_common(source: &EntityCommon) -> EntityCommon {
@@ -183,7 +205,7 @@ fn subtract_bodies(
     Ok(result)
 }
 
-fn entity_with_subtract_body(mut source: EntityType, body: &Body) -> Option<EntityType> {
+fn entity_with_boolean_body(mut source: EntityType, body: &Body) -> Option<EntityType> {
     let document = crate::scene::convert::acis_export::solid_to_sat(body)?;
     let wires = solid_model::edge_wires(body);
     if matches!(
@@ -220,6 +242,39 @@ fn entity_with_subtract_body(mut source: EntityType, body: &Body) -> Option<Enti
         _ => return None,
     }
     Some(source)
+}
+
+enum IntersectBodyOutcome {
+    Area(Body),
+    Touching,
+    Disjoint,
+}
+
+fn intersect_bodies(
+    kind: UnionEntityKind,
+    bodies: Vec<Body>,
+) -> Result<IntersectBodyOutcome, cadkernel::brep::Snag> {
+    if kind == UnionEntityKind::Solid {
+        let mut operands = bodies.into_iter();
+        let mut result = operands
+            .next()
+            .ok_or(cadkernel::brep::Snag::CutRefused)?;
+        for operand in operands {
+            result = solid_model::boolean_result(Bool::Intersect, &result, &operand)?;
+            if result.faces.is_empty() {
+                return Ok(IntersectBodyOutcome::Disjoint);
+            }
+        }
+        return Ok(IntersectBodyOutcome::Area(result));
+    }
+
+    let references = bodies.iter().collect::<Vec<_>>();
+    let tolerance = cadkernel::brep::operation_tolerance(&references);
+    Ok(match cadkernel::brep::intersect_planar_regions(&bodies, tolerance)? {
+        cadkernel::brep::PlanarIntersection::Area(body) => IntersectBodyOutcome::Area(body),
+        cadkernel::brep::PlanarIntersection::Touching => IntersectBodyOutcome::Touching,
+        cadkernel::brep::PlanarIntersection::Disjoint => IntersectBodyOutcome::Disjoint,
+    })
 }
 
 impl super::OpenCADStudio {
@@ -431,6 +486,71 @@ impl super::OpenCADStudio {
             .any(|group| group.handles.len() >= 2)
     }
 
+    pub(super) fn intersect_ready(&self) -> bool {
+        self.union_ready()
+    }
+
+    fn selected_intersect_handles(&self) -> Vec<Handle> {
+        let scene = &self.tabs[self.active_tab].scene;
+        scene
+            .selected_handles_in_order()
+            .into_iter()
+            .filter(|handle| !scene.is_layer_locked(*handle))
+            .filter(|handle| {
+                scene
+                    .document
+                    .get_entity(*handle)
+                    .and_then(UnionEntityKind::from_entity)
+                    .is_some()
+            })
+            .collect()
+    }
+
+    fn intersect_groups(
+        &self,
+        handles: &[Handle],
+        bodies: &HashMap<Handle, Body>,
+    ) -> Vec<IntersectGroup> {
+        let scene = &self.tabs[self.active_tab].scene;
+        let mut groups = Vec::<IntersectGroup>::new();
+        for handle in handles {
+            let Some(kind) = scene
+                .document
+                .get_entity(*handle)
+                .and_then(UnionEntityKind::from_entity)
+            else {
+                continue;
+            };
+            let plane = (kind != UnionEntityKind::Solid)
+                .then(|| planar_body_plane(&bodies[handle]))
+                .flatten();
+            if let Some(group) = groups.iter_mut().find(|group| {
+                group.kind == kind
+                    && if kind == UnionEntityKind::Solid {
+                        true
+                    } else {
+                        match (group.plane, plane) {
+                            (Some(group_plane), Some(_)) => {
+                                coplanar_bodies(group_plane, &bodies[handle])
+                            }
+                            (None, None) => true,
+                            _ => false,
+                        }
+                    }
+            }) {
+                group.handles.push(*handle);
+            } else {
+                groups.push(IntersectGroup {
+                    kind,
+                    plane,
+                    handles: vec![*handle],
+                });
+            }
+        }
+        groups.retain(|group| group.handles.len() >= 2);
+        groups
+    }
+
     fn replace_solid_body(&mut self, handle: Handle, result: Body, label: &str) -> bool {
         let i = self.active_tab;
         let Some(document) =
@@ -526,10 +646,198 @@ impl super::OpenCADStudio {
         Task::none()
     }
 
+    /// Intersect compatible selected solids, Regions, and coplanar Surfaces.
+    pub(super) fn solid_intersect(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let mut handles = self.selected_intersect_handles();
+        self.tabs[i].scene.restore_solid_models(&handles);
+        handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        let bodies = handles
+            .iter()
+            .filter_map(|handle| {
+                self.tabs[i]
+                    .scene
+                    .solid_models
+                    .get(handle)
+                    .cloned()
+                    .map(|body| (*handle, body))
+            })
+            .collect::<HashMap<_, _>>();
+        let groups = self.intersect_groups(&handles, &bodies);
+        if groups.is_empty() {
+            self.command_line.push_error(
+                crate::t!("INTERSECT: select at least two solids, Regions, or coplanar Surfaces of a compatible type.")
+                    .as_ref(),
+            );
+            return Task::none();
+        }
+
+        let mut prepared = Vec::new();
+        let mut retained_without_change = 0usize;
+        for group in groups {
+            let operands = group
+                .handles
+                .iter()
+                .map(|handle| bodies[handle].clone())
+                .collect::<Vec<_>>();
+            let outcome = match intersect_bodies(group.kind, operands) {
+                Ok(outcome) => outcome,
+                Err(cadkernel::brep::Snag::NoClosedForm) => {
+                    self.command_line.push_error(
+                        crate::t!("INTERSECT: the selected objects do not have a supported coplanar surface intersection.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::Coincident) => {
+                    self.command_line.push_error(
+                        crate::t!("INTERSECT: the selected coincident geometry is ambiguous.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::CutRefused) => {
+                    self.command_line.push_error(
+                        crate::t!("INTERSECT: the selected topology could not be intersected safely.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+            };
+
+            match outcome {
+                IntersectBodyOutcome::Area(body) => {
+                    let retained = group.handles[0];
+                    let Some(source) = self.tabs[i].scene.document.get_entity(retained).cloned()
+                    else {
+                        return Task::none();
+                    };
+                    let Some(entity) = entity_with_boolean_body(source, &body) else {
+                        self.command_line.push_error(
+                            crate::t!("The INTERSECT result could not be encoded as ACIS.")
+                                .as_ref(),
+                        );
+                        return Task::none();
+                    };
+                    let Some(display) = self.tabs[i]
+                        .scene
+                        .prepare_solid_model_display(retained, &body)
+                        .filter(|display| display.0.complete)
+                    else {
+                        self.command_line.push_error(
+                            crate::t!("The INTERSECT result could not be displayed completely. The original objects were retained.")
+                                .as_ref(),
+                        );
+                        return Task::none();
+                    };
+                    prepared.push(PreparedIntersect {
+                        handles: group.handles,
+                        outcome: PreparedIntersectOutcome::Replace {
+                            retained,
+                            entity,
+                            body,
+                            display,
+                        },
+                    });
+                }
+                IntersectBodyOutcome::Touching
+                    if group.kind == UnionEntityKind::Region
+                        || group.kind == UnionEntityKind::Surface =>
+                {
+                    prepared.push(PreparedIntersect {
+                        handles: group.handles,
+                        outcome: PreparedIntersectOutcome::Consume,
+                    });
+                }
+                IntersectBodyOutcome::Disjoint if group.kind == UnionEntityKind::Region => {
+                    prepared.push(PreparedIntersect {
+                        handles: group.handles,
+                        outcome: PreparedIntersectOutcome::Consume,
+                    });
+                }
+                IntersectBodyOutcome::Touching | IntersectBodyOutcome::Disjoint => {
+                    retained_without_change += group.handles.len();
+                }
+            }
+        }
+
+        if prepared.is_empty() {
+            self.command_line.push_output(
+                crate::tf!(
+                    "INTERSECT: no positive-area common result; %{count} original object(s) retained.",
+                    count = retained_without_change
+                )
+                .as_ref(),
+            );
+            return Task::none();
+        }
+
+        let record_history = self.tabs[i].scene.document.header.record_solid_history;
+        self.push_undo_snapshot(i, "INTERSECT");
+        let mut results = Vec::new();
+        let mut consumed = Vec::new();
+        for group in prepared {
+            match group.outcome {
+                PreparedIntersectOutcome::Replace {
+                    retained,
+                    entity,
+                    body,
+                    display,
+                } => {
+                    self.tabs[i].scene.delete_solid_history(retained);
+                    if !self.tabs[i].scene.update_entity(entity) {
+                        self.command_line.push_error(
+                            crate::t!("INTERSECT: the retained object could not be updated.")
+                                .as_ref(),
+                        );
+                        return Task::none();
+                    }
+                    if record_history
+                        && matches!(
+                            self.tabs[i].scene.document.get_entity(retained),
+                            Some(EntityType::Solid3D(_))
+                        )
+                    {
+                        let history = solid_history::brep_op(&body);
+                        self.tabs[i].scene.create_solid_history(retained, history);
+                    }
+                    self.tabs[i]
+                        .scene
+                        .register_prepared_solid_model(retained, body, display);
+                    results.push(retained);
+                    consumed.extend(
+                        group
+                            .handles
+                            .into_iter()
+                            .filter(|handle| *handle != retained),
+                    );
+                }
+                PreparedIntersectOutcome::Consume => consumed.extend(group.handles),
+            }
+        }
+        self.tabs[i].scene.erase_entities(&consumed);
+        self.tabs[i].scene.deselect_all();
+        for handle in &results {
+            self.tabs[i].scene.select_entity(*handle, false);
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        self.command_line.push_output(
+            crate::tf!(
+                "INTERSECT: created %{count} result object(s).",
+                count = results.len()
+            )
+            .as_ref(),
+        );
+        Task::none()
+    }
+
     /// Run a boolean over the selected solids in selection order.
     pub(super) fn solid_boolean(&mut self, op: BoolOp) -> Task<Message> {
-        if op == BoolOp::Union {
-            return self.union_selected_entities();
+        match op {
+            BoolOp::Union => return self.union_selected_entities(),
+            BoolOp::Intersect => return self.solid_intersect(),
+            BoolOp::Subtract => {}
         }
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
@@ -890,7 +1198,7 @@ impl super::OpenCADStudio {
                 let Some(source) = self.tabs[i].scene.document.get_entity(retained).cloned() else {
                     return Task::none();
                 };
-                let Some(entity) = entity_with_subtract_body(source, &result) else {
+                let Some(entity) = entity_with_boolean_body(source, &result) else {
                     self.command_line.push_error(
                         crate::t!("The SUBTRACT result could not be encoded as ACIS.").as_ref(),
                     );

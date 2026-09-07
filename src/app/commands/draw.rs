@@ -990,22 +990,7 @@ impl OpenCADStudio {
 
             "INTERSECT" => {
                 use crate::modules::model::boolean_cmd::BoolOp;
-                let solid_count = {
-                    let scene = &self.tabs[i].scene;
-                    scene
-                        .selected_handles_in_order()
-                        .into_iter()
-                        .filter(|handle| !scene.is_layer_locked(*handle))
-                        .filter(|handle| {
-                            matches!(
-                                scene.document.get_entity(*handle),
-                                Some(acadrust::EntityType::Solid3D(_))
-                            )
-                        })
-                        .take(2)
-                        .count()
-                };
-                if solid_count < 2 {
+                if !self.intersect_ready() {
                     use crate::modules::draw::select::SelectObjectsCommand;
                     let selection = SelectObjectsCommand::new(cmd);
                     self.command_line.push_info(&selection.prompt());

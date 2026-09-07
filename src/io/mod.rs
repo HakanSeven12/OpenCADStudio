@@ -9,6 +9,8 @@ pub mod edit_lock;
 pub mod obj;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod single_instance;
+#[cfg(target_os = "macos")]
+pub mod macos_open_events;
 pub mod pdf_export;
 pub mod plot_style;
 pub mod print_to_printer;

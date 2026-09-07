@@ -1,7 +1,9 @@
 // Kernel B-rep solid modelling and exact ACIS persistence.
 
 use acadrust::{
-    entities::Solid3D, objects::SolidHistoryOperation, EntityType, Handle,
+    entities::{EntityCommon, Region, Solid3D, Surface, SurfaceKind},
+    objects::SolidHistoryOperation,
+    EntityType, Handle,
 };
 use cadkernel::brep::Body;
 use iced::Task;
@@ -11,19 +13,112 @@ use crate::modules::model::boolean_cmd::BoolOp;
 use crate::scene::model::solid_history;
 use crate::scene::model::solid_model::{self, Bool};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UnionEntityKind {
+    Solid,
+    Region,
+    Surface,
+}
+
+impl UnionEntityKind {
+    fn from_entity(entity: &EntityType) -> Option<Self> {
+        Some(match entity {
+            EntityType::Solid3D(_) => Self::Solid,
+            EntityType::Region(_) => Self::Region,
+            EntityType::Surface(_) => Self::Surface,
+            _ => return None,
+        })
+    }
+}
+
+struct UnionGroup {
+    kind: UnionEntityKind,
+    handles: Vec<Handle>,
+}
+
+struct PreparedUnion {
+    kind: UnionEntityKind,
+    handles: Vec<Handle>,
+    body: Body,
+    common: EntityCommon,
+}
+
+fn inherited_common(source: &EntityCommon) -> EntityCommon {
+    let mut result = EntityCommon::new();
+    result.layer = source.layer.clone();
+    result.color = source.color;
+    result.line_weight = source.line_weight;
+    result.linetype = source.linetype.clone();
+    result.linetype_handle = source.linetype_handle;
+    result.linetype_scale = source.linetype_scale;
+    result.transparency = source.transparency;
+    result.color_name = source.color_name.clone();
+    result.invisible = source.invisible;
+    result.color_book_handle = source.color_book_handle;
+    result.full_visual_style_handle = source.full_visual_style_handle;
+    result.face_visual_style_handle = source.face_visual_style_handle;
+    result.edge_visual_style_handle = source.edge_visual_style_handle;
+    result.material_flags = source.material_flags;
+    result.material_handle = source.material_handle;
+    result.shadow_flags = source.shadow_flags;
+    result.plotstyle_flags = source.plotstyle_flags;
+    result.plotstyle_handle = source.plotstyle_handle;
+    result
+}
+
+fn union_bodies(
+    kind: UnionEntityKind,
+    bodies: Vec<Body>,
+) -> Result<Body, cadkernel::brep::Snag> {
+    if kind == UnionEntityKind::Solid {
+        let mut operands = bodies.into_iter();
+        let mut result = operands
+            .next()
+            .ok_or(cadkernel::brep::Snag::CutRefused)?;
+        for operand in operands {
+            result = solid_model::boolean_result(Bool::Union, &result, &operand)?;
+        }
+        return Ok(result);
+    }
+    let references = bodies.iter().collect::<Vec<_>>();
+    let tolerance = cadkernel::brep::operation_tolerance(&references);
+    cadkernel::brep::union_planar_regions(&bodies, tolerance)
+}
+
 impl super::OpenCADStudio {
     /// Add a solid and register its persistent B-rep.
     pub(super) fn add_solid_model(
         &mut self,
+        entity: EntityType,
+        solid: Body,
+        history: SolidHistoryOperation,
+    ) -> Handle {
+        self.add_solid_model_inner(entity, solid, history, true)
+    }
+
+    fn add_solid_model_preserving_style(
+        &mut self,
+        entity: EntityType,
+        solid: Body,
+        history: SolidHistoryOperation,
+    ) -> Handle {
+        self.add_solid_model_inner(entity, solid, history, false)
+    }
+
+    fn add_solid_model_inner(
+        &mut self,
         mut entity: EntityType,
         solid: Body,
         history: SolidHistoryOperation,
+        apply_creation_style: bool,
     ) -> Handle {
         let i = self.active_tab;
         let EntityType::Solid3D(inner) = &mut entity else {
             return Handle::NULL;
         };
-        inner.common.plotstyle_flags = 2;
+        if apply_creation_style {
+            inner.common.plotstyle_flags = 2;
+        }
         inner.wires = solid_model::edge_wires(&solid);
         let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid)
         else {
@@ -32,7 +127,12 @@ impl super::OpenCADStudio {
             return Handle::NULL;
         };
         inner.set_sat_document(&document);
-        let Some(handle) = self.commit_entity_handle(entity) else {
+        let handle = if apply_creation_style {
+            self.commit_entity_handle(entity)
+        } else {
+            self.commit_entity_handle_preserve_style(entity)
+        };
+        let Some(handle) = handle else {
             return Handle::NULL;
         };
         let require_complete = matches!(history, SolidHistoryOperation::Loft(_));
@@ -52,14 +152,33 @@ impl super::OpenCADStudio {
     /// exact B-rep for shaded and wireframe display.
     pub(super) fn add_surface_model(
         &mut self,
+        entity: EntityType,
+        surface: Body,
+    ) -> Handle {
+        self.add_surface_model_inner(entity, surface, true)
+    }
+
+    fn add_surface_model_preserving_style(
+        &mut self,
+        entity: EntityType,
+        surface: Body,
+    ) -> Handle {
+        self.add_surface_model_inner(entity, surface, false)
+    }
+
+    fn add_surface_model_inner(
+        &mut self,
         mut entity: EntityType,
         surface: Body,
+        apply_creation_style: bool,
     ) -> Handle {
         let i = self.active_tab;
         let EntityType::Surface(inner) = &mut entity else {
             return Handle::NULL;
         };
-        inner.common.plotstyle_flags = 2;
+        if apply_creation_style {
+            inner.common.plotstyle_flags = 2;
+        }
         inner.wires = solid_model::edge_wires(&surface);
         let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&surface)
         else {
@@ -68,13 +187,56 @@ impl super::OpenCADStudio {
             return Handle::NULL;
         };
         inner.acis_data = acadrust::entities::AcisData::from_sat(&document.to_sat_string());
-        let Some(handle) = self.commit_entity_handle(entity) else {
+        let handle = if apply_creation_style {
+            self.commit_entity_handle(entity)
+        } else {
+            self.commit_entity_handle_preserve_style(entity)
+        };
+        let Some(handle) = handle else {
             return Handle::NULL;
         };
         let require_complete = self.tabs[i].scene.document.get_entity(handle).is_some_and(|entity|
             matches!(entity, EntityType::Surface(value) if value.kind == acadrust::entities::SurfaceKind::Lofted));
         if !self.tabs[i].scene.register_solid_model(handle, surface)
             || (require_complete && self.tabs[i].scene.meshes.get(&handle).is_none_or(|mesh| !mesh.complete)) {
+            self.tabs[i].scene.rollback_new_entities(&[handle]);
+            return Handle::NULL;
+        }
+        handle
+    }
+
+    pub(super) fn add_region_model(&mut self, region: Region, body: Body) -> Handle {
+        self.add_region_model_inner(region, body, false)
+    }
+
+    fn add_region_model_preserving_style(&mut self, region: Region, body: Body) -> Handle {
+        self.add_region_model_inner(region, body, true)
+    }
+
+    fn add_region_model_inner(
+        &mut self,
+        mut region: Region,
+        body: Body,
+        preserve_style: bool,
+    ) -> Handle {
+        let i = self.active_tab;
+        region.wires = solid_model::edge_wires(&body);
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
+            self.command_line
+                .push_error(crate::t!("The region could not be encoded as ACIS.").as_ref());
+            return Handle::NULL;
+        };
+        region.set_sat_document(&document);
+        let entity = EntityType::Region(region);
+        let handle = if preserve_style {
+            self.commit_entity_handle_preserve_style(entity)
+        } else {
+            self.commit_entity_handle(entity)
+        };
+        let Some(handle) = handle else {
+            return Handle::NULL;
+        };
+        if !self.tabs[i].scene.register_solid_model(handle, body) {
             self.tabs[i].scene.rollback_new_entities(&[handle]);
             return Handle::NULL;
         }
@@ -98,6 +260,38 @@ impl super::OpenCADStudio {
         self.tabs[i].scene.restore_solid_models(&handles);
         handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
         handles
+    }
+
+    fn selected_union_groups(&self) -> Vec<UnionGroup> {
+        let scene = &self.tabs[self.active_tab].scene;
+        let mut groups: Vec<UnionGroup> = Vec::new();
+        for handle in scene.selected_handles_in_order() {
+            if scene.is_layer_locked(handle) {
+                continue;
+            }
+            let Some(kind) = scene
+                .document
+                .get_entity(handle)
+                .and_then(UnionEntityKind::from_entity)
+            else {
+                continue;
+            };
+            if let Some(group) = groups.iter_mut().find(|group| group.kind == kind) {
+                group.handles.push(handle);
+            } else {
+                groups.push(UnionGroup {
+                    kind,
+                    handles: vec![handle],
+                });
+            }
+        }
+        groups
+    }
+
+    pub(super) fn union_ready(&self) -> bool {
+        self.selected_union_groups()
+            .iter()
+            .any(|group| group.handles.len() >= 2)
     }
 
     fn replace_solid_body(&mut self, handle: Handle, result: Body, label: &str) -> bool {
@@ -197,6 +391,9 @@ impl super::OpenCADStudio {
 
     /// Run a boolean over the selected solids in selection order.
     pub(super) fn solid_boolean(&mut self, op: BoolOp) -> Task<Message> {
+        if op == BoolOp::Union {
+            return self.union_selected_entities();
+        }
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.len() < 2 {
@@ -240,6 +437,131 @@ impl super::OpenCADStudio {
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();
+        Task::none()
+    }
+
+    fn union_selected_entities(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let mut groups = self.selected_union_groups();
+        let handles = groups
+            .iter()
+            .flat_map(|group| group.handles.iter().copied())
+            .collect::<Vec<_>>();
+        self.tabs[i].scene.restore_solid_models(&handles);
+        for group in &mut groups {
+            group
+                .handles
+                .retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        }
+        groups.retain(|group| group.handles.len() >= 2);
+        if groups.is_empty() {
+            self.command_line.push_error(
+                crate::t!("UNION: select at least two solids, Regions, or planar Surfaces of the same type.")
+                    .as_ref(),
+            );
+            return Task::none();
+        }
+
+        let mut prepared = Vec::with_capacity(groups.len());
+        for group in groups {
+            let bodies = group
+                .handles
+                .iter()
+                .filter_map(|handle| self.tabs[i].scene.solid_models.get(handle).cloned())
+                .collect::<Vec<_>>();
+            let result = match union_bodies(group.kind, bodies) {
+                Ok(result) => result,
+                Err(cadkernel::brep::Snag::NoClosedForm) => {
+                    self.command_line.push_error(
+                        crate::t!("UNION: the selected geometry includes an unsupported surface intersection.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::Coincident) => {
+                    self.command_line.push_error(
+                        crate::t!("UNION: the selected coincident geometry is ambiguous.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::CutRefused) => {
+                    self.command_line.push_error(
+                        crate::t!("UNION: the selected topology could not be closed safely.").as_ref(),
+                    );
+                    return Task::none();
+                }
+            };
+            if crate::scene::convert::acis_export::solid_to_sat(&result).is_none() {
+                self.command_line.push_error(
+                    crate::t!("The UNION result could not be encoded as ACIS.").as_ref(),
+                );
+                return Task::none();
+            }
+            let Some(source) = group
+                .handles
+                .first()
+                .and_then(|handle| self.tabs[i].scene.document.get_entity(*handle))
+            else {
+                return Task::none();
+            };
+            prepared.push(PreparedUnion {
+                kind: group.kind,
+                handles: group.handles,
+                body: result,
+                common: inherited_common(source.common()),
+            });
+        }
+
+        let consumed = prepared
+            .iter()
+            .flat_map(|group| group.handles.iter().copied())
+            .collect::<Vec<_>>();
+        self.push_undo_snapshot(i, "UNION");
+        let mut created = Vec::with_capacity(prepared.len());
+        for group in prepared {
+            let handle = match group.kind {
+                UnionEntityKind::Solid => {
+                    let history = solid_history::brep_op(&group.body);
+                    let mut entity = Solid3D::new();
+                    entity.common = group.common;
+                    self.add_solid_model_preserving_style(
+                        EntityType::Solid3D(entity),
+                        group.body,
+                        history,
+                    )
+                }
+                UnionEntityKind::Region => {
+                    let mut entity = Region::new();
+                    entity.common = group.common;
+                    self.add_region_model_preserving_style(entity, group.body)
+                }
+                UnionEntityKind::Surface => {
+                    let mut entity = Surface::new(SurfaceKind::Generic);
+                    entity.common = group.common;
+                    self.add_surface_model_preserving_style(
+                        EntityType::Surface(entity),
+                        group.body,
+                    )
+                }
+            };
+            if handle.is_null() {
+                self.tabs[i].scene.rollback_new_entities(&created);
+                self.discard_last_undo_entry(i);
+                return Task::none();
+            }
+            created.push(handle);
+        }
+
+        self.tabs[i].scene.erase_entities(&consumed);
+        self.tabs[i].scene.deselect_all();
+        for handle in &created {
+            self.tabs[i].scene.select_entity(*handle, false);
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        self.command_line.push_output(
+            crate::tf!("UNION: created %{count} result object(s).", count = created.len()).as_ref(),
+        );
         Task::none()
     }
 

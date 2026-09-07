@@ -605,6 +605,9 @@ impl Scene {
                     Some(EntityType::Surface(surface)) => {
                         crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
                     }
+                    Some(EntityType::Region(region)) => {
+                        crate::scene::convert::solid3d_tess::kernel_region_body(region)
+                    }
                     _ => None,
                 })?;
                 Some((handle, body))

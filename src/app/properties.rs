@@ -440,15 +440,15 @@ impl OpenCADStudio {
                     let display_entity = dispatch::entity_in_working_plane(contextual.as_ref(), plane);
                     let entity = &display_entity;
                     let group_names = self.tabs[i].scene.group_names_for_entity(handle);
-                    let specialized_primitive =
-                        crate::scene::model::solid_history::has_specialized_primitive_properties(
+                    let compact_solid =
+                        crate::scene::model::solid_history::has_compact_solid_properties(
                             &self.tabs[i].scene.document,
                             handle,
                         );
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
-                    if specialized_primitive {
-                        retain_specialized_primitive_sections(&mut sections);
+                    if compact_solid {
+                        retain_compact_solid_sections(&mut sections);
                     }
                     sections.extend(
                         crate::scene::model::solid_history::primitive_properties(
@@ -636,7 +636,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !specialized_primitive && matches!(
+                    if !compact_solid && matches!(
                         entity,
                         acadrust::EntityType::Solid3D(_)
                             | acadrust::EntityType::Region(_)
@@ -710,7 +710,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !specialized_primitive {
+                    if !compact_solid {
                         sections.extend(crate::entities::object_data::sections(
                             &self.tabs[i].scene.document,
                             &self.tabs[i].scene.object_data_cache,
@@ -2068,8 +2068,8 @@ impl OpenCADStudio {
                             });
                         }
                     }
-                    if specialized_primitive {
-                        retain_specialized_primitive_sections(&mut sections);
+                    if compact_solid {
+                        retain_compact_solid_sections(&mut sections);
                     }
                     let title = match entity {
                         acadrust::EntityType::Insert(ins) => {
@@ -2166,7 +2166,7 @@ impl OpenCADStudio {
                         .collect();
                     let mut sections = aggregate_sections(&local_refs, &text_style_names);
                     if local_refs.iter().all(|(handle, _)| {
-                        crate::scene::model::solid_history::has_specialized_primitive_properties(
+                        crate::scene::model::solid_history::has_compact_solid_properties(
                             &self.tabs[i].scene.document,
                             *handle,
                         )
@@ -2591,7 +2591,7 @@ impl OpenCADStudio {
         &mut self,
         entity: acadrust::EntityType,
     ) -> Option<Handle> {
-        self.commit_entity_handle_with_policies(entity, false, false)
+        self.commit_entity_handle_with_policies(entity, false, false, false)
     }
 
     pub(super) fn commit_entity_handle_with_dimension_policy(
@@ -2603,6 +2603,7 @@ impl OpenCADStudio {
             entity,
             preserve_dimension_layer_and_style,
             false,
+            false,
         )
     }
 
@@ -2610,7 +2611,14 @@ impl OpenCADStudio {
         &mut self,
         entity: acadrust::EntityType,
     ) -> Option<Handle> {
-        self.commit_entity_handle_with_policies(entity, false, true)
+        self.commit_entity_handle_with_policies(entity, false, true, false)
+    }
+
+    pub(super) fn commit_entity_handle_preserve_style(
+        &mut self,
+        entity: acadrust::EntityType,
+    ) -> Option<Handle> {
+        self.commit_entity_handle_with_policies(entity, false, true, true)
     }
 
     fn commit_entity_handle_with_policies(
@@ -2618,6 +2626,7 @@ impl OpenCADStudio {
         mut entity: acadrust::EntityType,
         preserve_dimension_layer_and_style: bool,
         preserve_entity_layer: bool,
+        preserve_entity_style: bool,
     ) -> Option<Handle> {
         let i = self.active_tab;
         let tracks_dimension_chain = matches!(
@@ -2735,25 +2744,32 @@ impl OpenCADStudio {
             }
         }
 
-        crate::scene::view::dispatch::apply_color(&mut entity, self.ribbon.active_color);
-        crate::scene::view::dispatch::apply_common_prop(
-            &mut entity,
-            "linetype",
-            &self.ribbon.active_linetype.clone(),
-        );
-        crate::scene::view::dispatch::apply_line_weight(&mut entity, self.ribbon.active_lineweight);
-        // CELTSCALE (header.current_entity_linetype_scale): new entities
-        // pick up the document's saved per-entity linetype scale. The user
-        // can override per entity later via the properties panel.
-        let celtscale = self.tabs[i].scene.document.header.current_entity_linetype_scale;
-        if (celtscale - 1.0).abs() > 1e-9 && celtscale.abs() > 1e-9 {
-            entity.common_mut().linetype_scale = celtscale;
+        if !preserve_entity_style {
+            crate::scene::view::dispatch::apply_color(&mut entity, self.ribbon.active_color);
+            crate::scene::view::dispatch::apply_common_prop(
+                &mut entity,
+                "linetype",
+                &self.ribbon.active_linetype.clone(),
+            );
+            crate::scene::view::dispatch::apply_line_weight(
+                &mut entity,
+                self.ribbon.active_lineweight,
+            );
+            // CELTSCALE (header.current_entity_linetype_scale): new entities
+            // pick up the document's saved per-entity linetype scale. The user
+            // can override per entity later via the properties panel.
+            let celtscale = self.tabs[i].scene.document.header.current_entity_linetype_scale;
+            if (celtscale - 1.0).abs() > 1e-9 && celtscale.abs() > 1e-9 {
+                entity.common_mut().linetype_scale = celtscale;
+            }
         }
 
-        crate::scene::creation_style::apply_current_creation_styles(
-            &self.tabs[i].scene.document,
-            &mut entity,
-        );
+        if !preserve_entity_style {
+            crate::scene::creation_style::apply_current_creation_styles(
+                &self.tabs[i].scene.document,
+                &mut entity,
+            );
+        }
         if let (Some((layer, style_name)), acadrust::EntityType::Dimension(dimension)) =
             (inherited_dimension, &mut entity)
         {
@@ -3061,7 +3077,7 @@ fn aggregate_solid_history_sections(
     merged
 }
 
-fn retain_specialized_primitive_sections(
+fn retain_compact_solid_sections(
     sections: &mut Vec<crate::scene::model::object::PropSection>,
 ) {
     sections.iter_mut().for_each(|section| {

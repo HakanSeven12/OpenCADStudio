@@ -215,6 +215,14 @@ pub fn extract_circle_instance(
         return None;
     }
     let (center, axis_x, axis_y, radius, start_angle, end_angle) = match wire.tangent_geoms[0] {
+        crate::scene::model::wire_model::TangentGeom::Circle { center, radius } => (
+            [center[0] as f64, center[1] as f64, center[2] as f64],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            radius as f64,
+            0.0f32,
+            std::f32::consts::TAU,
+        ),
         crate::scene::model::wire_model::TangentGeom::PlanarCircle {
             center,
             axis_x,

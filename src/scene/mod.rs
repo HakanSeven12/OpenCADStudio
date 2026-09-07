@@ -11284,4 +11284,45 @@ mod layout_cache_tests {
                 | crate::scene::model::wire_model::TangentGeom::Circle { .. }
         ));
     }
+
+    #[test]
+    fn block_circles_and_arcs_extract_as_analytical_gpu_instances() {
+        let mut s = Scene::new();
+        // Create initial entities
+        let mut circle = acadrust::entities::Circle::default();
+        circle.radius = 50.0;
+        let c_h = s.add_entity(EntityType::Circle(circle));
+
+        let mut arc = acadrust::entities::Arc::default();
+        arc.radius = 25.0;
+        arc.start_angle = 0.0;
+        arc.end_angle = 3.14159;
+        let a_h = s.add_entity(EntityType::Arc(arc));
+
+        let line = acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(100.0, 100.0, 0.0),
+        );
+        let l_h = s.add_entity(EntityType::Line(line));
+
+        // Create block and place insert at (200, 300, 0)
+        let xform = acadrust::types::Transform::from_translation(acadrust::types::Vector3::new(200.0, 300.0, 0.0));
+        let _ = s.create_block_from_entities(
+            &[c_h, a_h, l_h],
+            "TEST_ANALYTICAL_BLOCK",
+            &acadrust::types::Transform::identity(),
+            &xform,
+        ).unwrap();
+
+        let wires = s.model_tile_wires_arc(0, &Camera::default(), 1.0, 1000.0);
+        let depths = rustc_hash::FxHashMap::default();
+        let partitioned = crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths);
+
+        // Both the circle and the arc inside the block must be extracted as analytical GPU circle instances!
+        assert!(
+            partitioned.circle_instances.len() >= 2,
+            "Expected at least 2 analytical circle instances from block, got {}",
+            partitioned.circle_instances.len()
+        );
+    }
 }

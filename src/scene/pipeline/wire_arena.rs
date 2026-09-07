@@ -150,7 +150,8 @@ pub fn classify_wire(wire: &WireModel) -> WireKind {
         && wire.text_verts.is_empty()
     {
         match &wire.tangent_geoms[0] {
-            crate::scene::model::wire_model::TangentGeom::PlanarCircle { .. }
+            crate::scene::model::wire_model::TangentGeom::Circle { .. }
+            | crate::scene::model::wire_model::TangentGeom::PlanarCircle { .. }
             | crate::scene::model::wire_model::TangentGeom::Arc { .. } => {
                 if super::circle_gpu::extract_circle_instance(wire, 0.0).is_some() {
                     return WireKind::Circle;
@@ -214,7 +215,8 @@ pub fn partition_wires<'a>(
             && wire.text_verts.is_empty()
         {
             match &wire.tangent_geoms[0] {
-                crate::scene::model::wire_model::TangentGeom::PlanarCircle { .. }
+                crate::scene::model::wire_model::TangentGeom::Circle { .. }
+                | crate::scene::model::wire_model::TangentGeom::PlanarCircle { .. }
                 | crate::scene::model::wire_model::TangentGeom::Arc { .. } => {
                     if let Some(inst) = super::circle_gpu::extract_circle_instance(wire, depth) {
                         circle_instances.push(inst);

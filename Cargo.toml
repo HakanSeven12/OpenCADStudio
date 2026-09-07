@@ -3,6 +3,7 @@ name = "OpenCADStudio"
 version = "2026.36.0"
 edition = "2021"
 build = "build.rs"
+default-run = "OpenCADStudio"
 
 [workspace]
 members = [

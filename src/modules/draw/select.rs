@@ -17,6 +17,7 @@ use crate::modules::draw::fence::FencePick;
 use crate::scene::model::wire_model::WireModel;
 
 pub struct SelectObjectsCommand {
+    prompt_cmd: String,
     pending_cmd: String,
     /// Selection accumulated so far (kept in sync with the scene selection by
     /// each `on_selection_complete` call). Applied on Enter when `commit_on_enter`.
@@ -24,6 +25,8 @@ pub struct SelectObjectsCommand {
     /// When true, gathering continues until Enter / right-click commits the set.
     /// When false, the first completed selection action fires immediately.
     commit_on_enter: bool,
+    /// Whether the generic selection methods are shown as command buttons.
+    show_options: bool,
     /// A Fence / WPolygon / CPolygon path being picked point by point. While
     /// one is under way the host must send clicks here as points rather than
     /// treating them as picks, which is what `is_selection_gathering` reports.
@@ -37,9 +40,25 @@ impl SelectObjectsCommand {
     /// Standard selection set: accumulate picks, apply on Enter / right-click.
     pub fn new(pending_cmd: &str) -> Self {
         Self {
+            prompt_cmd: pending_cmd.to_string(),
             pending_cmd: pending_cmd.to_string(),
             handles: Vec::new(),
             commit_on_enter: true,
+            show_options: true,
+            pick: None,
+            pick_crossing: true,
+        }
+    }
+
+    /// Plain gather prompt with no generic selection-method buttons. The
+    /// visible command name may differ from the private apply command.
+    pub fn plain(prompt_cmd: &str, pending_cmd: &str) -> Self {
+        Self {
+            prompt_cmd: prompt_cmd.to_string(),
+            pending_cmd: pending_cmd.to_string(),
+            handles: Vec::new(),
+            commit_on_enter: true,
+            show_options: false,
             pick: None,
             pick_crossing: true,
         }
@@ -49,9 +68,11 @@ impl SelectObjectsCommand {
     /// immediately, with no Enter (used by commands that act on one object).
     pub fn instant(pending_cmd: &str) -> Self {
         Self {
+            prompt_cmd: pending_cmd.to_string(),
             pending_cmd: pending_cmd.to_string(),
             handles: Vec::new(),
             commit_on_enter: false,
+            show_options: false,
             pick: None,
             pick_crossing: true,
         }
@@ -82,12 +103,12 @@ impl CadCommand for SelectObjectsCommand {
         if self.commit_on_enter && !self.handles.is_empty() {
             t!(
                 "%{cmd}  Select objects (%{count} selected, Enter to apply):",
-                cmd = self.pending_cmd,
+                cmd = self.prompt_cmd,
                 count = self.handles.len()
             )
             .into_owned()
         } else {
-            t!("%{cmd}  Select objects:", cmd = self.pending_cmd).into_owned()
+            t!("%{cmd}  Select objects:", cmd = self.prompt_cmd).into_owned()
         }
     }
 
@@ -108,7 +129,7 @@ impl CadCommand for SelectObjectsCommand {
     // they work typed as well — these buttons only surface them, which is what
     // the on-screen keyboard-less case needs.
     fn options(&self) -> Vec<CmdOption> {
-        if self.commit_on_enter {
+        if self.commit_on_enter && self.show_options {
             vec![
                 CmdOption::new(t!("Window").as_ref(), "W"),
                 CmdOption::new(t!("Crossing").as_ref(), "C"),

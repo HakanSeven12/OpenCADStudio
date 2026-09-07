@@ -365,13 +365,18 @@ pub enum Bool {
 /// missing, and passing that on unchanged is the point: a half-done boolean
 /// looks finished.
 pub fn boolean(op: Bool, a: &Body, b: &Body) -> Option<Body> {
+    boolean_result(op, a, b).ok()
+}
+
+/// Combine two solids while retaining the kernel's exact refusal reason.
+pub fn boolean_result(op: Bool, a: &Body, b: &Body) -> Result<Body, brep::Snag> {
     let how = match op {
         Bool::Union => brep::Operation::Union,
         Bool::Subtract => brep::Operation::Difference,
         Bool::Intersect => brep::Operation::Intersection,
     };
     let tolerance = brep::operation_tolerance(&[a, b]);
-    brep::combine(a.clone(), b.clone(), how, tolerance).ok()
+    brep::combine(a.clone(), b.clone(), how, tolerance)
 }
 
 // ── Tessellation ────────────────────────────────────────────────────────────

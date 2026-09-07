@@ -975,6 +975,41 @@ fn cone_properties(
     ]
 }
 
+fn brep_properties(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> Vec<PropSection> {
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(object_show_history, show_history_mode);
+    vec![PropSection {
+        title: t!("Solid History").into_owned(),
+        props: vec![
+            Property {
+                label: t!("History").into_owned(),
+                field: PROP_HISTORY,
+                value: PropValue::Choice {
+                    selected: if record_history { "Record" } else { "None" }.to_string(),
+                    options: vec!["None".to_string(), "Record".to_string()],
+                },
+            },
+            Property {
+                label: t!("Show History").into_owned(),
+                field: PROP_SHOW_HISTORY,
+                value: if show_history_editable {
+                    PropValue::Choice {
+                        selected: if show_history { "Yes" } else { "No" }.to_string(),
+                        options: vec!["No".to_string(), "Yes".to_string()],
+                    }
+                } else {
+                    PropValue::ReadOnly(if show_history { "Yes" } else { "No" }.to_string())
+                },
+            },
+        ],
+    }]
+}
+
 fn cylinder_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
@@ -1411,6 +1446,7 @@ pub fn primitive_properties(
             extrusion_properties(document, handle, value)
         }
         SolidHistoryOperation::Revolve(value) => revolve_properties(document, handle, value),
+        SolidHistoryOperation::Brep(_) => brep_properties(document, handle),
         _ => Vec::new(),
     }
 }

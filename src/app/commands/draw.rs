@@ -972,32 +972,46 @@ impl OpenCADStudio {
             }
 
             // ── Solid booleans ─────────────────────────────────────────────
-            "UNION" | "INTERSECT" => {
+            "UNION" => {
                 use crate::modules::model::boolean_cmd::BoolOp;
-                if let Some(op) = BoolOp::from_id(cmd) {
-                    let solid_count = {
-                        let scene = &self.tabs[i].scene;
-                        scene
-                            .selected_handles_in_order()
-                            .into_iter()
-                            .filter(|handle| !scene.is_layer_locked(*handle))
-                            .filter(|handle| {
-                                matches!(
-                                    scene.document.get_entity(*handle),
-                                    Some(acadrust::EntityType::Solid3D(_))
-                                )
-                            })
-                            .take(2)
-                            .count()
-                    };
-                    if solid_count < 2 {
-                        use crate::modules::draw::select::SelectObjectsCommand;
-                        let selection = SelectObjectsCommand::new(cmd);
-                        self.command_line.push_info(&selection.prompt());
-                        self.tabs[i].active_cmd = Some(Box::new(selection));
-                    } else {
-                        return Some(self.solid_boolean(op));
-                    }
+                if self.union_ready() {
+                    return Some(self.solid_boolean(BoolOp::Union));
+                }
+                use crate::modules::draw::select::SelectObjectsCommand;
+                let selection = SelectObjectsCommand::plain("UNION", "UNIONAPPLY");
+                self.command_line.push_info(&selection.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(selection));
+            }
+
+            "UNIONAPPLY" => {
+                use crate::modules::model::boolean_cmd::BoolOp;
+                return Some(self.solid_boolean(BoolOp::Union));
+            }
+
+            "INTERSECT" => {
+                use crate::modules::model::boolean_cmd::BoolOp;
+                let solid_count = {
+                    let scene = &self.tabs[i].scene;
+                    scene
+                        .selected_handles_in_order()
+                        .into_iter()
+                        .filter(|handle| !scene.is_layer_locked(*handle))
+                        .filter(|handle| {
+                            matches!(
+                                scene.document.get_entity(*handle),
+                                Some(acadrust::EntityType::Solid3D(_))
+                            )
+                        })
+                        .take(2)
+                        .count()
+                };
+                if solid_count < 2 {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                } else {
+                    return Some(self.solid_boolean(BoolOp::Intersect));
                 }
             }
 
@@ -1069,9 +1083,9 @@ impl OpenCADStudio {
             // REGION — convert selected closed boundaries (closed polylines /
             // circles) into Region entities (one wire loop each).
             "REGION" | "REG" => {
-                use acadrust::entities::{Region, Wire};
+                use acadrust::entities::Region;
                 use acadrust::types::Vector3;
-                let mut loops: Vec<Vec<Vector3>> = Vec::new();
+                let mut regions = Vec::new();
                 for (_, e) in self.tabs[i].scene.selected_entities().iter() {
                     let supported = matches!(
                         e,
@@ -1079,32 +1093,39 @@ impl OpenCADStudio {
                             if pl.is_closed && pl.vertices.len() >= 3
                     ) || matches!(e, acadrust::EntityType::Circle(_));
                     if supported {
-                        let Some(curve) = crate::entities::curve::entity_curve(e) else {
+                        let Some((plane, loops, true)) =
+                            crate::scene::model::presspull_model::profile_geometry(e)
+                        else {
                             continue;
                         };
-                        loops.push(
-                            crate::entities::curve::curve_points(&curve)
-                                .into_iter()
-                                .map(|point| Vector3::new(point[0], point[1], point[2]))
-                                .collect(),
+                        let Some(body) = cadkernel::brep::planar_region(plane, &loops) else {
+                            continue;
+                        };
+                        let mut region = Region::new();
+                        region.point_of_reference = Vector3::new(
+                            plane.origin[0],
+                            plane.origin[1],
+                            plane.origin[2],
                         );
+                        region.common.layer = self.tabs[i].active_layer.clone();
+                        regions.push((region, body));
                     }
                 }
-                if loops.is_empty() {
+                if regions.is_empty() {
                     self.command_line
                         .push_error(crate::t!("REGION: select closed polylines or circles.").as_ref());
                 } else {
                     self.push_undo_snapshot(i, "REGION");
-                    let count = loops.len();
-                    for pts in loops {
-                        let mut w = Wire::new();
-                        let first = pts.first().copied().unwrap_or(Vector3::new(0.0, 0.0, 0.0));
-                        w.points = pts;
-                        let mut r = Region::new();
-                        r.point_of_reference = first;
-                        r.wires = vec![w];
-                        r.common.layer = self.tabs[i].active_layer.clone();
-                        self.tabs[i].scene.add_entity(acadrust::EntityType::Region(r));
+                    let count = regions.len();
+                    let mut created = Vec::with_capacity(count);
+                    for (region, body) in regions {
+                        let handle = self.add_region_model(region, body);
+                        if handle.is_null() {
+                            self.tabs[i].scene.rollback_new_entities(&created);
+                            self.discard_last_undo_entry(i);
+                            return Some(iced::Task::none());
+                        }
+                        created.push(handle);
                     }
                     self.tabs[i].dirty = true;
                     self.command_line

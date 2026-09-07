@@ -337,6 +337,9 @@ jobs:
         run: |
           cargo build --locked --release --target aarch64-apple-darwin
           cargo build --locked --release --target aarch64-apple-darwin -p dwg-thumbnailer
+          # The launcher shim is the .app's actual CFBundleExecutable (#1039)
+          # — see src/bin/ocs_launcher.rs for why.
+          cargo build --locked --release --target aarch64-apple-darwin --bin ocs_launcher
 
       - name: Build .icns from SVG
         run: |
@@ -395,8 +398,13 @@ jobs:
           APP=OpenCADStudio.app
           rm -rf "$APP"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/PlugIns"
-          cp target/aarch64-apple-darwin/release/OpenCADStudio "$APP/Contents/MacOS/OpenCADStudio"
-          chmod +x "$APP/Contents/MacOS/OpenCADStudio"
+          # The launcher is CFBundleExecutable (Finder always launches it,
+          # for both document opens and plain launches); it execs into the
+          # real GUI binary, renamed alongside it, over argv. See
+          # src/bin/ocs_launcher.rs.
+          cp target/aarch64-apple-darwin/release/ocs_launcher "$APP/Contents/MacOS/OpenCADStudio"
+          cp target/aarch64-apple-darwin/release/OpenCADStudio "$APP/Contents/MacOS/OpenCADStudio-App"
+          chmod +x "$APP/Contents/MacOS/OpenCADStudio" "$APP/Contents/MacOS/OpenCADStudio-App"
           cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
           cp DWG.icns DXF.icns "$APP/Contents/Resources/"
           # QuickLook thumbnail extension.

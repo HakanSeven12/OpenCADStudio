@@ -395,8 +395,8 @@ impl GlyphAtlas {
             // This prevents bilinear filtering from bleeding into neighbouring tiles.
             uv_min: [(ox as f32 + 0.5) / fw, (oy as f32 + 0.5) / fh],
             uv_max: [
-                (ox as f32 + tile.w as f32 - 0.5) / fw,
-                (oy as f32 + tile.h as f32 - 0.5) / fh,
+                ((ox + tile.w) as f32 - 0.5) / fw,
+                ((oy + tile.h) as f32 - 0.5) / fh,
             ],
             plane_min: tile.plane_min,
             plane_max: tile.plane_max,

@@ -2232,7 +2232,6 @@ impl Scene {
             self.annotation_all_visible(),
             None,
             None,
-            None,
         );
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);
@@ -5162,9 +5161,9 @@ impl Scene {
     pub(super) fn model_tile_wires_arc(
         &self,
         _tile_idx: usize,
-        cam: &Camera,
+        _cam: &Camera,
         _cam_aspect: f32,
-        tile_pixel_height: f32,
+        _tile_pixel_height: f32,
     ) -> Arc<Vec<WireModel>> {
         // In a BEDIT block editor the resident set is the edited block's own
         // (block-local) entities; otherwise model space. (#261)
@@ -5175,12 +5174,7 @@ impl Scene {
             &self.document,
             &self.document.header.current_annotation_scale,
         );
-        let wpp = if tile_pixel_height > 0.0 {
-            Some((2.0 * cam.ortho_size()) / tile_pixel_height)
-        } else {
-            self.world_per_pixel()
-        };
-        self.resident_wires_for(block, None, scale, None, None, wpp)
+        self.resident_wires_for(block, None, scale, None, None)
     }
 
     /// Unified static-hold wire builder — the ONE tessellation path every
@@ -5229,7 +5223,6 @@ impl Scene {
         annotation_scale_handle: Option<Handle>,
         frozen_layers: Option<&HashSet<Handle>>,
         style_viewport: Option<Handle>,
-        wpp: Option<f32>,
     ) -> Arc<Vec<WireModel>> {
         // Normalize an inert anno override away so distinct viewport scales
         // share one resident set when annotation can't change the wires.
@@ -5246,7 +5239,6 @@ impl Scene {
             self.paper_bg_color
         };
         let all_visible = self.annotation_all_visible();
-        let quantized_wpp = Self::quantize_wpp(wpp);
         let key = self.resident_wire_key(
             block,
             bg,
@@ -5255,7 +5247,6 @@ impl Scene {
             all_visible,
             frozen_layers,
             style_viewport,
-            quantized_wpp,
         );
         {
             let sets = self.resident_wire_sets.borrow();
@@ -5280,18 +5271,17 @@ impl Scene {
                 all_visible,
                 frozen_layers,
                 style_viewport,
-                quantized_wpp,
             )
         {
             return arc;
         }
-        // Build once: full tessellation, no cull (region = None), zoom LOD
-        // bounded by quantized_wpp for every space.
+        // Build once: full tessellation, no cull, no zoom LOD — the resident
+        // set is zoom-independent (GPU analytical circles/arcs/ellipses).
         let t_tess = iced::time::Instant::now();
         let mut wires = self.wires_for_block_culled(
             block,
             None,
-            quantized_wpp,
+            None,
             frozen_layers,
             anno_scale_override,
             annotation_scale_handle,
@@ -5361,7 +5351,6 @@ impl Scene {
         all_visible: bool,
         frozen_layers: Option<&HashSet<Handle>>,
         style_viewport: Option<Handle>,
-        quantized_wpp: Option<f32>,
     ) -> u64 {
         let mut key: u64 = 0xcbf2_9ce4_8422_2325;
         let mut mix =
@@ -5376,9 +5365,9 @@ impl Scene {
         mix(annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0));
         mix(all_visible as u64);
         mix(self.viewport_style_key(style_viewport));
-        mix(quantized_wpp
-            .map(|w| w.to_bits() as u64)
-            .unwrap_or(u64::MAX));
+        // quantized_wpp removed: GPU analytical rendering for circles/arcs/
+        // ellipses makes tessellation zoom-independent, so the resident set is
+        // shared across all zoom levels.
         match frozen_layers {
             Some(frozen) => {
                 let mut signature = 0u64;
@@ -5491,7 +5480,6 @@ impl Scene {
         all_visible: bool,
         frozen_layers: Option<&HashSet<Handle>>,
         style_viewport: Option<Handle>,
-        quantized_wpp: Option<f32>,
     ) -> Option<Arc<Vec<WireModel>>> {
         if self.viewport_style_key(style_viewport) != 0 {
             return None;
@@ -5575,7 +5563,7 @@ impl Scene {
                 e,
                 Some(&blk),
                 None,
-                quantized_wpp,
+                None,
                 anno_scale_override.is_some(),
             );
             memo_updates.push((*h, Arc::new(raw.clone())));
@@ -5857,7 +5845,7 @@ impl Scene {
         }
         let layout_block = self.current_layout_block_handle();
         let scale = self.paper_annotation_scale_handle();
-        let base = self.resident_wires_for(layout_block, None, scale, None, None, None);
+        let base = self.resident_wires_for(layout_block, None, scale, None, None);
         let mut wires = (*base).clone();
         // The overall "sheet" viewport now IS the paper view itself, so its own
         // border rectangle must not be drawn as an entity on the sheet.
@@ -9112,7 +9100,10 @@ impl Scene {
             let guard = {
                 let mut g: u64 = 0xcbf2_9ce4_8422_2325;
                 let mut mix = |x: u64| g = g.rotate_left(13) ^ x;
-                mix(wpp.map(|w| w.to_bits() as u64).unwrap_or(u64::MAX));
+                // wpp removed from guard: GPU analytical rendering handles
+                // circles/arcs/ellipses, Point ignores wpp, and Light (the
+                // only remaining wpp consumer) is rare enough that its stale
+                // glyphs don't justify clearing every memoized entity on zoom.
                 if let Some(v) = view_aabb {
                     for c in v {
                         mix(c.to_bits() as u64);
@@ -10230,7 +10221,6 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
             scale,
             None,
             None,
-            None,
         );
         let wire_points = wires.iter().flat_map(|wire| wire.key_vertices.iter().copied());
         let mesh_points = self.meshes.iter().filter_map(|(&handle, set)| {
@@ -11244,7 +11234,6 @@ mod layout_cache_tests {
                 scale,
                 None,
                 None,
-                None,
             );
             let generation = s.last_model_wire_gen.get();
             let bounds = s.model_space_extents().unwrap();
@@ -11260,17 +11249,17 @@ mod layout_cache_tests {
     }
 
     #[test]
-    fn circle_wires_scale_with_zoom_level() {
+    fn resident_wires_are_zoom_independent_and_gpu_analytical() {
         let mut s = Scene::new();
         let mut circle = acadrust::entities::Circle::default();
         circle.radius = 100.0;
         let handle = s.add_entity(EntityType::Circle(circle));
 
-        // Far camera: distance is large -> wpp is large
+        // Far camera: distance is large
         let mut cam_far = Camera::default();
         cam_far.distance = 1000.0;
 
-        // Close camera: distance is small -> wpp is small
+        // Close camera: distance is small
         let mut cam_close = Camera::default();
         cam_close.distance = 1.0;
 
@@ -11279,19 +11268,20 @@ mod layout_cache_tests {
             .iter()
             .find(|w| w.name == handle.value().to_string())
             .unwrap();
-        let far_pts = circle_wire_far.points.len();
 
         let wires_close = s.model_tile_wires_arc(0, &cam_close, 1.0, 1000.0);
-        let circle_wire_close = wires_close
-            .iter()
-            .find(|w| w.name == handle.value().to_string())
-            .unwrap();
-        let close_pts = circle_wire_close.points.len();
 
+        // Zooming must reuse the exact same resident wire set (zero re-tessellation)
         assert!(
-            close_pts > far_pts,
-            "Close camera points ({close_pts}) should exceed far camera points ({far_pts})"
+            Arc::ptr_eq(&wires_far, &wires_close),
+            "Resident wires must be identical Arc across zoom levels"
         );
-        assert!(close_pts > 500, "Close points ({close_pts}) should be > 500");
+        // Circle must carry TangentGeom for GPU analytical rendering
+        assert_eq!(circle_wire_far.tangent_geoms.len(), 1);
+        assert!(matches!(
+            circle_wire_far.tangent_geoms[0],
+            crate::scene::model::wire_model::TangentGeom::PlanarCircle { .. }
+                | crate::scene::model::wire_model::TangentGeom::Circle { .. }
+        ));
     }
 }

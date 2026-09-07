@@ -1,7 +1,9 @@
 // Kernel B-rep solid modelling and exact ACIS persistence.
 
 use acadrust::{
-    entities::{EntityCommon, Region, Solid3D, Surface, SurfaceKind},
+    entities::{
+        AcisData, EntityCommon, Region, Solid3D, Surface, SurfaceData, SurfaceKind, Wire,
+    },
     objects::SolidHistoryOperation,
     EntityType, Handle,
 };
@@ -31,6 +33,17 @@ impl UnionEntityKind {
     }
 }
 
+fn subtract_entity_kind(entity: &EntityType, convert_meshes: bool) -> Option<UnionEntityKind> {
+    UnionEntityKind::from_entity(entity).or_else(|| {
+        (convert_meshes
+            && matches!(
+                entity,
+                EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_)
+            ))
+        .then_some(UnionEntityKind::Solid)
+    })
+}
+
 struct UnionGroup {
     kind: UnionEntityKind,
     handles: Vec<Handle>,
@@ -41,6 +54,25 @@ struct PreparedUnion {
     handles: Vec<Handle>,
     body: Body,
     common: EntityCommon,
+}
+
+struct SubtractGroup {
+    kind: UnionEntityKind,
+    plane: Option<cadkernel::space::Plane>,
+    bases: Vec<Handle>,
+    cutters: Vec<Handle>,
+}
+
+type PreparedSolidDisplay = (
+    crate::scene::model::mesh_model::MeshLodSet,
+    Vec<Wire>,
+    [f64; 3],
+);
+
+struct PreparedSubtract {
+    bases: Vec<Handle>,
+    cutters: Vec<Handle>,
+    result: Option<(Handle, EntityType, Body, PreparedSolidDisplay)>,
 }
 
 fn inherited_common(source: &EntityCommon) -> EntityCommon {
@@ -83,6 +115,111 @@ fn union_bodies(
     let references = bodies.iter().collect::<Vec<_>>();
     let tolerance = cadkernel::brep::operation_tolerance(&references);
     cadkernel::brep::union_planar_regions(&bodies, tolerance)
+}
+
+fn planar_body_plane(body: &Body) -> Option<cadkernel::space::Plane> {
+    let mut faces = body.face_keys();
+    let first = cadkernel::brep::planar_face_profile(body, faces.next()?)?.plane;
+    let first_normal = glam::DVec3::from_array(first.normal()?);
+    let tolerance = cadkernel::brep::operation_tolerance(&[body]);
+    faces
+        .all(|face| {
+            let Some(profile) = cadkernel::brep::planar_face_profile(body, face) else {
+                return false;
+            };
+            let Some(normal) = profile.plane.normal() else {
+                return false;
+            };
+            first_normal.dot(glam::DVec3::from_array(normal)).abs() >= 1.0 - 1e-9
+                && first
+                    .distance_to(profile.plane.origin)
+                    .is_some_and(|distance| distance.abs() <= tolerance * 4.0)
+        })
+        .then_some(first)
+}
+
+fn coplanar_bodies(plane: cadkernel::space::Plane, body: &Body) -> bool {
+    let Some(other) = planar_body_plane(body) else {
+        return false;
+    };
+    let Some(one_normal) = plane.normal().map(glam::DVec3::from_array) else {
+        return false;
+    };
+    let Some(other_normal) = other.normal().map(glam::DVec3::from_array) else {
+        return false;
+    };
+    let tolerance = cadkernel::brep::operation_tolerance(&[body]);
+    one_normal.dot(other_normal).abs() >= 1.0 - 1e-9
+        && plane
+            .distance_to(other.origin)
+            .is_some_and(|distance| distance.abs() <= tolerance * 4.0)
+}
+
+fn subtract_bodies(
+    kind: UnionEntityKind,
+    plane: Option<cadkernel::space::Plane>,
+    bases: Vec<Body>,
+    cutters: Vec<Body>,
+) -> Result<Body, cadkernel::brep::Snag> {
+    if kind != UnionEntityKind::Solid && plane.is_none() {
+        return Err(cadkernel::brep::Snag::NoClosedForm);
+    }
+    if kind != UnionEntityKind::Solid && plane.is_some() {
+        let references = bases.iter().chain(&cutters).collect::<Vec<_>>();
+        let tolerance = cadkernel::brep::operation_tolerance(&references);
+        return cadkernel::brep::subtract_planar_regions(&bases, &cutters, tolerance);
+    }
+
+    let mut bases = bases.into_iter();
+    let mut result = bases
+        .next()
+        .ok_or(cadkernel::brep::Snag::CutRefused)?;
+    for base in bases {
+        result = solid_model::boolean_result(Bool::Union, &result, &base)?;
+    }
+    for cutter in cutters {
+        result = solid_model::boolean_result(Bool::Subtract, &result, &cutter)?;
+    }
+    Ok(result)
+}
+
+fn entity_with_subtract_body(mut source: EntityType, body: &Body) -> Option<EntityType> {
+    let document = crate::scene::convert::acis_export::solid_to_sat(body)?;
+    let wires = solid_model::edge_wires(body);
+    if matches!(
+        &source,
+        EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_)
+    ) {
+        let mut solid = Solid3D::new();
+        solid.common = source.common().clone();
+        source = EntityType::Solid3D(solid);
+    }
+    match &mut source {
+        EntityType::Solid3D(entity) => {
+            entity.wires = wires;
+            entity.silhouettes.clear();
+            entity.history_handle = None;
+            entity.set_sat_document(&document);
+        }
+        EntityType::Region(entity) => {
+            entity.wires = wires;
+            entity.silhouettes.clear();
+            entity.history_handle = None;
+            entity.set_sat_document(&document);
+        }
+        EntityType::Surface(entity) => {
+            entity.wires = wires;
+            entity.silhouettes.clear();
+            entity.history_handle = None;
+            if entity.kind != SurfaceKind::Plane {
+                entity.kind = SurfaceKind::Generic;
+                entity.surface_data = SurfaceData::Generic;
+            }
+            entity.acis_data = AcisData::from_sat(&document.to_sat_string());
+        }
+        _ => return None,
+    }
+    Some(source)
 }
 
 impl super::OpenCADStudio {
@@ -569,73 +706,262 @@ impl super::OpenCADStudio {
         &mut self,
         bases: &[Handle],
         cutters: &[Handle],
+        convert_meshes: bool,
     ) -> Task<Message> {
         let i = self.active_tab;
-        let valid_solid = |handle: &Handle| {
+        let valid_operand = |handle: &Handle| {
             !self.tabs[i].scene.is_layer_locked(*handle)
-                && matches!(
-                    self.tabs[i].scene.document.get_entity(*handle),
-                    Some(EntityType::Solid3D(_))
-                )
+                && self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(*handle)
+                    .and_then(|entity| subtract_entity_kind(entity, convert_meshes))
+                    .is_some()
         };
-        let mut base_handles: Vec<_> = bases.iter().copied().filter(valid_solid).collect();
-        let mut cutter_handles: Vec<_> = cutters.iter().copied().filter(valid_solid).collect();
+        let mut base_handles: Vec<_> = bases.iter().copied().filter(valid_operand).collect();
+        let mut cutter_handles: Vec<_> = cutters.iter().copied().filter(valid_operand).collect();
         cutter_handles.retain(|handle| !base_handles.contains(handle));
 
         let mut operands = base_handles.clone();
         operands.extend(cutter_handles.iter().copied());
         self.tabs[i].scene.restore_solid_models(&operands);
-        base_handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
-        cutter_handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        let mut operand_bodies = std::collections::HashMap::<Handle, Body>::new();
+        for handle in &operands {
+            if let Some(body) = self.tabs[i].scene.solid_models.get(handle).cloned() {
+                operand_bodies.insert(*handle, body);
+                continue;
+            }
+            let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) else {
+                continue;
+            };
+            if convert_meshes
+                && matches!(
+                    entity,
+                    EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_)
+                )
+            {
+                let Some(body) = crate::entities::mesh::closed_mesh_body(entity) else {
+                    self.command_line.push_error(
+                        crate::t!("SUBTRACT: a selected Mesh is not a supported closed single-shell mesh; no object was changed.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                };
+                operand_bodies.insert(*handle, body);
+            }
+        }
+        base_handles.retain(|handle| operand_bodies.contains_key(handle));
+        cutter_handles.retain(|handle| operand_bodies.contains_key(handle));
         if base_handles.is_empty() || cutter_handles.is_empty() {
             self.command_line.push_error(
-                crate::t!("SUBTRACT: select at least one base solid and one cutter solid.")
+                crate::t!("SUBTRACT: select at least one base and one cutter Solid, Region, or Surface.")
                     .as_ref(),
             );
             return Task::none();
         }
 
-        let mut result = self.tabs[i].scene.solid_models[&base_handles[0]].clone();
-        for handle in &base_handles[1..] {
-            let operand = &self.tabs[i].scene.solid_models[handle];
-            let Some(combined) = solid_model::boolean(Bool::Union, &result, operand) else {
-                self.command_line.push_error(
-                    crate::t!("SUBTRACT failed while combining the base solids.").as_ref(),
-                );
-                return Task::none();
-            };
-            result = combined;
+        let kind_for = |handle: Handle| {
+            self.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .and_then(|entity| subtract_entity_kind(entity, convert_meshes))
+        };
+        let mut groups = Vec::<SubtractGroup>::new();
+        for kind in [
+            UnionEntityKind::Solid,
+            UnionEntityKind::Region,
+            UnionEntityKind::Surface,
+        ] {
+            let kind_bases = base_handles
+                .iter()
+                .copied()
+                .filter(|handle| kind_for(*handle) == Some(kind))
+                .collect::<Vec<_>>();
+            if kind_bases.is_empty() {
+                continue;
+            }
+            if kind == UnionEntityKind::Solid {
+                let kind_cutters = cutter_handles
+                    .iter()
+                    .copied()
+                    .filter(|handle| kind_for(*handle) == Some(kind))
+                    .collect::<Vec<_>>();
+                if !kind_cutters.is_empty() {
+                    groups.push(SubtractGroup {
+                        kind,
+                        plane: None,
+                        bases: kind_bases,
+                        cutters: kind_cutters,
+                    });
+                }
+                continue;
+            }
+
+            for handle in kind_bases {
+                let body = &operand_bodies[&handle];
+                let plane = planar_body_plane(body);
+                if let Some(group) = groups.iter_mut().find(|group| {
+                    group.kind == kind
+                        && match (group.plane, plane) {
+                            (Some(group_plane), Some(_)) => coplanar_bodies(group_plane, body),
+                            (None, None) => true,
+                            _ => false,
+                        }
+                }) {
+                    group.bases.push(handle);
+                } else {
+                    groups.push(SubtractGroup {
+                        kind,
+                        plane,
+                        bases: vec![handle],
+                        cutters: Vec::new(),
+                    });
+                }
+            }
+            for handle in cutter_handles
+                .iter()
+                .copied()
+                .filter(|handle| kind_for(*handle) == Some(kind))
+            {
+                let body = &operand_bodies[&handle];
+                let plane = planar_body_plane(body);
+                if let Some(group) = groups.iter_mut().find(|group| {
+                    group.kind == kind
+                        && match (group.plane, plane) {
+                            (Some(group_plane), Some(_)) => coplanar_bodies(group_plane, body),
+                            (None, None) => true,
+                            _ => false,
+                        }
+                }) {
+                    group.cutters.push(handle);
+                }
+            }
         }
-        for handle in &cutter_handles {
-            let operand = &self.tabs[i].scene.solid_models[handle];
-            let Some(difference) = solid_model::boolean(Bool::Subtract, &result, operand) else {
-                self.command_line.push_error(
-                    crate::t!("SUBTRACT failed while removing the selected solids.").as_ref(),
-                );
-                return Task::none();
-            };
-            result = difference;
-        }
-        if crate::scene::convert::acis_export::solid_to_sat(&result).is_none() {
-            self.command_line
-                .push_error(crate::t!("The boolean result could not be encoded as ACIS.").as_ref());
+        groups.retain(|group| !group.bases.is_empty() && !group.cutters.is_empty());
+        if groups.is_empty() {
+            self.command_line.push_error(
+                crate::t!("SUBTRACT: no compatible base and cutter types or planes were selected.")
+                    .as_ref(),
+            );
             return Task::none();
         }
 
-        operands = base_handles;
-        operands.extend(cutter_handles);
+        let mut prepared = Vec::with_capacity(groups.len());
+        for group in groups {
+            let base_bodies = group
+                .bases
+                .iter()
+                .map(|handle| operand_bodies[handle].clone())
+                .collect::<Vec<_>>();
+            let cutter_bodies = group
+                .cutters
+                .iter()
+                .map(|handle| operand_bodies[handle].clone())
+                .collect::<Vec<_>>();
+            let result = match subtract_bodies(group.kind, group.plane, base_bodies, cutter_bodies) {
+                Ok(result) => result,
+                Err(cadkernel::brep::Snag::NoClosedForm) => {
+                    self.command_line.push_error(
+                        crate::t!("SUBTRACT: the selected geometry includes an unsupported surface intersection.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::Coincident) => {
+                    self.command_line.push_error(
+                        crate::t!("SUBTRACT: the selected coincident geometry is ambiguous.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::CutRefused) => {
+                    self.command_line.push_error(
+                        crate::t!("SUBTRACT: the selected topology could not be cut safely.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+            };
+            let staged_result = if result.faces.is_empty() {
+                None
+            } else {
+                let retained = group.bases[0];
+                let Some(source) = self.tabs[i].scene.document.get_entity(retained).cloned() else {
+                    return Task::none();
+                };
+                let Some(entity) = entity_with_subtract_body(source, &result) else {
+                    self.command_line.push_error(
+                        crate::t!("The SUBTRACT result could not be encoded as ACIS.").as_ref(),
+                    );
+                    return Task::none();
+                };
+                let Some(display) = self.tabs[i]
+                    .scene
+                    .prepare_solid_model_display(retained, &result)
+                    .filter(|display| display.0.complete)
+                else {
+                    self.command_line.push_error(
+                        crate::t!("The SUBTRACT result could not be displayed completely. The original objects were retained.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                };
+                Some((retained, entity, result, display))
+            };
+            prepared.push(PreparedSubtract {
+                bases: group.bases,
+                cutters: group.cutters,
+                result: staged_result,
+            });
+        }
+
+        let record_history = self.tabs[i].scene.document.header.record_solid_history;
         self.push_undo_snapshot(i, "SUBTRACT");
-        self.tabs[i].scene.erase_entities(&operands);
-        let mut entity = Solid3D::new();
-        entity.wires = solid_model::edge_wires(&result);
-        let history = solid_history::brep_op(&result);
-        let handle = self.add_solid_model(EntityType::Solid3D(entity), result, history);
+        let mut retained = Vec::new();
+        let mut consumed = Vec::new();
+        for group in prepared {
+            if let Some((handle, entity, body, display)) = group.result {
+                self.tabs[i].scene.delete_solid_history(handle);
+                if !self.tabs[i].scene.update_entity(entity) {
+                    self.command_line.push_error(
+                        crate::t!("SUBTRACT: the retained base object could not be updated.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                if record_history
+                    && matches!(
+                        self.tabs[i].scene.document.get_entity(handle),
+                        Some(EntityType::Solid3D(_))
+                    )
+                {
+                    let history = solid_history::brep_op(&body);
+                    self.tabs[i].scene.create_solid_history(handle, history);
+                }
+                self.tabs[i]
+                    .scene
+                    .register_prepared_solid_model(handle, body, display);
+                retained.push(handle);
+                consumed.extend(group.bases.into_iter().skip(1));
+            } else {
+                consumed.extend(group.bases);
+            }
+            consumed.extend(group.cutters);
+        }
+        self.tabs[i].scene.erase_entities(&consumed);
         self.tabs[i].scene.deselect_all();
-        if !handle.is_null() {
-            self.tabs[i].scene.select_entity(handle, false);
+        for handle in &retained {
+            self.tabs[i].scene.select_entity(*handle, false);
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();
+        self.command_line.push_output(
+            crate::tf!(
+                "SUBTRACT: created %{count} result object(s).",
+                count = retained.len()
+            )
+            .as_ref(),
+        );
         Task::none()
     }
 

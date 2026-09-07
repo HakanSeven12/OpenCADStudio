@@ -1017,22 +1017,40 @@ impl OpenCADStudio {
 
             "SUBTRACT" => {
                 use crate::modules::model::boolean_cmd::SubtractCommand;
-                let bases = {
+                let (bases, bases_have_mesh) = {
                     let scene = &self.tabs[i].scene;
-                    scene
+                    let bases = scene
                         .selected_handles_in_order()
                         .into_iter()
                         .filter(|handle| !scene.is_layer_locked(*handle))
                         .filter(|handle| {
                             matches!(
                                 scene.document.get_entity(*handle),
-                                Some(acadrust::EntityType::Solid3D(_))
+                                Some(
+                                    acadrust::EntityType::Solid3D(_)
+                                        | acadrust::EntityType::Region(_)
+                                        | acadrust::EntityType::Surface(_)
+                                        | acadrust::EntityType::Mesh(_)
+                                        | acadrust::EntityType::PolygonMesh(_)
+                                        | acadrust::EntityType::PolyfaceMesh(_)
+                                )
                             )
                         })
-                        .collect()
+                        .collect::<Vec<_>>();
+                    let bases_have_mesh = bases.iter().any(|handle| {
+                        matches!(
+                            scene.document.get_entity(*handle),
+                            Some(
+                                acadrust::EntityType::Mesh(_)
+                                    | acadrust::EntityType::PolygonMesh(_)
+                                    | acadrust::EntityType::PolyfaceMesh(_)
+                            )
+                        )
+                    });
+                    (bases, bases_have_mesh)
                 };
                 self.tabs[i].scene.deselect_all();
-                let subtract = SubtractCommand::new(bases);
+                let subtract = SubtractCommand::new(bases, bases_have_mesh);
                 self.command_line.push_info(&subtract.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(subtract));
             }

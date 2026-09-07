@@ -222,11 +222,9 @@ pub fn has_compact_solid_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
 ) -> bool {
-    has_specialized_primitive_properties(document, handle)
-        || matches!(
-            document.solid_history_operation(handle),
-            Some(SolidHistoryOperation::Brep(_))
-        )
+    document
+        .get_entity(handle)
+        .is_some_and(|entity| matches!(entity, acadrust::EntityType::Solid3D(_)))
 }
 
 pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3> {
@@ -1441,7 +1439,7 @@ pub fn primitive_properties(
     handle: acadrust::Handle,
 ) -> Vec<PropSection> {
     let Some(operation) = document.solid_history_operation(handle) else {
-        return Vec::new();
+        return brep_properties(document, handle);
     };
     match operation {
         SolidHistoryOperation::Box(value) => {
@@ -1462,7 +1460,7 @@ pub fn primitive_properties(
         }
         SolidHistoryOperation::Revolve(value) => revolve_properties(document, handle, value),
         SolidHistoryOperation::Brep(_) => brep_properties(document, handle),
-        _ => Vec::new(),
+        _ => brep_properties(document, handle),
     }
 }
 

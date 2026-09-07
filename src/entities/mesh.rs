@@ -991,6 +991,67 @@ fn display_mesh(mesh: &Mesh) -> RefinedMesh {
     refined
 }
 
+/// Convert a closed indexed mesh entity to an exact planar-faced B-rep.
+/// Open, non-manifold, non-planar, and degenerate meshes return `None` so a
+/// modelling command can leave the source untouched.
+pub(crate) fn closed_mesh_body(entity: &acadrust::EntityType) -> Option<cadkernel::brep::Body> {
+    match entity {
+        acadrust::EntityType::Mesh(mesh) => {
+            let base = base_refined_mesh(mesh);
+            cadkernel::brep::make::faceted_solid(&base.vertices, &base.faces)
+        }
+        acadrust::EntityType::PolygonMesh(mesh) => {
+            if !mesh.is_closed_m() || !mesh.is_closed_n() {
+                return None;
+            }
+            let m = mesh.m_vertex_count.max(0) as usize;
+            let n = mesh.n_vertex_count.max(0) as usize;
+            let vertices = mesh
+                .vertices
+                .iter()
+                .take(m.saturating_mul(n))
+                .map(|vertex| v3(&vertex.location))
+                .collect::<Vec<_>>();
+            if m < 2 || n < 2 || vertices.len() != m.saturating_mul(n) {
+                return None;
+            }
+            let mut faces = Vec::with_capacity(m.saturating_mul(n));
+            for row in 0..m {
+                for column in 0..n {
+                    faces.push(vec![
+                        row * n + column,
+                        ((row + 1) % m) * n + column,
+                        ((row + 1) % m) * n + (column + 1) % n,
+                        row * n + (column + 1) % n,
+                    ]);
+                }
+            }
+            cadkernel::brep::make::faceted_solid(&vertices, &faces)
+        }
+        acadrust::EntityType::PolyfaceMesh(mesh) => {
+            let vertices = mesh
+                .vertices
+                .iter()
+                .map(|vertex| v3(&vertex.location))
+                .collect::<Vec<_>>();
+            let faces = mesh
+                .faces
+                .iter()
+                .filter_map(|face| {
+                    let indices = [face.index1, face.index2, face.index3, face.index4]
+                        .into_iter()
+                        .filter(|index| *index != 0)
+                        .map(|index| (index.unsigned_abs() as usize).checked_sub(1))
+                        .collect::<Option<Vec<_>>>()?;
+                    (indices.len() >= 3).then_some(indices)
+                })
+                .collect::<Vec<_>>();
+            cadkernel::brep::make::faceted_solid(&vertices, &faces)
+        }
+        _ => None,
+    }
+}
+
 fn face_triangle_indices(
     vertices: &[[f64; 3]],
     faces: &[Vec<usize>],

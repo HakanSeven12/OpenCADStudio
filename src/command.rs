@@ -1557,6 +1557,7 @@ pub enum CmdResult {
     SolidSubtract {
         bases: Vec<Handle>,
         cutters: Vec<Handle>,
+        convert_meshes: bool,
     },
     /// INSERT landed on a block that has AttributeDefinitions.
     /// The host should look up the attdefs for `block_name` from the document

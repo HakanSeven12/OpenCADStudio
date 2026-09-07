@@ -4115,8 +4115,12 @@ impl OpenCADStudio {
                 return task;
             }
 
-            CmdResult::SolidSubtract { bases, cutters } => {
-                let task = self.solid_subtract(&bases, &cutters);
+            CmdResult::SolidSubtract {
+                bases,
+                cutters,
+                convert_meshes,
+            } => {
+                let task = self.solid_subtract(&bases, &cutters, convert_meshes);
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();

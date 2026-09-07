@@ -2,18 +2,6 @@ name: Deploy web (GitHub Pages)
 run-name: ${{ github.event.release.tag_name || github.ref_name }} Web
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - index.html
-      - site/**
-      - assets/logo.svg
-      - scripts/assemble-site.sh
-      - scripts/build-site.py
-      - scripts/test_site.py
-      - scripts/test_site.cjs
-      - scripts/generate-star-history.py
-      - .github/workflows/pages.yml
   release:
     types: [published]
   workflow_call:

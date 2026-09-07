@@ -1,0 +1,374 @@
+//! GPU-instanced analytical circle buffer & pipeline layout.
+//!
+//! Renders 2D/planar circles as analytical screen/plane-aligned quads with
+//! screen-space derivative anti-aliasing. Each circle is a single instance
+//! (6 vertices for a 2-triangle quad), eliminating CPU re-tessellation on zoom
+//! and providing infinite visual smoothness.
+
+use iced::wgpu;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CircleInstance {
+    pub center_high: [f32; 3],
+    pub _pad0: f32,
+    pub center_low: [f32; 3],
+    pub radius: f32,
+    pub axis_x: [f32; 3],
+    pub start_angle: f32,
+    pub axis_y: [f32; 3],
+    pub end_angle: f32,
+    pub color: [f32; 4],
+    /// `[half_width, pattern_length, draw_depth, padding]`
+    pub params: [f32; 4],
+    pub pat0: [f32; 4],
+    pub pat1: [f32; 4],
+}
+
+impl CircleInstance {
+    pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRS: &[wgpu::VertexAttribute] = &[
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(CircleInstance, center_high) as u64,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(CircleInstance, center_low) as u64,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(CircleInstance, axis_x) as u64,
+                shader_location: 2,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(CircleInstance, axis_y) as u64,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(CircleInstance, color) as u64,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(CircleInstance, params) as u64,
+                shader_location: 5,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(CircleInstance, pat0) as u64,
+                shader_location: 6,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(CircleInstance, pat1) as u64,
+                shader_location: 7,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+        ];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<CircleInstance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: ATTRS,
+        }
+    }
+}
+
+pub struct CircleGpu {
+    pub instance_buffer: wgpu::Buffer,
+    pub instance_count: u32,
+}
+
+impl CircleGpu {
+    pub fn from_instances(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: &str,
+        instances: &[CircleInstance],
+    ) -> Self {
+        let instance_buffer = super::gpu_upload::upload_buffer(
+            device,
+            queue,
+            label,
+            instances,
+            wgpu::BufferUsages::VERTEX,
+        );
+        Self {
+            instance_buffer,
+            instance_count: instances.len() as u32,
+        }
+    }
+}
+
+/// Build the base and xray circle pipelines.
+pub fn create_pipelines(
+    device: &wgpu::Device,
+    frame_bgl: &wgpu::BindGroupLayout,
+    color_format: wgpu::TextureFormat,
+    sample_count: u32,
+    content_stencil: &wgpu::StencilState,
+) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("circle.wgsl"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/circle.wgsl").into()),
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("circle.pipeline.layout"),
+        bind_group_layouts: &[Some(frame_bgl)],
+        immediate_size: 0,
+    });
+    let circle_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("circle.pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[CircleInstance::layout()],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth24PlusStencil8,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: content_stencil.clone(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    });
+    let circle_xray_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("circle_xray.pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[CircleInstance::layout()],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth24PlusStencil8,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: content_stencil.clone(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    });
+    (circle_pipeline, circle_xray_pipeline)
+}
+
+/// Helper to extract an analytical circle or circular arc instance from a `WireModel`.
+pub fn extract_circle_instance(
+    wire: &crate::scene::WireModel,
+    draw_depth: f32,
+) -> Option<CircleInstance> {
+    // Only thin 2D planar circles or circular arcs have exactly 1 PlanarCircle / Arc tangent geometry
+    // and no 3D mesh fills or text quads.
+    if wire.tangent_geoms.len() != 1
+        || !wire.fill_tris.is_empty()
+        || !wire.pick_tris.is_empty()
+        || !wire.text_verts.is_empty()
+        || wire.render_instance.is_some()
+    {
+        return None;
+    }
+    let (center, axis_x, axis_y, radius, start_angle, end_angle) = match wire.tangent_geoms[0] {
+        crate::scene::model::wire_model::TangentGeom::PlanarCircle {
+            center,
+            axis_x,
+            axis_y,
+            radius,
+        } => (center, axis_x, axis_y, radius, 0.0f32, std::f32::consts::TAU),
+        crate::scene::model::wire_model::TangentGeom::Arc {
+            center,
+            axis_x,
+            axis_y,
+            radius,
+            start_angle,
+            end_angle,
+        } => (
+            center,
+            axis_x,
+            axis_y,
+            radius,
+            start_angle as f32,
+            end_angle as f32,
+        ),
+        _ => return None,
+    };
+    if radius <= 0.0 || !radius.is_finite() || !start_angle.is_finite() || !end_angle.is_finite() {
+        return None;
+    }
+
+    let (ch, cl) = split_ds_xyz(center[0], center[1], center[2]);
+    let hw = wire.line_weight_px * 0.5;
+    let pat0 = [wire.pattern[0], wire.pattern[1], wire.pattern[2], wire.pattern[3]];
+    let pat1 = [wire.pattern[4], wire.pattern[5], wire.pattern[6], wire.pattern[7]];
+
+    Some(CircleInstance {
+        center_high: ch,
+        _pad0: 0.0,
+        center_low: cl,
+        radius: radius as f32,
+        axis_x: [axis_x[0] as f32, axis_x[1] as f32, axis_x[2] as f32],
+        start_angle,
+        axis_y: [axis_y[0] as f32, axis_y[1] as f32, axis_y[2] as f32],
+        end_angle,
+        color: wire.color,
+        params: [hw, wire.pattern_length, draw_depth, 0.0],
+        pat0,
+        pat1,
+    })
+}
+
+fn split_ds_xyz(x: f64, y: f64, z: f64) -> ([f32; 3], [f32; 3]) {
+    let hx = x as f32;
+    let lx = (x - hx as f64) as f32;
+    let hy = y as f32;
+    let ly = (y - hy as f64) as f32;
+    let hz = z as f32;
+    let lz = (z - hz as f64) as f32;
+    ([hx, hy, hz], [lx, ly, lz])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn circle_instance_size_matches_stride() {
+        assert_eq!(std::mem::size_of::<CircleInstance>(), 128);
+    }
+
+    #[test]
+    fn circle_shader_validates_with_naga() {
+        let source = include_str!("../../shaders/circle.wgsl");
+        let module = naga::front::wgsl::parse_str(source).expect("circle.wgsl parses cleanly");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        );
+        validator
+            .validate(&module)
+            .expect("circle.wgsl validates cleanly with naga");
+    }
+
+    #[test]
+    fn extract_circle_instance_planar_success() {
+        let mut wire = crate::scene::WireModel::default();
+        wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::PlanarCircle {
+            center: [100.0, 200.0, 300.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 50.0,
+        });
+        wire.line_weight_px = 2.0;
+        wire.color = [1.0, 0.0, 0.0, 1.0];
+
+        let inst = extract_circle_instance(&wire, 1.5).expect("should extract planar circle");
+        assert_eq!(inst.radius, 50.0);
+        assert_eq!(inst.start_angle, 0.0);
+        assert_eq!(inst.end_angle, std::f32::consts::TAU);
+        assert_eq!(inst.center_high, [100.0, 200.0, 300.0]);
+        assert_eq!(inst.color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(inst.params[0], 1.0); // half lineweight
+        assert_eq!(inst.params[2], 1.5); // draw depth
+    }
+
+    #[test]
+    fn extract_circle_instance_arc_success() {
+        let mut wire = crate::scene::WireModel::default();
+        wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
+            center: [10.0, 20.0, 30.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 25.0,
+            start_angle: 0.5,
+            end_angle: 2.5,
+        });
+        wire.line_weight_px = 3.0;
+        wire.color = [0.0, 1.0, 0.0, 1.0];
+
+        let inst = extract_circle_instance(&wire, 0.5).expect("should extract circular arc");
+        assert_eq!(inst.radius, 25.0);
+        assert_eq!(inst.start_angle, 0.5);
+        assert_eq!(inst.end_angle, 2.5);
+        assert_eq!(inst.center_high, [10.0, 20.0, 30.0]);
+        assert_eq!(inst.color, [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(inst.params[0], 1.5);
+    }
+
+    #[test]
+    fn extract_circle_instance_rejects_non_planar_or_complex() {
+        let mut wire = crate::scene::WireModel::default();
+        wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::PlanarCircle {
+            center: [0.0, 0.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+        });
+        // 1. With fill_tris (e.g. 3D solid or hatch)
+        wire.fill_tris = vec![[0.0; 3]];
+        assert!(extract_circle_instance(&wire, 0.0).is_none());
+
+        // 2. Clear fill_tris, add render_instance (block instance)
+        wire.fill_tris.clear();
+        wire.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
+            source_id: 1,
+            translation: [0.0; 3],
+        });
+        assert!(extract_circle_instance(&wire, 0.0).is_none());
+
+        // 3. Invalid radius
+        wire.render_instance = None;
+        wire.tangent_geoms[0] = crate::scene::model::wire_model::TangentGeom::PlanarCircle {
+            center: [0.0, 0.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: -5.0,
+        };
+        assert!(extract_circle_instance(&wire, 0.0).is_none());
+    }
+}

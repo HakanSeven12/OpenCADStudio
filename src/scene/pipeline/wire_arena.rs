@@ -126,7 +126,11 @@ pub fn split_wires(wires: &[WireModel]) -> (Vec<&WireModel>, Vec<&WireModel>) {
     wires
         .iter()
         .filter(|wire| {
-            wire.display_visible && !wire.points.is_empty() && wire.render_instance.is_none()
+            wire.display_visible
+                && !wire.points.is_empty()
+                && wire.render_instance.is_none()
+                && super::circle_gpu::extract_circle_instance(wire, 0.0).is_none()
+                && super::ellipse_gpu::extract_ellipse_instance(wire, 0.0).is_none()
         })
         .partition(|wire| !wire.fill_is_3d)
 }

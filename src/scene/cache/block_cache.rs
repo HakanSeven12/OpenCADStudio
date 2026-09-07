@@ -1268,7 +1268,8 @@ fn translated_prototype_wire(
                 }
             }
             TangentGeom::PlanarCircle { center, .. }
-            | TangentGeom::Arc { center, .. } => {
+            | TangentGeom::Arc { center, .. }
+            | TangentGeom::PlanarEllipse { center, .. } => {
                 for axis in 0..3 {
                     center[axis] += delta[axis];
                 }
@@ -2725,6 +2726,31 @@ fn transform_tangent(
                 axis_x: [x.x, x.y, x.z],
                 axis_y: [y.x, y.y, y.z],
                 radius: radius * ((sx + sy) * 0.5),
+            })
+        }
+        TangentGeom::PlanarEllipse {
+            center,
+            major_axis,
+            normal,
+            minor_axis_ratio,
+            start_param,
+            end_param,
+        } => {
+            let c = t.apply(Vector3::new(center[0], center[1], center[2]));
+            let m = t.apply_rotation(Vector3::new(major_axis[0], major_axis[1], major_axis[2]));
+            let n = t.apply_rotation(Vector3::new(normal[0], normal[1], normal[2]));
+            let n_len = n.length();
+            if n_len <= 1.0e-12 {
+                return None;
+            }
+            let n = n / n_len;
+            Some(TangentGeom::PlanarEllipse {
+                center: [c.x, c.y, c.z],
+                major_axis: [m.x, m.y, m.z],
+                normal: [n.x, n.y, n.z],
+                minor_axis_ratio: *minor_axis_ratio,
+                start_param: *start_param,
+                end_param: *end_param,
             })
         }
     }

@@ -2232,6 +2232,7 @@ impl Scene {
             self.annotation_all_visible(),
             None,
             None,
+            None,
         );
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);
@@ -5161,9 +5162,9 @@ impl Scene {
     pub(super) fn model_tile_wires_arc(
         &self,
         _tile_idx: usize,
-        _cam: &Camera,
+        cam: &Camera,
         _cam_aspect: f32,
-        _tile_pixel_height: f32,
+        tile_pixel_height: f32,
     ) -> Arc<Vec<WireModel>> {
         // In a BEDIT block editor the resident set is the edited block's own
         // (block-local) entities; otherwise model space. (#261)
@@ -5174,7 +5175,12 @@ impl Scene {
             &self.document,
             &self.document.header.current_annotation_scale,
         );
-        self.resident_wires_for(block, None, scale, None, None)
+        let wpp = if tile_pixel_height > 0.0 {
+            Some((2.0 * cam.ortho_size()) / tile_pixel_height)
+        } else {
+            self.world_per_pixel()
+        };
+        self.resident_wires_for(block, None, scale, None, None, wpp)
     }
 
     /// Unified static-hold wire builder — the ONE tessellation path every
@@ -5223,6 +5229,7 @@ impl Scene {
         annotation_scale_handle: Option<Handle>,
         frozen_layers: Option<&HashSet<Handle>>,
         style_viewport: Option<Handle>,
+        wpp: Option<f32>,
     ) -> Arc<Vec<WireModel>> {
         // Normalize an inert anno override away so distinct viewport scales
         // share one resident set when annotation can't change the wires.
@@ -5239,6 +5246,7 @@ impl Scene {
             self.paper_bg_color
         };
         let all_visible = self.annotation_all_visible();
+        let quantized_wpp = Self::quantize_wpp(wpp);
         let key = self.resident_wire_key(
             block,
             bg,
@@ -5247,6 +5255,7 @@ impl Scene {
             all_visible,
             frozen_layers,
             style_viewport,
+            quantized_wpp,
         );
         {
             let sets = self.resident_wire_sets.borrow();
@@ -5271,17 +5280,18 @@ impl Scene {
                 all_visible,
                 frozen_layers,
                 style_viewport,
+                quantized_wpp,
             )
         {
             return arc;
         }
-        // Build once: full tessellation, no cull (region = None), no zoom LOD
-        // (wpp = None) — for every space, exactly like the Model static-hold.
+        // Build once: full tessellation, no cull (region = None), zoom LOD
+        // bounded by quantized_wpp for every space.
         let t_tess = iced::time::Instant::now();
         let mut wires = self.wires_for_block_culled(
             block,
             None,
-            None,
+            quantized_wpp,
             frozen_layers,
             anno_scale_override,
             annotation_scale_handle,
@@ -5327,6 +5337,9 @@ impl Scene {
         // spaces or re-scaling a viewport can't accumulate dead full sets.
         let cur_epoch = self.geometry_epoch;
         sets.retain(|_, set| set.epoch == cur_epoch);
+        if sets.len() > 16 {
+            sets.clear();
+        }
         sets.insert(
             key,
             ResidentWireSet {
@@ -5348,6 +5361,7 @@ impl Scene {
         all_visible: bool,
         frozen_layers: Option<&HashSet<Handle>>,
         style_viewport: Option<Handle>,
+        quantized_wpp: Option<f32>,
     ) -> u64 {
         let mut key: u64 = 0xcbf2_9ce4_8422_2325;
         let mut mix =
@@ -5362,6 +5376,9 @@ impl Scene {
         mix(annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0));
         mix(all_visible as u64);
         mix(self.viewport_style_key(style_viewport));
+        mix(quantized_wpp
+            .map(|w| w.to_bits() as u64)
+            .unwrap_or(u64::MAX));
         match frozen_layers {
             Some(frozen) => {
                 let mut signature = 0u64;
@@ -5374,6 +5391,18 @@ impl Scene {
             None => mix(u64::MAX - 1),
         }
         key
+    }
+
+    /// Quantize world units per pixel (`wpp`) into half-octave bands (~1.414x zoom ratio).
+    ///
+    /// This provides discrete, stable zoom bands so that panning (where wpp is constant)
+    /// and small subpixel viewport drifts or mouse-wheel motions within a band do not
+    /// cause re-tessellation or GPU buffer re-uploads, while zooming past a band threshold
+    /// smoothly scales circle tessellation detail.
+    pub fn quantize_wpp(wpp: Option<f32>) -> Option<f32> {
+        let w = wpp.filter(|&w| w.is_finite() && w > 0.0)?;
+        let step = (w.log2() * 2.0).floor() * 0.5;
+        Some(2.0f32.powf(step))
     }
 
     /// The GPU wire-arena handoff for a viewport whose content id is `gen`:
@@ -5462,6 +5491,7 @@ impl Scene {
         all_visible: bool,
         frozen_layers: Option<&HashSet<Handle>>,
         style_viewport: Option<Handle>,
+        quantized_wpp: Option<f32>,
     ) -> Option<Arc<Vec<WireModel>>> {
         if self.viewport_style_key(style_viewport) != 0 {
             return None;
@@ -5545,7 +5575,7 @@ impl Scene {
                 e,
                 Some(&blk),
                 None,
-                None,
+                quantized_wpp,
                 anno_scale_override.is_some(),
             );
             memo_updates.push((*h, Arc::new(raw.clone())));
@@ -5827,7 +5857,7 @@ impl Scene {
         }
         let layout_block = self.current_layout_block_handle();
         let scale = self.paper_annotation_scale_handle();
-        let base = self.resident_wires_for(layout_block, None, scale, None, None);
+        let base = self.resident_wires_for(layout_block, None, scale, None, None, None);
         let mut wires = (*base).clone();
         // The overall "sheet" viewport now IS the paper view itself, so its own
         // border rectangle must not be drawn as an entity on the sheet.
@@ -9061,7 +9091,7 @@ impl Scene {
             static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             *EN.get_or_init(|| std::env::var("OCS_NO_RESIDENT_MEMO").is_err())
         }
-        let resident = base_ok && view_aabb.is_none() && wpp.is_none() && resident_memo_enabled();
+        let resident = base_ok && view_aabb.is_none() && resident_memo_enabled();
         let memo_active = base_ok && (view_aabb.is_some() || resident);
         // Reported in one line below. `tess_ms` / `memo_misses` are assigned by
         // both branches; the rest exist only on the memo path and stay zero.
@@ -10200,6 +10230,7 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
             scale,
             None,
             None,
+            None,
         );
         let wire_points = wires.iter().flat_map(|wire| wire.key_vertices.iter().copied());
         let mesh_points = self.meshes.iter().filter_map(|(&handle, set)| {
@@ -11213,6 +11244,7 @@ mod layout_cache_tests {
                 scale,
                 None,
                 None,
+                None,
             );
             let generation = s.last_model_wire_gen.get();
             let bounds = s.model_space_extents().unwrap();
@@ -11225,5 +11257,41 @@ mod layout_cache_tests {
             );
             assert!(!source.is_empty());
         }
+    }
+
+    #[test]
+    fn circle_wires_scale_with_zoom_level() {
+        let mut s = Scene::new();
+        let mut circle = acadrust::entities::Circle::default();
+        circle.radius = 100.0;
+        let handle = s.add_entity(EntityType::Circle(circle));
+
+        // Far camera: distance is large -> wpp is large
+        let mut cam_far = Camera::default();
+        cam_far.distance = 1000.0;
+
+        // Close camera: distance is small -> wpp is small
+        let mut cam_close = Camera::default();
+        cam_close.distance = 1.0;
+
+        let wires_far = s.model_tile_wires_arc(0, &cam_far, 1.0, 1000.0);
+        let circle_wire_far = wires_far
+            .iter()
+            .find(|w| w.name == handle.value().to_string())
+            .unwrap();
+        let far_pts = circle_wire_far.points.len();
+
+        let wires_close = s.model_tile_wires_arc(0, &cam_close, 1.0, 1000.0);
+        let circle_wire_close = wires_close
+            .iter()
+            .find(|w| w.name == handle.value().to_string())
+            .unwrap();
+        let close_pts = circle_wire_close.points.len();
+
+        assert!(
+            close_pts > far_pts,
+            "Close camera points ({close_pts}) should exceed far camera points ({far_pts})"
+        );
+        assert!(close_pts > 500, "Close points ({close_pts}) should be > 500");
     }
 }

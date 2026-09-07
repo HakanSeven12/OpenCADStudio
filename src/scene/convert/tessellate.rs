@@ -707,9 +707,11 @@ pub fn tessellate(
     }
 
     // ── Try the kernel path first ───────────────────────────────────────────
+    // Zoom-adaptive circles scale their segment count from the current zoom level and radius.
     // Relative-PDSIZE points size their glyph from the current zoom so they
     // stay a roughly constant on-screen size; otherwise the header-driven path.
-    let te = crate::entities::point::relative_render(entity, document, world_per_pixel)
+    let te = crate::entities::circle::relative_render(entity, document, world_per_pixel)
+        .or_else(|| crate::entities::point::relative_render(entity, document, world_per_pixel))
         .or_else(|| crate::entities::light::relative_render(entity, document, world_per_pixel))
         .or_else(|| match entity {
             EntityType::Text(text) => Some(crate::entities::text::to_render_at_scale(

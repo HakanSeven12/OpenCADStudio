@@ -47,6 +47,15 @@ pub enum TangentGeom {
         start_angle: f64,
         end_angle: f64,
     },
+    /// Ellipse or elliptical arc in an arbitrary world-space plane.
+    PlanarEllipse {
+        center: [f64; 3],
+        major_axis: [f64; 3],
+        normal: [f64; 3],
+        minor_axis_ratio: f64,
+        start_param: f64,
+        end_param: f64,
+    },
 }
 
 /// Viewport-relative display transform for a point marker.

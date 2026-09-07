@@ -2318,19 +2318,26 @@ fn emit_wire(
     // and transforms cleanly with accum_xform into an analytical curve, emit it as a standalone
     // wire in extra_wires. This lets partition_wires extract it into CircleGpu / EllipseGpu for
     // pixel-perfect analytical rendering on the GPU instead of segmented lines.
-    if lw.tangent_geoms.len() == 1
+    if !lw.tangent_geoms.is_empty()
         && lw.fill_tris.is_empty()
         && lw.pick_tris.is_empty()
         && lw.text_verts.is_empty()
     {
-        if let Some(tangent) = transform_tangent(&lw.tangent_geoms[0], accum_xform) {
-            if matches!(
-                tangent,
-                TangentGeom::Circle { .. }
-                    | TangentGeom::PlanarCircle { .. }
-                    | TangentGeom::Arc { .. }
-                    | TangentGeom::PlanarEllipse { .. }
-            ) {
+        let transformed_tangents: Option<Vec<TangentGeom>> = lw
+            .tangent_geoms
+            .iter()
+            .map(|tg| transform_tangent(tg, accum_xform))
+            .collect();
+        if let Some(tangents) = transformed_tangents {
+            if tangents.iter().all(|tangent| {
+                matches!(
+                    tangent,
+                    TangentGeom::Circle { .. }
+                        | TangentGeom::PlanarCircle { .. }
+                        | TangentGeom::Arc { .. }
+                        | TangentGeom::PlanarEllipse { .. }
+                )
+            }) {
                 let contrast_bg = lw.contrast_bg.unwrap_or(ctx.bg_color);
                 let color = if lw.canvas_color {
                     ctx.bg_color
@@ -2421,7 +2428,7 @@ fn emit_wire(
                     line_weight_px: final_lw_px,
                     aci: final_aci,
                     snap_pts,
-                    tangent_geoms: vec![tangent],
+                    tangent_geoms: tangents,
                     key_vertices,
                     aabb,
                     plinegen: lw.plinegen,

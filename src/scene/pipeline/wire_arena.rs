@@ -144,25 +144,16 @@ pub fn classify_wire(wire: &WireModel) -> WireKind {
     if wire.render_instance.is_some() {
         return WireKind::Block;
     }
-    if wire.tangent_geoms.len() == 1
+    if !wire.tangent_geoms.is_empty()
         && wire.fill_tris.is_empty()
         && wire.pick_tris.is_empty()
         && wire.text_verts.is_empty()
     {
-        match &wire.tangent_geoms[0] {
-            crate::scene::model::wire_model::TangentGeom::Circle { .. }
-            | crate::scene::model::wire_model::TangentGeom::PlanarCircle { .. }
-            | crate::scene::model::wire_model::TangentGeom::Arc { .. } => {
-                if super::circle_gpu::extract_circle_instance(wire, 0.0).is_some() {
-                    return WireKind::Circle;
-                }
-            }
-            crate::scene::model::wire_model::TangentGeom::PlanarEllipse { .. } => {
-                if super::ellipse_gpu::extract_ellipse_instance(wire, 0.0).is_some() {
-                    return WireKind::Ellipse;
-                }
-            }
-            _ => {}
+        if super::circle_gpu::extract_circle_instances(wire, 0.0).is_some() {
+            return WireKind::Circle;
+        }
+        if super::ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_some() {
+            return WireKind::Ellipse;
         }
     }
     if !wire.points.is_empty() {
@@ -209,27 +200,18 @@ pub fn partition_wires<'a>(
             continue;
         }
         let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
-        if wire.tangent_geoms.len() == 1
+        if !wire.tangent_geoms.is_empty()
             && wire.fill_tris.is_empty()
             && wire.pick_tris.is_empty()
             && wire.text_verts.is_empty()
         {
-            match &wire.tangent_geoms[0] {
-                crate::scene::model::wire_model::TangentGeom::Circle { .. }
-                | crate::scene::model::wire_model::TangentGeom::PlanarCircle { .. }
-                | crate::scene::model::wire_model::TangentGeom::Arc { .. } => {
-                    if let Some(inst) = super::circle_gpu::extract_circle_instance(wire, depth) {
-                        circle_instances.push(inst);
-                        continue;
-                    }
-                }
-                crate::scene::model::wire_model::TangentGeom::PlanarEllipse { .. } => {
-                    if let Some(inst) = super::ellipse_gpu::extract_ellipse_instance(wire, depth) {
-                        ellipse_instances.push(inst);
-                        continue;
-                    }
-                }
-                _ => {}
+            if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
+                circle_instances.extend(insts);
+                continue;
+            }
+            if let Some(insts) = super::ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                ellipse_instances.extend(insts);
+                continue;
             }
         }
         if !wire.points.is_empty() {

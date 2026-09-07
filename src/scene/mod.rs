@@ -11358,4 +11358,44 @@ mod layout_cache_tests {
             "Single bulge arc polyline must be extracted as analytical GPU arc instance"
         );
     }
+
+    #[test]
+    fn multi_bulge_polyline_extracts_as_analytical_gpu_arcs() {
+        let mut s = Scene::new();
+        let mut pline = acadrust::entities::LwPolyline::new();
+        // A circle represented as a closed 2-vertex polyline with two semicircle bulges (standard CAD polyline circle)
+        pline.is_closed = true;
+        pline.vertices = vec![
+            acadrust::entities::LwVertex {
+                location: acadrust::types::Vector2::new(0.0, 0.0),
+                bulge: 1.0,
+                start_width: 0.0,
+                end_width: 0.0,
+                vertex_id: 0,
+            },
+            acadrust::entities::LwVertex {
+                location: acadrust::types::Vector2::new(100.0, 0.0),
+                bulge: 1.0,
+                start_width: 0.0,
+                end_width: 0.0,
+                vertex_id: 1,
+            },
+        ];
+        let _ = s.add_entity(EntityType::LwPolyline(pline));
+
+        let wires = s.model_tile_wires_arc(0, &Camera::default(), 1.0, 1000.0);
+        let depths = rustc_hash::FxHashMap::default();
+        let partitioned = crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths);
+
+        assert_eq!(
+            partitioned.circle_instances.len(),
+            2,
+            "Multi-bulge closed polyline circle must be extracted as 2 analytical GPU arc instances"
+        );
+        assert_eq!(
+            partitioned.regular.len(),
+            0,
+            "Multi-bulge pure arc polyline must not be sent to regular line arena"
+        );
+    }
 }

@@ -2421,8 +2421,8 @@ impl Pipeline {
                 continue;
             }
             let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(inst) = circle_gpu::extract_circle_instance(wire, depth) {
-                instances.push(inst);
+            if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
+                instances.extend(insts);
             }
         }
         self.upload_circles_from_instances(device, queue, &instances)
@@ -2461,8 +2461,8 @@ impl Pipeline {
                 continue;
             }
             let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(inst) = ellipse_gpu::extract_ellipse_instance(wire, depth) {
-                instances.push(inst);
+            if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                instances.extend(insts);
             }
         }
         self.upload_ellipses_from_instances(device, queue, &instances)
@@ -2656,18 +2656,22 @@ impl Pipeline {
         let mut selected_circles: Vec<CircleInstance> = Vec::new();
         for &wire in &selected_wires {
             let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(mut inst) = circle_gpu::extract_circle_instance(wire, depth) {
-                if let Some(tint) = selected_tint {
-                    inst.color = tint;
+            if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
+                for mut inst in insts {
+                    if let Some(tint) = selected_tint {
+                        inst.color = tint;
+                    }
+                    selected_circles.push(inst);
                 }
-                selected_circles.push(inst);
             }
         }
         for &wire in &hover_wires {
             let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(mut inst) = circle_gpu::extract_circle_instance(wire, depth) {
-                inst.color = WireModel::HOVER;
-                selected_circles.push(inst);
+            if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
+                for mut inst in insts {
+                    inst.color = WireModel::HOVER;
+                    selected_circles.push(inst);
+                }
             }
         }
         self.gpu_selected_circles = if selected_circles.is_empty() {
@@ -2684,18 +2688,22 @@ impl Pipeline {
         let mut selected_ellipses: Vec<EllipseInstance> = Vec::new();
         for &wire in &selected_wires {
             let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(mut inst) = ellipse_gpu::extract_ellipse_instance(wire, depth) {
-                if let Some(tint) = selected_tint {
-                    inst.color = tint;
+            if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                for mut inst in insts {
+                    if let Some(tint) = selected_tint {
+                        inst.color = tint;
+                    }
+                    selected_ellipses.push(inst);
                 }
-                selected_ellipses.push(inst);
             }
         }
         for &wire in &hover_wires {
             let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(mut inst) = ellipse_gpu::extract_ellipse_instance(wire, depth) {
-                inst.color = WireModel::HOVER;
-                selected_ellipses.push(inst);
+            if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                for mut inst in insts {
+                    inst.color = WireModel::HOVER;
+                    selected_ellipses.push(inst);
+                }
             }
         }
         self.gpu_selected_ellipses = if selected_ellipses.is_empty() {
@@ -2714,8 +2722,8 @@ impl Pipeline {
             .copied()
             .filter(|wire| {
                 wire.render_instance.is_none()
-                    && circle_gpu::extract_circle_instance(wire, 0.0).is_none()
-                    && ellipse_gpu::extract_ellipse_instance(wire, 0.0).is_none()
+                    && circle_gpu::extract_circle_instances(wire, 0.0).is_none()
+                    && ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_none()
             })
             .collect();
         let hover_regular: Vec<&WireModel> = hover_wires
@@ -2723,8 +2731,8 @@ impl Pipeline {
             .copied()
             .filter(|wire| {
                 wire.render_instance.is_none()
-                    && circle_gpu::extract_circle_instance(wire, 0.0).is_none()
-                    && ellipse_gpu::extract_ellipse_instance(wire, 0.0).is_none()
+                    && circle_gpu::extract_circle_instances(wire, 0.0).is_none()
+                    && ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_none()
             })
             .collect();
         let selected_blocks: Vec<&WireModel> = selected_wires

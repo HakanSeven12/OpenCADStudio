@@ -199,19 +199,12 @@ pub fn create_pipelines(
     (ellipse_pipeline, ellipse_xray_pipeline)
 }
 
-/// Helper to extract an analytical ellipse instance from a `WireModel`.
-pub fn extract_ellipse_instance(
+/// Helper to extract an analytical ellipse instance from a single `TangentGeom`.
+pub fn extract_ellipse_instance_from_geom(
+    geom: &crate::scene::model::wire_model::TangentGeom,
     wire: &crate::scene::WireModel,
     draw_depth: f32,
 ) -> Option<EllipseInstance> {
-    if wire.tangent_geoms.len() != 1
-        || !wire.fill_tris.is_empty()
-        || !wire.pick_tris.is_empty()
-        || !wire.text_verts.is_empty()
-        || wire.render_instance.is_some()
-    {
-        return None;
-    }
     let crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
         center,
         major_axis,
@@ -219,7 +212,7 @@ pub fn extract_ellipse_instance(
         minor_axis_ratio,
         start_param,
         end_param,
-    } = wire.tangent_geoms[0] else {
+    } = *geom else {
         return None;
     };
 
@@ -252,6 +245,43 @@ pub fn extract_ellipse_instance(
         pat0,
         pat1,
     })
+}
+
+/// Helper to extract all analytical ellipse instances from a `WireModel`.
+pub fn extract_ellipse_instances(
+    wire: &crate::scene::WireModel,
+    draw_depth: f32,
+) -> Option<Vec<EllipseInstance>> {
+    if wire.tangent_geoms.is_empty()
+        || !wire.fill_tris.is_empty()
+        || !wire.pick_tris.is_empty()
+        || !wire.text_verts.is_empty()
+        || wire.render_instance.is_some()
+    {
+        return None;
+    }
+
+    let mut instances = Vec::with_capacity(wire.tangent_geoms.len());
+    for geom in &wire.tangent_geoms {
+        if let Some(inst) = extract_ellipse_instance_from_geom(geom, wire, draw_depth) {
+            instances.push(inst);
+        } else {
+            return None;
+        }
+    }
+    Some(instances)
+}
+
+/// Helper to extract a single analytical ellipse instance from a `WireModel`.
+pub fn extract_ellipse_instance(
+    wire: &crate::scene::WireModel,
+    draw_depth: f32,
+) -> Option<EllipseInstance> {
+    if wire.tangent_geoms.len() == 1 {
+        extract_ellipse_instances(wire, draw_depth).and_then(|mut v| v.pop())
+    } else {
+        None
+    }
 }
 
 fn split_ds_xyz(x: f64, y: f64, z: f64) -> ([f32; 3], [f32; 3]) {

@@ -147,6 +147,23 @@ declare_class!(
                 .collect();
             deliver_or_launch(&files);
         }
+
+        /// Fires when this already-running process is reactivated with no
+        /// visible windows to show — clicking the Dock icon, or Finder
+        /// launching the bundle again while Launch Services still considers
+        /// it running (this launcher's own ASN never dies between opens; see
+        /// the module doc). Without this, quitting the real GUI window while
+        /// this relay stays alive left the app in a state where reopening it
+        /// did nothing: no fresh `applicationDidFinishLaunching:` (that only
+        /// fires once, at this process's own cold start) and no
+        /// `application:openURLs:` (no document was named).
+        #[method(applicationShouldHandleReopen:hasVisibleWindows:)]
+        fn should_handle_reopen(&self, _sender: &NSApplication, has_visible_windows: bool) -> bool {
+            if !has_visible_windows {
+                deliver_or_launch(&[]);
+            }
+            true
+        }
     }
 );
 

@@ -261,20 +261,13 @@ pub fn run_request_proxy(
     token: [u8; PROXY_TOKEN_LEN],
 ) -> std::io::Result<()> {
     for stream in listener.incoming() {
-        let mut stream = match stream {
-            Ok(s) => s,
-            Err(e) => return Err(e),
-        };
+        let mut stream = stream?;
         if !verify_token(&mut stream, &token) {
             continue;
         }
         let sender = Arc::clone(&sender);
         std::thread::spawn(move || {
-            loop {
-                let req: PluginRequest = match recv_framed(&mut stream) {
-                    Ok(r) => r,
-                    Err(_) => break,
-                };
+            while let Ok(req) = recv_framed(&mut stream) {
                 let resp = match sender.request(req) {
                     Ok(r) => r,
                     Err(e) => PluginResponse::Error(e.to_string()),

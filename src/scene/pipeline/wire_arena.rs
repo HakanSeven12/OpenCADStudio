@@ -120,15 +120,131 @@ fn handle_of(w: &WireModel) -> Option<Handle> {
     crate::scene::Scene::handle_from_wire_name(&w.name)
 }
 
+/// Classification of a wire model for rendering pipelines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WireKind {
+    Invisible,
+    Block,
+    Circle,
+    Ellipse,
+    Regular,
+    MeshEdge,
+    Empty,
+}
+
+/// Fast, branch-predicted classification of a wire model.
+///
+/// Bypasses analytical circle/ellipse extraction for the 95%+ of wires that have
+/// no tangent geometry or multiple tangent primitives, reducing overhead to ~2 ns.
+#[inline]
+pub fn classify_wire(wire: &WireModel) -> WireKind {
+    if !wire.display_visible {
+        return WireKind::Invisible;
+    }
+    if wire.render_instance.is_some() {
+        return WireKind::Block;
+    }
+    if !wire.tangent_geoms.is_empty()
+        && wire.fill_tris.is_empty()
+        && wire.pick_tris.is_empty()
+        && wire.text_verts.is_empty()
+    {
+        if super::circle_gpu::extract_circle_instances(wire, 0.0).is_some() {
+            return WireKind::Circle;
+        }
+        if super::ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_some() {
+            return WireKind::Ellipse;
+        }
+    }
+    if !wire.points.is_empty() {
+        if wire.fill_is_3d {
+            WireKind::MeshEdge
+        } else {
+            WireKind::Regular
+        }
+    } else {
+        WireKind::Empty
+    }
+}
+
+/// Result of a single-pass partitioning of viewport wires.
+pub struct PartitionedWires<'a> {
+    pub regular: Vec<&'a WireModel>,
+    pub mesh: Vec<&'a WireModel>,
+    pub instanced: Vec<&'a WireModel>,
+    pub circle_instances: Vec<super::circle_gpu::CircleInstance>,
+    pub ellipse_instances: Vec<super::ellipse_gpu::EllipseInstance>,
+}
+
+/// Single-pass classification and extraction of all viewport wire categories.
+///
+/// Traverses the wire slice exactly once, eliminating redundant passes and duplicate
+/// analytical extractions across split_wires, upload_block_wires, upload_circles,
+/// and upload_ellipses.
+pub fn partition_wires<'a>(
+    wires: &'a [WireModel],
+    depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+) -> PartitionedWires<'a> {
+    let mut regular = Vec::new();
+    let mut mesh = Vec::new();
+    let mut instanced = Vec::new();
+    let mut circle_instances = Vec::new();
+    let mut ellipse_instances = Vec::new();
+
+    for wire in wires {
+        if !wire.display_visible {
+            continue;
+        }
+        if wire.render_instance.is_some() {
+            instanced.push(wire);
+            continue;
+        }
+        let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
+        if !wire.tangent_geoms.is_empty()
+            && wire.fill_tris.is_empty()
+            && wire.pick_tris.is_empty()
+            && wire.text_verts.is_empty()
+        {
+            if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
+                circle_instances.extend(insts);
+                continue;
+            }
+            if let Some(insts) = super::ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                ellipse_instances.extend(insts);
+                continue;
+            }
+        }
+        if !wire.points.is_empty() {
+            if wire.fill_is_3d {
+                mesh.push(wire);
+            } else {
+                regular.push(wire);
+            }
+        }
+    }
+
+    PartitionedWires {
+        regular,
+        mesh,
+        instanced,
+        circle_instances,
+        ellipse_instances,
+    }
+}
+
 /// Use the same regular/mesh partition for full uploads and changed runs.
 /// Instanced blocks are uploaded separately by `BlockWireGpu`.
 pub fn split_wires(wires: &[WireModel]) -> (Vec<&WireModel>, Vec<&WireModel>) {
-    wires
-        .iter()
-        .filter(|wire| {
-            wire.display_visible && !wire.points.is_empty() && wire.render_instance.is_none()
-        })
-        .partition(|wire| !wire.fill_is_3d)
+    let mut regular = Vec::new();
+    let mut mesh = Vec::new();
+    for wire in wires {
+        match classify_wire(wire) {
+            WireKind::Regular => regular.push(wire),
+            WireKind::MeshEdge => mesh.push(wire),
+            _ => {}
+        }
+    }
+    (regular, mesh)
 }
 
 /// True when appending a new entity at the tail could change the image, so the

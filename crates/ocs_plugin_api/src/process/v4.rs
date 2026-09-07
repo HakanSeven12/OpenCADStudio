@@ -75,10 +75,12 @@ fn request_kind(req: &HostRequest) -> &'static str {
     }
 }
 
+type DeferredRequest = (u64, Option<u64>, Box<PluginRequest>);
+
 pub(crate) struct V4Connection {
     shared: Arc<V4HostShared>,
     incoming: Mutex<mpsc::Receiver<HostIncoming>>,
-    deferred: Mutex<VecDeque<(u64, Option<u64>, Box<PluginRequest>)>>,
+    deferred: Mutex<VecDeque<DeferredRequest>>,
     call_lock: Mutex<()>,
     next_id: AtomicU64,
     reader_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
@@ -199,7 +201,7 @@ impl V4Connection {
                     tab_id,
                     payload,
                 }) => {
-                    if tab_id.map_or(true, |request_tab| request_tab == host.tab_id()) {
+                    if tab_id.is_none_or(|request_tab| request_tab == host.tab_id()) {
                         self.respond_to_plugin_request(
                             host,
                             rid,
@@ -251,7 +253,7 @@ impl V4Connection {
             let mut deferred = self.deferred.lock().unwrap_or_else(|e| e.into_inner());
             let mut waiting = VecDeque::new();
             while let Some((id, tab_id, payload)) = deferred.pop_front() {
-                if tab_id.map_or(true, |request_tab| request_tab == current_tab_id) {
+                if tab_id.is_none_or(|request_tab| request_tab == current_tab_id) {
                     ready.push_back((id, payload));
                 } else {
                     waiting.push_back((id, tab_id, payload));
@@ -271,7 +273,7 @@ impl V4Connection {
                     tab_id,
                     payload,
                 }) => {
-                    if tab_id.map_or(true, |request_tab| request_tab == current_tab_id) {
+                    if tab_id.is_none_or(|request_tab| request_tab == current_tab_id) {
                         self.respond_to_plugin_request(
                             host,
                             id,

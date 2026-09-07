@@ -839,18 +839,29 @@ impl shader::Primitive for Primitive {
                             gpus.extend(arena.wire_gpus());
                         }
                         inner.gpu_wires = std::sync::Arc::new(gpus);
-                        // Blocks keep their own cached geometry and placements.
-                        let instanced: Vec<&crate::scene::WireModel> = vp_wires
-                            .iter()
-                            .filter(|w| w.render_instance.is_some())
-                            .collect();
+                        let partitioned =
+                            wire_arena::partition_wires(&vp_wires, &draw_depths);
                         inner.gpu_block_wires = std::sync::Arc::new(
                             inner.upload_block_wires(
                                 device,
                                 queue,
-                                &instanced,
+                                &partitioned.instanced,
                                 &draw_depths,
                                 &mut pipeline.block_geometry,
+                            ),
+                        );
+                        inner.gpu_circles = std::sync::Arc::new(
+                            inner.upload_circles_from_instances(
+                                device,
+                                queue,
+                                &partitioned.circle_instances,
+                            ),
+                        );
+                        inner.gpu_ellipses = std::sync::Arc::new(
+                            inner.upload_ellipses_from_instances(
+                                device,
+                                queue,
+                                &partitioned.ellipse_instances,
                             ),
                         );
                         if _patched {
@@ -911,10 +922,14 @@ impl shader::Primitive for Primitive {
                             // Other panes retain their own references to shared geometry.
                             inner.gpu_wires = std::sync::Arc::new(Vec::new());
                             inner.gpu_block_wires = std::sync::Arc::new(Vec::new());
+                            inner.gpu_circles = std::sync::Arc::new(Vec::new());
+                            inner.gpu_ellipses = std::sync::Arc::new(Vec::new());
                             let held_before = pipeline.wire_buffer_cache.len();
-                            pipeline.wire_buffer_cache.retain(|_, (w, b, _)| {
+                            pipeline.wire_buffer_cache.retain(|_, (w, b, _, c, e)| {
                                 std::sync::Arc::strong_count(w) > 1
                                     || std::sync::Arc::strong_count(b) > 1
+                                    || std::sync::Arc::strong_count(c) > 1
+                                    || std::sync::Arc::strong_count(e) > 1
                             });
                             if _perf {
                                 crate::perf_record!(
@@ -959,6 +974,8 @@ impl shader::Primitive for Primitive {
                     inner.gpu_wires = built.0;
                     inner.gpu_block_wires = built.1;
                     inner.wire_handle_index = built.2;
+                    inner.gpu_circles = built.3;
+                    inner.gpu_ellipses = built.4;
                 } // end !arena_served
                 inner.cached_wire_id = vp.wire_content_id;
                 if _perf {

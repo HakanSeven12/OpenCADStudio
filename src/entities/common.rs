@@ -702,6 +702,30 @@ pub fn parse_angle_deg(value: &str) -> Option<f64> {
 /// there is one obvious place to see that the maths moved out.
 pub use cadkernel::geom2d::BulgeArc;
 
+/// Convert a 2D BulgeArc into a 3D TangentGeom::Arc with its world center,
+/// plane axes, radius, and counter-clockwise start/end sweep angles.
+pub fn bulge_arc_to_tangent(
+    arc: &BulgeArc,
+    to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+    normal: (f64, f64, f64),
+) -> crate::scene::model::wire_model::TangentGeom {
+    let (cwx, cwy, cwz) = to_wcs(arc.center[0], arc.center[1]);
+    let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
+    let (sa, ea) = if arc.sweep >= 0.0 {
+        (arc.start_angle, arc.end_angle)
+    } else {
+        (arc.end_angle, arc.start_angle)
+    };
+    crate::scene::model::wire_model::TangentGeom::Arc {
+        center: [cwx, cwy, cwz],
+        axis_x: [ax.0, ax.1, ax.2],
+        axis_y: [ay.0, ay.1, ay.2],
+        radius: arc.radius,
+        start_angle: sa,
+        end_angle: ea,
+    }
+}
+
 /// Triangulate the solid bands a `wide_fills` returns into the flat WCS f64
 /// triangle list `RenderEntity::pick_tris` carries, so a wide polyline is
 /// selectable across the band it draws and not just along its centreline.

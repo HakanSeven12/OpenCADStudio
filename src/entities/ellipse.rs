@@ -15,6 +15,7 @@ use crate::entities::common::{
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::scene::model::wire_model::TangentGeom;
 
 fn to_render(ell: &Ellipse) -> RenderEntity {
     // ELLIPSE is one of the few WCS entities in DXF: `center` (code 10) and
@@ -29,6 +30,15 @@ fn to_render(ell: &Ellipse) -> RenderEntity {
         .map(crate::entities::curve::snap_from)
         .unwrap_or_default();
 
+    let tangent = TangentGeom::PlanarEllipse {
+        center: [ell.center.x, ell.center.y, ell.center.z],
+        major_axis: [ell.major_axis.x, ell.major_axis.y, ell.major_axis.z],
+        normal: [ell.normal.x, ell.normal.y, ell.normal.z],
+        minor_axis_ratio: ell.minor_axis_ratio,
+        start_param: ell.start_parameter,
+        end_param: ell.end_parameter,
+    };
+
     // The points come from the entity's own kernel curve and angular policy.
     //
     // What does not change is the shape of the object. EXTRUDE, REVOLVE and
@@ -39,7 +49,7 @@ fn to_render(ell: &Ellipse) -> RenderEntity {
         pick_tris: Vec::new(),
         object: RenderObject::Lines(Vec::new()),
         snap_pts: snap.snap_pts,
-        tangent_geoms: vec![],
+        tangent_geoms: vec![tangent.clone()],
         key_vertices: vec![],
         fill_tris: vec![],
     };
@@ -57,7 +67,7 @@ fn to_render(ell: &Ellipse) -> RenderEntity {
         pick_tris: Vec::new(),
         object,
         snap_pts: snap.snap_pts,
-        tangent_geoms: vec![],
+        tangent_geoms: vec![tangent],
         key_vertices: vec![],
         fill_tris: vec![],
     }
@@ -284,16 +294,16 @@ fn apply_axis_grip(ell: &mut Ellipse, grip_id: usize, point: glam::DVec3) {
 fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
     match (grip_id, apply) {
         (0, GripApply::Translate(d)) => {
-            ell.center.x += d.x as f64;
-            ell.center.y += d.y as f64;
-            ell.center.z += d.z as f64;
+            ell.center.x += d.x;
+            ell.center.y += d.y;
+            ell.center.z += d.z;
         }
         (0, GripApply::Absolute(p)) => {
-            ell.center.x = p.x as f64;
-            ell.center.y = p.y as f64;
-            ell.center.z = p.z as f64;
+            ell.center.x = p.x;
+            ell.center.y = p.y;
+            ell.center.z = p.z;
         }
-        (1 | 2 | 3 | 4, GripApply::Absolute(p)) => apply_axis_grip(ell, grip_id, p),
+        (1..=4, GripApply::Absolute(p)) => apply_axis_grip(ell, grip_id, p),
         (5 | 6, GripApply::Absolute(p)) => {
             let Some(parameter) = parameter_at_point(ell, p) else {
                 return;

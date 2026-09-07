@@ -1108,7 +1108,7 @@ pub fn expand_insert(
         );
         let mut first = first_batches.finalize(&name, selected, bg_color);
         for wire in &mut first {
-            if wire.render_instance.is_none() {
+            if !is_standalone_analytical_curve(wire) && wire.render_instance.is_none() {
                 wire.render_instance = Some(
                     crate::scene::model::instance_model::RenderInstance {
                         source_id: crate::scene::model::instance_model::next_source_id(),
@@ -1149,7 +1149,7 @@ pub fn expand_insert(
     if let Some(guard) = prototype_guard.as_mut() {
         let translation = transform_translation(&xform);
         for wire in &mut wires {
-            if wire.render_instance.is_none() {
+            if !is_standalone_analytical_curve(wire) && wire.render_instance.is_none() {
                 wire.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
                     source_id: crate::scene::model::instance_model::next_source_id(),
                     translation,
@@ -1268,7 +1268,8 @@ fn translated_prototype_wire(
                 }
             }
             TangentGeom::PlanarCircle { center, .. }
-            | TangentGeom::Arc { center, .. } => {
+            | TangentGeom::Arc { center, .. }
+            | TangentGeom::PlanarEllipse { center, .. } => {
                 for axis in 0..3 {
                     center[axis] += delta[axis];
                 }
@@ -1311,6 +1312,20 @@ fn aabb_pixel_size(local_aabb: [f32; 4], world_per_pixel: f32) -> f32 {
     let w = (local_aabb[2] - local_aabb[0]).abs();
     let h = (local_aabb[3] - local_aabb[1]).abs();
     w.max(h) / world_per_pixel
+}
+
+fn is_standalone_analytical_curve(wire: &WireModel) -> bool {
+    wire.tangent_geoms.len() == 1
+        && wire.fill_tris.is_empty()
+        && wire.pick_tris.is_empty()
+        && wire.text_verts.is_empty()
+        && matches!(
+            wire.tangent_geoms[0],
+            TangentGeom::Circle { .. }
+                | TangentGeom::PlanarCircle { .. }
+                | TangentGeom::Arc { .. }
+                | TangentGeom::PlanarEllipse { .. }
+        )
 }
 
 struct ExpandCtx<'a> {
@@ -1930,12 +1945,14 @@ fn expand_defn(
                             .collect();
                         crate::scene::pick::xclip::clip_wires(&mut wires, &world_poly);
                         for wire in &mut wires {
-                            wire.render_instance = Some(
-                                crate::scene::model::instance_model::RenderInstance {
-                                    source_id: crate::scene::model::instance_model::next_source_id(),
-                                    translation,
-                                },
-                            );
+                            if !is_standalone_analytical_curve(wire) {
+                                wire.render_instance = Some(
+                                    crate::scene::model::instance_model::RenderInstance {
+                                        source_id: crate::scene::model::instance_model::next_source_id(),
+                                        translation,
+                                    },
+                                );
+                            }
                         }
                         out.extra_wires.extend(wires.iter().cloned());
                         first = Some((wires, translation));
@@ -1983,7 +2000,7 @@ fn expand_defn(
                             );
                             let mut wires = sub.finalize("", ctx.selected, ctx.bg_color);
                             for wire in &mut wires {
-                                if wire.render_instance.is_none() {
+                                if !is_standalone_analytical_curve(wire) && wire.render_instance.is_none() {
                                     wire.render_instance = Some(
                                         crate::scene::model::instance_model::RenderInstance {
                                             source_id: crate::scene::model::instance_model::next_source_id(),
@@ -2295,6 +2312,134 @@ fn emit_wire(
     } else {
         lw.line_weight_px
     };
+
+    // Analytical GPU circle / arc / ellipse fast path:
+    // If this LocalWire is a pure analytical curve (single tangent geometry, no fills/text/pick),
+    // and transforms cleanly with accum_xform into an analytical curve, emit it as a standalone
+    // wire in extra_wires. This lets partition_wires extract it into CircleGpu / EllipseGpu for
+    // pixel-perfect analytical rendering on the GPU instead of segmented lines.
+    if !lw.tangent_geoms.is_empty()
+        && lw.fill_tris.is_empty()
+        && lw.pick_tris.is_empty()
+        && lw.text_verts.is_empty()
+    {
+        let transformed_tangents: Option<Vec<TangentGeom>> = lw
+            .tangent_geoms
+            .iter()
+            .map(|tg| transform_tangent(tg, accum_xform))
+            .collect();
+        if let Some(tangents) = transformed_tangents {
+            if tangents.iter().all(|tangent| {
+                matches!(
+                    tangent,
+                    TangentGeom::Circle { .. }
+                        | TangentGeom::PlanarCircle { .. }
+                        | TangentGeom::Arc { .. }
+                        | TangentGeom::PlanarEllipse { .. }
+                )
+            }) {
+                let contrast_bg = lw.contrast_bg.unwrap_or(ctx.bg_color);
+                let color = if lw.canvas_color {
+                    ctx.bg_color
+                } else if lw.preserve_color {
+                    final_color
+                } else {
+                    crate::scene::view::render::adapt_to_bg(final_color, contrast_bg)
+                };
+                let bg_adapt: crate::scene::model::wire_model::BgAdapt =
+                    (lw.canvas_color || !lw.preserve_color).then(|| {
+                        Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                            raw_color: final_color,
+                            text_raw_colors: Vec::new(),
+                            contrast_bg: lw.contrast_bg,
+                            canvas_color: lw.canvas_color,
+                            preserve_color: lw.preserve_color,
+                        })
+                    });
+
+                let mut points = Vec::with_capacity(lw.points.len());
+                let mut points_low = Vec::with_capacity(lw.points.len());
+                let mut min_x = f32::INFINITY;
+                let mut min_y = f32::INFINITY;
+                let mut max_x = f32::NEG_INFINITY;
+                let mut max_y = f32::NEG_INFINITY;
+                for (idx, p) in lw.points.iter().enumerate() {
+                    let pl = lw.points_low.get(idx).copied().unwrap_or([0.0; 3]);
+                    let point = accum_xform.apply(Vector3::new(
+                        p[0] as f64 + pl[0] as f64,
+                        p[1] as f64 + pl[1] as f64,
+                        p[2] as f64 + pl[2] as f64,
+                    ));
+                    let (hx, lx) = WireModel::split_ds(point.x);
+                    let (hy, ly) = WireModel::split_ds(point.y);
+                    let (hz, lz) = WireModel::split_ds(point.z);
+                    if hx < min_x { min_x = hx; }
+                    if hy < min_y { min_y = hy; }
+                    if hx > max_x { max_x = hx; }
+                    if hy > max_y { max_y = hy; }
+                    points.push([hx, hy, hz]);
+                    points_low.push([lx, ly, lz]);
+                }
+                let aabb = if min_x.is_infinite() {
+                    WireModel::UNBOUNDED_AABB
+                } else {
+                    [min_x, min_y, max_x, max_y]
+                };
+                let mut snap_pts = Vec::with_capacity(lw.snap_pts.len());
+                for (p, hint) in &lw.snap_pts {
+                    let v = accum_xform.apply(Vector3::new(p.x, p.y, p.z));
+                    snap_pts.push((glam::DVec3::new(v.x, v.y, v.z), *hint));
+                }
+                let mut key_vertices = Vec::with_capacity(lw.key_vertices.len());
+                for p in &lw.key_vertices {
+                    let v = accum_xform.apply(Vector3::new(p[0], p[1], p[2]));
+                    key_vertices.push([v.x, v.y, v.z]);
+                }
+                let local_depth = if d_range != (0.0, 1.0) {
+                    Some(d_range.0)
+                } else {
+                    None
+                };
+
+                let wire = WireModel {
+                    bg_adapt,
+                    point_marker: lw.point_marker,
+                    taper_widths: Vec::new(),
+                    pattern_stations: Vec::new(),
+                    world_width: 0.0,
+                    depth_override: local_depth,
+                    display_visible: !lw.hide_unselected || ctx.selected,
+                    plot_visible: lw.plot_visible,
+                    fill_is_3d: false,
+                    fill_is_2d_solid: false,
+                    render_instance: None,
+                    pick_tris: Vec::new(),
+                    pick_tris_low: Vec::new(),
+                    dash_from_start: false,
+                    dash_align_end: None,
+                    text_verts: Vec::new(),
+                    name: String::new(),
+                    points,
+                    points_low,
+                    color,
+                    selected: ctx.selected,
+                    pattern_length: final_pat_len,
+                    pattern: final_pat,
+                    line_weight_px: final_lw_px,
+                    aci: final_aci,
+                    snap_pts,
+                    tangent_geoms: tangents,
+                    key_vertices,
+                    aabb,
+                    plinegen: lw.plinegen,
+                    fill_tris: Vec::new(),
+                    fill_tris_low: Vec::new(),
+                };
+                out.extra_wires.push(wire);
+                return;
+            }
+        }
+    }
 
     let station_values = pattern_station_values(&lw.pattern_stations, lw.points.len());
     let station_map = decode_pattern_station_map(&lw.pattern_stations, lw.points.len());
@@ -2725,6 +2870,31 @@ fn transform_tangent(
                 axis_x: [x.x, x.y, x.z],
                 axis_y: [y.x, y.y, y.z],
                 radius: radius * ((sx + sy) * 0.5),
+            })
+        }
+        TangentGeom::PlanarEllipse {
+            center,
+            major_axis,
+            normal,
+            minor_axis_ratio,
+            start_param,
+            end_param,
+        } => {
+            let c = t.apply(Vector3::new(center[0], center[1], center[2]));
+            let m = t.apply_rotation(Vector3::new(major_axis[0], major_axis[1], major_axis[2]));
+            let n = t.apply_rotation(Vector3::new(normal[0], normal[1], normal[2]));
+            let n_len = n.length();
+            if n_len <= 1.0e-12 {
+                return None;
+            }
+            let n = n / n_len;
+            Some(TangentGeom::PlanarEllipse {
+                center: [c.x, c.y, c.z],
+                major_axis: [m.x, m.y, m.z],
+                normal: [n.x, n.y, n.z],
+                minor_axis_ratio: *minor_axis_ratio,
+                start_param: *start_param,
+                end_param: *end_param,
             })
         }
     }

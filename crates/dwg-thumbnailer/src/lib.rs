@@ -259,7 +259,7 @@ pub unsafe extern "C" fn dwg_thumbnail_png(
 #[no_mangle]
 pub unsafe extern "C" fn dwg_thumbnail_free(ptr: *mut u8, len: usize) {
     if !ptr.is_null() && len != 0 {
-        drop(Box::from_raw(std::slice::from_raw_parts_mut(ptr, len)));
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)));
     }
 }
 

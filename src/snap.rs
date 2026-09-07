@@ -1778,6 +1778,7 @@ impl Snapper {
                                 .fold(f32::INFINITY, f32::min);
                             (world, edge_d2)
                         }
+                        TangentGeom::PlanarEllipse { .. } => continue,
                     };
                     let (tier, sub) = (
                         snap_tier(SnapType::Tangent),
@@ -1814,6 +1815,7 @@ impl Snapper {
                                     radius: *radius,
                                 }
                             }
+                            TangentGeom::PlanarEllipse { .. } => unreachable!(),
                         };
                         best = Some(SnapResult {
                             world: world_pt,

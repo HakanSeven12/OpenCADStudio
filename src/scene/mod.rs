@@ -5275,8 +5275,8 @@ impl Scene {
         {
             return arc;
         }
-        // Build once: full tessellation, no cull (region = None), no zoom LOD
-        // (wpp = None) — for every space, exactly like the Model static-hold.
+        // Build once: full tessellation, no cull, no zoom LOD — the resident
+        // set is zoom-independent (GPU analytical circles/arcs/ellipses).
         let t_tess = iced::time::Instant::now();
         let mut wires = self.wires_for_block_culled(
             block,
@@ -5327,6 +5327,9 @@ impl Scene {
         // spaces or re-scaling a viewport can't accumulate dead full sets.
         let cur_epoch = self.geometry_epoch;
         sets.retain(|_, set| set.epoch == cur_epoch);
+        if sets.len() > 16 {
+            sets.clear();
+        }
         sets.insert(
             key,
             ResidentWireSet {
@@ -5362,6 +5365,9 @@ impl Scene {
         mix(annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0));
         mix(all_visible as u64);
         mix(self.viewport_style_key(style_viewport));
+        // quantized_wpp removed: GPU analytical rendering for circles/arcs/
+        // ellipses makes tessellation zoom-independent, so the resident set is
+        // shared across all zoom levels.
         match frozen_layers {
             Some(frozen) => {
                 let mut signature = 0u64;
@@ -5374,6 +5380,18 @@ impl Scene {
             None => mix(u64::MAX - 1),
         }
         key
+    }
+
+    /// Quantize world units per pixel (`wpp`) into half-octave bands (~1.414x zoom ratio).
+    ///
+    /// This provides discrete, stable zoom bands so that panning (where wpp is constant)
+    /// and small subpixel viewport drifts or mouse-wheel motions within a band do not
+    /// cause re-tessellation or GPU buffer re-uploads, while zooming past a band threshold
+    /// smoothly scales circle tessellation detail.
+    pub fn quantize_wpp(wpp: Option<f32>) -> Option<f32> {
+        let w = wpp.filter(|&w| w.is_finite() && w > 0.0)?;
+        let step = (w.log2() * 2.0).floor() * 0.5;
+        Some(2.0f32.powf(step))
     }
 
     /// The GPU wire-arena handoff for a viewport whose content id is `gen`:
@@ -9061,7 +9079,7 @@ impl Scene {
             static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             *EN.get_or_init(|| std::env::var("OCS_NO_RESIDENT_MEMO").is_err())
         }
-        let resident = base_ok && view_aabb.is_none() && wpp.is_none() && resident_memo_enabled();
+        let resident = base_ok && view_aabb.is_none() && resident_memo_enabled();
         let memo_active = base_ok && (view_aabb.is_some() || resident);
         // Reported in one line below. `tess_ms` / `memo_misses` are assigned by
         // both branches; the rest exist only on the memo path and stay zero.
@@ -9082,7 +9100,10 @@ impl Scene {
             let guard = {
                 let mut g: u64 = 0xcbf2_9ce4_8422_2325;
                 let mut mix = |x: u64| g = g.rotate_left(13) ^ x;
-                mix(wpp.map(|w| w.to_bits() as u64).unwrap_or(u64::MAX));
+                // wpp removed from guard: GPU analytical rendering handles
+                // circles/arcs/ellipses, Point ignores wpp, and Light (the
+                // only remaining wpp consumer) is rare enough that its stale
+                // glyphs don't justify clearing every memoized entity on zoom.
                 if let Some(v) = view_aabb {
                     for c in v {
                         mix(c.to_bits() as u64);
@@ -11225,5 +11246,280 @@ mod layout_cache_tests {
             );
             assert!(!source.is_empty());
         }
+    }
+
+    #[test]
+    fn resident_wires_are_zoom_independent_and_gpu_analytical() {
+        let mut s = Scene::new();
+        let mut circle = acadrust::entities::Circle::default();
+        circle.radius = 100.0;
+        let handle = s.add_entity(EntityType::Circle(circle));
+
+        // Far camera: distance is large
+        let mut cam_far = Camera::default();
+        cam_far.distance = 1000.0;
+
+        // Close camera: distance is small
+        let mut cam_close = Camera::default();
+        cam_close.distance = 1.0;
+
+        let wires_far = s.model_tile_wires_arc(0, &cam_far, 1.0, 1000.0);
+        let circle_wire_far = wires_far
+            .iter()
+            .find(|w| w.name == handle.value().to_string())
+            .unwrap();
+
+        let wires_close = s.model_tile_wires_arc(0, &cam_close, 1.0, 1000.0);
+
+        // Zooming must reuse the exact same resident wire set (zero re-tessellation)
+        assert!(
+            Arc::ptr_eq(&wires_far, &wires_close),
+            "Resident wires must be identical Arc across zoom levels"
+        );
+        // Circle must carry TangentGeom for GPU analytical rendering
+        assert_eq!(circle_wire_far.tangent_geoms.len(), 1);
+        assert!(matches!(
+            circle_wire_far.tangent_geoms[0],
+            crate::scene::model::wire_model::TangentGeom::PlanarCircle { .. }
+                | crate::scene::model::wire_model::TangentGeom::Circle { .. }
+        ));
+    }
+
+    #[test]
+    fn block_circles_and_arcs_extract_as_analytical_gpu_instances() {
+        let mut s = Scene::new();
+        // Create initial entities
+        let mut circle = acadrust::entities::Circle::default();
+        circle.radius = 50.0;
+        let c_h = s.add_entity(EntityType::Circle(circle));
+
+        let mut arc = acadrust::entities::Arc::default();
+        arc.radius = 25.0;
+        arc.start_angle = 0.0;
+        arc.end_angle = 3.14159;
+        let a_h = s.add_entity(EntityType::Arc(arc));
+
+        let line = acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(100.0, 100.0, 0.0),
+        );
+        let l_h = s.add_entity(EntityType::Line(line));
+
+        // Create block and place insert at (200, 300, 0)
+        let xform = acadrust::types::Transform::from_translation(acadrust::types::Vector3::new(200.0, 300.0, 0.0));
+        let _ = s.create_block_from_entities(
+            &[c_h, a_h, l_h],
+            "TEST_ANALYTICAL_BLOCK",
+            &acadrust::types::Transform::identity(),
+            &xform,
+        ).unwrap();
+
+        let wires = s.model_tile_wires_arc(0, &Camera::default(), 1.0, 1000.0);
+        let depths = rustc_hash::FxHashMap::default();
+        let partitioned = crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths);
+
+        // Both the circle and the arc inside the block must be extracted as analytical GPU circle instances!
+        assert!(
+            partitioned.circle_instances.len() >= 2,
+            "Expected at least 2 analytical circle instances from block, got {}",
+            partitioned.circle_instances.len()
+        );
+    }
+
+    #[test]
+    fn single_bulge_polyline_extracts_as_analytical_gpu_arc() {
+        let mut s = Scene::new();
+        let mut pline = acadrust::entities::LwPolyline::new();
+        pline.vertices = vec![
+            acadrust::entities::LwVertex {
+                location: acadrust::types::Vector2::new(0.0, 0.0),
+                bulge: 1.0, // semicircle
+                start_width: 0.0,
+                end_width: 0.0,
+                vertex_id: 0,
+            },
+            acadrust::entities::LwVertex {
+                location: acadrust::types::Vector2::new(100.0, 0.0),
+                bulge: 0.0,
+                start_width: 0.0,
+                end_width: 0.0,
+                vertex_id: 0,
+            },
+        ];
+        let _ = s.add_entity(EntityType::LwPolyline(pline));
+
+        let wires = s.model_tile_wires_arc(0, &Camera::default(), 1.0, 1000.0);
+        let depths = rustc_hash::FxHashMap::default();
+        let partitioned = crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths);
+
+        assert_eq!(
+            partitioned.circle_instances.len(),
+            1,
+            "Single bulge arc polyline must be extracted as analytical GPU arc instance"
+        );
+    }
+
+    #[test]
+    fn multi_bulge_polyline_extracts_as_analytical_gpu_arcs() {
+        let mut s = Scene::new();
+        let mut pline = acadrust::entities::LwPolyline::new();
+        // A circle represented as a closed 2-vertex polyline with two semicircle bulges (standard CAD polyline circle)
+        pline.is_closed = true;
+        pline.vertices = vec![
+            acadrust::entities::LwVertex {
+                location: acadrust::types::Vector2::new(0.0, 0.0),
+                bulge: 1.0,
+                start_width: 0.0,
+                end_width: 0.0,
+                vertex_id: 0,
+            },
+            acadrust::entities::LwVertex {
+                location: acadrust::types::Vector2::new(100.0, 0.0),
+                bulge: 1.0,
+                start_width: 0.0,
+                end_width: 0.0,
+                vertex_id: 1,
+            },
+        ];
+        let _ = s.add_entity(EntityType::LwPolyline(pline));
+
+        let wires = s.model_tile_wires_arc(0, &Camera::default(), 1.0, 1000.0);
+        let depths = rustc_hash::FxHashMap::default();
+        let partitioned = crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths);
+
+        assert_eq!(
+            partitioned.circle_instances.len(),
+            2,
+            "Multi-bulge closed polyline circle must be extracted as 2 analytical GPU arc instances"
+        );
+        assert_eq!(
+            partitioned.regular.len(),
+            0,
+            "Multi-bulge pure arc polyline must not be sent to regular line arena"
+        );
+    }
+
+    #[test]
+    fn bench_analytical_rendering() {
+        use std::time::Instant;
+        use acadrust::entities::{Arc as AcadArc, Circle, Ellipse, LwPolyline, LwVertex};
+        use acadrust::types::{Vector2, Vector3};
+
+        let n_circles = 5000;
+        let n_arcs = 5000;
+        let n_ellipses = 2000;
+        let n_polylines = 2000;
+        let total_entities = n_circles + n_arcs + n_ellipses + n_polylines;
+
+        let mut scene = Scene::new();
+        for i in 0..n_circles {
+            let x = (i % 100) as f64 * 50.0;
+            let y = (i / 100) as f64 * 50.0;
+            let mut circle = Circle::default();
+            circle.center = Vector3::new(x, y, 0.0);
+            circle.radius = 10.0 + (i % 20) as f64;
+            scene.add_entity(EntityType::Circle(circle));
+        }
+
+        for i in 0..n_arcs {
+            let x = (i % 100) as f64 * 50.0 + 25.0;
+            let y = (i / 100) as f64 * 50.0;
+            let mut arc = AcadArc::default();
+            arc.center = Vector3::new(x, y, 0.0);
+            arc.radius = 15.0;
+            arc.start_angle = ((i % 8) as f64) * 0.25 * std::f64::consts::PI;
+            arc.end_angle = arc.start_angle + 0.75 * std::f64::consts::PI;
+            scene.add_entity(EntityType::Arc(arc));
+        }
+
+        for i in 0..n_ellipses {
+            let x = (i % 50) as f64 * 100.0;
+            let y = (i / 50) as f64 * 100.0 + 5000.0;
+            let mut el = Ellipse::default();
+            el.center = Vector3::new(x, y, 0.0);
+            el.major_axis = Vector3::new(20.0, 0.0, 0.0);
+            el.minor_axis_ratio = 0.5;
+            el.start_parameter = 0.0;
+            el.end_parameter = std::f64::consts::TAU;
+            scene.add_entity(EntityType::Ellipse(el));
+        }
+
+        for i in 0..n_polylines {
+            let x = (i % 50) as f64 * 100.0 + 50.0;
+            let y = (i / 50) as f64 * 100.0 + 5000.0;
+            let mut pline = LwPolyline::new();
+            pline.is_closed = true;
+            pline.vertices = vec![
+                LwVertex {
+                    location: Vector2::new(x, y),
+                    bulge: 1.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                    vertex_id: 0,
+                },
+                LwVertex {
+                    location: Vector2::new(x + 30.0, y),
+                    bulge: 1.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                    vertex_id: 1,
+                },
+            ];
+            scene.add_entity(EntityType::LwPolyline(pline));
+        }
+
+        let cam = Camera::default();
+        let t_tess_start = Instant::now();
+        let wires = scene.model_tile_wires_arc(0, &cam, 1.0, 1000.0);
+        let tess_duration = t_tess_start.elapsed();
+
+        let total_wires = wires.len();
+        let mut chord_points = 0usize;
+        let mut analytical_tangents = 0usize;
+        for w in wires.iter() {
+            chord_points += w.points.len();
+            analytical_tangents += w.tangent_geoms.len();
+        }
+
+        let depths = rustc_hash::FxHashMap::default();
+        let t_part_start = Instant::now();
+        let iters = 100;
+        let mut part = None;
+        for _ in 0..iters {
+            part = Some(crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths));
+        }
+        let part_duration = t_part_start.elapsed() / (iters as u32);
+        let p = part.unwrap();
+
+        // Zoom simulation
+        let zoom_levels = [0.1f32, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 1000.0];
+        let t_zoom_start = Instant::now();
+        let mut dynamic_cam = Camera::default();
+        for &zoom in zoom_levels.iter().cycle().take(100) {
+            dynamic_cam.distance = 1000.0 / zoom;
+            let _w = scene.model_tile_wires_arc(0, &dynamic_cam, 1.0, 1000.0);
+        }
+        let zoom_100_duration = t_zoom_start.elapsed();
+        let per_zoom_ms = zoom_100_duration.as_secs_f64() * 1000.0 / 100.0;
+
+        let line_vram_mb = (chord_points * 36) as f64 / (1024.0 * 1024.0);
+        let inst_vram_mb = (p.circle_instances.len() * 128 + p.ellipse_instances.len() * 144) as f64 / (1024.0 * 1024.0);
+
+        println!("\n=== BENCHMARK REPORT: CURRENT HEAD (WITH GPU ANALYTICAL & OPTIMIZATIONS) ===");
+        println!("Curved Entities Tested:         {total_entities}");
+        println!("Initial Wire Build Time:        {:.2?}", tess_duration);
+        println!("Total Wires:                    {total_wires}");
+        println!("Tessellated Chord Vertices:     {chord_points}");
+        println!("Analytical Tangent Geometries:  {analytical_tangents}");
+        println!("Partitioning Time (per frame):  {:.3?}", part_duration);
+        println!("Regular Line Wires:             {}", p.regular.len());
+        println!("GPU Circle/Arc Instances:       {}", p.circle_instances.len());
+        println!("GPU Ellipse Instances:          {}", p.ellipse_instances.len());
+        println!("Line Arena VRAM (chord lines):  {:.2} MB", line_vram_mb);
+        println!("GPU Analytical VRAM:            {:.2} MB", inst_vram_mb);
+        println!("VRAM Reduction Ratio:           {:.1}x", if inst_vram_mb > 0.0 { line_vram_mb / inst_vram_mb } else { 0.0 });
+        println!("100 Camera Zoom Navigations:    {:.2?}", zoom_100_duration);
+        println!("Zoom Frame Overhead:            {:.3} ms ({:.0} FPS)", per_zoom_ms, 1000.0 / per_zoom_ms.max(0.001));
+        println!("============================================================================\n");
     }
 }

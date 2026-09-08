@@ -1644,4 +1644,48 @@ mod tests {
         assert!(blank_const().pattern_length < 0.0);
         assert!(blank_packed_instance().pattern_length < 0.0);
     }
+
+    #[test]
+    fn partition_wires_partitions_preview_analytical_curves() {
+        use crate::scene::model::wire_model::TangentGeom;
+        let mut circle_preview = WireModel::default();
+        circle_preview.tangent_geoms.push(TangentGeom::PlanarCircle {
+            center: [1.0, 2.0, 3.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+        });
+
+        let mut arc_preview = WireModel::default();
+        arc_preview.tangent_geoms.push(TangentGeom::Arc {
+            center: [4.0, 5.0, 6.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 8.0,
+            start_angle: 0.1,
+            end_angle: 2.0,
+        });
+
+        let mut ellipse_preview = WireModel::default();
+        ellipse_preview.tangent_geoms.push(TangentGeom::PlanarEllipse {
+            center: [7.0, 8.0, 9.0],
+            major_axis: [5.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            minor_axis_ratio: 0.6,
+            start_param: 0.0,
+            end_param: std::f64::consts::TAU,
+        });
+
+        let mut regular_line = WireModel::default();
+        regular_line.points.push([0.0, 0.0, 0.0]);
+        regular_line.points.push([1.0, 1.0, 1.0]);
+
+        let wires = vec![circle_preview, arc_preview, ellipse_preview, regular_line];
+        let depth_map = rustc_hash::FxHashMap::default();
+        let partitioned = partition_wires(&wires, &depth_map);
+
+        assert_eq!(partitioned.circle_instances.len(), 2);
+        assert_eq!(partitioned.ellipse_instances.len(), 1);
+        assert_eq!(partitioned.regular.len(), 1);
+    }
 }

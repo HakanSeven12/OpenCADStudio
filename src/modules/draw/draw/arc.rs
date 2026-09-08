@@ -7,7 +7,7 @@ use cadkernel::geom2d::{self, Curve as KernelCurve};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::IconKind;
-use crate::scene::model::wire_model::WireModel;
+use crate::scene::model::wire_model::{TangentGeom, WireModel};
 use glam::DVec3;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -71,9 +71,9 @@ fn arc_preview(
     end_angle: f64,
     plane: WorkingPlane,
 ) -> Option<WireModel> {
-    let center = plane.to_local(center);
+    let center_local = plane.to_local(center);
     let arc = geom2d::bounded_arc(
-        [center.x, center.y],
+        [center_local.x, center_local.y],
         radius,
         start_angle,
         end_angle,
@@ -81,14 +81,23 @@ fn arc_preview(
     let points = KernelCurve::Arc(arc)
         .tessellate_angle(TAU / 64.0)
         .into_iter()
-        .map(|point| plane.to_world(DVec3::new(point[0], point[1], center.z)).to_array())
+        .map(|point| plane.to_world(DVec3::new(point[0], point[1], center_local.z)).to_array())
         .collect();
-    Some(WireModel::solid_f64(
+    let mut wire = WireModel::solid_f64(
         "rubber_band".into(),
         points,
         WireModel::CYAN,
         false,
-    ))
+    );
+    wire.tangent_geoms.push(TangentGeom::Arc {
+        center: [center.x, center.y, center.z],
+        axis_x: plane.x.to_array(),
+        axis_y: plane.y.to_array(),
+        radius: arc.radius,
+        start_angle: arc.start_angle,
+        end_angle: arc.end_angle,
+    });
+    Some(wire)
 }
 
 fn make_arc(

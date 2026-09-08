@@ -11,7 +11,7 @@ use crate::t;
 use crate::command::{CadCommand, CmdResult, DynField, TangentObject, WorkingPlane};
 use crate::modules::draw::defaults;
 use crate::modules::IconKind;
-use crate::scene::model::wire_model::WireModel;
+use crate::scene::model::wire_model::{TangentGeom, WireModel};
 use glam::DVec3;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -56,16 +56,23 @@ pub const ICON: IconKind = ICON_CR;
 // ── Shared geometry ────────────────────────────────────────────────────────
 
 fn circle_wire(center: DVec3, radius: f64, plane: WorkingPlane) -> WireModel {
-    let center = plane.to_local(center);
+    let center_local = plane.to_local(center);
     let points = KernelCurve::Circle(KernelCircle {
-        centre: [center.x, center.y],
+        centre: [center_local.x, center_local.y],
         radius,
     })
         .tessellate_angle(TAU / 64.0)
         .into_iter()
-        .map(|point| plane.to_world(DVec3::new(point[0], point[1], center.z)).to_array())
+        .map(|point| plane.to_world(DVec3::new(point[0], point[1], center_local.z)).to_array())
         .collect();
-    WireModel::solid_f64("rubber_band".into(), points, WireModel::CYAN, false)
+    let mut wire = WireModel::solid_f64("rubber_band".into(), points, WireModel::CYAN, false);
+    wire.tangent_geoms.push(TangentGeom::PlanarCircle {
+        center: [center.x, center.y, center.z],
+        axis_x: plane.x.to_array(),
+        axis_y: plane.y.to_array(),
+        radius,
+    });
+    wire
 }
 
 fn make_circle(center: DVec3, radius: f64, plane: WorkingPlane) -> EntityType {

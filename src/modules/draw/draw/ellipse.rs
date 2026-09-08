@@ -11,7 +11,7 @@ use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::IconKind;
-use crate::scene::model::wire_model::WireModel;
+use crate::scene::model::wire_model::{TangentGeom, WireModel};
 use glam::DVec3;
 
 fn parse_num(text: &str) -> Option<f64> {
@@ -75,7 +75,16 @@ fn ellipse_wire(
             [p.x, p.y, p.z]
         })
         .collect();
-    WireModel::solid_f64("rubber_band".into(), pts, WireModel::CYAN, false)
+    let mut wire = WireModel::solid_f64("rubber_band".into(), pts, WireModel::CYAN, false);
+    wire.tangent_geoms.push(TangentGeom::PlanarEllipse {
+        center: [center.x, center.y, center.z],
+        major_axis: [major.x, major.y, major.z],
+        normal: plane.z.to_array(),
+        minor_axis_ratio: ratio,
+        start_param: t_start,
+        end_param: t_e,
+    });
+    wire
 }
 
 /// Convert a world point to the parametric angle on the ellipse.

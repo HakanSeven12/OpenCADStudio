@@ -273,6 +273,8 @@ pub struct Pipeline {
     /// frame they are present (small), drawn on top of the base wire pass — so
     /// a live drag never re-uploads the resident base buffer.
     gpu_preview_wires: Vec<WireGpu>,
+    gpu_preview_circles: Vec<CircleGpu>,
+    gpu_preview_ellipses: Vec<EllipseGpu>,
     /// Wipeout masks — solid fills rendered after wires in a separate pass via
     /// the legacy per-primitive `WipeoutGpu` renderer.
     gpu_wipeouts: Vec<WipeoutGpu>,
@@ -2346,6 +2348,8 @@ impl Pipeline {
             gpu_selected_ellipses: vec![],
             gpu_selected_block_wires: vec![],
             gpu_preview_wires: vec![],
+            gpu_preview_circles: vec![],
+            gpu_preview_ellipses: vec![],
             gpu_wipeouts: vec![],
             wipeout_skip_flags: vec![],
             gpu_images: vec![],
@@ -2940,11 +2944,47 @@ impl Pipeline {
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
-        self.gpu_preview_wires = if wires.is_empty() {
-            vec![]
+        if wires.is_empty() {
+            self.gpu_preview_wires.clear();
+            self.gpu_preview_circles.clear();
+            self.gpu_preview_ellipses.clear();
         } else {
-            WireGpu::from_run(device, queue, wires, depth_map, false, self.wire_const_bgl.as_ref())
-        };
+            let partitioned = wire_arena::partition_wires(wires, depth_map);
+            let mut non_analytical = partitioned.regular;
+            non_analytical.extend(partitioned.mesh);
+            self.gpu_preview_wires = if non_analytical.is_empty() {
+                vec![]
+            } else {
+                WireGpu::from_run_refs(
+                    device,
+                    queue,
+                    &non_analytical,
+                    depth_map,
+                    false,
+                    self.wire_const_bgl.as_ref(),
+                )
+            };
+            self.gpu_preview_circles = if partitioned.circle_instances.is_empty() {
+                vec![]
+            } else {
+                vec![CircleGpu::from_instances(
+                    device,
+                    queue,
+                    "preview.circles",
+                    &partitioned.circle_instances,
+                )]
+            };
+            self.gpu_preview_ellipses = if partitioned.ellipse_instances.is_empty() {
+                vec![]
+            } else {
+                vec![EllipseGpu::from_instances(
+                    device,
+                    queue,
+                    "preview.ellipses",
+                    &partitioned.ellipse_instances,
+                )]
+            };
+        }
     }
 
     /// Upload the live grip-drag / command-preview SDF glyph quads. Re-uploaded
@@ -4611,6 +4651,24 @@ impl Pipeline {
                     }
                 }
             }
+            if self.gpu_preview_circles.iter().any(|cg| cg.instance_count > 0) {
+                pass.set_pipeline(&self.circle_xray_pipeline);
+                for cg in &self.gpu_preview_circles {
+                    if cg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..cg.instance_count);
+                    }
+                }
+            }
+            if self.gpu_preview_ellipses.iter().any(|eg| eg.instance_count > 0) {
+                pass.set_pipeline(&self.ellipse_xray_pipeline);
+                for eg in &self.gpu_preview_ellipses {
+                    if eg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..eg.instance_count);
+                    }
+                }
+            }
         }
 
         // ── Pass 5c: SDF text quads (drawn over wires) ────────────────────
@@ -4970,6 +5028,8 @@ impl Pipeline {
         self.gpu_selected_circles.clear();
         self.gpu_selected_ellipses.clear();
         self.gpu_preview_wires.clear();
+        self.gpu_preview_circles.clear();
+        self.gpu_preview_ellipses.clear();
         self.hatch_gpu.clear();
         self.gpu_wipeouts.clear();
         self.wipeout_skip_flags.clear();

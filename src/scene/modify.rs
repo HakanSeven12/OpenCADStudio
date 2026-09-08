@@ -828,8 +828,13 @@ impl Scene {
     pub(crate) fn sync_solid_reference_point(&mut self, handle: Handle) {
         let reference = self
             .document
-            .solid_history_operation(handle)
-            .and_then(crate::scene::model::solid_history::reference_point);
+            .solid_history_operations(handle)
+            .and_then(|operations| {
+                operations
+                    .iter()
+                    .rev()
+                    .find_map(crate::scene::model::solid_history::reference_point)
+            });
         let Some(reference) = reference else {
             return;
         };
@@ -883,7 +888,24 @@ impl Scene {
             }
             (EntityType::Solid3D(_), _) => {
                 let mut operations = self.document.solid_history_operations(handle)?;
-                *operations.last_mut()? = operation.clone();
+                let replacement_id = operation.base().map(|base| {
+                    if base.eval.node_id > 0 {
+                        base.eval.node_id
+                    } else {
+                        base.step_id
+                    }
+                })?;
+                let target = operations.iter_mut().find(|candidate| {
+                    candidate.base().is_some_and(|base| {
+                        let node_id = if base.eval.node_id > 0 {
+                            base.eval.node_id
+                        } else {
+                            base.step_id
+                        };
+                        node_id == replacement_id
+                    })
+                })?;
+                *target = operation.clone();
                 cadkernel::acis::rebuild_history(&operations).ok()
             }
             _ => None,
@@ -938,7 +960,7 @@ impl Scene {
         self.record_solid_history_before(handle);
         if self
             .document
-            .update_solid_history(handle, operation)
+            .update_solid_history_step(handle, operation)
             .is_none()
         {
             return false;
@@ -1199,7 +1221,12 @@ impl Scene {
         field: &str,
         value: &str,
     ) -> bool {
-        let Some(mut operation) = self.document.solid_history_operation(handle).cloned() else {
+        let Some(mut operation) =
+            crate::scene::model::solid_history::primitive_property_operation(
+                &self.document,
+                handle,
+            )
+        else {
             return false;
         };
         if !crate::scene::model::solid_history::apply_primitive_property(

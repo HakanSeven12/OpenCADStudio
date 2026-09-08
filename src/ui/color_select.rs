@@ -5,6 +5,7 @@
 
 use crate::app::Message;
 use crate::ui::properties::acad_color_display;
+use crate::ui::ROW_H;
 use acadrust::types::Color as AcadColor;
 use iced::widget::{button, column, container, row, text};
 use iced::{Background, Border, Color, Element, Length, Theme};
@@ -223,6 +224,7 @@ fn color_selector_with_indicator<'a>(
     )
     .on_press(on_toggle)
     .padding([3, 6])
+    .height(ROW_H)
     .width(Length::Fill);
 
     if !open {

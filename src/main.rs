@@ -134,7 +134,9 @@ fn main() -> iced::Result {
                 Ok(text) => text
                     .lines()
                     .map(str::trim)
-                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    // Blank script rows are significant: they submit Enter to
+                    // the active command (for example, accepting a preview).
+                    .filter(|l| !l.starts_with('#') && !l.starts_with(';'))
                     .map(str::to_string)
                     .collect(),
                 Err(e) => {

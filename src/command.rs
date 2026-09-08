@@ -1558,11 +1558,13 @@ pub enum CmdResult {
         options: LoftOptions,
         color: [f32; 4],
     },
-    /// Round or bevel the straight edge nearest `pick` on a solid.
+    /// Round or bevel one or more resolved B-rep edges on a solid.
     SolidEdgeBlend {
         handle: Handle,
-        pick: DVec3,
+        edges: Vec<cadkernel::brep::EdgeKey>,
+        base_face: Option<cadkernel::brep::FaceKey>,
         value: f64,
+        other_value: f64,
         fillet: bool,
     },
     /// Offset a solid and optionally open selected faces.
@@ -1575,6 +1577,20 @@ pub enum CmdResult {
         bases: Vec<Handle>,
         cutters: Vec<Handle>,
         convert_meshes: bool,
+    },
+    /// Split every selected solid or surface with one arbitrary plane.
+    /// `keep_point == None` retains both sides; otherwise it selects the side
+    /// containing that WCS point.
+    SliceEntities {
+        targets: Vec<Handle>,
+        plane: cadkernel::space::Plane,
+        keep_point: Option<DVec3>,
+    },
+    /// Split selected solids or surfaces with one selected analytic sheet.
+    SliceSurfaceEntities {
+        targets: Vec<Handle>,
+        cutter: Box<cadkernel::brep::Body>,
+        keep_point: Option<DVec3>,
     },
     /// INSERT landed on a block that has AttributeDefinitions.
     /// The host should look up the attdefs for `block_name` from the document

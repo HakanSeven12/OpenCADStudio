@@ -1307,21 +1307,51 @@ impl OpenCADStudio {
                 }
             }
 
-            // SLICE [X|Y|Z] <value> [TOP|BOTTOM] — cut the selected solid with an
-            // axis-aligned plane, keeping the lower half by default.
             "SLICE" | "SL" => {
-                use crate::command::SelectThenKeywordCommand;
-                let has_sel = !self.tabs[i].scene.selected_entities().is_empty();
-                let c = SelectThenKeywordCommand::new(
-                    "SLICE",
-                    "SLICE  cutting-plane axis  [X / Y / Z]  (add TOP/BOTTOM by typing):",
-                    vec![
-                        ("X", "X", Some("SLICE  offset along X:")),
-                        ("Y", "Y", Some("SLICE  offset along Y:")),
-                        ("Z", "Z", Some("SLICE  offset along Z:")),
-                    ],
-                    has_sel,
-                );
+                use crate::modules::model::slice_cmd::SliceCommand;
+                let (targets, centre, radius, view_normal) = {
+                    let scene = &mut self.tabs[i].scene;
+                    let mut targets = scene
+                        .selected_handles_in_order()
+                        .into_iter()
+                        .filter(|handle| !scene.is_layer_locked(*handle))
+                        .filter(|handle| {
+                            matches!(
+                                scene.document.get_entity(*handle),
+                                Some(
+                                    acadrust::EntityType::Solid3D(_)
+                                        | acadrust::EntityType::Surface(_)
+                                )
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    scene.restore_solid_models(&targets);
+                    targets.retain(|handle| scene.solid_models.contains_key(handle));
+                    let bounds = targets
+                        .iter()
+                        .filter_map(|handle| {
+                            crate::scene::model::solid_model::extent(&scene.solid_models[handle])
+                        })
+                        .fold(None::<([f64; 3], [f64; 3])>, |bounds, (low, high)| {
+                            Some(match bounds {
+                                None => (low, high),
+                                Some((mut min, mut max)) => {
+                                    for axis in 0..3 {
+                                        min[axis] = min[axis].min(low[axis]);
+                                        max[axis] = max[axis].max(high[axis]);
+                                    }
+                                    (min, max)
+                                }
+                            })
+                        });
+                    let (centre, radius) = bounds.map_or((glam::DVec3::ZERO, 10.0), |(min, max)| {
+                        let min = glam::DVec3::from_array(min);
+                        let max = glam::DVec3::from_array(max);
+                        ((min + max) * 0.5, (max - min).length().max(2.0) * 0.65)
+                    });
+                    (targets, centre, radius, scene.active_gaze_dir().as_dvec3())
+                };
+                let c = SliceCommand::new(targets, view_normal, centre, radius);
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
@@ -1340,7 +1370,18 @@ impl OpenCADStudio {
                 let value: Option<f64> = parts.get(val_idx).and_then(|s| s.parse().ok());
                 let keep_low = !parts.iter().any(|s| s == "TOP");
                 match value {
-                    Some(v) => return Some(self.solid_slice(axis, v, keep_low)),
+                    Some(v) => {
+                        let (origin, x, normal) = match axis {
+                            0 => ([v, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
+                            1 => ([0.0, v, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+                            _ => ([0.0, 0.0, v], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+                        };
+                        let plane = cadkernel::space::Plane::orthonormal(origin, x, normal)
+                            .expect("fixed world axes define a plane");
+                        let side = glam::DVec3::from_array(origin)
+                            + glam::DVec3::from_array(normal) * if keep_low { -1.0 } else { 1.0 };
+                        return Some(self.slice_selected(plane, Some(side)));
+                    }
                     None => self.command_line.push_info(
                         crate::t!("Usage: SLICE [X|Y|Z] <value> [TOP|BOTTOM]   (cuts the selected solid)").as_ref(),
                     ),

@@ -802,11 +802,39 @@ impl Scene {
         true
     }
 
+    pub fn append_solid_history(
+        &mut self,
+        handle: Handle,
+        operation: acadrust::objects::SolidHistoryOperation,
+    ) -> bool {
+        let previous = self
+            .document
+            .solid_history_graph(handle)
+            .map(|graph| graph.nodes)
+            .unwrap_or_default();
+        self.record_solid_history_before(handle);
+        let Some(graph) = self.document.append_solid_history(handle, operation) else {
+            return false;
+        };
+        for node in graph.nodes {
+            if !previous.contains(&node) {
+                self.record_undo_object_before(node, None);
+            }
+        }
+        self.sync_solid_reference_point(handle);
+        true
+    }
+
     pub(crate) fn sync_solid_reference_point(&mut self, handle: Handle) {
         let reference = self
             .document
-            .solid_history_operation(handle)
-            .and_then(crate::scene::model::solid_history::reference_point);
+            .solid_history_operations(handle)
+            .and_then(|operations| {
+                operations
+                    .iter()
+                    .rev()
+                    .find_map(crate::scene::model::solid_history::reference_point)
+            });
         let Some(reference) = reference else {
             return;
         };
@@ -855,8 +883,31 @@ impl Scene {
             (EntityType::Surface(_), SolidHistoryOperation::Extrusion(value)) => {
                 cadkernel::acis::rebuild_extrusion_with_mode(value, true).ok()
             }
-            (EntityType::Surface(_), SolidHistoryOperation::Loft(_))
-                | (EntityType::Solid3D(_), _) => cadkernel::acis::rebuild_body(operation).ok(),
+            (EntityType::Surface(_), SolidHistoryOperation::Loft(_)) => {
+                cadkernel::acis::rebuild_body(operation).ok()
+            }
+            (EntityType::Solid3D(_), _) => {
+                let mut operations = self.document.solid_history_operations(handle)?;
+                let replacement_id = operation.base().map(|base| {
+                    if base.eval.node_id > 0 {
+                        base.eval.node_id
+                    } else {
+                        base.step_id
+                    }
+                })?;
+                let target = operations.iter_mut().find(|candidate| {
+                    candidate.base().is_some_and(|base| {
+                        let node_id = if base.eval.node_id > 0 {
+                            base.eval.node_id
+                        } else {
+                            base.step_id
+                        };
+                        node_id == replacement_id
+                    })
+                })?;
+                *target = operation.clone();
+                cadkernel::acis::rebuild_history(&operations).ok()
+            }
             _ => None,
         }
     }
@@ -909,7 +960,7 @@ impl Scene {
         self.record_solid_history_before(handle);
         if self
             .document
-            .update_solid_history(handle, operation)
+            .update_solid_history_step(handle, operation)
             .is_none()
         {
             return false;
@@ -1122,6 +1173,79 @@ impl Scene {
         let Some(mut operation) = self.document.solid_history_operation(handle).cloned() else {
             return false;
         };
+        if grip_id == crate::scene::model::solid_history::GRIP_FILLET_RADIUS {
+            let acadrust::objects::SolidHistoryOperation::Fillet(value) = &mut operation else {
+                return false;
+            };
+            let Some(radius) = value.radii.first().copied() else {
+                return false;
+            };
+            self.restore_solid_models(&[handle]);
+            let Some(definition) = self
+                .solid_models
+                .get(&handle)
+                .and_then(|body| {
+                    crate::scene::model::solid_history::fillet_radius_grip(body, radius)
+                })
+            else {
+                return false;
+            };
+            let Some(axis) = definition.axis else {
+                return false;
+            };
+            let change = match apply {
+                GripApply::Absolute(world) => (world - definition.world).dot(axis),
+                GripApply::Translate(delta) => delta.dot(axis),
+            };
+            let radius = radius + change;
+            if !radius.is_finite() || radius <= 1.0e-6 {
+                return false;
+            }
+            value.radii.clear();
+            value.radii.push(radius);
+            return self.preview_solid_history(handle, operation);
+        }
+        if matches!(
+            grip_id,
+            crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE1
+                | crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE2
+        ) {
+            let definitions = {
+                let acadrust::objects::SolidHistoryOperation::Chamfer(value) = &operation else {
+                    return false;
+                };
+                crate::scene::model::solid_history::chamfer_distance_grips(
+                    &self.document,
+                    handle,
+                    value,
+                )
+            };
+            let Some(definition) = definitions.into_iter().find(|grip| grip.id == grip_id) else {
+                return false;
+            };
+            let Some(axis) = definition.axis else {
+                return false;
+            };
+            let change = match apply {
+                GripApply::Absolute(world) => (world - definition.world).dot(axis),
+                GripApply::Translate(delta) => delta.dot(axis),
+            };
+            let acadrust::objects::SolidHistoryOperation::Chamfer(value) = &mut operation else {
+                return false;
+            };
+            let distance = if grip_id
+                == crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE1
+            {
+                &mut value.base_distance
+            } else {
+                &mut value.other_distance
+            };
+            *distance += change;
+            if !distance.is_finite() || *distance <= 1.0e-6 {
+                return false;
+            }
+            return self.preview_solid_history(handle, operation);
+        }
         if !crate::scene::model::solid_history::apply_primitive_grip(
             &mut operation,
             grip_id,
@@ -1138,7 +1262,12 @@ impl Scene {
         field: &str,
         value: &str,
     ) -> bool {
-        let Some(mut operation) = self.document.solid_history_operation(handle).cloned() else {
+        let Some(mut operation) =
+            crate::scene::model::solid_history::primitive_property_operation(
+                &self.document,
+                handle,
+            )
+        else {
             return false;
         };
         if !crate::scene::model::solid_history::apply_primitive_property(

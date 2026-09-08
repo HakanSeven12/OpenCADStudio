@@ -218,7 +218,7 @@ pub fn extract_ellipse_instance_from_geom(
 
     let major_len_sq = major_axis[0] * major_axis[0] + major_axis[1] * major_axis[1] + major_axis[2] * major_axis[2];
     let norm_len_sq = normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
-    if major_len_sq <= 1e-12 || !major_len_sq.is_finite()
+    if major_len_sq <= 1e-12 || !major_len_sq.is_finite() || major_len_sq > 1e12
         || norm_len_sq <= 1e-12 || !norm_len_sq.is_finite()
         || minor_axis_ratio <= 1e-6 || !minor_axis_ratio.is_finite()
         || !start_param.is_finite() || !end_param.is_finite()

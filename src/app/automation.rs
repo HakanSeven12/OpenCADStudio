@@ -1265,4 +1265,63 @@ mod tests {
         let _ = std::fs::remove_file(sidecar);
         let _ = std::fs::remove_file(&path);
     }
+
+    #[test]
+    fn test_pline_line_then_arc() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        {
+            app.tabs[0].scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+            app.tabs[0].scene.sync_tiles_from_panes(1920.0, 1080.0);
+        }
+        
+        // Start PLINE
+        let _ = app.update(Message::CommandInput("PLINE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+
+        // Click first point (100, 100)
+        let _ = app.update(Message::ViewportMove(iced::Point::new(100.0, 100.0)));
+        let _ = app.update(Message::ViewportLeftPress);
+        let _ = app.update(Message::ViewportLeftRelease);
+
+        // Move to (200, 100) and click second point (draw line)
+        let _ = app.update(Message::ViewportMove(iced::Point::new(200.0, 100.0)));
+        let _ = app.update(Message::ViewportLeftPress);
+        let _ = app.update(Message::ViewportLeftRelease);
+
+        let wid = app.main_window.unwrap_or_else(iced::window::Id::unique);
+
+        // Switch to arc: Option 1 - CommandOptionPick("A")
+        let _ = app.update(Message::CommandOptionPick("A".to_string()));
+        let _ = app.view(wid);
+        println!("ENTITIES: {}", app.tabs[0].scene.document.entities().count());
+        println!("CMD: {:?}", app.tabs[0].active_cmd.as_ref().map(|c| c.name()));
+
+        // Move mouse!
+        let _ = app.update(Message::ViewportMove(iced::Point::new(200.0, 100.0)));
+        let _ = app.view(wid);
+        let _ = app.update(Message::ViewportMove(iced::Point::new(201.0, 100.0)));
+        let _ = app.view(wid);
+        let _ = app.update(Message::ViewportMove(iced::Point::new(200.0, 150.0)));
+        let _ = app.view(wid);
+        let _ = app.update(Message::ViewportMove(iced::Point::new(150.0, 150.0)));
+        let _ = app.view(wid);
+
+        // Click arc point
+        let _ = app.update(Message::ViewportLeftPress);
+        let _ = app.update(Message::ViewportLeftRelease);
+
+        // Move mouse again
+        let _ = app.update(Message::ViewportMove(iced::Point::new(150.0, 160.0)));
+
+        // Switch to line
+        let _ = app.update(Message::CommandOptionPick("L".to_string()));
+
+        // Move mouse again
+        let _ = app.update(Message::ViewportMove(iced::Point::new(100.0, 150.0)));
+
+        // Finish
+        let _ = app.update(Message::CommandOptionPick(String::new()));
+    }
 }

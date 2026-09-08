@@ -2117,6 +2117,10 @@ pub enum Message {
     CommandInput(String),
     CommandSubmit,
     Command(String),
+    /// Execute one complete line read from a command script. Unlike UI/ribbon
+    /// dispatch, this accepts an interactive verb and all of its arguments on
+    /// the same line (`BOX 0,0,0 10,10,0 10`).
+    ScriptLine(String),
     /// Append one typed character to the command-line input from the
     /// global key-press subscription. Used when the text-input widget
     /// itself isn't focused (focus parked on viewport / button / etc.)
@@ -3832,7 +3836,7 @@ impl OpenCADStudio {
             Task::batch(
                 cfg.script_lines
                     .into_iter()
-                    .map(|line| Task::done(Message::Command(line))),
+                    .map(|line| Task::done(Message::ScriptLine(line))),
             )
         };
         s.queue_startup_prompts();

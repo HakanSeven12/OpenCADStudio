@@ -360,19 +360,62 @@ impl Scene {
         self.selected.len()
     }
 
-    /// Sorted entity types in the current layout, cached until geometry or layout changes.
+    /// Entity type names in the current layout for the selection-filter menu.
+    /// Pure additions are folded into the cached set; other changes rebuild it.
     pub fn entity_type_names_in_layout(&self) -> std::sync::Arc<Vec<String>> {
         use crate::entities::traits::entity_type_name;
         let block = self.current_layout_block_handle();
+        let mut cached_epoch = None;
         {
             let cache = self.layout_type_names_cache.borrow();
-            if let Some((epoch, cached_block, names)) = cache.as_ref() {
-                if *epoch == self.geometry_epoch && *cached_block == block {
-                    return std::sync::Arc::clone(names);
+            if let Some((epoch, cached_block, _, names)) = cache.as_ref() {
+                if *cached_block == block {
+                    if *epoch == self.geometry_epoch {
+                        return std::sync::Arc::clone(names);
+                    }
+                    cached_epoch = Some(*epoch);
                 }
             }
         }
-        let mut names: std::collections::BTreeSet<&str> =
+
+        // Incremental: fold the changes since the cached epoch into the set.
+        if let Some(since) = cached_epoch {
+            if let Some(deltas) = self.replay_since(since) {
+                if deltas
+                    .iter()
+                    .all(|(_, kind)| *kind == ChangeKind::Added)
+                {
+                    let mut cache = self.layout_type_names_cache.borrow_mut();
+                    if let Some((epoch, _, present, names)) = cache.as_mut() {
+                        let mut added = false;
+                        for (handle, _) in &deltas {
+                            if let Some(entity) = self.document.get_entity(*handle) {
+                                if entity.common().owner_handle == block {
+                                    // `contains` first: the common case is a
+                                    // type already present, and that path must
+                                    // not allocate.
+                                    let name = entity_type_name(entity);
+                                    if !present.contains(name) {
+                                        present.insert(name.to_string());
+                                        added = true;
+                                    }
+                                }
+                            }
+                        }
+                        // Only rebuild the list when the set actually moved;
+                        // otherwise the existing `Arc` is still the answer.
+                        if added {
+                            *names =
+                                std::sync::Arc::new(present.iter().cloned().collect());
+                        }
+                        *epoch = self.geometry_epoch;
+                        return std::sync::Arc::clone(names);
+                    }
+                }
+            }
+        }
+
+        let mut present: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
         if let Some(record) = self
             .document
@@ -382,15 +425,21 @@ impl Scene {
         {
             for &handle in &record.entity_handles {
                 if let Some(entity) = self.document.get_entity(handle) {
-                    names.insert(entity_type_name(entity));
+                    let name = entity_type_name(entity);
+                    if !present.contains(name) {
+                        present.insert(name.to_string());
+                    }
                 }
             }
         }
-        let names: std::sync::Arc<Vec<String>> = std::sync::Arc::new(
-            names.into_iter().map(str::to_string).collect(),
-        );
-        *self.layout_type_names_cache.borrow_mut() =
-            Some((self.geometry_epoch, block, std::sync::Arc::clone(&names)));
+        let names: std::sync::Arc<Vec<String>> =
+            std::sync::Arc::new(present.iter().cloned().collect());
+        *self.layout_type_names_cache.borrow_mut() = Some((
+            self.geometry_epoch,
+            block,
+            present,
+            std::sync::Arc::clone(&names),
+        ));
         names
     }
 
@@ -953,6 +1002,60 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adding_a_type_already_present_reuses_the_list() {
+        use acadrust::entities::{Circle, EntityType, Line};
+        use acadrust::types::Vector3;
+        use std::sync::Arc;
+
+        let line = || {
+            EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ))
+        };
+        let mut scene = Scene::new();
+        scene.add_entity(line());
+        let first = scene.entity_type_names_in_layout();
+
+        scene.add_entity(line());
+        let second = scene.entity_type_names_in_layout();
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "a second line changes no type name, so the list must be reused",
+        );
+
+        scene.add_entity(EntityType::Circle(Circle::new()));
+        let third = scene.entity_type_names_in_layout();
+        assert_eq!(third.as_slice(), ["Circle", "Line"], "a new type must appear");
+
+        // The incremental answer has to be the answer a full walk gives.
+        scene.layout_type_names_cache.borrow_mut().take();
+        assert_eq!(
+            scene.entity_type_names_in_layout().as_slice(),
+            third.as_slice(),
+            "folding edits in must match rebuilding from scratch",
+        );
+    }
+
+    #[test]
+    fn changing_an_entity_type_rebuilds_the_type_names() {
+        use acadrust::entities::{Circle, EntityType, Line};
+        use acadrust::types::Vector3;
+
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+        )));
+        assert_eq!(scene.entity_type_names_in_layout().as_slice(), ["Line"]);
+
+        let mut circle = Circle::new();
+        circle.common.handle = handle;
+        assert!(scene.update_entity(EntityType::Circle(circle)));
+        assert_eq!(scene.entity_type_names_in_layout().as_slice(), ["Circle"]);
+    }
 
     #[test]
     fn layout_type_cache_reuses_and_invalidates_on_edits_undo_and_layout() {

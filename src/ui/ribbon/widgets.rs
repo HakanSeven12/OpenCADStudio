@@ -128,14 +128,13 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
         .0;
     let max_label_height = line_height * LARGE_LABEL_LINES + 0.5;
     let fits = |width: f32| {
-        ribbon_label_bounds(
+        let bounds = ribbon_label_bounds(
             renderer,
             label,
             width,
-            advanced_text::Wrapping::WordOrGlyph,
-        )
-        .height
-            <= max_label_height
+            advanced_text::Wrapping::Word,
+        );
+        bounds.width <= width + 0.5 && bounds.height <= max_label_height
     };
 
     if fits(base_inner) {
@@ -685,7 +684,7 @@ pub(super) fn render_large_dropdown<'a>(
                 .size(10)
                 .width(Fill)
                 .align_x(iced::Center)
-                .wrapping(advanced_text::Wrapping::WordOrGlyph),
+                .wrapping(advanced_text::Wrapping::Word),
         ]
         .align_x(iced::Center)
         .spacing(0)
@@ -818,7 +817,7 @@ pub(super) fn render_large<'a>(
                         .size(10)
                         .width(Fill)
                         .align_x(iced::Center)
-                        .wrapping(advanced_text::Wrapping::WordOrGlyph),
+                        .wrapping(advanced_text::Wrapping::Word),
                 ]
                 .align_x(iced::Center)
                 .spacing(0)

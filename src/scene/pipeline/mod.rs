@@ -251,6 +251,11 @@ pub struct Pipeline {
     pub(crate) wire_arena_fallback_handles: rustc_hash::FxHashSet<acadrust::Handle>,
     /// The Model content id both arenas currently mirror (`u64::MAX` = none).
     pub(crate) wire_arena_id: u64,
+    /// Handles that contributed to this slot's retained analytical uploads.
+    pub(crate) partition_contributors: rustc_hash::FxHashSet<acadrust::Handle>,
+    /// The draw-depth generation those uploads baked. A full depth rebuild
+    /// reassigns every label, so they stop being reusable when it moves.
+    pub(crate) partition_depth_generation: u64,
     /// Last content/camera/viewport tuple used to derive visible instance
     /// ranges from the resident arena.
     pub(crate) wire_cull_key: (u64, u64, u32, u32),
@@ -273,6 +278,8 @@ pub struct Pipeline {
     /// frame they are present (small), drawn on top of the base wire pass — so
     /// a live drag never re-uploads the resident base buffer.
     gpu_preview_wires: Vec<WireGpu>,
+    gpu_preview_circles: Vec<CircleGpu>,
+    gpu_preview_ellipses: Vec<EllipseGpu>,
     /// Wipeout masks — solid fills rendered after wires in a separate pass via
     /// the legacy per-primitive `WipeoutGpu` renderer.
     gpu_wipeouts: Vec<WipeoutGpu>,
@@ -2336,6 +2343,8 @@ impl Pipeline {
             wire_arena_fallback_kind: None,
             wire_arena_fallback_handles: rustc_hash::FxHashSet::default(),
             wire_arena_id: u64::MAX,
+            partition_contributors: rustc_hash::FxHashSet::default(),
+            partition_depth_generation: u64::MAX,
             wire_cull_key: (u64::MAX, u64::MAX, 0, 0),
             hatch_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
             wipeout_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
@@ -2346,6 +2355,8 @@ impl Pipeline {
             gpu_selected_ellipses: vec![],
             gpu_selected_block_wires: vec![],
             gpu_preview_wires: vec![],
+            gpu_preview_circles: vec![],
+            gpu_preview_ellipses: vec![],
             gpu_wipeouts: vec![],
             wipeout_skip_flags: vec![],
             gpu_images: vec![],
@@ -2630,6 +2641,9 @@ impl Pipeline {
                 slots.sort_unstable();
                 for &i in &slots {
                     if let Some(w) = wires.get(i as usize) {
+                        if !w.display_visible {
+                            continue;
+                        }
                         selected_wires.push(w);
                     }
                 }
@@ -2641,12 +2655,18 @@ impl Pipeline {
                 slots.sort_unstable();
                 for &i in &slots {
                     if let Some(w) = wires.get(i as usize) {
+                        if !w.display_visible {
+                            continue;
+                        }
                         hover_wires.push(w);
                     }
                 }
             }
         }
         for wire in annotation_context_wires {
+            if !wire.display_visible {
+                continue;
+            }
             if wire.selected {
                 selected_wires.push(wire);
             } else {
@@ -2654,13 +2674,12 @@ impl Pipeline {
             }
         }
         let mut selected_circles: Vec<CircleInstance> = Vec::new();
+        let circle_sel_tint = selected_tint.unwrap_or(WireModel::SELECTED);
         for &wire in &selected_wires {
             let depth = wire_gpu::wire_draw_depth(wire, depth_map);
             if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
                 for mut inst in insts {
-                    if let Some(tint) = selected_tint {
-                        inst.color = tint;
-                    }
+                    inst.color = circle_sel_tint;
                     selected_circles.push(inst);
                 }
             }
@@ -2686,13 +2705,12 @@ impl Pipeline {
         };
 
         let mut selected_ellipses: Vec<EllipseInstance> = Vec::new();
+        let ellipse_sel_tint = selected_tint.unwrap_or(WireModel::SELECTED);
         for &wire in &selected_wires {
             let depth = wire_gpu::wire_draw_depth(wire, depth_map);
             if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
                 for mut inst in insts {
-                    if let Some(tint) = selected_tint {
-                        inst.color = tint;
-                    }
+                    inst.color = ellipse_sel_tint;
                     selected_ellipses.push(inst);
                 }
             }
@@ -2940,11 +2958,47 @@ impl Pipeline {
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
-        self.gpu_preview_wires = if wires.is_empty() {
-            vec![]
+        if wires.is_empty() {
+            self.gpu_preview_wires.clear();
+            self.gpu_preview_circles.clear();
+            self.gpu_preview_ellipses.clear();
         } else {
-            WireGpu::from_run(device, queue, wires, depth_map, false, self.wire_const_bgl.as_ref())
-        };
+            let partitioned = wire_arena::partition_wires(wires, depth_map);
+            let mut non_analytical = partitioned.regular;
+            non_analytical.extend(partitioned.mesh);
+            self.gpu_preview_wires = if non_analytical.is_empty() {
+                vec![]
+            } else {
+                WireGpu::from_run_refs(
+                    device,
+                    queue,
+                    &non_analytical,
+                    depth_map,
+                    false,
+                    self.wire_const_bgl.as_ref(),
+                )
+            };
+            self.gpu_preview_circles = if partitioned.circle_instances.is_empty() {
+                vec![]
+            } else {
+                vec![CircleGpu::from_instances(
+                    device,
+                    queue,
+                    "preview.circles",
+                    &partitioned.circle_instances,
+                )]
+            };
+            self.gpu_preview_ellipses = if partitioned.ellipse_instances.is_empty() {
+                vec![]
+            } else {
+                vec![EllipseGpu::from_instances(
+                    device,
+                    queue,
+                    "preview.ellipses",
+                    &partitioned.ellipse_instances,
+                )]
+            };
+        }
     }
 
     /// Upload the live grip-drag / command-preview SDF glyph quads. Re-uploaded
@@ -4611,6 +4665,24 @@ impl Pipeline {
                     }
                 }
             }
+            if self.gpu_preview_circles.iter().any(|cg| cg.instance_count > 0) {
+                pass.set_pipeline(&self.circle_xray_pipeline);
+                for cg in &self.gpu_preview_circles {
+                    if cg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..cg.instance_count);
+                    }
+                }
+            }
+            if self.gpu_preview_ellipses.iter().any(|eg| eg.instance_count > 0) {
+                pass.set_pipeline(&self.ellipse_xray_pipeline);
+                for eg in &self.gpu_preview_ellipses {
+                    if eg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..eg.instance_count);
+                    }
+                }
+            }
         }
 
         // ── Pass 5c: SDF text quads (drawn over wires) ────────────────────
@@ -4721,6 +4793,8 @@ impl Pipeline {
                 || !self.block_text_highlight_gpu.is_empty();
         if !self.gpu_selected_wires.is_empty()
             || !self.gpu_selected_block_wires.is_empty()
+            || !self.gpu_selected_circles.is_empty()
+            || !self.gpu_selected_ellipses.is_empty()
             || have_text_highlight
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -4787,6 +4861,7 @@ impl Pipeline {
                 } else {
                     &self.circle_xray_pipeline
                 });
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 for cg in &self.gpu_selected_circles {
                     if cg.instance_count > 0 {
                         pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
@@ -4800,6 +4875,7 @@ impl Pipeline {
                 } else {
                     &self.ellipse_xray_pipeline
                 });
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 for eg in &self.gpu_selected_ellipses {
                     if eg.instance_count > 0 {
                         pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
@@ -4892,12 +4968,7 @@ impl Pipeline {
         }
     }
 
-    /// Forget every cache key that describes this slot's uploaded content.
-    ///
-    /// Shared by slot reuse and by [`Self::release_heavy_resources`] so the two
-    /// cannot disagree about what "this slot holds nothing you can trust"
-    /// means. Keys only — the buffers themselves are dropped by the caller that
-    /// wants the memory back.
+    /// Reset every cache key that describes this slot's uploaded content.
     pub(crate) fn forget_cached_keys(&mut self) {
         self.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
         self.cached_wire_id = u64::MAX;
@@ -4920,6 +4991,9 @@ impl Pipeline {
         self.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
         self.silhouette_source_key = (usize::MAX, usize::MAX, u64::MAX);
         self.render_sig = u64::MAX;
+        // The retained-upload record is part of the slot's cached state.
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
     }
 
     /// Catch errors delivered after the previous upload/submit completed.
@@ -4933,6 +5007,8 @@ impl Pipeline {
         self.wire_arena = None;
         self.wire_arena_mesh = None;
         self.wire_arena_id = u64::MAX;
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
         self.alloc_size = Size::new(0, 0);
         self.shadow_full = None;
         self.background_source_id = usize::MAX;
@@ -4964,12 +5040,16 @@ impl Pipeline {
         self.wire_arena_fallback_kind = None;
         self.wire_arena_fallback_handles.clear();
         self.wire_arena_id = u64::MAX;
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
 
         self.gpu_selected_wires.clear();
         self.gpu_selected_block_wires.clear();
         self.gpu_selected_circles.clear();
         self.gpu_selected_ellipses.clear();
         self.gpu_preview_wires.clear();
+        self.gpu_preview_circles.clear();
+        self.gpu_preview_ellipses.clear();
         self.hatch_gpu.clear();
         self.gpu_wipeouts.clear();
         self.wipeout_skip_flags.clear();

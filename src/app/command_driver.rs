@@ -733,7 +733,10 @@ impl OpenCADStudio {
             &result,
             CmdResult::Relaunch(..)
                 | CmdResult::Dispatch(..)
+                | CmdResult::SolidEdgeBlend { .. }
                 | CmdResult::SolidSubtract { .. }
+                | CmdResult::SliceEntities { .. }
+                | CmdResult::SliceSurfaceEntities { .. }
         );
         let task = self.apply_cmd_result_inner(result);
         let i = self.active_tab;
@@ -4111,11 +4114,20 @@ impl OpenCADStudio {
 
             CmdResult::SolidEdgeBlend {
                 handle,
-                pick,
+                edges,
+                base_face,
                 value,
+                other_value,
                 fillet,
             } => {
-                let task = self.solid_edge_blend(handle, pick, value, fillet);
+                let task = self.solid_edge_blend(
+                    handle,
+                    &edges,
+                    base_face,
+                    value,
+                    other_value,
+                    fillet,
+                );
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
@@ -4142,6 +4154,32 @@ impl OpenCADStudio {
                 convert_meshes,
             } => {
                 let task = self.solid_subtract(&bases, &cutters, convert_meshes);
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                return task;
+            }
+
+            CmdResult::SliceEntities {
+                targets,
+                plane,
+                keep_point,
+            } => {
+                let task = self.solid_slice(&targets, plane, keep_point);
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                return task;
+            }
+
+            CmdResult::SliceSurfaceEntities {
+                targets,
+                cutter,
+                keep_point,
+            } => {
+                let task = self.solid_slice_surface(&targets, *cutter, keep_point);
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();

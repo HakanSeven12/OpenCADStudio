@@ -174,6 +174,16 @@ pub struct PartitionedWires<'a> {
     pub instanced: Vec<&'a WireModel>,
     pub circle_instances: Vec<super::circle_gpu::CircleInstance>,
     pub ellipse_instances: Vec<super::ellipse_gpu::EllipseInstance>,
+    /// Handles that contributed to the retained analytical uploads.
+    pub contributors: rustc_hash::FxHashSet<Handle>,
+}
+
+/// Whether this wire contributes to an upload retained across arena patches.
+pub fn feeds_analytical_uploads(wire: &WireModel) -> bool {
+    matches!(
+        classify_wire(wire),
+        WireKind::Block | WireKind::Circle | WireKind::Ellipse
+    )
 }
 
 /// Single-pass classification and extraction of all viewport wire categories.
@@ -190,26 +200,36 @@ pub fn partition_wires<'a>(
     let mut instanced = Vec::new();
     let mut circle_instances = Vec::new();
     let mut ellipse_instances = Vec::new();
+    let mut contributors: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
+    let note = |wire: &WireModel, set: &mut rustc_hash::FxHashSet<Handle>| {
+        if let Some(handle) = handle_of(wire) {
+            set.insert(handle);
+        }
+    };
 
     for wire in wires {
         if !wire.display_visible {
             continue;
         }
         if wire.render_instance.is_some() {
+            note(wire, &mut contributors);
             instanced.push(wire);
             continue;
         }
-        let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
+        // Resolve draw depth only for wires eligible for analytical extraction.
         if !wire.tangent_geoms.is_empty()
             && wire.fill_tris.is_empty()
             && wire.pick_tris.is_empty()
             && wire.text_verts.is_empty()
         {
+            let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
             if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
+                note(wire, &mut contributors);
                 circle_instances.extend(insts);
                 continue;
             }
             if let Some(insts) = super::ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                note(wire, &mut contributors);
                 ellipse_instances.extend(insts);
                 continue;
             }
@@ -229,6 +249,7 @@ pub fn partition_wires<'a>(
         instanced,
         circle_instances,
         ellipse_instances,
+        contributors,
     }
 }
 
@@ -1643,5 +1664,49 @@ mod tests {
     fn tombstones_use_the_shader_discard_sentinel() {
         assert!(blank_const().pattern_length < 0.0);
         assert!(blank_packed_instance().pattern_length < 0.0);
+    }
+
+    #[test]
+    fn partition_wires_partitions_preview_analytical_curves() {
+        use crate::scene::model::wire_model::TangentGeom;
+        let mut circle_preview = WireModel::default();
+        circle_preview.tangent_geoms.push(TangentGeom::PlanarCircle {
+            center: [1.0, 2.0, 3.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+        });
+
+        let mut arc_preview = WireModel::default();
+        arc_preview.tangent_geoms.push(TangentGeom::Arc {
+            center: [4.0, 5.0, 6.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 8.0,
+            start_angle: 0.1,
+            end_angle: 2.0,
+        });
+
+        let mut ellipse_preview = WireModel::default();
+        ellipse_preview.tangent_geoms.push(TangentGeom::PlanarEllipse {
+            center: [7.0, 8.0, 9.0],
+            major_axis: [5.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            minor_axis_ratio: 0.6,
+            start_param: 0.0,
+            end_param: std::f64::consts::TAU,
+        });
+
+        let mut regular_line = WireModel::default();
+        regular_line.points.push([0.0, 0.0, 0.0]);
+        regular_line.points.push([1.0, 1.0, 1.0]);
+
+        let wires = vec![circle_preview, arc_preview, ellipse_preview, regular_line];
+        let depth_map = rustc_hash::FxHashMap::default();
+        let partitioned = partition_wires(&wires, &depth_map);
+
+        assert_eq!(partitioned.circle_instances.len(), 2);
+        assert_eq!(partitioned.ellipse_instances.len(), 1);
+        assert_eq!(partitioned.regular.len(), 1);
     }
 }

@@ -237,7 +237,7 @@ pub fn extract_circle_instance_from_geom(
         ),
         _ => return None,
     };
-    if radius <= 0.0 || !radius.is_finite() || !start_angle.is_finite() || !end_angle.is_finite() {
+    if radius <= 0.0 || !radius.is_finite() || !start_angle.is_finite() || !end_angle.is_finite() || radius > 1e6 {
         return None;
     }
 

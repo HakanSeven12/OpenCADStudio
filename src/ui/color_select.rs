@@ -5,10 +5,16 @@
 
 use crate::app::Message;
 use crate::ui::properties::acad_color_display;
+use crate::ui::ROW_H;
 use acadrust::types::Color as AcadColor;
 use iced::widget::{button, column, container, row, text};
-use iced::{Background, Border, Color, Element, Length, Theme};
+use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 use crate::t;
+
+/// Font size for color selector buttons (matches combo_box styling).
+const FONT_SZ: f32 = ROW_H * 0.42;
+/// Vertical padding for color selector buttons (matches combo_box styling).
+const SELECTOR_PAD_V: f32 = (ROW_H - FONT_SZ * 1.3 - 2.0) / 2.0;
 
 /// Which "logical" entries the colour list offers besides the standard ACI
 /// colours.
@@ -222,7 +228,12 @@ fn color_selector_with_indicator<'a>(
         .align_y(iced::Center),
     )
     .on_press(on_toggle)
-    .padding([3, 6])
+    .padding(Padding {
+        top: SELECTOR_PAD_V,
+        bottom: SELECTOR_PAD_V,
+        left: 6.0,
+        right: 6.0,
+    })
     .width(Length::Fill);
 
     if !open {

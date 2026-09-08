@@ -184,17 +184,23 @@ pub struct PartitionedWires<'a> {
 /// Whether a change to this wire can alter what `partition_wires` produces for
 /// the instanced, circle and ellipse uploads.
 ///
-/// Deliberately conservative: a wire that looks analytical here may still fail
-/// extraction and end up in `regular`, which costs an unnecessary re-partition
-/// and never a stale upload. Shared with `partition_wires` so the test that
-/// decides to skip cannot drift from the walk it is skipping.
+/// Decided by attempting the extraction, exactly as the walk decides it. The
+/// cheap structural test alone is not enough: an ordinary drawn line carries a
+/// tangent geom for snapping and no triangles, so it passes that test, fails
+/// extraction, and lands in `regular` — a membership test that stopped there
+/// would call every line a contributor and never skip anything.
+///
+/// `draw_depth` only rides along in the extracted instance, so the value passed
+/// here cannot change the answer.
 pub fn feeds_analytical_uploads(wire: &WireModel) -> bool {
-    wire.display_visible
-        && (wire.render_instance.is_some()
-            || (!wire.tangent_geoms.is_empty()
-                && wire.fill_tris.is_empty()
-                && wire.pick_tris.is_empty()
-                && wire.text_verts.is_empty()))
+    if !wire.display_visible {
+        return false;
+    }
+    if wire.render_instance.is_some() {
+        return true;
+    }
+    super::circle_gpu::extract_circle_instances(wire, 0.0).is_some()
+        || super::ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_some()
 }
 
 /// Single-pass classification and extraction of all viewport wire categories.

@@ -10660,6 +10660,44 @@ mod journal_tests {
     // Differential oracle: the incrementally-patched entity index must always
     // equal a from-scratch rebuild after any add / move / erase.
     #[test]
+    /// The partition skip turns on a membership test, and the test has to tell
+    /// a drawn line from a drawn circle. A line carries a tangent geom for
+    /// snapping and no triangles, so the cheap structural filter admits it —
+    /// deciding on that alone called every line a contributor and the skip
+    /// never fired once in a real session.
+    #[test]
+    fn the_partition_membership_test_separates_lines_from_curves() {
+        use acadrust::entities::{Circle, Line};
+        use acadrust::types::Vector3;
+        use crate::scene::pipeline::wire_arena::feeds_analytical_uploads;
+
+        let mut scene = Scene::new();
+        let feeds = |scene: &Scene, handle: Handle| {
+            let entity = scene.document.get_entity(handle).unwrap().clone();
+            scene
+                .tessellate_one(&entity)
+                .iter()
+                .any(feeds_analytical_uploads)
+        };
+
+        let line = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 5.0, 0.0),
+        )));
+        assert!(
+            !feeds(&scene, line),
+            "a drawn line must not force the partition walk",
+        );
+
+        let mut circle = Circle::new();
+        circle.radius = 4.0;
+        let circle = scene.add_entity(EntityType::Circle(circle));
+        assert!(
+            feeds(&scene, circle),
+            "a drawn circle feeds the analytical uploads and must force the walk",
+        );
+    }
+
     /// The partition skip reuses uploads that bake a draw depth, and it is only
     /// sound while existing depths hold still. An incremental add must leave
     /// them alone and must not bump the generation; a rebuild from scratch may

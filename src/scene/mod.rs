@@ -8342,24 +8342,33 @@ impl Scene {
             let Some(indices) = lookup.get(&handle) else {
                 continue;
             };
-            if indices
-                .iter()
-                .filter_map(|&index| meshes.get(index as usize))
-                .any(|set| {
-                    set.geometry_lods().first().is_some_and(|mesh| {
-                        !pick::hit_test::mesh_box_hit(
-                            a,
-                            b,
-                            crossing,
-                            std::iter::once((handle, mesh, set.instance_transform)),
-                            view_rot,
-                            eye,
-                            bounds,
-                        )
-                        .is_empty()
-                    })
+            let test = |set: &MeshLodSet| {
+                set.geometry_lods().first().is_some_and(|mesh| {
+                    !pick::hit_test::mesh_box_hit(
+                        a,
+                        b,
+                        crossing,
+                        std::iter::once((handle, mesh, set.instance_transform)),
+                        view_rot,
+                        eye,
+                        bounds,
+                    )
+                    .is_empty()
                 })
-            {
+            };
+            let mut sets = indices
+                .iter()
+                .filter_map(|&index| meshes.get(index as usize));
+            let hit = if crossing {
+                sets.any(test)
+            } else {
+                let mut count = 0;
+                sets.all(|set| {
+                    count += 1;
+                    test(set)
+                }) && count > 0
+            };
+            if hit {
                 out.push(handle);
             }
         }
@@ -8510,23 +8519,32 @@ impl Scene {
             let Some(indices) = lookup.get(&handle) else {
                 continue;
             };
-            if indices
-                .iter()
-                .filter_map(|&index| meshes.get(index as usize))
-                .any(|set| {
-                    set.geometry_lods().first().is_some_and(|mesh| {
-                        !pick::hit_test::mesh_poly_hit(
-                            poly,
-                            crossing,
-                            std::iter::once((handle, mesh, set.instance_transform)),
-                            view_rot,
-                            eye,
-                            bounds,
-                        )
-                        .is_empty()
-                    })
+            let test = |set: &MeshLodSet| {
+                set.geometry_lods().first().is_some_and(|mesh| {
+                    !pick::hit_test::mesh_poly_hit(
+                        poly,
+                        crossing,
+                        std::iter::once((handle, mesh, set.instance_transform)),
+                        view_rot,
+                        eye,
+                        bounds,
+                    )
+                    .is_empty()
                 })
-            {
+            };
+            let mut sets = indices
+                .iter()
+                .filter_map(|&index| meshes.get(index as usize));
+            let hit = if crossing {
+                sets.any(test)
+            } else {
+                let mut count = 0;
+                sets.all(|set| {
+                    count += 1;
+                    test(set)
+                }) && count > 0
+            };
+            if hit {
                 out.push(handle);
             }
         }
@@ -8768,23 +8786,32 @@ impl Scene {
             let Some(indices) = lookup.get(&handle) else {
                 continue;
             };
-            let hit = indices
+            let test = |set: &MeshLodSet| {
+                set.geometry_lods().first().is_some_and(|mesh| {
+                    !pick::hit_test::mesh_box_hit(
+                        a,
+                        b,
+                        crossing,
+                        std::iter::once((handle, mesh, set.instance_transform)),
+                        view_rot,
+                        eye,
+                        bounds,
+                    )
+                    .is_empty()
+                })
+            };
+            let mut sets = indices
                 .iter()
-                .filter_map(|&index| meshes.get(index as usize))
-                .any(|set| {
-                    set.geometry_lods().first().is_some_and(|mesh| {
-                        !pick::hit_test::mesh_box_hit(
-                            a,
-                            b,
-                            crossing,
-                            std::iter::once((handle, mesh, set.instance_transform)),
-                            view_rot,
-                            eye,
-                            bounds,
-                        )
-                        .is_empty()
-                    })
-                });
+                .filter_map(|&index| meshes.get(index as usize));
+            let hit = if crossing {
+                sets.any(test)
+            } else {
+                let mut count = 0;
+                sets.all(|set| {
+                    count += 1;
+                    test(set)
+                }) && count > 0
+            };
             if hit {
                 out.push(handle);
             }
@@ -8819,22 +8846,31 @@ impl Scene {
             let Some(indices) = lookup.get(&handle) else {
                 continue;
             };
-            let hit = indices
+            let test = |set: &MeshLodSet| {
+                set.geometry_lods().first().is_some_and(|mesh| {
+                    !pick::hit_test::mesh_poly_hit(
+                        poly,
+                        crossing,
+                        std::iter::once((handle, mesh, set.instance_transform)),
+                        view_rot,
+                        eye,
+                        bounds,
+                    )
+                    .is_empty()
+                })
+            };
+            let mut sets = indices
                 .iter()
-                .filter_map(|&index| meshes.get(index as usize))
-                .any(|set| {
-                    set.geometry_lods().first().is_some_and(|mesh| {
-                        !pick::hit_test::mesh_poly_hit(
-                            poly,
-                            crossing,
-                            std::iter::once((handle, mesh, set.instance_transform)),
-                            view_rot,
-                            eye,
-                            bounds,
-                        )
-                        .is_empty()
-                    })
-                });
+                .filter_map(|&index| meshes.get(index as usize));
+            let hit = if crossing {
+                sets.any(test)
+            } else {
+                let mut count = 0;
+                sets.all(|set| {
+                    count += 1;
+                    test(set)
+                }) && count > 0
+            };
             if hit {
                 out.push(handle);
             }

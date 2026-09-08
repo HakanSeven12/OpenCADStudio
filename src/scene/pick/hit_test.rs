@@ -1615,10 +1615,10 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
         );
     }
 
-    // Q: lazy projection — accumulate screen points without allocating per-wire Vec.
-    wires
-        .iter()
-        .filter_map(|wire| {
+    if crossing {
+        let mut out = Vec::new();
+        let mut seen = HashSet::default();
+        for wire in wires.iter() {
             // Fallback: when wire has no line geometry (e.g. greek text emits
             // only fill_tris) treat the AABB rectangle as the hit-test shape
             // so low-LOD text stays selectable. See #19.
@@ -1639,7 +1639,7 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
                 ];
                 &aabb_pts
             } else {
-                return None;
+                continue;
             };
 
             // Low residual parallel to `pts` (empty for the AABB fallback,
@@ -1650,6 +1650,85 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
                 &[]
             };
             let mut hit = false;
+            let mut prev: Option<Point> = None;
+
+            for (i, &[px, py, pz]) in pts.iter().enumerate() {
+                if px.is_nan() {
+                    prev = None;
+                    continue;
+                }
+                let world = if !wire.points.is_empty() {
+                    wire_point_world(wire, i, view_rot, eye)
+                } else {
+                    wp64([px, py, pz], low, i)
+                };
+                let sp = world_to_screen(world, view_rot, eye, bounds);
+                if inside(sp) {
+                    hit = true;
+                }
+                if let Some(p0) = prev {
+                    if !hit {
+                        hit = segments_intersect(p0, sp, box_tl, box_tr)
+                            || segments_intersect(p0, sp, box_tr, box_br)
+                            || segments_intersect(p0, sp, box_br, box_bl)
+                            || segments_intersect(p0, sp, box_bl, box_tl);
+                    }
+                }
+                prev = Some(sp);
+            }
+
+            let mut glyph_crosses = false;
+            for start in (0..wire.text_verts.len()).step_by(6) {
+                let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds) else {
+                    continue;
+                };
+                if [0usize, 3].into_iter().any(|offset| {
+                    triangle_crosses_box(
+                        [screen[offset], screen[offset + 1], screen[offset + 2]],
+                        box_corners,
+                    )
+                }) {
+                    glyph_crosses = true;
+                    break;
+                }
+            }
+
+            if (hit || glyph_crosses) && seen.insert(wire.name.as_str()) {
+                out.push(wire.name.as_str());
+            }
+        }
+        out
+    } else {
+        let mut qualified = Vec::new();
+        let mut disqualified = HashSet::default();
+        let mut seen = HashSet::default();
+
+        for wire in wires.iter() {
+            let aabb_pts: Vec<[f32; 3]>;
+            let empty_pts: [[f32; 3]; 0] = [];
+            let pts: &[[f32; 3]] = if !wire.points.is_empty() {
+                &wire.points
+            } else if !wire.text_verts.is_empty() {
+                &empty_pts
+            } else if wire.aabb != WireModel::UNBOUNDED_AABB {
+                let [ax, ay, bx, by] = wire.aabb;
+                aabb_pts = vec![
+                    [ax, ay, 0.0],
+                    [bx, ay, 0.0],
+                    [bx, by, 0.0],
+                    [ax, by, 0.0],
+                    [ax, ay, 0.0],
+                ];
+                &aabb_pts
+            } else {
+                continue;
+            };
+
+            let low: &[[f32; 3]] = if !wire.points.is_empty() {
+                &wire.points_low
+            } else {
+                &[]
+            };
             let mut all_inside = true;
             let mut prev: Option<Point> = None;
 
@@ -1664,61 +1743,42 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
                     wp64([px, py, pz], low, i)
                 };
                 let sp = world_to_screen(world, view_rot, eye, bounds);
-                if crossing {
-                    if inside(sp) {
-                        hit = true;
-                    }
-                    if let Some(p0) = prev {
-                        if !hit {
-                            hit = segments_intersect(p0, sp, box_tl, box_tr)
-                                || segments_intersect(p0, sp, box_tr, box_br)
-                                || segments_intersect(p0, sp, box_br, box_bl)
-                                || segments_intersect(p0, sp, box_bl, box_tl);
-                        }
-                    }
-                } else {
-                    if !inside(sp) {
-                        all_inside = false;
-                    }
+                if !inside(sp) {
+                    all_inside = false;
                 }
                 prev = Some(sp);
             }
 
             let glyphs_present = !wire.text_verts.is_empty();
-            let mut glyph_crosses = false;
             let mut glyphs_inside = true;
             for start in (0..wire.text_verts.len()).step_by(6) {
                 let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds) else {
                     continue;
                 };
-                if crossing {
-                    if [0usize, 3].into_iter().any(|offset| {
-                        triangle_crosses_box(
-                            [screen[offset], screen[offset + 1], screen[offset + 2]],
-                            box_corners,
-                        )
-                    }) {
-                        glyph_crosses = true;
-                        break;
-                    }
-                } else if !screen.iter().copied().all(inside) {
+                if !screen.iter().copied().all(inside) {
                     glyphs_inside = false;
                     break;
                 }
             }
 
-            let result = if crossing {
-                hit || glyph_crosses
-            } else {
-                all_inside && glyphs_inside && (prev.is_some() || glyphs_present)
-            };
-            if result {
-                Some(wire.name.as_str())
-            } else {
-                None
+            let has_geom = prev.is_some() || glyphs_present;
+            if !has_geom {
+                continue;
             }
-        })
-        .collect()
+
+            let name = wire.name.as_str();
+            if all_inside && glyphs_inside {
+                if seen.insert(name) {
+                    qualified.push(name);
+                }
+            } else {
+                disqualified.insert(name);
+            }
+        }
+
+        qualified.retain(|name| !disqualified.contains(name));
+        qualified
+    }
 }
 
 // ── Polygon / lasso selection ─────────────────────────────────────────────
@@ -1743,10 +1803,10 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
         return indexed_polygon_crossing_hits(wires, poly, view_rot, eye, bounds);
     }
 
-    // Q: lazy projection — no Vec allocation per wire.
-    wires
-        .iter()
-        .filter_map(|wire| {
+    if crossing {
+        let mut out = Vec::new();
+        let mut seen = HashSet::default();
+        for wire in wires.iter() {
             // Same AABB fallback as `box_hit`: when a wire has no line
             // geometry (e.g. greek-LOD text emits only fill_tris) treat the
             // AABB rectangle as the hit-test shape so low-LOD text stays
@@ -1768,7 +1828,7 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                 ];
                 &aabb_pts
             } else {
-                return None;
+                continue;
             };
 
             let low: &[[f32; 3]] = if !wire.points.is_empty() {
@@ -1777,6 +1837,88 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                 &[]
             };
             let mut hit = false;
+            let mut prev: Option<Point> = None;
+
+            for (i, &[px, py, pz]) in pts.iter().enumerate() {
+                if px.is_nan() {
+                    prev = None;
+                    continue;
+                }
+                let world = if !wire.points.is_empty() {
+                    wire_point_world(wire, i, view_rot, eye)
+                } else {
+                    wp64([px, py, pz], low, i)
+                };
+                let sp = world_to_screen(world, view_rot, eye, bounds);
+                if sp.x < 0.0 || sp.x > bounds.width || sp.y < 0.0 || sp.y > bounds.height {
+                    prev = None;
+                    continue;
+                }
+                if point_in_polygon(sp, poly) {
+                    hit = true;
+                }
+                if !hit {
+                    if let Some(p0) = prev {
+                        if segment_crosses_polygon(p0, sp, poly) {
+                            hit = true;
+                        }
+                    }
+                }
+                prev = Some(sp);
+            }
+
+            let mut glyph_crosses = false;
+            for start in (0..wire.text_verts.len()).step_by(6) {
+                let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds) else {
+                    continue;
+                };
+                if [0usize, 3].into_iter().any(|offset| {
+                    triangle_crosses_polygon(
+                        [screen[offset], screen[offset + 1], screen[offset + 2]],
+                        poly,
+                    )
+                }) {
+                    glyph_crosses = true;
+                    break;
+                }
+            }
+
+            if (hit || glyph_crosses) && seen.insert(wire.name.as_str()) {
+                out.push(wire.name.as_str());
+            }
+        }
+        out
+    } else {
+        let mut qualified = Vec::new();
+        let mut disqualified = HashSet::default();
+        let mut seen = HashSet::default();
+
+        for wire in wires.iter() {
+            let aabb_pts: Vec<[f32; 3]>;
+            let empty_pts: [[f32; 3]; 0] = [];
+            let pts: &[[f32; 3]] = if !wire.points.is_empty() {
+                &wire.points
+            } else if !wire.text_verts.is_empty() {
+                &empty_pts
+            } else if wire.aabb != WireModel::UNBOUNDED_AABB {
+                let [ax, ay, bx, by] = wire.aabb;
+                aabb_pts = vec![
+                    [ax, ay, 0.0],
+                    [bx, ay, 0.0],
+                    [bx, by, 0.0],
+                    [ax, by, 0.0],
+                    [ax, ay, 0.0],
+                ];
+                &aabb_pts
+            } else {
+                continue;
+            };
+
+            let low: &[[f32; 3]] = if !wire.points.is_empty() {
+                &wire.points_low
+            } else {
+                &[]
+            };
             let mut all_inside = true;
             let mut prev: Option<Point> = None;
 
@@ -1798,43 +1940,19 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                     prev = None;
                     continue;
                 }
-                if crossing {
-                    if point_in_polygon(sp, poly) {
-                        hit = true;
-                    }
-                    if !hit {
-                        if let Some(p0) = prev {
-                            if segment_crosses_polygon(p0, sp, poly) {
-                                hit = true;
-                            }
-                        }
-                    }
-                } else {
-                    if !point_in_polygon(sp, poly) {
-                        all_inside = false;
-                    }
+                if !point_in_polygon(sp, poly) {
+                    all_inside = false;
                 }
                 prev = Some(sp);
             }
 
             let glyphs_present = !wire.text_verts.is_empty();
-            let mut glyph_crosses = false;
             let mut glyphs_inside = true;
             for start in (0..wire.text_verts.len()).step_by(6) {
                 let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds) else {
                     continue;
                 };
-                if crossing {
-                    if [0usize, 3].into_iter().any(|offset| {
-                        triangle_crosses_polygon(
-                            [screen[offset], screen[offset + 1], screen[offset + 2]],
-                            poly,
-                        )
-                    }) {
-                        glyph_crosses = true;
-                        break;
-                    }
-                } else if !screen.iter().copied().all(|point| {
+                if !screen.iter().copied().all(|point| {
                     point.x >= 0.0
                         && point.x <= bounds.width
                         && point.y >= 0.0
@@ -1846,18 +1964,24 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                 }
             }
 
-            let result = if crossing {
-                hit || glyph_crosses
-            } else {
-                all_inside && glyphs_inside && (prev.is_some() || glyphs_present)
-            };
-            if result {
-                Some(wire.name.as_str())
-            } else {
-                None
+            let has_geom = prev.is_some() || glyphs_present;
+            if !has_geom {
+                continue;
             }
-        })
-        .collect()
+
+            let name = wire.name.as_str();
+            if all_inside && glyphs_inside {
+                if seen.insert(name) {
+                    qualified.push(name);
+                }
+            } else {
+                disqualified.insert(name);
+            }
+        }
+
+        qualified.retain(|name| !disqualified.contains(name));
+        qualified
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -2511,4 +2635,80 @@ mod aabb_reject_tests {
             vec!["479"],
         );
     }
+
+    #[test]
+    fn window_selection_multi_wire_entity_behavior() {
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 200.0,
+        };
+        // In identity ortho view:
+        // world (0.0, 0.0) -> screen (100.0, 100.0)
+        // world (0.1, 0.1) -> screen (110.0, 90.0)
+        // world (0.8, 0.8) -> screen (180.0, 20.0)
+        let wire_arc = wire(
+            "4F",
+            vec![[0.0, 0.0, 0.0], [0.1, 0.1, 0.0]],
+            [0.0, 0.0, 0.1, 0.1],
+        );
+        let wire_lines = wire(
+            "4F",
+            vec![[0.1, 0.1, 0.0], [0.8, 0.8, 0.0]],
+            [0.1, 0.1, 0.8, 0.8],
+        );
+        let wires = [wire_arc, wire_lines];
+
+        // Box enclosing ONLY wire_arc (screen 95..115, 85..105):
+        let box_a = Point::new(95.0, 85.0);
+        let box_b = Point::new(115.0, 105.0);
+        let poly_small = [
+            Point::new(95.0, 85.0),
+            Point::new(115.0, 85.0),
+            Point::new(115.0, 105.0),
+            Point::new(95.0, 105.0),
+        ];
+
+        // Crossing mode selects "4F" because wire_arc is inside:
+        assert_eq!(
+            box_hit(box_a, box_b, true, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            vec!["4F"]
+        );
+        assert_eq!(
+            poly_hit(&poly_small, true, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            vec!["4F"]
+        );
+
+        // Window mode MUST NOT select "4F" because wire_lines has a vertex at (0.8, 0.8) -> (180.0, 20.0) outside:
+        assert_eq!(
+            box_hit(box_a, box_b, false, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            Vec::<&str>::new()
+        );
+        assert_eq!(
+            poly_hit(&poly_small, false, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            Vec::<&str>::new()
+        );
+
+        // Big box enclosing BOTH wire_arc and wire_lines (screen 50..190, 10..110):
+        let big_a = Point::new(50.0, 10.0);
+        let big_b = Point::new(190.0, 110.0);
+        let poly_big = [
+            Point::new(50.0, 10.0),
+            Point::new(190.0, 10.0),
+            Point::new(190.0, 110.0),
+            Point::new(50.0, 110.0),
+        ];
+
+        // Window mode now selects "4F" once (deduplicated):
+        assert_eq!(
+            box_hit(big_a, big_b, false, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            vec!["4F"]
+        );
+        assert_eq!(
+            poly_hit(&poly_big, false, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            vec!["4F"]
+        );
+    }
 }
+

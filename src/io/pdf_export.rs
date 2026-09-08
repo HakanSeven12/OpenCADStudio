@@ -175,8 +175,7 @@ pub fn export_pdf(
         plot_style,
         options,
     );
-    let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    file.write_all(&bytes).map_err(|e| e.to_string())
+    write_pdf_atomically(path, &bytes)
 }
 
 /// Export several independently sized pages into one PDF file.
@@ -190,8 +189,27 @@ pub fn export_pdf_pages(
         return Err("No pages were selected.".into());
     }
     let bytes = build_pdf_pages(pages, plot_style);
-    let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    file.write_all(&bytes).map_err(|e| e.to_string())
+    write_pdf_atomically(path, &bytes)
+}
+
+/// Atomically write PDF bytes to a file. Writes to a temporary file first,
+/// then renames it to the target path to avoid crashes when overwriting
+/// a file that is locked by another process (e.g., PDF reader).
+#[cfg(not(target_arch = "wasm32"))]
+fn write_pdf_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = path.file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Invalid file path".to_string())?;
+    let temp_path = dir.join(format!(".{}.tmp", file_name));
+
+    let mut file = std::fs::File::create(&temp_path)
+        .map_err(|e| format!("Failed to create temporary PDF file: {}", e))?;
+    file.write_all(bytes)
+        .map_err(|e| format!("Failed to write PDF data: {}", e))?;
+
+    std::fs::rename(&temp_path, path)
+        .map_err(|e| format!("Failed to write PDF file: {} (the file may be open in another application)", e))
 }
 
 /// Show a parented PDF save-file dialog and return the chosen path.

@@ -9,7 +9,7 @@ use acadrust::{
 };
 use cadkernel::brep::{Body, EdgeKey, FaceKey};
 use iced::Task;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::Message;
 use crate::modules::model::boolean_cmd::BoolOp;
@@ -858,6 +858,143 @@ impl super::OpenCADStudio {
             self.command_line
                 .push_output(crate::tf!("{label}: solid updated.").as_ref());
         }
+        Task::none()
+    }
+
+    pub(super) fn solid_shell(
+        &mut self,
+        handle: Handle,
+        actions: &[crate::command::ShellFaceAction],
+        distance: f64,
+    ) -> Task<Message> {
+        use crate::command::ShellFaceAction;
+
+        let i = self.active_tab;
+        if self.reject_locked_edit(i, handle) {
+            return Task::none();
+        }
+        if !matches!(
+            self.tabs[i].scene.document.get_entity(handle),
+            Some(EntityType::Solid3D(_))
+        ) {
+            self.command_line
+                .push_error(crate::t!("Select a 3D solid.").as_ref());
+            return Task::none();
+        }
+        if !distance.is_finite() || distance.abs() <= f64::EPSILON {
+            self.command_line
+                .push_error(crate::t!("The shell offset distance must be nonzero.").as_ref());
+            return Task::none();
+        }
+
+        self.tabs[i].scene.restore_solid_models(&[handle]);
+        let Some(body) = self.tabs[i].scene.solid_models.get(&handle).cloned() else {
+            self.command_line
+                .push_error(crate::t!("The solid geometry could not be restored.").as_ref());
+            return Task::none();
+        };
+
+        let all_faces = body.face_keys().collect::<Vec<_>>();
+        let mut removed = HashSet::new();
+        for action in actions {
+            match *action {
+                ShellFaceAction::Remove(point) => {
+                    let Some(face) = cadkernel::brep::shell_face_at_point(&body, point.to_array())
+                    else {
+                        self.command_line.push_error(
+                            crate::t!("A selected face could not be resolved.").as_ref(),
+                        );
+                        return Task::none();
+                    };
+                    removed.insert(face);
+                }
+                ShellFaceAction::Add(point) => {
+                    let Some(face) = cadkernel::brep::shell_face_at_point(&body, point.to_array())
+                    else {
+                        self.command_line.push_error(
+                            crate::t!("A selected face could not be resolved.").as_ref(),
+                        );
+                        return Task::none();
+                    };
+                    removed.remove(&face);
+                }
+                ShellFaceAction::RemoveAll => removed.extend(all_faces.iter().copied()),
+                ShellFaceAction::AddAll => removed.clear(),
+            }
+        }
+        let removed = removed.into_iter().collect::<Vec<_>>();
+
+        let result = match cadkernel::brep::shell(&body, &removed, distance) {
+            Ok(result) => result,
+            Err(cadkernel::brep::ShellError::InvalidDistance) => {
+                self.command_line
+                    .push_error(crate::t!("The shell offset distance must be nonzero.").as_ref());
+                return Task::none();
+            }
+            Err(cadkernel::brep::ShellError::UnsupportedSolid) => {
+                self.command_line.push_error(
+                    crate::t!("SHELL supports rectangular boxes, circular cylinders, and spheres.")
+                        .as_ref(),
+                );
+                return Task::none();
+            }
+            Err(cadkernel::brep::ShellError::UnknownFace) => {
+                self.command_line
+                    .push_error(crate::t!("A selected face does not belong to the solid.").as_ref());
+                return Task::none();
+            }
+            Err(cadkernel::brep::ShellError::NoMaterial) => {
+                self.command_line.push_error(
+                    crate::t!("The offset removes all material. Use a smaller distance or add a face back.")
+                        .as_ref(),
+                );
+                return Task::none();
+            }
+            Err(cadkernel::brep::ShellError::Kernel(_)) => {
+                self.command_line.push_error(
+                    crate::t!("The shell could not be constructed from the selected solid and distance.")
+                        .as_ref(),
+                );
+                return Task::none();
+            }
+        };
+
+        let Some(source) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
+            return Task::none();
+        };
+        let Some(entity) = entity_with_boolean_body(source, &result) else {
+            self.command_line
+                .push_error(crate::t!("The result could not be encoded as ACIS.").as_ref());
+            return Task::none();
+        };
+        let Some(display) = self.tabs[i]
+            .scene
+            .prepare_solid_model_display(handle, &result)
+            .filter(|display| display.0.complete)
+        else {
+            self.command_line.push_error(crate::t!("The result could not be displayed completely. The original solid was retained.").as_ref());
+            return Task::none();
+        };
+
+        self.push_undo_snapshot(i, "SHELL");
+        self.tabs[i].scene.delete_solid_history(handle);
+        if !self.tabs[i].scene.update_entity(entity) {
+            self.command_line
+                .push_error(crate::t!("The solid could not be updated.").as_ref());
+            return Task::none();
+        }
+        self.tabs[i]
+            .scene
+            .create_solid_history(handle, solid_history::brep_op(&result));
+        self.tabs[i]
+            .scene
+            .register_prepared_solid_model(handle, result, display);
+        self.tabs[i].scene.deselect_all();
+        self.tabs[i].scene.select_entity(handle, false);
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        self.command_line
+            .push_output(crate::t!("SHELL: solid updated.").as_ref());
         Task::none()
     }
 

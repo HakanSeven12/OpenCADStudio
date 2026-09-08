@@ -1364,9 +1364,7 @@ impl Scene {
                 generator.source = source;
             }
         }
-        set.metrics.centroid[0] += delta[0];
-        set.metrics.centroid[1] += delta[1];
-        set.metrics.centroid[2] += delta[2];
+        set.metrics.translate(delta);
         set.recompute_aabb();
     }
 

@@ -177,6 +177,11 @@ pub fn tessellate_sat(
         color,
         None,
     ));
+    if let [single] = bodies.as_slice() {
+        if let Some(properties) = brep::analytic_mass_properties(&single.0) {
+            set.apply_mass_properties(properties);
+        }
+    }
     set.curved_gens = curved_gens;
     for point in edges {
         let high = [point[0] as f32, point[1] as f32, point[2] as f32];

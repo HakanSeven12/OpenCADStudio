@@ -55,6 +55,44 @@ pub struct MeshMetrics {
     pub surface_area: f64,
     pub volume: f64,
     pub centroid: [f64; 3],
+    pub moment_of_inertia: [f64; 3],
+    pub principal_directions: [f64; 9],
+    pub principal_moments: [f64; 3],
+    pub product_of_inertia: [f64; 3],
+    pub radii_of_gyration: [f64; 3],
+}
+
+impl MeshMetrics {
+    fn apply_mass_properties(&mut self, properties: cadkernel::brep::MassProperties) {
+        self.volume = properties.volume;
+        self.centroid = properties.centroid;
+        self.moment_of_inertia = properties.moment_of_inertia;
+        self.principal_directions = properties.principal_directions;
+        self.principal_moments = properties.principal_moments;
+        self.product_of_inertia = properties.product_of_inertia;
+        self.radii_of_gyration = properties.radii_of_gyration;
+    }
+
+    pub fn translate(&mut self, delta: [f64; 3]) {
+        if self.volume > 1e-18 {
+            self.apply_mass_properties(
+                cadkernel::brep::MassProperties {
+                    volume: self.volume,
+                    centroid: self.centroid,
+                    moment_of_inertia: self.moment_of_inertia,
+                    principal_directions: self.principal_directions,
+                    principal_moments: self.principal_moments,
+                    product_of_inertia: self.product_of_inertia,
+                    radii_of_gyration: self.radii_of_gyration,
+                }
+                .translated(delta),
+            );
+        } else {
+            for axis in 0..3 {
+                self.centroid[axis] += delta[axis];
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -146,74 +184,52 @@ fn compute_mesh_metrics(lods: &[MeshModel]) -> MeshMetrics {
     let Some(mesh) = lods.iter().find(|mesh| !mesh.indices.is_empty()) else {
         return MeshMetrics::default();
     };
-    let point = |index: u32| {
-        let index = index as usize;
-        let high = mesh.verts.get(index).copied().unwrap_or([0.0; 3]);
-        let low = mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]);
-        [
-            high[0] as f64 + low[0] as f64,
-            high[1] as f64 + low[1] as f64,
-            high[2] as f64 + low[2] as f64,
-        ]
+    let kernel_mesh = cadkernel::brep::Mesh {
+        positions: mesh
+            .verts
+            .iter()
+            .enumerate()
+            .map(|(index, high)| {
+                let low = mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]);
+                [
+                    high[0] as f64 + low[0] as f64,
+                    high[1] as f64 + low[1] as f64,
+                    high[2] as f64 + low[2] as f64,
+                ]
+            })
+            .collect(),
+        normals: Vec::new(),
+        triangles: mesh
+            .indices
+            .chunks_exact(3)
+            .map(|triangle| {
+                [
+                    triangle[0] as usize,
+                    triangle[1] as usize,
+                    triangle[2] as usize,
+                ]
+            })
+            .collect(),
     };
-    let mut area = 0.0;
-    let mut area_centroid_numerator = [0.0; 3];
-    let mut signed_volume = 0.0;
-    let mut centroid_numerator = [0.0; 3];
-    for triangle in mesh.indices.chunks_exact(3) {
-        let a = point(triangle[0]);
-        let b = point(triangle[1]);
-        let c = point(triangle[2]);
-        let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-        let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-        let cross = [
-            ab[1] * ac[2] - ab[2] * ac[1],
-            ab[2] * ac[0] - ab[0] * ac[2],
-            ab[0] * ac[1] - ab[1] * ac[0],
-        ];
-        let triangle_area = 0.5
-            * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2])
-                .sqrt();
-        area += triangle_area;
-        for axis in 0..3 {
-            area_centroid_numerator[axis] +=
-                triangle_area * (a[axis] + b[axis] + c[axis]) / 3.0;
-        }
-        let tetra = (
-            a[0] * (b[1] * c[2] - b[2] * c[1])
-                - a[1] * (b[0] * c[2] - b[2] * c[0])
-                + a[2] * (b[0] * c[1] - b[1] * c[0])
-        ) / 6.0;
-        signed_volume += tetra;
-        for axis in 0..3 {
-            centroid_numerator[axis] += tetra * (a[axis] + b[axis] + c[axis]) / 4.0;
-        }
-    }
-    let centroid = if signed_volume.abs() > 1e-18 {
-        [
-            centroid_numerator[0] / signed_volume,
-            centroid_numerator[1] / signed_volume,
-            centroid_numerator[2] / signed_volume,
-        ]
-    } else if area > 1e-18 {
-        [
-            area_centroid_numerator[0] / area,
-            area_centroid_numerator[1] / area,
-            area_centroid_numerator[2] / area,
-        ]
-    } else {
-        [0.0; 3]
-    };
-    MeshMetrics {
+    let surface = kernel_mesh.surface_properties();
+    let mut metrics = MeshMetrics {
         vertices: mesh.verts.len(),
         triangles: mesh.indices.len() / 3,
-        surface_area: area,
-        volume: signed_volume.abs(),
-        centroid,
+        surface_area: surface.map_or(0.0, |value| value.0),
+        centroid: surface.map_or([0.0; 3], |value| value.1),
+        ..MeshMetrics::default()
+    };
+    if let Some(properties) = kernel_mesh.inertial_properties() {
+        metrics.apply_mass_properties(properties);
     }
+    metrics
 }
 
 impl MeshLodSet {
+    pub fn apply_mass_properties(&mut self, properties: cadkernel::brep::MassProperties) {
+        self.metrics.apply_mass_properties(properties);
+    }
+
     /// Build a set from its LODs, computing the 3D AABB.
     pub fn from_lods(lods: Vec<MeshModel>) -> Self {
         let (world_aabb, z_aabb) = compute_mesh_aabb(&lods);

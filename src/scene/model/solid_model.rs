@@ -475,7 +475,11 @@ pub fn display_from_solid(
             )
         })
         .collect();
-    Some((mesh_from_tessellation(tessellation, color)?, wires, center))
+    let mut mesh = mesh_from_tessellation(tessellation, color)?;
+    if let Some(properties) = cadkernel::brep::analytic_mass_properties(body) {
+        mesh.apply_mass_properties(properties);
+    }
+    Some((mesh, wires, center))
 }
 
 /// The middle of a body, for a caller needing a point to turn or scale about.

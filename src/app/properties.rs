@@ -640,7 +640,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !compact_solid && matches!(
+                    if matches!(
                         entity,
                         acadrust::EntityType::Solid3D(_)
                             | acadrust::EntityType::Region(_)
@@ -658,38 +658,44 @@ impl OpenCADStudio {
                         {
                             use crate::entities::common::ro_prop;
                             let metrics = mesh.metrics;
-                            let mut props = vec![
-                                ro_prop(
-                                    t!("Vertices").as_ref(),
-                                    "mesh_vertices",
-                                    metrics.vertices.to_string(),
-                                ),
-                                ro_prop(
-                                    t!("Triangles").as_ref(),
-                                    "mesh_triangles",
-                                    metrics.triangles.to_string(),
-                                ),
-                                ro_prop(
-                                    t!("Surface Area").as_ref(),
-                                    "mesh_surface_area",
-                                    format!("{:.6}", metrics.surface_area),
-                                ),
-                                ro_prop(
+                            let triple = |values: [f64; 3]| {
+                                format!("{:.6}, {:.6}, {:.6}", values[0], values[1], values[2])
+                            };
+                            let mut props = if compact_solid {
+                                vec![ro_prop(
                                     t!("Centroid").as_ref(),
                                     "mesh_centroid",
-                                    format!(
-                                        "{:.6}, {:.6}, {:.6}",
-                                        metrics.centroid[0],
-                                        metrics.centroid[1],
-                                        metrics.centroid[2]
+                                    triple(metrics.centroid),
+                                )]
+                            } else {
+                                vec![
+                                    ro_prop(
+                                        t!("Vertices").as_ref(),
+                                        "mesh_vertices",
+                                        metrics.vertices.to_string(),
                                     ),
-                                ),
-                                ro_prop(
-                                    t!("Tessellation").as_ref(),
-                                    "mesh_complete",
-                                    if mesh.complete { "Complete" } else { "Partial" },
-                                ),
-                            ];
+                                    ro_prop(
+                                        t!("Triangles").as_ref(),
+                                        "mesh_triangles",
+                                        metrics.triangles.to_string(),
+                                    ),
+                                    ro_prop(
+                                        t!("Surface Area").as_ref(),
+                                        "mesh_surface_area",
+                                        format!("{:.6}", metrics.surface_area),
+                                    ),
+                                    ro_prop(
+                                        t!("Centroid").as_ref(),
+                                        "mesh_centroid",
+                                        triple(metrics.centroid),
+                                    ),
+                                    ro_prop(
+                                        t!("Tessellation").as_ref(),
+                                        "mesh_complete",
+                                        if mesh.complete { "Complete" } else { "Partial" },
+                                    ),
+                                ]
+                            };
                             if mesh.complete
                                 && matches!(
                                     entity,
@@ -698,14 +704,50 @@ impl OpenCADStudio {
                                         | acadrust::EntityType::Body(_)
                                 )
                             {
-                                props.insert(
-                                    3,
+                                let closed_props = vec![
+                                    ro_prop(
+                                        t!("Moment of inertia").as_ref(),
+                                        "mesh_moment_of_inertia",
+                                        triple(metrics.moment_of_inertia),
+                                    ),
+                                    ro_prop(
+                                        t!("Principal directions").as_ref(),
+                                        "mesh_principal_directions",
+                                        metrics
+                                            .principal_directions
+                                            .chunks_exact(3)
+                                            .map(|axis| format!("({:.6}, {:.6}, {:.6})", axis[0], axis[1], axis[2]))
+                                            .collect::<Vec<_>>()
+                                            .join(", "),
+                                    ),
+                                    ro_prop(
+                                        t!("Principal moments").as_ref(),
+                                        "mesh_principal_moments",
+                                        triple(metrics.principal_moments),
+                                    ),
+                                    ro_prop(
+                                        t!("Product of inertia").as_ref(),
+                                        "mesh_product_of_inertia",
+                                        triple(metrics.product_of_inertia),
+                                    ),
+                                    ro_prop(
+                                        t!("Radii of gyration").as_ref(),
+                                        "mesh_radii_of_gyration",
+                                        triple(metrics.radii_of_gyration),
+                                    ),
                                     ro_prop(
                                         t!("Volume").as_ref(),
                                         "mesh_volume",
                                         format!("{:.6}", metrics.volume),
                                     ),
-                                );
+                                ];
+                                if compact_solid {
+                                    props.extend(closed_props);
+                                } else {
+                                    let volume = closed_props.last().cloned().unwrap();
+                                    props.insert(3, volume);
+                                    props.extend(closed_props.into_iter().take(5));
+                                }
                             }
                             sections.push(crate::scene::model::object::PropSection {
                                 title: t!("Mass Properties").into_owned(),
@@ -3098,7 +3140,8 @@ fn retain_compact_solid_sections(
                     | "transparency"
                     | "hyperlink"
                     | "material"
-            ) || crate::scene::model::solid_history::is_specialized_property(property.field)
+            ) || property.field.starts_with("mesh_")
+                || crate::scene::model::solid_history::is_specialized_property(property.field)
         });
     });
     sections.retain(|section| !section.props.is_empty());

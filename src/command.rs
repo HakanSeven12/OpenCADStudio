@@ -1195,6 +1195,15 @@ pub struct LoftOptions {
     pub align_direction: bool,
 }
 
+/// One face-selection edit made while collecting a solid shell operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ShellFaceAction {
+    Remove(DVec3),
+    Add(DVec3),
+    RemoveAll,
+    AddAll,
+}
+
 impl Default for LoftOptions {
     fn default() -> Self {
         Self {
@@ -1374,6 +1383,8 @@ pub enum CmdResult {
     Measurement(String),
     /// Print a measurement result and keep the command active.
     ReportMeasurement(String),
+    /// Print an input error and keep the command active.
+    ReportError(String),
     /// Print a measurement result, clear the current selection, and keep the command active.
     ReportMeasurementAndDeselect(String),
     /// Clear the current selection and keep the command active at its updated step.
@@ -1555,6 +1566,12 @@ pub enum CmdResult {
         value: f64,
         other_value: f64,
         fillet: bool,
+    },
+    /// Offset a solid and optionally open selected faces.
+    SolidShell {
+        handle: Handle,
+        actions: Vec<ShellFaceAction>,
+        distance: f64,
     },
     SolidSubtract {
         bases: Vec<Handle>,

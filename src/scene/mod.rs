@@ -1851,7 +1851,20 @@ pub struct Scene {
     /// (geometry_epoch, layout block). The status bar asks for this on every
     /// frame to populate the selection-filter menu, but the answer only
     /// changes when entities are added or removed.
-    layout_type_names_cache: RefCell<Option<(u64, Handle, std::sync::Arc<Vec<String>>)>>,
+    /// `(epoch, block, present type names, the list handed to the UI)`.
+    ///
+    /// The set is kept alongside the list so an edit can be folded in without
+    /// rebuilding either: drawing a line into a drawing that already has lines
+    /// does not change the answer, and the walk that produces it visits every
+    /// entity the layout owns.
+    layout_type_names_cache: RefCell<
+        Option<(
+            u64,
+            Handle,
+            std::collections::BTreeSet<String>,
+            std::sync::Arc<Vec<String>>,
+        )>,
+    >,
     /// Reverse dependencies from layer/style/block definitions to the top-level
     /// entities whose resident wire runs actually change. Kept independent from
     /// `geometry_epoch`: a layer colour toggle can reuse the index, invalidate

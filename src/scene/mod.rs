@@ -8827,6 +8827,32 @@ impl Scene {
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
     ) -> bool {
+        let layer = self.document.layers.get(&e.common().layer);
+        self.resident_entity_visible_with_layer(
+            e,
+            block_handle,
+            frozen_layers,
+            annotation_scale_handle,
+            all_visible,
+            layer,
+        )
+    }
+
+    /// `resident_entity_visible` with the layer already resolved.
+    ///
+    /// `Table::get` normalises the name with `to_uppercase`, which allocates,
+    /// and the selection calls this once per candidate — 444 938 allocations on
+    /// the reproducer, ~440 ms, to look up a few hundred distinct layers. A
+    /// caller in a loop resolves each name once and passes the result here.
+    fn resident_entity_visible_with_layer(
+        &self,
+        e: &EntityType,
+        block_handle: Handle,
+        frozen_layers: Option<&HashSet<Handle>>,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        layer: Option<&acadrust::tables::layer::Layer>,
+    ) -> bool {
         let c = e.common();
         if c.invisible {
             return false;
@@ -8839,7 +8865,6 @@ impl Scene {
         if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)) {
             return false;
         }
-        let layer = self.document.layers.get(&c.layer);
         if layer
             .map(|l| l.flags.off || l.flags.frozen)
             .unwrap_or(false)
@@ -8866,8 +8891,8 @@ impl Scene {
         self.belongs_to_visible_block(c.handle, c.owner_handle, block_handle)
     }
 
-    fn wires_for_block_culled(
-        &self,
+    fn wires_for_block_culled<'doc>(
+        &'doc self,
         block_handle: Handle,
         view_aabb: Option<[f32; 4]>,
         wpp: Option<f32>,
@@ -8921,13 +8946,45 @@ impl Scene {
         // Visibility test reused by both paths below — and by the resident
         // incremental patch, so a changed entity is included/excluded exactly as
         // a from-scratch build would (no divergence).
-        let visibility_ok = |e: &EntityType| {
-            self.resident_entity_visible(
+        // `Table::get` normalises with `to_uppercase`, so every layer lookup
+        // allocates. The selection asks once per candidate and a drawing has a
+        // few hundred layers, so the name is resolved once and remembered.
+        // Keys borrow the entity's own layer string, which lives in the
+        // document for the whole call.
+        type LayerRef<'a> = Option<&'a acadrust::tables::layer::Layer>;
+        let layer_of: RefCell<rustc_hash::FxHashMap<&'doc str, LayerRef<'doc>>> =
+            RefCell::new(rustc_hash::FxHashMap::default());
+        // Kill switch, so one binary can measure both paths on one drawing.
+        // Same shape as `OCS_NO_RESIDENT_MEMO`.
+        fn layer_memo_enabled() -> bool {
+            static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *EN.get_or_init(|| std::env::var("OCS_NO_LAYER_MEMO").is_err())
+        }
+        let memo_on = layer_memo_enabled();
+        let visibility_ok = |e: &'doc EntityType| {
+            let name = e.common().layer.as_str();
+            if !memo_on {
+                return self.resident_entity_visible(
+                    e,
+                    block_handle,
+                    frozen_layers,
+                    annotation_scale_handle,
+                    all_visible,
+                );
+            }
+            let layer = match layer_of.borrow_mut().entry(name) {
+                std::collections::hash_map::Entry::Occupied(hit) => *hit.get(),
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    *slot.insert(self.document.layers.get(name))
+                }
+            };
+            self.resident_entity_visible_with_layer(
                 e,
                 block_handle,
                 frozen_layers,
                 annotation_scale_handle,
                 all_visible,
+                layer,
             )
         };
 
@@ -8943,6 +9000,7 @@ impl Scene {
         // the loop could own that: resolving each handle through the document's
         // hash index, or the predicate, which looks a layer up **by name** —
         // a string hash per entity. Timed separately, under PERF only.
+        let mut visible_index_ms = 0.0f64;
         let mut visible_probe_ms = 0.0f64;
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
@@ -9020,7 +9078,13 @@ impl Scene {
             // block's list is already in document order and the wires come out
             // in exactly the order the full scan produced.
             visible_path = "block-index";
+            // The index itself: rebuilt by walking the whole document once per
+            // `geometry_epoch`, and the epoch moves on every edit. Timed
+            // separately because it is inside `visible` and is not per-entity
+            // work, so no per-candidate breakdown can ever account for it.
+            let t_members = perf.then(iced::time::Instant::now);
             let members = self.block_members();
+            visible_index_ms = crate::perf::elapsed_ms(t_members);
             let (_, by_block) = &*members;
             let claimed = by_block.get(&block_handle).map(Vec::as_slice).unwrap_or(&[]);
             visible_candidates = claimed.len();
@@ -9033,9 +9097,13 @@ impl Scene {
                 }
             }
             if perf {
-                // A second, resolve-only pass. It repeats work rather than
-                // instrumenting inside the loop, where a clock read per
-                // iteration would cost more than what it measures.
+                // Resolve-only pass, for the share of `visible` that is the
+                // document's hash index rather than the predicate. Repeated
+                // rather than clocked per iteration, and PERF only.
+                //
+                // It runs after the real loop, so it reads a warm cache and
+                // undercounts what the first traversal actually paid. Treat it
+                // as a floor, not as the cost.
                 let t_probe = iced::time::Instant::now();
                 let mut resolved = 0usize;
                 for &handle in claimed {
@@ -9291,7 +9359,7 @@ impl Scene {
 build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
 entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates={} \
 guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={} \
-visible_probe={:.1}",
+vis_index={:.1} visible_probe={:.1}",
                 crate::perf::elapsed_ms(t_fn),
                 sort_cache_ms,
                 visible_ms,
@@ -9318,6 +9386,7 @@ visible_probe={:.1}",
                 annotation_scale_handle.map(|h| h.value()).unwrap_or(0),
                 all_visible,
                 crate::scene::text::sdf_atlas::generation(),
+                visible_index_ms,
                 visible_probe_ms,
             );
         }
@@ -10578,6 +10647,65 @@ mod journal_tests {
             s.update_entity(moved);
         }
         assert_eq!(indexed(&s, block), scanned(&s, block), "after modify");
+    }
+
+    /// The layer memo keys on the entity's **raw** layer string, while
+    /// `Table::get` normalises with `to_uppercase`. Two spellings of one layer
+    /// therefore take two memo slots, and both must resolve to that same layer
+    /// — otherwise the memo would hide geometry the unmemoized path shows.
+    ///
+    /// Covers the property the memo rests on (the table is case-insensitive)
+    /// and the predicate that reads it, not the memo's own bookkeeping.
+    #[test]
+    fn the_layer_memo_respects_case_insensitive_layer_names() {
+        use acadrust::entities::Line;
+        use acadrust::tables::layer::Layer;
+        use acadrust::types::Vector3;
+
+        let mut scene = Scene::new();
+        let mut hidden = Layer::new("Walls");
+        hidden.flags.off = true;
+        scene.document.layers.add_or_replace(hidden);
+
+        let mut on_layer = |layer: &str| {
+            let mut line = Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            );
+            line.common.layer = layer.to_string();
+            scene.add_entity(EntityType::Line(line))
+        };
+        // Three spellings of the same, switched-off layer, plus one that is
+        // genuinely a different layer and stays visible.
+        on_layer("Walls");
+        on_layer("WALLS");
+        on_layer("walls");
+        on_layer("Doors");
+
+        let block = scene.model_space_block_handle();
+        let visible: Vec<_> = scene
+            .document
+            .entities()
+            .filter(|e| scene.resident_entity_visible(e, block, None, None, true))
+            .map(|e| e.common().layer.clone())
+            .collect();
+        assert_eq!(
+            visible,
+            vec!["Doors".to_string()],
+            "every spelling of a switched-off layer must be hidden",
+        );
+
+        // The memo takes one slot per spelling; each must find the same layer.
+        let resolved: Vec<_> = ["Walls", "WALLS", "walls"]
+            .iter()
+            .map(|name| scene.document.layers.get(name).map(|l| l.name.clone()))
+            .collect();
+        assert_eq!(
+            resolved,
+            vec![Some("Walls".to_string()); 3],
+            "the table is case-insensitive, which is what lets the memo key on \
+             the raw name",
+        );
     }
 
     /// The loader computes the draw-order map and the receiving scene used to

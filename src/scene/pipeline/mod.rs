@@ -251,9 +251,7 @@ pub struct Pipeline {
     pub(crate) wire_arena_fallback_handles: rustc_hash::FxHashSet<acadrust::Handle>,
     /// The Model content id both arenas currently mirror (`u64::MAX` = none).
     pub(crate) wire_arena_id: u64,
-    /// Entities that fed the instanced / circle / ellipse uploads this slot is
-    /// holding. A patch touching none of them cannot change those uploads, so
-    /// the partition walk over the whole resident set can be skipped.
+    /// Handles that contributed to this slot's retained analytical uploads.
     pub(crate) partition_contributors: rustc_hash::FxHashSet<acadrust::Handle>,
     /// The draw-depth generation those uploads baked. A full depth rebuild
     /// reassigns every label, so they stop being reusable when it moves.
@@ -4961,12 +4959,7 @@ impl Pipeline {
         }
     }
 
-    /// Forget every cache key that describes this slot's uploaded content.
-    ///
-    /// Shared by slot reuse and by [`Self::release_heavy_resources`] so the two
-    /// cannot disagree about what "this slot holds nothing you can trust"
-    /// means. Keys only — the buffers themselves are dropped by the caller that
-    /// wants the memory back.
+    /// Reset every cache key that describes this slot's uploaded content.
     pub(crate) fn forget_cached_keys(&mut self) {
         self.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
         self.cached_wire_id = u64::MAX;
@@ -4989,10 +4982,7 @@ impl Pipeline {
         self.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
         self.silhouette_source_key = (usize::MAX, usize::MAX, u64::MAX);
         self.render_sig = u64::MAX;
-        // The partition record describes uploads this slot is no longer
-        // entitled to reuse. A reused slot rebuilds anyway, because its content
-        // id changed, but leaving a stale record here would make that an
-        // accident rather than a guarantee.
+        // The retained-upload record is part of the slot's cached state.
         self.partition_contributors.clear();
         self.partition_depth_generation = u64::MAX;
     }

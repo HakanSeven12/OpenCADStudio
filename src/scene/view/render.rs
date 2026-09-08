@@ -842,18 +842,8 @@ impl shader::Primitive for Primitive {
                             gpus.extend(arena.wire_gpus());
                         }
                         inner.gpu_wires = std::sync::Arc::new(gpus);
-                        // A one-entity patch costs 73 ms in this block, and the
-                        // three steps below are all O(resident set) rather than
-                        // O(changes). Which of them dominates decides the fix.
-                        // The partition walks the whole resident set, and on
-                        // a patch it almost always produces the three uploads it
-                        // produced last frame. Skip it when no changed entity
-                        // feeds them and none did before.
-                        //
-                        // Safe because adding an entity does not disturb any
-                        // other entity's draw depth: `inserted_draw_depth_label`
-                        // allocates into the reserved label gap rather than
-                        // renumbering, so instances already uploaded stay right.
+                        // Retain analytical uploads when a patch changes neither
+                        // their contributors nor their baked draw depths.
                         let analytical_untouched = _patched
                             && inner.partition_depth_generation == vp.draw_depth_generation
                             && patch.is_some_and(|patch| {
@@ -910,10 +900,7 @@ impl shader::Primitive for Primitive {
                                 .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                         }
                         if _perf {
-                            // Counts only when a partition produced them.
-                            // Printing zeros on a skip reads as "no circles"
-                            // rather than "not recomputed", which is the
-                            // opposite of what the line is reporting.
+                            // Report counts only when partitioning ran.
                             match &partitioned {
                                 Some(partitioned) => crate::perf_record!(
                                     "[perf] arena-post partition={part_ms:.1}ms \

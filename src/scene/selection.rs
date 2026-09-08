@@ -360,21 +360,8 @@ impl Scene {
         self.selected.len()
     }
 
-    /// Sorted entity types in the current layout, cached until geometry or layout changes.
-    /// The entity type names present in the current layout, for the selection
-    /// filter menu.
-    ///
-    /// The status bar asks for this on **every** frame, and the cache used to
-    /// be keyed on `geometry_epoch` alone — so every drawn point invalidated it
-    /// and the walk below visited all 444 937 handles a model space owns. That
-    /// was ~100 ms per edit, the largest single cost of drawing a line, and
-    /// almost always to arrive at the same answer: adding a line to a drawing
-    /// that already has lines changes nothing here.
-    ///
-    /// An edit is now folded in from the delta journal instead. Additions only
-    /// ever grow the set, so they are cheap to apply; a removal can retire a
-    /// type and cannot be resolved from a handle that is already gone, so those
-    /// fall back to the full walk.
+    /// Entity type names in the current layout for the selection-filter menu.
+    /// Pure additions are folded into the cached set; other changes rebuild it.
     pub fn entity_type_names_in_layout(&self) -> std::sync::Arc<Vec<String>> {
         use crate::entities::traits::entity_type_name;
         let block = self.current_layout_block_handle();
@@ -394,7 +381,10 @@ impl Scene {
         // Incremental: fold the changes since the cached epoch into the set.
         if let Some(since) = cached_epoch {
             if let Some(deltas) = self.replay_since(since) {
-                if !deltas.iter().any(|(_, kind)| *kind == ChangeKind::Removed) {
+                if deltas
+                    .iter()
+                    .all(|(_, kind)| *kind == ChangeKind::Added)
+                {
                     let mut cache = self.layout_type_names_cache.borrow_mut();
                     if let Some((epoch, _, present, names)) = cache.as_mut() {
                         let mut added = false;
@@ -1013,10 +1003,6 @@ impl Scene {
 mod tests {
     use super::*;
 
-    /// The reason the cache carries a set as well as a list: drawing into a
-    /// drawing that already has that type must not rebuild either, because the
-    /// rebuild walks every entity the layout owns — 444 937 of them on the
-    /// reproducer, ~100 ms, on every single drawn point.
     #[test]
     fn adding_a_type_already_present_reuses_the_list() {
         use acadrust::entities::{Circle, EntityType, Line};
@@ -1051,6 +1037,24 @@ mod tests {
             third.as_slice(),
             "folding edits in must match rebuilding from scratch",
         );
+    }
+
+    #[test]
+    fn changing_an_entity_type_rebuilds_the_type_names() {
+        use acadrust::entities::{Circle, EntityType, Line};
+        use acadrust::types::Vector3;
+
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+        )));
+        assert_eq!(scene.entity_type_names_in_layout().as_slice(), ["Line"]);
+
+        let mut circle = Circle::new();
+        circle.common.handle = handle;
+        assert!(scene.update_entity(EntityType::Circle(circle)));
+        assert_eq!(scene.entity_type_names_in_layout().as_slice(), ["Circle"]);
     }
 
     #[test]

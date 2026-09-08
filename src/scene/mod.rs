@@ -437,9 +437,7 @@ pub struct PreparedOpenGeometry {
     pub tess_guard: u64,
     /// Loader block definitions; the receiving scene supplies its own epoch.
     pub block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)>,
-    /// The loader's draw-order map. Computing it walks all 1.17 M entities and
-    /// costs ~300 ms; the loader already paid that, and the receiving scene
-    /// used to pay it again on the first frame.
+    /// Loader-computed draw-order map, re-stamped by the receiving scene.
     pub(crate) draw_depths: Option<DrawDepthCache>,
 }
 
@@ -1439,9 +1437,7 @@ pub(crate) enum NavPerfOp {
     Pan,
     Zoom,
     Rotate,
-    /// A message that changed geometry. Reported through the same line as
-    /// navigation because the question is the same one: how long from the
-    /// input to the frame that answers it.
+    /// A message that changed geometry before the next rendered frame.
     Edit,
 }
 
@@ -1459,9 +1455,7 @@ impl NavPerfOp {
 #[derive(Clone, Copy, Debug)]
 pub(in crate::scene) struct NavPerfSample {
     pub(in crate::scene) op: NavPerfOp,
-    /// Which message caused it. An edit whose handler runs in under a
-    /// millisecond never reaches the `update` line's threshold, so without this
-    /// the log shows the latency but not what asked for it.
+    /// Message label that caused the sample.
     pub(in crate::scene) cause: &'static str,
     pub(in crate::scene) space: &'static str,
     pub(in crate::scene) mode: &'static str,
@@ -1715,11 +1709,8 @@ pub struct Scene {
     /// constants. `[depth, half]` retains a fixed child sub-range for block
     /// composition. Full sort/layout/block changes rebuild the labels.
     draw_depth_cache: RefCell<Option<DrawDepthCache>>,
-    /// Bumped only when the draw-order map is rebuilt from scratch, which is
-    /// the one case that can change an existing entity's depth — an
-    /// incremental insert allocates into the reserved label gap and leaves
-    /// every other label alone. Consumers that cached anything carrying a baked
-    /// depth compare this before reusing it.
+    /// Bumped when a full draw-order rebuild can move existing depths.
+    /// Cached uploads compare it before reusing baked depth values.
     draw_depth_generation: std::cell::Cell<u64>,
     /// Shared empty map for 3-D wireframe, where true depth wins instead of
     /// the entity submission order used by the optimized 2-D style.
@@ -1869,16 +1860,8 @@ pub struct Scene {
     block_members_cache: RefCell<Option<BlockMembers>>,
     /// Insert/Viewport/Block/BlockEnd handles omitted by the spatial index.
     unindexable_cache: RefCell<Option<(u64, Vec<Handle>)>>,
-    /// Distinct entity type names present in a layout, keyed by
-    /// (geometry_epoch, layout block). The status bar asks for this on every
-    /// frame to populate the selection-filter menu, but the answer only
-    /// changes when entities are added or removed.
-    /// `(epoch, block, present type names, the list handed to the UI)`.
-    ///
-    /// The set is kept alongside the list so an edit can be folded in without
-    /// rebuilding either: drawing a line into a drawing that already has lines
-    /// does not change the answer, and the walk that produces it visits every
-    /// entity the layout owns.
+    /// `(epoch, layout block, present type names, list exposed to the UI)`.
+    /// The set lets pure additions update without rebuilding the list.
     layout_type_names_cache: RefCell<
         Option<(
             u64,
@@ -2286,11 +2269,7 @@ impl Scene {
             *self.resident_tess_memo.borrow_mut() = prepared.tess_memo;
             self.resident_tess_guard.set(prepared.tess_guard);
         }
-        // The draw-order map, on the same terms as the block definitions
-        // below: the document is the loader's own, unmodified since, so its
-        // order labels describe this scene exactly. Only the epoch is this
-        // scene's. Without this the first frame recomputed it — a walk of
-        // every entity in the drawing, ~300 ms, for a map that already existed.
+        // Reuse the loader's draw-order map with this scene's epoch.
         if let Some(mut depths) = prepared.draw_depths {
             depths.epoch = self.geometry_epoch;
             *self.draw_depth_cache.borrow_mut() = Some(depths);
@@ -8887,12 +8866,7 @@ impl Scene {
         )
     }
 
-    /// `resident_entity_visible` with the layer already resolved.
-    ///
-    /// `Table::get` normalises the name with `to_uppercase`, which allocates,
-    /// and the selection calls this once per candidate — 444 938 allocations on
-    /// the reproducer, ~440 ms, to look up a few hundred distinct layers. A
-    /// caller in a loop resolves each name once and passes the result here.
+    /// Visibility predicate with the layer resolved by the caller.
     fn resident_entity_visible_with_layer(
         &self,
         e: &EntityType,
@@ -8995,32 +8969,12 @@ impl Scene {
         // Visibility test reused by both paths below — and by the resident
         // incremental patch, so a changed entity is included/excluded exactly as
         // a from-scratch build would (no divergence).
-        // `Table::get` normalises with `to_uppercase`, so every layer lookup
-        // allocates. The selection asks once per candidate and a drawing has a
-        // few hundred layers, so the name is resolved once and remembered.
-        // Keys borrow the entity's own layer string, which lives in the
-        // document for the whole call.
+        // Resolve each distinct layer name once for this candidate pass.
         type LayerRef<'a> = Option<&'a acadrust::tables::layer::Layer>;
         let layer_of: RefCell<rustc_hash::FxHashMap<&'doc str, LayerRef<'doc>>> =
             RefCell::new(rustc_hash::FxHashMap::default());
-        // Kill switch, so one binary can measure both paths on one drawing.
-        // Same shape as `OCS_NO_RESIDENT_MEMO`.
-        fn layer_memo_enabled() -> bool {
-            static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-            *EN.get_or_init(|| std::env::var("OCS_NO_LAYER_MEMO").is_err())
-        }
-        let memo_on = layer_memo_enabled();
         let visibility_ok = |e: &'doc EntityType| {
             let name = e.common().layer.as_str();
-            if !memo_on {
-                return self.resident_entity_visible(
-                    e,
-                    block_handle,
-                    frozen_layers,
-                    annotation_scale_handle,
-                    all_visible,
-                );
-            }
             let layer = match layer_of.borrow_mut().entry(name) {
                 std::collections::hash_map::Entry::Occupied(hit) => *hit.get(),
                 std::collections::hash_map::Entry::Vacant(slot) => {
@@ -9045,10 +8999,7 @@ impl Scene {
         // version of this diagnostic report a constant.
         let visible_path: &str;
         let mut visible_candidates: usize;
-        // `visible` costs ~400 ms over 444 937 candidates, and two things in
-        // the loop could own that: resolving each handle through the document's
-        // hash index, or the predicate, which looks a layer up **by name** —
-        // a string hash per entity. Timed separately, under PERF only.
+        // PERF-only breakdown for index maintenance and handle resolution.
         let mut visible_index_ms = 0.0f64;
         let mut visible_probe_ms = 0.0f64;
 
@@ -9118,19 +9069,9 @@ impl Scene {
                 .filter(|e| visibility_ok(e))
                 .collect()
         } else {
-            // Ask the per-epoch membership index for this block's candidates
-            // instead of testing every entity in the document. For a paper
-            // sheet holding 43 entities in a 1.17 M-entity drawing that is the
-            // difference between 313 ms and nothing measurable.
-            //
-            // The index is filled by walking `document.entities()`, so each
-            // block's list is already in document order and the wires come out
-            // in exactly the order the full scan produced.
+            // The per-epoch index preserves document order for each block.
             visible_path = "block-index";
-            // The index itself: rebuilt by walking the whole document once per
-            // `geometry_epoch`, and the epoch moves on every edit. Timed
-            // separately because it is inside `visible` and is not per-entity
-            // work, so no per-candidate breakdown can ever account for it.
+            // Time index maintenance separately from the candidate loop.
             let t_members = perf.then(iced::time::Instant::now);
             let members = self.block_members();
             visible_index_ms = crate::perf::elapsed_ms(t_members);
@@ -9146,13 +9087,7 @@ impl Scene {
                 }
             }
             if perf {
-                // Resolve-only pass, for the share of `visible` that is the
-                // document's hash index rather than the predicate. Repeated
-                // rather than clocked per iteration, and PERF only.
-                //
-                // It runs after the real loop, so it reads a warm cache and
-                // undercounts what the first traversal actually paid. Treat it
-                // as a floor, not as the cost.
+                // PERF-only lower bound for warm handle resolution.
                 let t_probe = iced::time::Instant::now();
                 let mut resolved = 0usize;
                 for &handle in claimed {
@@ -9463,18 +9398,8 @@ vis_index={:.1} visible_probe={:.1}",
         std::cell::Ref::map(self.unindexable_cache.borrow(), |c| c.as_ref().unwrap())
     }
 
-    /// Resolve owner handles and block-record membership once per geometry epoch.
-    ///
-    /// The walk visits every entity in the drawing and the epoch moves on every
-    /// edit, so it used to run again for each one — 19 ms of a 55 ms selection
-    /// on a 586 k-entity drawing, to add a single handle to a single list.
-    ///
-    /// A lone addition is folded in instead. Only a lone one: entities are
-    /// appended to the document, so a single new handle belongs at the end of
-    /// its block's list, while `replay_since` returns several changes in no
-    /// particular order and each list is in document order because that is
-    /// draw order. Anything else — a removal, a modification that could move an
-    /// entity between blocks, more than one change — takes the full walk.
+    /// Resolve block membership once per geometry epoch. A single addition is
+    /// appended safely; any other delta rebuilds the document-ordered index.
     fn block_members(&self) -> std::cell::Ref<'_, BlockMembers> {
         let mut cached_epoch = None;
         {
@@ -10691,12 +10616,7 @@ mod journal_tests {
 
     // Differential oracle: the incrementally-patched entity index must always
     // equal a from-scratch rebuild after any add / move / erase.
-    #[test]
-    /// The partition skip turns on a membership test, and the test has to tell
-    /// a drawn line from a drawn circle. A line carries a tangent geom for
-    /// snapping and no triangles, so the cheap structural filter admits it —
-    /// deciding on that alone called every line a contributor and the skip
-    /// never fired once in a real session.
+    /// A line has tangent geometry but does not feed the analytical uploads.
     #[test]
     fn the_partition_membership_test_separates_lines_from_curves() {
         use acadrust::entities::{Circle, Line};
@@ -10730,10 +10650,7 @@ mod journal_tests {
         );
     }
 
-    /// The partition skip reuses uploads that bake a draw depth, and it is only
-    /// sound while existing depths hold still. An incremental add must leave
-    /// them alone and must not bump the generation; a rebuild from scratch may
-    /// move them and must bump it.
+    /// Incremental additions preserve existing depths; full rebuilds invalidate them.
     #[test]
     fn adding_an_entity_leaves_existing_draw_depths_alone() {
         use acadrust::entities::Line;
@@ -10776,9 +10693,7 @@ mod journal_tests {
         );
     }
 
-    /// Folding a lone addition must land the handle where the full walk would
-    /// have put it — at the end of its block's list, because that list is in
-    /// document order and document order is draw order.
+    /// A folded addition must match the full document-order scan.
     #[test]
     fn folding_one_addition_matches_the_full_scan() {
         use acadrust::entities::Line;
@@ -10863,13 +10778,8 @@ mod journal_tests {
         assert_eq!(indexed(&s, block), scanned(&s, block), "after modify");
     }
 
-    /// The layer memo keys on the entity's **raw** layer string, while
-    /// `Table::get` normalises with `to_uppercase`. Two spellings of one layer
-    /// therefore take two memo slots, and both must resolve to that same layer
-    /// — otherwise the memo would hide geometry the unmemoized path shows.
-    ///
-    /// Covers the property the memo rests on (the table is case-insensitive)
-    /// and the predicate that reads it, not the memo's own bookkeeping.
+    /// Raw layer spellings used as memo keys must resolve through the
+    /// case-insensitive table.
     #[test]
     fn the_layer_memo_respects_case_insensitive_layer_names() {
         use acadrust::entities::Line;
@@ -10889,8 +10799,7 @@ mod journal_tests {
             line.common.layer = layer.to_string();
             scene.add_entity(EntityType::Line(line))
         };
-        // Three spellings of the same, switched-off layer, plus one that is
-        // genuinely a different layer and stays visible.
+        // Spellings of the switched-off layer must all remain hidden.
         on_layer("Walls");
         on_layer("WALLS");
         on_layer("walls");
@@ -10909,7 +10818,7 @@ mod journal_tests {
             "every spelling of a switched-off layer must be hidden",
         );
 
-        // The memo takes one slot per spelling; each must find the same layer.
+        // Each spelling resolves to the same table entry.
         let resolved: Vec<_> = ["Walls", "WALLS", "walls"]
             .iter()
             .map(|name| scene.document.layers.get(name).map(|l| l.name.clone()))
@@ -10922,10 +10831,7 @@ mod journal_tests {
         );
     }
 
-    /// The loader computes the draw-order map and the receiving scene used to
-    /// compute it again — a walk of every entity, ~300 ms, for a map that
-    /// already existed. Handing it over is only sound if it describes the
-    /// receiving scene's document exactly, so that is what this asserts.
+    /// The loader's handed-over draw depths must equal a local rebuild.
     #[test]
     fn the_handed_over_draw_depth_map_matches_a_recompute() {
         use acadrust::entities::{Circle, Line};
@@ -10942,7 +10848,7 @@ mod journal_tests {
             Vector3::new(3.0, 0.0, 0.0),
         )));
 
-        // What the loader would hand over, and what it built it from.
+        // Capture the map the loader would hand over.
         let expected = scene.draw_depth_map();
         let handed_over = scene
             .draw_depth_cache
@@ -10950,8 +10856,7 @@ mod journal_tests {
             .take()
             .expect("the map was just computed, so it is cached");
 
-        // Installing it stands in for `install_prepared_open_geometry`: the
-        // epoch is the receiving scene's, the contents are the loader's.
+        // Install it under the receiving scene's epoch.
         scene.bump_geometry();
         scene.install_prepared_open_geometry(PreparedOpenGeometry {
             wires: Arc::new(Vec::new()),
@@ -10967,7 +10872,7 @@ mod journal_tests {
             "the handed-over map must be served as-is",
         );
 
-        // ...and it must be the map this scene would have produced itself.
+        // A local rebuild must agree.
         *scene.draw_depth_cache.borrow_mut() = None;
         assert_eq!(
             *scene.draw_depth_map(),

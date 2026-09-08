@@ -1,6 +1,7 @@
 // Solid creation and kernel modelling tools.
 
 pub mod boolean_cmd;
+pub mod chamferedge_cmd;
 pub mod cylinder_cmd;
 pub mod edge_cmd;
 pub mod polysolid_cmd;
@@ -89,7 +90,7 @@ impl CadModule for ModelModule {
                     title: "Edges",
                     tools: vec![
                         RibbonItem::LargeTool(tool("SOLIDFILLET", "Fillet", FILLET_ICON)),
-                        RibbonItem::LargeTool(tool("SOLIDCHAMFER", "Chamfer", CHAMFER_ICON)),
+                        RibbonItem::LargeTool(tool("CHAMFEREDGE", "Chamfer", CHAMFER_ICON)),
                     ],
                 },
             ]

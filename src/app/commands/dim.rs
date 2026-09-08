@@ -17,6 +17,49 @@ fn selected_solid(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
     }
 }
 
+fn selected_chamfer_body(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
+    let scene = &app.tabs.get(tab)?.scene;
+    let selected = scene.selected_handles_in_order();
+    let [handle] = selected.as_slice() else {
+        return None;
+    };
+    matches!(
+        scene.document.get_entity(*handle),
+        Some(acadrust::EntityType::Solid3D(_) | acadrust::EntityType::Surface(_))
+    )
+    .then_some(*handle)
+}
+
+fn chamfer_edge_sources(
+    app: &mut OpenCADStudio,
+    tab: usize,
+) -> Vec<(acadrust::Handle, cadkernel::brep::Body)> {
+    let handles = app.tabs[tab]
+        .scene
+        .document
+        .entities()
+        .filter_map(|entity| {
+            matches!(
+                entity,
+                acadrust::EntityType::Solid3D(_) | acadrust::EntityType::Surface(_)
+            )
+            .then_some(entity.common().handle)
+        })
+        .collect::<Vec<_>>();
+    app.tabs[tab].scene.restore_solid_models(&handles);
+    handles
+        .into_iter()
+        .filter_map(|handle| {
+            app.tabs[tab]
+                .scene
+                .solid_models
+                .get(&handle)
+                .cloned()
+                .map(|body| (handle, body))
+        })
+        .collect()
+}
+
 impl OpenCADStudio {
     pub(super) fn dispatch_dim(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
@@ -1107,16 +1150,52 @@ impl OpenCADStudio {
                 }
             }
 
-            "SOLIDCHAMFER" => {
-                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let command = SolidEdgeCommand::new(EdgeOperation::Chamfer, selected_solid(self, i));
+            "CHAMFEREDGE" | "SOLIDCHAMFER" => {
+                use crate::modules::model::chamferedge_cmd::ChamferEdgeCommand;
+                let target = selected_chamfer_body(self, i);
+                let header = &self.tabs[i].scene.document.header;
+                let distances = (header.chamfer_distance_a, header.chamfer_distance_b);
+                let bodies = chamfer_edge_sources(self, i);
+                let command = ChamferEdgeCommand::new(
+                    target,
+                    bodies,
+                    crate::scene::WireModel::SELECTED,
+                    distances,
+                );
+                let distances = command.distances();
+                self.command_line.push_output(
+                    crate::tf!(
+                        "Distance1 = {:.4}, Distance2 = {:.4}",
+                        distances.0,
+                        distances.1
+                    )
+                    .as_ref(),
+                );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
-            "CHAMFER" if selected_solid(self, i).is_some() => {
-                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let command = SolidEdgeCommand::new(EdgeOperation::Chamfer, selected_solid(self, i));
+            "CHAMFER" if selected_chamfer_body(self, i).is_some() => {
+                use crate::modules::model::chamferedge_cmd::ChamferEdgeCommand;
+                let target = selected_chamfer_body(self, i);
+                let header = &self.tabs[i].scene.document.header;
+                let distances = (header.chamfer_distance_a, header.chamfer_distance_b);
+                let bodies = chamfer_edge_sources(self, i);
+                let command = ChamferEdgeCommand::new(
+                    target,
+                    bodies,
+                    crate::scene::WireModel::SELECTED,
+                    distances,
+                );
+                let distances = command.distances();
+                self.command_line.push_output(
+                    crate::tf!(
+                        "Distance1 = {:.4}, Distance2 = {:.4}",
+                        distances.0,
+                        distances.1
+                    )
+                    .as_ref(),
+                );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }

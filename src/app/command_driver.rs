@@ -733,6 +733,7 @@ impl OpenCADStudio {
             &result,
             CmdResult::Relaunch(..)
                 | CmdResult::Dispatch(..)
+                | CmdResult::SolidChamferEdges { .. }
                 | CmdResult::SolidSubtract { .. }
         );
         let task = self.apply_cmd_result_inner(result);
@@ -4108,6 +4109,27 @@ impl OpenCADStudio {
                 fillet,
             } => {
                 let task = self.solid_edge_blend(handle, pick, value, fillet);
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                return task;
+            }
+
+            CmdResult::SolidChamferEdges {
+                handle,
+                edges,
+                base_face,
+                distance1,
+                distance2,
+            } => {
+                let task = self.solid_chamfer_edges(
+                    handle,
+                    &edges,
+                    base_face,
+                    distance1,
+                    distance2,
+                );
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();

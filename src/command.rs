@@ -1554,6 +1554,14 @@ pub enum CmdResult {
         value: f64,
         fillet: bool,
     },
+    /// Chamfer one or more resolved B-rep edges on a common base face.
+    SolidChamferEdges {
+        handle: Handle,
+        edges: Vec<cadkernel::brep::EdgeKey>,
+        base_face: cadkernel::brep::FaceKey,
+        distance1: f64,
+        distance2: f64,
+    },
     SolidSubtract {
         bases: Vec<Handle>,
         cutters: Vec<Handle>,

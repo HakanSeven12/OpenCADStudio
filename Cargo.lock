@@ -79,7 +79,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.5.4"
-source = "git+https://github.com/ramox81/cadcodec.git?rev=af1f31287d4730f228cbb27d6884078295627ca7#af1f31287d4730f228cbb27d6884078295627ca7"
+source = "git+https://github.com/ramox81/cadcodec.git?rev=5c0c01dcad4543dde2ee8bcd0e08131dfafbf2dc#5c0c01dcad4543dde2ee8bcd0e08131dfafbf2dc"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -885,7 +885,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "cadkernel"
 version = "0.1.0"
-source = "git+https://github.com/ramox81/cadkernel.git?rev=55a09bc3f79fde624e7daf7249ed570675e0aae2#55a09bc3f79fde624e7daf7249ed570675e0aae2"
+source = "git+https://github.com/ramox81/cadkernel.git?rev=9d872e04e1b69654e98ce6184ca3efd28a5eb830#9d872e04e1b69654e98ce6184ca3efd28a5eb830"
 dependencies = [
  "acadrust",
  "cavalier_contours",

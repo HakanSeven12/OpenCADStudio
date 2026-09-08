@@ -201,7 +201,7 @@ pub fn has_specialized_primitive_properties(
     handle: acadrust::Handle,
 ) -> bool {
     matches!(
-        document.solid_history_operation(handle),
+        primitive_property_operation(document, handle).as_ref(),
         Some(
             SolidHistoryOperation::Box(_)
                 | SolidHistoryOperation::Wedge(_)
@@ -216,6 +216,19 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Revolve(_)
         )
     )
+}
+
+/// Return the primitive that owns the public Geometry rows. Later operations
+/// such as edge fillets and chamfers refine that primitive but do not replace
+/// its editable type, position, or dimensions.
+pub fn primitive_property_operation(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> Option<SolidHistoryOperation> {
+    document
+        .solid_history_operations(handle)
+        .and_then(|operations| operations.into_iter().next())
+        .or_else(|| document.solid_history_operation(handle).cloned())
 }
 
 /// Solid history results whose public Properties palette is fully described by
@@ -1442,10 +1455,10 @@ pub fn primitive_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
 ) -> Vec<PropSection> {
-    let Some(operation) = document.solid_history_operation(handle) else {
+    let Some(operation) = primitive_property_operation(document, handle) else {
         return brep_properties(document, handle);
     };
-    match operation {
+    match &operation {
         SolidHistoryOperation::Box(value) => {
             rectangular_properties(document, handle, value, "Box")
         }

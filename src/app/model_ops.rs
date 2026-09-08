@@ -625,6 +625,11 @@ impl super::OpenCADStudio {
                 .push_error(crate::t!("The fillet history could not be recorded.").as_ref());
             return false;
         }
+        let _ = self.tabs[i].scene.apply_solid_history_choice(
+            handle,
+            solid_history::PROP_HISTORY,
+            "Record",
+        );
         let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
             return false;
         };
@@ -713,6 +718,11 @@ impl super::OpenCADStudio {
                 .push_error(crate::t!("The chamfer history could not be recorded.").as_ref());
             return false;
         }
+        let _ = self.tabs[i].scene.apply_solid_history_choice(
+            handle,
+            solid_history::PROP_HISTORY,
+            "Record",
+        );
         let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
             return false;
         };

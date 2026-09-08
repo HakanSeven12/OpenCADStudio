@@ -8939,6 +8939,11 @@ impl Scene {
         // version of this diagnostic report a constant.
         let visible_path: &str;
         let mut visible_candidates: usize;
+        // `visible` costs ~400 ms over 444 937 candidates, and two things in
+        // the loop could own that: resolving each handle through the document's
+        // hash index, or the predicate, which looks a layer up **by name** —
+        // a string hash per entity. Timed separately, under PERF only.
+        let mut visible_probe_ms = 0.0f64;
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
         // AABB exists (Model layout with a settled camera), only iterate
@@ -9026,6 +9031,20 @@ impl Scene {
                         out.push(entity);
                     }
                 }
+            }
+            if perf {
+                // A second, resolve-only pass. It repeats work rather than
+                // instrumenting inside the loop, where a clock read per
+                // iteration would cost more than what it measures.
+                let t_probe = iced::time::Instant::now();
+                let mut resolved = 0usize;
+                for &handle in claimed {
+                    if self.document.get_entity(handle).is_some() {
+                        resolved += 1;
+                    }
+                }
+                std::hint::black_box(resolved);
+                visible_probe_ms = t_probe.elapsed().as_secs_f64() * 1000.0;
             }
             out
         };
@@ -9271,7 +9290,8 @@ impl Scene {
                 "[perf] wires-build total={:.1}ms sort_cache={:.1} visible={:.1} blk_cache={:.1} colors={:.1} \
 build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
 entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates={} \
-guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
+guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={} \
+visible_probe={:.1}",
                 crate::perf::elapsed_ms(t_fn),
                 sort_cache_ms,
                 visible_ms,
@@ -9298,6 +9318,7 @@ guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={}",
                 annotation_scale_handle.map(|h| h.value()).unwrap_or(0),
                 all_visible,
                 crate::scene::text::sdf_atlas::generation(),
+                visible_probe_ms,
             );
         }
         wires

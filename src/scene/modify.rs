@@ -1183,6 +1183,47 @@ impl Scene {
             value.radii.push(radius);
             return self.preview_solid_history(handle, operation);
         }
+        if matches!(
+            grip_id,
+            crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE1
+                | crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE2
+        ) {
+            let definitions = {
+                let acadrust::objects::SolidHistoryOperation::Chamfer(value) = &operation else {
+                    return false;
+                };
+                crate::scene::model::solid_history::chamfer_distance_grips(
+                    &self.document,
+                    handle,
+                    value,
+                )
+            };
+            let Some(definition) = definitions.into_iter().find(|grip| grip.id == grip_id) else {
+                return false;
+            };
+            let Some(axis) = definition.axis else {
+                return false;
+            };
+            let change = match apply {
+                GripApply::Absolute(world) => (world - definition.world).dot(axis),
+                GripApply::Translate(delta) => delta.dot(axis),
+            };
+            let acadrust::objects::SolidHistoryOperation::Chamfer(value) = &mut operation else {
+                return false;
+            };
+            let distance = if grip_id
+                == crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE1
+            {
+                &mut value.base_distance
+            } else {
+                &mut value.other_distance
+            };
+            *distance += change;
+            if !distance.is_finite() || *distance <= 1.0e-6 {
+                return false;
+            }
+            return self.preview_solid_history(handle, operation);
+        }
         if !crate::scene::model::solid_history::apply_primitive_grip(
             &mut operation,
             grip_id,

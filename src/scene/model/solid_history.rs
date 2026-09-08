@@ -1,7 +1,8 @@
 use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
-    DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
-    SolidHistoryCylinder, SolidHistoryFillet, SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
+    DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryChamfer,
+    SolidHistoryCone, SolidHistoryCylinder, SolidHistoryFillet, SolidHistoryLoft,
+    SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
     SolidHistoryPyramid, SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep,
     SolidHistoryTorus,
 };
@@ -33,6 +34,8 @@ pub const GRIP_LOFT_SECTION_FIRST: usize = 40_000;
 pub const GRIP_REVOLVE_PROFILE_FIRST: usize = 50_000;
 pub const GRIP_REVOLVE_AXIS: usize = 10_013;
 pub const GRIP_FILLET_RADIUS: usize = 10_014;
+pub const GRIP_CHAMFER_DISTANCE1: usize = 10_015;
+pub const GRIP_CHAMFER_DISTANCE2: usize = 10_016;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -3132,6 +3135,104 @@ pub fn fillet_radius_grip(body: &Body, radius: f64) -> Option<GripDef> {
     None
 }
 
+pub fn chamfer_distance_grips(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryChamfer,
+) -> Vec<GripDef> {
+    let Some(operations) = document.solid_history_operations(handle) else {
+        return Vec::new();
+    };
+    let Some(chamfer_index) = operations
+        .iter()
+        .rposition(|operation| matches!(operation, SolidHistoryOperation::Chamfer(_)))
+    else {
+        return Vec::new();
+    };
+    let Ok(source) = cadkernel::acis::rebuild_history(&operations[..chamfer_index]) else {
+        return Vec::new();
+    };
+    let edges = source.edge_keys().collect::<Vec<_>>();
+    let faces = source.face_keys().collect::<Vec<_>>();
+    let Some(edge) = value
+        .edges
+        .first()
+        .and_then(|ordinal| usize::try_from(*ordinal).ok())
+        .and_then(|ordinal| edges.get(ordinal).copied())
+        .and_then(|edge| source.edges.get(edge))
+    else {
+        return Vec::new();
+    };
+    let Some(base_face) = usize::try_from(value.base_face)
+        .ok()
+        .and_then(|ordinal| faces.get(ordinal).copied())
+    else {
+        return Vec::new();
+    };
+    let adjacent = edge
+        .coedges
+        .iter()
+        .filter_map(|coedge| source.coedges.get(*coedge))
+        .filter_map(|coedge| source.loops.get(coedge.owner))
+        .map(|edge_loop| edge_loop.owner)
+        .collect::<Vec<_>>();
+    let Some(other_face) = adjacent.iter().copied().find(|face| *face != base_face) else {
+        return Vec::new();
+    };
+    let outward = |face_key| {
+        let face = source.faces.get(face_key)?;
+        let Surface::Plane(plane) = source.surfaces.get(face.surface)? else {
+            return None;
+        };
+        let normal = glam::DVec3::from_array(plane.normal()?).try_normalize()?;
+        Some(if face.forward { normal } else { -normal })
+    };
+    let Some(base_normal) = outward(base_face) else {
+        return Vec::new();
+    };
+    let Some(other_normal) = outward(other_face) else {
+        return Vec::new();
+    };
+    let dot = base_normal.dot(other_normal);
+    let Some(base_inward) = (-(other_normal - base_normal * dot)).try_normalize() else {
+        return Vec::new();
+    };
+    let Some(other_inward) = (-(base_normal - other_normal * dot)).try_normalize() else {
+        return Vec::new();
+    };
+    let Some(start) = source.vertices.get(edge.start) else {
+        return Vec::new();
+    };
+    let Some(end) = source.vertices.get(edge.end) else {
+        return Vec::new();
+    };
+    let midpoint =
+        (glam::DVec3::from_array(start.point) + glam::DVec3::from_array(end.point)) * 0.5;
+    [
+        (
+            GRIP_CHAMFER_DISTANCE1,
+            value.base_distance,
+            base_inward,
+        ),
+        (
+            GRIP_CHAMFER_DISTANCE2,
+            value.other_distance,
+            other_inward,
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, distance, _)| distance.is_finite() && *distance > 0.0)
+    .map(|(id, distance, axis)| {
+        grip(
+            id,
+            midpoint + axis * distance,
+            GripShape::Square,
+            Some(axis),
+        )
+    })
+    .collect()
+}
+
 pub fn primitive_grips(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
@@ -3150,6 +3251,9 @@ pub fn primitive_grips(
             .and_then(|body| fillet_radius_grip(&body, radius))
             .into_iter()
             .collect();
+    }
+    if let SolidHistoryOperation::Chamfer(value) = operation {
+        return chamfer_distance_grips(document, handle, value);
     }
     let mut grips = Vec::new();
     let mut add = |id, transform, point, shape, axis: Option<[f64; 3]>| {
@@ -3780,5 +3884,23 @@ pub fn fillet_op(edges: Vec<i32>, radius: f64) -> SolidHistoryOperation {
         edges,
         radii: vec![radius],
         ..SolidHistoryFillet::default()
+    })
+}
+
+pub fn chamfer_op(
+    edges: Vec<i32>,
+    base_face: i32,
+    base_distance: f64,
+    other_distance: f64,
+) -> SolidHistoryOperation {
+    SolidHistoryOperation::Chamfer(SolidHistoryChamfer {
+        base: base(glam::DMat4::IDENTITY.to_cols_array()),
+        operation_major: 1,
+        method: 0,
+        base_distance,
+        other_distance,
+        edges,
+        base_face,
+        ..SolidHistoryChamfer::default()
     })
 }

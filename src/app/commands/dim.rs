@@ -1,6 +1,6 @@
 use super::*;
 
-fn selected_solid(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
+fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
     let scene = &app.tabs.get(tab)?.scene;
     let selected = scene.selected_handles_in_order();
     let [handle] = selected.as_slice() else {
@@ -9,7 +9,7 @@ fn selected_solid(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
 
     if matches!(
         scene.document.get_entity(*handle),
-        Some(acadrust::EntityType::Solid3D(_))
+        Some(acadrust::EntityType::Solid3D(_) | acadrust::EntityType::Surface(_))
     ) {
         Some(*handle)
     } else {
@@ -26,7 +26,10 @@ fn solid_edge_sources(
         .document
         .entities()
         .filter_map(|entity| {
-            matches!(entity, acadrust::EntityType::Solid3D(_))
+            matches!(
+                entity,
+                acadrust::EntityType::Solid3D(_) | acadrust::EntityType::Surface(_)
+            )
                 .then_some(entity.common().handle)
         })
         .collect::<Vec<_>>();
@@ -989,7 +992,7 @@ impl OpenCADStudio {
 
             "FILLETEDGE" | "SOLIDFILLET" => {
                 use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let target = selected_solid(self, i);
+                let target = selected_edge_body(self, i);
                 let bodies = solid_edge_sources(self, i);
                 let command = SolidEdgeCommand::new(
                     EdgeOperation::Fillet,
@@ -1001,9 +1004,9 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
-            "FILLET" if selected_solid(self, i).is_some() => {
+            "FILLET" if selected_edge_body(self, i).is_some() => {
                 use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let target = selected_solid(self, i);
+                let target = selected_edge_body(self, i);
                 let bodies = solid_edge_sources(self, i);
                 let command = SolidEdgeCommand::new(
                     EdgeOperation::Fillet,
@@ -1148,29 +1151,51 @@ impl OpenCADStudio {
                 }
             }
 
-            "SOLIDCHAMFER" => {
-                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let target = selected_solid(self, i);
+            "CHAMFEREDGE" | "SOLIDCHAMFER" => {
+                use crate::modules::model::edge_cmd::SolidEdgeCommand;
+                let target = selected_edge_body(self, i);
+                let header = &self.tabs[i].scene.document.header;
+                let distances = (header.chamfer_distance_a, header.chamfer_distance_b);
                 let bodies = solid_edge_sources(self, i);
-                let command = SolidEdgeCommand::new(
-                    EdgeOperation::Chamfer,
+                let command = SolidEdgeCommand::new_chamfer(
                     target,
                     bodies,
                     crate::scene::WireModel::SELECTED,
+                    distances,
+                );
+                let distances = command.chamfer_distances();
+                self.command_line.push_output(
+                    crate::tf!(
+                        "Distance1 = {:.4}, Distance2 = {:.4}",
+                        distances.0,
+                        distances.1
+                    )
+                    .as_ref(),
                 );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
-            "CHAMFER" if selected_solid(self, i).is_some() => {
-                use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let target = selected_solid(self, i);
+            "CHAMFER" if selected_edge_body(self, i).is_some() => {
+                use crate::modules::model::edge_cmd::SolidEdgeCommand;
+                let target = selected_edge_body(self, i);
+                let header = &self.tabs[i].scene.document.header;
+                let distances = (header.chamfer_distance_a, header.chamfer_distance_b);
                 let bodies = solid_edge_sources(self, i);
-                let command = SolidEdgeCommand::new(
-                    EdgeOperation::Chamfer,
+                let command = SolidEdgeCommand::new_chamfer(
                     target,
                     bodies,
                     crate::scene::WireModel::SELECTED,
+                    distances,
+                );
+                let distances = command.chamfer_distances();
+                self.command_line.push_output(
+                    crate::tf!(
+                        "Distance1 = {:.4}, Distance2 = {:.4}",
+                        distances.0,
+                        distances.1
+                    )
+                    .as_ref(),
                 );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));

@@ -1551,7 +1551,9 @@ pub enum CmdResult {
     SolidEdgeBlend {
         handle: Handle,
         edges: Vec<cadkernel::brep::EdgeKey>,
+        base_face: Option<cadkernel::brep::FaceKey>,
         value: f64,
+        other_value: f64,
         fillet: bool,
     },
     SolidSubtract {

@@ -4105,10 +4105,19 @@ impl OpenCADStudio {
             CmdResult::SolidEdgeBlend {
                 handle,
                 edges,
+                base_face,
                 value,
+                other_value,
                 fillet,
             } => {
-                let task = self.solid_edge_blend(handle, &edges, value, fillet);
+                let task = self.solid_edge_blend(
+                    handle,
+                    &edges,
+                    base_face,
+                    value,
+                    other_value,
+                    fillet,
+                );
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();

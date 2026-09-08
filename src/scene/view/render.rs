@@ -910,15 +910,27 @@ impl shader::Primitive for Primitive {
                                 .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                         }
                         if _perf {
-                            crate::perf_record!(
-                                "[perf] arena-post partition={part_ms:.1}ms blocks={blk_ms:.1}ms \
-curves={curve_ms:.1}ms skipped={} wires={} instanced={} circles={} ellipses={}",
-                                partitioned.is_none(),
-                                vp_wires.len(),
-                                partitioned.as_ref().map_or(0, |p| p.instanced.len()),
-                                partitioned.as_ref().map_or(0, |p| p.circle_instances.len()),
-                                partitioned.as_ref().map_or(0, |p| p.ellipse_instances.len()),
-                            );
+                            // Counts only when a partition produced them.
+                            // Printing zeros on a skip reads as "no circles"
+                            // rather than "not recomputed", which is the
+                            // opposite of what the line is reporting.
+                            match &partitioned {
+                                Some(partitioned) => crate::perf_record!(
+                                    "[perf] arena-post partition={part_ms:.1}ms \
+blocks={blk_ms:.1}ms curves={curve_ms:.1}ms skipped=false wires={} instanced={} \
+circles={} ellipses={}",
+                                    vp_wires.len(),
+                                    partitioned.instanced.len(),
+                                    partitioned.circle_instances.len(),
+                                    partitioned.ellipse_instances.len(),
+                                ),
+                                None => crate::perf_record!(
+                                    "[perf] arena-post skipped=true wires={} \
+retained_contributors={}",
+                                    vp_wires.len(),
+                                    inner.partition_contributors.len(),
+                                ),
+                            }
                         }
                         if _patched {
                             wire_arena::patch_handle_index(

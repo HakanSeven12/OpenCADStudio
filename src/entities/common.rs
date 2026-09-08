@@ -142,7 +142,13 @@ pub fn format_length(value: f64) -> String {
             };
             let unit_suffix = if ctx.lunits == 4 { "\"" } else { "" };
             match feet {
-                Some(f) => format!("{}{:.0}'-{:.0}{}{}", sign, f, whole, frac_str, unit_suffix),
+                Some(f) => {
+                    if f == 0.0 && whole > 0.0 {
+                        format!("{}{:.0}{}{}", sign, whole, frac_str, unit_suffix)
+                    } else {
+                        format!("{}{:.0}'-{:.0}{}{}", sign, f, whole, frac_str, unit_suffix)
+                    }
+                }
                 None => format!("{}{:.0}{}", sign, whole, frac_str),
             }
         }
@@ -1102,7 +1108,7 @@ mod length_format_tests {
 
     #[test]
     fn architectural_carries_into_feet() {
-        assert_eq!(with_units(4, 4, 11.99), "0'-11 63/64\"");
+        assert_eq!(with_units(4, 4, 11.99), "11 63/64\"");
         assert_eq!(with_units(4, 4, 11.999), "1'-0\"");
         assert_eq!(with_units(4, 4, 23.999), "2'-0\"");
         assert_eq!(with_units(4, 4, 66.5), "5'-6 1/2\"");
@@ -1111,7 +1117,7 @@ mod length_format_tests {
 
     #[test]
     fn engineering_carries_into_feet() {
-        assert_eq!(with_units(3, 1, 11.94), "0'-11.9\"");
+        assert_eq!(with_units(3, 1, 11.94), "11.9\"");
         assert_eq!(with_units(3, 1, 11.99), "1'-0.0\"");
         assert_eq!(with_units(3, 1, 23.99), "2'-0.0\"");
         assert_eq!(with_units(3, 2, 11.999), "1'-0.00\"");

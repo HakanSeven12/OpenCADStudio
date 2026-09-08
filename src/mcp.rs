@@ -22,11 +22,13 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Preserve document_id, revision, selection and request_id. Use ocs_read commands with parameters.name for a command manifest. Use ocs_execute batch when several steps are known, and request changed_entities when the resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path.";
+const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
     "query",
+    "records",
+    "capabilities",
     "entities",
     "layers",
     "header",
@@ -38,12 +40,39 @@ const READ_OPS: &[&str] = &[
     "operation",
 ];
 const EXECUTE_OPS: &[&str] = &[
-    "new", "open", "activate", "run", "start", "input", "cancel", "undo", "redo", "select",
-    "property", "action", "save", "stop", "batch",
+    "new",
+    "open",
+    "activate",
+    "run",
+    "start",
+    "input",
+    "cancel",
+    "undo",
+    "redo",
+    "select",
+    "property",
+    "set_properties",
+    "action",
+    "save",
+    "stop",
+    "batch",
 ];
 const BATCH_STEP_OPS: &[&str] = &[
-    "new", "open", "activate", "run", "start", "input", "cancel", "undo", "redo", "select",
-    "property", "action", "save", "stop",
+    "new",
+    "open",
+    "activate",
+    "run",
+    "start",
+    "input",
+    "cancel",
+    "undo",
+    "redo",
+    "select",
+    "property",
+    "set_properties",
+    "action",
+    "save",
+    "stop",
 ];
 const MAX_BATCH_STEPS: usize = 64;
 
@@ -671,6 +700,15 @@ fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
                 r#"{"op":"property","field":"color","value":1}"#,
             )
         }
+        "set_properties"
+            if request["collection"].as_str().is_none_or(str::is_empty)
+                || request["updates"].as_array().is_none_or(Vec::is_empty) =>
+        {
+            missing(
+                "collection or updates",
+                r#"{"op":"set_properties","collection":"entities","handle":"2A","updates":[{"path":"/common/layer","value":"Walls"}]}"#,
+            )
+        }
         "action" => match request["name"].as_str() {
             Some(name) if crate::app::automation_action_names().contains(&name) => Ok(()),
             Some(name) => Err(format!(
@@ -833,6 +871,8 @@ fn batch_step_schema() -> Value {
             "clear":{"type":"boolean"},
             "field":{"type":"string"},
             "value":{"description":"New property value; its JSON type must match the property kind.","anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"},{"type":"object"},{"type":"array"},{"type":"null"}]},
+            "collection":{"type":"string"},
+            "updates":{"type":"array","minItems":1,"items":{"type":"object","properties":{"path":{"type":"string","pattern":"^/"},"value":{},"expected":{}},"required":["path","value"],"additionalProperties":false}},
             "name":{"type":"string","enum":crate::app::automation_action_names()}
         },
         "required":["op"],
@@ -873,6 +913,8 @@ fn execute_request_schema() -> Value {
             "clear":{"type":"boolean","description":"Clear the current selection before applying select filters."},
             "field":{"type":"string","minLength":1,"description":"Property id returned by ocs_read properties."},
             "value":{"description":"New property value; its JSON type must match the property kind.","anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"},{"type":"object"},{"type":"array"},{"type":"null"}]},
+            "collection":{"type":"string","description":"Record collection returned by ocs_read records."},
+            "updates":{"type":"array","minItems":1,"description":"Atomic, type-checked property replacements. Paths are RFC 6901 JSON Pointers relative to record.properties.","items":{"type":"object","properties":{"path":{"type":"string","pattern":"^/"},"value":{},"expected":{"description":"Optional compare-and-set value."}},"required":["path","value"],"additionalProperties":false}},
             "name":{"type":"string","enum":crate::app::automation_action_names(),"description":"UI action returned by ocs_read commands."},
             "steps":{"type":"array","minItems":1,"maxItems":MAX_BATCH_STEPS,"description":"Sequential editor operations executed with fresh state and idempotency keys. Execution stops at the first failure; completed_steps says what committed.","items":batch_step_schema()}
         },
@@ -898,6 +940,7 @@ fn execute_request_schema() -> Value {
             {"properties":{"op":{"const":"redo"}}},
             {"properties":{"op":{"const":"select"}}},
             {"properties":{"op":{"const":"property"}},"required":["field","value"]},
+            {"properties":{"op":{"const":"set_properties"}},"required":["collection","updates"]},
             {"properties":{"op":{"const":"action"}},"required":["name"]},
             {"properties":{"op":{"const":"save"}}},
             {"properties":{"op":{"const":"stop"}}},
@@ -943,8 +986,8 @@ fn tool_definitions() -> Value {
         },
         {
             "name":"ocs_read",
-            "description":"Read state, command manifests, entities, layers, properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session.",
-            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name for detailed commands help."},"search":{"type":"string","description":"Case-insensitive command-name search."},"document_id":{"type":"integer","minimum":0},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity handles for query or measure."},"type":{"type":"string","description":"Entity type filter for query."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["ocs_session_id"],"additionalProperties":false},
+            "description":"Discover capabilities or read state, complete database records, command manifests, entities, properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session.",
+            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name or record name."},"search":{"type":"string","description":"Case-insensitive command-name search."},"document_id":{"type":"integer","minimum":0},"collection":{"type":"string","description":"Record collection, all, or omit to discover collections."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."},"type":{"type":"string","description":"Entity or record type filter."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"paths":{"type":"array","items":{"type":"string"},"description":"Project RFC 6901 JSON Pointer paths relative to record.properties."},"where":{"type":"array","description":"All property filters must match.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string","enum":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],"default":"eq"},"value":{}},"required":["path"],"additionalProperties":false}},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["ocs_session_id"],"additionalProperties":false},
             "outputSchema":read_output_schema(),
             "annotations":{"title":"Read OCS state","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
@@ -1272,13 +1315,17 @@ mod tests {
         );
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], false);
         for tool in [&tools[1], &tools[2], &tools[3]] {
-            assert!(tool["inputSchema"]["properties"]
-                .get("session_id")
-                .is_none());
-            assert!(tool["inputSchema"]["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("ocs_session_id")));
+            assert!(
+                tool["inputSchema"]["properties"]
+                    .get("session_id")
+                    .is_none()
+            );
+            assert!(
+                tool["inputSchema"]["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("ocs_session_id"))
+            );
         }
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["request"]["required"],
@@ -1306,6 +1353,31 @@ mod tests {
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["request"]["properties"]["cmd"]["examples"][0],
             "LINE 0,0 10,10"
+        );
+        assert!(READ_OPS.contains(&"capabilities"));
+        assert!(READ_OPS.contains(&"records"));
+        assert!(EXECUTE_OPS.contains(&"set_properties"));
+        assert_eq!(
+            tools[1]["inputSchema"]["properties"]["parameters"]["properties"]["where"]["items"]["properties"]
+                ["op"]["enum"],
+            json!([
+                "eq",
+                "ne",
+                "lt",
+                "lte",
+                "gt",
+                "gte",
+                "contains",
+                "starts_with",
+                "ends_with",
+                "in",
+                "exists",
+                "not_exists"
+            ])
+        );
+        assert_eq!(
+            tools[2]["inputSchema"]["properties"]["request"]["properties"]["updates"]["items"]["required"],
+            json!(["path", "value"])
         );
         assert!(tools[0].get("outputSchema").is_some());
         assert!(tools[1].get("outputSchema").is_some());

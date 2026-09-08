@@ -2,7 +2,7 @@
 use super::{Message, OpenCADStudio};
 use crate::command::{InputKind, StepInput};
 use iced::Task;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::OnceLock};
 #[cfg(not(target_arch = "wasm32"))]
 mod transport;
@@ -361,7 +361,7 @@ impl OpenCADStudio {
             "mtext_editor":self.mtext_editor.as_ref().map(|e|json!({"text":e.content.text(),"height":e.height,"style":e.style})),
             "text_editor":self.text_inline.is_some(),"event_cursor":self.control.serial,
             "operation":self.control.pending.as_ref().map(|p| &p.id),
-            "capabilities":["commands","command_manifest","step_input","batch","compact_results","entity_pick","structure_pick","selection","properties","layers","history","documents","events","capture","viewport_capture","measure","spatial_query"]
+            "capabilities":["commands","command_manifest","step_input","batch","compact_results","entity_pick","structure_pick","selection","properties","records","record_filters","atomic_record_updates","layers","history","documents","events","capture","viewport_capture","measure","spatial_query"]
         })
     }
 
@@ -377,6 +377,8 @@ impl OpenCADStudio {
                 | "properties"
                 | "measure"
                 | "query"
+                | "records"
+                | "capabilities"
                 | "entities"
                 | "layers"
                 | "header"
@@ -449,7 +451,9 @@ impl OpenCADStudio {
                     return (
                         failure(
                             "unknown_command",
-                            format!("Unknown command {requested}; call commands without name to list commands"),
+                            format!(
+                                "Unknown command {requested}; call commands without name to list commands"
+                            ),
                         ),
                         Task::none(),
                     );
@@ -511,7 +515,7 @@ impl OpenCADStudio {
                             "Supply a unique request_id (maximum 128 bytes)",
                         ),
                         Task::none(),
-                    )
+                    );
                 }
             };
             if let Some((_, old, result)) = self.control.completed.iter().find(|(i, _, _)| i == &id)
@@ -773,6 +777,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             "property" => self.control_set_property(req)?,
+            "set_properties" => self.control_set_record_properties(req)?,
             "action" => self.control_ui_action(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "save" => {
@@ -812,6 +817,12 @@ impl OpenCADStudio {
             }
             _ => return Err(failure("unknown_operation", "Unknown operation")),
         })
+    }
+
+    pub(super) fn set_control_result(&mut self, value: Value) {
+        if let Some(operation) = self.control.pending.as_mut() {
+            operation.result = value;
+        }
     }
 
     pub(super) fn control_track(&mut self, task: Task<Message>) -> Task<Message> {
@@ -1101,10 +1112,12 @@ mod tests {
         );
         let started = request(&mut app, json!({"op":"start","cmd":"LINE"}));
         assert_eq!(started["status"], "waiting_input");
-        assert!(started["state"]["command"]["accepts"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("point")));
+        assert!(
+            started["state"]["command"]["accepts"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("point"))
+        );
         assert_eq!(
             started["state"]["command"]["input_example"]["kind"],
             "point"
@@ -1129,10 +1142,12 @@ mod tests {
         );
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 1);
         request(&mut app, json!({"op":"select","type":"LINE"}));
-        assert!(!app.control_properties()["sections"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !app.control_properties()["sections"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         let changed = request(&mut app, json!({"op":"property","field":"color","value":1}));
         assert_eq!(changed["ok"], true, "{changed}");
         assert_eq!(

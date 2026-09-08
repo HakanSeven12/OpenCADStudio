@@ -2771,11 +2771,9 @@ annotate =
     .mleader = MLeader
     .mtext-specify-insertion-point = MTEXT Plaatsingspunt specificeren:
     .markup = Markering
-    .multileader = Multiverwijs Lijn
+    .multileader = Multiverwijslijn
     .multileader-draw-order = Tekenvolgorde multiverwijslijn:
-    .multiline-text =
-        Multiline
-        Tekst
+    .multiline-text = Multilijntekst
     .ordinate = Ordinaat
     .out = Uit
     .qdim-select-geometry-to-dimension-enter-when-d = QDIM Selecteer de te bematen geometrie (Enter om te voltooien):
@@ -3879,9 +3877,9 @@ properties =
     .mode = Modus
     .monochrome = Monochroom
     .more-colors = Meer kleuren...
-    .multileader = Multiverwijs Lijn
-    .multiline = Multilijn Tekst
-    .multileader-style = Multiverwijs Lijnstijl
+    .multileader = Multiverwijslijn
+    .multiline = Multilijntekst
+    .multileader-style = Multiverwijslijnstijl
     .multiple-lines = Meerdere regels
     .n-closed = N gesloten
     .n-density = N-dichtheid

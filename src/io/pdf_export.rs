@@ -20,8 +20,6 @@ use printpdf::{
     PdfFontHandle, PdfPage, PdfSaveOptions, Point, Polygon, PolygonRing, Pt, Rgb, TextItem,
     WindingOrder,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use std::io::Write;
 use std::path::Path;
 
 #[derive(Clone, Debug)]
@@ -192,24 +190,19 @@ pub fn export_pdf_pages(
     write_pdf_atomically(path, &bytes)
 }
 
-/// Atomically write PDF bytes to a file. Writes to a temporary file first,
-/// then renames it to the target path to avoid crashes when overwriting
-/// a file that is locked by another process (e.g., PDF reader).
+/// Write a complete PDF beside the destination, then replace it atomically.
 #[cfg(not(target_arch = "wasm32"))]
 fn write_pdf_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let file_name = path.file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| "Invalid file path".to_string())?;
-    let temp_path = dir.join(format!(".{}.tmp", file_name));
-
-    let mut file = std::fs::File::create(&temp_path)
-        .map_err(|e| format!("Failed to create temporary PDF file: {}", e))?;
-    file.write_all(bytes)
-        .map_err(|e| format!("Failed to write PDF data: {}", e))?;
-
-    std::fs::rename(&temp_path, path)
-        .map_err(|e| format!("Failed to write PDF file: {} (the file may be open in another application)", e))
+    let temp_path = super::save_temp_path(path);
+    if let Err(error) = std::fs::write(&temp_path, bytes) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(format!("Failed to write PDF data: {error}"));
+    }
+    if let Err(error) = super::replace_save_file(&temp_path, path) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(format!("Failed to replace PDF file: {error}"));
+    }
+    Ok(())
 }
 
 /// Show a parented PDF save-file dialog and return the chosen path.
@@ -1522,6 +1515,24 @@ fn emit_text(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atomic_write_replaces_an_existing_pdf() {
+        let path = std::env::temp_dir().join(format!(
+            "ocs-pdf-replace-{}-{}.pdf",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"old").unwrap();
+
+        write_pdf_atomically(&path, b"new").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn clip_and_scale_emit_pdf_bytes() {

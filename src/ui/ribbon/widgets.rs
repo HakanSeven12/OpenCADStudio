@@ -128,14 +128,13 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
         .0;
     let max_label_height = line_height * LARGE_LABEL_LINES + 0.5;
     let fits = |width: f32| {
-        ribbon_label_bounds(
+        let bounds = ribbon_label_bounds(
             renderer,
             label,
             width,
             advanced_text::Wrapping::Word,
-        )
-        .height
-            <= max_label_height
+        );
+        bounds.width <= width + 0.5 && bounds.height <= max_label_height
     };
 
     if fits(base_inner) {

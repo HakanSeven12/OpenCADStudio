@@ -114,7 +114,11 @@ pub fn format_length(value: f64) -> String {
             let per_foot = 12.0 * scale;
             let feet = (total / per_foot).trunc();
             let rem = (total - feet * per_foot) / scale;
-            format!("{}{:.0}'-{:.*}\"", sign, feet, prec, rem)
+            if feet == 0.0 {
+                format!("{}{:.*}\"", sign, prec, rem)
+            } else {
+                format!("{}{:.0}'-{:.*}\"", sign, feet, prec, rem)
+            }
         }
         4 | 5 => {
             // Architectural and fractional formats use 1/64-inch resolution.
@@ -142,13 +146,10 @@ pub fn format_length(value: f64) -> String {
             };
             let unit_suffix = if ctx.lunits == 4 { "\"" } else { "" };
             match feet {
-                Some(f) => {
-                    if f == 0.0 && whole > 0.0 {
-                        format!("{}{:.0}{}{}", sign, whole, frac_str, unit_suffix)
-                    } else {
-                        format!("{}{:.0}'-{:.0}{}{}", sign, f, whole, frac_str, unit_suffix)
-                    }
+                Some(f) if f == 0.0 => {
+                    format!("{}{:.0}{}{}", sign, whole, frac_str, unit_suffix)
                 }
+                Some(f) => format!("{}{:.0}'-{:.0}{}{}", sign, f, whole, frac_str, unit_suffix),
                 None => format!("{}{:.0}{}", sign, whole, frac_str),
             }
         }
@@ -1109,6 +1110,8 @@ mod length_format_tests {
     #[test]
     fn architectural_carries_into_feet() {
         assert_eq!(with_units(4, 4, 11.99), "11 63/64\"");
+        assert_eq!(with_units(4, 4, 0.5), "0 1/2\"");
+        assert_eq!(with_units(4, 4, -9.25), "-9 1/4\"");
         assert_eq!(with_units(4, 4, 11.999), "1'-0\"");
         assert_eq!(with_units(4, 4, 23.999), "2'-0\"");
         assert_eq!(with_units(4, 4, 66.5), "5'-6 1/2\"");
@@ -1118,6 +1121,8 @@ mod length_format_tests {
     #[test]
     fn engineering_carries_into_feet() {
         assert_eq!(with_units(3, 1, 11.94), "11.9\"");
+        assert_eq!(with_units(3, 1, 0.5), "0.5\"");
+        assert_eq!(with_units(3, 1, -9.25), "-9.3\"");
         assert_eq!(with_units(3, 1, 11.99), "1'-0.0\"");
         assert_eq!(with_units(3, 1, 23.99), "2'-0.0\"");
         assert_eq!(with_units(3, 2, 11.999), "1'-0.00\"");

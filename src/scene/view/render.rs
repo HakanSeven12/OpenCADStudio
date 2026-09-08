@@ -1216,8 +1216,9 @@ impl shader::Primitive for Primitive {
         let prepare_ms = nav_prepare_started.elapsed().as_secs_f64() * 1000.0;
         if let Some(sample) = self.nav_perf {
             crate::perf::record(format_args!(
-                "[perf] nav-prepare op={} space={} mode={} input={:.2}ms build={:.2}ms prepare={:.2}ms elapsed={:.2}ms viewports={}",
+                "[perf] nav-prepare op={} cause={} space={} mode={} input={:.2}ms build={:.2}ms prepare={:.2}ms elapsed={:.2}ms viewports={}",
                 sample.op.label(),
+                sample.cause,
                 sample.space,
                 sample.mode,
                 sample.input_ms,

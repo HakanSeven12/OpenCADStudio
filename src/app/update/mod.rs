@@ -334,8 +334,11 @@ impl OpenCADStudio {
         if let (Some(started), Some(before)) = (perf_started, perf_epoch_before) {
             let tab = &self.tabs[self.active_tab];
             if tab.scene.geometry_epoch != before {
-                tab.scene
-                    .record_nav_perf(crate::scene::NavPerfOp::Edit, started);
+                tab.scene.record_nav_perf_caused(
+                    crate::scene::NavPerfOp::Edit,
+                    perf_label,
+                    started,
+                );
             }
         }
         if let Some(started) = perf_started {

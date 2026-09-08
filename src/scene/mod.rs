@@ -1452,6 +1452,10 @@ impl NavPerfOp {
 #[derive(Clone, Copy, Debug)]
 pub(in crate::scene) struct NavPerfSample {
     pub(in crate::scene) op: NavPerfOp,
+    /// Which message caused it. An edit whose handler runs in under a
+    /// millisecond never reaches the `update` line's threshold, so without this
+    /// the log shows the latency but not what asked for it.
+    pub(in crate::scene) cause: &'static str,
     pub(in crate::scene) space: &'static str,
     pub(in crate::scene) mode: &'static str,
     pub(in crate::scene) started: iced::time::Instant,
@@ -2880,6 +2884,15 @@ impl Scene {
     }
 
     pub(crate) fn record_nav_perf(&self, op: NavPerfOp, started: iced::time::Instant) {
+        self.record_nav_perf_caused(op, "-", started);
+    }
+
+    pub(crate) fn record_nav_perf_caused(
+        &self,
+        op: NavPerfOp,
+        cause: &'static str,
+        started: iced::time::Instant,
+    ) {
         if !crate::perf::enabled() {
             return;
         }
@@ -2892,6 +2905,7 @@ impl Scene {
         };
         self.nav_perf_pending.set(Some(NavPerfSample {
             op,
+            cause,
             space,
             mode,
             started,

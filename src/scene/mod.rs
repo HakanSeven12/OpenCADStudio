@@ -9415,14 +9415,59 @@ vis_index={:.1} visible_probe={:.1}",
     }
 
     /// Resolve owner handles and block-record membership once per geometry epoch.
+    ///
+    /// The walk visits every entity in the drawing and the epoch moves on every
+    /// edit, so it used to run again for each one — 19 ms of a 55 ms selection
+    /// on a 586 k-entity drawing, to add a single handle to a single list.
+    ///
+    /// A lone addition is folded in instead. Only a lone one: entities are
+    /// appended to the document, so a single new handle belongs at the end of
+    /// its block's list, while `replay_since` returns several changes in no
+    /// particular order and each list is in document order because that is
+    /// draw order. Anything else — a removal, a modification that could move an
+    /// entity between blocks, more than one change — takes the full walk.
     fn block_members(&self) -> std::cell::Ref<'_, BlockMembers> {
+        let mut cached_epoch = None;
         {
             let cache = self.block_members_cache.borrow();
-            if cache.as_ref().is_some_and(|(epoch, _)| *epoch == self.geometry_epoch) {
-                drop(cache);
-                return std::cell::Ref::map(self.block_members_cache.borrow(), |c| {
-                    c.as_ref().unwrap()
+            if let Some((epoch, _)) = cache.as_ref() {
+                if *epoch == self.geometry_epoch {
+                    drop(cache);
+                    return std::cell::Ref::map(self.block_members_cache.borrow(), |c| {
+                        c.as_ref().unwrap()
+                    });
+                }
+                cached_epoch = Some(*epoch);
+            }
+        }
+
+        if let Some(since) = cached_epoch {
+            let lone_add = self.replay_since(since).filter(|deltas| {
+                deltas.len() == 1 && deltas[0].1 == ChangeKind::Added
+            });
+            if let Some(deltas) = lone_add {
+                let handle = deltas[0].0;
+                // Resolve the owner before touching the cache: both lookups
+                // borrow, and `entity_block_map` is its own `RefCell`.
+                let owner = self.document.get_entity(handle).and_then(|entity| {
+                    let owner = entity.common().owner_handle;
+                    if !owner.is_null() {
+                        Some(owner)
+                    } else {
+                        self.entity_block_map().get(&handle).copied()
+                    }
                 });
+                let mut cache = self.block_members_cache.borrow_mut();
+                if let Some((epoch, members)) = cache.as_mut() {
+                    if let Some(owner) = owner {
+                        members.entry(owner).or_default().push(handle);
+                    }
+                    *epoch = self.geometry_epoch;
+                    drop(cache);
+                    return std::cell::Ref::map(self.block_members_cache.borrow(), |c| {
+                        c.as_ref().unwrap()
+                    });
+                }
             }
         }
         let mut members: HashMap<Handle, Vec<Handle>> = HashMap::default();
@@ -10597,6 +10642,42 @@ mod journal_tests {
 
     // Differential oracle: the incrementally-patched entity index must always
     // equal a from-scratch rebuild after any add / move / erase.
+    #[test]
+    /// Folding a lone addition must land the handle where the full walk would
+    /// have put it — at the end of its block's list, because that list is in
+    /// document order and document order is draw order.
+    #[test]
+    fn folding_one_addition_matches_the_full_scan() {
+        use acadrust::entities::Line;
+        use acadrust::types::Vector3;
+
+        let mut scene = Scene::new();
+        fn add(scene: &mut Scene, x: f64) -> Handle {
+            scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x + 1.0, 0.0, 0.0),
+            )))
+        }
+        add(&mut scene, 0.0);
+        add(&mut scene, 1.0);
+        // Build the index, then add one more so the next call folds.
+        let block = scene.model_space_block_handle();
+        let before = scene.block_members().1.get(&block).cloned().unwrap_or_default();
+        let third = add(&mut scene, 2.0);
+        let folded = scene.block_members().1.get(&block).cloned().unwrap_or_default();
+
+        scene.block_members_cache.borrow_mut().take();
+        let rebuilt = scene.block_members().1.get(&block).cloned().unwrap_or_default();
+
+        assert_eq!(folded, rebuilt, "the folded index must equal a full rebuild");
+        assert_eq!(
+            folded.last(),
+            Some(&third),
+            "an appended entity belongs at the end of its block's list",
+        );
+        assert_eq!(folded.len(), before.len() + 1);
+    }
+
     #[test]
     fn block_member_index_matches_the_full_scan() {
         use acadrust::entities::Line;

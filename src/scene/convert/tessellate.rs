@@ -219,7 +219,33 @@ fn split_mixed_polyline(
 
     // Emit each arc segment as an analytical wire (CircleGpu target)
     for tg in tangent_geoms {
-        if matches!(tg, TangentGeom::Arc { .. }) {
+        if let TangentGeom::Arc {
+            center,
+            axis_x,
+            axis_y,
+            radius,
+            start_angle,
+            end_angle,
+        } = *tg
+        {
+            let mut arc_pts = Vec::with_capacity(17);
+            let n = 16;
+            let sweep = if end_angle >= start_angle {
+                end_angle - start_angle
+            } else {
+                end_angle - start_angle + std::f64::consts::TAU
+            };
+            for s in 0..=n {
+                let frac = s as f64 / n as f64;
+                let ang = start_angle + frac * sweep;
+                let p = [
+                    center[0] + radius * (ang.cos() * axis_x[0] + ang.sin() * axis_y[0]),
+                    center[1] + radius * (ang.cos() * axis_x[1] + ang.sin() * axis_y[1]),
+                    center[2] + radius * (ang.cos() * axis_x[2] + ang.sin() * axis_y[2]),
+                ];
+                arc_pts.push(p);
+            }
+            let (points, points_low) = points_to_ds(arc_pts);
             out.push(WireModel {
                 bg_adapt: None,
                 point_marker: None,
@@ -238,8 +264,8 @@ fn split_mixed_polyline(
                 dash_align_end: None,
                 text_verts: Vec::new(),
                 name: name.to_string(),
-                points: Vec::new(),
-                points_low: Vec::new(),
+                points,
+                points_low,
                 color,
                 selected,
                 pattern_length,

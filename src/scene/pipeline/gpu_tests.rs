@@ -408,3 +408,76 @@ fn late_device_errors_invalidate_uploaded_content_and_targets() {
         "the same error must not invalidate twice"
     );
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn test_pline_arc_switch_preview_and_render() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+    let depth = rustc_hash::FxHashMap::default();
+    use crate::command::CadCommand;
+
+    let mut cmd = crate::modules::draw::draw::polyline::PlineCommand::new();
+    cmd.on_point(glam::DVec3::new(0.0, 0.0, 0.0));
+    let _res = cmd.on_point(glam::DVec3::new(10.0, 0.0, 0.0));
+    cmd.set_live_handle(acadrust::Handle::new(1));
+    cmd.on_text_input("A");
+
+    let test_points = [
+        glam::DVec3::new(10.0, 0.0, 0.0),
+        glam::DVec3::new(10.0000001, 0.0, 0.0),
+        glam::DVec3::new(10.0, 0.0000001, 0.0),
+        glam::DVec3::new(10.0, -0.0000001, 0.0),
+        glam::DVec3::new(9.9999999, 0.0, 0.0),
+        glam::DVec3::new(15.0, 5.0, 0.0),
+        glam::DVec3::new(10.0, 10.0, 0.0),
+        glam::DVec3::new(5.0, 5.0, 0.0),
+        glam::DVec3::new(0.0, 0.0, 0.0),
+    ];
+
+    pipeline.ensure_depth_texture(&device, iced::Size::new(512, 512));
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("test_target"),
+        size: wgpu::Extent3d {
+            width: 512,
+            height: 512,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let target = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    for pt in test_points {
+        let wire = cmd.on_mouse_move(pt);
+        if let Some(w) = wire {
+            pipeline.upload_preview_wires(&device, &queue, &[w], &depth);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("test_encoder"),
+            });
+            pipeline.render(
+                &mut encoder,
+                &target,
+                iced::Size::new(512, 512),
+                iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+                [0.0, 0.0, 0.0, 1.0],
+                false,
+                false,
+                false,
+            );
+            queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        }
+    }
+}

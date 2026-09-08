@@ -1,11 +1,11 @@
 use super::{
     document::{
         DeltaSnapshot, HistorySnapshot, ObjectEntryDelta, ObjectVisibilitySnapshot,
-        PendingHistorySnapshot, StructureSnapshot, TableEntryDelta,
+        PendingHistorySnapshot, SketchConstraintsSnapshot, StructureSnapshot, TableEntryDelta,
     },
     OpenCADStudio,
 };
-use crate::scene::ObjectIsolationState;
+use crate::scene::{ChangeKind, ObjectIsolationState};
 use acadrust::{EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet as HashSet};
 use std::sync::Arc;
@@ -182,6 +182,40 @@ impl OpenCADStudio {
                 label: label.into(),
             }),
         );
+    }
+
+    /// Design doc §5.1/§9: makes a persistent-constraint add/remove
+    /// undoable. `before` is the scope's constraint set captured *before*
+    /// the caller's edit (by the caller, since this fn only sees "now");
+    /// `after` is read fresh here, so call this once the edit is done.
+    pub(super) fn push_sketch_constraints_history(
+        &mut self,
+        i: usize,
+        label: impl Into<String>,
+        scope: crate::scene::sketch_constraints::SketchScope,
+        before: Option<crate::scene::sketch_constraints::SketchConstraintSet>,
+    ) {
+        self.finish_pending_history(i);
+        let after = self.tabs[i].scene.sketch_constraint_set(scope).cloned();
+        self.push_undo_entry(
+            i,
+            HistorySnapshot::SketchConstraints(SketchConstraintsSnapshot { scope, before, after, label: label.into() }),
+        );
+    }
+
+    fn apply_sketch_constraints_state(&mut self, i: usize, snapshot: &SketchConstraintsSnapshot, undo: bool) {
+        let state = if undo { snapshot.before.clone() } else { snapshot.after.clone() };
+        let scene = &mut self.tabs[i].scene;
+        let set = state.unwrap_or_else(|| crate::scene::sketch_constraints::SketchConstraintSet::new(snapshot.scope));
+        // The restored set's geometry may be stale (e.g. redo re-adds a
+        // constraint whose entities moved via other edits since) — resolve
+        // every entity it references, same as a fresh add would.
+        let touched: Vec<Handle> = set.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.entity)).collect();
+        *scene.sketch_constraint_set_mut(snapshot.scope) = set;
+        if !touched.is_empty() {
+            let changes: Vec<(Handle, ChangeKind)> = touched.into_iter().map(|h| (h, ChangeKind::Modified)).collect();
+            scene.bump_entities(&changes);
+        }
     }
 
     pub(super) fn push_entity_group_history(
@@ -1102,6 +1136,13 @@ impl OpenCADStudio {
                         .redo_stack
                         .push(HistorySnapshot::ObjectVisibility(v));
                 }
+                HistorySnapshot::SketchConstraints(s) => {
+                    self.apply_sketch_constraints_state(i, &s, true);
+                    self.tabs[i]
+                        .history
+                        .redo_stack
+                        .push(HistorySnapshot::SketchConstraints(s));
+                }
             }
         }
         self.finish_history_apply(i, had_full, layer_panel_changed, &changes);
@@ -1156,6 +1197,13 @@ impl OpenCADStudio {
                         .history
                         .undo_stack
                         .push(HistorySnapshot::ObjectVisibility(v));
+                }
+                HistorySnapshot::SketchConstraints(s) => {
+                    self.apply_sketch_constraints_state(i, &s, false);
+                    self.tabs[i]
+                        .history
+                        .undo_stack
+                        .push(HistorySnapshot::SketchConstraints(s));
                 }
             }
         }

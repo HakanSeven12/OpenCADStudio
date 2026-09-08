@@ -3292,6 +3292,10 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::ResolveOneSketchConflict => {
+                self.resolve_one_sketch_conflict();
+                Task::none()
+            }
             Message::TogglePolar => {
                 self.polar_mode ^= true;
                 if self.polar_mode {
@@ -5869,6 +5873,18 @@ impl OpenCADStudio {
                     tab.scene.model_lineweight_scale = scale;
                 }
                 self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::RibbonLabelFontSizeChanged(value) => {
+                self.ribbon.set_label_font_size(value);
+                self.save_config();
+                Task::none()
+            }
+
+            Message::RibbonGroupTitleFontSizeChanged(value) => {
+                self.ribbon.set_group_title_font_size(value);
+                self.save_config();
                 Task::none()
             }
 

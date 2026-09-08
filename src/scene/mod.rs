@@ -43,6 +43,9 @@ mod preview;
 mod project;
 mod scene_markers;
 mod selection;
+pub mod sketch_constraints;
+mod sketch_persist;
+mod sketch_solve;
 
 pub(crate) use boundary::{
     boundary_entities, boundary_entities_from_sources, boundary_faces,
@@ -1863,6 +1866,19 @@ pub struct Scene {
     /// Conservative association hint: unknown until scanned, then updated from
     /// changed entities. Retaining `true` after deletion only costs an extra scan.
     has_associative_centers: std::cell::Cell<Option<bool>>,
+    /// Persistent parametric constraint sets, one per active
+    /// [`sketch_constraints::SketchScope`]. Lives on `Scene` (not
+    /// `DocumentTab`, despite `docs/parametric_system_design.md` §2.1's
+    /// original suggestion) because `bump_entities` — the hook
+    /// `refresh_sketch_constraints` rides, per that doc's §4.1 — is a
+    /// `Scene` method with no access to the owning `DocumentTab`; discovered
+    /// while implementing that stage, not anticipated in the design doc.
+    /// Synced with each scope's own `OCS_SKETCH_CONSTRAINTS` XRecord around
+    /// open/save (design doc §8 stage 4, `sketch_persist.rs`) — the "lazy"
+    /// model: this `Vec` is the live in-memory state every add/remove/solve
+    /// touches directly, materialized into `document.objects` only right
+    /// before a save and read back right after a load.
+    pub(crate) sketch_constraints: Vec<sketch_constraints::SketchConstraintSet>,
     /// Tessellated block definitions in block-local coords, keyed by render
     /// background and block epoch. Model and Paper adapt black/white colours
     /// differently; retaining both variants prevents a full block rebuild on
@@ -2094,6 +2110,7 @@ impl Scene {
             layout_type_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
             associative_hatch_source_cache: RefCell::new(None),
+            sketch_constraints: Vec::new(),
             has_associative_centers: std::cell::Cell::new(None),
             block_defn_cache: RefCell::new(HashMap::default()),
             entity_index_cache: RefCell::new(None),
@@ -2640,6 +2657,13 @@ impl Scene {
         for change in self.refresh_associative_hatches(&changes) {
             if !changes.iter().any(|(handle, _)| *handle == change.0) {
                 changes.push(change);
+            }
+        }
+        if !self.sketch_constraints.is_empty() {
+            for change in self.refresh_sketch_constraints(&changes) {
+                if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                    changes.push(change);
+                }
             }
         }
         if !changes.is_empty() {

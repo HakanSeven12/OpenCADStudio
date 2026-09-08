@@ -1939,6 +1939,10 @@ pub enum Message {
     CursorTypeChanged(settings::CursorType),
     /// Set the model-space lineweight preview scale from Options.
     LineweightDisplayScaleChanged(i32),
+    /// Set the ribbon's large-button icon-label font size from Options.
+    RibbonLabelFontSizeChanged(i32),
+    /// Set the ribbon's panel-title ("Draw", "Modify", …) font size from Options.
+    RibbonGroupTitleFontSizeChanged(i32),
     /// Edit the optional crosshair RGB value; blank restores automatic contrast.
     CrosshairColorChanged(String),
     /// Set the default type/version used when first saving a new drawing.
@@ -2394,6 +2398,14 @@ pub enum Message {
     CloseLayoutList,
     /// Cycle the coordinate readout mode ($COORDS): static → live → polar.
     CycleCoordsMode,
+    /// Design doc §6.4, stage 11: removes one flagged redundant/conflicting
+    /// constraint from the current sketch scope (a bounded v1 of the
+    /// "SketchXpert-style" resolver — one guided removal per click rather
+    /// than a candidate-list panel with a cyclable preview; see the status
+    /// bar's `ResolveOneSketchConflict` pill and
+    /// `OpenCADStudio::resolve_one_sketch_conflict` for the full rationale).
+    /// No-op if the scope currently has no flagged conflict.
+    ResolveOneSketchConflict,
     /// Toggle the status-bar customization menu open/closed.
     ToggleStatusBarMenu,
     /// Close the status-bar customization menu.
@@ -3965,9 +3977,9 @@ pub fn run() -> iced::Result {
         if let Some(tab) = state.tabs.get(state.active_tab) {
             let dot = if tab.dirty { "● " } else { "" };
             let name = tab.tab_display_name();
-            format!("{}Open CAD Studio {} - {}", dot, env!("OCS_APP_VERSION"), name)
+            format!("{}OCS-{} - {}", dot, env!("OCS_BUILD_STAMP"), name)
         } else {
-            concat!("Open CAD Studio ", env!("OCS_APP_VERSION")).to_string()
+            concat!("OCS-", env!("OCS_BUILD_STAMP")).to_string()
         }
     })
     .theme(|state: &OpenCADStudio, _| state.active_theme.clone())
@@ -3999,7 +4011,7 @@ pub fn run_web() -> iced::Result {
         OpenCADStudio::view_main,
     )
     .subscription(OpenCADStudio::subscription)
-    .title(|_state: &OpenCADStudio| concat!("Open CAD Studio ", env!("OCS_APP_VERSION")).to_string())
+    .title(|_state: &OpenCADStudio| concat!("OCS-", env!("OCS_BUILD_STAMP")).to_string())
     .theme(|state: &OpenCADStudio| state.active_theme.clone())
     .backend(iced::Backend::Hardware(iced::backend::Api::OpenGL))
     .font(iced_aw::ICED_AW_FONT_BYTES)

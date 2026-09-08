@@ -2,6 +2,7 @@
 
 mod changelog;
 pub mod clipboard;
+pub mod constrain;
 pub mod defaults;
 mod donate;
 pub mod draw;
@@ -33,6 +34,7 @@ impl CadModule for DrawModule {
         };
         use crate::modules::insert::{create_block, insert_block};
         use clipboard::{copy_clip, cut, paste};
+        use constrain::{angle_tool, coincident_tool, distance_tool, equal, horizontal, parallel, perpendicular, tangent, vertical};
         use draw::{arc, circle, ellipse, hatch, line, polyline, shapes};
         use groups::{group, ungroup};
         use layers::{
@@ -118,6 +120,20 @@ impl CadModule for DrawModule {
                         delete::tool().into(),
                         explode::tool().into(),
                         offset::tool().into(),
+                    ],
+                },
+                RibbonGroup {
+                    title: "Constraints",
+                    tools: vec![
+                        horizontal::tool().into(),
+                        vertical::tool().into(),
+                        parallel::tool().into(),
+                        perpendicular::tool().into(),
+                        equal::tool().into(),
+                        tangent::tool().into(),
+                        coincident_tool::tool().into(),
+                        distance_tool::tool().into(),
+                        angle_tool::tool().into(),
                     ],
                 },
                 RibbonGroup {

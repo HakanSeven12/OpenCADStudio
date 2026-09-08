@@ -41,6 +41,8 @@ pub fn view_window<'a>(
     crosshair_color: Option<[u8; 3]>,
     crosshair_color_input: &'a str,
     lineweight_display_scale: i32,
+    ribbon_label_font_size: i32,
+    ribbon_group_title_font_size: i32,
     model_space: &'a crate::app::config::ModelSpaceThemeConfig,
     model_bg_input: &'a str,
     paper_bg_input: &'a str,
@@ -533,6 +535,56 @@ pub fn view_window<'a>(
         .push(Space::new().height(6))
         .push(
             text(crate::t!("Changes the on-screen width in Model without affecting plotted output."))
+                .size(11)
+                .width(sizing.width),
+        )
+        .push(Space::new().height(24))
+        .push(text(crate::t!("Ribbon")).size(15))
+        .push(Space::new().height(10))
+        .push(
+            row![
+                text(crate::t!("Icon label size")).size(12).width(140),
+                slider(
+                    8..=16,
+                    ribbon_label_font_size.clamp(8, 16),
+                    Message::RibbonLabelFontSizeChanged,
+                )
+                .step(1)
+                .width(Fill),
+                text(format!("{}px", ribbon_label_font_size.clamp(8, 16)))
+                    .size(11)
+                    .width(44),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(6))
+        .push(
+            text(crate::t!("Font size of the caption under each ribbon button's icon."))
+                .size(11)
+                .width(sizing.width),
+        )
+        .push(Space::new().height(10))
+        .push(
+            row![
+                text(crate::t!("Section title size")).size(12).width(140),
+                slider(
+                    7..=14,
+                    ribbon_group_title_font_size.clamp(7, 14),
+                    Message::RibbonGroupTitleFontSizeChanged,
+                )
+                .step(1)
+                .width(Fill),
+                text(format!("{}px", ribbon_group_title_font_size.clamp(7, 14)))
+                    .size(11)
+                    .width(44),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(6))
+        .push(
+            text(crate::t!("Font size of each panel's own title (Draw, Modify, Layers, …)."))
                 .size(11)
                 .width(sizing.width),
         );

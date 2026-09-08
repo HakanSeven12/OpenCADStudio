@@ -775,6 +775,8 @@ impl OpenCADStudio {
             annotation_auto_scale: self.annotation_auto_scale,
             ribbon: crate::app::config::RibbonConfig {
                 collapse: self.ribbon.collapse_mode(),
+                label_font_size: self.ribbon.label_font_size(),
+                group_title_font_size: self.ribbon.group_title_font_size(),
             },
             plot: self.plot_dialog.clone(),
             shortcuts: crate::app::config::ShortcutConfig {
@@ -832,6 +834,9 @@ impl OpenCADStudio {
         self.dock = dock;
         self.annotation_auto_scale = cfg.annotation_auto_scale.clamp(-4, 4);
         self.ribbon.set_collapse_mode(cfg.ribbon.collapse);
+        self.ribbon.set_label_font_size(cfg.ribbon.label_font_size);
+        self.ribbon
+            .set_group_title_font_size(cfg.ribbon.group_title_font_size);
         self.plot_dialog = cfg.plot;
         self.shortcut_bindings = cfg.shortcuts.bindings.into_iter().collect();
         self.shortcut_bindings
@@ -1383,6 +1388,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 self.tabs[i].scene.material_base_dir =
                     path.parent().map(std::path::Path::to_path_buf);
                 self.tabs[i].scene.document = doc;
+                // Design doc §8 stage 4: read back any persisted sketch
+                // constraint sets right after the document is installed.
+                self.tabs[i].scene.load_sketch_constraints_from_document();
                 self.tabs[i].active_layer = self.tabs[i]
                     .scene
                     .document
@@ -1646,6 +1654,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         self.tabs[i].scene.document.header.user_real1 =
             self.tabs[i].scene.annotation_scale as f64;
         self.sync_solid_models_for_save(i);
+        // Design doc §8 stage 4: write any sketch constraint sets into the
+        // document right before it's serialized.
+        self.tabs[i].scene.materialize_sketch_constraints_for_save();
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2596,6 +2607,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     sync_annotation_scale_header(&mut self.tabs[i].scene);
                     self.stamp_header_sysvars(i);
                     self.sync_solid_models_for_save(i);
+                    self.tabs[i].scene.materialize_sketch_constraints_for_save();
                     let tab_id = self.tabs[i].id;
                     let bounds = crate::ui::wrap_bar::dropdown_bounds(
                         crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,

@@ -849,6 +849,105 @@ impl OpenCADStudio {
         TableCellEditStart::Started
     }
 
+    /// Design doc §6.2 (stage 8, Phase B live inference): after a `LINE`
+    /// command commits `new_handle`, auto-adds a Coincident constraint for
+    /// every endpoint that already coincides with an existing entity's
+    /// point in the current scope (`sketch_constraints::infer_coincident_refs`).
+    /// Suppressible by holding Shift while placing the point — reuses the
+    /// existing `shift_down` tracking rather than the design doc's proposed
+    /// new `CadCommand::set_modifier` mechanism, since this dispatch site
+    /// already reads `self.shift_down` directly (`apply_cmd_result_inner`'s
+    /// Ctrl/Shift push at :392-393) and needs no per-command plumbing.
+    /// No-op (and no undo entry) when nothing was inferred.
+    fn infer_and_add_coincident_constraints(&mut self, i: usize, new_handle: Handle, entity: &acadrust::EntityType) {
+        if self.shift_down {
+            return;
+        }
+        let scope = self.tabs[i].current_sketch_scope();
+        let pairs = crate::scene::sketch_constraints::infer_coincident_refs(
+            &self.tabs[i].scene.document,
+            scope,
+            new_handle,
+            entity,
+        );
+        if pairs.is_empty() {
+            return;
+        }
+        let constraints_before = self.tabs[i].scene.sketch_constraint_set(scope).cloned();
+        let mut touched: Vec<Handle> = Vec::new();
+        for (new_ref, existing_ref) in &pairs {
+            touched.push(new_ref.entity);
+            touched.push(existing_ref.entity);
+        }
+        touched.sort();
+        touched.dedup();
+        let label = "Coincident (inferred)";
+        // Mirrors `CmdResult::AddSketchConstraint`'s handler: brackets the
+        // add-and-solve in its own `begin_undo`/`commit_undo_delta` so any
+        // geometry the solve moves (the two points may be within epsilon but
+        // not bit-identical) is captured as an undoable `Delta`, then pushes
+        // the constraint-set edit itself as the separate, adjacent
+        // `SketchConstraints` entry stage 9 established.
+        let pending = self.begin_undo(i, label, touched.len(), true);
+        for (new_ref, existing_ref) in pairs {
+            self.tabs[i].scene.sketch_constraint_set_mut(scope).add(
+                crate::scene::sketch_constraints::ConstraintKind::Coincident,
+                vec![new_ref, existing_ref],
+                None,
+            );
+        }
+        let changes: Vec<(Handle, crate::scene::ChangeKind)> =
+            touched.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
+        self.tabs[i].scene.bump_entities(&changes);
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
+        self.push_sketch_constraints_history(i, label, scope, constraints_before);
+    }
+
+    /// Design doc §6.4 (stage 11, Phase C): removes the first
+    /// redundant/conflicting constraint `SketchConstraintSet::conflicts`
+    /// (populated by `solve_scope`'s `ocs_gcs::diagnosis::classify_redundant`
+    /// call, stage 10) flags in the active tab's current sketch scope, and
+    /// re-solves.
+    ///
+    /// **Scope-down from this doc**: a full `ConflictResolverPanel` — a
+    /// window listing every flagged constraint by name with a cyclable live
+    /// preview of each candidate fix before committing — is real, standalone
+    /// UI work (new window state, `Message` plumbing for open/close/select/
+    /// preview/commit) this pass didn't have live-UI-testing access to
+    /// verify (the desktop session's app focus was blocked by an unrelated
+    /// stuck System Settings window for the whole of this stage). What's
+    /// built instead is bounded but real: a status-bar pill, visible only
+    /// when the current scope has at least one flagged conflict, that
+    /// removes exactly one flagged constraint per click — "guided" in that
+    /// the flagged set already comes from `classify_redundant`, just without
+    /// per-candidate naming/preview/choice. A user with several conflicts
+    /// clicks it repeatedly, watching the DOF/conflict count drop, same
+    /// outcome as the panel's "remove and re-solve" action minus the
+    /// browsing UI. The full panel remains open follow-up work, not silently
+    /// dropped.
+    pub(super) fn resolve_one_sketch_conflict(&mut self) {
+        let i = self.active_tab;
+        let scope = self.tabs[i].current_sketch_scope();
+        let Some(set) = self.tabs[i].scene.sketch_constraint_set(scope) else { return };
+        let Some(&(id, _kind)) = set.conflicts.first() else { return };
+        let Some(constraint) = set.get(id) else { return };
+        let touched: Vec<Handle> = constraint.refs.iter().map(|r| r.entity).collect();
+        let label = "Remove conflicting constraint";
+
+        let constraints_before = Some(set.clone());
+        let pending = self.begin_undo(i, label, touched.len(), true);
+        self.tabs[i].scene.sketch_constraint_set_mut(scope).remove(id);
+        let changes: Vec<(Handle, crate::scene::ChangeKind)> =
+            touched.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
+        self.tabs[i].scene.bump_entities(&changes);
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
+        self.push_sketch_constraints_history(i, label, scope, constraints_before);
+    }
+
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         let preserve_commit_layer = self.tabs[i]
@@ -972,6 +1071,20 @@ impl OpenCADStudio {
                 }
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
+                }
+                // Stage 8/§6.2: live inference, scoped to `LINE` (the design
+                // doc's own example) rather than every `CommitEntity` source —
+                // FILLET/OFFSET/MIRROR/etc. also route Lines through this same
+                // dispatch and shouldn't silently acquire constraints a user
+                // never asked for.
+                if let Some(handle) = committed {
+                    let is_line_command =
+                        self.tabs[i].active_cmd.as_ref().is_some_and(|c| c.name() == "LINE");
+                    if is_line_command {
+                        if let Some(new_entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                            self.infer_and_add_coincident_constraints(i, handle, &new_entity);
+                        }
+                    }
                 }
             }
             CmdResult::CommitEntities(entities) => {
@@ -2131,6 +2244,58 @@ impl OpenCADStudio {
                     self.command_line.push_info(&prompt);
                 }
                 self.refresh_properties();
+            }
+            CmdResult::AddSketchConstraint { kind, refs, driving_param, label } => {
+                let scope = self.tabs[i].current_sketch_scope();
+                // Design doc §5.1/§9: captured before the add so the
+                // constraint-set edit itself (not just the geometry it
+                // triggers) is undoable — pushed as its own history entry
+                // below, adjacent to (not merged into) the entity delta.
+                let constraints_before = self.tabs[i].scene.sketch_constraint_set(scope).cloned();
+                let touched: Vec<Handle> = refs.iter().map(|r| r.entity).collect();
+                let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i].scene.sketch_constraint_set_mut(scope).add(kind, refs, driving_param);
+                let changes: Vec<(Handle, crate::scene::ChangeKind)> = touched
+                    .into_iter()
+                    .map(|h| (h, crate::scene::ChangeKind::Modified))
+                    .collect();
+                self.tabs[i].scene.bump_entities(&changes);
+                self.tabs[i].dirty = true;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.command_line.push_output("Constraint applied.");
+                self.refresh_properties();
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+                self.push_sketch_constraints_history(i, label, scope, constraints_before);
+            }
+            CmdResult::AddCoincidentConstraint { point_a, point_b, label } => {
+                let scope = self.tabs[i].current_sketch_scope();
+                let to_world = |p: glam::DVec3| acadrust::types::Vector3::new(p.x, p.y, p.z);
+                let resolved_a =
+                    crate::scene::sketch_constraints::nearest_sketch_point(&self.tabs[i].scene.document, scope, to_world(point_a), None);
+                let resolved_b = resolved_a.and_then(|ref_a| {
+                    crate::scene::sketch_constraints::nearest_sketch_point(&self.tabs[i].scene.document, scope, to_world(point_b), None)
+                        .filter(|ref_b| *ref_b != ref_a)
+                });
+                match (resolved_a, resolved_b) {
+                    (Some(ref_a), Some(ref_b)) => {
+                        return self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                            kind: crate::scene::sketch_constraints::ConstraintKind::Coincident,
+                            refs: vec![ref_a, ref_b],
+                            driving_param: None,
+                            label,
+                        });
+                    }
+                    _ => {
+                        self.command_line.push_error(
+                            "Coincident: pick didn't land on a point (endpoint, center, or vertex) — enable an Endpoint/Center object snap and try again.",
+                        );
+                        self.tabs[i].active_cmd = None;
+                        self.tabs[i].snap_result = None;
+                    }
+                }
             }
             CmdResult::ReassociateCenterMark { target, source, point } => {
                 if self.reject_locked_edit(i, target) {
@@ -4709,6 +4874,9 @@ impl OpenCADStudio {
             let groups = self.clipboard_deps.groups.clone();
             self.tabs[i].scene.recreate_groups(groups, &handle_map);
         }
+        // Design doc §12: a constraint entirely between pasted entities
+        // follows them, matching in-drawing COPY (`Scene::copy_entities`).
+        self.tabs[i].scene.duplicate_sketch_constraints_for(&handle_map);
         // Incremental: `add_entity` already tessellated every pasted top-level
         // solid, and existing document solids are still cached — so only newly
         // introduced block-definition solids need building. The full rebuild
@@ -5649,4 +5817,250 @@ fn resample_widths(source: &[(f64, f64)], count: usize) -> Vec<(f64, f64)> {
             source[source_index]
         })
         .collect()
+}
+
+#[cfg(test)]
+mod sketch_constraint_undo_tests {
+    use super::*;
+    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef, SketchScope};
+
+    fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> Handle {
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(acadrust::EntityType::Line(acadrust::entities::Line::from_points(
+                acadrust::types::Vector3::new(x1, y1, 0.0),
+                acadrust::types::Vector3::new(x2, y2, 0.0),
+            )))
+    }
+
+    fn line_angle_deg(app: &OpenCADStudio, handle: Handle) -> f64 {
+        match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(acadrust::EntityType::Line(l)) => (l.end.y - l.start.y).atan2(l.end.x - l.start.x).to_degrees(),
+            other => panic!("expected a Line, got {other:?}"),
+        }
+    }
+
+    /// Design doc §5.1/§9: adding a persistent constraint must itself be
+    /// undoable/redoable — not just the geometry it happens to move. This is
+    /// the scoped-down §5.1(a) alternative (not the §5.1(b) "live XRecord"
+    /// approach, which needs stage 4/save-load): the constraint-set edit is
+    /// pushed as its own `HistorySnapshot::SketchConstraints` entry, adjacent
+    /// to but not merged into the entity `Delta` the solve produced. So a
+    /// compound add-and-solve costs two undo/redo presses, not one — the
+    /// first press (topmost entry, pushed last) removes the constraint
+    /// record while leaving the solved geometry in place; the second
+    /// (the earlier `Delta` entry) reverts the geometry itself.
+    #[test]
+    fn adding_a_constraint_is_undoable_and_redoable_in_two_steps() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let line = add_line(&mut app, 0.0, 0.0, 10.0, 3.0);
+        let original_angle = line_angle_deg(&app, line);
+        assert!((original_angle - 16.699244).abs() < 1e-3);
+
+        let _ = app.apply_cmd_result(CmdResult::AddSketchConstraint {
+            kind: ConstraintKind::Horizontal,
+            refs: vec![SketchRef::whole(line)],
+            driving_param: None,
+            label: "Horizontal constraint",
+        });
+        assert!(line_angle_deg(&app, line).abs() < 1e-6, "constraint should have leveled the line");
+        assert_eq!(
+            app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap().constraints.len(),
+            1
+        );
+
+        // First undo: pops the (later-pushed) SketchConstraints entry —
+        // removes the constraint record but leaves the already-solved
+        // geometry alone.
+        app.undo_steps(1);
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .sketch_constraint_set(SketchScope::ModelSpace)
+                .map(|s| s.constraints.len())
+                .unwrap_or(0),
+            0,
+            "first undo should remove the constraint record"
+        );
+        assert!(line_angle_deg(&app, line).abs() < 1e-6, "first undo should not yet touch the solved geometry");
+
+        // Second undo: pops the Delta entry — reverts the geometry.
+        app.undo_steps(1);
+        assert!(
+            (line_angle_deg(&app, line) - original_angle).abs() < 1e-3,
+            "second undo should restore the pre-constraint angle"
+        );
+
+        // Redo replays in the same two-step order, symmetric with undo.
+        app.redo_steps(1);
+        assert!(line_angle_deg(&app, line).abs() < 1e-6, "first redo should re-level the line");
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .sketch_constraint_set(SketchScope::ModelSpace)
+                .map(|s| s.constraints.len())
+                .unwrap_or(0),
+            0,
+            "first redo should not yet restore the constraint record"
+        );
+
+        app.redo_steps(1);
+        assert_eq!(
+            app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap().constraints.len(),
+            1,
+            "second redo should restore the constraint record"
+        );
+    }
+
+    /// Design doc §6.2 (stage 8): drawing a `LINE` whose endpoint already
+    /// coincides with an existing entity's point should auto-add a
+    /// Coincident constraint — suppressible by holding Shift.
+    #[test]
+    fn drawing_a_line_onto_an_existing_endpoint_infers_a_coincident_constraint() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let existing = add_line(&mut app, 0.0, 0.0, 5.0, 0.0);
+
+        let new_line = acadrust::EntityType::Line(acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(5.0, 0.0, 0.0), // exactly on `existing`'s end point
+            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        ));
+        app.tabs[app.active_tab].active_cmd = Some(Box::new(crate::modules::draw::draw::line::LineCommand::new()));
+        let _ = app.apply_cmd_result(CmdResult::CommitEntity(new_line));
+
+        let set = app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).expect("a constraint set should exist");
+        assert_eq!(set.constraints.len(), 1, "an inferred Coincident constraint should have been added");
+        let c = &set.constraints[0];
+        assert_eq!(c.kind, ConstraintKind::Coincident);
+        let touches_existing = c.refs.iter().any(|r| r.entity == existing);
+        assert!(touches_existing, "the inferred constraint should reference the pre-existing line");
+    }
+
+    /// Same setup as above, but with Shift held: inference must be
+    /// suppressed entirely.
+    #[test]
+    fn shift_suppresses_the_coincident_inference() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _existing = add_line(&mut app, 0.0, 0.0, 5.0, 0.0);
+
+        let new_line = acadrust::EntityType::Line(acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(5.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        ));
+        app.tabs[app.active_tab].active_cmd = Some(Box::new(crate::modules::draw::draw::line::LineCommand::new()));
+        app.shift_down = true;
+        let _ = app.apply_cmd_result(CmdResult::CommitEntity(new_line));
+
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .sketch_constraint_set(SketchScope::ModelSpace)
+                .map(|s| s.constraints.len())
+                .unwrap_or(0),
+            0,
+            "Shift should have suppressed the inference"
+        );
+    }
+
+    /// Design doc §6.4 (stage 11): the bounded v1 conflict resolver removes
+    /// one flagged constraint per call and re-solves, and the removal itself
+    /// is undoable/redoable via the same stage-9 mechanism.
+    #[test]
+    fn resolve_one_sketch_conflict_removes_a_flagged_constraint_and_is_undoable() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let line = add_line(&mut app, 0.0, 0.0, 10.0, 3.0);
+
+        let _ = app.apply_cmd_result(CmdResult::AddSketchConstraint {
+            kind: ConstraintKind::Horizontal,
+            refs: vec![SketchRef::whole(line)],
+            driving_param: None,
+            label: "Horizontal constraint",
+        });
+        let _ = app.apply_cmd_result(CmdResult::AddSketchConstraint {
+            kind: ConstraintKind::Horizontal,
+            refs: vec![SketchRef::whole(line)],
+            driving_param: None,
+            label: "Horizontal constraint",
+        }); // exact duplicate — flagged redundant once bumped
+        app.tabs[app.active_tab].scene.bump_entities(&[(line, crate::scene::ChangeKind::Modified)]);
+
+        let set = app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap();
+        assert_eq!(set.constraints.len(), 2);
+        assert_eq!(set.conflicts.len(), 1, "the duplicate should have been flagged");
+
+        app.resolve_one_sketch_conflict();
+        let set = app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap();
+        assert_eq!(set.constraints.len(), 1, "one of the two duplicates should have been removed");
+
+        // Undo restores it. The removal pushes at least its own
+        // `SketchConstraints` entry (stage 9's mechanism); it may or may not
+        // also push a geometry `Delta`, depending on whether the resolve's
+        // own re-solve actually moved anything (here it shouldn't — removing
+        // a duplicate Horizontal changes nothing already-horizontal) — so
+        // undo one step at a time until the constraint reappears, rather
+        // than asserting a fixed step count.
+        for _ in 0..5 {
+            if app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap().constraints.len() == 2 {
+                break;
+            }
+            app.undo_steps(1);
+        }
+        let set = app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap();
+        assert_eq!(set.constraints.len(), 2, "undo should restore the removed constraint");
+    }
+
+    /// Design doc §6.1's manual Coincident UI: two picks landing on two
+    /// different lines' endpoints should resolve to a real `SketchRef` pair
+    /// and add a Coincident constraint — the same `AddCoincidentConstraint`
+    /// → `nearest_sketch_point` → `AddSketchConstraint` path
+    /// `CoincidentConstraintCommand` drives via its two `on_point` calls.
+    #[test]
+    fn coincident_command_resolves_two_picked_points_into_a_constraint() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let a = add_line(&mut app, 0.0, 0.0, 5.0, 0.0);
+        let b = add_line(&mut app, 20.0, 0.0, 20.0, 5.0); // deliberately far from `a`, so the two picks are unambiguous
+
+        let _ = app.apply_cmd_result(CmdResult::AddCoincidentConstraint {
+            point_a: glam::DVec3::new(5.0, 0.0, 0.0),  // a's end
+            point_b: glam::DVec3::new(20.0, 0.0, 0.0), // b's start
+            label: "Coincident constraint",
+        });
+
+        let set = app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).expect("a constraint set should exist");
+        assert_eq!(set.constraints.len(), 1);
+        let c = &set.constraints[0];
+        assert_eq!(c.kind, ConstraintKind::Coincident);
+        let entities: Vec<Handle> = c.refs.iter().map(|r| r.entity).collect();
+        assert!(entities.contains(&a) && entities.contains(&b), "the constraint should reference both lines");
+    }
+
+    /// A pick that doesn't land near any real point (no object snap match)
+    /// must not add a constraint — it should report an error and leave the
+    /// scope untouched rather than silently constraining the wrong thing.
+    #[test]
+    fn coincident_command_reports_an_error_when_a_pick_misses() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _a = add_line(&mut app, 0.0, 0.0, 5.0, 0.0);
+
+        let _ = app.apply_cmd_result(CmdResult::AddCoincidentConstraint {
+            point_a: glam::DVec3::new(5.0, 0.0, 0.0), // a's end — a real point
+            point_b: glam::DVec3::new(500.0, 500.0, 0.0), // nowhere near anything
+            label: "Coincident constraint",
+        });
+
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .sketch_constraint_set(SketchScope::ModelSpace)
+                .map(|s| s.constraints.len())
+                .unwrap_or(0),
+            0,
+            "a missed pick must not add a constraint"
+        );
+    }
 }

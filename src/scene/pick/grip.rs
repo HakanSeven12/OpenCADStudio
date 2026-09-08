@@ -217,8 +217,10 @@ pub fn find_hit_grip(
 /// Project an f64 world point with an explicit relative-to-eye `(view_rot,
 /// eye)` pair — the camera-less form of `Camera::project`. Used by the
 /// in-viewport editing path, which supplies a *composed* model→screen view
-/// (see `Scene::composed_viewport_view`) instead of a real camera.
-fn project_rte(world: DVec3, view_rot: Mat4, eye: DVec3, bounds: Rectangle) -> Option<Vec2> {
+/// (see `Scene::composed_viewport_view`) instead of a real camera. `pub(crate)`
+/// so any other single-point world→screen projection (e.g. constraint-glyph
+/// anchors) can reuse it instead of re-deriving the same NDC math.
+pub(crate) fn project_rte(world: DVec3, view_rot: Mat4, eye: DVec3, bounds: Rectangle) -> Option<Vec2> {
     let rel = (world - eye).as_vec3();
     let clip = view_rot * rel.extend(1.0);
     if clip.w.abs() < 1e-9 {

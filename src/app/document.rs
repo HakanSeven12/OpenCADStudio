@@ -240,6 +240,17 @@ impl DocumentTab {
             .and_then(|index| self.block_edits.get_mut(index))
     }
 
+    /// The [`crate::scene::sketch_constraints::SketchScope`] a new persistent
+    /// constraint should attach to right now — whatever's actually being
+    /// edited: the open block definition if a BEDIT session is active, model
+    /// space otherwise.
+    pub(super) fn current_sketch_scope(&self) -> crate::scene::sketch_constraints::SketchScope {
+        match self.active_block_edit_session() {
+            Some(session) => crate::scene::sketch_constraints::SketchScope::Block(session.br_handle),
+            None => crate::scene::sketch_constraints::SketchScope::ModelSpace,
+        }
+    }
+
     /// The active WCS↔UCS converter for this tab — identity when no UCS is set.
     /// Every consumer that needs UCS-relative coordinates goes through this.
     pub(super) fn ucs_xform(&self) -> super::helpers::UcsXform {
@@ -646,6 +657,7 @@ impl DocumentTab {
 pub(super) enum HistorySnapshot {
     Delta(DeltaSnapshot),
     ObjectVisibility(ObjectVisibilitySnapshot),
+    SketchConstraints(SketchConstraintsSnapshot),
 }
 
 impl HistorySnapshot {
@@ -653,6 +665,7 @@ impl HistorySnapshot {
         match self {
             HistorySnapshot::Delta(d) => &d.label,
             HistorySnapshot::ObjectVisibility(v) => &v.label,
+            HistorySnapshot::SketchConstraints(s) => &s.label,
         }
     }
 
@@ -699,8 +712,38 @@ impl HistorySnapshot {
                 .saturating_add(v.selected_after.len())
                 .saturating_mul(16)
                 .saturating_add(v.label.len()),
+            HistorySnapshot::SketchConstraints(s) => s
+                .before
+                .as_ref()
+                .map_or(0, |set| set.constraints.len())
+                .saturating_add(s.after.as_ref().map_or(0, |set| set.constraints.len()))
+                .saturating_mul(96) // rough per-constraint size (a handful of refs + an id/kind/f64)
+                .saturating_add(s.label.len()),
         }
     }
+}
+
+/// Undo/redo image for one persistent-constraint edit (design doc §5.1/§9):
+/// a `SketchConstraintSet` add/remove, captured as a whole-set before/after
+/// pair rather than a per-constraint diff — sketches are small, so cloning
+/// the whole set is cheap, and it sidesteps needing a separate "undo one
+/// constraint add" vs. "undo one constraint remove" representation. Kept as
+/// its own `HistorySnapshot` variant (not folded into `DeltaSnapshot`) since
+/// `SketchConstraintSet` lives on `Scene`, not in the entity/object store
+/// `DeltaSnapshot` already covers — see the design doc's §5.1 discussion of
+/// why this needs its own path. A geometry-changing constraint add (the
+/// common case) pushes this *alongside* its own `DeltaSnapshot` entry rather
+/// than merged into one atomic step — two adjacent undo presses instead of
+/// one, a deliberate scope-down from the design doc's recommended "live
+/// XRecord" approach (§5.1(b)), which needs stage 4 (save/load) wired up
+/// first; this variant needs nothing beyond what already exists.
+#[derive(Clone)]
+pub(super) struct SketchConstraintsSnapshot {
+    pub(super) scope: crate::scene::sketch_constraints::SketchScope,
+    /// `None` when the scope had no constraint set at all yet.
+    pub(super) before: Option<crate::scene::sketch_constraints::SketchConstraintSet>,
+    pub(super) after: Option<crate::scene::sketch_constraints::SketchConstraintSet>,
+    pub(super) label: String,
 }
 
 /// Symmetric undo/redo image for session-only object visibility. It contains

@@ -805,6 +805,50 @@ bg={bg_ms:.1}ms n={view_count}"
             let point_cursor = tab.active_cmd.as_ref().is_some_and(|cmd| {
                 !cmd.needs_entity_pick() && !cmd.is_selection_gathering()
             });
+            // Persistent sketch-constraint glyphs (design doc §6.3/§7) — model
+            // space only, like the constraints themselves; paper space shows
+            // none (out of scope per the design doc §3.1).
+            let constraint_glyphs: Vec<(iced::Point, String, bool)> = if is_paper {
+                Vec::new()
+            } else {
+                let (vw, vh) = sel_ref.vp_size;
+                let scope = tab.current_sketch_scope();
+                match tab.scene.sketch_constraint_set(scope) {
+                    Some(set) if !set.constraints.is_empty() => {
+                        let edit_frame = tab.scene.viewport_edit_frame((vw, vh));
+                        let bounds = match &edit_frame {
+                            Some((_, full)) => *full,
+                            None => tab.scene.active_model_tile_bounds(vw, vh),
+                        };
+                        let (view_rot, eye) = if let Some((cam, _)) = &edit_frame {
+                            (cam.view_proj_rte(bounds), cam.eye())
+                        } else {
+                            let cam = tab.scene.camera.borrow();
+                            (cam.view_proj_rte(bounds), cam.eye())
+                        };
+                        set.constraints
+                            .iter()
+                            .filter(|c| c.enabled)
+                            .filter_map(|c| {
+                                let anchor = crate::scene::sketch_constraints::glyph_anchor(&tab.scene.document, c)?;
+                                let screen = crate::scene::pick::grip::project_rte(
+                                    glam::DVec3::new(anchor.x, anchor.y, anchor.z),
+                                    view_rot,
+                                    eye,
+                                    bounds,
+                                )?;
+                                let point = iced::Point::new(bounds.x + screen.x, bounds.y + screen.y);
+                                let is_conflicting = set.conflicts.iter().any(|(id, _)| *id == c.id);
+                                point
+                                    .x
+                                    .is_finite()
+                                    .then(|| (point, crate::scene::sketch_constraints::glyph_label(c), is_conflicting))
+                            })
+                            .collect()
+                    }
+                    _ => Vec::new(),
+                }
+            };
             crate::ui::overlay::selection_overlay(
                 std::sync::Arc::clone(&tab.scene.selection),
                 snap_info,
@@ -847,6 +891,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     grip_hot: self.model_space.grip_hot,
                     grip_hover: self.model_space.grip_hover,
                 },
+                constraint_glyphs,
             )
         };
 
@@ -2055,6 +2100,8 @@ bg={bg_ms:.1}ms n={view_count}"
                         self.selection_cycling,
                         &self.statusbar_config,
                         status_menu_data,
+                        tab.scene.sketch_constraint_set(tab.current_sketch_scope()).and_then(|s| s.dof),
+                        tab.scene.sketch_constraint_set(tab.current_sketch_scope()).map(|s| s.conflicts.len()).unwrap_or(0),
                     )
                 })
                 .width(Fill)

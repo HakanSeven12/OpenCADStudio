@@ -956,6 +956,117 @@ impl OpenCADStudio {
                 }
             }
 
+            // ── Constraints (persistent: added to the scope's SketchConstraintSet,
+            // solved via Scene::bump_entities, re-solved on every later edit —
+            // see docs/parametric_system_design.md §6.1) ──
+            "HCONSTRAINT" | "VCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 1 {
+                    self.command_line
+                        .push_output("Select exactly one line, then run this constraint again.");
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                    let (kind, label) = if cmd == "HCONSTRAINT" {
+                        (ConstraintKind::Horizontal, "Horizontal constraint")
+                    } else {
+                        (ConstraintKind::Vertical, "Vertical constraint")
+                    };
+                    return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind,
+                        refs: vec![SketchRef::whole(handles[0])],
+                        driving_param: None,
+                        label,
+                    }));
+                }
+            }
+
+            "CCONSTRAINT" => {
+                use crate::modules::draw::constrain::CoincidentConstraintCommand;
+                let new_cmd = CoincidentConstraintCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 2 {
+                    self.command_line.push_output(
+                        "Select exactly two entities (first = reference, second = the one that moves), then run this constraint again.",
+                    );
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                    let (kind, label) = match cmd {
+                        "PCONSTRAINT" => (ConstraintKind::Parallel, "Parallel constraint"),
+                        "QCONSTRAINT" => (ConstraintKind::Perpendicular, "Perpendicular constraint"),
+                        "TCONSTRAINT" => (ConstraintKind::Tangent, "Tangent constraint"),
+                        _ => (ConstraintKind::Equal, "Equal constraint"),
+                    };
+                    return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind,
+                        refs: vec![SketchRef::whole(handles[0]), SketchRef::whole(handles[1])],
+                        driving_param: None,
+                        label,
+                    }));
+                }
+            }
+
+            "DCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 1 {
+                    self.command_line
+                        .push_output("Select exactly one line or circle, then run this constraint again.");
+                } else {
+                    use crate::modules::draw::constrain::DistanceConstraintCommand;
+                    match DistanceConstraintCommand::new(&self.tabs[i].scene, handles[0]) {
+                        Some(new_cmd) => {
+                            self.command_line.push_info(&new_cmd.prompt());
+                            self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                        }
+                        None => self.command_line.push_output("Select a line or a circle for a distance constraint."),
+                    }
+                }
+            }
+
+            "ACONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 2 {
+                    self.command_line.push_output(
+                        "Select exactly two lines (first = reference, second = the one that rotates), then run this constraint again.",
+                    );
+                } else {
+                    use crate::modules::draw::constrain::AngleConstraintCommand;
+                    match AngleConstraintCommand::new(&self.tabs[i].scene, handles[0], handles[1]) {
+                        Some(new_cmd) => {
+                            self.command_line.push_info(&new_cmd.prompt());
+                            self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                        }
+                        None => self.command_line.push_output("Select two lines for an angle constraint."),
+                    }
+                }
+            }
+
             // ── Model commands (3D primitives) ─────────────────────────────
             "CYLINDER" => {
                 use crate::modules::model::cylinder_cmd::CylinderCommand;

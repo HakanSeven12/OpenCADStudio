@@ -4987,6 +4987,12 @@ impl Pipeline {
         self.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
         self.silhouette_source_key = (usize::MAX, usize::MAX, u64::MAX);
         self.render_sig = u64::MAX;
+        // The partition record describes uploads this slot is no longer
+        // entitled to reuse. A reused slot rebuilds anyway, because its content
+        // id changed, but leaving a stale record here would make that an
+        // accident rather than a guarantee.
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
     }
 
     /// Catch errors delivered after the previous upload/submit completed.

@@ -7,7 +7,7 @@
   {
     "repo": "mf4633/opencad-storm-sewer-plugin",
     "name": "Storm Sewer",
-    "description": "Gravity storm-drain network design and analysis (Rational + Manning + HGL, LandXML import)."
+    "description": "Gravity storm-drain network design and analysis (Rational + Manning + HGL, LandXML import). Free to draw and analyze; Pro ($29/yr) adds HTML reports, pipe sizing, multi-RP."
   },
   {
     "repo": "mf4633/opencad-hydrocomplete-plugin",

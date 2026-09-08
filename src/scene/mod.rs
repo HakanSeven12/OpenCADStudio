@@ -437,6 +437,10 @@ pub struct PreparedOpenGeometry {
     pub tess_guard: u64,
     /// Loader block definitions; the receiving scene supplies its own epoch.
     pub block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)>,
+    /// The loader's draw-order map. Computing it walks all 1.17 M entities and
+    /// costs ~300 ms; the loader already paid that, and the receiving scene
+    /// used to pay it again on the first frame.
+    pub(crate) draw_depths: Option<DrawDepthCache>,
 }
 
 impl std::fmt::Debug for PreparedOpenGeometry {
@@ -557,7 +561,8 @@ fn inserted_draw_depth_label(order: &[DrawDepthEntry], position: usize) -> Optio
     }
 }
 
-struct DrawDepthCache {
+#[derive(Clone)]
+pub(crate) struct DrawDepthCache {
     epoch: u64,
     depths: Arc<HashMap<u64, [f32; 2]>>,
     /// Per-block stable order labels, including deleted tombstones retained for
@@ -1026,6 +1031,7 @@ pub fn prepare_open_geometry(
     // Taken, not cloned: the scene is discarded on the next line.
     let tess_memo = std::mem::take(&mut *scene.resident_tess_memo.borrow_mut());
     let tess_guard = scene.resident_tess_guard.get();
+    let draw_depths = scene.draw_depth_cache.borrow_mut().take();
     let block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)> =
         std::mem::take(&mut *scene.block_defn_cache.borrow_mut())
             .into_iter()
@@ -1040,6 +1046,7 @@ pub fn prepare_open_geometry(
             tess_memo,
             tess_guard,
             block_defns,
+            draw_depths,
         },
     )
 }
@@ -2249,6 +2256,15 @@ impl Scene {
         if !prepared.tess_memo.is_empty() {
             *self.resident_tess_memo.borrow_mut() = prepared.tess_memo;
             self.resident_tess_guard.set(prepared.tess_guard);
+        }
+        // The draw-order map, on the same terms as the block definitions
+        // below: the document is the loader's own, unmodified since, so its
+        // order labels describe this scene exactly. Only the epoch is this
+        // scene's. Without this the first frame recomputed it — a walk of
+        // every entity in the drawing, ~300 ms, for a map that already existed.
+        if let Some(mut depths) = prepared.draw_depths {
+            depths.epoch = self.geometry_epoch;
+            *self.draw_depth_cache.borrow_mut() = Some(depths);
         }
         // Same for the block definitions, stamped with this scene's block
         // epoch: the document has not been touched between the loader
@@ -10541,6 +10557,60 @@ mod journal_tests {
             s.update_entity(moved);
         }
         assert_eq!(indexed(&s, block), scanned(&s, block), "after modify");
+    }
+
+    /// The loader computes the draw-order map and the receiving scene used to
+    /// compute it again — a walk of every entity, ~300 ms, for a map that
+    /// already existed. Handing it over is only sound if it describes the
+    /// receiving scene's document exactly, so that is what this asserts.
+    #[test]
+    fn the_handed_over_draw_depth_map_matches_a_recompute() {
+        use acadrust::entities::{Circle, Line};
+        use acadrust::types::Vector3;
+
+        let mut scene = Scene::new();
+        scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+        )));
+        scene.add_entity(EntityType::Circle(Circle::new()));
+        scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(2.0, 0.0, 0.0),
+            Vector3::new(3.0, 0.0, 0.0),
+        )));
+
+        // What the loader would hand over, and what it built it from.
+        let expected = scene.draw_depth_map();
+        let handed_over = scene
+            .draw_depth_cache
+            .borrow_mut()
+            .take()
+            .expect("the map was just computed, so it is cached");
+
+        // Installing it stands in for `install_prepared_open_geometry`: the
+        // epoch is the receiving scene's, the contents are the loader's.
+        scene.bump_geometry();
+        scene.install_prepared_open_geometry(PreparedOpenGeometry {
+            wires: Arc::new(Vec::new()),
+            interaction_index: None,
+            tess_memo: HashMap::default(),
+            tess_guard: 0,
+            block_defns: Vec::new(),
+            draw_depths: Some(handed_over),
+        });
+        assert_eq!(
+            *scene.draw_depth_map(),
+            *expected,
+            "the handed-over map must be served as-is",
+        );
+
+        // ...and it must be the map this scene would have produced itself.
+        *scene.draw_depth_cache.borrow_mut() = None;
+        assert_eq!(
+            *scene.draw_depth_map(),
+            *expected,
+            "a recompute must agree with what was handed over",
+        );
     }
 
     #[test]

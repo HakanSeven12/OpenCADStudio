@@ -1715,6 +1715,12 @@ pub struct Scene {
     /// constants. `[depth, half]` retains a fixed child sub-range for block
     /// composition. Full sort/layout/block changes rebuild the labels.
     draw_depth_cache: RefCell<Option<DrawDepthCache>>,
+    /// Bumped only when the draw-order map is rebuilt from scratch, which is
+    /// the one case that can change an existing entity's depth — an
+    /// incremental insert allocates into the reserved label gap and leaves
+    /// every other label alone. Consumers that cached anything carrying a baked
+    /// depth compare this before reusing it.
+    draw_depth_generation: std::cell::Cell<u64>,
     /// Shared empty map for 3-D wireframe, where true depth wins instead of
     /// the entity submission order used by the optimized 2-D style.
     no_draw_depths: Arc<HashMap<u64, [f32; 2]>>,
@@ -2075,6 +2081,7 @@ impl Scene {
             interaction_handle_index_cache: RefCell::new(None),
             sort_cache: RefCell::new(None),
             draw_depth_cache: RefCell::new(None),
+            draw_depth_generation: std::cell::Cell::new(0),
             no_draw_depths: Arc::new(HashMap::default()),
             hatch_cache: RefCell::new(HashMap::default()),
             wipeout_cache: RefCell::new(HashMap::default()),
@@ -6030,6 +6037,11 @@ impl Scene {
     /// A full build assigns sparse labels in effective draw order. Incremental
     /// Add/Remove then changes only the named handle: existing siblings retain
     /// their depth, avoiding an O(all entities) map rewrite and GPU const upload.
+    /// See [`Self::draw_depth_generation`].
+    pub(in crate::scene) fn draw_depth_generation(&self) -> u64 {
+        self.draw_depth_generation.get()
+    }
+
     pub(super) fn draw_depth_map(&self) -> Arc<HashMap<u64, [f32; 2]>> {
         {
             let cache = self.draw_depth_cache.borrow();
@@ -6158,6 +6170,11 @@ impl Scene {
                 }
             }
         }
+
+        // From here the labels are assigned afresh, so an existing entity's
+        // depth can move. Anything holding a baked depth has to rebuild.
+        self.draw_depth_generation
+            .set(self.draw_depth_generation.get().wrapping_add(1));
 
         use acadrust::objects::ObjectType;
         // Per-block SortEntitiesTable overrides: block -> (entity_val -> sort_val).
@@ -10675,6 +10692,90 @@ mod journal_tests {
     // Differential oracle: the incrementally-patched entity index must always
     // equal a from-scratch rebuild after any add / move / erase.
     #[test]
+    /// The partition skip turns on a membership test, and the test has to tell
+    /// a drawn line from a drawn circle. A line carries a tangent geom for
+    /// snapping and no triangles, so the cheap structural filter admits it —
+    /// deciding on that alone called every line a contributor and the skip
+    /// never fired once in a real session.
+    #[test]
+    fn the_partition_membership_test_separates_lines_from_curves() {
+        use acadrust::entities::{Circle, Line};
+        use acadrust::types::Vector3;
+        use crate::scene::pipeline::wire_arena::feeds_analytical_uploads;
+
+        let mut scene = Scene::new();
+        let feeds = |scene: &Scene, handle: Handle| {
+            let entity = scene.document.get_entity(handle).unwrap().clone();
+            scene
+                .tessellate_one(&entity)
+                .iter()
+                .any(feeds_analytical_uploads)
+        };
+
+        let line = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 5.0, 0.0),
+        )));
+        assert!(
+            !feeds(&scene, line),
+            "a drawn line must not force the partition walk",
+        );
+
+        let mut circle = Circle::new();
+        circle.radius = 4.0;
+        let circle = scene.add_entity(EntityType::Circle(circle));
+        assert!(
+            feeds(&scene, circle),
+            "a drawn circle feeds the analytical uploads and must force the walk",
+        );
+    }
+
+    /// The partition skip reuses uploads that bake a draw depth, and it is only
+    /// sound while existing depths hold still. An incremental add must leave
+    /// them alone and must not bump the generation; a rebuild from scratch may
+    /// move them and must bump it.
+    #[test]
+    fn adding_an_entity_leaves_existing_draw_depths_alone() {
+        use acadrust::entities::Line;
+        use acadrust::types::Vector3;
+
+        fn add(scene: &mut Scene, x: f64) -> Handle {
+            scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x + 1.0, 0.0, 0.0),
+            )))
+        }
+        let mut scene = Scene::new();
+        let first = add(&mut scene, 0.0);
+        let second = add(&mut scene, 1.0);
+        let before = scene.draw_depth_map();
+        let generation = scene.draw_depth_generation();
+
+        add(&mut scene, 2.0);
+        let after = scene.draw_depth_map();
+        assert_eq!(
+            scene.draw_depth_generation(),
+            generation,
+            "an incremental add must not invalidate baked depths",
+        );
+        for handle in [first, second] {
+            assert_eq!(
+                after.get(&handle.value()),
+                before.get(&handle.value()),
+                "an existing entity's depth must not move when another is added",
+            );
+        }
+
+        // A rebuild from scratch reassigns labels, so it has to say so.
+        scene.draw_depth_cache.borrow_mut().take();
+        let _ = scene.draw_depth_map();
+        assert_ne!(
+            scene.draw_depth_generation(),
+            generation,
+            "a full rebuild must invalidate anything holding a baked depth",
+        );
+    }
+
     /// Folding a lone addition must land the handle where the full walk would
     /// have put it — at the end of its block's list, because that list is in
     /// document order and document order is draw order.

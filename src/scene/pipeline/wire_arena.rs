@@ -174,6 +174,33 @@ pub struct PartitionedWires<'a> {
     pub instanced: Vec<&'a WireModel>,
     pub circle_instances: Vec<super::circle_gpu::CircleInstance>,
     pub ellipse_instances: Vec<super::ellipse_gpu::EllipseInstance>,
+    /// Entities that fed `instanced` / `circle_instances` / `ellipse_instances`.
+    ///
+    /// A patch that touches none of these cannot change those three uploads, so
+    /// the caller can keep the ones it already has and skip the walk entirely.
+    pub contributors: rustc_hash::FxHashSet<Handle>,
+}
+
+/// Whether a change to this wire can alter what `partition_wires` produces for
+/// the instanced, circle and ellipse uploads.
+///
+/// Decided by attempting the extraction, exactly as the walk decides it. The
+/// cheap structural test alone is not enough: an ordinary drawn line carries a
+/// tangent geom for snapping and no triangles, so it passes that test, fails
+/// extraction, and lands in `regular` — a membership test that stopped there
+/// would call every line a contributor and never skip anything.
+///
+/// `draw_depth` only rides along in the extracted instance, so the value passed
+/// here cannot change the answer.
+pub fn feeds_analytical_uploads(wire: &WireModel) -> bool {
+    if !wire.display_visible {
+        return false;
+    }
+    if wire.render_instance.is_some() {
+        return true;
+    }
+    super::circle_gpu::extract_circle_instances(wire, 0.0).is_some()
+        || super::ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_some()
 }
 
 /// Single-pass classification and extraction of all viewport wire categories.
@@ -190,26 +217,39 @@ pub fn partition_wires<'a>(
     let mut instanced = Vec::new();
     let mut circle_instances = Vec::new();
     let mut ellipse_instances = Vec::new();
+    let mut contributors: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
+    let note = |wire: &WireModel, set: &mut rustc_hash::FxHashSet<Handle>| {
+        if let Some(handle) = handle_of(wire) {
+            set.insert(handle);
+        }
+    };
 
     for wire in wires {
         if !wire.display_visible {
             continue;
         }
         if wire.render_instance.is_some() {
+            note(wire, &mut contributors);
             instanced.push(wire);
             continue;
         }
-        let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
+        // `wire_draw_depth` is a hash lookup and its result is used only by the
+        // analytical extractions below, which most wires never reach. Computing
+        // it first cost one lookup per resident wire on every patch — 236 956
+        // of them for the ~56 000 that are circles or ellipses.
         if !wire.tangent_geoms.is_empty()
             && wire.fill_tris.is_empty()
             && wire.pick_tris.is_empty()
             && wire.text_verts.is_empty()
         {
+            let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
             if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
+                note(wire, &mut contributors);
                 circle_instances.extend(insts);
                 continue;
             }
             if let Some(insts) = super::ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                note(wire, &mut contributors);
                 ellipse_instances.extend(insts);
                 continue;
             }
@@ -229,6 +269,7 @@ pub fn partition_wires<'a>(
         instanced,
         circle_instances,
         ellipse_instances,
+        contributors,
     }
 }
 

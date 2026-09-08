@@ -2658,14 +2658,14 @@ impl Pipeline {
             }
         }
         let mut selected_circles: Vec<CircleInstance> = Vec::new();
-        for &wire in &selected_wires {
-            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
-                for mut inst in insts {
-                    if let Some(tint) = selected_tint {
+        if let Some(tint) = selected_tint {
+            for &wire in &selected_wires {
+                let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+                if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
+                    for mut inst in insts {
                         inst.color = tint;
+                        selected_circles.push(inst);
                     }
-                    selected_circles.push(inst);
                 }
             }
         }
@@ -2690,14 +2690,14 @@ impl Pipeline {
         };
 
         let mut selected_ellipses: Vec<EllipseInstance> = Vec::new();
-        for &wire in &selected_wires {
-            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
-                for mut inst in insts {
-                    if let Some(tint) = selected_tint {
+        if let Some(tint) = selected_tint {
+            for &wire in &selected_wires {
+                let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+                if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                    for mut inst in insts {
                         inst.color = tint;
+                        selected_ellipses.push(inst);
                     }
-                    selected_ellipses.push(inst);
                 }
             }
         }
@@ -4779,6 +4779,8 @@ impl Pipeline {
                 || !self.block_text_highlight_gpu.is_empty();
         if !self.gpu_selected_wires.is_empty()
             || !self.gpu_selected_block_wires.is_empty()
+            || !self.gpu_selected_circles.is_empty()
+            || !self.gpu_selected_ellipses.is_empty()
             || have_text_highlight
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

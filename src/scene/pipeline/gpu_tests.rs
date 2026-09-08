@@ -411,6 +411,87 @@ fn late_device_errors_invalidate_uploaded_content_and_targets() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
+fn test_selected_circle_arc_ellipse_highlight_overlay() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+    let depth = rustc_hash::FxHashMap::default();
+
+    let mut circle_wire = WireModel::default();
+    circle_wire.name = "circle_wire".into();
+    circle_wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::PlanarCircle {
+        center: [0.0, 0.0, 0.0],
+        axis_x: [1.0, 0.0, 0.0],
+        axis_y: [0.0, 1.0, 0.0],
+        radius: 10.0,
+    });
+
+    let handle = acadrust::Handle::new(100);
+    let mut selected_handles = rustc_hash::FxHashSet::default();
+    selected_handles.insert(handle);
+    let hover_handles = rustc_hash::FxHashSet::default();
+
+    let mut index = rustc_hash::FxHashMap::default();
+    index.insert(handle.value(), vec![0]);
+    pipeline.wire_handle_index = std::sync::Arc::new(index);
+
+    let wires = vec![circle_wire];
+    pipeline.upload_selected_wires(
+        &device,
+        &queue,
+        &wires,
+        &selected_handles,
+        &hover_handles,
+        &[],
+        &depth,
+        Some([0.0, 1.0, 1.0, 1.0]),
+    );
+
+    assert_eq!(pipeline.gpu_selected_circles.len(), 1);
+    assert_eq!(pipeline.gpu_selected_circles[0].instance_count, 1);
+    assert!(pipeline.gpu_selected_wires.is_empty());
+
+    pipeline.ensure_depth_texture(&device, iced::Size::new(512, 512));
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("test_target"),
+        size: wgpu::Extent3d {
+            width: 512,
+            height: 512,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let target = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("test_encoder"),
+    });
+    pipeline.render(
+        &mut encoder,
+        &target,
+        iced::Size::new(512, 512),
+        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+        [0.0, 0.0, 0.0, 1.0],
+        false,
+        false,
+        false,
+    );
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
 fn test_pline_arc_switch_preview_and_render() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))

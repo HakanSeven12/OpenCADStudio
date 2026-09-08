@@ -199,12 +199,16 @@ pub fn partition_wires<'a>(
             instanced.push(wire);
             continue;
         }
-        let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
+        // `wire_draw_depth` is a hash lookup and its result is used only by the
+        // analytical extractions below, which most wires never reach. Computing
+        // it first cost one lookup per resident wire on every patch — 236 956
+        // of them for the ~56 000 that are circles or ellipses.
         if !wire.tangent_geoms.is_empty()
             && wire.fill_tris.is_empty()
             && wire.pick_tris.is_empty()
             && wire.text_verts.is_empty()
         {
+            let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
             if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
                 circle_instances.extend(insts);
                 continue;

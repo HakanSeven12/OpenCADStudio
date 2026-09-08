@@ -447,6 +447,10 @@ pub struct PropertiesPanel {
     /// carried across panel rebuilds so the state survives edits and selection
     /// changes.
     pub expanded_groups: HashSet<String>,
+    /// Property sections the user collapsed. This is a rendered copy of the
+    /// app-wide preference, allowing every open document panel to share it.
+    /// Empty by default, meaning every section is initially shown.
+    pub collapsed_sections: HashSet<String>,
     /// Whether the editable-dropdown (block Name) option list is open.
     pub edit_choice_open: bool,
     /// Field key of the value row currently being edited, or `None`. Marked when
@@ -485,6 +489,7 @@ impl Default for PropertiesPanel {
             prop_vertex: 0,
             prop_vertex_indicator_active: false,
             expanded_groups: HashSet::default(),
+            collapsed_sections: HashSet::default(),
             edit_choice_open: false,
             active_field: None,
             field_key_by_id: HashMap::default(),
@@ -710,8 +715,32 @@ impl PropertiesPanel {
     // ── Section renderer ──────────────────────────────────────────────────
 
     fn render_section<'a>(&'a self, section: &'a PropSection) -> Element<'a, Message> {
-        // Section header
-        let hdr = container(text(&section.title).size(10))
+        let collapsed = self.collapsed_sections.contains(&section.title);
+        let toggle = button(if collapsed {
+            crate::ui::icons::themed_arrow_right(10.0)
+        } else {
+            crate::ui::icons::themed_arrow_down(10.0)
+        })
+        .on_press(Message::PropSectionToggle(section.title.clone()))
+        .style(button::text)
+        .padding([0, 3]);
+
+        // The arrow intentionally sits at the far end of the header. The rest
+        // of the header responds to a double-click, leaving a single click on
+        // the arrow as the precise, discoverable toggle target.
+        let title = mouse_area(
+            container(text(&section.title).size(10))
+                .width(Length::Fill)
+                .padding([3, 8]),
+        )
+        .on_double_click(Message::PropSectionToggle(section.title.clone()));
+        let hdr = container(
+            row![
+                title,
+                toggle,
+            ]
+            .align_y(iced::Center),
+        )
             .style(|theme: &Theme| {
                 let palette = theme.palette();
                 container::Style {
@@ -724,10 +753,12 @@ impl PropertiesPanel {
                 ..Default::default()
                 }
             })
-            .width(Length::Fill)
-            .padding([3, 8]);
+            .width(Length::Fill);
 
         let mut col = column![hdr].spacing(0);
+        if collapsed {
+            return col.into();
+        }
 
         // Consecutive "<Base> X / <Base> Y [/ <Base> Z]" text rows collapse
         // into one clickable summary row; clicking expands the components.

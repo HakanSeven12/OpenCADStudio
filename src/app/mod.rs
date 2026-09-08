@@ -385,6 +385,10 @@ pub(super) struct OpenCADStudio {
     /// though the three factors are currently equal — the user unchecked the
     /// "Uniform scale" box for them (#427). Keyed by entity handle.
     props_asym_scale: std::collections::HashSet<u64>,
+    /// Collapsed Properties-panel section titles. This belongs to the app,
+    /// rather than an individual document tab, so the same view preference is
+    /// used by every currently open drawing/project.
+    collapsed_property_sections: rustc_hash::FxHashSet<String>,
     /// Which Start-page section is shown when the page is too narrow for all
     /// three side by side and falls back to a tab bar.
     start_section: StartSection,
@@ -2555,6 +2559,8 @@ pub enum Message {
     /// Toggle a collapsed coordinate group ("Position", "Scale", …) open or
     /// closed in the Properties panel, keyed `section:base`.
     PropGroupToggle(String),
+    /// Toggle an entire Properties-panel section, keyed by its title.
+    PropSectionToggle(String),
     /// Toggle the editable-dropdown (block Name) option list open/closed.
     PropEditChoiceToggle,
     /// User is typing in a block-attribute value field (live buffer update),
@@ -3304,6 +3310,7 @@ impl OpenCADStudio {
             discussions: Vec::new(),
             discussions_loading: false,
             props_asym_scale: std::collections::HashSet::new(),
+            collapsed_property_sections: rustc_hash::FxHashSet::default(),
             start_section: StartSection::default(),
             start_action_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             history_content: iced::widget::text_editor::Content::new(),

@@ -2641,6 +2641,9 @@ impl Pipeline {
                 slots.sort_unstable();
                 for &i in &slots {
                     if let Some(w) = wires.get(i as usize) {
+                        if !w.display_visible {
+                            continue;
+                        }
                         selected_wires.push(w);
                     }
                 }
@@ -2652,12 +2655,18 @@ impl Pipeline {
                 slots.sort_unstable();
                 for &i in &slots {
                     if let Some(w) = wires.get(i as usize) {
+                        if !w.display_visible {
+                            continue;
+                        }
                         hover_wires.push(w);
                     }
                 }
             }
         }
         for wire in annotation_context_wires {
+            if !wire.display_visible {
+                continue;
+            }
             if wire.selected {
                 selected_wires.push(wire);
             } else {
@@ -2665,14 +2674,13 @@ impl Pipeline {
             }
         }
         let mut selected_circles: Vec<CircleInstance> = Vec::new();
-        if let Some(tint) = selected_tint {
-            for &wire in &selected_wires {
-                let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-                if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
-                    for mut inst in insts {
-                        inst.color = tint;
-                        selected_circles.push(inst);
-                    }
+        let circle_sel_tint = selected_tint.unwrap_or(WireModel::SELECTED);
+        for &wire in &selected_wires {
+            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
+                for mut inst in insts {
+                    inst.color = circle_sel_tint;
+                    selected_circles.push(inst);
                 }
             }
         }
@@ -2697,14 +2705,13 @@ impl Pipeline {
         };
 
         let mut selected_ellipses: Vec<EllipseInstance> = Vec::new();
-        if let Some(tint) = selected_tint {
-            for &wire in &selected_wires {
-                let depth = wire_gpu::wire_draw_depth(wire, depth_map);
-                if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
-                    for mut inst in insts {
-                        inst.color = tint;
-                        selected_ellipses.push(inst);
-                    }
+        let ellipse_sel_tint = selected_tint.unwrap_or(WireModel::SELECTED);
+        for &wire in &selected_wires {
+            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                for mut inst in insts {
+                    inst.color = ellipse_sel_tint;
+                    selected_ellipses.push(inst);
                 }
             }
         }
@@ -4854,6 +4861,7 @@ impl Pipeline {
                 } else {
                     &self.circle_xray_pipeline
                 });
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 for cg in &self.gpu_selected_circles {
                     if cg.instance_count > 0 {
                         pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
@@ -4867,6 +4875,7 @@ impl Pipeline {
                 } else {
                     &self.ellipse_xray_pipeline
                 });
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 for eg in &self.gpu_selected_ellipses {
                     if eg.instance_count > 0 {
                         pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));

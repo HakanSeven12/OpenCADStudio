@@ -2,6 +2,8 @@ use acadrust::tables::{Table, TableEntry};
 use iced::Task;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
+use std::collections::VecDeque;
+use std::sync::OnceLock;
 
 use super::{Message, OpenCADStudio};
 
@@ -35,6 +37,135 @@ const COLLECTIONS: &[(&str, bool)] = &[
     ("preview", false),
     ("document", false),
 ];
+
+fn collection_root_type(collection: &str) -> Option<&'static str> {
+    Some(match collection {
+        "entities" => "EntityType",
+        "objects" => "ObjectType",
+        "layers" => "Layer",
+        "line_types" => "LineType",
+        "text_styles" => "TextStyle",
+        "block_records" => "BlockRecord",
+        "dim_styles" => "DimStyle",
+        "app_ids" => "AppId",
+        "views" => "View",
+        "vports" => "VPort",
+        "ucss" => "Ucs",
+        "vx_table" => "VxTableRecord",
+        "header" => "HeaderVariables",
+        "summary_info" => "SummaryInfo",
+        "classes" => "DxfClass",
+        "block_visibility" => "BlockVisibilityParameter",
+        "context_scales"
+        | "block_representations"
+        | "vx_control_entries"
+        | "section_view_representations"
+        | "view_rep_references" => "Handle",
+        "fields" => "FieldDef",
+        "dgn_line_style_definitions" => "DgnLsDefinition",
+        "dgn_line_style_components" => "DgnLsComponent",
+        "notifications" => "NotificationCollection",
+        "preview" => "Preview",
+        "section_view_style" => "EntitySectionViewStyle",
+        // This aggregate is assembled by OCS and has a live inferred schema.
+        "document" => "Value",
+        _ => return None,
+    })
+}
+
+fn collection_is_mutable(collection: &str) -> bool {
+    COLLECTIONS
+        .iter()
+        .find(|(name, _)| *name == collection)
+        .is_some_and(|(_, mutable)| *mutable)
+}
+
+fn collection_record_name(collection: &str) -> Option<&'static str> {
+    Some(match collection {
+        "classes" => "Class",
+        "fields" => "Field",
+        "dgn_line_style_definitions" => "LineStyleDefinition",
+        "dgn_line_style_components" => "LineStyleComponent",
+        "section_view_style" => "SectionViewStyle",
+        "view_rep_references" => "HandleReferences",
+        "notifications" => "Notifications",
+        "document" => "Document",
+        _ => collection_root_type(collection)?,
+    })
+}
+
+fn identity_paths(collection: &str) -> &'static [&'static str] {
+    match collection {
+        "entities" => &["/common/handle", "/common/owner_handle"],
+        "objects" => &[
+            "/handle",
+            "/owner",
+            "/common/handle",
+            "/common/owner_handle",
+        ],
+        "header" => &["/handle_seed"],
+        "summary_info" => &[],
+        "layers" | "line_types" | "text_styles" | "block_records" | "dim_styles" | "app_ids"
+        | "views" | "vports" | "ucss" | "vx_table" => &["/handle", "/name"],
+        _ => &[],
+    }
+}
+
+fn path_changes_identity(collection: &str, path: &str) -> bool {
+    path_is_identity_field(collection, path)
+        || identity_paths(collection).iter().any(|identity| {
+            path == *identity
+                || identity
+                    .strip_prefix(path)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+        })
+}
+
+fn path_is_identity_field(collection: &str, path: &str) -> bool {
+    match collection {
+        "entities" => path.ends_with("/common/handle") || path.ends_with("/common/owner_handle"),
+        "objects" => {
+            matches!(path, "/handle" | "/owner")
+                || path.ends_with("/common/handle")
+                || path.ends_with("/common/owner_handle")
+        }
+        _ => identity_paths(collection).contains(&path),
+    }
+}
+
+fn collect_identity_values(value: &Value, collection: &str, path: &str, output: &mut Vec<Value>) {
+    if path_is_identity_field(collection, path) {
+        output.push(json!({"path":path,"value":value}));
+    }
+    match value {
+        Value::Object(object) => {
+            for (name, value) in object {
+                collect_identity_values(
+                    value,
+                    collection,
+                    &format!("{path}/{}", json_pointer_name(name)),
+                    output,
+                );
+            }
+        }
+        Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                collect_identity_values(value, collection, &format!("{path}/{index}"), output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn registry_types() -> &'static Map<String, Value> {
+    static REGISTRY: OnceLock<Value> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        serde_json::from_str(ocs_plugin_api::get_embedded_type_registry_json())
+            .expect("embedded type registry")
+    })["types"]
+        .as_object()
+        .expect("type registry object")
+}
 
 fn failure(code: &str, message: impl Into<String>) -> Value {
     json!({"ok":false,"status":"failed","code":code,"error":message.into()})
@@ -504,6 +635,467 @@ fn project_paths(mut record: Value, paths: Option<&Vec<Value>>) -> Result<Value,
     Ok(record)
 }
 
+fn resolved_type_name(requested: &str) -> Option<String> {
+    let types = registry_types();
+    types
+        .get_key_value(requested)
+        .or_else(|| {
+            types
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(requested))
+        })
+        .map(|(name, _)| name.clone())
+}
+
+fn collect_type_references(value: &Value, pending: &mut VecDeque<String>) {
+    match value {
+        Value::Object(object) => {
+            for (key, value) in object {
+                if key == "type_id" {
+                    if let Some(type_id) = value.as_str() {
+                        for token in type_id.split(|character: char| {
+                            !character.is_ascii_alphanumeric() && character != '_'
+                        }) {
+                            if registry_types().contains_key(token) {
+                                pending.push_back(token.to_string());
+                            }
+                        }
+                    }
+                }
+                collect_type_references(value, pending);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_type_references(value, pending);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn referenced_definitions(root: &str) -> Map<String, Value> {
+    let mut definitions = Map::new();
+    let mut pending = VecDeque::from([root.to_string()]);
+    while let Some(name) = pending.pop_front() {
+        if definitions.contains_key(&name) {
+            continue;
+        }
+        let Some(info) = registry_types().get(&name) else {
+            continue;
+        };
+        collect_type_references(info, &mut pending);
+        definitions.insert(name, info.clone());
+    }
+    definitions
+}
+
+fn json_pointer_name(name: &str) -> String {
+    name.replace('~', "~0").replace('/', "~1")
+}
+
+fn field_unit(name: &str, type_id: &str) -> Option<&'static str> {
+    let numeric = matches!(
+        type_id,
+        "f32"
+            | "f64"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "Vector2"
+            | "Vector3"
+    );
+    if !numeric {
+        return None;
+    }
+    let name = name.to_ascii_lowercase();
+    if name.contains("angle") || name == "rotation" || name.contains("twist") {
+        return Some("radians");
+    }
+    if name.contains("scale") || name.contains("ratio") || name.contains("factor") {
+        return Some("unitless");
+    }
+    if [
+        "point",
+        "position",
+        "origin",
+        "center",
+        "location",
+        "elevation",
+        "height",
+        "width",
+        "length",
+        "radius",
+        "diameter",
+        "offset",
+        "thickness",
+        "distance",
+        "size",
+        "spacing",
+    ]
+    .iter()
+    .any(|part| name.contains(part))
+    {
+        return Some("drawing_units");
+    }
+    None
+}
+
+fn type_constraints(type_id: &str) -> Option<Value> {
+    let integer_bounds = match type_id {
+        "i8" => Some(json!({"minimum":i8::MIN,"maximum":i8::MAX})),
+        "i16" => Some(json!({"minimum":i16::MIN,"maximum":i16::MAX})),
+        "i32" => Some(json!({"minimum":i32::MIN,"maximum":i32::MAX})),
+        "i64" => Some(json!({"minimum":i64::MIN,"maximum":i64::MAX})),
+        "u8" => Some(json!({"minimum":0,"maximum":u8::MAX})),
+        "u16" => Some(json!({"minimum":0,"maximum":u16::MAX})),
+        "u32" => Some(json!({"minimum":0,"maximum":u32::MAX})),
+        "u64" | "Handle" => Some(json!({"minimum":0,"maximum":u64::MAX})),
+        _ => None,
+    };
+    if integer_bounds.is_some() {
+        return integer_bounds;
+    }
+    let info = registry_types().get(type_id)?;
+    if info["kind"] != "Enum" {
+        return None;
+    }
+    Some(json!({
+        "allowed_variants":info["variants"].as_array().into_iter().flatten()
+            .filter_map(|variant|variant["name"].as_str()).collect::<Vec<_>>()
+    }))
+}
+
+fn append_schema_fields(
+    owner_type: &str,
+    type_fields: &[Value],
+    prefix: &str,
+    collection: Option<&str>,
+    depth: usize,
+    stack: &mut Vec<String>,
+    fields: &mut Vec<Value>,
+) {
+    for field in type_fields {
+        let Some(name) = field["name"].as_str() else {
+            continue;
+        };
+        let type_id = field["type_id"].as_str().unwrap_or("Value");
+        let path = format!("{prefix}/{}", json_pointer_name(name));
+        let sequence = field["is_sequence"].as_bool().unwrap_or(false);
+        let writable = collection.is_some_and(collection_is_mutable)
+            && collection.is_none_or(|collection| !path_changes_identity(collection, &path));
+        let mut description = json!({
+            "path":path,
+            "name":name,
+            "description":format!("{} property on {owner_type}", name.replace('_', " ")),
+            "type":type_id,
+            "optional":field["optional"].as_bool().unwrap_or(false),
+            "sequence":sequence,
+            "writable":writable,
+        });
+        let object = description.as_object_mut().expect("field description");
+        if sequence {
+            object.insert(
+                "item_path_template".into(),
+                json!(format!("{path}/{{index}}")),
+            );
+        }
+        if let Some(unit) = field_unit(name, type_id) {
+            object.insert("unit".into(), json!(unit));
+        }
+        if let Some(constraints) = type_constraints(type_id) {
+            object.insert("constraints".into(), constraints);
+        }
+        fields.push(description);
+
+        let nested_prefix = if sequence {
+            format!("{path}/{{index}}")
+        } else {
+            path
+        };
+        if registry_types().contains_key(type_id) {
+            append_field_descriptions(
+                type_id,
+                &nested_prefix,
+                collection,
+                depth + 1,
+                stack,
+                fields,
+            );
+        }
+    }
+}
+
+fn append_field_descriptions(
+    type_name: &str,
+    prefix: &str,
+    collection: Option<&str>,
+    depth: usize,
+    stack: &mut Vec<String>,
+    fields: &mut Vec<Value>,
+) {
+    if depth > 12 || stack.iter().any(|name| name == type_name) {
+        return;
+    }
+    let Some(info) = registry_types().get(type_name) else {
+        return;
+    };
+    stack.push(type_name.to_string());
+    match info["kind"].as_str() {
+        Some("Struct") => append_schema_fields(
+            type_name,
+            info["fields"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+            prefix,
+            collection,
+            depth,
+            stack,
+            fields,
+        ),
+        Some("Enum") => append_enum_descriptions(
+            type_name,
+            info["variants"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+            prefix,
+            collection,
+            depth,
+            stack,
+            fields,
+        ),
+        _ => {}
+    }
+    stack.pop();
+}
+
+fn append_enum_descriptions(
+    enum_type: &str,
+    variants: &[Value],
+    prefix: &str,
+    collection: Option<&str>,
+    depth: usize,
+    stack: &mut Vec<String>,
+    fields: &mut Vec<Value>,
+) {
+    for variant in variants {
+        let Some(variant_name) = variant["name"].as_str() else {
+            continue;
+        };
+        let Some(variant_fields) = variant["fields"]
+            .as_array()
+            .filter(|fields| !fields.is_empty())
+        else {
+            continue;
+        };
+        let path = format!("{prefix}/{}", json_pointer_name(variant_name));
+        let newtype = (variant_fields.len() == 1 && variant_fields[0]["name"] == "0")
+            .then(|| &variant_fields[0]);
+        let type_id = newtype
+            .and_then(|field| field["type_id"].as_str())
+            .unwrap_or("struct_variant");
+        let sequence = newtype
+            .and_then(|field| field["is_sequence"].as_bool())
+            .unwrap_or(false);
+        let writable = collection.is_some_and(collection_is_mutable)
+            && collection.is_none_or(|collection| !path_changes_identity(collection, &path));
+        let mut description = json!({
+            "path":path,
+            "name":variant_name,
+            "description":format!("{variant_name} variant on {enum_type}"),
+            "type":type_id,
+            "enum":enum_type,
+            "variant":variant_name,
+            "optional":false,
+            "sequence":sequence,
+            "writable":writable,
+        });
+        if sequence {
+            description
+                .as_object_mut()
+                .expect("variant description")
+                .insert(
+                    "item_path_template".into(),
+                    json!(format!("{path}/{{index}}")),
+                );
+        }
+        if let Some(unit) = field_unit(variant_name, type_id) {
+            description
+                .as_object_mut()
+                .expect("variant description")
+                .insert("unit".into(), json!(unit));
+        }
+        if let Some(constraints) = type_constraints(type_id) {
+            description
+                .as_object_mut()
+                .expect("variant description")
+                .insert("constraints".into(), constraints);
+        }
+        fields.push(description);
+
+        if newtype.is_some() {
+            if registry_types().contains_key(type_id) {
+                let nested_prefix = if sequence {
+                    format!("{path}/{{index}}")
+                } else {
+                    path
+                };
+                append_field_descriptions(
+                    type_id,
+                    &nested_prefix,
+                    collection,
+                    depth + 1,
+                    stack,
+                    fields,
+                );
+            }
+        } else {
+            append_schema_fields(
+                variant_name,
+                variant_fields,
+                &path,
+                collection,
+                depth + 1,
+                stack,
+                fields,
+            );
+        }
+    }
+}
+
+fn append_variant_field_descriptions(
+    enum_type: &str,
+    variant_name: &str,
+    collection: Option<&str>,
+    fields: &mut Vec<Value>,
+) {
+    let Some(variant_fields) = registry_types()
+        .get(enum_type)
+        .and_then(|info| info["variants"].as_array())
+        .and_then(|variants| {
+            variants.iter().find(|variant| {
+                variant["name"]
+                    .as_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(variant_name))
+            })
+        })
+        .and_then(|variant| variant["fields"].as_array())
+    else {
+        return;
+    };
+    let mut stack = vec![enum_type.to_string()];
+    append_schema_fields(
+        variant_name,
+        variant_fields,
+        "",
+        collection,
+        0,
+        &mut stack,
+        fields,
+    );
+}
+
+fn runtime_value_schema(value: &Value, collection: &str, path: &str) -> Value {
+    let mut schema = match value {
+        Value::Null => json!({"type":"null"}),
+        Value::Bool(value) => json!({"type":"boolean","example":value}),
+        Value::Number(value) if value.is_i64() || value.is_u64() => {
+            json!({"type":"integer","example":value})
+        }
+        Value::Number(value) => json!({"type":"number","example":value}),
+        Value::String(value) => {
+            let example: String = value.chars().take(160).collect();
+            json!({"type":"string","example":example})
+        }
+        Value::Array(values) => {
+            let item = values
+                .first()
+                .map(|value| runtime_value_schema(value, collection, &format!("{path}/0")))
+                .unwrap_or_else(|| json!({}));
+            json!({"type":"array","items":item})
+        }
+        Value::Object(values) => {
+            let properties = values
+                .iter()
+                .map(|(name, value)| {
+                    let child_path = format!("{path}/{}", json_pointer_name(name));
+                    (
+                        name.clone(),
+                        runtime_value_schema(value, collection, &child_path),
+                    )
+                })
+                .collect::<Map<_, _>>();
+            json!({
+                "type":"object",
+                "properties":properties,
+                "required":values.keys().collect::<Vec<_>>(),
+                "additionalProperties":false,
+            })
+        }
+    };
+    if !path.is_empty() {
+        let object = schema.as_object_mut().expect("runtime schema");
+        object.insert(
+            "readOnly".into(),
+            json!(!collection_is_mutable(collection) || path_changes_identity(collection, path)),
+        );
+        let name = path.rsplit('/').next().unwrap_or("");
+        let scalar_type = if value.is_number() { "f64" } else { "Value" };
+        if let Some(unit) = field_unit(name, scalar_type) {
+            object.insert("x-unit".into(), json!(unit));
+        }
+    }
+    schema
+}
+
+fn editing_description(collection: Option<&str>) -> Value {
+    let mutable = collection.is_some_and(collection_is_mutable);
+    json!({
+        "read_operation":"records",
+        "write_operation":mutable.then_some("set_properties"),
+        "selector":match collection {
+            Some("entities" | "objects") => "handle",
+            Some("header" | "summary_info") => "singleton",
+            Some(_) if mutable => "handle or name",
+            Some(_) => "read-only derived record",
+            None => "collection plus handle or name",
+        },
+        "path":"RFC 6901 JSON Pointer relative to record.properties",
+        "sequence_path":"Replace {index} in item_path_template with a current zero-based array index",
+        "identity_paths":collection.map(identity_paths).unwrap_or(&[]),
+        "atomic":true,
+        "compare_and_set":"Add expected to an update to reject stale field values",
+        "validation":["document revision","request id","JSON type","enum variant","integer bounds","record identity","layer lock"],
+    })
+}
+
+fn collection_record_types(collection: &str) -> Vec<Value> {
+    let root = collection_root_type(collection).unwrap_or("Value");
+    if matches!(collection, "entities" | "objects") {
+        return registry_types()[root]["variants"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|variant| {
+                let fields = variant["fields"].as_array();
+                let schema_type = fields
+                    .filter(|fields| fields.len() == 1 && fields[0]["name"] == "0")
+                    .and_then(|fields| fields[0]["type_id"].as_str())
+                    .unwrap_or(root);
+                json!({"type":variant["name"],"schema_type":schema_type})
+            })
+            .collect();
+    }
+    vec![json!({
+        "type":collection_record_name(collection).unwrap_or(root),
+        "schema_type":root,
+    })]
+}
+
 fn requested_handle(request: &Value) -> Result<acadrust::Handle, String> {
     request["handle"]
         .as_str()
@@ -523,6 +1115,8 @@ fn apply_updates(
     if updates.is_empty() {
         return Err("set_properties requires a non-empty updates array".into());
     }
+    let mut original_identity = Vec::new();
+    collect_identity_values(properties, collection, "", &mut original_identity);
     let mut paths = Vec::with_capacity(updates.len());
     for update in updates {
         let path = update["path"]
@@ -531,14 +1125,7 @@ fn apply_updates(
         if path.is_empty() || !path.starts_with('/') {
             return Err("updates require a non-empty JSON Pointer path".into());
         }
-        let identity = match collection {
-            "entities" => matches!(path, "/common/handle" | "/common/owner_handle"),
-            "objects" => matches!(path, "/handle" | "/common/handle"),
-            "header" => path == "/handle_seed",
-            "summary_info" => false,
-            _ => matches!(path, "/handle" | "/name"),
-        };
-        if identity {
+        if path_changes_identity(collection, path) {
             return Err(format!("{path} is read-only identity data"));
         }
         let value = update
@@ -555,6 +1142,11 @@ fn apply_updates(
         }
         *target = value;
         paths.push(path.to_string());
+    }
+    let mut edited_identity = Vec::new();
+    collect_identity_values(properties, collection, "", &mut edited_identity);
+    if edited_identity != original_identity {
+        return Err("record identity is read-only".into());
     }
     Ok(paths)
 }
@@ -611,15 +1203,162 @@ impl OpenCADStudio {
             "records":{
                 "read":"records",
                 "write":"set_properties",
+                "describe":"record_schema",
                 "path":"RFC 6901 JSON Pointer relative to properties",
                 "filters":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],
                 "collections":COLLECTIONS.iter().map(|(name, mutable)|json!({
                     "name":name,
                     "mutable":mutable,
+                    "root_type":collection_root_type(name),
                     "count":collection_count(document, name),
                 })).collect::<Vec<_>>()
             },
             "editor":{"selection":true,"properties":true,"commands":true,"files":true,"capture":true,"events":true}
+        })
+    }
+
+    pub(super) fn record_schema(&self, request: &Value) -> Value {
+        let collection = request["collection"].as_str();
+        if collection.is_some_and(|name| collection_root_type(name).is_none()) {
+            return failure(
+                "unknown_collection",
+                format!("unknown record collection: {}", collection.unwrap()),
+            );
+        }
+        let collections = COLLECTIONS
+            .iter()
+            .map(|(name, mutable)| {
+                json!({
+                    "name":name,
+                    "mutable":mutable,
+                    "root_type":collection_root_type(name),
+                    "identity_paths":identity_paths(name),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let Some(requested_type) = request["type"].as_str() else {
+            let mut record_types = if let Some(collection) = collection {
+                collection_record_types(collection)
+            } else {
+                registry_types()
+                    .iter()
+                    .map(|(name, info)| json!({"type":name,"schema_type":name,"kind":info["kind"]}))
+                    .collect()
+            };
+            if let Some(search) = request["search"].as_str().filter(|value| !value.is_empty()) {
+                let search = search.to_ascii_lowercase();
+                record_types.retain(|entry| {
+                    entry["type"]
+                        .as_str()
+                        .is_some_and(|name| name.to_ascii_lowercase().contains(&search))
+                });
+            }
+            let count = record_types.len();
+            let offset = request["offset"].as_u64().unwrap_or(0) as usize;
+            let limit = request["limit"].as_u64().unwrap_or(1000).min(10_000) as usize;
+            let record_types = record_types
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect::<Vec<_>>();
+            return json!({
+                "ok":true,
+                "schema_version":1,
+                "collection":collection,
+                "root_type":collection.and_then(collection_root_type),
+                "collections":collections,
+                "count":count,
+                "returned":record_types.len(),
+                "next_offset":(offset + record_types.len() < count).then_some(offset + record_types.len()),
+                "record_types":record_types,
+                "editing":editing_description(collection),
+                "next":"Call record_schema again with type set to a record type or schema_type returned here."
+            });
+        };
+
+        let root_type = collection
+            .and_then(|collection| {
+                collection_record_types(collection)
+                    .into_iter()
+                    .find(|entry| {
+                        ["type", "schema_type"].iter().any(|key| {
+                            entry[*key]
+                                .as_str()
+                                .is_some_and(|name| name.eq_ignore_ascii_case(requested_type))
+                        })
+                    })
+                    .and_then(|entry| entry["schema_type"].as_str().map(str::to_string))
+            })
+            .or_else(|| resolved_type_name(requested_type))
+            .or_else(|| {
+                (requested_type == "Value"
+                    || collection.and_then(collection_root_type) == Some("Value"))
+                .then(|| "Value".to_string())
+            });
+        let Some(root_type) = root_type else {
+            return failure(
+                "unknown_record_type",
+                format!("unknown record type: {requested_type}"),
+            );
+        };
+        let mut fields = Vec::new();
+        let direct_collection_variant =
+            collection
+                .and_then(collection_root_type)
+                .is_some_and(|collection_root| {
+                    collection_root == root_type && !requested_type.eq_ignore_ascii_case(&root_type)
+                })
+                && registry_types()
+                    .get(&root_type)
+                    .is_some_and(|info| info["kind"] == "Enum");
+        if direct_collection_variant {
+            append_variant_field_descriptions(&root_type, requested_type, collection, &mut fields);
+        } else {
+            append_field_descriptions(&root_type, "", collection, 0, &mut Vec::new(), &mut fields);
+        }
+        let definitions = referenced_definitions(&root_type);
+        let runtime_schema = collection.and_then(|collection| {
+            collection_records(&self.tabs[self.active_tab].scene.document, collection)
+                .ok()?
+                .into_iter()
+                .find(|record| {
+                    let type_matches = record["type"]
+                        .as_str()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(requested_type))
+                        || collection_root_type(collection)
+                            .is_some_and(|name| name.eq_ignore_ascii_case(requested_type));
+                    type_matches
+                        && request["handle"].as_str().is_none_or(|handle| {
+                            record["handle"].as_str().is_some_and(|actual| {
+                                actual.eq_ignore_ascii_case(without_hex_prefix(handle))
+                            })
+                        })
+                        && request["name"].as_str().is_none_or(|name| {
+                            record["name"]
+                                .as_str()
+                                .is_some_and(|actual| actual.eq_ignore_ascii_case(name))
+                        })
+                })
+                .map(|record| runtime_value_schema(&record["properties"], collection, ""))
+        });
+        json!({
+            "ok":true,
+            "schema_version":1,
+            "collection":collection,
+            "record_type":requested_type,
+            "schema_type":root_type,
+            "schema":registry_types().get(&root_type),
+            "definitions":definitions,
+            "fields":fields,
+            "runtime_schema":runtime_schema,
+            "editing":editing_description(collection),
+            "notes":[
+                "Enum constraints list every accepted serialized variant.",
+                "Integer constraints reflect the complete serialized range.",
+                "Unit annotations are supplied only where the serialized field name and type are unambiguous.",
+                "runtime_schema describes an existing matching record when one is available."
+            ]
         })
     }
 
@@ -991,6 +1730,104 @@ mod tests {
     }
 
     #[test]
+    fn record_schema_describes_absent_types_fields_enums_units_and_write_rules() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        let catalog = app.record_schema(&json!({"collection":"entities"}));
+        assert_eq!(catalog["ok"], true, "{catalog}");
+        assert_eq!(catalog["root_type"], "EntityType");
+        assert_eq!(catalog["count"], 48);
+        assert!(catalog["record_types"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|record| record["type"] == "Insert" && record["schema_type"] == "Insert"));
+
+        let schema = app.record_schema(&json!({
+            "collection":"entities",
+            "type":"Insert"
+        }));
+        assert_eq!(schema["ok"], true, "{schema}");
+        assert!(schema["definitions"].get("Insert").is_some());
+        assert!(schema["definitions"].get("AttributeEntity").is_some());
+        assert!(schema["runtime_schema"].is_null());
+        let fields = schema["fields"].as_array().unwrap();
+        let field = |path: &str| {
+            fields
+                .iter()
+                .find(|field| field["path"] == path)
+                .unwrap_or_else(|| panic!("missing schema field {path}"))
+        };
+        assert_eq!(field("/common/handle")["writable"], false);
+        assert_eq!(field("/insert_point")["unit"], "drawing_units");
+        assert_eq!(field("/rotation")["unit"], "radians");
+        assert_eq!(
+            field("/attributes")["item_path_template"],
+            "/attributes/{index}"
+        );
+        assert_eq!(field("/attributes/{index}/value")["writable"], true);
+
+        let text = app.record_schema(&json!({"collection":"entities","type":"Text"}));
+        let alignment = text["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["path"] == "/horizontal_alignment")
+            .expect("horizontal alignment schema");
+        assert!(alignment["constraints"]["allowed_variants"]
+            .as_array()
+            .is_some_and(|variants| variants.len() >= 3));
+
+        let unknown = app.record_schema(&json!({"collection":"objects","type":"Unknown"}));
+        assert_eq!(unknown["schema_type"], "ObjectType");
+        let fields = unknown["fields"].as_array().unwrap();
+        let field = |path: &str| {
+            fields
+                .iter()
+                .find(|field| field["path"] == path)
+                .unwrap_or_else(|| panic!("missing enum variant field {path}"))
+        };
+        assert_eq!(field("/type_name")["writable"], true);
+        assert_eq!(field("/handle")["writable"], false);
+        assert_eq!(field("/owner")["writable"], false);
+        assert_eq!(field("/raw_dwg_handle_bits")["writable"], true);
+
+        let dimension = app.record_schema(&json!({"collection":"entities","type":"Dimension"}));
+        let fields = dimension["fields"].as_array().unwrap();
+        assert!(fields.iter().any(|field| field["path"] == "/Linear"));
+        assert!(fields.iter().any(
+            |field| field["path"] == "/Linear/base/common/handle" && field["writable"] == false
+        ));
+        assert!(fields.iter().any(|field| field["path"] == "/Radius"));
+
+        let section_style = app
+            .record_schema(&json!({"collection":"section_view_style","type":"SectionViewStyle"}));
+        assert_eq!(section_style["schema_type"], "EntitySectionViewStyle");
+        assert!(section_style["fields"]
+            .as_array()
+            .is_some_and(|fields| fields
+                .iter()
+                .any(|field| field["path"] == "/arrow_size" && field["unit"] == "drawing_units")));
+
+        let class = app.record_schema(&json!({"collection":"classes","type":"Class"}));
+        assert_eq!(class["schema_type"], "DxfClass");
+        assert!(class["fields"]
+            .as_array()
+            .is_some_and(|fields| fields.iter().any(|field| field["path"] == "/dxf_name")));
+
+        for (collection, root) in [("entities", "EntityType"), ("objects", "ObjectType")] {
+            let complete = app.record_schema(&json!({"collection":collection,"type":root}));
+            assert_eq!(complete["ok"], true, "{root}: {complete}");
+            assert!(complete["fields"]
+                .as_array()
+                .is_some_and(|fields| !fields.is_empty()));
+            let bytes = serde_json::to_vec(&complete).unwrap().len();
+            assert!(bytes < 8 * 1024 * 1024, "{root} schema is {bytes} bytes");
+        }
+    }
+
+    #[test]
     fn record_updates_reject_type_identity_and_compare_failures() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -1015,6 +1852,17 @@ mod tests {
             "identity",
         );
         assert_eq!(identity["code"], "invalid_update", "{identity}");
+
+        let identity_parent = execute(
+            &mut app,
+            json!({"op":"set_properties","collection":"entities","handle":handle,
+                "updates":[{"path":"/common","value":{}}]}),
+            "identity-parent",
+        );
+        assert_eq!(
+            identity_parent["code"], "invalid_update",
+            "{identity_parent}"
+        );
 
         let compare = execute(
             &mut app,

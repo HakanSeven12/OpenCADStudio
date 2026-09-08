@@ -56,6 +56,7 @@ def legacy(server: Path) -> None:
     assert execute_request["properties"]["steps"]["maxItems"] == 64
     assert execute_request["properties"]["cmd"]["examples"][0] == "LINE 0,0 10,10"
     assert "set_properties" in execute_request["properties"]["op"]["enum"]
+    assert "record_schema" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
     read_parameters = definitions["ocs_read"]["inputSchema"]["properties"]["parameters"]["properties"]
     assert {"collection", "where", "paths"} <= set(read_parameters)
     assert execute_request["properties"]["kind"]["enum"] == [

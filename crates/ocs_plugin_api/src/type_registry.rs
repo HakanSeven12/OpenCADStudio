@@ -1,17 +1,15 @@
 //! Embedded type registry generated at build time.
 //!
-//! The JSON embedded here is produced by tracing a curated allow-list of
-//! `acadrust` types with `serde-reflection` and mapping the result into a
-//! stable, language-binding-friendly schema defined in
+//! The JSON embedded here is produced by tracing every editor record root and
+//! its dependent `acadrust` types with `serde-reflection`, then mapping the
+//! result into a stable, language-binding-friendly schema defined in
 //! [`crate::type_registry_types`]. The registry is embedded via
 //! `include_str!(concat!(env!("OUT_DIR"), "/type_registry.json"))` so the
 //! `host` feature is not required to read it.
 //!
-//! The allow-list is intentionally narrow: it excludes generic containers and
-//! internal enums such as `EntityType` in favor of concrete serializable structs
-//! like `Point`, `Line`, `Circle`, and `MText`. Language bindings and tooling
-//! can depend on this schema without pulling the full `acadrust` dependency
-//! tree.
+//! The registry covers the complete entity, object, symbol-table, header, and
+//! document-record roots used by the editor. Language bindings and tooling can
+//! inspect every variant without pulling the full `acadrust` dependency tree.
 
 pub use crate::type_registry_types::*;
 
@@ -121,13 +119,45 @@ mod tests {
     }
 
     #[test]
-    fn embedded_type_registry_does_not_contain_entity_type() {
+    fn embedded_type_registry_contains_every_entity_and_object_variant() {
         let registry: TypeRegistry = serde_json::from_str(get_embedded_type_registry_json())
             .expect("valid TypeRegistry JSON");
-        assert!(
-            !registry.types.contains_key(&TypeId::new("EntityType")),
-            "EntityType should not be in the allow-list registry"
-        );
+        let entities = registry
+            .types
+            .get(&TypeId::new("EntityType"))
+            .expect("EntityType in complete registry");
+        let objects = registry
+            .types
+            .get(&TypeId::new("ObjectType"))
+            .expect("ObjectType in complete registry");
+        assert_eq!(entities.variants.len(), 48);
+        assert_eq!(objects.variants.len(), 36);
+        for root in [
+            "HeaderVariables",
+            "SummaryInfo",
+            "LineType",
+            "TextStyle",
+            "BlockRecord",
+            "DimStyle",
+            "AppId",
+            "View",
+            "VPort",
+            "Ucs",
+            "VxTableRecord",
+            "DxfClass",
+            "BlockVisibilityParameter",
+            "FieldDef",
+            "DgnLsDefinition",
+            "DgnLsComponent",
+            "NotificationCollection",
+            "Preview",
+            "EntitySectionViewStyle",
+        ] {
+            assert!(
+                registry.types.contains_key(&TypeId::new(root)),
+                "missing {root}"
+            );
+        }
     }
 
     #[test]

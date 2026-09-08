@@ -367,6 +367,7 @@ impl OpenCADStudio {
             "entities" => self.entity_summary(),
             "query" => self.entity_query(&req),
             "records" => self.record_query(&req),
+            "record_schema" => self.record_schema(&req),
             "capabilities" => self.record_capabilities(),
             "layers" => {
                 let i = self.active_tab;

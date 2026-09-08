@@ -33,6 +33,21 @@ The normal flow is to call `ocs_sessions`, pass its returned `session_id` as `oc
 
 Call `ocs_read` with `op: "capabilities"` before unfamiliar work. It reports the command, geometry, transaction, capture, and database facilities supported by the running build. The `records.collections` list gives every available database collection, its record count, and whether it can be edited.
 
+Call `ocs_read` with `op: "record_schema"` before editing an unfamiliar record. With no parameters it lists the complete generated type registry. A collection returns the record types accepted by that collection even when the current drawing has no instance of a type. Supplying both `collection` and `type` returns the type's complete dependency graph, flattened property paths, JSON types, optional and sequence markers, enum variants, integer bounds, unambiguous unit annotations, identity fields, and write rules:
+
+```json
+{
+  "ocs_session_id": "SESSION_FROM_OCS_SESSIONS",
+  "op": "record_schema",
+  "parameters": {
+    "collection": "entities",
+    "type": "Insert"
+  }
+}
+```
+
+Sequence fields include an `item_path_template` such as `/attributes/{index}`. Replace `{index}` with an index returned by `records` before using the path in `set_properties`. When a matching record exists, `runtime_schema` adds its exact JSON shape and bounded scalar examples. The embedded registry is generated from all 48 entity variants, all 36 non-graphical object variants, symbol-table records, header data, summary data, and the remaining stored record roots at build time.
+
 `op: "records"` returns every serializable property of entities, non-graphical objects, symbol-table records, the complete header, document metadata, and derived database views. Omitting `collection` returns the same collection manifest; use `collection: "all"` for a paged query across the complete database. Records have a stable collection plus a handle or name, a type, and `properties`. Entity records also include their display and file record type names.
 
 Property filters and projections use RFC 6901 JSON Pointer paths relative to `properties`. Multiple `where` filters are combined with AND. Supported operators are `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `contains`, `starts_with`, `ends_with`, `in`, `exists`, and `not_exists`:

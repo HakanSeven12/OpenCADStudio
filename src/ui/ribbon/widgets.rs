@@ -132,7 +132,7 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
             renderer,
             label,
             width,
-            advanced_text::Wrapping::WordOrGlyph,
+            advanced_text::Wrapping::Word,
         )
         .height
             <= max_label_height
@@ -685,7 +685,7 @@ pub(super) fn render_large_dropdown<'a>(
                 .size(10)
                 .width(Fill)
                 .align_x(iced::Center)
-                .wrapping(advanced_text::Wrapping::WordOrGlyph),
+                .wrapping(advanced_text::Wrapping::Word),
         ]
         .align_x(iced::Center)
         .spacing(0)
@@ -818,7 +818,7 @@ pub(super) fn render_large<'a>(
                         .size(10)
                         .width(Fill)
                         .align_x(iced::Center)
-                        .wrapping(advanced_text::Wrapping::WordOrGlyph),
+                        .wrapping(advanced_text::Wrapping::Word),
                 ]
                 .align_x(iced::Center)
                 .spacing(0)

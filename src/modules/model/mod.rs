@@ -89,8 +89,8 @@ impl CadModule for ModelModule {
                 RibbonGroup {
                     title: "Edges",
                     tools: vec![
-                        RibbonItem::LargeTool(tool("SOLIDFILLET", "Fillet", FILLET_ICON)),
-                        RibbonItem::LargeTool(tool("SOLIDCHAMFER", "Chamfer", CHAMFER_ICON)),
+                        RibbonItem::LargeTool(tool("FILLETEDGE", "Fillet Edge", FILLET_ICON)),
+                        RibbonItem::LargeTool(tool("CHAMFEREDGE", "Chamfer", CHAMFER_ICON)),
                     ],
                 },
             ]

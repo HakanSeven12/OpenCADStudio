@@ -733,6 +733,7 @@ impl OpenCADStudio {
             &result,
             CmdResult::Relaunch(..)
                 | CmdResult::Dispatch(..)
+                | CmdResult::SolidEdgeBlend { .. }
                 | CmdResult::SolidSubtract { .. }
                 | CmdResult::SliceEntities { .. }
                 | CmdResult::SliceSurfaceEntities { .. }
@@ -4105,11 +4106,20 @@ impl OpenCADStudio {
 
             CmdResult::SolidEdgeBlend {
                 handle,
-                pick,
+                edges,
+                base_face,
                 value,
+                other_value,
                 fillet,
             } => {
-                let task = self.solid_edge_blend(handle, pick, value, fillet);
+                let task = self.solid_edge_blend(
+                    handle,
+                    &edges,
+                    base_face,
+                    value,
+                    other_value,
+                    fillet,
+                );
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();

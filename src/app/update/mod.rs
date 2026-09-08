@@ -1969,6 +1969,14 @@ impl OpenCADStudio {
                 self.dispatch_command(&cmd)
             }
 
+            Message::ScriptLine(line) => {
+                if line.trim().is_empty() {
+                    self.feed_command(crate::command::StepInput::Enter)
+                } else {
+                    self.run_command_line(&line)
+                }
+            }
+
             Message::ToggleLayers => {
                 if self.active_modal == Some(super::ModalKind::Layers) {
                     self.ribbon.deactivate_tool_if("LAYERS");

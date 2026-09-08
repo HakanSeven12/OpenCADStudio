@@ -2468,6 +2468,14 @@ impl OpenCADStudio {
                     previews.push(guide);
                 }
             }
+            let preview_hidden = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| command.preview_hidden_handles().to_vec())
+                .unwrap_or_default();
+            self.tabs[i]
+                .scene
+                .set_command_preview_hidden(&preview_hidden);
             self.tabs[i].scene.set_preview_wires(previews);
         } else {
             self.tabs[i].snap_result = None;

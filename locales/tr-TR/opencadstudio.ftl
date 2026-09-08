@@ -3179,6 +3179,17 @@ model =
     .cylinder-specify-axis-endpoint = CYLINDER  { common.specify }: { draw.axis-endpoint }:
     .elliptical = Eliptik
     .select-a-solid-edge = { draw.select }: { properties.solid } · { common.edge }:
+    .filletedge-select-edge-or-chain-loop-radius = Bir kenar seçin veya [Zincir/Döngü/Yarıçap]:
+    .filletedge-select-edge-chain-or-edge-radius = Bir kenar zinciri seçin veya [Kenar/Yarıçap]:
+    .filletedge-select-loop-edge-or-edge-chain-radius = Döngünün kenarını seçin veya [Kenar/Zincir/Yarıçap]:
+    .filletedge-enter-option-accept-next = Bir seçenek girin [Kabul/Sonraki] <Kabul>:
+    .filletedge-accept-or-radius = Fillet'i kabul etmek için Enter'a basın veya [Yarıçap]:
+    .filletedge-enter-radius-or-expression = Fillet yarıçapını girin veya [İfade] <__ocs_fmt_0__>:
+    .filletedge-specify-radius-or-expression = Yarıçapı belirtin veya [İfade] <__ocs_fmt_0__>:
+    .filletedge-enter-expression = İfadeyi girin:
+    .filletedge-stale-edge = Seçilen kenar artık katıya ait değil.
+    .filletedge-history-create-failed = Katı geçmişi oluşturulamadı.
+    .filletedge-history-append-failed = Fillet geçmişi kaydedilemedi.
     .specify-fillet-radius = { common.specify }: { common.fillet } · { common.radius } <__ocs_fmt_0__>:
     .specify-chamfer-distance = { common.specify }: { common.chamfer } · { common.distance } <__ocs_fmt_0__>:
     .polysolid-height-width-justification = POLYSOLID  { common.height } = __ocs_fmt_0__, { common.width } = __ocs_fmt_1__, { ui.justification } = __ocs_fmt_2__

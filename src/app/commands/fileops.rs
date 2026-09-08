@@ -335,9 +335,9 @@ impl OpenCADStudio {
             "PERSP" => return Some(Task::done(Message::SetProjection(false))),
             "LAYERS" => return Some(Task::done(Message::ToggleLayers)),
 
-            // SCRIPT <path> — run a command script: each non-blank, non-comment
+            // SCRIPT <path> — run a command script: each non-comment
             // line is fed through the same command path the `--script` startup
-            // flag uses, so the behaviour matches headless automation exactly.
+            // flag uses. Blank rows submit Enter to the active command.
             "SCRIPT" | "SCR" => {
                 use crate::command::ValuePromptCommand;
                 let c = ValuePromptCommand::new("SCRIPT", "SCRIPT  path to the .scr file:");
@@ -352,10 +352,8 @@ impl OpenCADStudio {
                             let cmds: Vec<Task<Message>> = text
                                 .lines()
                                 .map(str::trim)
-                                .filter(|l| {
-                                    !l.is_empty() && !l.starts_with('#') && !l.starts_with(';')
-                                })
-                                .map(|l| Task::done(Message::Command(l.to_string())))
+                                .filter(|l| !l.starts_with('#') && !l.starts_with(';'))
+                                .map(|l| Task::done(Message::ScriptLine(l.to_string())))
                                 .collect();
                             self.command_line.push_output(crate::tf!(
                                 "SCRIPT: running {} command(s) from {p}.",

@@ -1,12 +1,13 @@
 use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
-    DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
-    SolidHistoryCylinder, SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
+    DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryChamfer,
+    SolidHistoryCone, SolidHistoryCylinder, SolidHistoryFillet, SolidHistoryLoft,
+    SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
     SolidHistoryPyramid, SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep,
     SolidHistoryTorus,
 };
 use acadrust::EntityType;
-use cadkernel::brep::Body;
+use cadkernel::brep::{Body, Surface};
 
 use crate::command::EntityTransform;
 use crate::entities::traits::EntityTypeOps;
@@ -32,6 +33,9 @@ pub const GRIP_SWEEP_PATH_FIRST: usize = 30_000;
 pub const GRIP_LOFT_SECTION_FIRST: usize = 40_000;
 pub const GRIP_REVOLVE_PROFILE_FIRST: usize = 50_000;
 pub const GRIP_REVOLVE_AXIS: usize = 10_013;
+pub const GRIP_FILLET_RADIUS: usize = 10_014;
+pub const GRIP_CHAMFER_DISTANCE1: usize = 10_015;
+pub const GRIP_CHAMFER_DISTANCE2: usize = 10_016;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -197,7 +201,7 @@ pub fn has_specialized_primitive_properties(
     handle: acadrust::Handle,
 ) -> bool {
     matches!(
-        document.solid_history_operation(handle),
+        primitive_property_operation(document, handle).as_ref(),
         Some(
             SolidHistoryOperation::Box(_)
                 | SolidHistoryOperation::Wedge(_)
@@ -212,6 +216,19 @@ pub fn has_specialized_primitive_properties(
                 | SolidHistoryOperation::Revolve(_)
         )
     )
+}
+
+/// Return the primitive that owns the public Geometry rows. Later operations
+/// such as edge fillets and chamfers refine that primitive but do not replace
+/// its editable type, position, or dimensions.
+pub fn primitive_property_operation(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+) -> Option<SolidHistoryOperation> {
+    document
+        .solid_history_operations(handle)
+        .and_then(|operations| operations.into_iter().next())
+        .or_else(|| document.solid_history_operation(handle).cloned())
 }
 
 /// Solid history results whose public Properties palette is fully described by
@@ -1438,10 +1455,10 @@ pub fn primitive_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
 ) -> Vec<PropSection> {
-    let Some(operation) = document.solid_history_operation(handle) else {
+    let Some(operation) = primitive_property_operation(document, handle) else {
         return brep_properties(document, handle);
     };
-    match operation {
+    match &operation {
         SolidHistoryOperation::Box(value) => {
             rectangular_properties(document, handle, value, "Box")
         }
@@ -3086,6 +3103,149 @@ fn grip(
     }
 }
 
+pub fn fillet_radius_grip(body: &Body, radius: f64) -> Option<GripDef> {
+    if !radius.is_finite() || radius <= 0.0 {
+        return None;
+    }
+    for (face_key, face) in body.faces.iter() {
+        let Some(Surface::Cylinder(cylinder)) = body.surfaces.get(face.surface) else {
+            continue;
+        };
+        if (cylinder.radius.abs() - radius).abs() > radius.max(1.0) * 1.0e-7 {
+            continue;
+        }
+        let axis = glam::DVec3::from_array(cylinder.base.normal()?).try_normalize()?;
+        let origin = glam::DVec3::from_array(cylinder.base.origin);
+        let points = body
+            .face_coedges(face_key)
+            .into_iter()
+            .filter_map(|coedge| body.coedges.get(coedge))
+            .filter_map(|coedge| body.edges.get(coedge.edge))
+            .flat_map(|edge| [edge.start, edge.end])
+            .filter_map(|vertex| body.vertices.get(vertex))
+            .map(|vertex| glam::DVec3::from_array(vertex.point))
+            .collect::<Vec<_>>();
+        let minimum = points
+            .iter()
+            .map(|point| (*point - origin).dot(axis))
+            .reduce(f64::min)?;
+        let maximum = points
+            .iter()
+            .map(|point| (*point - origin).dot(axis))
+            .reduce(f64::max)?;
+        let center = origin + axis * ((minimum + maximum) * 0.5);
+        let radial = points
+            .iter()
+            .map(|point| *point - center - axis * (*point - center).dot(axis))
+            .find_map(|radial| radial.try_normalize())?;
+        return Some(grip(
+            GRIP_FILLET_RADIUS,
+            center + radial * radius,
+            GripShape::Square,
+            Some(radial),
+        ));
+    }
+    None
+}
+
+pub fn chamfer_distance_grips(
+    document: &acadrust::CadDocument,
+    handle: acadrust::Handle,
+    value: &SolidHistoryChamfer,
+) -> Vec<GripDef> {
+    let Some(operations) = document.solid_history_operations(handle) else {
+        return Vec::new();
+    };
+    let Some(chamfer_index) = operations
+        .iter()
+        .rposition(|operation| matches!(operation, SolidHistoryOperation::Chamfer(_)))
+    else {
+        return Vec::new();
+    };
+    let Ok(source) = cadkernel::acis::rebuild_history(&operations[..chamfer_index]) else {
+        return Vec::new();
+    };
+    let edges = source.edge_keys().collect::<Vec<_>>();
+    let faces = source.face_keys().collect::<Vec<_>>();
+    let Some(edge) = value
+        .edges
+        .first()
+        .and_then(|ordinal| usize::try_from(*ordinal).ok())
+        .and_then(|ordinal| edges.get(ordinal).copied())
+        .and_then(|edge| source.edges.get(edge))
+    else {
+        return Vec::new();
+    };
+    let Some(base_face) = usize::try_from(value.base_face)
+        .ok()
+        .and_then(|ordinal| faces.get(ordinal).copied())
+    else {
+        return Vec::new();
+    };
+    let adjacent = edge
+        .coedges
+        .iter()
+        .filter_map(|coedge| source.coedges.get(*coedge))
+        .filter_map(|coedge| source.loops.get(coedge.owner))
+        .map(|edge_loop| edge_loop.owner)
+        .collect::<Vec<_>>();
+    let Some(other_face) = adjacent.iter().copied().find(|face| *face != base_face) else {
+        return Vec::new();
+    };
+    let outward = |face_key| {
+        let face = source.faces.get(face_key)?;
+        let Surface::Plane(plane) = source.surfaces.get(face.surface)? else {
+            return None;
+        };
+        let normal = glam::DVec3::from_array(plane.normal()?).try_normalize()?;
+        Some(if face.forward { normal } else { -normal })
+    };
+    let Some(base_normal) = outward(base_face) else {
+        return Vec::new();
+    };
+    let Some(other_normal) = outward(other_face) else {
+        return Vec::new();
+    };
+    let dot = base_normal.dot(other_normal);
+    let Some(base_inward) = (-(other_normal - base_normal * dot)).try_normalize() else {
+        return Vec::new();
+    };
+    let Some(other_inward) = (-(base_normal - other_normal * dot)).try_normalize() else {
+        return Vec::new();
+    };
+    let Some(start) = source.vertices.get(edge.start) else {
+        return Vec::new();
+    };
+    let Some(end) = source.vertices.get(edge.end) else {
+        return Vec::new();
+    };
+    let midpoint =
+        (glam::DVec3::from_array(start.point) + glam::DVec3::from_array(end.point)) * 0.5;
+    [
+        (
+            GRIP_CHAMFER_DISTANCE1,
+            value.base_distance,
+            base_inward,
+        ),
+        (
+            GRIP_CHAMFER_DISTANCE2,
+            value.other_distance,
+            other_inward,
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, distance, _)| distance.is_finite() && *distance > 0.0)
+    .map(|(id, distance, axis)| {
+        grip(
+            id,
+            midpoint + axis * distance,
+            GripShape::Square,
+            Some(axis),
+        )
+    })
+    .collect()
+}
+
 pub fn primitive_grips(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
@@ -3093,6 +3253,21 @@ pub fn primitive_grips(
     let Some(operation) = document.solid_history_operation(handle) else {
         return Vec::new();
     };
+    if let SolidHistoryOperation::Fillet(value) = operation {
+        let Some(radius) = value.radii.first().copied() else {
+            return Vec::new();
+        };
+        let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
+            return Vec::new();
+        };
+        return crate::scene::convert::solid3d_tess::kernel_body(solid)
+            .and_then(|body| fillet_radius_grip(&body, radius))
+            .into_iter()
+            .collect();
+    }
+    if let SolidHistoryOperation::Chamfer(value) = operation {
+        return chamfer_distance_grips(document, handle, value);
+    }
     let mut grips = Vec::new();
     let mut add = |id, transform, point, shape, axis: Option<[f64; 3]>| {
         if let Some(world) = world_point(transform, point) {
@@ -3711,5 +3886,34 @@ pub fn brep_op(body: &Body) -> SolidHistoryOperation {
         operation_major: 1,
         acis_data,
         ..SolidHistoryBrep::default()
+    })
+}
+
+pub fn fillet_op(edges: Vec<i32>, radius: f64) -> SolidHistoryOperation {
+    SolidHistoryOperation::Fillet(SolidHistoryFillet {
+        base: base(glam::DMat4::IDENTITY.to_cols_array()),
+        operation_major: 1,
+        method: 0,
+        edges,
+        radii: vec![radius],
+        ..SolidHistoryFillet::default()
+    })
+}
+
+pub fn chamfer_op(
+    edges: Vec<i32>,
+    base_face: i32,
+    base_distance: f64,
+    other_distance: f64,
+) -> SolidHistoryOperation {
+    SolidHistoryOperation::Chamfer(SolidHistoryChamfer {
+        base: base(glam::DMat4::IDENTITY.to_cols_array()),
+        operation_major: 1,
+        method: 0,
+        base_distance,
+        other_distance,
+        edges,
+        base_face,
+        ..SolidHistoryChamfer::default()
     })
 }

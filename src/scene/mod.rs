@@ -411,7 +411,8 @@ struct ResidentWireSet {
     layout: Option<ResidentWireLayout>,
 }
 
-struct ResidentWireLayout {
+#[derive(Clone)]
+pub(crate) struct ResidentWireLayout {
     /// Entity handles in final submission order. A temporarily hidden entity
     /// remains here with no range so grip commit can restore it in place.
     order: Vec<Handle>,
@@ -435,6 +436,12 @@ pub struct PreparedOpenGeometry {
     /// Loader tessellations and their guard; a state mismatch clears the memo.
     pub tess_memo: HashMap<Handle, Arc<Vec<WireModel>>>,
     pub tess_guard: u64,
+    /// The loader's submission-order layout for `wires`.
+    ///
+    /// Without it the installed set has `layout: None`, and `try_resident_patch`
+    /// refuses any set that has none — so the first edit after opening a file
+    /// could never patch and rebuilt the whole wire assembly instead.
+    pub(crate) resident_layout: Option<ResidentWireLayout>,
     /// Loader block definitions; the receiving scene supplies its own epoch.
     pub block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)>,
     /// The loader's draw-order map. Computing it walks all 1.17 M entities and
@@ -1032,6 +1039,17 @@ pub fn prepare_open_geometry(
     let tess_memo = std::mem::take(&mut *scene.resident_tess_memo.borrow_mut());
     let tess_guard = scene.resident_tess_guard.get();
     let draw_depths = scene.draw_depth_cache.borrow_mut().take();
+    // The layout the loader already built for exactly these wires. Taken by
+    // identity so it cannot be paired with a different assembly.
+    let resident_layout = scene
+        .resident_wire_sets
+        .borrow_mut()
+        .drain()
+        .find_map(|(_, set)| {
+            Arc::ptr_eq(&set.wires, &wires)
+                .then_some(set.layout)
+                .flatten()
+        });
     let block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)> =
         std::mem::take(&mut *scene.block_defn_cache.borrow_mut())
             .into_iter()
@@ -1047,6 +1065,7 @@ pub fn prepare_open_geometry(
             tess_guard,
             block_defns,
             draw_depths,
+            resident_layout,
         },
     )
 }
@@ -2248,7 +2267,7 @@ impl Scene {
                 epoch: self.geometry_epoch,
                 gen,
                 wires: Arc::clone(&prepared.wires),
-                layout: None,
+                layout: prepared.resident_layout,
             },
         );
         // Adopt the loader thread's tessellation memo so the first edit patches
@@ -5497,18 +5516,32 @@ impl Scene {
         frozen_layers: Option<&HashSet<Handle>>,
         style_viewport: Option<Handle>,
     ) -> Option<Arc<Vec<WireModel>>> {
-        if self.viewport_style_key(style_viewport) != 0 {
-            return None;
-        }
         let perf = crate::perf::enabled();
+        // Each early exit here costs a full wire assembly, so say which one.
+        let declined = |reason: &str| -> Option<Arc<Vec<WireModel>>> {
+            if perf {
+                crate::perf_record!("[perf] resident-patch-skip reason={reason}");
+            }
+            None
+        };
+        if self.viewport_style_key(style_viewport) != 0 {
+            return declined("viewport-style");
+        }
         let t_patch = iced::time::Instant::now();
         // The entry must exist, be stale, and be uniquely held so we can move
         // its wires out rather than deep-clone them.
         let cached_epoch = {
             let sets = self.resident_wire_sets.borrow();
-            let entry = sets.get(&key)?;
-            if entry.epoch == self.geometry_epoch || entry.layout.is_none() {
+            let Some(entry) = sets.get(&key) else {
+                drop(sets);
+                return declined("no-entry");
+            };
+            if entry.epoch == self.geometry_epoch {
                 return None;
+            }
+            if entry.layout.is_none() {
+                drop(sets);
+                return declined("no-layout");
             }
             let strong = Arc::strong_count(&entry.wires);
             if strong != 1 {
@@ -5519,7 +5552,9 @@ impl Scene {
             }
             entry.epoch
         };
-        let deltas = self.replay_since(cached_epoch)?;
+        let Some(deltas) = self.replay_since(cached_epoch) else {
+            return declined("journal-too-old");
+        };
 
         // Take ownership of the cached assembly (guaranteed unique above).
         // `prev_gen` is the content id the GPU currently holds for this set — the
@@ -10827,6 +10862,7 @@ mod journal_tests {
             tess_guard: 0,
             block_defns: Vec::new(),
             draw_depths: Some(handed_over),
+            resident_layout: None,
         });
         assert_eq!(
             *scene.draw_depth_map(),

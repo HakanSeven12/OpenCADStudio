@@ -839,8 +839,15 @@ impl shader::Primitive for Primitive {
                             gpus.extend(arena.wire_gpus());
                         }
                         inner.gpu_wires = std::sync::Arc::new(gpus);
+                        // A one-entity patch costs 73 ms in this block, and the
+                        // three steps below are all O(resident set) rather than
+                        // O(changes). Which of them dominates decides the fix.
+                        let t_part = _perf.then(iced::time::Instant::now);
                         let partitioned =
                             wire_arena::partition_wires(&vp_wires, &draw_depths);
+                        let part_ms = t_part
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_blk = _perf.then(iced::time::Instant::now);
                         inner.gpu_block_wires = std::sync::Arc::new(
                             inner.upload_block_wires(
                                 device,
@@ -850,6 +857,9 @@ impl shader::Primitive for Primitive {
                                 &mut pipeline.block_geometry,
                             ),
                         );
+                        let blk_ms = t_blk
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_curve = _perf.then(iced::time::Instant::now);
                         inner.gpu_circles = std::sync::Arc::new(
                             inner.upload_circles_from_instances(
                                 device,
@@ -864,6 +874,17 @@ impl shader::Primitive for Primitive {
                                 &partitioned.ellipse_instances,
                             ),
                         );
+                        if _perf {
+                            crate::perf_record!(
+                                "[perf] arena-post partition={part_ms:.1}ms blocks={blk_ms:.1}ms \
+curves={:.1}ms wires={} instanced={} circles={} ellipses={}",
+                                t_curve.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0),
+                                vp_wires.len(),
+                                partitioned.instanced.len(),
+                                partitioned.circle_instances.len(),
+                                partitioned.ellipse_instances.len(),
+                            );
+                        }
                         if _patched {
                             wire_arena::patch_handle_index(
                                 &mut inner.wire_handle_index,

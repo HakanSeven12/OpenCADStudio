@@ -3187,6 +3187,17 @@ model =
     .cylinder-specify-axis-endpoint = CYLINDER  Specify axis endpoint:
     .elliptical = Elliptical
     .select-a-solid-edge = Select a solid edge:
+    .filletedge-select-edge-or-chain-loop-radius = Select an edge or [Chain/Loop/Radius]:
+    .filletedge-select-edge-chain-or-edge-radius = Select an edge chain or [Edge/Radius]:
+    .filletedge-select-loop-edge-or-edge-chain-radius = Select edge of loop or [Edge/Chain/Radius]:
+    .filletedge-enter-option-accept-next = Enter an option [Accept/Next] <Accept>:
+    .filletedge-accept-or-radius = Press Enter to accept the fillet or [Radius]:
+    .filletedge-enter-radius-or-expression = Enter fillet radius or [Expression] <__ocs_fmt_0__>:
+    .filletedge-specify-radius-or-expression = Specify Radius or [Expression] <__ocs_fmt_0__>:
+    .filletedge-enter-expression = Enter expression:
+    .filletedge-stale-edge = A selected edge no longer belongs to the solid.
+    .filletedge-history-create-failed = The solid history could not be created.
+    .filletedge-history-append-failed = The fillet history could not be recorded.
     .specify-fillet-radius = Specify fillet radius <__ocs_fmt_0__>:
     .specify-chamfer-distance = Specify chamfer distance <__ocs_fmt_0__>:
     .polysolid-height-width-justification = POLYSOLID  Height = __ocs_fmt_0__, Width = __ocs_fmt_1__, Justification = __ocs_fmt_2__

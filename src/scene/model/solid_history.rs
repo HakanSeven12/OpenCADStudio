@@ -1,12 +1,12 @@
 use acadrust::entities::{EmbeddedEntity, Solid3D};
 use acadrust::objects::{
     DynamicBlockData, ObjectType, SolidHistoryBox, SolidHistoryBrep, SolidHistoryCone,
-    SolidHistoryCylinder, SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
+    SolidHistoryCylinder, SolidHistoryFillet, SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase, SolidHistoryOperation,
     SolidHistoryPyramid, SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep,
     SolidHistoryTorus,
 };
 use acadrust::EntityType;
-use cadkernel::brep::Body;
+use cadkernel::brep::{Body, Surface};
 
 use crate::command::EntityTransform;
 use crate::entities::traits::EntityTypeOps;
@@ -32,6 +32,7 @@ pub const GRIP_SWEEP_PATH_FIRST: usize = 30_000;
 pub const GRIP_LOFT_SECTION_FIRST: usize = 40_000;
 pub const GRIP_REVOLVE_PROFILE_FIRST: usize = 50_000;
 pub const GRIP_REVOLVE_AXIS: usize = 10_013;
+pub const GRIP_FILLET_RADIUS: usize = 10_014;
 pub const GRIP_BOX_CORNER_FIRST: usize = 10_100;
 pub const GRIP_BOX_FACE_X_MIN: usize = 10_110;
 pub const GRIP_BOX_FACE_X_MAX: usize = 10_111;
@@ -3086,6 +3087,51 @@ fn grip(
     }
 }
 
+pub fn fillet_radius_grip(body: &Body, radius: f64) -> Option<GripDef> {
+    if !radius.is_finite() || radius <= 0.0 {
+        return None;
+    }
+    for (face_key, face) in body.faces.iter() {
+        let Some(Surface::Cylinder(cylinder)) = body.surfaces.get(face.surface) else {
+            continue;
+        };
+        if (cylinder.radius.abs() - radius).abs() > radius.max(1.0) * 1.0e-7 {
+            continue;
+        }
+        let axis = glam::DVec3::from_array(cylinder.base.normal()?).try_normalize()?;
+        let origin = glam::DVec3::from_array(cylinder.base.origin);
+        let points = body
+            .face_coedges(face_key)
+            .into_iter()
+            .filter_map(|coedge| body.coedges.get(coedge))
+            .filter_map(|coedge| body.edges.get(coedge.edge))
+            .flat_map(|edge| [edge.start, edge.end])
+            .filter_map(|vertex| body.vertices.get(vertex))
+            .map(|vertex| glam::DVec3::from_array(vertex.point))
+            .collect::<Vec<_>>();
+        let minimum = points
+            .iter()
+            .map(|point| (*point - origin).dot(axis))
+            .reduce(f64::min)?;
+        let maximum = points
+            .iter()
+            .map(|point| (*point - origin).dot(axis))
+            .reduce(f64::max)?;
+        let center = origin + axis * ((minimum + maximum) * 0.5);
+        let radial = points
+            .iter()
+            .map(|point| *point - center - axis * (*point - center).dot(axis))
+            .find_map(|radial| radial.try_normalize())?;
+        return Some(grip(
+            GRIP_FILLET_RADIUS,
+            center + radial * radius,
+            GripShape::Square,
+            Some(radial),
+        ));
+    }
+    None
+}
+
 pub fn primitive_grips(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
@@ -3093,6 +3139,18 @@ pub fn primitive_grips(
     let Some(operation) = document.solid_history_operation(handle) else {
         return Vec::new();
     };
+    if let SolidHistoryOperation::Fillet(value) = operation {
+        let Some(radius) = value.radii.first().copied() else {
+            return Vec::new();
+        };
+        let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
+            return Vec::new();
+        };
+        return crate::scene::convert::solid3d_tess::kernel_body(solid)
+            .and_then(|body| fillet_radius_grip(&body, radius))
+            .into_iter()
+            .collect();
+    }
     let mut grips = Vec::new();
     let mut add = |id, transform, point, shape, axis: Option<[f64; 3]>| {
         if let Some(world) = world_point(transform, point) {
@@ -3711,5 +3769,16 @@ pub fn brep_op(body: &Body) -> SolidHistoryOperation {
         operation_major: 1,
         acis_data,
         ..SolidHistoryBrep::default()
+    })
+}
+
+pub fn fillet_op(edges: Vec<i32>, radius: f64) -> SolidHistoryOperation {
+    SolidHistoryOperation::Fillet(SolidHistoryFillet {
+        base: base(glam::DMat4::IDENTITY.to_cols_array()),
+        operation_major: 1,
+        method: 0,
+        edges,
+        radii: vec![radius],
+        ..SolidHistoryFillet::default()
     })
 }

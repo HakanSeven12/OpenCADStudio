@@ -740,6 +740,14 @@ impl OpenCADStudio {
             .as_mut()
             .map(|c| c.on_preview_wires(cur))
             .unwrap_or_default();
+        let preview_hidden = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.preview_hidden_handles().to_vec())
+            .unwrap_or_default();
+        self.tabs[i]
+            .scene
+            .set_command_preview_hidden(&preview_hidden);
         self.tabs[i].scene.set_preview_wires(previews);
     }
 }

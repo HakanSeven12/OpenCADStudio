@@ -7,7 +7,7 @@ use acadrust::{
     objects::SolidHistoryOperation,
     EntityType, Handle,
 };
-use cadkernel::brep::Body;
+use cadkernel::brep::{Body, EdgeKey};
 use iced::Task;
 use std::collections::HashMap;
 
@@ -596,10 +596,92 @@ impl super::OpenCADStudio {
         true
     }
 
+    fn replace_solid_body_with_fillet(
+        &mut self,
+        handle: Handle,
+        source: &Body,
+        result: Body,
+        edges: &[EdgeKey],
+        radius: f64,
+    ) -> bool {
+        let i = self.active_tab;
+        let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&result) else {
+            self.command_line
+                .push_error(crate::t!("The result could not be encoded as ACIS.").as_ref());
+            return false;
+        };
+        let Some(display) = self.tabs[i]
+            .scene
+            .prepare_solid_model_display(handle, &result)
+            .filter(|display| display.0.complete)
+        else {
+            self.command_line.push_error(crate::t!("The result could not be displayed completely. The original solid was retained.").as_ref());
+            return false;
+        };
+        let ordered = source.edge_keys().collect::<Vec<_>>();
+        let Some(history_edges) = edges
+            .iter()
+            .map(|edge| {
+                ordered
+                    .iter()
+                    .position(|candidate| candidate == edge)
+                    .and_then(|ordinal| i32::try_from(ordinal).ok())
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            self.command_line
+                .push_error(crate::t!("A selected edge no longer belongs to the solid.").as_ref());
+            return false;
+        };
+
+        self.push_undo_snapshot(i, "FILLETEDGE");
+        if self.tabs[i].scene.document.solid_history_graph(handle).is_none()
+            && !self.tabs[i]
+                .scene
+                .create_solid_history(handle, solid_history::brep_op(source))
+        {
+            self.command_line
+                .push_error(crate::t!("The solid history could not be created.").as_ref());
+            return false;
+        }
+        if !self.tabs[i].scene.append_solid_history(
+            handle,
+            solid_history::fillet_op(history_edges, radius),
+        ) {
+            self.command_line
+                .push_error(crate::t!("The fillet history could not be recorded.").as_ref());
+            return false;
+        }
+        let Some(EntityType::Solid3D(mut entity)) =
+            self.tabs[i].scene.document.get_entity(handle).cloned()
+        else {
+            return false;
+        };
+        entity.wires = solid_model::edge_wires(&result);
+        entity.silhouettes.clear();
+        entity.set_sat_document(&document);
+        if !self.tabs[i]
+            .scene
+            .update_entity(EntityType::Solid3D(entity))
+        {
+            self.command_line
+                .push_error(crate::t!("The solid could not be updated.").as_ref());
+            return false;
+        }
+        self.tabs[i]
+            .scene
+            .register_prepared_solid_model(handle, result, display);
+        self.tabs[i].scene.deselect_all();
+        self.tabs[i].scene.select_entity(handle, false);
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        true
+    }
+
     pub(super) fn solid_edge_blend(
         &mut self,
         handle: Handle,
-        pick: glam::DVec3,
+        edges: &[EdgeKey],
         value: f64,
         fillet: bool,
     ) -> Task<Message> {
@@ -621,15 +703,19 @@ impl super::OpenCADStudio {
                 .push_error(crate::t!("The solid geometry could not be restored.").as_ref());
             return Task::none();
         };
-        let Some(edge) = solid_model::nearest_edge(&body, pick.to_array()) else {
-            self.command_line
-                .push_error(crate::t!("Select a solid edge.").as_ref());
-            return Task::none();
-        };
         let result = if fillet {
-            cadkernel::brep::fillet(&body, edge, value)
+            match cadkernel::brep::fillet_edges(&body, edges, value) {
+                Ok(result) => Some(result),
+                Err(error) => {
+                    self.command_line
+                        .push_error(&format!("FILLETEDGE: {error}"));
+                    return Task::none();
+                }
+            }
         } else {
-            cadkernel::brep::chamfer(&body, edge, value)
+            edges
+                .first()
+                .and_then(|edge| cadkernel::brep::chamfer(&body, *edge, value))
         };
         let Some(result) = result else {
             self.command_line.push_error(
@@ -638,8 +724,13 @@ impl super::OpenCADStudio {
             );
             return Task::none();
         };
-        let label = if fillet { "SOLIDFILLET" } else { "SOLIDCHAMFER" };
-        if self.replace_solid_body(handle, result, label) {
+        let label = if fillet { "FILLETEDGE" } else { "SOLIDCHAMFER" };
+        let updated = if fillet {
+            self.replace_solid_body_with_fillet(handle, &body, result, edges, value)
+        } else {
+            self.replace_solid_body(handle, result, label)
+        };
+        if updated {
             self.command_line
                 .push_output(crate::tf!("{label}: solid updated.").as_ref());
         }

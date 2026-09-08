@@ -1,42 +1,232 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use acadrust::Handle;
+use cadkernel::brep::{Body, EdgeKey};
 use glam::DVec3;
 
 use crate::command::{
-    CadCommand, CmdResult, DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec,
+    CadCommand, CmdOption, CmdResult, DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec,
 };
+use crate::scene::model::wire_model::WireModel;
 
-#[derive(Clone, Copy)]
+static FILLET_RADIUS_BITS: AtomicU64 = AtomicU64::new(1.0f64.to_bits());
+
+fn fillet_radius() -> f64 {
+    f64::from_bits(FILLET_RADIUS_BITS.load(Ordering::Relaxed))
+}
+
+fn set_fillet_radius(value: f64) {
+    FILLET_RADIUS_BITS.store(value.to_bits(), Ordering::Relaxed);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EdgeOperation {
     Fillet,
     Chamfer,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EdgeSelectionMode {
+    Edge,
+    Chain,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EdgeStep {
+    Selecting,
+    PickingLoop,
+    LoopConfirm,
+    PreviewConfirm,
+    Radius,
+    Expression,
+    ChamferValue,
+}
+
 pub struct SolidEdgeCommand {
     operation: EdgeOperation,
     target: Option<Handle>,
-    picked: Option<(Handle, DVec3)>,
+    bodies: Vec<(Handle, Body)>,
+    handle: Option<Handle>,
+    selected_edges: Vec<EdgeKey>,
+    selection_batches: Vec<(Vec<EdgeKey>, DVec3)>,
+    selection_mode: EdgeSelectionMode,
+    step: EdgeStep,
+    radius_return: EdgeStep,
+    loop_candidates: Vec<Vec<EdgeKey>>,
+    loop_index: usize,
+    last_pick: Option<DVec3>,
     default_value: f64,
+    preview_color: [f32; 4],
+    preview_wires: Vec<WireModel>,
+    preview_hidden: Vec<Handle>,
 }
 
 impl SolidEdgeCommand {
-    pub fn new(operation: EdgeOperation, target: Option<Handle>) -> Self {
+    pub fn new(
+        operation: EdgeOperation,
+        target: Option<Handle>,
+        bodies: Vec<(Handle, Body)>,
+        preview_color: [f32; 4],
+    ) -> Self {
         Self {
             operation,
             target,
-            picked: None,
-            default_value: 1.0,
+            bodies,
+            handle: None,
+            selected_edges: Vec::new(),
+            selection_batches: Vec::new(),
+            selection_mode: EdgeSelectionMode::Edge,
+            step: EdgeStep::Selecting,
+            radius_return: EdgeStep::Selecting,
+            loop_candidates: Vec::new(),
+            loop_index: 0,
+            last_pick: None,
+            default_value: if operation == EdgeOperation::Fillet {
+                fillet_radius()
+            } else {
+                1.0
+            },
+            preview_color,
+            preview_wires: Vec::new(),
+            preview_hidden: Vec::new(),
         }
     }
 
-    fn finish(&self, value: f64) -> CmdResult {
-        let Some((handle, pick)) = self.picked else {
+    fn body(&self, handle: Handle) -> Option<&Body> {
+        self.bodies
+            .iter()
+            .find_map(|(candidate, body)| (*candidate == handle).then_some(body))
+    }
+
+    fn active_body(&self) -> Option<(Handle, &Body)> {
+        let handle = self.handle?;
+        self.body(handle).map(|body| (handle, body))
+    }
+
+    fn pick_allowed(&self, handle: Handle) -> bool {
+        !handle.is_null()
+            && self.target.is_none_or(|target| target == handle)
+            && self.handle.is_none_or(|selected| selected == handle)
+            && self.body(handle).is_some()
+    }
+
+    fn add_batch(&mut self, edges: Vec<EdgeKey>, anchor: DVec3) -> bool {
+        let batch = edges
+            .into_iter()
+            .filter(|edge| !self.selected_edges.contains(edge))
+            .collect::<Vec<_>>();
+        if batch.is_empty() {
+            return false;
+        }
+        self.selected_edges.extend(batch.iter().copied());
+        self.selection_batches.push((batch, anchor));
+        true
+    }
+
+    fn current_loop(&self) -> Option<&[EdgeKey]> {
+        self.loop_candidates
+            .get(self.loop_index)
+            .map(Vec::as_slice)
+    }
+
+    fn preview_edges(&self) -> Vec<EdgeKey> {
+        let mut edges = self.selected_edges.clone();
+        if self.step == EdgeStep::LoopConfirm {
+            if let Some(loop_edges) = self.current_loop() {
+                for edge in loop_edges {
+                    if !edges.contains(edge) {
+                        edges.push(*edge);
+                    }
+                }
+            }
+        }
+        edges
+    }
+
+    fn preview_active(&self) -> bool {
+        self.operation == EdgeOperation::Fillet
+            && matches!(
+                self.step,
+                EdgeStep::LoopConfirm
+                    | EdgeStep::PreviewConfirm
+                    | EdgeStep::Radius
+                    | EdgeStep::Expression
+            )
+    }
+
+    fn preview_for_value(&self, value: f64) -> Option<(Handle, Vec<WireModel>)> {
+        if !self.preview_active() {
+            return None;
+        }
+        let edges = self.preview_edges();
+        if edges.is_empty() {
+            return None;
+        }
+        let (handle, body) = self.active_body()?;
+        let result = cadkernel::brep::fillet_edges(body, &edges, value).ok()?;
+        let mut wires = crate::scene::model::solid_model::grip_preview_wires(&result, handle);
+        for wire in &mut wires {
+            wire.color = self.preview_color;
+            wire.name = format!("{}-FILLETEDGE-PREVIEW", handle.value());
+        }
+        (!wires.is_empty()).then_some((handle, wires))
+    }
+
+    fn rebuild_preview(&mut self) {
+        self.preview_wires.clear();
+        self.preview_hidden.clear();
+        if let Some((handle, wires)) = self.preview_for_value(self.default_value) {
+            self.preview_wires = wires;
+            self.preview_hidden.push(handle);
+        }
+    }
+
+    fn begin_radius(&mut self, return_to: EdgeStep) -> CmdResult {
+        self.radius_return = return_to;
+        self.step = EdgeStep::Radius;
+        self.rebuild_preview();
+        CmdResult::NeedPoint
+    }
+
+    fn accept_radius(&mut self, value: f64) -> Option<CmdResult> {
+        if value <= 0.0 || !value.is_finite() {
+            return None;
+        }
+        self.default_value = value;
+        if self.operation == EdgeOperation::Fillet {
+            set_fillet_radius(value);
+        }
+        self.step = self.radius_return;
+        self.rebuild_preview();
+        Some(CmdResult::NeedPoint)
+    }
+
+    fn accept_loop(&mut self) -> CmdResult {
+        if let (Some(edges), Some(anchor)) = (
+            self.current_loop().map(|edges| edges.to_vec()),
+            self.last_pick,
+        ) {
+            self.add_batch(edges, anchor);
+        }
+        self.loop_candidates.clear();
+        self.loop_index = 0;
+        self.step = EdgeStep::Selecting;
+        self.rebuild_preview();
+        CmdResult::NeedPoint
+    }
+
+    fn finish(&self) -> CmdResult {
+        let Some(handle) = self.handle else {
             return CmdResult::Cancel;
         };
+        if self.selected_edges.is_empty() {
+            return CmdResult::Cancel;
+        }
         CmdResult::SolidEdgeBlend {
             handle,
-            pick,
-            value,
-            fillet: matches!(self.operation, EdgeOperation::Fillet),
+            edges: self.selected_edges.clone(),
+            value: self.default_value,
+            fillet: self.operation == EdgeOperation::Fillet,
         }
     }
 }
@@ -44,27 +234,83 @@ impl SolidEdgeCommand {
 impl CadCommand for SolidEdgeCommand {
     fn name(&self) -> &'static str {
         match self.operation {
-            EdgeOperation::Fillet => "SOLIDFILLET",
+            EdgeOperation::Fillet => "FILLETEDGE",
             EdgeOperation::Chamfer => "SOLIDCHAMFER",
         }
     }
 
     fn prompt(&self) -> String {
-        if self.picked.is_none() {
-            return crate::t!("Select a solid edge:").into_owned();
+        match (self.operation, self.step, self.selection_mode) {
+            (EdgeOperation::Chamfer, EdgeStep::Selecting, _) => {
+                crate::t!("Select a solid edge:").into_owned()
+            }
+            (EdgeOperation::Chamfer, EdgeStep::ChamferValue, _) => crate::tf!(
+                "Specify chamfer distance <{:.3}>:",
+                self.default_value
+            )
+            .into_owned(),
+            (_, EdgeStep::Selecting, EdgeSelectionMode::Edge) => {
+                crate::t!("Select an edge or [Chain/Loop/Radius]:").into_owned()
+            }
+            (_, EdgeStep::Selecting, EdgeSelectionMode::Chain) => {
+                crate::t!("Select an edge chain or [Edge/Radius]:").into_owned()
+            }
+            (_, EdgeStep::PickingLoop, _) => {
+                crate::t!("Select edge of loop or [Edge/Chain/Radius]:").into_owned()
+            }
+            (_, EdgeStep::LoopConfirm, _) => {
+                crate::t!("Enter an option [Accept/Next] <Accept>:").into_owned()
+            }
+            (_, EdgeStep::PreviewConfirm, _) => {
+                crate::t!("Press Enter to accept the fillet or [Radius]:").into_owned()
+            }
+            (_, EdgeStep::Radius, _) if self.radius_return == EdgeStep::PreviewConfirm => crate::tf!(
+                "Specify Radius or [Expression] <{:.4}>:",
+                self.default_value
+            )
+            .into_owned(),
+            (_, EdgeStep::Radius, _) => crate::tf!(
+                "Enter fillet radius or [Expression] <{:.4}>:",
+                self.default_value
+            )
+            .into_owned(),
+            (_, EdgeStep::Expression, _) => crate::t!("Enter expression:").into_owned(),
+            _ => String::new(),
         }
-        match self.operation {
-            EdgeOperation::Fillet => {
-                crate::tf!("Specify fillet radius <{:.3}>:", self.default_value).into_owned()
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        match (self.operation, self.step, self.selection_mode) {
+            (EdgeOperation::Fillet, EdgeStep::Selecting, EdgeSelectionMode::Edge) => vec![
+                CmdOption::new("Chain", "C"),
+                CmdOption::new("Loop", "L"),
+                CmdOption::new("Radius", "R"),
+            ],
+            (EdgeOperation::Fillet, EdgeStep::Selecting, EdgeSelectionMode::Chain) => vec![
+                CmdOption::new("Edge", "E"),
+                CmdOption::new("Radius", "R"),
+            ],
+            (EdgeOperation::Fillet, EdgeStep::PickingLoop, _) => vec![
+                CmdOption::new("Edge", "E"),
+                CmdOption::new("Chain", "C"),
+                CmdOption::new("Radius", "R"),
+            ],
+            (EdgeOperation::Fillet, EdgeStep::LoopConfirm, _) => vec![
+                CmdOption::new("Accept", "A"),
+                CmdOption::new("Next", "N"),
+            ],
+            (EdgeOperation::Fillet, EdgeStep::PreviewConfirm, _) => {
+                vec![CmdOption::new("Radius", "R")]
             }
-            EdgeOperation::Chamfer => {
-                crate::tf!("Specify chamfer distance <{:.3}>:", self.default_value).into_owned()
+            (EdgeOperation::Fillet, EdgeStep::Radius, _) => {
+                vec![CmdOption::new("Expression", "E")]
             }
+            _ => Vec::new(),
         }
     }
 
     fn needs_entity_pick(&self) -> bool {
-        self.picked.is_none()
+        matches!(self.step, EdgeStep::Selecting | EdgeStep::PickingLoop)
     }
 
     fn entity_pick_includes_fills(&self) -> bool {
@@ -80,52 +326,199 @@ impl CadCommand for SolidEdgeCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
-        if handle.is_null() || self.target.is_some_and(|target| target != handle) {
+        if !self.pick_allowed(handle) {
             return CmdResult::NeedPoint;
         }
-        self.picked = Some((handle, point));
+        let Some(seed) = self
+            .body(handle)
+            .and_then(|body| crate::scene::model::solid_model::nearest_edge(body, point.to_array()))
+        else {
+            return CmdResult::NeedPoint;
+        };
+        self.handle = Some(handle);
+        self.last_pick = Some(point);
+
+        if self.operation == EdgeOperation::Chamfer {
+            self.add_batch(vec![seed], point);
+            self.step = EdgeStep::ChamferValue;
+            return CmdResult::NeedPoint;
+        }
+
+        if self.step == EdgeStep::PickingLoop {
+            self.loop_candidates = edge_loops(self.body(handle).expect("pick body exists"), seed);
+            self.loop_index = 0;
+            self.step = if self.loop_candidates.is_empty() {
+                EdgeStep::Selecting
+            } else {
+                EdgeStep::LoopConfirm
+            };
+            self.rebuild_preview();
+            return CmdResult::NeedPoint;
+        }
+
+        let edges = match self.selection_mode {
+            EdgeSelectionMode::Edge => vec![seed],
+            EdgeSelectionMode::Chain => edge_chain(self.body(handle).expect("pick body exists"), seed),
+        };
+        self.add_batch(edges, point);
         CmdResult::NeedPoint
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
-        let Some((_, pick)) = self.picked else {
+        if !matches!(self.step, EdgeStep::Radius | EdgeStep::ChamferValue) {
+            return CmdResult::NeedPoint;
+        }
+        let Some(anchor) = self.last_pick else {
             return CmdResult::NeedPoint;
         };
-        let value = point.distance(pick);
-        if value > 0.0 && value.is_finite() {
-            self.finish(value)
+        let value = point.distance(anchor);
+        if value <= 0.0 || !value.is_finite() {
+            return CmdResult::NeedPoint;
+        }
+        if self.step == EdgeStep::ChamferValue {
+            self.default_value = value;
+            self.finish()
         } else {
-            CmdResult::NeedPoint
+            self.accept_radius(value).unwrap_or(CmdResult::NeedPoint)
         }
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        if self.picked.is_none() {
-            return None;
+        let keyword = text.trim().to_ascii_uppercase();
+        if self.operation == EdgeOperation::Chamfer {
+            if self.step != EdgeStep::ChamferValue {
+                return None;
+            }
+            let value = keyword.parse::<f64>().ok()?;
+            if value <= 0.0 || !value.is_finite() {
+                return None;
+            }
+            self.default_value = value;
+            return Some(self.finish());
         }
-        let value = text.trim().parse::<f64>().ok()?;
-        (value > 0.0 && value.is_finite()).then(|| self.finish(value))
+
+        match self.step {
+            EdgeStep::Selecting => match keyword.as_str() {
+                "R" | "RADIUS" => Some(self.begin_radius(EdgeStep::Selecting)),
+                "C" | "CHAIN" => {
+                    self.selection_mode = EdgeSelectionMode::Chain;
+                    Some(CmdResult::NeedPoint)
+                }
+                "E" | "EDGE" if self.selection_mode == EdgeSelectionMode::Chain => {
+                    self.selection_mode = EdgeSelectionMode::Edge;
+                    Some(CmdResult::NeedPoint)
+                }
+                "L" | "LOOP" => {
+                    self.step = EdgeStep::PickingLoop;
+                    Some(CmdResult::NeedPoint)
+                }
+                _ => None,
+            },
+            EdgeStep::PickingLoop => match keyword.as_str() {
+                "E" | "EDGE" => {
+                    self.selection_mode = EdgeSelectionMode::Edge;
+                    self.step = EdgeStep::Selecting;
+                    Some(CmdResult::NeedPoint)
+                }
+                "C" | "CHAIN" => {
+                    self.selection_mode = EdgeSelectionMode::Chain;
+                    self.step = EdgeStep::Selecting;
+                    Some(CmdResult::NeedPoint)
+                }
+                "R" | "RADIUS" => Some(self.begin_radius(EdgeStep::PickingLoop)),
+                _ => None,
+            },
+            EdgeStep::LoopConfirm => match keyword.as_str() {
+                "A" | "ACCEPT" => Some(self.accept_loop()),
+                "N" | "NEXT" if !self.loop_candidates.is_empty() => {
+                    self.loop_index = (self.loop_index + 1) % self.loop_candidates.len();
+                    self.rebuild_preview();
+                    Some(CmdResult::NeedPoint)
+                }
+                _ => None,
+            },
+            EdgeStep::PreviewConfirm => match keyword.as_str() {
+                "R" | "RADIUS" => Some(self.begin_radius(EdgeStep::PreviewConfirm)),
+                _ => None,
+            },
+            EdgeStep::Radius => {
+                if matches!(keyword.as_str(), "E" | "EXPRESSION") {
+                    self.step = EdgeStep::Expression;
+                    return Some(CmdResult::NeedPoint);
+                }
+                let value = keyword.parse::<f64>().ok()?;
+                self.accept_radius(value)
+            }
+            EdgeStep::Expression => {
+                let value = keyword.parse::<f64>().ok()?;
+                self.accept_radius(value)
+            }
+            EdgeStep::ChamferValue => None,
+        }
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        if self.picked.is_some() {
-            self.finish(self.default_value)
-        } else {
-            CmdResult::Cancel
+        match (self.operation, self.step) {
+            (EdgeOperation::Chamfer, EdgeStep::ChamferValue) => self.finish(),
+            (EdgeOperation::Chamfer, _) => CmdResult::Cancel,
+            (_, EdgeStep::Selecting) if !self.selected_edges.is_empty() => {
+                self.step = EdgeStep::PreviewConfirm;
+                self.rebuild_preview();
+                CmdResult::NeedPoint
+            }
+            (_, EdgeStep::LoopConfirm) => self.accept_loop(),
+            (_, EdgeStep::PreviewConfirm) => self.finish(),
+            (_, EdgeStep::Radius) => self
+                .accept_radius(self.default_value)
+                .unwrap_or(CmdResult::NeedPoint),
+            (_, EdgeStep::Expression) => CmdResult::NeedPoint,
+            _ => CmdResult::Cancel,
         }
     }
 
+    fn on_undo_step(&mut self) -> Option<CmdResult> {
+        if self.operation != EdgeOperation::Fillet {
+            return None;
+        }
+        if self.step == EdgeStep::LoopConfirm {
+            self.loop_candidates.clear();
+            self.loop_index = 0;
+            self.step = EdgeStep::Selecting;
+            self.rebuild_preview();
+            return Some(CmdResult::NeedPoint);
+        }
+        let (batch, _) = self.selection_batches.pop()?;
+        for edge in batch {
+            if let Some(index) = self.selected_edges.iter().position(|candidate| *candidate == edge) {
+                self.selected_edges.remove(index);
+            }
+        }
+        if self.selected_edges.is_empty() {
+            self.handle = None;
+        }
+        self.last_pick = self
+            .selection_batches
+            .last()
+            .map(|(_, anchor)| *anchor);
+        self.step = EdgeStep::Selecting;
+        self.rebuild_preview();
+        Some(CmdResult::NeedPoint)
+    }
+
     fn wants_text_input(&self) -> bool {
-        self.picked.is_some()
+        matches!(
+            self.step,
+            EdgeStep::Radius | EdgeStep::Expression | EdgeStep::ChamferValue
+        )
     }
 
     fn dyn_commit_as_text(&self) -> bool {
-        self.picked.is_some()
+        matches!(self.step, EdgeStep::Radius | EdgeStep::ChamferValue)
     }
 
     fn dyn_spec(&self) -> Option<DynSpec> {
-        let (_, pick) = self.picked?;
-        Some(DynSpec {
+        let pick = self.last_pick?;
+        matches!(self.step, EdgeStep::Radius | EdgeStep::ChamferValue).then(|| DynSpec {
             anchor: DynAnchor::Point(pick),
             fields: vec![DynFieldSpec::new(match self.operation {
                 EdgeOperation::Fillet => DynRole::Radius,
@@ -137,10 +530,118 @@ impl CadCommand for SolidEdgeCommand {
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
-        self.picked.map(|(_, pick)| cursor.distance(pick))
+        matches!(self.step, EdgeStep::Radius | EdgeStep::ChamferValue)
+            .then(|| self.last_pick.map(|pick| cursor.distance(pick)))
+            .flatten()
+    }
+
+    fn on_preview_wires(&mut self, cursor: DVec3) -> Vec<WireModel> {
+        if self.step == EdgeStep::Radius {
+            if let Some(value) = self.last_pick.map(|pick| cursor.distance(pick)) {
+                if value > 0.0 && value.is_finite() {
+                    if let Some((handle, wires)) = self.preview_for_value(value) {
+                        self.preview_wires = wires;
+                        self.preview_hidden.clear();
+                        self.preview_hidden.push(handle);
+                    } else {
+                        self.preview_wires.clear();
+                        self.preview_hidden.clear();
+                    }
+                }
+            }
+        }
+        self.preview_wires.clone()
+    }
+
+    fn preview_hidden_handles(&self) -> &[Handle] {
+        &self.preview_hidden
     }
 }
 
+fn edge_loops(body: &Body, seed: EdgeKey) -> Vec<Vec<EdgeKey>> {
+    let Some(edge) = body.edges.get(seed) else {
+        return Vec::new();
+    };
+    let mut candidates = Vec::new();
+    for coedge_key in &edge.coedges {
+        let Some(coedge) = body.coedges.get(*coedge_key) else {
+            continue;
+        };
+        let Some(edge_loop) = body.loops.get(coedge.owner) else {
+            continue;
+        };
+        let edges = edge_loop
+            .coedges
+            .iter()
+            .filter_map(|key| body.coedges.get(*key).map(|coedge| coedge.edge))
+            .collect::<Vec<_>>();
+        if !edges.is_empty() && !candidates.contains(&edges) {
+            candidates.push(edges);
+        }
+    }
+    candidates
+}
+
+fn edge_chain(body: &Body, seed: EdgeKey) -> Vec<EdgeKey> {
+    let mut chain = vec![seed];
+    let mut next = 0;
+    while next < chain.len() {
+        let current_key = chain[next];
+        next += 1;
+        let Some(current) = body.edges.get(current_key) else {
+            continue;
+        };
+        for vertex in [current.start, current.end] {
+            let Some(current_tangent) = edge_tangent_from_vertex(body, current_key, vertex) else {
+                continue;
+            };
+            for candidate_key in body.edge_keys() {
+                if chain.contains(&candidate_key) {
+                    continue;
+                }
+                let Some(candidate) = body.edges.get(candidate_key) else {
+                    continue;
+                };
+                if candidate.start != vertex && candidate.end != vertex {
+                    continue;
+                }
+                let Some(candidate_tangent) =
+                    edge_tangent_from_vertex(body, candidate_key, vertex)
+                else {
+                    continue;
+                };
+                if current_tangent.dot(candidate_tangent) < -0.999 {
+                    chain.push(candidate_key);
+                }
+            }
+        }
+    }
+    chain
+}
+
+fn edge_tangent_from_vertex(
+    body: &Body,
+    edge_key: EdgeKey,
+    vertex: cadkernel::brep::VertexKey,
+) -> Option<DVec3> {
+    let edge = body.edges.get(edge_key)?;
+    let curve = body.curves.get(edge.curve)?;
+    let span = edge.end_parameter - edge.start_parameter;
+    if !span.is_finite() || span.abs() <= f64::EPSILON {
+        return None;
+    }
+    let step = span * 1.0e-6;
+    let (at, inside) = if edge.start == vertex {
+        (edge.start_parameter, edge.start_parameter + step)
+    } else if edge.end == vertex {
+        (edge.end_parameter, edge.end_parameter - step)
+    } else {
+        return None;
+    };
+    let tangent = DVec3::from(curve.point_at(inside)) - DVec3::from(curve.point_at(at));
+    (tangent.length_squared() > 0.0 && tangent.is_finite()).then(|| tangent.normalize())
+}
+
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["SOLIDFILLET", "SOLIDCHAMFER"]
+    names: &["FILLETEDGE", "SOLIDFILLET", "SOLIDCHAMFER"]
 });

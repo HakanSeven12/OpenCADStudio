@@ -17,6 +17,33 @@ fn selected_solid(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
     }
 }
 
+fn solid_edge_sources(
+    app: &mut OpenCADStudio,
+    tab: usize,
+) -> Vec<(acadrust::Handle, cadkernel::brep::Body)> {
+    let handles = app.tabs[tab]
+        .scene
+        .document
+        .entities()
+        .filter_map(|entity| {
+            matches!(entity, acadrust::EntityType::Solid3D(_))
+                .then_some(entity.common().handle)
+        })
+        .collect::<Vec<_>>();
+    app.tabs[tab].scene.restore_solid_models(&handles);
+    handles
+        .into_iter()
+        .filter_map(|handle| {
+            app.tabs[tab]
+                .scene
+                .solid_models
+                .get(&handle)
+                .cloned()
+                .map(|body| (handle, body))
+        })
+        .collect()
+}
+
 impl OpenCADStudio {
     pub(super) fn dispatch_dim(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
@@ -960,16 +987,30 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "SOLIDFILLET" => {
+            "FILLETEDGE" | "SOLIDFILLET" => {
                 use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let command = SolidEdgeCommand::new(EdgeOperation::Fillet, selected_solid(self, i));
+                let target = selected_solid(self, i);
+                let bodies = solid_edge_sources(self, i);
+                let command = SolidEdgeCommand::new(
+                    EdgeOperation::Fillet,
+                    target,
+                    bodies,
+                    crate::scene::WireModel::SELECTED,
+                );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "FILLET" if selected_solid(self, i).is_some() => {
                 use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let command = SolidEdgeCommand::new(EdgeOperation::Fillet, selected_solid(self, i));
+                let target = selected_solid(self, i);
+                let bodies = solid_edge_sources(self, i);
+                let command = SolidEdgeCommand::new(
+                    EdgeOperation::Fillet,
+                    target,
+                    bodies,
+                    crate::scene::WireModel::SELECTED,
+                );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
@@ -1109,14 +1150,28 @@ impl OpenCADStudio {
 
             "SOLIDCHAMFER" => {
                 use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let command = SolidEdgeCommand::new(EdgeOperation::Chamfer, selected_solid(self, i));
+                let target = selected_solid(self, i);
+                let bodies = solid_edge_sources(self, i);
+                let command = SolidEdgeCommand::new(
+                    EdgeOperation::Chamfer,
+                    target,
+                    bodies,
+                    crate::scene::WireModel::SELECTED,
+                );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "CHAMFER" if selected_solid(self, i).is_some() => {
                 use crate::modules::model::edge_cmd::{EdgeOperation, SolidEdgeCommand};
-                let command = SolidEdgeCommand::new(EdgeOperation::Chamfer, selected_solid(self, i));
+                let target = selected_solid(self, i);
+                let bodies = solid_edge_sources(self, i);
+                let command = SolidEdgeCommand::new(
+                    EdgeOperation::Chamfer,
+                    target,
+                    bodies,
+                    crate::scene::WireModel::SELECTED,
+                );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }

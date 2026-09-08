@@ -411,7 +411,8 @@ struct ResidentWireSet {
     layout: Option<ResidentWireLayout>,
 }
 
-struct ResidentWireLayout {
+#[derive(Clone)]
+pub(crate) struct ResidentWireLayout {
     /// Entity handles in final submission order. A temporarily hidden entity
     /// remains here with no range so grip commit can restore it in place.
     order: Vec<Handle>,
@@ -435,6 +436,12 @@ pub struct PreparedOpenGeometry {
     /// Loader tessellations and their guard; a state mismatch clears the memo.
     pub tess_memo: HashMap<Handle, Arc<Vec<WireModel>>>,
     pub tess_guard: u64,
+    /// The loader's submission-order layout for `wires`.
+    ///
+    /// Without it the installed set has `layout: None`, and `try_resident_patch`
+    /// refuses any set that has none — so the first edit after opening a file
+    /// could never patch and rebuilt the whole wire assembly instead.
+    pub(crate) resident_layout: Option<ResidentWireLayout>,
     /// Loader block definitions; the receiving scene supplies its own epoch.
     pub block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)>,
     /// Loader-computed draw-order map, re-stamped by the receiving scene.
@@ -1030,6 +1037,17 @@ pub fn prepare_open_geometry(
     let tess_memo = std::mem::take(&mut *scene.resident_tess_memo.borrow_mut());
     let tess_guard = scene.resident_tess_guard.get();
     let draw_depths = scene.draw_depth_cache.borrow_mut().take();
+    // The layout the loader already built for exactly these wires. Taken by
+    // identity so it cannot be paired with a different assembly.
+    let resident_layout = scene
+        .resident_wire_sets
+        .borrow_mut()
+        .drain()
+        .find_map(|(_, set)| {
+            Arc::ptr_eq(&set.wires, &wires)
+                .then_some(set.layout)
+                .flatten()
+        });
     let block_defns: Vec<(u64, Arc<cache::block_cache::BlockCache>)> =
         std::mem::take(&mut *scene.block_defn_cache.borrow_mut())
             .into_iter()
@@ -1045,6 +1063,7 @@ pub fn prepare_open_geometry(
             tess_guard,
             block_defns,
             draw_depths,
+            resident_layout,
         },
     )
 }
@@ -2260,7 +2279,7 @@ impl Scene {
                 epoch: self.geometry_epoch,
                 gen,
                 wires: Arc::clone(&prepared.wires),
-                layout: None,
+                layout: prepared.resident_layout,
             },
         );
         // Adopt the loader thread's tessellation memo so the first edit patches
@@ -5515,18 +5534,32 @@ impl Scene {
         frozen_layers: Option<&HashSet<Handle>>,
         style_viewport: Option<Handle>,
     ) -> Option<Arc<Vec<WireModel>>> {
-        if self.viewport_style_key(style_viewport) != 0 {
-            return None;
-        }
         let perf = crate::perf::enabled();
+        // Each early exit here costs a full wire assembly, so say which one.
+        let declined = |reason: &str| -> Option<Arc<Vec<WireModel>>> {
+            if perf {
+                crate::perf_record!("[perf] resident-patch-skip reason={reason}");
+            }
+            None
+        };
+        if self.viewport_style_key(style_viewport) != 0 {
+            return declined("viewport-style");
+        }
         let t_patch = iced::time::Instant::now();
         // The entry must exist, be stale, and be uniquely held so we can move
         // its wires out rather than deep-clone them.
         let cached_epoch = {
             let sets = self.resident_wire_sets.borrow();
-            let entry = sets.get(&key)?;
-            if entry.epoch == self.geometry_epoch || entry.layout.is_none() {
+            let Some(entry) = sets.get(&key) else {
+                drop(sets);
+                return declined("no-entry");
+            };
+            if entry.epoch == self.geometry_epoch {
                 return None;
+            }
+            if entry.layout.is_none() {
+                drop(sets);
+                return declined("no-layout");
             }
             let strong = Arc::strong_count(&entry.wires);
             if strong != 1 {
@@ -5537,7 +5570,9 @@ impl Scene {
             }
             entry.epoch
         };
-        let deltas = self.replay_since(cached_epoch)?;
+        let Some(deltas) = self.replay_since(cached_epoch) else {
+            return declined("journal-too-old");
+        };
 
         // Take ownership of the cached assembly (guaranteed unique above).
         // `prev_gen` is the content id the GPU currently holds for this set — the
@@ -10901,6 +10936,7 @@ mod journal_tests {
             tess_guard: 0,
             block_defns: Vec::new(),
             draw_depths: Some(handed_over),
+            resident_layout: None,
         });
         assert_eq!(
             *scene.draw_depth_map(),
@@ -10915,6 +10951,48 @@ mod journal_tests {
             *expected,
             "a recompute must agree with what was handed over",
         );
+    }
+
+    #[test]
+    fn prepared_open_geometry_keeps_layout_for_the_first_edit_patch() {
+        use acadrust::entities::Line;
+        use acadrust::types::Vector3;
+
+        fn line(y: f64) -> EntityType {
+            EntityType::Line(Line::from_points(
+                Vector3::new(0.0, y, 0.0),
+                Vector3::new(10.0, y, 0.0),
+            ))
+        }
+
+        let mut document = CadDocument::new();
+        document.add_entity(line(0.0)).unwrap();
+        let caches = build_derived_caches_impl(&document, None, None);
+        let model_bg = [0.0, 0.0, 0.0, 1.0];
+        let (document, prepared) = prepare_open_geometry(document, &caches, model_bg);
+        assert!(prepared.resident_layout.is_some());
+
+        let mut scene = Scene::new();
+        scene.document = document;
+        scene.local_extent_max = caches.local_extent_max;
+        scene.local_center = caches.local_center;
+        scene.bg_color = model_bg;
+        scene.current_layout = "Model".to_string();
+        let scale = scene.document.header.annotation_scale_value;
+        let unit_factor = scene.annotation_scale_unit_factor();
+        scene.annotation_scale = if scale > 1e-9 {
+            ((1.0 / scale) / unit_factor) as f32
+        } else {
+            (1.0 / unit_factor) as f32
+        };
+        scene.install_prepared_open_geometry(prepared);
+
+        let hits = scene.resident_patch_hits.get();
+        scene.add_entity(line(1.0));
+        let wires = scene.model_tile_wires_arc(0, &Camera::default(), 1.0, 1.0);
+        drop(wires);
+
+        assert_eq!(scene.resident_patch_hits.get(), hits + 1);
     }
 
     #[test]

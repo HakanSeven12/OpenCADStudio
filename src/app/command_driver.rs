@@ -2926,6 +2926,14 @@ impl OpenCADStudio {
                     self.command_line.push_info(&prompt);
                 }
             }
+            CmdResult::ReportError(msg) => {
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.command_line.push_error(&msg);
+                if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
+                    self.command_line.push_info(&prompt);
+                }
+            }
             CmdResult::ReportMeasurementAndDeselect(msg) => {
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.deselect_all();
@@ -4108,6 +4116,19 @@ impl OpenCADStudio {
                 fillet,
             } => {
                 let task = self.solid_edge_blend(handle, pick, value, fillet);
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                return task;
+            }
+
+            CmdResult::SolidShell {
+                handle,
+                actions,
+                distance,
+            } => {
+                let task = self.solid_shell(handle, &actions, distance);
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();

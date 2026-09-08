@@ -55,6 +55,42 @@ pub struct MeshMetrics {
     pub surface_area: f64,
     pub volume: f64,
     pub centroid: [f64; 3],
+    pub moment_of_inertia: [f64; 3],
+    pub principal_directions: [f64; 9],
+    pub principal_moments: [f64; 3],
+    pub product_of_inertia: [f64; 3],
+    pub radii_of_gyration: [f64; 3],
+}
+
+impl MeshMetrics {
+    pub fn translate(&mut self, delta: [f64; 3]) {
+        let old = self.centroid;
+        let new = [old[0] + delta[0], old[1] + delta[1], old[2] + delta[2]];
+        if self.volume > 1e-18 {
+            self.moment_of_inertia[0] += self.volume
+                * (new[1] * new[1] + new[2] * new[2]
+                    - old[1] * old[1]
+                    - old[2] * old[2]);
+            self.moment_of_inertia[1] += self.volume
+                * (new[0] * new[0] + new[2] * new[2]
+                    - old[0] * old[0]
+                    - old[2] * old[2]);
+            self.moment_of_inertia[2] += self.volume
+                * (new[0] * new[0] + new[1] * new[1]
+                    - old[0] * old[0]
+                    - old[1] * old[1]);
+            self.product_of_inertia[0] -=
+                self.volume * (new[0] * new[1] - old[0] * old[1]);
+            self.product_of_inertia[1] -=
+                self.volume * (new[1] * new[2] - old[1] * old[2]);
+            self.product_of_inertia[2] -=
+                self.volume * (new[2] * new[0] - old[2] * old[0]);
+            self.radii_of_gyration = self
+                .moment_of_inertia
+                .map(|moment| (moment.max(0.0) / self.volume).sqrt());
+        }
+        self.centroid = new;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -160,6 +196,8 @@ fn compute_mesh_metrics(lods: &[MeshModel]) -> MeshMetrics {
     let mut area_centroid_numerator = [0.0; 3];
     let mut signed_volume = 0.0;
     let mut centroid_numerator = [0.0; 3];
+    let mut squared_integrals = [0.0; 3];
+    let mut product_integrals = [0.0; 3];
     for triangle in mesh.indices.chunks_exact(3) {
         let a = point(triangle[0]);
         let b = point(triangle[1]);
@@ -187,6 +225,25 @@ fn compute_mesh_metrics(lods: &[MeshModel]) -> MeshMetrics {
         signed_volume += tetra;
         for axis in 0..3 {
             centroid_numerator[axis] += tetra * (a[axis] + b[axis] + c[axis]) / 4.0;
+            squared_integrals[axis] += tetra
+                * (a[axis] * a[axis]
+                    + b[axis] * b[axis]
+                    + c[axis] * c[axis]
+                    + a[axis] * b[axis]
+                    + a[axis] * c[axis]
+                    + b[axis] * c[axis])
+                / 10.0;
+        }
+        for (index, (first, second)) in [(0usize, 1usize), (1, 2), (2, 0)]
+            .into_iter()
+            .enumerate()
+        {
+            let diagonal = a[first] * a[second]
+                + b[first] * b[second]
+                + c[first] * c[second];
+            let all = (a[first] + b[first] + c[first])
+                * (a[second] + b[second] + c[second]);
+            product_integrals[index] += tetra * (diagonal + all) / 20.0;
         }
     }
     let centroid = if signed_volume.abs() > 1e-18 {
@@ -204,16 +261,120 @@ fn compute_mesh_metrics(lods: &[MeshModel]) -> MeshMetrics {
     } else {
         [0.0; 3]
     };
+    let orientation = if signed_volume < 0.0 { -1.0 } else { 1.0 };
+    let volume = signed_volume.abs();
+    let square = squared_integrals.map(|value| value * orientation);
+    let products = product_integrals.map(|value| -value * orientation);
+    let moment_of_inertia = [
+        square[1] + square[2],
+        square[0] + square[2],
+        square[0] + square[1],
+    ];
+    let central = [
+        [
+            moment_of_inertia[0] - volume * (centroid[1].powi(2) + centroid[2].powi(2)),
+            products[0] + volume * centroid[0] * centroid[1],
+            products[2] + volume * centroid[0] * centroid[2],
+        ],
+        [
+            products[0] + volume * centroid[0] * centroid[1],
+            moment_of_inertia[1] - volume * (centroid[0].powi(2) + centroid[2].powi(2)),
+            products[1] + volume * centroid[1] * centroid[2],
+        ],
+        [
+            products[2] + volume * centroid[0] * centroid[2],
+            products[1] + volume * centroid[1] * centroid[2],
+            moment_of_inertia[2] - volume * (centroid[0].powi(2) + centroid[1].powi(2)),
+        ],
+    ];
+    let (principal_moments, principal_directions) = principal_axes(central);
+    let radii_of_gyration = if volume > 1e-18 {
+        moment_of_inertia.map(|moment| (moment.max(0.0) / volume).sqrt())
+    } else {
+        [0.0; 3]
+    };
     MeshMetrics {
         vertices: mesh.verts.len(),
         triangles: mesh.indices.len() / 3,
         surface_area: area,
-        volume: signed_volume.abs(),
+        volume,
         centroid,
+        moment_of_inertia,
+        principal_directions,
+        principal_moments,
+        product_of_inertia: products,
+        radii_of_gyration,
     }
 }
 
+fn principal_axes(mut matrix: [[f64; 3]; 3]) -> ([f64; 3], [f64; 9]) {
+    let mut vectors = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    for _ in 0..24 {
+        let (p, q) = [(0usize, 1usize), (0, 2), (1, 2)]
+            .into_iter()
+            .max_by(|&(ap, aq), &(bp, bq)| {
+                matrix[ap][aq].abs().total_cmp(&matrix[bp][bq].abs())
+            })
+            .unwrap_or((0, 1));
+        if matrix[p][q].abs() <= 1e-12 {
+            break;
+        }
+        let angle = 0.5 * (2.0 * matrix[p][q]).atan2(matrix[q][q] - matrix[p][p]);
+        let (sine, cosine) = angle.sin_cos();
+        for row in 0..3 {
+            let mp = matrix[row][p];
+            let mq = matrix[row][q];
+            matrix[row][p] = cosine * mp - sine * mq;
+            matrix[row][q] = sine * mp + cosine * mq;
+        }
+        for column in 0..3 {
+            let mp = matrix[p][column];
+            let mq = matrix[q][column];
+            matrix[p][column] = cosine * mp - sine * mq;
+            matrix[q][column] = sine * mp + cosine * mq;
+        }
+        for row in 0..3 {
+            let vp = vectors[row][p];
+            let vq = vectors[row][q];
+            vectors[row][p] = cosine * vp - sine * vq;
+            vectors[row][q] = sine * vp + cosine * vq;
+        }
+    }
+    let mut axes = (0..3)
+        .map(|axis| {
+            (
+                matrix[axis][axis].max(0.0),
+                [vectors[0][axis], vectors[1][axis], vectors[2][axis]],
+            )
+        })
+        .collect::<Vec<_>>();
+    axes.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let moments = [axes[0].0, axes[1].0, axes[2].0];
+    let scale = moments[2].abs().max(1.0);
+    if (moments[2] - moments[0]).abs() <= scale * 1e-10 {
+        return (
+            moments,
+            [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        );
+    }
+    let directions = [
+        axes[0].1[0], axes[0].1[1], axes[0].1[2], axes[1].1[0], axes[1].1[1],
+        axes[1].1[2], axes[2].1[0], axes[2].1[1], axes[2].1[2],
+    ];
+    (moments, directions)
+}
+
 impl MeshLodSet {
+    pub fn apply_mass_properties(&mut self, properties: cadkernel::brep::MassProperties) {
+        self.metrics.volume = properties.volume;
+        self.metrics.centroid = properties.centroid;
+        self.metrics.moment_of_inertia = properties.moment_of_inertia;
+        self.metrics.principal_directions = properties.principal_directions;
+        self.metrics.principal_moments = properties.principal_moments;
+        self.metrics.product_of_inertia = properties.product_of_inertia;
+        self.metrics.radii_of_gyration = properties.radii_of_gyration;
+    }
+
     /// Build a set from its LODs, computing the 3D AABB.
     pub fn from_lods(lods: Vec<MeshModel>) -> Self {
         let (world_aabb, z_aabb) = compute_mesh_aabb(&lods);

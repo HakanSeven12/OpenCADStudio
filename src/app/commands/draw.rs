@@ -971,6 +971,30 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "SHELL" | "SOLIDEDIT" => {
+                use crate::modules::model::shell_cmd::ShellCommand;
+                let selected = self.tabs[i]
+                    .scene
+                    .selected_handles_in_order()
+                    .into_iter()
+                    .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+                    .filter(|handle| {
+                        matches!(
+                            self.tabs[i].scene.document.get_entity(*handle),
+                            Some(acadrust::EntityType::Solid3D(_))
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let target = (selected.len() == 1).then_some(selected[0]);
+                let new_cmd = if cmd == "SHELL" {
+                    ShellCommand::direct(target)
+                } else {
+                    ShellCommand::solid_edit(target)
+                };
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             // ── Solid booleans ─────────────────────────────────────────────
             "UNION" => {
                 use crate::modules::model::boolean_cmd::BoolOp;

@@ -337,6 +337,18 @@ pub fn nearest_planar_face(body: &Body, pick: [f64; 3]) -> Option<FaceKey> {
     matches!(body.surfaces.get(node.surface)?, Surface::Plane(_)).then_some(face)
 }
 
+/// Face nearest a world-space surface pick, including curved surfaces.
+pub fn nearest_face(body: &Body, pick: [f64; 3]) -> Option<FaceKey> {
+    body.face_keys()
+        .filter_map(|key| {
+            let face = body.faces.get(key)?;
+            let surface = body.surfaces.get(face.surface)?;
+            Some((key, surface.distance_to(pick).abs()))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(key, _)| key)
+}
+
 /// Outward normal of a planar face.
 pub fn planar_face_normal(body: &Body, face: FaceKey) -> Option<[f64; 3]> {
     let face = body.faces.get(face)?;
@@ -475,7 +487,11 @@ pub fn display_from_solid(
             )
         })
         .collect();
-    Some((mesh_from_tessellation(tessellation, color)?, wires, center))
+    let mut mesh = mesh_from_tessellation(tessellation, color)?;
+    if let Some(properties) = cadkernel::brep::analytic_mass_properties(body) {
+        mesh.apply_mass_properties(properties);
+    }
+    Some((mesh, wires, center))
 }
 
 /// The middle of a body, for a caller needing a point to turn or scale about.

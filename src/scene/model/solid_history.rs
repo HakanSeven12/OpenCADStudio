@@ -996,9 +996,44 @@ fn brep_properties(
         history_flags(document, handle).unwrap_or((false, false, 1));
     let (show_history, show_history_editable) =
         displayed_history_state(object_show_history, show_history_mode);
-    vec![PropSection {
-        title: t!("Solid History").into_owned(),
-        props: vec![
+    let mut geometry = vec![Property {
+        label: t!("Solid type").into_owned(),
+        field: "solid_history_type",
+        value: PropValue::ReadOnly(t!("3D Solid").into_owned()),
+    }];
+    if let Some(position) = document
+        .solid_history_operation(handle)
+        .and_then(|operation| match operation {
+            SolidHistoryOperation::Brep(value) => world_point(value.base.transform, [0.0; 3]),
+            _ => None,
+        })
+    {
+        geometry.extend([
+            crate::entities::common::edit_prop(
+                t!("Position X").as_ref(),
+                PROP_POSITION_X,
+                position.x,
+            ),
+            crate::entities::common::edit_prop(
+                t!("Position Y").as_ref(),
+                PROP_POSITION_Y,
+                position.y,
+            ),
+            crate::entities::common::edit_prop(
+                t!("Position Z").as_ref(),
+                PROP_POSITION_Z,
+                position.z,
+            ),
+        ]);
+    }
+    vec![
+        PropSection {
+            title: t!("Geometry").into_owned(),
+            props: geometry,
+        },
+        PropSection {
+            title: t!("Solid History").into_owned(),
+            props: vec![
             Property {
                 label: t!("History").into_owned(),
                 field: PROP_HISTORY,
@@ -1020,7 +1055,8 @@ fn brep_properties(
                 },
             },
         ],
-    }]
+        },
+    ]
 }
 
 fn cylinder_properties(
@@ -2186,11 +2222,50 @@ fn set_pyramid_sides(value: &mut SolidHistoryPyramid, sides: i32) -> bool {
     true
 }
 
+fn apply_brep_position_property(
+    value: &mut SolidHistoryBrep,
+    field: &str,
+    text: &str,
+) -> Option<bool> {
+    let axis = match field {
+        PROP_POSITION_X => 0,
+        PROP_POSITION_Y => 1,
+        PROP_POSITION_Z => 2,
+        _ => return None,
+    };
+    let Some(target) = crate::entities::common::parse_length(text) else {
+        return Some(false);
+    };
+    if !target.is_finite() {
+        return Some(false);
+    }
+    let Some(current) = matrix(value.base.transform) else {
+        return Some(false);
+    };
+    let position = current.transform_point3(glam::DVec3::ZERO);
+    let mut next = position;
+    next[axis] = target;
+    if next == position {
+        return Some(true);
+    }
+    let updated = glam::DMat4::from_translation(next - position) * current;
+    if !updated.is_finite() || updated.determinant().abs() <= 1e-12 {
+        return Some(false);
+    }
+    value.base.transform = updated.to_cols_array();
+    Some(true)
+}
+
 pub fn apply_primitive_property(
     operation: &mut SolidHistoryOperation,
     field: &str,
     value: &str,
 ) -> bool {
+    if let SolidHistoryOperation::Brep(brep_value) = operation {
+        if let Some(applied) = apply_brep_position_property(brep_value, field, value) {
+            return applied;
+        }
+    }
     if let SolidHistoryOperation::Box(rectangular_value)
     | SolidHistoryOperation::Wedge(rectangular_value) = operation
     {

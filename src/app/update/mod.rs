@@ -265,6 +265,13 @@ impl OpenCADStudio {
         self.control_observe_user_message(&msg);
         let perf_started = crate::perf::enabled().then(Instant::now);
         let perf_label = perf_message_label(&msg);
+        // Geometry epoch before dispatch. When it moves, this message drew or
+        // changed something, and the latency the user feels runs from here to
+        // the frame that shows it — not to the end of this handler. Stamping
+        // the nav-perf sample makes `nav-prepare` / `nav-render` report that
+        // span, the same way they already do for pan and zoom.
+        let perf_epoch_before = perf_started
+            .map(|_| self.tabs[self.active_tab].scene.geometry_epoch);
         // A modal dialog must capture the keyboard the same way it already
         // captures the mouse. Otherwise keystrokes from the global key
         // subscription leak past the modal into the command line and fire as
@@ -323,6 +330,13 @@ impl OpenCADStudio {
             self.snapper.clear_tracking();
             self.otrack_active = None;
             self.otrack_kind = None;
+        }
+        if let (Some(started), Some(before)) = (perf_started, perf_epoch_before) {
+            let tab = &self.tabs[self.active_tab];
+            if tab.scene.geometry_epoch != before {
+                tab.scene
+                    .record_nav_perf(crate::scene::NavPerfOp::Edit, started);
+            }
         }
         if let Some(started) = perf_started {
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;

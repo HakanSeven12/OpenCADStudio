@@ -1432,6 +1432,10 @@ pub(crate) enum NavPerfOp {
     Pan,
     Zoom,
     Rotate,
+    /// A message that changed geometry. Reported through the same line as
+    /// navigation because the question is the same one: how long from the
+    /// input to the frame that answers it.
+    Edit,
 }
 
 impl NavPerfOp {
@@ -1440,6 +1444,7 @@ impl NavPerfOp {
             Self::Pan => "pan",
             Self::Zoom => "zoom",
             Self::Rotate => "rotate",
+            Self::Edit => "edit",
         }
     }
 }

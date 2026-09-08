@@ -77,7 +77,7 @@ iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0
 acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "1c7b30ff62aef5dd934c91bf8dd1cbdeb3d7155d" }
 
 [patch."https://github.com/HakanSeven12/cadkernel.git"]
-cadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "a1286c8fe2223973293c1010c7f8329e4ba0daf5" }
+cadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "31b19e69ab6edced5f3563c9a12c974268dcb8b0" }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -1559,6 +1559,20 @@ pub enum CmdResult {
         cutters: Vec<Handle>,
         convert_meshes: bool,
     },
+    /// Split every selected solid or surface with one arbitrary plane.
+    /// `keep_point == None` retains both sides; otherwise it selects the side
+    /// containing that WCS point.
+    SliceEntities {
+        targets: Vec<Handle>,
+        plane: cadkernel::space::Plane,
+        keep_point: Option<DVec3>,
+    },
+    /// Split selected solids or surfaces with one selected analytic sheet.
+    SliceSurfaceEntities {
+        targets: Vec<Handle>,
+        cutter: Box<cadkernel::brep::Body>,
+        keep_point: Option<DVec3>,
+    },
     /// INSERT landed on a block that has AttributeDefinitions.
     /// The host should look up the attdefs for `block_name` from the document
     /// and call `attreq_set_attdefs()` on the command, then loop on text input.

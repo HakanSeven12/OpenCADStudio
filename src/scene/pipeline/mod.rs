@@ -251,6 +251,13 @@ pub struct Pipeline {
     pub(crate) wire_arena_fallback_handles: rustc_hash::FxHashSet<acadrust::Handle>,
     /// The Model content id both arenas currently mirror (`u64::MAX` = none).
     pub(crate) wire_arena_id: u64,
+    /// Entities that fed the instanced / circle / ellipse uploads this slot is
+    /// holding. A patch touching none of them cannot change those uploads, so
+    /// the partition walk over the whole resident set can be skipped.
+    pub(crate) partition_contributors: rustc_hash::FxHashSet<acadrust::Handle>,
+    /// The draw-depth generation those uploads baked. A full depth rebuild
+    /// reassigns every label, so they stop being reusable when it moves.
+    pub(crate) partition_depth_generation: u64,
     /// Last content/camera/viewport tuple used to derive visible instance
     /// ranges from the resident arena.
     pub(crate) wire_cull_key: (u64, u64, u32, u32),
@@ -2338,6 +2345,8 @@ impl Pipeline {
             wire_arena_fallback_kind: None,
             wire_arena_fallback_handles: rustc_hash::FxHashSet::default(),
             wire_arena_id: u64::MAX,
+            partition_contributors: rustc_hash::FxHashSet::default(),
+            partition_depth_generation: u64::MAX,
             wire_cull_key: (u64::MAX, u64::MAX, 0, 0),
             hatch_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
             wipeout_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
@@ -4991,6 +5000,8 @@ impl Pipeline {
         self.wire_arena = None;
         self.wire_arena_mesh = None;
         self.wire_arena_id = u64::MAX;
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
         self.alloc_size = Size::new(0, 0);
         self.shadow_full = None;
         self.background_source_id = usize::MAX;
@@ -5022,6 +5033,8 @@ impl Pipeline {
         self.wire_arena_fallback_kind = None;
         self.wire_arena_fallback_handles.clear();
         self.wire_arena_id = u64::MAX;
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
 
         self.gpu_selected_wires.clear();
         self.gpu_selected_block_wires.clear();

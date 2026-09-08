@@ -174,6 +174,27 @@ pub struct PartitionedWires<'a> {
     pub instanced: Vec<&'a WireModel>,
     pub circle_instances: Vec<super::circle_gpu::CircleInstance>,
     pub ellipse_instances: Vec<super::ellipse_gpu::EllipseInstance>,
+    /// Entities that fed `instanced` / `circle_instances` / `ellipse_instances`.
+    ///
+    /// A patch that touches none of these cannot change those three uploads, so
+    /// the caller can keep the ones it already has and skip the walk entirely.
+    pub contributors: rustc_hash::FxHashSet<Handle>,
+}
+
+/// Whether a change to this wire can alter what `partition_wires` produces for
+/// the instanced, circle and ellipse uploads.
+///
+/// Deliberately conservative: a wire that looks analytical here may still fail
+/// extraction and end up in `regular`, which costs an unnecessary re-partition
+/// and never a stale upload. Shared with `partition_wires` so the test that
+/// decides to skip cannot drift from the walk it is skipping.
+pub fn feeds_analytical_uploads(wire: &WireModel) -> bool {
+    wire.display_visible
+        && (wire.render_instance.is_some()
+            || (!wire.tangent_geoms.is_empty()
+                && wire.fill_tris.is_empty()
+                && wire.pick_tris.is_empty()
+                && wire.text_verts.is_empty()))
 }
 
 /// Single-pass classification and extraction of all viewport wire categories.
@@ -190,12 +211,19 @@ pub fn partition_wires<'a>(
     let mut instanced = Vec::new();
     let mut circle_instances = Vec::new();
     let mut ellipse_instances = Vec::new();
+    let mut contributors: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
+    let note = |wire: &WireModel, set: &mut rustc_hash::FxHashSet<Handle>| {
+        if let Some(handle) = handle_of(wire) {
+            set.insert(handle);
+        }
+    };
 
     for wire in wires {
         if !wire.display_visible {
             continue;
         }
         if wire.render_instance.is_some() {
+            note(wire, &mut contributors);
             instanced.push(wire);
             continue;
         }
@@ -210,10 +238,12 @@ pub fn partition_wires<'a>(
         {
             let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
             if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
+                note(wire, &mut contributors);
                 circle_instances.extend(insts);
                 continue;
             }
             if let Some(insts) = super::ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                note(wire, &mut contributors);
                 ellipse_instances.extend(insts);
                 continue;
             }
@@ -233,6 +263,7 @@ pub fn partition_wires<'a>(
         instanced,
         circle_instances,
         ellipse_instances,
+        contributors,
     }
 }
 

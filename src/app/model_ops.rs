@@ -76,6 +76,35 @@ struct PreparedSubtract {
     result: Option<(Handle, EntityType, Body, PreparedSolidDisplay)>,
 }
 
+struct PreparedSlice {
+    retained: Handle,
+    entity: EntityType,
+    body: Body,
+    display: PreparedSolidDisplay,
+    extra: Option<(EntityType, Body)>,
+}
+
+enum ModelSliceTool {
+    Plane(cadkernel::space::Plane),
+    Surface(Body),
+}
+
+impl ModelSliceTool {
+    fn side(&self, point: [f64; 3]) -> Option<f64> {
+        match self {
+            Self::Plane(plane) => plane.distance_to(point),
+            Self::Surface(surface) => cadkernel::brep::surface_side(surface, point),
+        }
+    }
+
+    fn split(&self, body: &Body) -> Result<Option<cadkernel::brep::PlaneSlice>, cadkernel::brep::Snag> {
+        match self {
+            Self::Plane(plane) => cadkernel::brep::slice_by_plane(body, *plane),
+            Self::Surface(surface) => cadkernel::brep::slice_by_surface(body, surface),
+        }
+    }
+}
+
 struct IntersectGroup {
     kind: UnionEntityKind,
     plane: Option<cadkernel::space::Plane>,
@@ -1273,75 +1302,246 @@ impl super::OpenCADStudio {
         Task::none()
     }
 
-    /// Slice the one selected solid with an axis-aligned plane (axis 0/1/2 =
-    /// X/Y/Z at `value`), keeping the lower side when `keep_low` is true. The
-    /// kept half is the intersection of the solid with a half-space box, reusing
-    /// the same boolean path as the modelling tools.
-    pub(super) fn solid_slice(&mut self, axis: usize, value: f64, keep_low: bool) -> Task<Message> {
+    /// Split every selected solid or surface by an arbitrary plane.  All
+    /// geometry, persistence records, and displays are prepared before the
+    /// first source entity is changed.
+    pub(super) fn solid_slice(
+        &mut self,
+        requested: &[Handle],
+        plane: cadkernel::space::Plane,
+        keep_point: Option<glam::DVec3>,
+    ) -> Task<Message> {
+        self.solid_slice_with_tool(requested, ModelSliceTool::Plane(plane), keep_point)
+    }
+
+    pub(super) fn solid_slice_surface(
+        &mut self,
+        requested: &[Handle],
+        cutter: Body,
+        keep_point: Option<glam::DVec3>,
+    ) -> Task<Message> {
+        self.solid_slice_with_tool(requested, ModelSliceTool::Surface(cutter), keep_point)
+    }
+
+    fn solid_slice_with_tool(
+        &mut self,
+        requested: &[Handle],
+        tool: ModelSliceTool,
+        keep_point: Option<glam::DVec3>,
+    ) -> Task<Message> {
         let i = self.active_tab;
-        let handles = self.selected_solid_handles();
-        if handles.len() != 1 {
-            self.command_line
-                .push_error(crate::t!("SLICE: select exactly one solid created this session.").as_ref());
+        let mut handles = requested
+            .iter()
+            .copied()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .filter(|handle| {
+                matches!(
+                    self.tabs[i].scene.document.get_entity(*handle),
+                    Some(EntityType::Solid3D(_) | EntityType::Surface(_))
+                )
+            })
+            .collect::<Vec<_>>();
+        handles.sort_unstable_by_key(|handle| handle.value());
+        handles.dedup();
+        self.tabs[i].scene.restore_solid_models(&handles);
+        handles.retain(|handle| self.tabs[i].scene.solid_models.contains_key(handle));
+        if handles.is_empty() {
+            self.command_line.push_error(
+                crate::t!("SLICE: select at least one solid or surface.").as_ref(),
+            );
             return Task::none();
         }
-        let solid = self.tabs[i].scene.solid_models[&handles[0]].clone();
-        // Bounding box from the solid's edge wires.
-        let Some((min, max)) = solid_model::extent(&solid) else {
-            self.command_line
-                .push_error(crate::t!("SLICE: could not determine the solid's extent.").as_ref());
-            return Task::none();
-        };
-        // Generous margin so the box fully spans the solid in the free axes.
-        let m = [
-            (max[0] - min[0]).max(1.0),
-            (max[1] - min[1]).max(1.0),
-            (max[2] - min[2]).max(1.0),
-        ];
-        let mut lo = [min[0] - m[0], min[1] - m[1], min[2] - m[2]];
-        let mut hi = [max[0] + m[0], max[1] + m[1], max[2] + m[2]];
-        if keep_low {
-            hi[axis] = value;
+
+        let keep_positive = if let Some(point) = keep_point {
+            let tolerance = cadkernel::brep::operation_tolerance(
+                &handles
+                    .iter()
+                    .map(|handle| &self.tabs[i].scene.solid_models[handle])
+                    .collect::<Vec<_>>(),
+            );
+            let Some(distance) = tool.side(point.to_array()) else {
+                self.command_line
+                    .push_error(crate::t!("SLICE: the cutting plane is invalid.").as_ref());
+                return Task::none();
+            };
+            if distance.abs() <= tolerance {
+                self.command_line.push_error(
+                    crate::t!("SLICE: choose a point away from the cutting plane.").as_ref(),
+                );
+                return Task::none();
+            }
+            Some(distance > 0.0)
         } else {
-            lo[axis] = value;
-        }
-        if hi[axis] <= lo[axis] {
-            self.command_line
-                .push_error(crate::t!("SLICE: the plane does not cross the solid on the kept side.").as_ref());
-            return Task::none();
-        }
-        let center = [
-            (lo[0] + hi[0]) / 2.0,
-            (lo[1] + hi[1]) / 2.0,
-            (lo[2] + hi[2]) / 2.0,
-        ];
-        let halfspace = solid_model::box_solid(center, hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
-        let Some(result) = halfspace
-            .as_ref()
-            .and_then(|half| solid_model::boolean(Bool::Intersect, &solid, half))
-        else {
-            self.command_line
-                .push_error(crate::t!("SLICE failed — the plane may not cross the solid.").as_ref());
-            return Task::none();
+            None
         };
+
+        let mut prepared = Vec::with_capacity(handles.len());
+        for handle in &handles {
+            let body = &self.tabs[i].scene.solid_models[handle];
+            let result = match tool.split(body) {
+                Ok(Some(result)) => result,
+                Ok(None) => {
+                    self.command_line.push_error(
+                        crate::t!("SLICE: the cutting plane does not cross every selected object; no object was changed.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::NoClosedForm) => {
+                    self.command_line.push_error(
+                        crate::t!("SLICE: the selected geometry has an unsupported surface intersection; no object was changed.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::Coincident) => {
+                    self.command_line.push_error(
+                        crate::t!("SLICE: the cutting plane is coincident with source geometry; no object was changed.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+                Err(cadkernel::brep::Snag::CutRefused) => {
+                    self.command_line.push_error(
+                        crate::t!("SLICE: the selected topology could not be split safely; no object was changed.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                }
+            };
+            let (body, extra_body) = match keep_positive {
+                Some(true) => (result.positive, None),
+                Some(false) => (result.negative, None),
+                None => (result.negative, Some(result.positive)),
+            };
+            let Some(source) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
+                return Task::none();
+            };
+            let Some(entity) = entity_with_boolean_body(source.clone(), &body) else {
+                self.command_line.push_error(
+                    crate::t!("SLICE: a result could not be encoded; no object was changed.")
+                        .as_ref(),
+                );
+                return Task::none();
+            };
+            let Some(display) = self.tabs[i]
+                .scene
+                .prepare_solid_model_display(*handle, &body)
+                .filter(|display| display.0.complete)
+            else {
+                self.command_line.push_error(
+                    crate::t!("SLICE: a result could not be displayed completely; no object was changed.")
+                        .as_ref(),
+                );
+                return Task::none();
+            };
+            let extra = match extra_body {
+                Some(extra_body) => {
+                    let mut extra_entity = match entity_with_boolean_body(source, &extra_body) {
+                        Some(entity) => entity,
+                        None => {
+                            self.command_line.push_error(
+                                crate::t!("SLICE: a result could not be encoded; no object was changed.")
+                                    .as_ref(),
+                            );
+                            return Task::none();
+                        }
+                    };
+                    extra_entity.common_mut().handle = Handle::NULL;
+                    Some((extra_entity, extra_body))
+                }
+                None => None,
+            };
+            prepared.push(PreparedSlice {
+                retained: *handle,
+                entity,
+                body,
+                display,
+                extra,
+            });
+        }
+
         self.push_undo_snapshot(i, "SLICE");
-        self.tabs[i].scene.erase_entities(&handles);
-        let mut s3d = Solid3D::new();
-        s3d.wires = solid_model::edge_wires(&result);
-        let history = solid_history::brep_op(&result);
-        let handle = self.add_solid_model(EntityType::Solid3D(s3d), result, history);
+        let mut created = Vec::new();
+        for item in &prepared {
+            let Some((entity, body)) = &item.extra else {
+                continue;
+            };
+            let handle = match entity {
+                EntityType::Solid3D(_) => self.add_solid_model_preserving_style(
+                    entity.clone(),
+                    body.clone(),
+                    solid_history::brep_op(body),
+                ),
+                EntityType::Surface(_) => {
+                    self.add_surface_model_preserving_style(entity.clone(), body.clone())
+                }
+                _ => Handle::NULL,
+            };
+            if handle.is_null() {
+                self.tabs[i].scene.rollback_new_entities(&created);
+                self.discard_last_undo_entry(i);
+                self.command_line.push_error(
+                    crate::t!("SLICE: a result could not be committed; all source objects were retained.")
+                        .as_ref(),
+                );
+                return Task::none();
+            }
+            created.push(handle);
+        }
+
+        let record_history = self.tabs[i].scene.document.header.record_solid_history;
+        let mut retained = Vec::with_capacity(prepared.len());
+        for item in prepared {
+            self.tabs[i].scene.delete_solid_history(item.retained);
+            if !self.tabs[i].scene.update_entity(item.entity) {
+                self.command_line.push_error(
+                    crate::t!("SLICE: a retained result could not be updated.").as_ref(),
+                );
+                return Task::none();
+            }
+            if record_history
+                && matches!(
+                    self.tabs[i].scene.document.get_entity(item.retained),
+                    Some(EntityType::Solid3D(_))
+                )
+            {
+                self.tabs[i]
+                    .scene
+                    .create_solid_history(item.retained, solid_history::brep_op(&item.body));
+            }
+            self.tabs[i].scene.register_prepared_solid_model(
+                item.retained,
+                item.body,
+                item.display,
+            );
+            retained.push(item.retained);
+        }
+
+        retained.extend(created);
         self.tabs[i].scene.deselect_all();
-        if !handle.is_null() {
-            self.tabs[i].scene.select_entity(handle, false);
+        for handle in &retained {
+            self.tabs[i].scene.select_entity(*handle, false);
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();
-        let ax = ["X", "Y", "Z"][axis];
-        self.command_line.push_output(crate::tf!(
-            "SLICE: cut at {ax}={value}, kept the {} half.",
-            if keep_low { "lower" } else { "upper" }
-        ).as_ref());
+        self.command_line.push_output(
+            crate::tf!(
+                "SLICE: created %{count} result object(s).",
+                count = retained.len()
+            )
+            .as_ref(),
+        );
         Task::none()
+    }
+
+    pub(super) fn slice_selected(
+        &mut self,
+        plane: cadkernel::space::Plane,
+        keep_point: Option<glam::DVec3>,
+    ) -> Task<Message> {
+        let handles = self.tabs[self.active_tab].scene.selected_handles_in_order();
+        self.solid_slice(&handles, plane, keep_point)
     }
 
     /// INTERFERE — create a solid from the overlap of the two selected solids,

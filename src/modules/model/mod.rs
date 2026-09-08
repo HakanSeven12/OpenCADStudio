@@ -5,6 +5,7 @@ pub mod cylinder_cmd;
 pub mod edge_cmd;
 pub mod polysolid_cmd;
 pub mod primitive_cmd;
+pub mod slice_cmd;
 
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 

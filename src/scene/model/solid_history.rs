@@ -218,9 +218,9 @@ pub fn has_specialized_primitive_properties(
     )
 }
 
-/// Return the primitive that owns the public Geometry rows. Later operations
-/// such as edge fillets and chamfers refine that primitive but do not replace
-/// its editable type, position, or dimensions.
+/// Return the primitive that owns the public Geometry rows. Later edge
+/// operations refine that primitive without replacing its editable type,
+/// position, or dimensions.
 pub fn primitive_property_operation(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,

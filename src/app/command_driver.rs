@@ -3803,6 +3803,102 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
 
+            CmdResult::ThickenEntities { handles, distance } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+
+                if handles.is_empty() {
+                    self.command_line
+                        .push_output(crate::t!("No surfaces selected.").as_ref());
+                    return Task::none();
+                }
+                if !distance.is_finite() {
+                    self.command_line.push_error(
+                        crate::t!("Requires numeric distance or two points.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                if distance.abs() <= f64::EPSILON {
+                    return Task::none();
+                }
+
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                let pending = self.begin_undo(i, "THICKEN", handles.len(), true);
+                let mut created = 0usize;
+                let mut failed = 0usize;
+                let mut self_intersections = 0usize;
+                for handle in handles {
+                    let Some(acadrust::EntityType::Surface(surface)) =
+                        self.tabs[i].scene.document.get_entity(handle)
+                    else {
+                        failed += 1;
+                        continue;
+                    };
+                    let kernel_distance = if surface.kind
+                        == acadrust::entities::SurfaceKind::Revolved
+                    {
+                        -distance
+                    } else {
+                        distance
+                    };
+                    let body = self.tabs[i]
+                        .scene
+                        .solid_models
+                        .get(&handle)
+                        .cloned()
+                        .or_else(|| {
+                            crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
+                        });
+                    let Some(body) = body else {
+                        failed += 1;
+                        continue;
+                    };
+                    let solid = match cadkernel::brep::thicken(&body, kernel_distance) {
+                        Ok(solid) => solid,
+                        Err(cadkernel::brep::ThickenError::SelfIntersection) => {
+                            failed += 1;
+                            self_intersections += 1;
+                            continue;
+                        }
+                        Err(_) => {
+                            failed += 1;
+                            continue;
+                        }
+                    };
+                    let history = crate::scene::model::solid_history::brep_op(&solid);
+                    if self
+                        .add_solid_model(empty_solid3d(), solid, history)
+                        .is_null()
+                    {
+                        failed += 1;
+                    } else {
+                        created += 1;
+                    }
+                }
+
+                if created > 0 {
+                    self.tabs[i].dirty = true;
+                }
+                if self_intersections > 0 {
+                    self.command_line.push_error(&crate::tf!(
+                        "{} surface(s) cannot be thickened because the offset intersects itself.",
+                        self_intersections
+                    ));
+                }
+                if failed > 0 {
+                    self.command_line.push_output(&crate::tf!(
+                        "THICKEN: created {} solid(s); {} surface(s) could not be thickened exactly.",
+                        created, failed
+                    ));
+                }
+                if let Some(pending) = pending {
+                    self.commit_undo_delta(i, pending);
+                }
+                self.refresh_properties();
+            }
+
             CmdResult::PresspullPick { handle, point, offset, multiple: _ } => {
                 self.presspull_pick(handle, point, offset);
             }
@@ -5712,4 +5808,53 @@ fn resample_widths(source: &[(f64, f64)], count: usize) -> Vec<(f64, f64)> {
             source[source_index]
         })
         .collect()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod thicken_tests {
+    use super::*;
+    use acadrust::entities::{Surface, SurfaceKind};
+    use cadkernel::geom2d::{Circle, Curve};
+    use cadkernel::space::Plane;
+
+    #[test]
+    fn thicken_preserves_sources_and_round_trips_results_with_one_undo() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let body = cadkernel::brep::planar_region(Plane::XY, &[
+            vec![Curve::Circle(Circle { centre: [0.0; 2], radius: 3.0 })],
+        ]).unwrap();
+        let source = app.add_surface_model(acadrust::EntityType::Surface(Surface::new(SurfaceKind::Plane)), body);
+        assert!(!source.is_null());
+        let i = app.active_tab;
+        let invalid = app.tabs[i].scene.add_entity(acadrust::EntityType::Surface(Surface::new(SurfaceKind::Generic)));
+        let original = serde_json::to_value(app.tabs[i].scene.document.get_entity(source).unwrap()).unwrap();
+        let before = app.tabs[i].history.undo_stack.len();
+        let _ = app.apply_cmd_result(CmdResult::ThickenEntities { handles: vec![source], distance: 0.0 });
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        let _ = app.apply_cmd_result(CmdResult::ThickenEntities { handles: vec![invalid, source], distance: 2.0 });
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
+        let result = app.tabs[i].scene.document.entities().find_map(|entity| {
+            matches!(entity, acadrust::EntityType::Solid3D(_)).then_some(entity.common().handle)
+        }).unwrap();
+        assert!(app.tabs[i].scene.document.solid_history_operation(result).is_some());
+        assert_eq!(serde_json::to_value(app.tabs[i].scene.document.get_entity(source).unwrap()).unwrap(), original);
+        let expected = cadkernel::brep::analytic_mass_properties(&app.tabs[i].scene.solid_models[&result]).unwrap().volume;
+        let bytes = crate::io::save_to_bytes(&app.tabs[i].scene.document, "dwg", app.tabs[i].scene.document.version).unwrap();
+        let document = crate::io::load_bytes("thicken.dwg", bytes).unwrap();
+        let mut restored = crate::scene::Scene::new();
+        restored.document = document;
+        restored.restore_solid_models(&[result]);
+        let actual = cadkernel::brep::analytic_mass_properties(&restored.solid_models[&result]).unwrap().volume;
+        assert!((expected - actual).abs() < 1e-8);
+        app.undo_active_tab();
+        assert!(app.tabs[i].scene.document.get_entity(result).is_none());
+        assert!(app.tabs[i].scene.document.solid_history_operation(result).is_none());
+        assert!(app.tabs[i].scene.document.get_entity(source).is_some());
+        assert!(app.tabs[i].scene.document.get_entity(invalid).is_some());
+        app.redo_active_tab();
+        assert!(app.tabs[i].scene.document.get_entity(result).is_some());
+        assert!(app.tabs[i].scene.document.solid_history_operation(result).is_some());
+        assert_eq!(serde_json::to_value(app.tabs[i].scene.document.get_entity(source).unwrap()).unwrap(), original);
+    }
 }

@@ -2035,7 +2035,17 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
     // rarely use this many — and parser desync produces exactly-100_000-vertex
     // junk records.
     const MAX_VERTS: usize = 100_000;
+    // A MINSERT's row/column counts are parsed `u16`s whose unchecked product
+    // (`Insert::instance_count`) drives a per-instance allocation in
+    // `render_graph::array_offsets` and a full per-instance render-graph walk
+    // for every one — a corrupt or adversarial 65535x65535 pair requests over
+    // four billion instances (tens of GiB) long before any GPU-side chunking
+    // limit could help. Kept in sync with the identical failsafe clamp in
+    // `render_graph::array_offsets`, which guards inserts that reach the
+    // render graph some other way (e.g. built at runtime, not loaded).
+    const MAX_MINSERT_INSTANCES: usize = 20_000;
     match e {
+        E::Insert(i) => i.instance_count() > MAX_MINSERT_INSTANCES,
         E::LwPolyline(p) => {
             !finite_unit_normal(&p.normal)
                 || p.vertices.len() >= MAX_VERTS
@@ -2409,5 +2419,34 @@ mod corrupt_guard_tests {
         ];
         let s = Spline::from_control_points(3, pts);
         assert!(!is_entity_corrupt(&EntityType::Spline(s)));
+    }
+
+    // A corrupt or adversarial MINSERT row/column pair (u16, so its unchecked
+    // product can reach into the billions) must be rejected before it can
+    // drive the render graph's per-instance allocation and expansion.
+    #[test]
+    fn rejects_pathological_minsert_counts() {
+        let mut i = acadrust::entities::Insert::new("BLOCK", Vector3::ZERO);
+        i.row_count = u16::MAX;
+        i.column_count = u16::MAX;
+        assert!(is_entity_corrupt(&EntityType::Insert(i)));
+    }
+
+    // An ordinary array insert, well under the budget, is valid source data.
+    #[test]
+    fn keeps_a_reasonable_minsert() {
+        let mut i = acadrust::entities::Insert::new("BLOCK", Vector3::ZERO);
+        i.row_count = 10;
+        i.column_count = 10;
+        i.row_spacing = 5.0;
+        i.column_spacing = 5.0;
+        assert!(!is_entity_corrupt(&EntityType::Insert(i)));
+    }
+
+    // A plain (non-array) INSERT is never treated as a MINSERT-count problem.
+    #[test]
+    fn keeps_a_plain_insert() {
+        let i = acadrust::entities::Insert::new("BLOCK", Vector3::ZERO);
+        assert!(!is_entity_corrupt(&EntityType::Insert(i)));
     }
 }

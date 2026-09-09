@@ -2408,8 +2408,11 @@ fn curve_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Curve
 
     match geom {
         TangentGeom::Line { p1, p2 } => {
-            let p1 = DVec3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64);
-            let p2 = DVec3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64);
+            let (p1, p2) = if wire.points.len() == 2 {
+                (wp_f64(wire, 0), wp_f64(wire, 1))
+            } else {
+                (Vec3::from_array(*p1).as_dvec3(), Vec3::from_array(*p2).as_dvec3())
+            };
             (frame.contains(p1, tol) && frame.contains(p2, tol)).then(|| Curve::Line(KLine { start: frame.to_2d(p1), end: frame.to_2d(p2) }))
         }
         TangentGeom::Circle { center, radius } => {
@@ -3382,4 +3385,62 @@ mod ext_tests {
         assert!(pts[0].y < 0.0, "expected the lower point (normal flip must change which physical arc this is), got {:?}", pts[0]);
         assert!((pts[0] - DVec3::new(3.75, -(63.0_f64).sqrt() / 4.0, 0.0)).length() < 1e-6);
     }
+    #[test]
+    fn indexed_intersection_uses_true_curves_even_when_chords_miss_the_aperture() {
+        use crate::scene::pick::interaction_index::InteractionIndex;
+        use std::sync::Arc;
+        let circle = |name: &str, x: f64, radius: f64| {
+            let points = (0..=48).map(|i| {
+                let angle = i as f64 * std::f64::consts::TAU / 48.0 + if x == 0.0 { 0.03 } else { 0.0 };
+                [(x + radius * angle.cos()) as f32, (radius * angle.sin()) as f32, 0.0]
+            }).collect();
+            let mut wire = WireModel::solid(name.to_owned(), points, [1.0; 4], false);
+            wire.aabb = [(x - radius) as f32, -radius as f32, (x + radius) as f32, radius as f32];
+            wire.tangent_geoms = vec![TangentGeom::PlanarCircle {
+                center: [x, 0.0, 0.0], axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius,
+            }];
+            wire
+        };
+        let wires = Arc::new(vec![circle("1", 0.0, 4.0), circle("2", 3.0, 5.0)]);
+        let index = InteractionIndex::build(&wires);
+        let candidates = index.query_xy(Arc::clone(&wires), [-0.0001, 3.9999, 0.0001, 4.0001]);
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates.segments().unwrap().iter().all(|segment| segment.wire == 1));
+        let point = DVec3::new(0.0, 4.0, 0.0);
+        let mut snapper = Snapper::default();
+        snapper.snap_enabled = true;
+        snapper.enabled = [SnapType::Intersection].into_iter().collect();
+        let result = snapper.snap(
+            point, Point::new(500.0, 500.0), &candidates,
+            Mat4::from_scale(Vec3::splat(100.0)), point,
+            Rectangle { x: 0.0, y: 0.0, width: 1000.0, height: 1000.0 },
+            Vec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+        ).expect("the true intersection remains available at high zoom");
+        assert!((result.world - point).length() < 1e-9);
+    }
+
+    #[test]
+    fn line_circle_intersection_retains_low_coordinate_bits() {
+        let origin = 1_000_000_000.0;
+        let a = [origin - 10.0, origin, 0.0];
+        let b = [origin + 10.0, origin, 0.0];
+        let points = [a, b].map(|point| point.map(|value| value as f32));
+        let low = [a, b].into_iter().zip(points).map(|(point, high)| {
+            std::array::from_fn(|axis| (point[axis] - high[axis] as f64) as f32)
+        }).collect();
+        let line = WireModel {
+            points: points.to_vec(), points_low: low,
+            tangent_geoms: vec![TangentGeom::Line { p1: points[0], p2: points[1] }],
+            ..Default::default()
+        };
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [origin, origin, 0.0], axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius: 3.0,
+            }], ..Default::default()
+        };
+        let points = exact_curve_intersections(&line, &circle).unwrap();
+        assert_eq!(points.len(), 2);
+        assert!(points.iter().all(|point| (point.x - origin).abs() == 3.0 && point.y == origin));
+    }
+
 }

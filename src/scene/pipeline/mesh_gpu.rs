@@ -2492,4 +2492,13 @@ mod texture_limit_tests {
         let rgba = vec![0u8; 10];
         assert!(downscale_rgba_to_limit(1000, 1000, &rgba, 512).is_none());
     }
+    #[test]
+    fn malformed_material_images_are_rejected_even_below_the_texture_limit() {
+        for (width, height, pixels) in [(0, 1, vec![]), (1, 0, vec![]), (1, 1, vec![0; 3]), (1, 1, vec![0; 5])] {
+            assert!(!super::valid_rgba_size(width, height, &pixels));
+            assert!(downscale_rgba_to_limit(width, height, &pixels, 16).is_none());
+        }
+        assert!(downscale_rgba_to_limit(1, 1, &[0; 4], 0).is_none());
+    }
+
 }

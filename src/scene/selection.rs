@@ -1181,6 +1181,14 @@ mod tests {
             expanded.contains(&first) && expanded.contains(&second),
             "both leaders on one annotation must come back, not just one",
         );
+        for handle in [first, annotation, second] {
+            scene.deselect_all();
+            scene.select_entity(handle, false);
+            let expected = scene.selected_handles_in_order();
+            scene.deselect_all();
+            scene.select_entities(&[handle]);
+            assert_eq!(scene.selected_handles_in_order(), expected);
+        }
     }
 
     #[test]

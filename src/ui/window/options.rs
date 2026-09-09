@@ -760,10 +760,11 @@ pub fn view_window<'a>(
     .width(sizing.width)
     .height(sizing.height);
 
+    let intrinsic = sizing.width == crate::ui::modal::ModalSizing::INTRINSIC.width;
     container(body)
         .style(container::rounded_box)
         .padding([16, 18])
-        .width(sizing.width)
-        .height(sizing.height)
+        .width(if intrinsic { iced::Length::Fixed(540.0) } else { sizing.width })
+        .height(if intrinsic { iced::Length::Fixed(560.0) } else { sizing.height })
         .into()
 }

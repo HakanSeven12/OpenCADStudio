@@ -5104,6 +5104,20 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PropSectionToggle(title) => {
+                let sections = &mut self.collapsed_property_sections;
+                if !sections.remove(&title) {
+                    sections.insert(title);
+                }
+                // Keep already-built panels in other open documents in sync,
+                // rather than waiting for each one to rebuild on selection.
+                let sections = self.collapsed_property_sections.clone();
+                for tab in &mut self.tabs {
+                    tab.properties.collapsed_sections = sections.clone();
+                }
+                Task::none()
+            }
+
             Message::PropEditChoiceToggle => {
                 let panel = &mut self.tabs[self.active_tab].properties;
                 panel.edit_choice_open = !panel.edit_choice_open;

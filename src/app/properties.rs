@@ -47,6 +47,10 @@ impl OpenCADStudio {
         // Expanded coordinate groups persist across rebuilds AND selection
         // changes — it's a per-user view preference, not per-entity state.
         let expanded_groups = std::mem::take(&mut self.tabs[i].properties.expanded_groups);
+        // Section state belongs to the app, not a drawing tab, so the user's
+        // collapsed sections carry across every currently open drawing/project.
+        // The empty app-level default keeps a first-run palette fully expanded.
+        let collapsed_sections = self.collapsed_property_sections.clone();
         // Which entities the previous panel was built for — an uncommitted
         // edit buffer only survives a rebuild for the *same* selection.
         let prev_handles = std::mem::take(&mut self.tabs[i].properties.source_handles);
@@ -2278,6 +2282,7 @@ impl OpenCADStudio {
                 None
             };
             panel.expanded_groups = expanded_groups;
+            panel.collapsed_sections = collapsed_sections;
             panel.source_handles = new_handles;
             panel.prop_vertex = prop_vertex;
             panel.prop_vertex_indicator_active = prop_vertex_indicator_active;

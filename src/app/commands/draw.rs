@@ -1113,7 +1113,8 @@ impl OpenCADStudio {
                 use acadrust::entities::Region;
                 use acadrust::types::Vector3;
                 let mut regions = Vec::new();
-                for (_, e) in self.tabs[i].scene.selected_entities().iter() {
+                let mut sources = Vec::new();
+                for (handle, e) in self.tabs[i].scene.selected_entities().iter() {
                     let supported = matches!(
                         e,
                         acadrust::EntityType::LwPolyline(pl)
@@ -1136,6 +1137,7 @@ impl OpenCADStudio {
                         );
                         region.common.layer = self.tabs[i].active_layer.clone();
                         regions.push((region, body));
+                        sources.push(*handle);
                     }
                 }
                 if regions.is_empty() {
@@ -1153,6 +1155,10 @@ impl OpenCADStudio {
                             return Some(iced::Task::none());
                         }
                         created.push(handle);
+                    }
+                    if self.delete_objects != 0 {
+                        self.tabs[i].scene.erase_entities(&sources);
+                        self.refresh_properties();
                     }
                     self.tabs[i].dirty = true;
                     self.command_line
@@ -1528,5 +1534,49 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+}
+
+#[cfg(test)]
+mod region_tests {
+    use crate::app::OpenCADStudio;
+
+    #[test]
+    fn region_respects_delobj_and_preserves_unconverted_sources() {
+        for delete_sources in [false, true] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            app.automation_op(r#"{"op":"run","cmd":"CIRCLE 5,5 3"}"#);
+            app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#);
+            let i = app.active_tab;
+            let sources: Vec<_> = app.tabs[i].scene.document.entities()
+                .map(|entity| {
+                    (entity.common().handle, matches!(entity, acadrust::EntityType::Circle(_)))
+                })
+                .collect();
+            assert_eq!(sources.len(), 2);
+            let handles: Vec<_> = sources.iter().map(|(handle, _)| *handle).collect();
+            app.tabs[i].scene.select_entities(&handles);
+            app.delete_objects = i16::from(delete_sources);
+
+            let _ = app.dispatch_command("REGION");
+
+            for (handle, is_circle) in &sources {
+                assert_eq!(
+                    app.tabs[i].scene.document.get_entity(*handle).is_some(),
+                    !delete_sources || !is_circle,
+                );
+            }
+            let region_count = app.tabs[i].scene.document.entities()
+                .filter(|entity| matches!(entity, acadrust::EntityType::Region(_)))
+                .count();
+            assert_eq!(region_count, 1);
+
+            app.automation_op(r#"{"op":"undo"}"#);
+            for (handle, _) in &sources {
+                assert!(app.tabs[i].scene.document.get_entity(*handle).is_some());
+            }
+            assert_eq!(app.tabs[i].scene.document.entities().count(), 2);
+        }
     }
 }

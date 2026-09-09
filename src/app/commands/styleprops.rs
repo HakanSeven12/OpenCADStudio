@@ -1159,6 +1159,11 @@ impl OpenCADStudio {
                         "0" | "OFF" | "FALSE" => Some(false),
                         _ => None,
                     };
+                    let current_delete_objects = self.delete_objects;
+                    let requested_delete_objects = (name == "DELOBJ")
+                        .then(|| value.as_deref()?.parse::<i16>().ok())
+                        .flatten()
+                        .filter(|value| (0..=3).contains(value));
                     let outcome: Result<(String, bool), String> = {
                         let h = &mut self.tabs[i].scene.document.header;
                         match name.as_str() {
@@ -1633,15 +1638,18 @@ impl OpenCADStudio {
                                 }
                             },
                             "DELOBJ" => match &value {
-                                Some(v) => parse_bool(v)
-                                    .map(|b| {
-                                        h.delete_objects = b;
-                                        (format!("DELOBJ = {}", b as i32), true)
+                                Some(v) => v
+                                    .parse::<i16>()
+                                    .ok()
+                                    .filter(|value| (0..=3).contains(value))
+                                    .map(|value| {
+                                        (format!("DELOBJ = {value}"), true)
                                     })
-                                    .ok_or_else(|| "SETVAR: 0 or 1 required.".into()),
-                                None => {
-                                    Ok((format!("DELOBJ = {}", h.delete_objects as i32), false))
-                                }
+                                    .ok_or_else(|| "SETVAR: integer from 0 to 3 required.".into()),
+                                None => Ok((
+                                    format!("DELOBJ = {current_delete_objects}"),
+                                    false,
+                                )),
                             },
                             "PLINEGEN" => match &value {
                                 Some(v) => parse_bool(v)
@@ -2119,6 +2127,9 @@ impl OpenCADStudio {
                     };
                     match outcome {
                         Ok((msg, changed)) => {
+                            if let Some(value) = requested_delete_objects {
+                                self.delete_objects = value;
+                            }
                             if changed {
                                 if matches!(
                                     name.as_str(),
@@ -2144,6 +2155,7 @@ impl OpenCADStudio {
                                         | "GRIPHOT"
                                         | "GRIPHOVER"
                                         | "GRIPOBJLIMIT"
+                                        | "DELOBJ"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {
@@ -3119,5 +3131,18 @@ mod tests {
         let _ = app.update(crate::app::Message::CommandEscape);
         assert!(app.tabs[app.active_tab].active_cmd.is_none());
         assert_eq!(app.commandline_fade_ms, 5000);
+    }
+
+    #[test]
+    fn delobj_accepts_values_zero_through_three() {
+        let mut app = fresh_app();
+
+        for value in 0..=3 {
+            let _ = app.run_command_line(&format!("SETVAR DELOBJ {value}"));
+            assert_eq!(app.delete_objects, value);
+        }
+
+        let _ = app.run_command_line("SETVAR DELOBJ 4");
+        assert_eq!(app.delete_objects, 3);
     }
 }

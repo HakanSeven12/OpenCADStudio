@@ -347,6 +347,10 @@ pub(crate) enum TextEntryMode {
     FreeText,
 }
 
+pub(crate) fn delobj_deletes_auxiliary(value: i16, creates_surface: bool) -> bool {
+    value == 2 || (value == 3 && !creates_surface)
+}
+
 pub(super) struct OpenCADStudio {
     start: Instant,
     control: control::State,
@@ -566,6 +570,8 @@ pub(super) struct OpenCADStudio {
     /// `MIRRTEXT`) — the next command-line entry is its new value, empty keeps
     /// the current one.
     pending_setvar: Option<String>,
+    /// DELOBJ system variable (0–3), shared by every open drawing.
+    delete_objects: i16,
     /// Cursor is hovering over the UCS icon body — drives the hover highlight.
     ucs_icon_hover: bool,
     /// UCS icon is selected (clicked): its grips are shown and draggable.
@@ -3424,6 +3430,7 @@ impl OpenCADStudio {
             block_usage_last_persist: None,
             awaiting_vports: false,
             pending_setvar: None,
+            delete_objects: 1,
             ucs_icon_hover: false,
             ucs_icon_selected: false,
             ucs_grip_drag: None,

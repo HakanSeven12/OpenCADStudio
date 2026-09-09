@@ -219,6 +219,10 @@ pub struct UserSettings {
     /// the current creation layer/style. Registry-style, app-level preference.
     #[serde(default = "default_dimension_continue_mode")]
     pub dimension_continue_mode: i16,
+    /// DELOBJ: source-geometry deletion policy (0–3). Registry-style,
+    /// app-level preference; first-run default is 1.
+    #[serde(default = "default_delete_objects")]
+    pub delete_objects: i16,
     /// TEXTFILL: fill TrueType glyphs (true) or draw them hollow (false).
     pub textfill: bool,
     /// When true, saving over an existing file first copies it to a sibling
@@ -273,6 +277,10 @@ pub struct UserSettings {
 
 fn default_clipromptlines() -> i32 {
     3
+}
+
+fn default_delete_objects() -> i16 {
+    1
 }
 
 fn default_commandline_fade_ms() -> i32 {
@@ -339,6 +347,7 @@ impl Default for UserSettings {
             texteditmode: false,
             quick_dimension_snap_priority: 0,
             dimension_continue_mode: 1,
+            delete_objects: 1,
             textfill: true,
             backup_on_save: true,
             file_assoc_enabled: true,

@@ -2293,7 +2293,9 @@ impl super::OpenCADStudio {
             surfaces.push(surf);
         }
         self.push_undo_snapshot(i, "CONVTOSURFACE");
-        self.tabs[i].scene.erase_entities(&handles);
+        if self.delete_objects != 0 {
+            self.tabs[i].scene.erase_entities(&handles);
+        }
         let n = surfaces.len();
         for surf in surfaces {
             self.tabs[i].scene.add_entity(EntityType::Surface(surf));

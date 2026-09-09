@@ -852,7 +852,7 @@ impl CommandLine {
             .padding([2, 8]);
             let panel = container(column![header, log])
                 .width(Length::Fill)
-                .padding([4, 8]);
+                .padding(Padding { top: 0.0, right: 8.0, bottom: 4.0, left: 8.0 });
             let resize = iced::widget::mouse_area(
                 container(crate::ui::icons::themed_primary(
                     crate::ui::icons::RESIZE,

@@ -1779,7 +1779,7 @@ impl OpenCADStudio {
             } => {
                 let label = self.history_label_from_active_cmd(i, "SOLID");
                 let erase_source = erase_source.filter(|handle| {
-                    self.tabs[i].scene.document.header.delete_objects
+                    self.delete_objects != 0
                         && !self.tabs[i].scene.is_layer_locked(*handle)
                 });
                 let pending = self.begin_undo(
@@ -3661,7 +3661,7 @@ impl OpenCADStudio {
                 taper_angle,
                 color: _,
             } => {
-                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let delete_sources = self.delete_objects != 0;
                 if handles.is_empty()
                     || handles
                         .iter()
@@ -3948,7 +3948,7 @@ impl OpenCADStudio {
                     self.restore_pre_cmd_tangent();
                     return Task::none();
                 }
-                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let delete_sources = self.delete_objects != 0;
                 use crate::command::ExtrudeMode;
                 use crate::modules::insert::solid3d_cmds::{
                     empty_revolved_surface, empty_solid3d,
@@ -4082,7 +4082,9 @@ impl OpenCADStudio {
                 use crate::command::ExtrudeMode;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use crate::scene::model::sweep_model;
-                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let delete_objects = self.delete_objects;
+                let delete_profiles =
+                    crate::app::delobj_deletes_profiles(delete_objects);
                 let path = self.tabs[i].scene.document.get_entity(path_handle).cloned();
                 let mut profiles = Vec::new();
                 let mut failed = 0usize;
@@ -4120,6 +4122,14 @@ impl OpenCADStudio {
                         failed += 1;
                         continue;
                     };
+                    let deletes_path = crate::app::delobj_deletes_auxiliary(
+                        delete_objects,
+                        surface,
+                    );
+                    if deletes_path && self.tabs[i].scene.is_layer_locked(path_handle) {
+                        failed += 1;
+                        continue;
+                    }
                     let created = if surface {
                         self.add_surface_model(sweep_model::swept_surface_entity(&record), body)
                     } else {
@@ -4132,8 +4142,11 @@ impl OpenCADStudio {
                         failed += 1;
                     } else {
                         created_handles.push(created);
-                        if delete_sources {
+                        if delete_profiles {
                             consumed.push(handle);
+                        }
+                        if deletes_path {
+                            consumed.push(path_handle);
                         }
                     }
                 }
@@ -4175,12 +4188,15 @@ impl OpenCADStudio {
                 }).collect::<Vec<_>>();
                 sources.sort_unstable_by_key(|handle| handle.value());
                 sources.dedup();
-                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
-                let locked = delete_sources && sources.iter().any(|handle| self.tabs[i].scene.is_layer_locked(*handle));
+                let delete_objects = self.delete_objects;
+                let delete_sections =
+                    crate::app::delobj_deletes_profiles(delete_objects);
+                let section_locked = delete_sections
+                    && sources.iter().any(|handle| self.tabs[i].scene.is_layer_locked(*handle));
                 let available = sources.iter().chain(guides.iter()).copied().chain(path)
                     .filter_map(|handle| self.tabs[i].scene.document.get_entity(handle)
                         .cloned().map(|entity| (handle, entity))).collect::<Vec<_>>();
-                let result = if locked {
+                let result = if section_locked {
                     Err("LOFT: a source is on a locked layer; disable source deletion or unlock it.".to_string())
                 } else {
                     loft_command_model::record(&sections, &guides, path, &available, mode, options)
@@ -4189,6 +4205,19 @@ impl OpenCADStudio {
                 match result {
                     Ok((body, record)) => {
                         let surface = record.parameters.as_ref().is_some_and(|settings| settings.surface);
+                        let delete_auxiliary = crate::app::delobj_deletes_auxiliary(
+                            delete_objects,
+                            surface,
+                        );
+                        if delete_auxiliary
+                            && guides.iter().copied().chain(path)
+                                .any(|handle| self.tabs[i].scene.is_layer_locked(handle))
+                        {
+                            self.command_line.push_error(
+                                "LOFT: a source is on a locked layer; disable source deletion or unlock it.",
+                            );
+                            return Task::none();
+                        }
                         let dirty_before = self.tabs[i].dirty;
                         let pending = self.begin_undo(i, "LOFT", 1, true);
                         let created = if surface {
@@ -4210,7 +4239,18 @@ impl OpenCADStudio {
                             self.command_line.push_error(crate::t!("LOFT could not create a complete display. The source sections were preserved.").as_ref());
                             return Task::none();
                         } else {
-                            if delete_sources { self.tabs[i].scene.erase_entities(&sources); }
+                            let mut consumed = if delete_sections {
+                                sources.clone()
+                            } else {
+                                Vec::new()
+                            };
+                            if delete_auxiliary {
+                                consumed.extend(guides.iter().copied());
+                                consumed.extend(path);
+                            }
+                            consumed.sort_unstable_by_key(|handle| handle.value());
+                            consumed.dedup();
+                            self.tabs[i].scene.erase_entities(&consumed);
                             self.tabs[i].scene.deselect_all();
                             self.tabs[i].scene.select_entity(created, true);
                             self.tabs[i].dirty = true;

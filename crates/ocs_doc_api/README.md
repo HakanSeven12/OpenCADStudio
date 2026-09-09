@@ -30,12 +30,13 @@ Transports bind to one document tab. Typed handles from another transport and
 requests for another tab are rejected. Raw `ObjectId` values are relative to the
 receiving document. Errors are serialized as `ApiError` variants over IPC.
 
-Layer CRUD is exposed through `Document::layers()` (list/create/update/delete)
-and per-entity `Entity::layer()` / `Entity::set_layer(...)`. Layer properties are
-carried as the plain-data `LayerInfo` DTO with `LayerFlags`, `Color` and
-`LineWeight`. The host enforces CAD-style rules: layer "0" and the current layer
-cannot be deleted, duplicate names are rejected, and a layer still referenced by
-entities cannot be removed.
+Layer CRUD is exposed through `Document::layers()`, `create_layer(info)`,
+`update_layer(name, info)`, `delete_layer(name)` and through the `layer()` /
+`set_layer(...)` methods on every entity handle (`Line`, `Circle`, `Solid`,
+`Entity`, etc.). Layer properties are carried as the plain-data `LayerInfo` DTO
+with `LayerFlags`, `Color` and `LineWeight`. The host enforces CAD-style rules:
+layer "0" and the current layer cannot be deleted, duplicate names are rejected,
+and a layer still referenced by entities cannot be removed.
 
 XDATA and XRECORD payloads are carried as plain-data, serde-compatible DTOs
 (`XDataRecord`, `XRecordSpec`, and their value/entry types) and roundtripped

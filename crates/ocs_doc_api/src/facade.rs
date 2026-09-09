@@ -189,6 +189,32 @@ impl Document {
         }
     }
 
+    /// Create a new layer. One undo step; fails if the name already exists or is empty.
+    pub fn create_layer(&self, info: &crate::ops::LayerInfo) -> ApiResult<()> {
+        self.session
+            .apply_op(Operation::CreateLayer(info.clone()))?;
+        Ok(())
+    }
+
+    /// Update an existing layer's properties by name. One undo step; `info.name`
+    /// becomes the new display name (case-insensitive key unchanged).
+    pub fn update_layer(&self, name: &str, info: &crate::ops::LayerInfo) -> ApiResult<()> {
+        self.session.apply_op(Operation::UpdateLayer {
+            name: name.to_string(),
+            info: info.clone(),
+        })?;
+        Ok(())
+    }
+
+    /// Delete a layer by name. One undo step; fails for layer "0", the current
+    /// layer, or any layer still referenced by entities.
+    pub fn delete_layer(&self, name: &str) -> ApiResult<()> {
+        self.session.apply_op(Operation::DeleteLayer {
+            name: name.to_string(),
+        })?;
+        Ok(())
+    }
+
     /// Batch of read-only queries in ONE round-trip (safe: no mutation/undo).
     /// The closure records queries on a [`QueryBatch`]; the results are returned
     /// in the same order as a [`QueryResults`] view the caller destructures.
@@ -355,6 +381,25 @@ macro_rules! handle {
                 })?;
                 Ok(())
             }
+            /// Return the entity's current layer name (normalized uppercase).
+            pub fn layer(&self) -> ApiResult<String> {
+                match self
+                    .session
+                    .one_query(Query::GetEntityLayer { id: self.id })?
+                {
+                    QueryResult::EntityLayer(name) => Ok(name),
+                    _ => Err(ApiError::Transport("unexpected entity layer result".into())),
+                }
+            }
+            /// Move the entity to a different layer. One undo step; fails if the
+            /// target layer does not exist or is locked.
+            pub fn set_layer(&self, layer: &str) -> ApiResult<()> {
+                self.session.apply_op(Operation::SetEntityLayer {
+                    id: self.id,
+                    layer: layer.to_string(),
+                })?;
+                Ok(())
+            }
         }
     };
 }
@@ -433,24 +478,6 @@ impl Entity {
         })?;
         Ok(())
     }
-    /// Move this entity to `layer` (the target layer must exist). One undo step.
-    pub fn set_layer(&self, layer: &str) -> ApiResult<()> {
-        self.session.apply_op(Operation::SetEntityLayer {
-            id: self.id,
-            layer: layer.to_string(),
-        })?;
-        Ok(())
-    }
-    /// The layer name this entity is on.
-    pub fn layer(&self) -> ApiResult<String> {
-        match self
-            .session
-            .one_query(Query::GetEntityLayer { id: self.id })?
-        {
-            QueryResult::EntityLayer(s) => Ok(s),
-            _ => Err(ApiError::Transport("unexpected entity-layer result".into())),
-        }
-    }
     /// This viewport's view (target WCS + zoom height). Viewport-only.
     pub fn viewport_view(&self) -> ApiResult<([f64; 3], f64)> {
         match self
@@ -474,24 +501,17 @@ impl Entity {
     }
     /// The XDATA record for `application_name` on this entity (`None` if absent).
     pub fn xdata(&self, application_name: &str) -> ApiResult<Option<XDataRecord>> {
-        match self
-            .session
-            .one_query(Query::GetXData {
-                id: self.id,
-                application_name: application_name.to_string(),
-            })?
-        {
+        match self.session.one_query(Query::GetXData {
+            id: self.id,
+            application_name: application_name.to_string(),
+        })? {
             QueryResult::XData(v) => Ok(v),
             _ => Err(ApiError::Transport("unexpected xdata result".into())),
         }
     }
     /// Attach or replace an XDATA record for `application_name` on this entity.
     /// Pass `None` to remove the record (one undo step).
-    pub fn set_xdata(
-        &self,
-        application_name: &str,
-        record: Option<XDataRecord>,
-    ) -> ApiResult<()> {
+    pub fn set_xdata(&self, application_name: &str, record: Option<XDataRecord>) -> ApiResult<()> {
         self.session.apply_op(Operation::SetXData {
             id: self.id,
             application_name: application_name.to_string(),
@@ -1087,7 +1107,9 @@ impl EntityCollection {
 
     /// Create a standalone `XRECORD` object (returns an `Entity` handle).
     pub fn create_xrecord(&self, spec: &XRecordSpec) -> ApiResult<Entity> {
-        let receipt = self.session.apply_op(Operation::CreateXRecord(spec.clone()))?;
+        let receipt = self
+            .session
+            .apply_op(Operation::CreateXRecord(spec.clone()))?;
         let id = receipt
             .outcome
             .and_then(|o| o.new_id())

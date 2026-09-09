@@ -383,11 +383,18 @@ impl DocApiBackend for MockBackend {
         }
         Ok(())
     }
-    fn xdata(&self, id: ObjectId, application_name: &str) -> ApiResult<Option<ocs_doc_api::XDataRecord>> {
+    fn xdata(
+        &self,
+        id: ObjectId,
+        application_name: &str,
+    ) -> ApiResult<Option<ocs_doc_api::XDataRecord>> {
         if !self.entity_exists(id) {
             return Err(ApiError::UnknownId(id));
         }
-        Ok(self.xdata_store.get(&(id, application_name.to_string())).cloned())
+        Ok(self
+            .xdata_store
+            .get(&(id, application_name.to_string()))
+            .cloned())
     }
     fn add_xrecord(&mut self, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<ObjectId> {
         let id = self.alloc("XRecord");

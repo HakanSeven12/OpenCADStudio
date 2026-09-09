@@ -476,12 +476,7 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
             ),
             Query::GetXRecord { id } => {
                 QueryResult::XRecord(b.xrecord(*id).map_err(|e| label(qname, e))?.ok_or_else(
-                    || {
-                        ApiError::validation(
-                            qname,
-                            format!("ObjectId {id:?} is not an XRecord"),
-                        )
-                    },
+                    || ApiError::validation(qname, format!("ObjectId {id:?} is not an XRecord")),
                 )?)
             }
             Query::ListLayers => QueryResult::Layers(b.layers().map_err(|e| label(qname, e))?),

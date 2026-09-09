@@ -162,7 +162,11 @@ pub trait DocApiBackend {
     ) -> ApiResult<()>;
 
     /// Read the XDATA record for `application_name` on `id` (`None` if absent).
-    fn xdata(&self, id: ObjectId, application_name: &str) -> ApiResult<Option<crate::ops::XDataRecord>>;
+    fn xdata(
+        &self,
+        id: ObjectId,
+        application_name: &str,
+    ) -> ApiResult<Option<crate::ops::XDataRecord>>;
 
     /// Create a standalone `XRECORD` object from a spec; returns the fresh `ObjectId`.
     fn add_xrecord(&mut self, spec: &crate::ops::XRecordSpec) -> ApiResult<ObjectId>;

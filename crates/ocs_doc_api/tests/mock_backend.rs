@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use ocs_doc_api::backend::{DocApiBackend, KernelBody};
 use ocs_doc_api::{
-    Aabb, ApiError, ApiResult, Curve2Spec, DocApi, EntityView, GeometryErrorKind, GeometryRevision,
-    HasId, ObjectId, PlacementSpec,
+    Aabb, ApiError, ApiResult, Color, Curve2Spec, DocApi, EntityView, GeometryErrorKind,
+    GeometryRevision, HasId, LayerInfo, LineWeight, ObjectId, PlacementSpec,
 };
 
 /// Coarse bounds for a stored 2D curve spec (mirrors the host's entity_bounds and
@@ -393,11 +393,18 @@ impl DocApiBackend for MockBackend {
         }
         Ok(())
     }
-    fn xdata(&self, id: ObjectId, application_name: &str) -> ApiResult<Option<ocs_doc_api::XDataRecord>> {
+    fn xdata(
+        &self,
+        id: ObjectId,
+        application_name: &str,
+    ) -> ApiResult<Option<ocs_doc_api::XDataRecord>> {
         if !self.entity_exists(id) {
             return Err(ApiError::UnknownId(id));
         }
-        Ok(self.xdata_store.get(&(id, application_name.to_string())).cloned())
+        Ok(self
+            .xdata_store
+            .get(&(id, application_name.to_string()))
+            .cloned())
     }
     fn add_xrecord(&mut self, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<ObjectId> {
         let id = self.alloc("XRecord");
@@ -754,4 +761,35 @@ fn typed_handles_reject_foreign_sessions_and_tabs() {
     group.track(Ok(foreign)).unwrap();
     assert!(group.compensate(&doc).is_err());
     assert!(first.document(11).curves().create_point([0.0; 3]).is_err());
+}
+
+#[test]
+fn doc_api_layer_crud_via_facade_and_entity_assignment() {
+    let (api, _tp) = api();
+    let doc = api.document(api.active_tab());
+
+    let mut info = LayerInfo::new("Walls");
+    info.color = Color::Index(1);
+    info.line_weight = LineWeight::Value(25);
+    doc.create_layer(&info).unwrap();
+
+    let layers = doc.layers().unwrap();
+    assert!(layers.iter().any(|l| l.name == "WALLS"));
+
+    let mut updated = info.clone();
+    updated.color = Color::Index(2);
+    doc.update_layer("walls", &updated).unwrap();
+
+    let line = doc.curves().create_line([0.0; 3], [1.0; 3]).unwrap();
+    line.set_layer("Walls").unwrap();
+    assert_eq!(line.layer().unwrap(), "WALLS");
+
+    let err = doc.delete_layer("Walls").unwrap_err();
+    assert!(matches!(err, ApiError::Validation { .. }));
+
+    let other = LayerInfo::new("Other");
+    doc.create_layer(&other).unwrap();
+    line.set_layer("Other").unwrap();
+    doc.delete_layer("Walls").unwrap();
+    assert!(!doc.layers().unwrap().iter().any(|l| l.name == "WALLS"));
 }

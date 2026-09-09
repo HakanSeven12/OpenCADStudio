@@ -1,4 +1,4 @@
-//! IPC transport: serializes `DocApiEnvelope` into the
+//! IPC transport (plan §7, decision #10): serializes `DocApiEnvelope` into the
 //! append-only `PluginRequest::DocApiRequest { tab_id, bytes }` variant and ships
 //! it through the plugin's `PluginRequestSender`. The host routes that variant to
 //! the same crate executor (`ocs_doc_api::executor`) — one implementation.
@@ -35,10 +35,7 @@ impl Transport for OcsPluginApiIpc {
             .map_err(|e| ApiError::Transport(format!("envelope serialize: {e}")))?;
         let resp = self
             .sender
-            .request(PluginRequest::DocApiRequest {
-                tab_id: self.tab_id,
-                bytes,
-            })
+            .request(PluginRequest::DocApiRequest { tab_id: self.tab_id, bytes })
             .map_err(Self::transport_err)?;
         match resp {
             PluginResponse::DocApiResponse { bytes } => {

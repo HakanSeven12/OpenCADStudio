@@ -1,5 +1,5 @@
 //! Write operations — the typed, transport-agnostic vocabulary for changing the
-//! document. The `Operation` enum is **hand-maintained** (append-only)
+//! document (plan §5). The `Operation` enum is **hand-maintained** (append-only)
 //! in `src/gen/ops_gen.rs` — it is NOT derived from the spec by build.rs; the
 //! spec's `op` names must each map to a variant here (asserted by a test). This
 //! module re-exports it and holds the hand-written payload mirrors.
@@ -20,86 +20,32 @@ pub enum BoolOp {
 /// non-serde `cadkernel::brep::make::*` arguments).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum SolidPrimitive {
-    Cuboid {
-        origin: [f64; 3],
-        size: [f64; 3],
-    },
-    Sphere {
-        centre: [f64; 3],
-        radius: f64,
-    },
-    Cylinder {
-        base: [f64; 3],
-        radius: f64,
-        height: f64,
-    },
-    Cone {
-        base: [f64; 3],
-        radius: f64,
-        height: f64,
-    },
-    Torus {
-        centre: [f64; 3],
-        major_radius: f64,
-        minor_radius: f64,
-    },
-    Wedge {
-        origin: [f64; 3],
-        size: [f64; 3],
-    },
+    Cuboid { origin: [f64; 3], size: [f64; 3] },
+    Sphere { centre: [f64; 3], radius: f64 },
+    Cylinder { base: [f64; 3], radius: f64, height: f64 },
+    Cone { base: [f64; 3], radius: f64, height: f64 },
+    Torus { centre: [f64; 3], major_radius: f64, minor_radius: f64 },
+    Wedge { origin: [f64; 3], size: [f64; 3] },
 }
 
 /// Construction spec for a minimal 2D curve entity (phase-1 set; profiles/inputs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Curve2Spec {
-    Line {
-        start: [f64; 3],
-        end: [f64; 3],
-    },
-    Circle {
-        centre: [f64; 3],
-        radius: f64,
-    },
-    Polyline {
-        points: Vec<[f64; 3]>,
-        closed: bool,
-    },
-    Point {
-        position: [f64; 3],
-    },
+    Line { start: [f64; 3], end: [f64; 3] },
+    Circle { centre: [f64; 3], radius: f64 },
+    Polyline { points: Vec<[f64; 3]>, closed: bool },
+    Point { position: [f64; 3] },
     /// Circular arc, counter-clockwise from `start_angle` to `end_angle` (radians).
-    Arc {
-        centre: [f64; 3],
-        radius: f64,
-        start_angle: f64,
-        end_angle: f64,
-    },
+    Arc { centre: [f64; 3], radius: f64, start_angle: f64, end_angle: f64 },
     /// Ellipse: `major_axis` is the major-axis endpoint relative to `centre`;
     /// `ratio` = minor/major. `start`/`end` parameters 0..2π (full ellipse = 0..2π).
-    Ellipse {
-        centre: [f64; 3],
-        major_axis: [f64; 3],
-        ratio: f64,
-        start: f64,
-        end: f64,
-    },
+    Ellipse { centre: [f64; 3], major_axis: [f64; 3], ratio: f64, start: f64, end: f64 },
     /// NURBS spline (control points + knots + weights; `degree` typically 3).
-    Spline {
-        degree: i32,
-        control_points: Vec<[f64; 3]>,
-        knots: Vec<f64>,
-        weights: Vec<f64>,
-    },
+    Spline { degree: i32, control_points: Vec<[f64; 3]>, knots: Vec<f64>, weights: Vec<f64> },
     /// A ray from `origin` along `direction` (bounded at origin only).
-    Ray {
-        origin: [f64; 3],
-        direction: [f64; 3],
-    },
+    Ray { origin: [f64; 3], direction: [f64; 3] },
     /// An infinite construction line through `origin` along `direction`.
-    XLine {
-        origin: [f64; 3],
-        direction: [f64; 3],
-    },
+    XLine { origin: [f64; 3], direction: [f64; 3] },
 }
 
 /// A generic entity-construction payload used by the bulk op
@@ -246,14 +192,11 @@ impl PlacementSpec {
 
     /// Pure translation to `origin` (axes unchanged).
     pub fn at(origin: [f64; 3]) -> Self {
-        Self {
-            origin,
-            ..Self::IDENTITY
-        }
+        Self { origin, ..Self::IDENTITY }
     }
 }
 
-/// The item-count cap for a single bulk op envelope: bounds
+/// The item-count cap for a single bulk op envelope (plan §5.3): bounds
 /// host-side execution time and payload. Over-cap → `ApiError::Validation`.
 pub const BULK_ITEM_CAP: usize = 100_000;
 

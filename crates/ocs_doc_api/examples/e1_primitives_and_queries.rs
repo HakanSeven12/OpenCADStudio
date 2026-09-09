@@ -15,9 +15,7 @@ fn main() -> ocs_doc_api::ApiResult<()> {
     let doc = api.document(api.active_tab());
 
     // The supported solid primitives.
-    let block = doc
-        .solids()
-        .create_cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])?;
+    let block = doc.solids().create_cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])?;
     let ball = doc.solids().create_sphere([5.0, 5.0, 5.0], 6.0)?;
     let cyl = doc.solids().create_cylinder([0.0, 0.0, 0.0], 4.0, 12.0)?;
 

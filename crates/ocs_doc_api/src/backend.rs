@@ -1,4 +1,4 @@
-//! The thin host hook. The host implements this trait;
+//! The thin host hook (plan §6, decision #11). The host implements this trait;
 //! the crate's [`crate::executor`] drives it. Both the in-process transport and
 //! the host's IPC executor call into it. Logic lives in the versioned crate; the
 //! host only provides scene primitives.
@@ -48,16 +48,6 @@ pub trait DocApiBackend {
     /// Add a 2D curve entity; returns the fresh `ObjectId`.
     fn add_curve(&mut self, spec: &Curve2Spec) -> ApiResult<ObjectId>;
 
-    /// Prepare every entity before recording one undo step and committing the batch.
-    fn create_many(&mut self, specs: &[crate::ops::EntitySpec]) -> ApiResult<Vec<ObjectId>>;
-
-    /// Prepare all transformed geometry before committing any entity.
-    fn transform_many(
-        &mut self,
-        ids: &[ObjectId],
-        placement: &crate::PlacementSpec,
-    ) -> ApiResult<()>;
-
     /// Add a block reference (`INSERT`). Validates `block_name` exists; returns
     /// the fresh `ObjectId`. `Validation` if the block is unknown.
     fn add_insert(&mut self, spec: &crate::ops::InsertSpec) -> ApiResult<ObjectId>;
@@ -87,37 +77,22 @@ pub trait DocApiBackend {
     fn add_dimension_linear(&mut self, spec: &crate::ops::DimensionSpec) -> ApiResult<ObjectId>;
 
     /// Add a radial `DIMENSION`; returns the fresh `ObjectId`.
-    fn add_dimension_radius(
-        &mut self,
-        spec: &crate::ops::DimensionRadialSpec,
-    ) -> ApiResult<ObjectId>;
+    fn add_dimension_radius(&mut self, spec: &crate::ops::DimensionRadialSpec) -> ApiResult<ObjectId>;
 
     /// Add a diameter `DIMENSION`; returns the fresh `ObjectId`.
-    fn add_dimension_diameter(
-        &mut self,
-        spec: &crate::ops::DimensionRadialSpec,
-    ) -> ApiResult<ObjectId>;
+    fn add_dimension_diameter(&mut self, spec: &crate::ops::DimensionRadialSpec) -> ApiResult<ObjectId>;
 
     /// Add a 3-point angular `DIMENSION`; returns the fresh `ObjectId`.
-    fn add_dimension_angular(
-        &mut self,
-        spec: &crate::ops::DimensionAngularSpec,
-    ) -> ApiResult<ObjectId>;
+    fn add_dimension_angular(&mut self, spec: &crate::ops::DimensionAngularSpec) -> ApiResult<ObjectId>;
 
     /// Add an `ATTDEF` (in-block attribute definition); returns the fresh `ObjectId`.
-    fn add_attribute_definition(
-        &mut self,
-        spec: &crate::ops::AttributeDefinitionSpec,
-    ) -> ApiResult<ObjectId>;
+    fn add_attribute_definition(&mut self, spec: &crate::ops::AttributeDefinitionSpec) -> ApiResult<ObjectId>;
 
     /// Add a `TABLE` (rows × columns grid); returns the fresh `ObjectId`.
     fn add_table(&mut self, spec: &crate::ops::TableSpec) -> ApiResult<ObjectId>;
 
     /// Add a 2-line angular `DIMENSION`; returns the fresh `ObjectId`.
-    fn add_dimension_angular2ln(
-        &mut self,
-        spec: &crate::ops::DimensionAngularSpec,
-    ) -> ApiResult<ObjectId>;
+    fn add_dimension_angular2ln(&mut self, spec: &crate::ops::DimensionAngularSpec) -> ApiResult<ObjectId>;
 
     /// A dimension's measured value (distance for linear/radius, degrees for angular).
     fn dimension_measurement(&self, id: ObjectId) -> ApiResult<f64>;
@@ -132,12 +107,7 @@ pub trait DocApiBackend {
     fn block_entities(&self, block_name: &str) -> ApiResult<Vec<EntityView>>;
 
     /// Set a viewport's view target + zoom height in place. Viewport-only.
-    fn set_viewport_view(
-        &mut self,
-        id: ObjectId,
-        view_target: [f64; 3],
-        view_height: f64,
-    ) -> ApiResult<()>;
+    fn set_viewport_view(&mut self, id: ObjectId, view_target: [f64; 3], view_height: f64) -> ApiResult<()>;
 
     /// A viewport's view (target WCS + zoom height). Viewport-only.
     fn viewport_view(&self, id: ObjectId) -> ApiResult<([f64; 3], f64)>;
@@ -147,10 +117,7 @@ pub trait DocApiBackend {
 
     /// Loft a solid through >= 2 profile curve sets (each already resolved to
     /// `geom2d::Curve`s on the XY plane). Returns the fresh `ObjectId`.
-    fn loft(
-        &mut self,
-        sections: &[(cadkernel::space::Plane, Vec<cadkernel::geom2d::Curve>)],
-    ) -> ApiResult<ObjectId>;
+    fn loft(&mut self, sections: &[Vec<cadkernel::geom2d::Curve>]) -> ApiResult<ObjectId>;
 
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
@@ -185,20 +152,12 @@ pub trait DocApiBackend {
     /// sweep ops (`Extrude`/`Revolve`). `UnknownId`/`Unsupported` if not a profile.
     fn profile_curves(&self, id: ObjectId) -> ApiResult<Vec<cadkernel::geom2d::Curve>>;
 
-    fn profile_plane(&self, _id: ObjectId) -> ApiResult<cadkernel::space::Plane> {
-        Ok(cadkernel::space::Plane::XY)
-    }
-
     /// Apply a rigid similarity to any entity in place (same `ObjectId`).
-    fn transform_entity(
-        &mut self,
-        id: ObjectId,
-        placement: &crate::ops::PlacementSpec,
-    ) -> ApiResult<()>;
+    fn transform_entity(&mut self, id: ObjectId, placement: &crate::ops::PlacementSpec) -> ApiResult<()>;
 
     /// Validate that `id` exists and can be transformed, WITHOUT mutating.
     /// Used by `TransformMany` to pre-validate all ids before `push_undo` so the
-    /// apply loop cannot fail part-way (all-or-nothing, the bulk contract). Default:
+    /// apply loop cannot fail part-way (all-or-nothing, plan §5.3). Default:
     /// existence-only (backends that restrict transform to a family override).
     fn ensure_transformable(&mut self, id: ObjectId) -> ApiResult<()> {
         if self.entity_exists(id) {
@@ -225,6 +184,4 @@ pub trait DocApiBackend {
     /// Called AFTER a successful write op (one DeltaSnapshot + one geometry bump
     /// + one publish). NOT called on failure (a failed op records nothing).
     fn finalize_op(&mut self);
-    /// Discard an undo capture after preparation or validation failed.
-    fn cancel_op(&mut self) {}
 }

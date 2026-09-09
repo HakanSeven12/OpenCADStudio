@@ -1,4 +1,4 @@
-//! The transport boundary — the ONLY plugin↔host boundary.
+//! The transport boundary (plan §7) — the ONLY plugin↔host boundary.
 //!
 //! Portability contract (SPSC / flume / shared-memory safe): a transport impl
 //! must (a) accept `&self` calls from many threads and serialize sends internally,

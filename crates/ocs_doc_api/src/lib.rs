@@ -1,4 +1,15 @@
-//! Typed document operations, queries and facades over in-process or IPC transports.
+//! `ocs_doc_api` — Object-oriented, transport-agnostic CAD entity API for
+//! OpenCADStudio plugins and hosts (v2).
+//!
+//! Core vocabulary: **Entity**, **ObjectId** (u64), **Operation** (typed write),
+//! **Query** (typed read), **Transport** (the only plugin↔host boundary).
+//! Every write op is one atomic host call = one undo step (no multi-op write
+//! transactions — removed after the security/integrity review; see the plan §13).
+//!
+//! The facade is object-centric: [`DocApi`] (root) → [`Document`] → collections
+//! ([`SolidCollection`], [`CurveCollection`], [`EntityCollection`]) → typed
+//! handles ([`Solid`], [`Line`], …) carrying geometric methods. The same typed
+//! requests run in-process and over IPC; only the [`Transport`] differs.
 
 pub mod error;
 pub mod id;
@@ -7,13 +18,11 @@ pub mod revision;
 #[cfg(feature = "host")]
 pub mod backend;
 #[cfg(feature = "host")]
-pub mod convert;
-#[cfg(feature = "host")]
 pub mod executor;
 #[cfg(feature = "host")]
 pub mod geom;
 #[cfg(feature = "host")]
-mod validation;
+pub mod convert;
 
 pub mod envelope;
 pub mod facade;
@@ -21,7 +30,7 @@ pub mod ops;
 pub mod query;
 pub mod transport;
 
-// Append-only wire enums, maintained alongside the DTOs and spec.
+// Generated (build.rs) — committed snapshots under src/gen/; do NOT edit by hand.
 pub mod gen {
     pub mod ops {
         include!("gen/ops_gen.rs");
@@ -58,8 +67,8 @@ pub use transport::Transport;
 /// Bridges must check this before speaking (see `bindings/README.md`).
 pub const ENVELOPE_VERSION: u16 = 1;
 
-/// The generated binding handover schema: object model + method
-/// signatures + op/query mapping with curated wire vocabulary. Single,
+/// The generated binding handover schema (plan §10.2): object model + method
+/// signatures + op/query mapping with traced wire layouts inlined. Single,
 /// self-contained, versioned with [`ENVELOPE_VERSION`].
 pub fn binding_schema_json() -> &'static str {
     include_str!("gen/binding_schema.json")

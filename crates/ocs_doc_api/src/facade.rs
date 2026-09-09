@@ -1,4 +1,4 @@
-//! The object-centric facade.
+//! The object-centric facade (plan §8.1, decision #12).
 //!
 //! Hierarchy: [`DocApi`] (root: session + transport) → [`Document`] →
 //! collections ([`SolidCollection`], [`CurveCollection`], [`EntityCollection`])
@@ -24,36 +24,13 @@ use crate::transport::Transport;
 #[derive(Clone)]
 pub struct Session {
     transport: Arc<dyn Transport>,
-    valid_tab: bool,
 }
 
 impl Session {
-    fn validate_tab(&self) -> ApiResult<()> {
-        if !self.valid_tab {
-            return Err(ApiError::validation(
-                "document",
-                "transport is bound to another tab",
-            ));
-        }
-        Ok(())
-    }
-    fn same_transport(&self, other: &Session) -> ApiResult<()> {
-        self.validate_tab()?;
-        other.validate_tab()?;
-        if !Arc::ptr_eq(&self.transport, &other.transport) {
-            return Err(ApiError::validation(
-                "document",
-                "handles belong to different sessions",
-            ));
-        }
-        Ok(())
-    }
     fn apply_op(&self, op: Operation) -> ApiResult<Receipt> {
-        self.validate_tab()?;
         self.transport.apply(DocApiEnvelope::op(op))
     }
     fn apply_queries(&self, queries: Vec<Query>) -> ApiResult<Receipt> {
-        self.validate_tab()?;
         self.transport.apply(DocApiEnvelope::queries(queries))
     }
     fn one_query(&self, q: Query) -> ApiResult<QueryResult> {
@@ -73,10 +50,7 @@ pub struct DocApi {
 impl DocApi {
     /// Connect over an existing transport (IPC or in-process) bound to `active_tab`.
     pub fn connect(transport: Arc<dyn Transport>, active_tab: u64) -> Self {
-        Self {
-            transport,
-            active_tab,
-        }
+        Self { transport, active_tab }
     }
     /// Connect in-process over a backend (host feature).
     #[cfg(feature = "host")]
@@ -84,10 +58,7 @@ impl DocApi {
         backend: B,
         active_tab: u64,
     ) -> Self {
-        Self::connect(
-            Arc::new(crate::transport::InProcess::new(backend)),
-            active_tab,
-        )
+        Self::connect(Arc::new(crate::transport::InProcess::new(backend)), active_tab)
     }
 
     /// The active tab id this root is bound to.
@@ -100,14 +71,21 @@ impl DocApi {
         self.transport.alive()
     }
 
-    /// Bind a document to the transport's tab. Requests for another tab fail.
-    pub fn document(&self, tab: u64) -> Document {
+    /// Bind a `Document` to `tab`. In v1 the transport is already bound to the
+    /// active tab (IPC carries `tab_id`; in-process carries the backend), so the
+    /// argument is accepted for API forward-compat but not stored.
+    pub fn document(&self, _tab: u64) -> Document {
         Document {
-            session: Session {
-                transport: Arc::clone(&self.transport),
-                valid_tab: tab == self.active_tab,
-            },
+            session: Session { transport: Arc::clone(&self.transport) },
         }
+    }
+
+    // Host console passthroughs (UX feedback; map to PushInfo/PushError on the host).
+    pub fn push_info(&self, msg: &str) {
+        let _ = msg; // host console passthrough is a host-side concern; facade is silent.
+    }
+    pub fn push_error(&self, msg: &str) {
+        let _ = msg;
     }
 }
 
@@ -119,19 +97,13 @@ pub struct Document {
 
 impl Document {
     pub fn solids(&self) -> SolidCollection {
-        SolidCollection {
-            session: self.session.clone(),
-        }
+        SolidCollection { session: self.session.clone() }
     }
     pub fn curves(&self) -> CurveCollection {
-        CurveCollection {
-            session: self.session.clone(),
-        }
+        CurveCollection { session: self.session.clone() }
     }
     pub fn entities(&self) -> EntityCollection {
-        EntityCollection {
-            session: self.session.clone(),
-        }
+        EntityCollection { session: self.session.clone() }
     }
 
     /// Current geometry revision (query, no bump).
@@ -151,22 +123,16 @@ impl Document {
         } else {
             Err(ApiError::Validation {
                 op: "assert_revision".to_string(),
-                reason: format!(
-                    "revision moved: expected {expected:?}, now {now:?}; re-read and retry"
-                ),
+                reason: format!("revision moved: expected {expected:?}, now {now:?}; re-read and retry"),
             })
         }
     }
 
     /// Read-only traversal of a block definition's entities (ids + kinds + bounds).
     pub fn block_entities(&self, block_name: &str) -> ApiResult<Vec<EntityView>> {
-        match self.session.one_query(Query::GetBlockEntities {
-            block_name: block_name.to_string(),
-        })? {
+        match self.session.one_query(Query::GetBlockEntities { block_name: block_name.to_string() })? {
             QueryResult::BlockEntities(v) => Ok(v),
-            _ => Err(ApiError::Transport(
-                "unexpected block-entities result".into(),
-            )),
+            _ => Err(ApiError::Transport("unexpected block-entities result".into())),
         }
     }
 
@@ -174,54 +140,30 @@ impl Document {
     /// The closure records queries on a [`QueryBatch`]; the results are returned
     /// in the same order as a [`QueryResults`] view the caller destructures.
     pub fn query_batch<F: FnOnce(&mut QueryBatch)>(&self, f: F) -> ApiResult<QueryResults> {
-        let mut qb = QueryBatch {
-            queries: Vec::new(),
-            session: self.session.clone(),
-            error: None,
-        };
+        let mut qb = QueryBatch { queries: Vec::new() };
         f(&mut qb);
-        if let Some(error) = qb.error {
-            return Err(error);
-        }
         let receipt = self.session.apply_queries(qb.queries)?;
-        Ok(QueryResults {
-            results: receipt.query_results,
-        })
+        Ok(QueryResults { results: receipt.query_results })
     }
 }
 
 /// Records queries for [`Document::query_batch`]. Each method appends one query.
 pub struct QueryBatch {
     queries: Vec<Query>,
-    session: Session,
-    error: Option<ApiError>,
 }
 
 impl QueryBatch {
-    fn check(&mut self, e: &impl HasId) {
-        if let Err(error) = e.validate_session(&self.session) {
-            self.error = Some(error);
-        }
-    }
     pub fn bounds(&mut self, e: &impl HasId) {
-        self.check(e);
         self.queries.push(Query::GetBounds { id: e.id() });
     }
     pub fn volume(&mut self, e: &impl HasId) {
-        self.check(e);
         self.queries.push(Query::GetVolume { id: e.id() });
     }
     pub fn centroid(&mut self, e: &impl HasId) {
-        self.check(e);
         self.queries.push(Query::GetCentroid { id: e.id() });
     }
     pub fn intersects(&mut self, a: &impl HasId, b: &impl HasId) {
-        self.check(a);
-        self.check(b);
-        self.queries.push(Query::GetIntersects {
-            a: a.id(),
-            b: b.id(),
-        });
+        self.queries.push(Query::GetIntersects { a: a.id(), b: b.id() });
     }
     pub fn revision(&mut self) {
         self.queries.push(Query::GetGeometryRevision);
@@ -235,9 +177,7 @@ pub struct QueryResults {
 
 impl QueryResults {
     fn at(&self, i: usize) -> ApiResult<&QueryResult> {
-        self.results
-            .get(i)
-            .ok_or_else(|| ApiError::Transport("query result missing".into()))
+        self.results.get(i).ok_or_else(|| ApiError::Transport("query result missing".into()))
     }
     pub fn bounds(&self, i: usize) -> ApiResult<Aabb> {
         match self.at(i)? {
@@ -274,16 +214,6 @@ impl QueryResults {
 /// Something with an `ObjectId` (all handles + raw ids).
 pub trait HasId {
     fn id(&self) -> ObjectId;
-    /// Typed handles retain their session; raw ids are relative to the receiver.
-    fn session(&self) -> Option<&Session> {
-        None
-    }
-    fn validate_session(&self, target: &Session) -> ApiResult<()> {
-        if let Some(session) = self.session() {
-            session.same_transport(target)?;
-        }
-        Ok(())
-    }
 }
 impl HasId for ObjectId {
     fn id(&self) -> ObjectId {
@@ -311,9 +241,6 @@ macro_rules! handle {
             }
         }
         impl HasId for $name {
-            fn session(&self) -> Option<&Session> {
-                Some(&self.session)
-            }
             fn id(&self) -> ObjectId {
                 self.id
             }
@@ -330,10 +257,7 @@ macro_rules! handle {
                 Ok(())
             }
             pub fn transform(&self, placement: PlacementSpec) -> ApiResult<()> {
-                self.session.apply_op(Operation::Transform {
-                    id: self.id,
-                    placement,
-                })?;
+                self.session.apply_op(Operation::Transform { id: self.id, placement })?;
                 Ok(())
             }
         }
@@ -359,10 +283,7 @@ impl Dimension {
     /// The measured value of this dimension (distance for linear/radius, degrees
     /// for angular).
     pub fn measurement(&self) -> ApiResult<f64> {
-        match self
-            .session
-            .one_query(Query::GetDimensionMeasurement { id: self.id })?
-        {
+        match self.session.one_query(Query::GetDimensionMeasurement { id: self.id })? {
             QueryResult::DimensionMeasurement(v) => Ok(v),
             _ => Err(ApiError::Transport("unexpected measurement result".into())),
         }
@@ -378,54 +299,36 @@ impl Entity {
     }
     /// This insert's attributes as (tag, value) pairs. Insert-only.
     pub fn attributes(&self) -> ApiResult<Vec<(String, String)>> {
-        match self
-            .session
-            .one_query(Query::GetAttributes { id: self.id })?
-        {
+        match self.session.one_query(Query::GetAttributes { id: self.id })? {
             QueryResult::Attributes(v) => Ok(v),
             _ => Err(ApiError::Transport("unexpected attributes result".into())),
         }
     }
     /// Set an attribute `value` for `tag` on this insert (adds if absent). One undo step.
     pub fn set_attribute(&self, tag: &str, value: &str) -> ApiResult<()> {
-        self.session.apply_op(Operation::SetAttribute {
-            id: self.id,
-            tag: tag.to_string(),
-            value: value.to_string(),
-        })?;
+        self.session.apply_op(Operation::SetAttribute { id: self.id, tag: tag.to_string(), value: value.to_string() })?;
         Ok(())
     }
     /// This viewport's view (target WCS + zoom height). Viewport-only.
     pub fn viewport_view(&self) -> ApiResult<([f64; 3], f64)> {
-        match self
-            .session
-            .one_query(Query::GetViewportView { id: self.id })?
-        {
+        match self.session.one_query(Query::GetViewportView { id: self.id })? {
             QueryResult::ViewportView { target, height } => Ok((target, height)),
-            _ => Err(ApiError::Transport(
-                "unexpected viewport-view result".into(),
-            )),
+            _ => Err(ApiError::Transport("unexpected viewport-view result".into())),
         }
     }
     /// Retarget / re-zoom this viewport (one undo step). Viewport-only.
     pub fn set_view(&self, view_target: [f64; 3], view_height: f64) -> ApiResult<()> {
-        self.session.apply_op(Operation::SetViewportView {
-            id: self.id,
-            view_target,
-            view_height,
-        })?;
+        self.session.apply_op(Operation::SetViewportView { id: self.id, view_target, view_height })?;
         Ok(())
     }
     pub fn as_solid(&self) -> Option<Solid> {
         // Typed downcast is validated by the view's kind.
-        matches!(self.view().ok()?.kind.as_str(), "Solid3D")
-            .then(|| Solid::new(self.session.clone(), self.id))
+        matches!(self.view().ok()?.kind.as_str(), "Solid3D").then(|| Solid::new(self.session.clone(), self.id))
     }
 }
 
 impl Solid {
     fn boolean(&self, op: BoolOp, other: &Solid) -> ApiResult<Solid> {
-        self.session.same_transport(&other.session)?;
         let receipt = self.session.apply_op(Operation::SolidBoolean {
             op,
             a: self.id,
@@ -460,11 +363,7 @@ impl Solid {
         }
     }
     pub fn intersects(&self, other: &Solid) -> ApiResult<bool> {
-        self.session.same_transport(&other.session)?;
-        match self.session.one_query(Query::GetIntersects {
-            a: self.id,
-            b: other.id,
-        })? {
+        match self.session.one_query(Query::GetIntersects { a: self.id, b: other.id })? {
             QueryResult::Intersects(x) => Ok(x),
             _ => Err(ApiError::Transport("unexpected intersects result".into())),
         }
@@ -473,11 +372,7 @@ impl Solid {
 
 impl Polyline {
     pub fn add_vertex(&self, at: usize, point: [f64; 3]) -> ApiResult<()> {
-        self.session.apply_op(Operation::AddVertex {
-            id: self.id,
-            at,
-            point,
-        })?;
+        self.session.apply_op(Operation::AddVertex { id: self.id, at, point })?;
         Ok(())
     }
 }
@@ -487,20 +382,14 @@ macro_rules! text_handle {
         impl $name {
             /// The text content of this annotation.
             pub fn content(&self) -> ApiResult<String> {
-                match self
-                    .session
-                    .one_query(Query::GetTextContent { id: self.id })?
-                {
+                match self.session.one_query(Query::GetTextContent { id: self.id })? {
                     QueryResult::TextContent(s) => Ok(s),
                     _ => Err(ApiError::Transport("unexpected content result".into())),
                 }
             }
             /// Replace the text content (one undo step).
             pub fn set_content(&self, value: &str) -> ApiResult<()> {
-                self.session.apply_op(Operation::SetTextContent {
-                    id: self.id,
-                    value: value.to_string(),
-                })?;
+                self.session.apply_op(Operation::SetTextContent { id: self.id, value: value.to_string() })?;
                 Ok(())
             }
         }
@@ -532,54 +421,26 @@ impl SolidCollection {
         self.create(SolidPrimitive::Sphere { centre, radius })
     }
     pub fn create_cylinder(&self, base: [f64; 3], radius: f64, height: f64) -> ApiResult<Solid> {
-        self.create(SolidPrimitive::Cylinder {
-            base,
-            radius,
-            height,
-        })
+        self.create(SolidPrimitive::Cylinder { base, radius, height })
     }
     pub fn create_cone(&self, base: [f64; 3], radius: f64, height: f64) -> ApiResult<Solid> {
-        self.create(SolidPrimitive::Cone {
-            base,
-            radius,
-            height,
-        })
+        self.create(SolidPrimitive::Cone { base, radius, height })
     }
-    pub fn create_torus(
-        &self,
-        centre: [f64; 3],
-        major_radius: f64,
-        minor_radius: f64,
-    ) -> ApiResult<Solid> {
-        self.create(SolidPrimitive::Torus {
-            centre,
-            major_radius,
-            minor_radius,
-        })
+    pub fn create_torus(&self, centre: [f64; 3], major_radius: f64, minor_radius: f64) -> ApiResult<Solid> {
+        self.create(SolidPrimitive::Torus { centre, major_radius, minor_radius })
     }
     pub fn create_wedge(&self, origin: [f64; 3], size: [f64; 3]) -> ApiResult<Solid> {
         self.create(SolidPrimitive::Wedge { origin, size })
     }
     pub fn extrude(&self, profile: &impl HasId, direction: [f64; 3]) -> ApiResult<Solid> {
-        profile.validate_session(&self.session)?;
-        let receipt = self.session.apply_op(Operation::Extrude {
-            profile: profile.id(),
-            direction,
-        })?;
+        let receipt = self.session.apply_op(Operation::Extrude { profile: profile.id(), direction })?;
         let id = receipt
             .outcome
             .and_then(|o| o.new_id())
             .ok_or_else(|| ApiError::Transport("extrude returned no id".into()))?;
         Ok(Solid::new(self.session.clone(), id))
     }
-    pub fn revolve(
-        &self,
-        profile: &impl HasId,
-        pivot: [f64; 3],
-        axis: [f64; 3],
-        angle: f64,
-    ) -> ApiResult<Solid> {
-        profile.validate_session(&self.session)?;
+    pub fn revolve(&self, profile: &impl HasId, pivot: [f64; 3], axis: [f64; 3], angle: f64) -> ApiResult<Solid> {
         let receipt = self.session.apply_op(Operation::Revolve {
             profile: profile.id(),
             axis: (pivot, axis),
@@ -593,15 +454,9 @@ impl SolidCollection {
     }
     /// Loft a solid through >= 2 profile entities (polylines/circles/arcs).
     pub fn loft(&self, profiles: &[impl HasId]) -> ApiResult<Solid> {
-        for profile in profiles {
-            profile.validate_session(&self.session)?;
-        }
         let ids: Vec<ObjectId> = profiles.iter().map(|p| p.id()).collect();
         let receipt = self.session.apply_op(Operation::Loft { profiles: ids })?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("loft returned no id".into()))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("loft returned no id".into()))?;
         Ok(Solid::new(self.session.clone(), id))
     }
 }
@@ -629,55 +484,22 @@ impl CurveCollection {
         Ok(Circle::new(s, id))
     }
     pub fn create_polyline(&self, points: &[[f64; 3]], closed: bool) -> ApiResult<Polyline> {
-        let (s, id) = self.create_curve(Curve2Spec::Polyline {
-            points: points.to_vec(),
-            closed,
-        })?;
+        let (s, id) = self.create_curve(Curve2Spec::Polyline { points: points.to_vec(), closed })?;
         Ok(Polyline::new(s, id))
     }
     pub fn create_point(&self, position: [f64; 3]) -> ApiResult<Point> {
         let (s, id) = self.create_curve(Curve2Spec::Point { position })?;
         Ok(Point::new(s, id))
     }
-    pub fn create_arc(
-        &self,
-        centre: [f64; 3],
-        radius: f64,
-        start_angle: f64,
-        end_angle: f64,
-    ) -> ApiResult<ArcCurve> {
-        let (s, id) = self.create_curve(Curve2Spec::Arc {
-            centre,
-            radius,
-            start_angle,
-            end_angle,
-        })?;
+    pub fn create_arc(&self, centre: [f64; 3], radius: f64, start_angle: f64, end_angle: f64) -> ApiResult<ArcCurve> {
+        let (s, id) = self.create_curve(Curve2Spec::Arc { centre, radius, start_angle, end_angle })?;
         Ok(ArcCurve::new(s, id))
     }
-    pub fn create_ellipse(
-        &self,
-        centre: [f64; 3],
-        major_axis: [f64; 3],
-        ratio: f64,
-        start: f64,
-        end: f64,
-    ) -> ApiResult<Ellipse> {
-        let (s, id) = self.create_curve(Curve2Spec::Ellipse {
-            centre,
-            major_axis,
-            ratio,
-            start,
-            end,
-        })?;
+    pub fn create_ellipse(&self, centre: [f64; 3], major_axis: [f64; 3], ratio: f64, start: f64, end: f64) -> ApiResult<Ellipse> {
+        let (s, id) = self.create_curve(Curve2Spec::Ellipse { centre, major_axis, ratio, start, end })?;
         Ok(Ellipse::new(s, id))
     }
-    pub fn create_spline(
-        &self,
-        degree: i32,
-        control_points: &[[f64; 3]],
-        knots: &[f64],
-        weights: &[f64],
-    ) -> ApiResult<Spline> {
+    pub fn create_spline(&self, degree: i32, control_points: &[[f64; 3]], knots: &[f64], weights: &[f64]) -> ApiResult<Spline> {
         let (s, id) = self.create_curve(Curve2Spec::Spline {
             degree,
             control_points: control_points.to_vec(),
@@ -695,81 +517,42 @@ impl CurveCollection {
         Ok(XLine::new(s, id))
     }
     /// A RASTER_IMAGE placed at `insertion_point` (host auto-registers the image definition).
-    pub fn create_raster_image(
-        &self,
-        file_path: &str,
-        insertion_point: [f64; 3],
-        u_vector: [f64; 3],
-        v_vector: [f64; 3],
-        size: [f64; 2],
-    ) -> ApiResult<Entity> {
-        let receipt =
-            self.session
-                .apply_op(Operation::CreateRasterImage(crate::ops::RasterImageSpec {
-                    file_path: file_path.to_string(),
-                    insertion_point,
-                    u_vector,
-                    v_vector,
-                    size,
-                }))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_raster_image returned no id".into()))?;
+    pub fn create_raster_image(&self, file_path: &str, insertion_point: [f64; 3], u_vector: [f64; 3], v_vector: [f64; 3], size: [f64; 2]) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateRasterImage(crate::ops::RasterImageSpec {
+            file_path: file_path.to_string(),
+            insertion_point,
+            u_vector,
+            v_vector,
+            size,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_raster_image returned no id".into()))?;
         Ok(Entity::new(self.session.clone(), id))
     }
 
     /// A solid (or pattern) HATCH over a single closed polyline boundary.
     pub fn create_hatch(&self, boundary: &[[f64; 2]], solid: bool) -> ApiResult<Entity> {
-        let receipt = self
-            .session
-            .apply_op(Operation::CreateHatch(crate::ops::HatchSpec {
-                boundary: boundary.to_vec(),
-                solid,
-            }))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_hatch returned no id".into()))?;
+        let receipt = self.session.apply_op(Operation::CreateHatch(crate::ops::HatchSpec {
+            boundary: boundary.to_vec(),
+            solid,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_hatch returned no id".into()))?;
         Ok(Entity::new(self.session.clone(), id))
     }
 
     /// A 2-line angular DIMENSION: angle between lines (vertex→first) and (vertex→second).
-    pub fn create_dimension_angular2ln(
-        &self,
-        vertex: [f64; 3],
-        first_point: [f64; 3],
-        second_point: [f64; 3],
-        arc_location: [f64; 3],
-    ) -> ApiResult<Dimension> {
-        let receipt = self.session.apply_op(Operation::CreateDimensionAngular2Ln(
-            crate::ops::DimensionAngularSpec {
-                vertex,
-                first_point,
-                second_point,
-                arc_location,
-            },
-        ))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
+    pub fn create_dimension_angular2ln(&self, vertex: [f64; 3], first_point: [f64; 3], second_point: [f64; 3], arc_location: [f64; 3]) -> ApiResult<Dimension> {
+        let receipt = self.session.apply_op(Operation::CreateDimensionAngular2Ln(crate::ops::DimensionAngularSpec {
+            vertex, first_point, second_point, arc_location,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
         Ok(Dimension::new(self.session.clone(), id))
     }
     /// A radial DIMENSION for the circle centered at `center` through `point`.
-    pub fn create_dimension_radius(
-        &self,
-        center: [f64; 3],
-        point: [f64; 3],
-    ) -> ApiResult<Dimension> {
+    pub fn create_dimension_radius(&self, center: [f64; 3], point: [f64; 3]) -> ApiResult<Dimension> {
         self.create_dim_radial(Operation::CreateDimensionRadius, center, point)
     }
     /// A diameter DIMENSION for the circle with chord points `center`/`point`.
-    pub fn create_dimension_diameter(
-        &self,
-        center: [f64; 3],
-        point: [f64; 3],
-    ) -> ApiResult<Dimension> {
+    pub fn create_dimension_diameter(&self, center: [f64; 3], point: [f64; 3]) -> ApiResult<Dimension> {
         self.create_dim_radial(Operation::CreateDimensionDiameter, center, point)
     }
     fn create_dim_radial(
@@ -778,111 +561,57 @@ impl CurveCollection {
         center: [f64; 3],
         point: [f64; 3],
     ) -> ApiResult<Dimension> {
-        let receipt = self
-            .session
-            .apply_op(op(crate::ops::DimensionRadialSpec { center, point }))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
+        let receipt = self.session.apply_op(op(crate::ops::DimensionRadialSpec { center, point }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
         Ok(Dimension::new(self.session.clone(), id))
     }
     /// A 3-point angular DIMENSION (vertex + one point on each leg).
-    pub fn create_dimension_angular(
-        &self,
-        vertex: [f64; 3],
-        first_point: [f64; 3],
-        second_point: [f64; 3],
-        arc_location: [f64; 3],
-    ) -> ApiResult<Dimension> {
-        let receipt = self.session.apply_op(Operation::CreateDimensionAngular(
-            crate::ops::DimensionAngularSpec {
-                vertex,
-                first_point,
-                second_point,
-                arc_location,
-            },
-        ))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
+    pub fn create_dimension_angular(&self, vertex: [f64; 3], first_point: [f64; 3], second_point: [f64; 3], arc_location: [f64; 3]) -> ApiResult<Dimension> {
+        let receipt = self.session.apply_op(Operation::CreateDimensionAngular(crate::ops::DimensionAngularSpec {
+            vertex, first_point, second_point, arc_location,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
         Ok(Dimension::new(self.session.clone(), id))
     }
     /// A linear DIMENSION between `first_point` and `second_point`, with the
     /// dimension line placed at `definition_point`. `measurement()` reads the value.
-    pub fn create_dimension_linear(
-        &self,
-        first_point: [f64; 3],
-        second_point: [f64; 3],
-        definition_point: [f64; 3],
-    ) -> ApiResult<Dimension> {
-        let receipt = self.session.apply_op(Operation::CreateDimensionLinear(
-            crate::ops::DimensionSpec {
-                first_point,
-                second_point,
-                definition_point,
-            },
-        ))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
+    pub fn create_dimension_linear(&self, first_point: [f64; 3], second_point: [f64; 3], definition_point: [f64; 3]) -> ApiResult<Dimension> {
+        let receipt = self.session.apply_op(Operation::CreateDimensionLinear(crate::ops::DimensionSpec {
+            first_point, second_point, definition_point,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_dimension returned no id".into()))?;
         Ok(Dimension::new(self.session.clone(), id))
     }
 
     /// Single-line TEXT annotation.
-    pub fn create_text(
-        &self,
-        value: &str,
-        insertion_point: [f64; 3],
-        height: f64,
-        rotation: f64,
-    ) -> ApiResult<Text> {
-        let receipt = self
-            .session
-            .apply_op(Operation::CreateText(crate::ops::TextSpec {
-                value: value.to_string(),
-                insertion_point,
-                height,
-                rotation,
-            }))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_text returned no id".into()))?;
+    pub fn create_text(&self, value: &str, insertion_point: [f64; 3], height: f64, rotation: f64) -> ApiResult<Text> {
+        let receipt = self.session.apply_op(Operation::CreateText(crate::ops::TextSpec {
+            value: value.to_string(),
+            insertion_point,
+            height,
+            rotation,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_text returned no id".into()))?;
         Ok(Text::new(self.session.clone(), id))
     }
     /// Multi-line MTEXT annotation.
-    pub fn create_mtext(
-        &self,
-        value: &str,
-        insertion_point: [f64; 3],
-        height: f64,
-    ) -> ApiResult<MText> {
-        let receipt = self
-            .session
-            .apply_op(Operation::CreateMText(crate::ops::MTextSpec {
-                value: value.to_string(),
-                insertion_point,
-                height,
-            }))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_mtext returned no id".into()))?;
+    pub fn create_mtext(&self, value: &str, insertion_point: [f64; 3], height: f64) -> ApiResult<MText> {
+        let receipt = self.session.apply_op(Operation::CreateMText(crate::ops::MTextSpec {
+            value: value.to_string(),
+            insertion_point,
+            height,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_mtext returned no id".into()))?;
         Ok(MText::new(self.session.clone(), id))
     }
-    /// Bulk-create many points in ONE op: all-or-nothing, one undo step.
+    /// Bulk-create many points in ONE op (plan §5.3): all-or-nothing, one undo step.
     pub fn create_points(&self, positions: &[[f64; 3]]) -> ApiResult<Vec<Point>> {
         let specs: Vec<crate::ops::EntitySpec> = positions
             .iter()
             .map(|&p| crate::ops::EntitySpec::Curve(Curve2Spec::Point { position: p }))
             .collect();
         let receipt = self.session.apply_op(Operation::CreateMany(specs))?;
-        let outcome = receipt
-            .outcome
-            .ok_or_else(|| ApiError::Transport("create_many returned no outcome".into()))?;
+        let outcome = receipt.outcome.ok_or_else(|| ApiError::Transport("create_many returned no outcome".into()))?;
         Ok(outcome
             .new_ids()
             .iter()
@@ -899,23 +628,10 @@ pub struct EntityCollection {
 impl EntityCollection {
     /// Create a paper-space `VIEWPORT` (a `width`×`height` viewport at `center`
     /// looking at `view_target` with `view_height` zoom).
-    pub fn create_viewport(
-        &self,
-        center: [f64; 3],
-        width: f64,
-        height: f64,
-        view_target: [f64; 3],
-        view_height: f64,
-    ) -> ApiResult<Entity> {
-        let receipt =
-            self.session
-                .apply_op(Operation::CreateViewport(crate::ops::ViewportSpec {
-                    center,
-                    width,
-                    height,
-                    view_target,
-                    view_height,
-                }))?;
+    pub fn create_viewport(&self, center: [f64; 3], width: f64, height: f64, view_target: [f64; 3], view_height: f64) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateViewport(crate::ops::ViewportSpec {
+            center, width, height, view_target, view_height,
+        }))?;
         let id = receipt
             .outcome
             .and_then(|o| o.new_id())
@@ -924,66 +640,37 @@ impl EntityCollection {
     }
 
     /// Create a TABLE from a grid of cell strings (`data[row][column]`), at a point.
-    pub fn create_table(
-        &self,
-        insertion_point: [f64; 3],
-        data: &[Vec<String>],
-    ) -> ApiResult<Entity> {
-        let receipt = self
-            .session
-            .apply_op(Operation::CreateTable(crate::ops::TableSpec {
-                insertion_point,
-                data: data.to_vec(),
-            }))?;
-        let id = receipt
-            .outcome
-            .and_then(|o| o.new_id())
-            .ok_or_else(|| ApiError::Transport("create_table returned no id".into()))?;
+    pub fn create_table(&self, insertion_point: [f64; 3], data: &[Vec<String>]) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateTable(crate::ops::TableSpec {
+            insertion_point,
+            data: data.to_vec(),
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_table returned no id".into()))?;
         Ok(Entity::new(self.session.clone(), id))
     }
 
     /// Create an ATTDEF (in-block attribute definition): tag/prompt/default at a point.
-    pub fn create_attribute_definition(
-        &self,
-        tag: &str,
-        prompt: &str,
-        default_value: &str,
-        insertion_point: [f64; 3],
-        height: f64,
-        rotation: f64,
-    ) -> ApiResult<Entity> {
-        let receipt = self.session.apply_op(Operation::CreateAttributeDefinition(
-            crate::ops::AttributeDefinitionSpec {
-                tag: tag.to_string(),
-                prompt: prompt.to_string(),
-                default_value: default_value.to_string(),
-                insertion_point,
-                height,
-                rotation,
-            },
-        ))?;
-        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| {
-            ApiError::Transport("create_attribute_definition returned no id".into())
-        })?;
+    pub fn create_attribute_definition(&self, tag: &str, prompt: &str, default_value: &str, insertion_point: [f64; 3], height: f64, rotation: f64) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateAttributeDefinition(crate::ops::AttributeDefinitionSpec {
+            tag: tag.to_string(),
+            prompt: prompt.to_string(),
+            default_value: default_value.to_string(),
+            insertion_point,
+            height,
+            rotation,
+        }))?;
+        let id = receipt.outcome.and_then(|o| o.new_id()).ok_or_else(|| ApiError::Transport("create_attribute_definition returned no id".into()))?;
         Ok(Entity::new(self.session.clone(), id))
     }
 
     /// Place a block reference (`INSERT`) for `block_name` (must exist).
-    pub fn create_insert(
-        &self,
-        block_name: &str,
-        insert_point: [f64; 3],
-        scale: f64,
-        rotation: f64,
-    ) -> ApiResult<Entity> {
-        let receipt = self
-            .session
-            .apply_op(Operation::CreateInsert(crate::ops::InsertSpec {
-                block_name: block_name.to_string(),
-                insert_point,
-                scale,
-                rotation,
-            }))?;
+    pub fn create_insert(&self, block_name: &str, insert_point: [f64; 3], scale: f64, rotation: f64) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateInsert(crate::ops::InsertSpec {
+            block_name: block_name.to_string(),
+            insert_point,
+            scale,
+            rotation,
+        }))?;
         let id = receipt
             .outcome
             .and_then(|o| o.new_id())
@@ -1003,10 +690,7 @@ impl EntityCollection {
     }
     /// Bulk transform (one op, all-or-nothing).
     pub fn transform_many(&self, ids: &[ObjectId], placement: PlacementSpec) -> ApiResult<()> {
-        self.session.apply_op(Operation::TransformMany {
-            ids: ids.to_vec(),
-            placement,
-        })?;
+        self.session.apply_op(Operation::TransformMany { ids: ids.to_vec(), placement })?;
         Ok(())
     }
     /// Bulk delete (one op, all-or-nothing). Used by `OpGroup::compensate`.
@@ -1019,45 +703,29 @@ impl EntityCollection {
 // ── OpGroup: client-side failure-cleanup (NOT a transaction) ────────────────
 
 /// Tracks handles created during a logical operation so a later failure can be
-/// cleaned up with a bulk delete. Separate writes remain committed;
+/// cleaned up (best-effort, sequential delete ops — plan §8.1). No atomicity,
 /// no host involvement, no rollback.
 #[derive(Default)]
 pub struct OpGroup {
     created: Vec<ObjectId>,
-    session: Option<Session>,
 }
 
 impl OpGroup {
     pub fn new() -> Self {
-        Self {
-            created: Vec::new(),
-            session: None,
-        }
+        Self { created: Vec::new() }
     }
     /// Record a created handle (propagating any construction error); returns it
     /// for fluent `grp.track(doc.solids().create_cuboid(..)?)?` use.
     pub fn track<T: HasId>(&mut self, handle: ApiResult<T>) -> ApiResult<T> {
         let handle = handle?;
-        if let Some(session) = handle.session() {
-            if let Some(previous) = &self.session {
-                previous.same_transport(session)?;
-            } else {
-                self.session = Some(session.clone());
-            }
-        }
-        if !self.created.contains(&handle.id()) {
-            self.created.push(handle.id());
-        }
+        self.created.push(handle.id());
         Ok(handle)
     }
     /// Keep everything: drop the tracking without deleting.
     pub fn commit(self) {}
     /// Best-effort cleanup: delete every tracked entity (one `DeleteMany` op).
-    /// Does not resurrect already-consumed/deleted entities.
+    /// Does not resurrect already-consumed/deleted entities (plan §13 note).
     pub fn compensate(self, doc: &Document) -> ApiResult<()> {
-        if let Some(session) = &self.session {
-            session.same_transport(&doc.session)?;
-        }
         if self.created.is_empty() {
             return Ok(());
         }

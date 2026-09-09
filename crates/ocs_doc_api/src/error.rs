@@ -1,4 +1,4 @@
-//! Structured error model. Serializable so IPC returns the
+//! Structured error model (plan §2 decision #9). Serializable so IPC returns the
 //! same error the in-process executor produced.
 
 use serde::{Deserialize, Serialize};
@@ -32,10 +32,7 @@ pub enum ApiError {
 
     /// The geometry kernel reported a failure (a mapped `Snag`).
     #[error("geometry kernel: {kind:?}: {msg}")]
-    Geometry {
-        kind: GeometryErrorKind,
-        msg: String,
-    },
+    Geometry { kind: GeometryErrorKind, msg: String },
 
     /// An `ObjectId` does not resolve to a live entity (stale/deleted/never existed).
     #[error("unknown ObjectId {0:?}")]
@@ -54,15 +51,9 @@ pub type ApiResult<T> = Result<T, ApiError>;
 
 impl ApiError {
     pub fn validation(op: &'static str, reason: impl Into<String>) -> Self {
-        ApiError::Validation {
-            op: op.to_string(),
-            reason: reason.into(),
-        }
+        ApiError::Validation { op: op.to_string(), reason: reason.into() }
     }
     pub fn geometry(kind: GeometryErrorKind, msg: impl Into<String>) -> Self {
-        ApiError::Geometry {
-            kind,
-            msg: msg.into(),
-        }
+        ApiError::Geometry { kind, msg: msg.into() }
     }
 }

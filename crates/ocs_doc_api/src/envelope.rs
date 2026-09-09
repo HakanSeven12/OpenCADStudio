@@ -1,4 +1,4 @@
-//! The wire envelope. One request = ONE write op OR a query batch
+//! The wire envelope (plan §7). One request = ONE write op OR a query batch
 //! (read-only batching is safe: no mutation, no undo, no rollback).
 
 use serde::{Deserialize, Serialize};
@@ -18,27 +18,11 @@ pub struct DocApiEnvelope {
 }
 
 impl DocApiEnvelope {
-    pub fn validate_version(&self) -> crate::ApiResult<()> {
-        if self.version != ENVELOPE_VERSION {
-            return Err(crate::ApiError::Unsupported(format!(
-                "envelope version {}",
-                self.version
-            )));
-        }
-        Ok(())
-    }
-
     pub fn op(operation: Operation) -> Self {
-        Self {
-            version: ENVELOPE_VERSION,
-            body: EnvelopeBody::Op(operation),
-        }
+        Self { version: ENVELOPE_VERSION, body: EnvelopeBody::Op(operation) }
     }
     pub fn queries(queries: Vec<Query>) -> Self {
-        Self {
-            version: ENVELOPE_VERSION,
-            body: EnvelopeBody::Queries(queries),
-        }
+        Self { version: ENVELOPE_VERSION, body: EnvelopeBody::Queries(queries) }
     }
 }
 

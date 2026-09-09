@@ -8,7 +8,7 @@
 
 mod common;
 
-use ocs_doc_api::{ApiError, DocApi, HasId, ObjectId, OpGroup};
+use ocs_doc_api::{ApiError, DocApi, HasId, OpGroup, ObjectId};
 
 fn main() -> ocs_doc_api::ApiResult<()> {
     let api = DocApi::in_process(common::MockBackend::default(), 0);
@@ -27,11 +27,7 @@ fn main() -> ocs_doc_api::ApiResult<()> {
     }
     // `a` is still live (failed op mutated nothing) and the revision did not move.
     assert!(a.bounds().is_ok(), "input solid survives a failed boolean");
-    assert_eq!(
-        doc.revision()?,
-        rev_before,
-        "failed op records no revision bump"
-    );
+    assert_eq!(doc.revision()?, rev_before, "failed op records no revision bump");
 
     // ── OpGroup: clean up a partially-built logical operation on failure ──
     let mut grp = OpGroup::new();

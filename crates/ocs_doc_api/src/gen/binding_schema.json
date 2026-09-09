@@ -4,189 +4,6 @@
     {
       "acadrust_variant": "Solid3D",
       "collection": "solids",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "origin",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "size",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "primitive": "Cuboid"
-          },
-          "name": "create_cuboid",
-          "op": "CreateSolid",
-          "returns": "Solid"
-        },
-        {
-          "args": [
-            {
-              "name": "centre",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "radius",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "primitive": "Sphere"
-          },
-          "name": "create_sphere",
-          "op": "CreateSolid",
-          "returns": "Solid"
-        },
-        {
-          "args": [
-            {
-              "name": "base",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "radius",
-              "ty": "f64"
-            },
-            {
-              "name": "height",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "primitive": "Cylinder"
-          },
-          "name": "create_cylinder",
-          "op": "CreateSolid",
-          "returns": "Solid"
-        },
-        {
-          "args": [
-            {
-              "name": "base",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "radius",
-              "ty": "f64"
-            },
-            {
-              "name": "height",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "primitive": "Cone"
-          },
-          "name": "create_cone",
-          "op": "CreateSolid",
-          "returns": "Solid"
-        },
-        {
-          "args": [
-            {
-              "name": "centre",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "major_radius",
-              "ty": "f64"
-            },
-            {
-              "name": "minor_radius",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "primitive": "Torus"
-          },
-          "name": "create_torus",
-          "op": "CreateSolid",
-          "returns": "Solid"
-        },
-        {
-          "args": [
-            {
-              "name": "origin",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "size",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "primitive": "Wedge"
-          },
-          "name": "create_wedge",
-          "op": "CreateSolid",
-          "returns": "Solid"
-        },
-        {
-          "args": [
-            {
-              "name": "profile",
-              "ty": "EntityRef"
-            },
-            {
-              "name": "direction",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "extrude",
-          "op": "Extrude",
-          "returns": "Solid"
-        },
-        {
-          "args": [
-            {
-              "name": "profile",
-              "ty": "EntityRef"
-            },
-            {
-              "name": "pivot",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "axis",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "angle",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "revolve",
-          "op": "Revolve",
-          "returns": "Solid"
-        },
-        {
-          "args": [
-            {
-              "name": "profiles",
-              "ty": "&[EntityRef]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "loft",
-          "op": "Loft",
-          "returns": "Solid"
-        }
-      ],
       "handle": "Solid",
       "methods": [
         {
@@ -290,27 +107,6 @@
     {
       "acadrust_variant": "Line",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "start",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "end",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "Line"
-          },
-          "name": "create_line",
-          "op": "CreateCurve",
-          "returns": "Line"
-        }
-      ],
       "handle": "Line",
       "methods": [],
       "name": "Line"
@@ -318,27 +114,6 @@
     {
       "acadrust_variant": "Circle",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "centre",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "radius",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "Circle"
-          },
-          "name": "create_circle",
-          "op": "CreateCurve",
-          "returns": "Circle"
-        }
-      ],
       "handle": "Circle",
       "methods": [],
       "name": "Circle"
@@ -346,27 +121,6 @@
     {
       "acadrust_variant": "LwPolyline",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "points",
-              "ty": "&[[f64; 3]]"
-            },
-            {
-              "name": "closed",
-              "ty": "bool"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "Polyline"
-          },
-          "name": "create_polyline",
-          "op": "CreateCurve",
-          "returns": "Polyline"
-        }
-      ],
       "handle": "Polyline",
       "methods": [
         {
@@ -395,38 +149,6 @@
     {
       "acadrust_variant": "Point",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "position",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "Point"
-          },
-          "name": "create_point",
-          "op": "CreateCurve",
-          "returns": "Point"
-        },
-        {
-          "args": [
-            {
-              "name": "positions",
-              "ty": "&[[f64; 3]]"
-            }
-          ],
-          "bulk": true,
-          "fixed": {
-            "curve": "Point"
-          },
-          "name": "create_points",
-          "op": "CreateMany",
-          "returns": "Vec<Point>"
-        }
-      ],
       "handle": "Point",
       "methods": [],
       "name": "Point"
@@ -434,35 +156,6 @@
     {
       "acadrust_variant": "Arc",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "centre",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "radius",
-              "ty": "f64"
-            },
-            {
-              "name": "start_angle",
-              "ty": "f64"
-            },
-            {
-              "name": "end_angle",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "Arc"
-          },
-          "name": "create_arc",
-          "op": "CreateCurve",
-          "returns": "ArcCurve"
-        }
-      ],
       "handle": "ArcCurve",
       "methods": [],
       "name": "Arc"
@@ -470,39 +163,6 @@
     {
       "acadrust_variant": "Ellipse",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "centre",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "major_axis",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "ratio",
-              "ty": "f64"
-            },
-            {
-              "name": "start",
-              "ty": "f64"
-            },
-            {
-              "name": "end",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "Ellipse"
-          },
-          "name": "create_ellipse",
-          "op": "CreateCurve",
-          "returns": "Ellipse"
-        }
-      ],
       "handle": "Ellipse",
       "methods": [],
       "name": "Ellipse"
@@ -510,35 +170,6 @@
     {
       "acadrust_variant": "Spline",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "degree",
-              "ty": "i32"
-            },
-            {
-              "name": "control_points",
-              "ty": "&[[f64; 3]]"
-            },
-            {
-              "name": "knots",
-              "ty": "&[f64]"
-            },
-            {
-              "name": "weights",
-              "ty": "&[f64]"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "Spline"
-          },
-          "name": "create_spline",
-          "op": "CreateCurve",
-          "returns": "Spline"
-        }
-      ],
       "handle": "Spline",
       "methods": [],
       "name": "Spline"
@@ -546,27 +177,6 @@
     {
       "acadrust_variant": "Ray",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "origin",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "direction",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "Ray"
-          },
-          "name": "create_ray",
-          "op": "CreateCurve",
-          "returns": "Ray"
-        }
-      ],
       "handle": "Ray",
       "methods": [],
       "name": "Ray"
@@ -574,27 +184,6 @@
     {
       "acadrust_variant": "XLine",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "origin",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "direction",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": {
-            "curve": "XLine"
-          },
-          "name": "create_xline",
-          "op": "CreateCurve",
-          "returns": "XLine"
-        }
-      ],
       "handle": "XLine",
       "methods": [],
       "name": "XLine"
@@ -602,33 +191,6 @@
     {
       "acadrust_variant": "Text",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "value",
-              "ty": "&str"
-            },
-            {
-              "name": "insertion_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "height",
-              "ty": "f64"
-            },
-            {
-              "name": "rotation",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_text",
-          "op": "CreateText",
-          "returns": "Text"
-        }
-      ],
       "handle": "Text",
       "methods": [
         {
@@ -664,29 +226,6 @@
     {
       "acadrust_variant": "MText",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "value",
-              "ty": "&str"
-            },
-            {
-              "name": "insertion_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "height",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_mtext",
-          "op": "CreateMText",
-          "returns": "MText"
-        }
-      ],
       "handle": "MText",
       "methods": [
         {
@@ -722,25 +261,6 @@
     {
       "acadrust_variant": "Hatch",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "boundary",
-              "ty": "&[[f64; 2]]"
-            },
-            {
-              "name": "solid",
-              "ty": "bool"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_hatch",
-          "op": "CreateHatch",
-          "returns": "Entity"
-        }
-      ],
       "handle": "Entity",
       "methods": [
         {
@@ -760,113 +280,6 @@
     {
       "acadrust_variant": "Dimension",
       "collection": "curves",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "first_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "second_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "definition_point",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_dimension_linear",
-          "op": "CreateDimensionLinear",
-          "returns": "Dimension"
-        },
-        {
-          "args": [
-            {
-              "name": "center",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "point",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_dimension_radius",
-          "op": "CreateDimensionRadius",
-          "returns": "Dimension"
-        },
-        {
-          "args": [
-            {
-              "name": "center",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "point",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_dimension_diameter",
-          "op": "CreateDimensionDiameter",
-          "returns": "Dimension"
-        },
-        {
-          "args": [
-            {
-              "name": "vertex",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "first_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "second_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "arc_location",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_dimension_angular",
-          "op": "CreateDimensionAngular",
-          "returns": "Dimension"
-        },
-        {
-          "args": [
-            {
-              "name": "vertex",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "first_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "second_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "arc_location",
-              "ty": "[f64; 3]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_dimension_angular2ln",
-          "op": "CreateDimensionAngular2Ln",
-          "returns": "Dimension"
-        }
-      ],
       "handle": "Dimension",
       "methods": [
         {
@@ -886,33 +299,6 @@
     {
       "acadrust_variant": "Insert",
       "collection": "entities",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "block_name",
-              "ty": "&str"
-            },
-            {
-              "name": "insert_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "scale",
-              "ty": "f64"
-            },
-            {
-              "name": "rotation",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_insert",
-          "op": "CreateInsert",
-          "returns": "Entity"
-        }
-      ],
       "handle": "Entity",
       "methods": [
         {
@@ -952,41 +338,6 @@
     {
       "acadrust_variant": "AttributeDefinition",
       "collection": "entities",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "tag",
-              "ty": "&str"
-            },
-            {
-              "name": "prompt",
-              "ty": "&str"
-            },
-            {
-              "name": "default_value",
-              "ty": "&str"
-            },
-            {
-              "name": "insertion_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "height",
-              "ty": "f64"
-            },
-            {
-              "name": "rotation",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_attribute_definition",
-          "op": "CreateAttributeDefinition",
-          "returns": "Entity"
-        }
-      ],
       "handle": "Entity",
       "methods": [],
       "name": "AttributeDefinition"
@@ -994,37 +345,6 @@
     {
       "acadrust_variant": "Viewport",
       "collection": "entities",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "center",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "width",
-              "ty": "f64"
-            },
-            {
-              "name": "height",
-              "ty": "f64"
-            },
-            {
-              "name": "view_target",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "view_height",
-              "ty": "f64"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_viewport",
-          "op": "CreateViewport",
-          "returns": "Entity"
-        }
-      ],
       "handle": "Entity",
       "methods": [
         {
@@ -1064,37 +384,6 @@
     {
       "acadrust_variant": "RasterImage",
       "collection": "entities",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "file_path",
-              "ty": "&str"
-            },
-            {
-              "name": "insertion_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "u_vector",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "v_vector",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "size",
-              "ty": "[f64; 2]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_raster_image",
-          "op": "CreateRasterImage",
-          "returns": "Entity"
-        }
-      ],
       "handle": "Entity",
       "methods": [],
       "name": "RasterImage"
@@ -1102,25 +391,6 @@
     {
       "acadrust_variant": "Table",
       "collection": "entities",
-      "constructors": [
-        {
-          "args": [
-            {
-              "name": "insertion_point",
-              "ty": "[f64; 3]"
-            },
-            {
-              "name": "data",
-              "ty": "&[Vec<String>]"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "name": "create_table",
-          "op": "CreateTable",
-          "returns": "Entity"
-        }
-      ],
       "handle": "Entity",
       "methods": [],
       "name": "Table"

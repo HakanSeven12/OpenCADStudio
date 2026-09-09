@@ -15,28 +15,19 @@ fn main() -> ocs_doc_api::ApiResult<()> {
     let doc = api.document(api.active_tab());
 
     // Individual 2D constructors.
-    let line = doc
-        .curves()
-        .create_line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0])?;
+    let line = doc.curves().create_line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0])?;
     let circle = doc.curves().create_circle([5.0, 5.0, 0.0], 3.0)?;
     let poly = doc.curves().create_polyline(
-        &[
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [1.0, 1.0, 0.0],
-            [0.0, 1.0, 0.0],
-        ],
+        &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
         true,
     )?;
 
-    println!("line   bounds: {:?}", line.bounds()?); // [0,10] in X
+    println!("line   bounds: {:?}", line.bounds()?);   // [0,10] in X
     println!("circle bounds: {:?}", circle.bounds()?); // centre ± radius
-    println!("poly   bounds: {:?}", poly.bounds()?); // unit square
+    println!("poly   bounds: {:?}", poly.bounds()?);   // unit square
 
     // Bulk: 1000 points in ONE op (all-or-nothing, one undo step — not 1000).
-    let coords: Vec<[f64; 3]> = (0..1000)
-        .map(|i| [i as f64, (i % 10) as f64, 0.0])
-        .collect();
+    let coords: Vec<[f64; 3]> = (0..1000).map(|i| [i as f64, (i % 10) as f64, 0.0]).collect();
     let pts = doc.curves().create_points(&coords)?;
     println!("created {} points in one bulk op", pts.len());
     assert_eq!(pts.len(), 1000);

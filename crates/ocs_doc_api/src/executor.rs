@@ -1,4 +1,4 @@
-//! The op executor: crate-owned logic mapping each
+//! The op executor (plan §6, decision #11): crate-owned logic mapping each
 //! `Operation`/`Query` to `DocApiBackend` calls. Both the in-process transport
 //! and the host's IPC executor use this — one implementation, versioned in the
 //! crate. Per-op atomicity: a write op validates its inputs and computes its
@@ -12,32 +12,10 @@ use crate::id::ObjectId;
 use crate::ops::{BoolOp, EntitySpec, BULK_ITEM_CAP};
 use crate::query::QueryResult;
 
-/// Apply ONE write op atomically. On success: one undo step and an advanced revision.
+/// Apply ONE write op atomically. On success: one undo step + one revision bump.
 /// On failure: nothing applied, no undo, no bump (the op validates before mutating).
 pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt> {
-    let result = apply_op_inner(b, op);
-    if result.is_err() {
-        b.cancel_op();
-    }
-    result
-}
-
-fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt> {
     let name = op.op_name();
-    crate::validation::operation(&op)?;
-    if let Operation::TransformMany { ids, .. } | Operation::DeleteMany(ids) = &op {
-        let unique: std::collections::HashSet<_> = ids.iter().collect();
-        if ids.is_empty() || unique.len() != ids.len() {
-            return Err(ApiError::validation(
-                name,
-                "batch ids must be nonempty and unique",
-            ));
-        }
-    }
-    if let Operation::Transform { placement, .. } | Operation::TransformMany { placement, .. } = &op
-    {
-        crate::geom::validate_placement(placement)?;
-    }
     let outcome = match &op {
         Operation::CreateSolid(prim) => {
             let body = crate::geom::make_solid(prim)?;
@@ -54,21 +32,16 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
         }
         Operation::Extrude { profile, direction } => {
             let curves = profile_curves(b, *profile, name)?;
-            let body = crate::geom::extrude(b.profile_plane(*profile)?, &curves, *direction)?;
+            let body = crate::geom::extrude(&curves, *direction)?;
             b.push_undo(name);
             let id = b.store_solid(&body)?;
             b.finalize_op();
             OpOutcome::NewId(id)
         }
-        Operation::Revolve {
-            profile,
-            axis,
-            angle,
-        } => {
+        Operation::Revolve { profile, axis, angle } => {
             let curves = profile_curves(b, *profile, name)?;
             let (pivot, axis_dir) = *axis;
-            let body =
-                crate::geom::revolve(b.profile_plane(*profile)?, &curves, pivot, axis_dir, *angle)?;
+            let body = crate::geom::revolve(&curves, pivot, axis_dir, *angle)?;
             b.push_undo(name);
             let id = b.store_solid(&body)?;
             b.finalize_op();
@@ -81,26 +54,15 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             b.finalize_op();
             OpOutcome::Updated(*id)
         }
-        Operation::SolidBoolean {
-            op: bop,
-            a,
-            b: bid,
-            erase_sources,
-        } => {
+        Operation::SolidBoolean { op: bop, a, b: bid, erase_sources } => {
             // Resolve + combine BEFORE push_undo: pure computation, no mutation.
             let ba = b.resolve_body(*a).map_err(|_| ApiError::UnknownId(*a))?;
-            let bb = b
-                .resolve_body(*bid)
-                .map_err(|_| ApiError::UnknownId(*bid))?;
+            let bb = b.resolve_body(*bid).map_err(|_| ApiError::UnknownId(*bid))?;
             let result = crate::geom::boolean(&ba, &bb, *bop)?;
             // Validate the erase BEFORE mutating: if `b` cannot be removed (e.g.
             // locked layer), fail now rather than after `update_solid(a)` has
-            // already committed a partial mutation.
+            // already committed a partial mutation (plan review: erase path).
             if *erase_sources {
-                if a == bid {
-                    return Err(ApiError::validation(name, "boolean source ids must differ"));
-                }
-                b.can_modify(*a)?;
                 b.can_remove(*bid)?;
             }
             b.push_undo(name);
@@ -126,11 +88,9 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
         Operation::Delete { id } => {
             // can_remove validates existence AND removability (locked layer) before
             // any mutation, so a locked entity errors cleanly instead of a no-op
-            // reported as Deleted.
+            // reported as Deleted (plan review: erase path).
             b.can_remove(*id).map_err(|e| match e {
-                ApiError::UnknownId(_) => {
-                    ApiError::validation(name, format!("unknown ObjectId {id:?}"))
-                }
+                ApiError::UnknownId(_) => ApiError::validation(name, format!("unknown ObjectId {id:?}")),
                 other => other,
             })?;
             b.push_undo(name);
@@ -142,15 +102,33 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             if specs.len() > BULK_ITEM_CAP {
                 return Err(over_cap(name, specs.len()));
             }
-            if specs.is_empty() {
-                return Err(ApiError::validation(name, "batch must not be empty"));
+            // Upfront validation: compute/validate EVERY payload before any insert
+            // (all-or-nothing without rollback, plan §5.3). This includes validating
+            // the curve spec's fallible conditions (e.g. ellipse ratio) that
+            // `curve_spec_to_entity` would otherwise reject mid-apply-loop.
+            let mut prepared = Vec::with_capacity(specs.len());
+            for (i, spec) in specs.iter().enumerate() {
+                let prep = match spec {
+                    EntitySpec::Solid(p) => {
+                        Prepared::Solid(crate::geom::make_solid(p).map_err(|e| at_index(name, i, e))?)
+                    }
+                    EntitySpec::Curve(c) => {
+                        validate_curve_spec(c).map_err(|e| at_index(name, i, e))?;
+                        Prepared::Curve(c.clone())
+                    }
+                };
+                prepared.push(prep);
             }
-            for spec in specs {
-                if let EntitySpec::Curve(curve) = spec {
-                    crate::validation::curve(curve)?;
-                }
+            b.push_undo(name);
+            let mut ids = Vec::with_capacity(prepared.len());
+            for prep in prepared {
+                let id = match prep {
+                    Prepared::Solid(body) => b.store_solid(&body)?,
+                    Prepared::Curve(c) => b.add_curve(&c)?,
+                };
+                ids.push(id);
             }
-            let ids = b.create_many(specs)?;
+            b.finalize_op();
             OpOutcome::NewIds(ids)
         }
         Operation::TransformMany { ids, placement } => {
@@ -158,7 +136,7 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
                 return Err(over_cap(name, ids.len()));
             }
             // Pre-validate EVERYTHING fallible before push_undo (all-or-nothing,
-            // the bulk contract): every id must exist AND be transformable, so the apply
+            // plan §5.3): every id must exist AND be transformable, so the apply
             // loop below cannot fail part-way. `transform_entity` after this is
             // infallible-by-construction for the validated ids.
             for (i, id) in ids.iter().enumerate() {
@@ -173,7 +151,11 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
                     },
                 })?;
             }
-            b.transform_many(ids, placement)?;
+            b.push_undo(name);
+            for id in ids {
+                b.transform_entity(*id, placement)?;
+            }
+            b.finalize_op();
             OpOutcome::Updated(*ids.first().unwrap_or(&ObjectId::NULL))
         }
         Operation::DeleteMany(ids) => {
@@ -226,9 +208,7 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
         }
         Operation::SetTextContent { id, value } => {
             b.can_modify(*id).map_err(|e| match e {
-                ApiError::UnknownId(_) => {
-                    ApiError::validation(name, format!("unknown ObjectId {id:?}"))
-                }
+                ApiError::UnknownId(_) => ApiError::validation(name, format!("unknown ObjectId {id:?}")),
                 other => other,
             })?;
             b.push_undo(name);
@@ -239,10 +219,7 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
         Operation::CreateHatch(spec) => {
             // Validate the boundary (>= 3 points) before committing.
             if spec.boundary.len() < 3 {
-                return Err(ApiError::validation(
-                    name,
-                    "hatch boundary needs >= 3 points",
-                ));
+                return Err(ApiError::validation(name, "hatch boundary needs >= 3 points"));
             }
             b.push_undo(name);
             let id = b.add_hatch(spec)?;
@@ -257,9 +234,7 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
         }
         Operation::SetAttribute { id, tag, value } => {
             b.can_modify(*id).map_err(|e| match e {
-                ApiError::UnknownId(_) => {
-                    ApiError::validation(name, format!("unknown ObjectId {id:?}"))
-                }
+                ApiError::UnknownId(_) => ApiError::validation(name, format!("unknown ObjectId {id:?}")),
                 other => other,
             })?;
             b.push_undo(name);
@@ -267,15 +242,9 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             b.finalize_op();
             OpOutcome::Updated(*id)
         }
-        Operation::SetViewportView {
-            id,
-            view_target,
-            view_height,
-        } => {
+        Operation::SetViewportView { id, view_target, view_height } => {
             b.can_modify(*id).map_err(|e| match e {
-                ApiError::UnknownId(_) => {
-                    ApiError::validation(name, format!("unknown ObjectId {id:?}"))
-                }
+                ApiError::UnknownId(_) => ApiError::validation(name, format!("unknown ObjectId {id:?}")),
                 other => other,
             })?;
             b.push_undo(name);
@@ -301,8 +270,9 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             }
             let mut sections = Vec::with_capacity(profiles.len());
             for (i, p) in profiles.iter().enumerate() {
-                let curves = profile_curves(b, *p, name).map_err(|e| at_index(name, i, e))?;
-                sections.push((b.profile_plane(*p)?, curves));
+                let curves = profile_curves(b, *p, name)
+                    .map_err(|e| at_index(name, i, e))?;
+                sections.push(curves);
             }
             b.push_undo(name);
             let id = b.loft(&sections)?;
@@ -337,10 +307,7 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             // Validate a non-empty, rectangular grid before committing.
             let cols = spec.data.first().map(|r| r.len()).unwrap_or(0);
             if spec.data.is_empty() || cols == 0 || spec.data.iter().any(|r| r.len() != cols) {
-                return Err(ApiError::validation(
-                    name,
-                    "table needs a non-empty rectangular grid",
-                ));
+                return Err(ApiError::validation(name, "table needs a non-empty rectangular grid"));
             }
             b.push_undo(name);
             let id = b.add_table(spec)?;
@@ -361,6 +328,11 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
     })
 }
 
+enum Prepared {
+    Solid(crate::backend::KernelBody),
+    Curve(crate::ops::Curve2Spec),
+}
+
 /// Apply a batch of read-only queries (no undo, no bump; `&mut` because solid
 /// resolution may populate the kernel body cache on miss). Bounded like the bulk
 /// ops: a batch over `BULK_ITEM_CAP` is rejected before any work (the 64 MiB frame
@@ -369,50 +341,28 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
     if queries.len() > BULK_ITEM_CAP {
         return Err(ApiError::validation(
             "Queries",
-            format!(
-                "query batch over cap: {} > {}",
-                queries.len(),
-                BULK_ITEM_CAP
-            ),
+            format!("query batch over cap: {} > {}", queries.len(), BULK_ITEM_CAP),
         ));
     }
     let mut results = Vec::with_capacity(queries.len());
     for q in &queries {
         let qname = q.query_name();
         let r = match q {
-            Query::GetEntity { id } => {
-                QueryResult::Entity(b.get_entity(*id).map_err(|e| label(qname, e))?)
-            }
-            Query::GetBounds { id } => {
-                QueryResult::Bounds(b.bounds(*id).map_err(|e| label(qname, e))?)
-            }
-            Query::GetCentroid { id } => {
-                QueryResult::Centroid(b.centroid(*id).map_err(|e| label(qname, e))?)
-            }
-            Query::GetVolume { id } => {
-                QueryResult::Volume(b.volume(*id).map_err(|e| label(qname, e))?)
-            }
+            Query::GetEntity { id } => QueryResult::Entity(b.get_entity(*id).map_err(|e| label(qname, e))?),
+            Query::GetBounds { id } => QueryResult::Bounds(b.bounds(*id).map_err(|e| label(qname, e))?),
+            Query::GetCentroid { id } => QueryResult::Centroid(b.centroid(*id).map_err(|e| label(qname, e))?),
+            Query::GetVolume { id } => QueryResult::Volume(b.volume(*id).map_err(|e| label(qname, e))?),
             Query::GetIntersects { a, b: bid } => {
                 let ba = b.bounds(*a).map_err(|e| label(qname, e))?;
                 let bb = b.bounds(*bid).map_err(|e| label(qname, e))?;
                 QueryResult::Intersects(ba.overlaps(&bb))
             }
             Query::GetGeometryRevision => QueryResult::Revision(b.revision()),
-            Query::GetTextContent { id } => {
-                QueryResult::TextContent(b.text_content(*id).map_err(|e| label(qname, e))?)
-            }
-            Query::GetHatchBoundary { id } => {
-                QueryResult::HatchBoundary(b.hatch_boundary(*id).map_err(|e| label(qname, e))?)
-            }
-            Query::GetDimensionMeasurement { id } => QueryResult::DimensionMeasurement(
-                b.dimension_measurement(*id).map_err(|e| label(qname, e))?,
-            ),
-            Query::GetAttributes { id } => {
-                QueryResult::Attributes(b.attributes(*id).map_err(|e| label(qname, e))?)
-            }
-            Query::GetBlockEntities { block_name } => QueryResult::BlockEntities(
-                b.block_entities(block_name).map_err(|e| label(qname, e))?,
-            ),
+            Query::GetTextContent { id } => QueryResult::TextContent(b.text_content(*id).map_err(|e| label(qname, e))?),
+            Query::GetHatchBoundary { id } => QueryResult::HatchBoundary(b.hatch_boundary(*id).map_err(|e| label(qname, e))?),
+            Query::GetDimensionMeasurement { id } => QueryResult::DimensionMeasurement(b.dimension_measurement(*id).map_err(|e| label(qname, e))?),
+            Query::GetAttributes { id } => QueryResult::Attributes(b.attributes(*id).map_err(|e| label(qname, e))?),
+            Query::GetBlockEntities { block_name } => QueryResult::BlockEntities(b.block_entities(block_name).map_err(|e| label(qname, e))?),
             Query::GetViewportView { id } => {
                 let (target, height) = b.viewport_view(*id).map_err(|e| label(qname, e))?;
                 QueryResult::ViewportView { target, height }
@@ -442,15 +392,26 @@ fn profile_curves<B: DocApiBackend>(
     op: &'static str,
 ) -> ApiResult<Vec<cadkernel::geom2d::Curve>> {
     if !b.entity_exists(profile) {
-        return Err(ApiError::validation(
-            op,
-            format!("unknown ObjectId {profile:?}"),
-        ));
+        return Err(ApiError::validation(op, format!("unknown ObjectId {profile:?}")));
     }
     b.profile_curves(profile)
 }
 
-/// Validate that an entity exists before performing an operation.
+/// Validate a `Curve2Spec`'s fallible conditions BEFORE mutation (the same rules
+/// the host's `curve_spec_to_entity` enforces), so `CreateMany` stays all-or-nothing.
+/// Currently: ellipse minor/major ratio must be in (0, 1].
+fn validate_curve_spec(spec: &crate::ops::Curve2Spec) -> ApiResult<()> {
+    if let crate::ops::Curve2Spec::Ellipse { ratio, .. } = spec {
+        if !(*ratio > 0.0 && *ratio <= 1.0) {
+            return Err(ApiError::validation(
+                "CreateMany",
+                format!("ellipse minor_axis_ratio must be in (0, 1], got {ratio}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn require_exists<B: DocApiBackend>(b: &B, id: ObjectId, op: &'static str) -> ApiResult<()> {
     if b.entity_exists(id) {
         Ok(())
@@ -469,9 +430,7 @@ fn stale_index(op: &'static str, i: usize, id: ObjectId) -> ApiError {
 
 fn at_index(op: &'static str, i: usize, e: ApiError) -> ApiError {
     match e {
-        ApiError::Validation { reason, .. } => {
-            ApiError::validation(op, format!("index {i}: {reason}"))
-        }
+        ApiError::Validation { reason, .. } => ApiError::validation(op, format!("index {i}: {reason}")),
         other => other,
     }
 }

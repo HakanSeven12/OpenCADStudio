@@ -17,55 +17,47 @@ fn geom_err(kind: GeometryErrorKind, msg: impl Into<String>) -> ApiError {
 /// theorem: V = Σ v0·(v1×v2)/6, C = Σ (v0+v1+v2)·tetra_vol / (4V). Single source
 /// of truth shared by the host backend and the test/example mock backends.
 pub fn mesh_volume_centroid(mesh: &cadkernel::brep::Mesh) -> (f64, [f64; 3]) {
-    mesh.mass_properties().unwrap_or((0.0, [0.0; 3]))
-}
-
-pub fn validate_placement(p: &crate::PlacementSpec) -> ApiResult<()> {
-    let placement = cadkernel::brep::Placement {
-        origin: p.origin,
-        x_axis: p.x_axis,
-        y_axis: p.y_axis,
-        z_axis: p.z_axis,
-    };
-    if placement.scale().is_none() || p.origin.iter().any(|v| !v.is_finite()) {
-        return Err(ApiError::validation(
-            "Transform",
-            "placement must be a finite, nonzero similarity",
-        ));
+    let mut vol = 0.0;
+    let mut c = [0.0; 3];
+    for t in &mesh.triangles {
+        let (v0, v1, v2) = (mesh.positions[t[0]], mesh.positions[t[1]], mesh.positions[t[2]]);
+        let cross = [
+            v1[1] * v2[2] - v1[2] * v2[1],
+            v1[2] * v2[0] - v1[0] * v2[2],
+            v1[0] * v2[1] - v1[1] * v2[0],
+        ];
+        let tet = (v0[0] * cross[0] + v0[1] * cross[1] + v0[2] * cross[2]) / 6.0;
+        vol += tet;
+        for i in 0..3 {
+            c[i] += (v0[i] + v1[i] + v2[i]) * tet;
+        }
     }
-    Ok(())
+    if vol.abs() < 1e-12 {
+        return (0.0, [0.0; 3]);
+    }
+    (vol, [c[0] / (4.0 * vol), c[1] / (4.0 * vol), c[2] / (4.0 * vol)])
 }
 
-/// Construct a solid primitive.
-pub fn make_solid(p: &SolidPrimitive) -> ApiResult<KernelBody> {
-    crate::validation::solid(p)?;
+/// The XY work plane (origin at 0, X=(1,0,0), normal=(0,0,1)).
+fn xy_plane() -> ApiResult<Plane> {
+    Plane::orthonormal([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+        .ok_or_else(|| geom_err(GeometryErrorKind::Other, "failed to construct XY plane"))
+}
+
+/// Construct a solid primitive (plan mapping table).
+pub(crate) fn make_solid(p: &SolidPrimitive) -> ApiResult<KernelBody> {
     use cadkernel::brep::make;
     let body = match *p {
         SolidPrimitive::Cuboid { origin, size } => make::cuboid(origin, size),
         SolidPrimitive::Sphere { centre, radius } => make::sphere(centre, radius),
-        SolidPrimitive::Cylinder {
-            base,
-            radius,
-            height,
-        } => make::cylinder(base, radius, height),
-        SolidPrimitive::Cone {
-            base,
-            radius,
-            height,
-        } => make::cone(base, radius, height),
-        SolidPrimitive::Torus {
-            centre,
-            major_radius,
-            minor_radius,
-        } => make::torus(centre, major_radius, minor_radius),
+        SolidPrimitive::Cylinder { base, radius, height } => make::cylinder(base, radius, height),
+        SolidPrimitive::Cone { base, radius, height } => make::cone(base, radius, height),
+        SolidPrimitive::Torus { centre, major_radius, minor_radius } => {
+            make::torus(centre, major_radius, minor_radius)
+        }
         SolidPrimitive::Wedge { origin, size } => make::wedge(origin, size[0], size[1], size[2]),
     };
-    body.ok_or_else(|| {
-        geom_err(
-            GeometryErrorKind::InvalidInput,
-            "kernel make returned empty body",
-        )
-    })
+    body.ok_or_else(|| geom_err(GeometryErrorKind::InvalidInput, "kernel make returned empty body"))
 }
 
 /// Boolean combine (pure): `brep::combine(a, b, op, operation_tolerance(&[&a,&b]))`.
@@ -78,23 +70,14 @@ pub(crate) fn boolean(a: &KernelBody, b: &KernelBody, op: BoolOp) -> ApiResult<K
 }
 
 /// Extrude a closed 2D profile into a solid (`brep::extrude`).
-pub(crate) fn extrude(
-    plane: Plane,
-    profile: &[Curve2],
-    direction: [f64; 3],
-) -> ApiResult<KernelBody> {
-    cadkernel::brep::extrude(plane, profile, direction)
+pub(crate) fn extrude(profile: &[Curve2], direction: [f64; 3]) -> ApiResult<KernelBody> {
+    cadkernel::brep::extrude(xy_plane()?, profile, direction)
         .ok_or_else(|| geom_err(GeometryErrorKind::InvalidInput, "extrude failed"))
 }
 
 /// Revolve a closed 2D profile about an axis into a solid (`brep::revolve`).
-pub(crate) fn revolve(
-    plane: Plane,
-    profile: &[Curve2],
-    pivot: [f64; 3],
-    axis: [f64; 3],
-    angle: f64,
-) -> ApiResult<KernelBody> {
-    cadkernel::brep::revolve(plane, profile, pivot, axis, angle)
+pub(crate) fn revolve(profile: &[Curve2], pivot: [f64; 3], axis: [f64; 3], angle: f64) -> ApiResult<KernelBody> {
+    cadkernel::brep::revolve(xy_plane()?, profile, pivot, axis, angle)
         .ok_or_else(|| geom_err(GeometryErrorKind::InvalidInput, "revolve failed"))
 }
+

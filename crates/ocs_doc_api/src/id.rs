@@ -1,4 +1,4 @@
-//! Stable entity identity.
+//! Stable entity identity (plan §2 decision #7).
 
 use serde::{Deserialize, Serialize};
 
@@ -23,13 +23,13 @@ impl ObjectId {
     }
 
     /// Build from an `acadrust::Handle` (host/ipc feature).
-    #[cfg(any(feature = "host", feature = "ipc"))]
+    #[cfg(any(feature = "host", feature = "ipc", test))]
     pub fn from_handle(h: acadrust::Handle) -> Self {
         Self(h.value())
     }
 
     /// Convert to an `acadrust::Handle` (host/ipc feature).
-    #[cfg(any(feature = "host", feature = "ipc"))]
+    #[cfg(any(feature = "host", feature = "ipc", test))]
     pub fn to_handle(self) -> acadrust::Handle {
         acadrust::Handle::new(self.0)
     }

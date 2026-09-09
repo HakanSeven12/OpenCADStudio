@@ -304,10 +304,10 @@ Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-
 
 | Variant | Meaning |
 |---|---|
-| `Validation { op, reason }` | Input rejected before any document mutation. |
+| `Validation { op, reason }` | Input rejected **before** any mutation (bulk ops name the failing index). |
 | `Geometry { kind, msg }` | The kernel failed (boolean refused, invalid input, ACIS lift/lower). |
 | `UnknownId(ObjectId)` | The handle is stale / deleted / never existed (never a panic). |
-| `Unsupported(String)` | Capability not supported for this entity or backend. |
+| `Unsupported(String)` | Capability not implemented (e.g. a later-phase family or sub-type). |
 | `Transport(String)` | The channel failed (disconnected / oversized / timeout). |
 
 `ApiError` is serializable, so IPC returns the same structured error the in-process

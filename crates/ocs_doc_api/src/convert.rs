@@ -1,11 +1,9 @@
-//! Entity conversions: map the crate's plain-data DTOs to acadrust
+//! Entity conversions (plan §5.1): map the crate's plain-data DTOs to acadrust
 //! `EntityType` and back. Host feature only (uses the real acadrust types). This
 //! module is host-side-capable but host-independent — it operates purely on
 //! acadrust entities and crate DTOs, so any host can reuse it.
 
-use acadrust::entities::{
-    Arc, Circle, Ellipse, Line, LwPolyline, LwVertex, Point, Ray, Spline, XLine,
-};
+use acadrust::entities::{Arc, Circle, Ellipse, Line, LwPolyline, LwVertex, Point, Ray, Spline, XLine};
 use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;
 
@@ -32,23 +30,26 @@ pub fn entity_to_profile_curves(entity: &EntityType) -> ApiResult<Vec<cadkernel:
         })],
         EntityType::LwPolyline(pl) => {
             if pl.vertices.len() < 2 {
-                return Err(ApiError::validation(
-                    "profile",
-                    "polyline profile needs at least two vertices",
-                ));
+                return Err(ApiError::validation("profile", "polyline profile needs >= 2 vertices"));
             }
-            KCurve::Polyline(cadkernel::geom2d::Polyline {
-                vertices: pl
-                    .vertices
-                    .iter()
-                    .map(|v| cadkernel::geom2d::PolylineVertex {
-                        position: [v.location.x, v.location.y],
-                        bulge: v.bulge,
-                    })
-                    .collect(),
-                closed: pl.is_closed,
-            })
-            .segments()
+            // Convert each segment: straight for bulge==0, a circular arc for
+            // bulge!=0 (bulge = tan(included_angle/4)). This supports bulged
+            // polyline profiles for Extrude/Revolve instead of rejecting them.
+            let n = pl.vertices.len();
+            let count = if pl.is_closed { n } else { n - 1 };
+            let mut segs = Vec::with_capacity(count);
+            for i in 0..count {
+                let a = pl.vertices[i];
+                let b = pl.vertices[(i + 1) % n];
+                let start = [a.location.x, a.location.y];
+                let end = [b.location.x, b.location.y];
+                if a.bulge.abs() < 1e-12 {
+                    segs.push(KCurve::Line(KLine { start, end }));
+                } else {
+                    segs.push(bulge_arc_segment(start, end, a.bulge)?);
+                }
+            }
+            segs
         }
         _ => {
             return Err(ApiError::Unsupported(
@@ -67,18 +68,126 @@ pub fn transform_entity_geometry(
     entity: &EntityType,
     p: &crate::PlacementSpec,
 ) -> ApiResult<EntityType> {
-    crate::geom::validate_placement(p)?;
-    let matrix = acadrust::types::Matrix4 {
-        m: [
-            [p.x_axis[0], p.y_axis[0], p.z_axis[0], p.origin[0]],
-            [p.x_axis[1], p.y_axis[1], p.z_axis[1], p.origin[1]],
-            [p.x_axis[2], p.y_axis[2], p.z_axis[2], p.origin[2]],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
+    // Placement = R·S·v + t where the axis COLUMNS carry rotation AND uniform
+    // scale (|x_axis| = s). A point maps v -> axes·v + origin (axes already embed
+    // s — do NOT pre-multiply by s or scale is applied twice). A direction maps
+    // v -> axes·v (no origin). Scalar fields (radius) scale by s = |x_axis|.
+    let s = (p.x_axis[0] * p.x_axis[0] + p.x_axis[1] * p.x_axis[1] + p.x_axis[2] * p.x_axis[2]).sqrt();
+    // Z-rotation of the placement in the XY plane (for arc angles / insert rotation).
+    let rot_z = p.x_axis[1].atan2(p.x_axis[0]);
+    let apply = |v: Vector3| -> Vector3 {
+        Vector3::new(
+            p.x_axis[0] * v.x + p.y_axis[0] * v.y + p.z_axis[0] * v.z + p.origin[0],
+            p.x_axis[1] * v.x + p.y_axis[1] * v.y + p.z_axis[1] * v.z + p.origin[1],
+            p.x_axis[2] * v.x + p.y_axis[2] * v.y + p.z_axis[2] * v.z + p.origin[2],
+        )
     };
-    let mut moved = entity.clone();
-    moved.apply_transform(&acadrust::types::Transform::from_matrix(matrix));
-    Ok(moved)
+    // Direction/vector transform: rotation+scale only, NO translation.
+    let apply_dir = |v: Vector3| -> Vector3 {
+        Vector3::new(
+            p.x_axis[0] * v.x + p.y_axis[0] * v.y + p.z_axis[0] * v.z,
+            p.x_axis[1] * v.x + p.y_axis[1] * v.y + p.z_axis[1] * v.z,
+            p.x_axis[2] * v.x + p.y_axis[2] * v.y + p.z_axis[2] * v.z,
+        )
+    };
+    let entity = match entity {
+        EntityType::Line(l) => {
+            let mut l = l.clone();
+            l.start = apply(l.start);
+            l.end = apply(l.end);
+            EntityType::Line(l)
+        }
+        EntityType::Circle(c) => {
+            let mut c = c.clone();
+            c.center = apply(c.center);
+            c.radius *= s;
+            EntityType::Circle(c)
+        }
+        EntityType::Arc(a) => {
+            let mut a = a.clone();
+            a.center = apply(a.center);
+            a.radius *= s;
+            // A Z-rotation shifts both angles by the placement's XY rotation.
+            a.start_angle += rot_z;
+            a.end_angle += rot_z;
+            EntityType::Arc(a)
+        }
+        EntityType::Ellipse(e) => {
+            let mut e = e.clone();
+            e.center = apply(e.center);
+            // The major-axis is a direction+length vector: rotate+scale it (no origin).
+            e.major_axis = apply_dir(e.major_axis);
+            // A Z-rotation also shifts the partial-arc sweep (eccentric-anomaly params).
+            e.start_parameter += rot_z;
+            e.end_parameter += rot_z;
+            EntityType::Ellipse(e)
+        }
+        EntityType::Spline(sp) => {
+            let mut sp = sp.clone();
+            for cp in &mut sp.control_points {
+                *cp = apply(*cp);
+            }
+            for fp in &mut sp.fit_points {
+                *fp = apply(*fp);
+            }
+            EntityType::Spline(sp)
+        }
+        EntityType::Ray(r) => {
+            let mut r = r.clone();
+            r.base_point = apply(r.base_point);
+            r.direction = apply_dir(r.direction);
+            EntityType::Ray(r)
+        }
+        EntityType::XLine(x) => {
+            let mut x = x.clone();
+            x.base_point = apply(x.base_point);
+            x.direction = apply_dir(x.direction);
+            EntityType::XLine(x)
+        }
+        EntityType::Insert(ins) => {
+            let mut ins = ins.clone();
+            ins.insert_point = apply(ins.insert_point);
+            // Compose the block rotation with the placement's Z-rotation.
+            ins.rotation += rot_z;
+            EntityType::Insert(ins)
+        }
+        EntityType::Viewport(vp) => {
+            let mut vp = vp.clone();
+            vp.center = apply(vp.center);
+            EntityType::Viewport(vp)
+        }
+        EntityType::Text(t) => {
+            let mut t = t.clone();
+            t.insertion_point = apply(t.insertion_point);
+            EntityType::Text(t)
+        }
+        EntityType::MText(t) => {
+            let mut t = t.clone();
+            t.insertion_point = apply(t.insertion_point);
+            EntityType::MText(t)
+        }
+        EntityType::Point(pt) => {
+            let mut pt = pt.clone();
+            pt.location = apply(pt.location);
+            EntityType::Point(pt)
+        }
+        EntityType::LwPolyline(pl) => {
+            let mut pl = pl.clone();
+            let z0 = pl.elevation;
+            for v in &mut pl.vertices {
+                let t = apply(Vector3::new(v.location.x, v.location.y, z0));
+                v.location = Vector2::new(t.x, t.y);
+                pl.elevation = t.z;
+            }
+            EntityType::LwPolyline(pl)
+        }
+        _ => {
+            return Err(ApiError::Unsupported(
+                "transform is supported for Line/Circle/Arc/Point/LwPolyline (and solids) in v1".into(),
+            ))
+        }
+    };
+    Ok(entity)
 }
 
 fn v3(p: [f64; 3]) -> Vector3 {
@@ -87,31 +196,41 @@ fn v3(p: [f64; 3]) -> Vector3 {
 
 /// Convert a polyline bulge segment (start → end, bulge = tan(θ/4)) to a
 /// `geom2d::Curve::Arc`. Positive bulge = counter-clockwise arc; negative = clockwise.
-pub fn bulge_arc_segment(
-    start: [f64; 2],
-    end: [f64; 2],
-    bulge: f64,
-) -> ApiResult<cadkernel::geom2d::Curve> {
+pub fn bulge_arc_segment(start: [f64; 2], end: [f64; 2], bulge: f64) -> ApiResult<cadkernel::geom2d::Curve> {
     use cadkernel::geom2d::{Arc as KArc, Curve as KCurve};
-    let arc = cadkernel::geom2d::BulgeArc::from_bulge(start, end, bulge)
-        .ok_or_else(|| ApiError::validation("profile", "invalid bulge segment"))?;
-    // The kernel's Arc is counter-clockwise; reverse clockwise endpoints.
-    let (start_angle, end_angle) = if arc.sweep < 0.0 {
-        (arc.end_angle, arc.start_angle)
-    } else {
-        (arc.start_angle, arc.end_angle)
-    };
-    Ok(KCurve::Arc(KArc {
-        centre: arc.center,
-        radius: arc.radius,
-        start_angle,
-        end_angle,
-    }))
+    let chord_x = end[0] - start[0];
+    let chord_y = end[1] - start[1];
+    let chord_len = (chord_x * chord_x + chord_y * chord_y).sqrt();
+    if chord_len < 1e-12 {
+        return Err(ApiError::validation("profile", "bulge segment with coincident endpoints"));
+    }
+    // Included angle θ = 4·atan(bulge); radius = (chord/2) / sin(θ/2).
+    let theta = 4.0 * bulge.atan();
+    let half = theta / 2.0;
+    let sin_half = half.sin();
+    if sin_half.abs() < 1e-9 {
+        return Err(ApiError::validation("profile", "bulge segment with degenerate angle"));
+    }
+    let radius = (chord_len / 2.0) / sin_half.abs();
+    // Center: chord midpoint + perpendicular offset. The apothem MAGNITUDE is
+    // (chord/2)/|tan(θ/2)| (always positive); the SIGN of the bulge alone picks the
+    // side (CCW=+90° perp, CW=-90° perp). Using signed tan(half) AND the sign flip
+    // would double-count and mirror CW arcs to the wrong side.
+    let mid_x = (start[0] + end[0]) / 2.0;
+    let mid_y = (start[1] + end[1]) / 2.0;
+    let apothem = (chord_len / 2.0) / half.tan().abs();
+    let sign = if bulge >= 0.0 { 1.0 } else { -1.0 };
+    let perp_x = -chord_y / chord_len * sign;
+    let perp_y = chord_x / chord_len * sign;
+    let centre = [mid_x + perp_x * apothem, mid_y + perp_y * apothem];
+    // Start/end angles about the centre.
+    let start_angle = (start[1] - centre[1]).atan2(start[0] - centre[0]);
+    let end_angle = (end[1] - centre[1]).atan2(end[0] - centre[0]);
+    Ok(KCurve::Arc(KArc { centre, radius, start_angle, end_angle }))
 }
 
 /// Build an acadrust entity for a 2D curve construction spec.
 pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
-    crate::validation::curve(spec)?;
     let entity = match spec {
         Curve2Spec::Line { start, end } => {
             let mut e = Line::new();
@@ -137,13 +256,6 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
                     vertex_id: 0,
                 })
                 .collect();
-            e.elevation = points.first().map_or(0.0, |p| p[2]);
-            if points.iter().any(|p| p[2] != e.elevation) {
-                return Err(ApiError::validation(
-                    "CreateCurve",
-                    "polyline points must share an elevation",
-                ));
-            }
             e.is_closed = *closed;
             EntityType::LwPolyline(e)
         }
@@ -152,12 +264,7 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             e.location = v3(*position);
             EntityType::Point(e)
         }
-        Curve2Spec::Arc {
-            centre,
-            radius,
-            start_angle,
-            end_angle,
-        } => {
+        Curve2Spec::Arc { centre, radius, start_angle, end_angle } => {
             let mut e = Arc::new();
             e.center = v3(*centre);
             e.radius = *radius;
@@ -165,13 +272,7 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             e.end_angle = *end_angle;
             EntityType::Arc(e)
         }
-        Curve2Spec::Ellipse {
-            centre,
-            major_axis,
-            ratio,
-            start,
-            end,
-        } => {
+        Curve2Spec::Ellipse { centre, major_axis, ratio, start, end } => {
             // Validate the minor/major ratio so the (major-axis) bounds never
             // under-bound: ratio must be in (0, 1].
             if !(*ratio > 0.0 && *ratio <= 1.0) {
@@ -188,12 +289,7 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             e.end_parameter = *end;
             EntityType::Ellipse(e)
         }
-        Curve2Spec::Spline {
-            degree,
-            control_points,
-            knots,
-            weights,
-        } => {
+        Curve2Spec::Spline { degree, control_points, knots, weights } => {
             let mut e = Spline::new();
             e.degree = *degree;
             e.control_points = control_points.iter().map(|p| v3(*p)).collect();
@@ -249,20 +345,161 @@ pub fn entity_kind_name(entity: &EntityType) -> &'static str {
     }
 }
 
-/// Existing entity bounds; unbounded or empty geometry returns an error.
+/// Coarse bounds for a non-solid entity (solids go through the kernel cache).
+/// For v1 typed curves we compute the obvious bounds; anything else errors
+/// `Unsupported` (viewport/annotation bounds land in later phases).
 pub fn entity_bounds(entity: Option<&EntityType>, id: ObjectId) -> ApiResult<Aabb> {
     let entity = entity.ok_or(ApiError::UnknownId(id))?;
-    if matches!(entity, EntityType::Ray(_) | EntityType::XLine(_)) {
-        return Err(ApiError::Unsupported("unbounded entity".into()));
+    let bb = match entity {
+        EntityType::Line(l) => Aabb {
+            min: [
+                l.start.x.min(l.end.x),
+                l.start.y.min(l.end.y),
+                l.start.z.min(l.end.z),
+            ],
+            max: [
+                l.start.x.max(l.end.x),
+                l.start.y.max(l.end.y),
+                l.start.z.max(l.end.z),
+            ],
+        },
+        EntityType::Circle(c) => Aabb {
+            min: [c.center.x - c.radius, c.center.y - c.radius, c.center.z],
+            max: [c.center.x + c.radius, c.center.y + c.radius, c.center.z],
+        },
+        EntityType::Point(p) => Aabb {
+            min: [p.location.x, p.location.y, p.location.z],
+            max: [p.location.x, p.location.y, p.location.z],
+        },
+        EntityType::LwPolyline(pl) if !pl.vertices.is_empty() => {
+            let mut min = [f64::INFINITY; 3];
+            let mut max = [f64::NEG_INFINITY; 3];
+            for vtx in &pl.vertices {
+                let (x, y, z) = (vtx.location.x, vtx.location.y, pl.elevation);
+                min = [min[0].min(x), min[1].min(y), min[2].min(z)];
+                max = [max[0].max(x), max[1].max(y), max[2].max(z)];
+            }
+            Aabb { min, max }
+        }
+        EntityType::Arc(a) => {
+            // Coarse: full-circle bounds (exact arc bounds is a later refinement).
+            Aabb {
+                min: [a.center.x - a.radius, a.center.y - a.radius, a.center.z],
+                max: [a.center.x + a.radius, a.center.y + a.radius, a.center.z],
+            }
+        }
+        EntityType::Ellipse(e) => {
+            // Coarse: use the major-axis length as the bounding radius.
+            let r = (e.major_axis.x * e.major_axis.x
+                + e.major_axis.y * e.major_axis.y
+                + e.major_axis.z * e.major_axis.z)
+                .sqrt();
+            Aabb {
+                min: [e.center.x - r, e.center.y - r, e.center.z - r],
+                max: [e.center.x + r, e.center.y + r, e.center.z + r],
+            }
+        }
+        EntityType::Spline(s) => points_aabb(s.control_points.iter().collect(), id)?,
+        EntityType::Viewport(vp) => Aabb {
+            min: [
+                vp.center.x - vp.width / 2.0,
+                vp.center.y - vp.height / 2.0,
+                vp.center.z,
+            ],
+            max: [
+                vp.center.x + vp.width / 2.0,
+                vp.center.y + vp.height / 2.0,
+                vp.center.z,
+            ],
+        },
+        EntityType::RasterImage(img) => {
+            // Bracket ALL FOUR image corners (origin, +u*W, +v*H, +u*W+v*H) per
+            // axis so rotated/flipped images are not under-bounded.
+            let (w, h) = (img.size.x, img.size.y);
+            let ux = img.u_vector.x * w;
+            let uy = img.u_vector.y * w;
+            let vx = img.v_vector.x * h;
+            let vy = img.v_vector.y * h;
+            let x0 = img.insertion_point.x;
+            let y0 = img.insertion_point.y;
+            let xs = [x0, x0 + ux, x0 + vx, x0 + ux + vx];
+            let ys = [y0, y0 + uy, y0 + vy, y0 + uy + vy];
+            let min_x = xs.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max_x = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let min_y = ys.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max_y = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            Aabb {
+                min: [min_x, min_y, img.insertion_point.z],
+                max: [max_x, max_y, img.insertion_point.z],
+            }
+        }
+        EntityType::Text(t) => Aabb {
+            // Coarse: a square of side height*N around the insertion point.
+            min: [t.insertion_point.x, t.insertion_point.y - t.height, t.insertion_point.z],
+            max: [t.insertion_point.x + t.height * t.value.len() as f64, t.insertion_point.y, t.insertion_point.z],
+        },
+        EntityType::MText(t) => Aabb {
+            min: [t.insertion_point.x, t.insertion_point.y - t.height, t.insertion_point.z],
+            max: [t.insertion_point.x + t.height * t.value.len() as f64, t.insertion_point.y, t.insertion_point.z],
+        },
+        EntityType::Dimension(acadrust::entities::Dimension::Linear(d)) => points_aabb(
+            [&d.first_point, &d.second_point, &d.definition_point].into_iter().collect(),
+            id,
+        )?,
+        EntityType::Hatch(h) => {
+            let mut min = [f64::INFINITY; 3];
+            let mut max = [f64::NEG_INFINITY; 3];
+            let mut any = false;
+            for path in &h.paths {
+                for edge in &path.edges {
+                    if let acadrust::entities::BoundaryEdge::Line(le) = edge {
+                        for (x, y) in [(le.start.x, le.start.y), (le.end.x, le.end.y)] {
+                            min = [min[0].min(x), min[1].min(y), min[2].min(0.0)];
+                            max = [max[0].max(x), max[1].max(y), max[2].max(0.0)];
+                            any = true;
+                        }
+                    }
+                }
+            }
+            if !any {
+                return Err(ApiError::Unsupported("hatch has no line-edge boundary".into()));
+            }
+            Aabb { min, max }
+        }
+        // Read-mostly families with vertex/point data: bounds from their points.
+        EntityType::Leader(l) => points_aabb(l.vertices.iter().collect(), id)?,
+        EntityType::Mesh(m) => points_aabb(m.vertices.iter().collect(), id)?,
+        EntityType::Face3D(f) => points_aabb(
+            [&f.first_corner, &f.second_corner, &f.third_corner, &f.fourth_corner].into_iter().collect(),
+            id,
+        )?,
+        EntityType::MLine(m) => points_aabb(m.vertices.iter().map(|v| &v.position).collect(), id)?,
+        EntityType::Helix(h) => {
+            // Bound the evaluated spline's control polygon (conservative); the
+            // single start_point alone would be a degenerate zero-size box.
+            if h.spline.control_points.is_empty() {
+                points_aabb([&h.start_point].into_iter().collect(), id)?
+            } else {
+                points_aabb(h.spline.control_points.iter().collect(), id)?
+            }
+        }
+        // Ray/XLine are unbounded by definition — no finite bounds.
+        _ => return Err(ApiError::Unsupported("bounds for this entity family is not yet implemented".into())),
+    };
+    Ok(bb)
+}
+
+/// AABB over a set of 3D points. A geometry-Empty error if there are no points
+/// to bound (the entity exists — do NOT misclassify as a stale/deleted id).
+fn points_aabb(pts: Vec<&Vector3>, _id: ObjectId) -> ApiResult<Aabb> {
+    if pts.is_empty() {
+        return Err(ApiError::geometry(GeometryErrorKind::Empty, "entity has no points to bound"));
     }
-    let bounds = entity.as_entity().bounding_box();
-    let min = [bounds.min.x, bounds.min.y, bounds.min.z];
-    let max = [bounds.max.x, bounds.max.y, bounds.max.z];
-    if min.iter().chain(&max).any(|v| !v.is_finite()) {
-        return Err(ApiError::geometry(
-            GeometryErrorKind::Empty,
-            "entity has no finite bounds",
-        ));
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for p in pts {
+        min = [min[0].min(p.x), min[1].min(p.y), min[2].min(p.z)];
+        max = [max[0].max(p.x), max[1].max(p.y), max[2].max(p.z)];
     }
     Ok(Aabb { min, max })
 }

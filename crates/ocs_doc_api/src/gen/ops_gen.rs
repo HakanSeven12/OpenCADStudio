@@ -2,18 +2,14 @@
 // from spec/entities.toml by build.rs — the enum is the canonical append-only
 // wire vocabulary; the spec's `op` names must each map to a variant here
 // (enforced by a test). Append new variants at the END only (bincode discriminant
-// stability). Do NOT reorder or remove variants.
+// stability, plan §7). Do NOT reorder or remove variants.
 
 use serde::{Deserialize, Serialize};
 
 use crate::id::ObjectId;
-use crate::ops::{
-    AttributeDefinitionSpec, BoolOp, Curve2Spec, DimensionAngularSpec, DimensionRadialSpec,
-    DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, RasterImageSpec,
-    SolidPrimitive, TableSpec, TextSpec, ViewportSpec,
-};
+use crate::ops::{AttributeDefinitionSpec, BoolOp, Curve2Spec, DimensionAngularSpec, DimensionRadialSpec, DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, RasterImageSpec, SolidPrimitive, TableSpec, TextSpec, ViewportSpec};
 
-/// A typed write operation. Each variant is ONE atomic host call = one
+/// A typed write operation (plan §5). Each variant is ONE atomic host call = one
 /// undo step. Append new variants at the END only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -21,40 +17,16 @@ pub enum Operation {
     // construction
     CreateSolid(SolidPrimitive),
     CreateCurve(Curve2Spec),
-    Extrude {
-        profile: ObjectId,
-        direction: [f64; 3],
-    },
-    Revolve {
-        profile: ObjectId,
-        axis: ([f64; 3], [f64; 3]),
-        angle: f64,
-    },
+    Extrude { profile: ObjectId, direction: [f64; 3] },
+    Revolve { profile: ObjectId, axis: ([f64; 3], [f64; 3]), angle: f64 },
     // modification
-    Transform {
-        id: ObjectId,
-        placement: PlacementSpec,
-    },
-    SolidBoolean {
-        op: BoolOp,
-        a: ObjectId,
-        b: ObjectId,
-        erase_sources: bool,
-    },
-    AddVertex {
-        id: ObjectId,
-        at: usize,
-        point: [f64; 3],
-    },
-    Delete {
-        id: ObjectId,
-    },
+    Transform { id: ObjectId, placement: PlacementSpec },
+    SolidBoolean { op: BoolOp, a: ObjectId, b: ObjectId, erase_sources: bool },
+    AddVertex { id: ObjectId, at: usize, point: [f64; 3] },
+    Delete { id: ObjectId },
     // Bulk ops (single op, upfront-validation all-or-nothing — NOT a transaction, §5.3)
     CreateMany(Vec<EntitySpec>),
-    TransformMany {
-        ids: Vec<ObjectId>,
-        placement: PlacementSpec,
-    },
+    TransformMany { ids: Vec<ObjectId>, placement: PlacementSpec },
     DeleteMany(Vec<ObjectId>),
     // containers
     CreateInsert(InsertSpec),
@@ -63,32 +35,19 @@ pub enum Operation {
     // annotations
     CreateText(TextSpec),
     CreateMText(MTextSpec),
-    SetTextContent {
-        id: ObjectId,
-        value: String,
-    },
+    SetTextContent { id: ObjectId, value: String },
     // hatch
     CreateHatch(HatchSpec),
     // dimensions
     CreateDimensionLinear(DimensionSpec),
     // attributes
-    SetAttribute {
-        id: ObjectId,
-        tag: String,
-        value: String,
-    },
+    SetAttribute { id: ObjectId, tag: String, value: String },
     // viewport view
-    SetViewportView {
-        id: ObjectId,
-        view_target: [f64; 3],
-        view_height: f64,
-    },
+    SetViewportView { id: ObjectId, view_target: [f64; 3], view_height: f64 },
     // media
     CreateRasterImage(RasterImageSpec),
     // multi-profile solid
-    Loft {
-        profiles: Vec<ObjectId>,
-    },
+    Loft { profiles: Vec<ObjectId> },
     // dimension sub-types
     CreateDimensionRadius(DimensionRadialSpec),
     CreateDimensionDiameter(DimensionRadialSpec),

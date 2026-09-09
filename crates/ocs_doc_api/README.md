@@ -30,6 +30,13 @@ Transports bind to one document tab. Typed handles from another transport and
 requests for another tab are rejected. Raw `ObjectId` values are relative to the
 receiving document. Errors are serialized as `ApiError` variants over IPC.
 
+XDATA and XRECORD payloads are carried as plain-data, serde-compatible DTOs
+(`XDataRecord`, `XRecordSpec`, and their value/entry types) and roundtripped
+verbatim by the host. Every `Entity` handle can read/write one XDATA record per
+registered application name via `xdata(application_name)` and `set_xdata(...)`,
+and standalone XRECORD objects can be created with `doc.entities().create_xrecord(...)`
+and updated through the `XRecord` handle.
+
 | Feature | Use |
 |---|---|
 | Default | DTOs, facade, transport trait and binding schema |

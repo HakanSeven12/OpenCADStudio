@@ -167,6 +167,24 @@ fn operation_variants() -> Vec<String> {
             second_point: [0.0; 3],
             arc_location: [0.0; 3],
         }),
+        Operation::SetXData {
+            id: ObjectId::from_u64(0),
+            application_name: String::new(),
+            record: None,
+        },
+        Operation::CreateXRecord(ocs_doc_api::ops::XRecordSpec {
+            name: String::new(),
+            cloning_flags: ocs_doc_api::ops::XRecordCloningFlags::NotApplicable,
+            entries: vec![],
+        }),
+        Operation::SetXRecord {
+            id: ObjectId::from_u64(0),
+            spec: ocs_doc_api::ops::XRecordSpec {
+                name: String::new(),
+                cloning_flags: ocs_doc_api::ops::XRecordCloningFlags::NotApplicable,
+                entries: vec![],
+            },
+        },
     ];
     _marker
         .iter()
@@ -224,6 +242,13 @@ fn query_variants() -> Vec<String> {
             block_name: String::new(),
         },
         Query::GetViewportView {
+            id: ObjectId::from_u64(0),
+        },
+        Query::GetXData {
+            id: ObjectId::from_u64(0),
+            application_name: String::new(),
+        },
+        Query::GetXRecord {
             id: ObjectId::from_u64(0),
         },
     ];
@@ -309,6 +334,9 @@ const OPERATION_BASELINE: &[&str] = &[
     "CreateAttributeDefinition",
     "CreateTable",
     "CreateDimensionAngular2Ln",
+    "SetXData",
+    "CreateXRecord",
+    "SetXRecord",
 ];
 
 /// Recorded baseline of the `Query` variant order.
@@ -325,6 +353,8 @@ const QUERY_BASELINE: &[&str] = &[
     "GetAttributes",
     "GetBlockEntities",
     "GetViewportView",
+    "GetXData",
+    "GetXRecord",
 ];
 
 #[test]

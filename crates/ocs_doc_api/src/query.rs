@@ -68,6 +68,10 @@ pub enum QueryResult {
         target: [f64; 3],
         height: f64,
     },
+    /// An XDATA record for a single application (`None` if no such record).
+    XData(Option<crate::ops::XDataRecord>),
+    /// An XRECORD object payload.
+    XRecord(crate::ops::XRecordSpec),
 }
 
 /// Convenience: the query name for diagnostics.
@@ -87,6 +91,8 @@ impl crate::gen::Query {
             GetAttributes { .. } => "GetAttributes",
             GetBlockEntities { .. } => "GetBlockEntities",
             GetViewportView { .. } => "GetViewportView",
+            GetXData { .. } => "GetXData",
+            GetXRecord { .. } => "GetXRecord",
         }
     }
 }

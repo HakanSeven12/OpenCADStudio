@@ -1124,6 +1124,92 @@
       "handle": "Entity",
       "methods": [],
       "name": "Table"
+    },
+    {
+      "acadrust_variant": "XRecord",
+      "collection": "entities",
+      "constructors": [
+        {
+          "args": [
+            {
+              "name": "spec",
+              "ty": "XRecordSpec"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "name": "create_xrecord",
+          "op": "CreateXRecord",
+          "returns": "Entity"
+        }
+      ],
+      "handle": "XRecord",
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "payload",
+          "op": null,
+          "query": "GetXRecord",
+          "read_only": true,
+          "returns": "XRecordSpec"
+        },
+        {
+          "args": [
+            {
+              "name": "spec",
+              "ty": "XRecordSpec"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "set_payload",
+          "op": "SetXRecord",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        },
+        {
+          "args": [
+            {
+              "name": "application_name",
+              "ty": "&str"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "xdata",
+          "op": null,
+          "query": "GetXData",
+          "read_only": true,
+          "returns": "Option<XDataRecord>"
+        },
+        {
+          "args": [
+            {
+              "name": "application_name",
+              "ty": "&str"
+            },
+            {
+              "name": "record",
+              "ty": "Option<XDataRecord>"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "set_xdata",
+          "op": "SetXData",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        }
+      ],
+      "name": "XRecord"
     }
   ],
   "layouts": {
@@ -1164,7 +1250,10 @@
         "CreateDimensionAngular(DimensionAngularSpec)",
         "CreateAttributeDefinition(AttributeDefinitionSpec)",
         "CreateTable(TableSpec)",
-        "CreateDimensionAngular2Ln(DimensionAngularSpec)"
+        "CreateDimensionAngular2Ln(DimensionAngularSpec)",
+        "SetXData { id: ObjectId, application_name: String, record: Option<XDataRecord> }",
+        "CreateXRecord(XRecordSpec)",
+        "SetXRecord { id: ObjectId, spec: XRecordSpec }"
       ]
     },
     "Query": {
@@ -1180,7 +1269,9 @@
         "GetDimensionMeasurement { id: ObjectId }",
         "GetAttributes { id: ObjectId }",
         "GetBlockEntities { block_name: String }",
-        "GetViewportView { id: ObjectId }"
+        "GetViewportView { id: ObjectId }",
+        "GetXData { id: ObjectId, application_name: String }",
+        "GetXRecord { id: ObjectId }"
       ]
     }
   },
@@ -1205,7 +1296,8 @@
       "XLine",
       "Text",
       "MText",
-      "Dimension"
+      "Dimension",
+      "XRecord"
     ],
     "root": "DocApi"
   },

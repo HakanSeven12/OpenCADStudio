@@ -41,9 +41,12 @@ pub use envelope::{DocApiEnvelope, EnvelopeBody, OpOutcome, Receipt};
 pub use facade::{
     ArcCurve, Circle, CurveCollection, Dimension, DocApi, Document, Ellipse, Entity,
     EntityCollection, HasId, Line, MText, OpGroup, Point, Polyline, QueryBatch, QueryResults, Ray,
-    Solid, SolidCollection, Spline, Text, XLine,
+    Solid, SolidCollection, Spline, Text, XLine, XRecord,
 };
-pub use ops::{BoolOp, Curve2Spec, EntitySpec, Operation, PlacementSpec, SolidPrimitive};
+pub use ops::{
+    BoolOp, Curve2Spec, EntitySpec, Operation, PlacementSpec, SolidPrimitive, XDataRecord,
+    XDataValue, XRecordCloningFlags, XRecordEntry, XRecordSpec, XRecordValue,
+};
 pub use query::{Aabb, EntityView, Query, QueryResult};
 
 #[cfg(feature = "host")]

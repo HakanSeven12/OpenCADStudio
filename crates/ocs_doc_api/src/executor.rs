@@ -353,6 +353,30 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::SetXData {
+            id,
+            application_name,
+            record,
+        } => {
+            require_exists(b, *id, name)?;
+            b.push_undo(name);
+            b.set_xdata(*id, application_name, record.as_ref())?;
+            b.finalize_op();
+            OpOutcome::Updated(*id)
+        }
+        Operation::CreateXRecord(spec) => {
+            b.push_undo(name);
+            let id = b.add_xrecord(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
+        Operation::SetXRecord { id, spec } => {
+            require_exists(b, *id, name)?;
+            b.push_undo(name);
+            b.set_xrecord(*id, spec)?;
+            b.finalize_op();
+            OpOutcome::Updated(*id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),
@@ -416,6 +440,24 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
             Query::GetViewportView { id } => {
                 let (target, height) = b.viewport_view(*id).map_err(|e| label(qname, e))?;
                 QueryResult::ViewportView { target, height }
+            }
+            Query::GetXData {
+                id,
+                application_name,
+            } => QueryResult::XData(
+                b.xdata(*id, application_name)
+                    .map_err(|e| label(qname, e))?
+                    .clone(),
+            ),
+            Query::GetXRecord { id } => {
+                QueryResult::XRecord(b.xrecord(*id).map_err(|e| label(qname, e))?.ok_or_else(
+                    || {
+                        ApiError::validation(
+                            qname,
+                            format!("ObjectId {id:?} is not an XRecord"),
+                        )
+                    },
+                )?)
             }
         };
         results.push(r);

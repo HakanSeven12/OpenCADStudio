@@ -92,6 +92,10 @@ struct MockBackend {
     curves: HashMap<ObjectId, Curve2Spec>,
     /// Stored viewport views (target, height).
     viewport_views: HashMap<ObjectId, ([f64; 3], f64)>,
+    /// Stored XDATA records keyed by (entity id, application name).
+    xdata_store: HashMap<(ObjectId, String), ocs_doc_api::XDataRecord>,
+    /// Stored XRECORD payloads keyed by entity id.
+    xrecord_store: HashMap<ObjectId, ocs_doc_api::XRecordSpec>,
 }
 
 impl MockBackend {
@@ -345,6 +349,50 @@ impl DocApiBackend for MockBackend {
             .copied()
             .ok_or(ApiError::UnknownId(id))
     }
+    fn set_xdata(
+        &mut self,
+        id: ObjectId,
+        application_name: &str,
+        record: Option<&ocs_doc_api::XDataRecord>,
+    ) -> ApiResult<()> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        let key = (id, application_name.to_string());
+        match record {
+            Some(r) => {
+                self.xdata_store.insert(key, r.clone());
+            }
+            None => {
+                self.xdata_store.remove(&key);
+            }
+        }
+        Ok(())
+    }
+    fn xdata(&self, id: ObjectId, application_name: &str) -> ApiResult<Option<ocs_doc_api::XDataRecord>> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        Ok(self.xdata_store.get(&(id, application_name.to_string())).cloned())
+    }
+    fn add_xrecord(&mut self, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("XRecord");
+        self.xrecord_store.insert(id, spec.clone());
+        Ok(id)
+    }
+    fn set_xrecord(&mut self, id: ObjectId, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<()> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        self.xrecord_store.insert(id, spec.clone());
+        Ok(())
+    }
+    fn xrecord(&self, id: ObjectId) -> ApiResult<Option<ocs_doc_api::XRecordSpec>> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        Ok(self.xrecord_store.get(&id).cloned())
+    }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {
             Ok(())
@@ -354,6 +402,8 @@ impl DocApiBackend for MockBackend {
     }
     fn remove_entity(&mut self, id: ObjectId) -> ApiResult<bool> {
         self.bodies.remove(&id);
+        self.xdata_store.retain(|(k, _), _| *k != id);
+        self.xrecord_store.remove(&id);
         Ok(self.kinds.remove(&id).is_some())
     }
     fn get_entity(&mut self, id: ObjectId) -> ApiResult<EntityView> {

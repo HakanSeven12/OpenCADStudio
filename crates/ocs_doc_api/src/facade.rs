@@ -18,6 +18,8 @@ use crate::query::{Aabb, EntityView, QueryResult};
 use crate::revision::GeometryRevision;
 use crate::transport::Transport;
 
+use crate::ops::{XDataRecord, XRecordSpec};
+
 /// Shared session: the transport. Held by every handle. The transport already
 /// carries the tab binding (IPC) or the backend (in-process), so the session
 /// stores no per-tab field.
@@ -167,6 +169,15 @@ impl Document {
             _ => Err(ApiError::Transport(
                 "unexpected block-entities result".into(),
             )),
+        }
+    }
+
+    /// Lookup an `XRECORD` object by id and return a typed accessor handle.
+    pub fn get_xrecord(&self, id: ObjectId) -> ApiResult<XRecord> {
+        // Validate existence + that the payload is readable as an XRecord.
+        match self.session.one_query(Query::GetXRecord { id })? {
+            QueryResult::XRecord(_) => Ok(XRecord::new(self.session.clone(), id)),
+            _ => Err(ApiError::Transport("unexpected xrecord result".into())),
         }
     }
 
@@ -354,6 +365,25 @@ handle!(XLine);
 handle!(Text);
 handle!(MText);
 handle!(Dimension);
+handle!(XRecord);
+
+impl XRecord {
+    /// Read the XRECORD payload.
+    pub fn payload(&self) -> ApiResult<XRecordSpec> {
+        match self.session.one_query(Query::GetXRecord { id: self.id })? {
+            QueryResult::XRecord(spec) => Ok(spec),
+            _ => Err(ApiError::Transport("unexpected xrecord result".into())),
+        }
+    }
+    /// Replace the XRECORD payload in place (one undo step).
+    pub fn set_payload(&self, spec: &XRecordSpec) -> ApiResult<()> {
+        self.session.apply_op(Operation::SetXRecord {
+            id: self.id,
+            spec: spec.clone(),
+        })?;
+        Ok(())
+    }
+}
 
 impl Dimension {
     /// The measured value of this dimension (distance for linear/radius, degrees
@@ -413,6 +443,33 @@ impl Entity {
             id: self.id,
             view_target,
             view_height,
+        })?;
+        Ok(())
+    }
+    /// The XDATA record for `application_name` on this entity (`None` if absent).
+    pub fn xdata(&self, application_name: &str) -> ApiResult<Option<XDataRecord>> {
+        match self
+            .session
+            .one_query(Query::GetXData {
+                id: self.id,
+                application_name: application_name.to_string(),
+            })?
+        {
+            QueryResult::XData(v) => Ok(v),
+            _ => Err(ApiError::Transport("unexpected xdata result".into())),
+        }
+    }
+    /// Attach or replace an XDATA record for `application_name` on this entity.
+    /// Pass `None` to remove the record (one undo step).
+    pub fn set_xdata(
+        &self,
+        application_name: &str,
+        record: Option<XDataRecord>,
+    ) -> ApiResult<()> {
+        self.session.apply_op(Operation::SetXData {
+            id: self.id,
+            application_name: application_name.to_string(),
+            record,
         })?;
         Ok(())
     }
@@ -1001,6 +1058,26 @@ impl EntityCollection {
         self.session.apply_op(Operation::Delete { id })?;
         Ok(())
     }
+
+    /// Create a standalone `XRECORD` object (returns an `Entity` handle).
+    pub fn create_xrecord(&self, spec: &XRecordSpec) -> ApiResult<Entity> {
+        let receipt = self.session.apply_op(Operation::CreateXRecord(spec.clone()))?;
+        let id = receipt
+            .outcome
+            .and_then(|o| o.new_id())
+            .ok_or_else(|| ApiError::Transport("create_xrecord returned no id".into()))?;
+        Ok(Entity::new(self.session.clone(), id))
+    }
+
+    /// Lookup an `XRECORD` object by id and return a typed accessor handle.
+    pub fn get_xrecord(&self, id: ObjectId) -> ApiResult<XRecord> {
+        // Validate existence + that the payload is readable as an XRecord.
+        match self.session.one_query(Query::GetXRecord { id })? {
+            QueryResult::XRecord(_) => Ok(XRecord::new(self.session.clone(), id)),
+            _ => Err(ApiError::Transport("unexpected xrecord result".into())),
+        }
+    }
+
     /// Bulk transform (one op, all-or-nothing).
     pub fn transform_many(&self, ids: &[ObjectId], placement: PlacementSpec) -> ApiResult<()> {
         self.session.apply_op(Operation::TransformMany {

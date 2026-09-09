@@ -4251,6 +4251,12 @@ properties={:.1}ms picked={}",
                 if box_anchor.is_none() {
                     let (view_rot, eye, all_wires) = self.pick_view(i, &edit_cam, bounds);
                     let click_world = self.cursor_model_point(i, &edit_cam, p, bounds);
+                    // The click that *starts* a window: the pick under the cursor decides
+                    // whether this selects an entity or arms a box, and it runs before the
+                    // rubber band can appear. Timed separately from the commit, which is
+                    // what `select-commit` covers.
+                    let t_arm = crate::perf::enabled().then(Instant::now);
+                    let prior_selection = self.tabs[i].scene.selected.len();
                     let click_candidates = self.tabs[i].scene.interaction_pick_candidates_near(
                         all_wires,
                         click_world,
@@ -4385,6 +4391,16 @@ properties={:.1}ms picked={}",
                             // (#234). Computed before the selection
                             // borrow so the &self projection can't clash.
                             let anchor_world = self.cursor_model_point(i, &edit_cam, p, bounds);
+                            if let Some(t) = t_arm {
+                                let arm_ms = t.elapsed().as_secs_f64() * 1000.0;
+                                if arm_ms >= 5.0 {
+                                    crate::perf_record!(
+                                        "[perf] select-arm {arm_ms:>7.1}ms pick+clear, \
+was_selected={}",
+                                        prior_selection,
+                                    );
+                                }
+                            }
                             let mut sel = self.tabs[i].scene.selection.borrow_mut();
                             // Full-canvas space: ViewportMove updates
                             // box_current in canvas coords and the overlay
@@ -4486,6 +4502,10 @@ properties={:.1}ms picked={}",
                     let candidate_handles = self.tabs[i]
                         .scene
                         .interaction_candidate_handles(&area_candidates);
+                    // `hit` covers five things, and which of them owns it has
+                    // never been separated: resolving candidate handles, the wire
+                    // box test, the two hatch tests and the two mesh tests.
+                    let m_handles = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     let mut handles: Vec<Handle> = scene::pick::hit_test::box_hit(
                         a,
                         p,
@@ -4498,6 +4518,7 @@ properties={:.1}ms picked={}",
                     .into_iter()
                     .filter_map(|s| Scene::handle_from_wire_name(s))
                     .collect();
+                    let m_wires = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     handles.extend(scene::pick::hit_test::box_hit_hatch(
                         a,
                         p,
@@ -4520,6 +4541,7 @@ properties={:.1}ms picked={}",
                         bounds,
                         candidate_handles.as_ref(),
                     ));
+                    let m_hatch = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     handles.extend(self.tabs[i].scene.mesh_box_hit(
                         a,
                         p,
@@ -4566,8 +4588,13 @@ properties={:.1}ms picked={}",
                     if crate::perf::enabled() {
                         crate::perf_record!(
                             "[perf] select-commit kind=window crossing={crossing} \
-candidates={cand_ms:.1}ms hit={hit_ms:.1}ms filter={filter_ms:.1}ms \
-apply={apply_ms:.1}ms properties={:.1}ms picked={}",
+candidates={cand_ms:.1}ms hit={hit_ms:.1}ms [handles={:.1} wires={:.1} \
+hatch={:.1} mesh={:.1}] filter={filter_ms:.1}ms apply={apply_ms:.1}ms \
+properties={:.1}ms picked={}",
+                            m_handles.unwrap_or(0.0),
+                            m_wires.unwrap_or(0.0) - m_handles.unwrap_or(0.0),
+                            m_hatch.unwrap_or(0.0) - m_wires.unwrap_or(0.0),
+                            hit_ms - m_hatch.unwrap_or(0.0),
                             t_props.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0),
                             handles.len(),
                         );

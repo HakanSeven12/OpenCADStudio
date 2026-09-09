@@ -47,6 +47,210 @@ pub enum TangentGeom {
         start_angle: f64,
         end_angle: f64,
     },
+    /// Ellipse or elliptical arc in an arbitrary world-space plane.
+    PlanarEllipse {
+        center: [f64; 3],
+        major_axis: [f64; 3],
+        normal: [f64; 3],
+        minor_axis_ratio: f64,
+        start_param: f64,
+        end_param: f64,
+    },
+}
+
+impl TangentGeom {
+    pub fn translated(&self, delta: glam::DVec3) -> Self {
+        match self {
+            Self::Line { p1, p2 } => Self::Line {
+                p1: [p1[0] + delta.x as f32, p1[1] + delta.y as f32, p1[2] + delta.z as f32],
+                p2: [p2[0] + delta.x as f32, p2[1] + delta.y as f32, p2[2] + delta.z as f32],
+            },
+            Self::Circle { center, radius } => Self::Circle {
+                center: [center[0] + delta.x as f32, center[1] + delta.y as f32, center[2] + delta.z as f32],
+                radius: *radius,
+            },
+            Self::PlanarCircle { center, axis_x, axis_y, radius } => Self::PlanarCircle {
+                center: [center[0] + delta.x, center[1] + delta.y, center[2] + delta.z],
+                axis_x: *axis_x,
+                axis_y: *axis_y,
+                radius: *radius,
+            },
+            Self::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => Self::Arc {
+                center: [center[0] + delta.x, center[1] + delta.y, center[2] + delta.z],
+                axis_x: *axis_x,
+                axis_y: *axis_y,
+                radius: *radius,
+                start_angle: *start_angle,
+                end_angle: *end_angle,
+            },
+            Self::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => Self::PlanarEllipse {
+                center: [center[0] + delta.x, center[1] + delta.y, center[2] + delta.z],
+                major_axis: *major_axis,
+                normal: *normal,
+                minor_axis_ratio: *minor_axis_ratio,
+                start_param: *start_param,
+                end_param: *end_param,
+            },
+        }
+    }
+
+    pub fn rotated(&self, center: glam::DVec3, axis: glam::DVec3, angle_rad: f64) -> Self {
+        let quat = glam::DQuat::from_axis_angle(axis.normalize_or(glam::DVec3::Z), angle_rad);
+        let rot_pt = |p: [f64; 3]| (center + quat * (glam::DVec3::from_array(p) - center)).to_array();
+        let rot_vec = |v: [f64; 3]| (quat * glam::DVec3::from_array(v)).to_array();
+        match self {
+            Self::Line { p1, p2 } => {
+                let p1_d = [p1[0] as f64, p1[1] as f64, p1[2] as f64];
+                let p2_d = [p2[0] as f64, p2[1] as f64, p2[2] as f64];
+                let r1 = rot_pt(p1_d);
+                let r2 = rot_pt(p2_d);
+                Self::Line {
+                    p1: [r1[0] as f32, r1[1] as f32, r1[2] as f32],
+                    p2: [r2[0] as f32, r2[1] as f32, r2[2] as f32],
+                }
+            }
+            Self::Circle { center: c, radius } => {
+                let c_d = [c[0] as f64, c[1] as f64, c[2] as f64];
+                let rc = rot_pt(c_d);
+                Self::Circle {
+                    center: [rc[0] as f32, rc[1] as f32, rc[2] as f32],
+                    radius: *radius,
+                }
+            }
+            Self::PlanarCircle { center: c, axis_x, axis_y, radius } => Self::PlanarCircle {
+                center: rot_pt(*c),
+                axis_x: rot_vec(*axis_x),
+                axis_y: rot_vec(*axis_y),
+                radius: *radius,
+            },
+            Self::Arc { center: c, axis_x, axis_y, radius, start_angle, end_angle } => Self::Arc {
+                center: rot_pt(*c),
+                axis_x: rot_vec(*axis_x),
+                axis_y: rot_vec(*axis_y),
+                radius: *radius,
+                start_angle: *start_angle,
+                end_angle: *end_angle,
+            },
+            Self::PlanarEllipse { center: c, major_axis, normal, minor_axis_ratio, start_param, end_param } => Self::PlanarEllipse {
+                center: rot_pt(*c),
+                major_axis: rot_vec(*major_axis),
+                normal: rot_vec(*normal),
+                minor_axis_ratio: *minor_axis_ratio,
+                start_param: *start_param,
+                end_param: *end_param,
+            },
+        }
+    }
+
+    pub fn scaled(&self, center: glam::DVec3, factor: f64) -> Self {
+        let scale_pt = |p: [f64; 3]| (center + (glam::DVec3::from_array(p) - center) * factor).to_array();
+        match self {
+            Self::Line { p1, p2 } => {
+                let p1_d = [p1[0] as f64, p1[1] as f64, p1[2] as f64];
+                let p2_d = [p2[0] as f64, p2[1] as f64, p2[2] as f64];
+                let s1 = scale_pt(p1_d);
+                let s2 = scale_pt(p2_d);
+                Self::Line {
+                    p1: [s1[0] as f32, s1[1] as f32, s1[2] as f32],
+                    p2: [s2[0] as f32, s2[1] as f32, s2[2] as f32],
+                }
+            }
+            Self::Circle { center: c, radius } => {
+                let c_d = [c[0] as f64, c[1] as f64, c[2] as f64];
+                let sc = scale_pt(c_d);
+                Self::Circle {
+                    center: [sc[0] as f32, sc[1] as f32, sc[2] as f32],
+                    radius: *radius * factor.abs() as f32,
+                }
+            }
+            Self::PlanarCircle { center: c, axis_x, axis_y, radius } => Self::PlanarCircle {
+                center: scale_pt(*c),
+                axis_x: *axis_x,
+                axis_y: *axis_y,
+                radius: *radius * factor.abs(),
+            },
+            Self::Arc { center: c, axis_x, axis_y, radius, start_angle, end_angle } => Self::Arc {
+                center: scale_pt(*c),
+                axis_x: *axis_x,
+                axis_y: *axis_y,
+                radius: *radius * factor.abs(),
+                start_angle: *start_angle,
+                end_angle: *end_angle,
+            },
+            Self::PlanarEllipse { center: c, major_axis, normal, minor_axis_ratio, start_param, end_param } => Self::PlanarEllipse {
+                center: scale_pt(*c),
+                major_axis: (glam::DVec3::from_array(*major_axis) * factor.abs()).to_array(),
+                normal: *normal,
+                minor_axis_ratio: *minor_axis_ratio,
+                start_param: *start_param,
+                end_param: *end_param,
+            },
+        }
+    }
+
+    pub fn mirrored(&self, p1: glam::DVec3, normal: glam::DVec3) -> Self {
+        let refl_pt = |p: [f64; 3]| {
+            let pt = glam::DVec3::from_array(p);
+            (pt - 2.0 * normal.dot(pt - p1) * normal).to_array()
+        };
+        let refl_vec = |v: [f64; 3]| {
+            let vec = glam::DVec3::from_array(v);
+            (vec - 2.0 * normal.dot(vec) * normal).to_array()
+        };
+        match self {
+            Self::Line { p1: lp1, p2: lp2 } => {
+                let p1_d = [lp1[0] as f64, lp1[1] as f64, lp1[2] as f64];
+                let p2_d = [lp2[0] as f64, lp2[1] as f64, lp2[2] as f64];
+                let m1 = refl_pt(p1_d);
+                let m2 = refl_pt(p2_d);
+                Self::Line {
+                    p1: [m1[0] as f32, m1[1] as f32, m1[2] as f32],
+                    p2: [m2[0] as f32, m2[1] as f32, m2[2] as f32],
+                }
+            }
+            Self::Circle { center: c, radius } => {
+                let c_d = [c[0] as f64, c[1] as f64, c[2] as f64];
+                let mc = refl_pt(c_d);
+                Self::Circle {
+                    center: [mc[0] as f32, mc[1] as f32, mc[2] as f32],
+                    radius: *radius,
+                }
+            }
+            Self::PlanarCircle { center: c, axis_x, axis_y, radius } => {
+                let ax = refl_vec(*axis_x);
+                let ay = refl_vec(*axis_y);
+                Self::PlanarCircle {
+                    center: refl_pt(*c),
+                    axis_x: ax,
+                    axis_y: [-ay[0], -ay[1], -ay[2]],
+                    radius: *radius,
+                }
+            }
+            Self::Arc { center: c, axis_x, axis_y, radius, start_angle, end_angle } => {
+                let ax = refl_vec(*axis_x);
+                let ay = refl_vec(*axis_y);
+                Self::Arc {
+                    center: refl_pt(*c),
+                    axis_x: ax,
+                    axis_y: [-ay[0], -ay[1], -ay[2]],
+                    radius: *radius,
+                    start_angle: -end_angle,
+                    end_angle: -start_angle,
+                }
+            }
+            Self::PlanarEllipse { center: c, major_axis, normal: n, minor_axis_ratio, start_param, end_param } => {
+                let norm = refl_vec(*n);
+                Self::PlanarEllipse {
+                    center: refl_pt(*c),
+                    major_axis: refl_vec(*major_axis),
+                    normal: [-norm[0], -norm[1], -norm[2]],
+                    minor_axis_ratio: *minor_axis_ratio,
+                    start_param: *start_param,
+                    end_param: *end_param,
+                }
+            }
+        }
+    }
 }
 
 /// Viewport-relative display transform for a point marker.
@@ -404,6 +608,11 @@ impl WireModel {
             out.text_verts =
                 map_text_verts(&self.text_verts, |x, y, z| (x + dx, y + dy, z + dz));
         }
+        out.tangent_geoms = self
+            .tangent_geoms
+            .iter()
+            .map(|tg| tg.translated(delta.as_dvec3()))
+            .collect();
         out
     }
 
@@ -456,6 +665,11 @@ impl WireModel {
                 (mapped.x, mapped.y, mapped.z)
             });
         }
+        out.tangent_geoms = self
+            .tangent_geoms
+            .iter()
+            .map(|tg| tg.rotated(center.as_dvec3(), axis.as_dvec3(), angle_rad as f64))
+            .collect();
         out
     }
 
@@ -490,6 +704,11 @@ impl WireModel {
                 (cx + (x - cx) * f, cy + (y - cy) * f, cz + (z - cz) * f)
             });
         }
+        out.tangent_geoms = self
+            .tangent_geoms
+            .iter()
+            .map(|tg| tg.scaled(center.as_dvec3(), factor as f64))
+            .collect();
         out
     }
 
@@ -630,6 +849,11 @@ pub fn stretched_windows(
                 (mapped.x, mapped.y, mapped.z)
             });
         }
+        out.tangent_geoms = self
+            .tangent_geoms
+            .iter()
+            .map(|tg| tg.mirrored(p1.as_dvec3(), plane_normal.as_dvec3()))
+            .collect();
         out
     }
 
@@ -752,6 +976,107 @@ impl Default for WireModel {
             render_instance: None,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_transformations_preserve_and_update_tangent_geoms() {
+        let mut wire = WireModel::default();
+        wire.tangent_geoms.push(TangentGeom::PlanarCircle {
+            center: [10.0, 20.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 5.0,
+        });
+        wire.tangent_geoms.push(TangentGeom::Arc {
+            center: [10.0, 20.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 5.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+        });
+        wire.tangent_geoms.push(TangentGeom::PlanarEllipse {
+            center: [10.0, 20.0, 0.0],
+            major_axis: [10.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            minor_axis_ratio: 0.5,
+            start_param: 0.0,
+            end_param: std::f64::consts::PI,
+        });
+
+        // Test translated
+        let trans = wire.translated(glam::Vec3::new(5.0, -5.0, 1.0));
+        assert_eq!(trans.tangent_geoms.len(), 3);
+        if let TangentGeom::PlanarCircle { center, radius, .. } = trans.tangent_geoms[0] {
+            assert!((center[0] - 15.0).abs() < 1e-5);
+            assert!((center[1] - 15.0).abs() < 1e-5);
+            assert!((center[2] - 1.0).abs() < 1e-5);
+            assert!((radius - 5.0).abs() < 1e-5);
+        } else {
+            panic!("Expected PlanarCircle");
+        }
+        if let TangentGeom::Arc { center, radius, start_angle, end_angle, .. } = trans.tangent_geoms[1] {
+            assert!((center[0] - 15.0).abs() < 1e-5);
+            assert!((center[1] - 15.0).abs() < 1e-5);
+            assert!((center[2] - 1.0).abs() < 1e-5);
+            assert!((radius - 5.0).abs() < 1e-5);
+            assert_eq!(start_angle, 0.0);
+            assert_eq!(end_angle, std::f64::consts::FRAC_PI_2);
+        } else {
+            panic!("Expected Arc");
+        }
+        if let TangentGeom::PlanarEllipse { center, major_axis, minor_axis_ratio, .. } = trans.tangent_geoms[2] {
+            assert!((center[0] - 15.0).abs() < 1e-5);
+            assert!((center[1] - 15.0).abs() < 1e-5);
+            assert!((center[2] - 1.0).abs() < 1e-5);
+            assert_eq!(major_axis, [10.0, 0.0, 0.0]);
+            assert_eq!(minor_axis_ratio, 0.5);
+        } else {
+            panic!("Expected PlanarEllipse");
+        }
+
+        // Test scaled
+        let scaled = wire.scaled(glam::Vec3::new(10.0, 20.0, 0.0), 2.0);
+        if let TangentGeom::PlanarCircle { radius, .. } = scaled.tangent_geoms[0] {
+            assert!((radius - 10.0).abs() < 1e-5);
+        } else {
+            panic!("Expected PlanarCircle");
+        }
+        if let TangentGeom::Arc { radius, .. } = scaled.tangent_geoms[1] {
+            assert!((radius - 10.0).abs() < 1e-5);
+        } else {
+            panic!("Expected Arc");
+        }
+        if let TangentGeom::PlanarEllipse { major_axis, .. } = scaled.tangent_geoms[2] {
+            assert!((major_axis[0] - 20.0).abs() < 1e-5);
+        } else {
+            panic!("Expected PlanarEllipse");
+        }
+
+        // Test rotated
+        let rot = wire.rotated(glam::Vec3::ZERO, std::f32::consts::FRAC_PI_2);
+        if let TangentGeom::PlanarCircle { center, axis_x, axis_y, .. } = rot.tangent_geoms[0] {
+            assert!((center[0] - -20.0).abs() < 1e-4);
+            assert!((center[1] - 10.0).abs() < 1e-4);
+            assert!((axis_x[1] - 1.0).abs() < 1e-4);
+            assert!((axis_y[0] - -1.0).abs() < 1e-4);
+        } else {
+            panic!("Expected PlanarCircle");
+        }
+
+        // Test mirrored across Y=0 plane (normal = Y)
+        let mirr = wire.mirrored(glam::Vec3::new(0.0, 0.0, 0.0), glam::Vec3::new(1.0, 0.0, 0.0));
+        if let TangentGeom::PlanarCircle { center, .. } = mirr.tangent_geoms[0] {
+            assert!((center[0] - 10.0).abs() < 1e-4);
+            assert!((center[1] - -20.0).abs() < 1e-4);
+        } else {
+            panic!("Expected PlanarCircle");
         }
     }
 }

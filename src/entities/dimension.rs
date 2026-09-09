@@ -5408,6 +5408,21 @@ fn map_wire_ocs_to_wcs(wire: &mut WireModel, normal: Vector3) {
                 *axis_x = map_vector(*axis_x);
                 *axis_y = map_vector(*axis_y);
             }
+            TangentGeom::PlanarEllipse {
+                center,
+                major_axis,
+                normal,
+                ..
+            } => {
+                let mapped = map(center[0], center[1], center[2]);
+                let map_vector = |axis: [f64; 3]| {
+                    let mapped = map(axis[0], axis[1], axis[2]);
+                    [mapped.0, mapped.1, mapped.2]
+                };
+                *center = [mapped.0, mapped.1, mapped.2];
+                *major_axis = map_vector(*major_axis);
+                *normal = map_vector(*normal);
+            }
         }
     }
     wire.aabb = WireModel::UNBOUNDED_AABB;

@@ -8,6 +8,8 @@ use glam::{DVec3, Mat4, Vec3};
 use iced::time::Instant;
 use iced::{Point, Rectangle};
 
+use cadkernel::geom2d::Curve;
+
 use crate::command::TangentObject;
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 use crate::scene::pick::interaction_index::WireSource;
@@ -1367,11 +1369,17 @@ impl Snapper {
             && (local_segments.is_some() || allow_unindexed_pairwise)
         {
             if let Some(segments) = &local_segments {
-                // Circle/arc pairs are solved exactly up front (bug #1052 —
-                // see `exact_circle_intersections`'s doc comment); the
-                // segment sweep below then skips any pair already resolved
-                // this way, so the stale tessellated approximation never
-                // competes with the true point as a candidate.
+                // Curved pairs (circle/arc/ellipse, and a line paired with
+                // one) are solved exactly up front (bug #1052 — see
+                // `exact_curve_intersections`'s doc comment); the segment
+                // sweep below then skips any pair already resolved this
+                // way, so the stale tessellated approximation never
+                // competes with the true point as a candidate. Every
+                // distinct wire pair touching the cursor-local segment set
+                // is tried — cheap even for a plain line-vs-line pair,
+                // which `exact_curve_intersections` rejects immediately —
+                // rather than pre-filtering to "known curved" wires, so a
+                // line paired with a circle/arc/ellipse is covered too.
                 let mut local_wires: Vec<u32> = segments.iter().map(|s| s.wire).collect();
                 local_wires.sort_unstable();
                 local_wires.dedup();
@@ -1381,7 +1389,7 @@ impl Snapper {
                         let (Some(wire_i), Some(wire_j)) = (wires.source_wire(wi), wires.source_wire(wj)) else {
                             continue;
                         };
-                        if let Some(pts) = exact_circle_intersections(wire_i, wire_j) {
+                        if let Some(pts) = exact_curve_intersections(wire_i, wire_j) {
                             for pt in pts {
                                 try_pt(pt, SnapType::Intersection);
                             }
@@ -1436,9 +1444,9 @@ impl Snapper {
                         if !wire_in_range(wire_j) {
                             continue;
                         }
-                        // Circle/arc pairs are solved exactly (bug #1052);
-                        // see `exact_circle_intersections`'s doc comment.
-                        if let Some(pts) = exact_circle_intersections(wire_i, wire_j) {
+                        // Curved pairs are solved exactly (bug #1052); see
+                        // `exact_curve_intersections`'s doc comment.
+                        if let Some(pts) = exact_curve_intersections(wire_i, wire_j) {
                             for pt in pts {
                                 try_pt(pt, SnapType::Intersection);
                             }
@@ -1812,6 +1820,7 @@ impl Snapper {
                                 .fold(f32::INFINITY, f32::min);
                             (world, edge_d2)
                         }
+                        TangentGeom::PlanarEllipse { .. } => continue,
                     };
                     let (tier, sub) = (
                         snap_tier(SnapType::Tangent),
@@ -1848,6 +1857,7 @@ impl Snapper {
                                     radius: *radius,
                                 }
                             }
+                            TangentGeom::PlanarEllipse { .. } => unreachable!(),
                         };
                         best = Some(SnapResult {
                             world: world_pt,
@@ -2362,15 +2372,14 @@ struct WireCircle {
 }
 
 /// The wire's underlying circle, if it's simple enough to have one: a single
-/// Circle or Arc entity as a whole, not a compound chain. Lines return
-/// `None` here and fall back to the ordinary tessellated sweep unchanged
-/// (line-vs-line is already exact via the segment sweep). This branch's
-/// `TangentGeom` has no `PlanarEllipse` variant yet (it predates that
-/// addition on `main`), so ellipse intersections aren't addressed by this
-/// port — see the equivalent fix on `main` (and the upstream PR) for the
-/// general `exact_curve_intersections` path once that variant lands here
-/// too. A polyline with a bulge segment still goes through the tessellated
-/// sweep: it isn't a single recognized curve.
+/// Circle or Arc entity as a whole, not a compound chain. Ellipses and lines
+/// return `None` here — they're handled by the more general
+/// `exact_curve_intersections` below, which this function's caller falls
+/// through to. A polyline with a bulge segment still goes through the
+/// tessellated sweep: it isn't a single recognized curve, and splitting it
+/// into per-segment exact geometry is a real follow-up, not a known-and-
+/// skipped case (there's no single closed form for "the rest of a compound
+/// chain" the way there is for one circle, arc, ellipse, or line).
 fn wire_circle(wire: &WireModel) -> Option<WireCircle> {
     let [geom] = wire.tangent_geoms.as_slice() else {
         return None;
@@ -2400,7 +2409,7 @@ fn wire_circle(wire: &WireModel) -> Option<WireCircle> {
                 arc_span: Some((axis_x, axis_y, *start_angle, *end_angle)),
             })
         }
-        TangentGeom::Line { .. } => None,
+        TangentGeom::Line { .. } | TangentGeom::PlanarEllipse { .. } => None,
     }
 }
 
@@ -2438,10 +2447,13 @@ impl WireCircle {
 /// so this handles arc-vs-arc (even two arcs with differently-rotated
 /// frames — see the test below) exactly as directly as circle-vs-circle.
 ///
-/// Scoped to circle/arc pairs: a line-vs-circle/arc pair and anything
-/// involving an ellipse are left to the existing sweep here (this branch's
-/// `TangentGeom` has no ellipse variant yet — see this function's sibling
-/// `wire_circle`'s doc comment).
+/// Deliberately scoped to circle/arc pairs, not every curved type: a
+/// line-vs-circle/arc pair and anything involving an ellipse are left to
+/// the existing sweep for now — line-circle needs its own (simple, but
+/// separate) closed form, and an ellipse's parametrisation is genuinely
+/// orientation-sensitive in a way a circle's isn't, so it doesn't fall out
+/// of this same construction for free. Not silently dropped — a natural
+/// follow-up once this lands.
 fn exact_circle_intersections(wire_a: &WireModel, wire_b: &WireModel) -> Option<Vec<DVec3>> {
     let a = wire_circle(wire_a)?;
     let b = wire_circle(wire_b)?;
@@ -2480,6 +2492,271 @@ fn exact_circle_intersections(wire_a: &WireModel, wire_b: &WireModel) -> Option<
     let points: Vec<DVec3> = candidates.into_iter().filter(|&p| a.contains_point(p) && b.contains_point(p)).collect();
 
     (!points.is_empty()).then_some(points)
+}
+
+/// A world-space working plane for embedding curves into
+/// `cadkernel::geom2d`'s 2D representation — the general-case fix for
+/// GitHub discussion #1052, covering every pairing `exact_circle_
+/// intersections`'s fast path doesn't: a line paired with a circle/arc/
+/// ellipse, and anything involving an ellipse (an ellipse's parametrisation
+/// is orientation-sensitive in a way a circle's isn't, so it doesn't fall
+/// out of that fast path's frame-independent construction for free).
+struct WirePlane {
+    origin: DVec3,
+    axis_x: DVec3,
+    axis_y: DVec3,
+    normal: DVec3,
+}
+
+impl WirePlane {
+    fn to_2d(&self, p: DVec3) -> [f64; 2] {
+        let rel = p - self.origin;
+        [rel.dot(self.axis_x), rel.dot(self.axis_y)]
+    }
+
+    /// Projects a *direction*, not a location — for re-expressing another
+    /// coplanar curve's own axis vector in this plane's 2D basis.
+    fn dir_to_2d(&self, d: DVec3) -> [f64; 2] {
+        [d.dot(self.axis_x), d.dot(self.axis_y)]
+    }
+
+    fn to_3d(&self, p: [f64; 2]) -> DVec3 {
+        self.origin + self.axis_x * p[0] + self.axis_y * p[1]
+    }
+
+    fn contains(&self, p: DVec3, tol: f64) -> bool {
+        (p - self.origin).dot(self.normal).abs() <= tol
+    }
+}
+
+/// A stable orthonormal in-plane basis for a given normal, used only to
+/// seed a shared working plane when neither wire's own native frame is
+/// preferred over the other's (both curved, or the "primary" role needs a
+/// deterministic pick) — the specific in-plane rotation chosen doesn't
+/// matter for correctness, only that both curves embed into the *same* one.
+fn stable_plane_basis(normal: DVec3) -> (DVec3, DVec3) {
+    let seed = if normal.x.abs() <= normal.y.abs() && normal.x.abs() <= normal.z.abs() {
+        DVec3::X
+    } else if normal.y.abs() <= normal.z.abs() {
+        DVec3::Y
+    } else {
+        DVec3::Z
+    };
+    let axis_x = (seed - normal * normal.dot(seed)).normalize();
+    let axis_y = normal.cross(axis_x);
+    (axis_x, axis_y)
+}
+
+/// A world point on an ellipse at native parameter `t`, using the ellipse's
+/// *own* normal for the minor-axis direction (not any externally-chosen
+/// plane's) — the correct, orientation-independent reference for computing
+/// where a boundary parameter actually sits in space, mirroring how
+/// `src/entities/curve.rs::ellipse_curve` already treats this convention as
+/// established (`normal` determines the minor-axis rotation sense).
+fn ellipse_world_point(center: DVec3, major_axis_world: DVec3, ell_normal: DVec3, minor_radius: f64, t: f64) -> DVec3 {
+    let major_radius = major_axis_world.length();
+    let major_unit = major_axis_world / major_radius;
+    let minor_unit = ell_normal.cross(major_unit);
+    center + major_unit * (major_radius * t.cos()) + minor_unit * (minor_radius * t.sin())
+}
+
+/// The parameter, in `frame`'s own 2D ellipse embedding (`major_axis_2d`
+/// already resolved there, `cadkernel`'s own "minor is major rotated 90°
+/// CCW in 2D" convention supplying the rest), that a world point already
+/// known to lie on the ellipse corresponds to. Inverting through the actual
+/// point — rather than assuming a native parameter value carries over
+/// unchanged — is what makes this correct even when the ellipse's own
+/// normal and `frame`'s normal are coplanar but *anti*-parallel (a plain
+/// "reuse start/end parameter" would silently pick the complementary arc in
+/// that case: 2D-CCW-in-`frame` and 2D-CCW-in-the-ellipse's-own-frame would
+/// disagree on which way is "forward").
+fn ellipse_param_in_frame(world_point: DVec3, centre: DVec3, major_axis_2d: [f64; 2], major_radius: f64, minor_radius: f64, frame: &WirePlane) -> f64 {
+    let rel = frame.to_2d(world_point);
+    let c = frame.to_2d(centre);
+    let d = [rel[0] - c[0], rel[1] - c[1]];
+    let minor_axis_2d = [-major_axis_2d[1], major_axis_2d[0]];
+    let cos_t = (d[0] * major_axis_2d[0] + d[1] * major_axis_2d[1]) / major_radius;
+    let sin_t = (d[0] * minor_axis_2d[0] + d[1] * minor_axis_2d[1]) / minor_radius;
+    sin_t.atan2(cos_t)
+}
+
+/// This wire's own natural working plane — only a Circle/PlanarCircle/Arc/
+/// PlanarEllipse has one; a line's two points don't define a unique plane,
+/// and a compound chain (a polyline with a bulge) isn't a single curve to
+/// begin with (out of scope for this pass, not because it's hard, but
+/// because a *chain* needs its own per-segment bookkeeping this pass
+/// doesn't add).
+fn wire_plane(wire: &WireModel) -> Option<WirePlane> {
+    let [geom] = wire.tangent_geoms.as_slice() else {
+        return None;
+    };
+    let (origin, axis_x, axis_y) = match geom {
+        TangentGeom::Circle { center, .. } => (DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64), DVec3::X, DVec3::Y),
+        TangentGeom::PlanarCircle { center, axis_x, axis_y, .. } | TangentGeom::Arc { center, axis_x, axis_y, .. } => (
+            DVec3::new(center[0], center[1], center[2]),
+            DVec3::new(axis_x[0], axis_x[1], axis_x[2]),
+            DVec3::new(axis_y[0], axis_y[1], axis_y[2]),
+        ),
+        TangentGeom::PlanarEllipse { center, major_axis, normal, .. } => {
+            let origin = DVec3::new(center[0], center[1], center[2]);
+            let n = DVec3::new(normal[0], normal[1], normal[2]).normalize();
+            let major = DVec3::new(major_axis[0], major_axis[1], major_axis[2]);
+            if major.length() <= 1e-12 {
+                return None;
+            }
+            (origin, major.normalize(), n.cross(major.normalize()))
+        }
+        TangentGeom::Line { .. } => return None,
+    };
+    Some(WirePlane { origin, axis_x, axis_y, normal: axis_x.cross(axis_y).normalize() })
+}
+
+/// `wire`'s curve, expressed in `frame`'s 2D coordinates — `None` if `wire`
+/// isn't a single recognized curve (see `wire_plane`'s doc comment for what
+/// that excludes) or doesn't actually lie in `frame`'s plane. Correct
+/// regardless of whether `wire`'s own native frame agrees in orientation
+/// with `frame`: an Arc's/Ellipse's boundary parameters are re-derived from
+/// their actual world points (`ellipse_param_in_frame`, the closure below
+/// for Arc), never assumed to carry over unchanged.
+fn curve_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Curve> {
+    use cadkernel::geom2d::{Arc as KArc, Circle as KCircle, Ellipse as KEllipse, EllipseArc as KEllipseArc, Line as KLine};
+
+    if wire.tangent_geoms.is_empty() {
+        if wire.points.len() != 2 {
+            return None;
+        }
+        let (p0, p1) = (wp_f64(wire, 0), wp_f64(wire, 1));
+        return (frame.contains(p0, tol) && frame.contains(p1, tol)).then(|| Curve::Line(KLine { start: frame.to_2d(p0), end: frame.to_2d(p1) }));
+    }
+
+    let [geom] = wire.tangent_geoms.as_slice() else {
+        return None;
+    };
+    let angle_in_frame = |world_point: DVec3, centre: DVec3| {
+        let (p2, c2) = (frame.to_2d(world_point), frame.to_2d(centre));
+        (p2[1] - c2[1]).atan2(p2[0] - c2[0])
+    };
+
+    match geom {
+        TangentGeom::Line { p1, p2 } => {
+            let p1 = DVec3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64);
+            let p2 = DVec3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64);
+            (frame.contains(p1, tol) && frame.contains(p2, tol)).then(|| Curve::Line(KLine { start: frame.to_2d(p1), end: frame.to_2d(p2) }))
+        }
+        TangentGeom::Circle { center, radius } => {
+            let c = DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64);
+            frame.contains(c, tol).then(|| Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius as f64 }))
+        }
+        TangentGeom::PlanarCircle { center, axis_x, axis_y, radius } => {
+            let c = DVec3::new(center[0], center[1], center[2]);
+            let n = DVec3::new(axis_x[0], axis_x[1], axis_x[2]).cross(DVec3::new(axis_y[0], axis_y[1], axis_y[2])).normalize();
+            (n.cross(frame.normal).length() <= tol && frame.contains(c, tol)).then(|| Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius }))
+        }
+        TangentGeom::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => {
+            let c = DVec3::new(center[0], center[1], center[2]);
+            let (ax, ay) = (DVec3::new(axis_x[0], axis_x[1], axis_x[2]), DVec3::new(axis_y[0], axis_y[1], axis_y[2]));
+            let n = ax.cross(ay).normalize();
+            if n.cross(frame.normal).length() > tol || !frame.contains(c, tol) {
+                return None;
+            }
+            let boundary = |angle: f64| c + *radius * (angle.cos() * ax + angle.sin() * ay);
+            let (raw_start, raw_end) = (angle_in_frame(boundary(*start_angle), c), angle_in_frame(boundary(*end_angle), c));
+            // The arc's own (ax, ay, n) frame and the target frame's (axis_x, axis_y, normal)
+            // agree on the plane but may disagree on which way is "up": when n is anti-parallel
+            // to frame.normal, mapping into the frame's basis is a reflection, which reverses
+            // the CCW sweep direction. Swap start/end so the swept range still traces the same
+            // physical arc instead of its complement.
+            let (start_angle, end_angle) = if n.dot(frame.normal) < 0.0 { (raw_end, raw_start) } else { (raw_start, raw_end) };
+            Some(Curve::Arc(KArc { centre: frame.to_2d(c), radius: *radius, start_angle, end_angle }))
+        }
+        TangentGeom::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => {
+            let c = DVec3::new(center[0], center[1], center[2]);
+            let ell_normal = DVec3::new(normal[0], normal[1], normal[2]).normalize();
+            if ell_normal.cross(frame.normal).length() > tol || !frame.contains(c, tol) {
+                return None;
+            }
+            let major = DVec3::new(major_axis[0], major_axis[1], major_axis[2]);
+            let major_radius = major.length();
+            if major_radius <= 1e-12 {
+                return None;
+            }
+            let minor_radius = major_radius * *minor_axis_ratio;
+            let dir2d = frame.dir_to_2d(major / major_radius);
+            let len = (dir2d[0] * dir2d[0] + dir2d[1] * dir2d[1]).sqrt();
+            if len <= 1e-12 {
+                return None;
+            }
+            let major_axis_2d = [dir2d[0] / len, dir2d[1] / len];
+            let world_at = |t: f64| ellipse_world_point(c, major, ell_normal, minor_radius, t);
+            let raw_start = ellipse_param_in_frame(world_at(*start_param), c, major_axis_2d, major_radius, minor_radius, frame);
+            let raw_end = ellipse_param_in_frame(world_at(*end_param), c, major_axis_2d, major_radius, minor_radius, frame);
+            // Same reflection issue as the Arc case above: the ellipse's own normal may be
+            // anti-parallel to the embedding frame's normal, which mirrors the parametrization
+            // and reverses the sweep direction — swap start/end to keep the same physical arc.
+            let (start_parameter, end_parameter) = if ell_normal.dot(frame.normal) < 0.0 { (raw_end, raw_start) } else { (raw_start, raw_end) };
+            Some(Curve::Ellipse(KEllipseArc {
+                ellipse: KEllipse { centre: frame.to_2d(c), major_radius, minor_radius, major_axis: major_axis_2d },
+                start_parameter,
+                end_parameter,
+            }))
+        }
+    }
+}
+
+/// Exact (or, where no closed form exists — an ellipse against another
+/// curved shape — properly tolerance-converged, via `cadkernel::geom2d::
+/// intersect`'s own subdivision-and-refinement fallback) intersection for
+/// one wire pair, bypassing their tessellated approximation entirely.
+/// Tries the fast, frame-independent circle/arc path first; the general
+/// embedding below only runs for a pair that path can't answer — a line
+/// paired with a circle/arc/ellipse, or anything involving an ellipse.
+/// `None` when neither side is a single recognized curve (both lines: the
+/// segment sweep is already exact), the two aren't coplanar, or they don't
+/// actually meet — in every `None` case the caller falls back to the
+/// ordinary segment sweep unchanged.
+fn exact_curve_intersections(wire_a: &WireModel, wire_b: &WireModel) -> Option<Vec<DVec3>> {
+    if let Some(pts) = exact_circle_intersections(wire_a, wire_b) {
+        return Some(pts);
+    }
+
+    // Prefer whichever side already has a natural working plane so a
+    // circle/arc paired with a line needs no reprojection of its own shape
+    // at all; when both are curved (at least one an ellipse, since a pure
+    // circle/arc pair would already have returned above) or neither is,
+    // fall back to a plane seeded from whichever side offers one.
+    let frame = wire_plane(wire_a).or_else(|| wire_plane(wire_b)).or_else(|| {
+        let normal = curve_normal_only(wire_a).or_else(|| curve_normal_only(wire_b))?;
+        let origin = wp_f64_first(wire_a).or_else(|| wp_f64_first(wire_b))?;
+        let (axis_x, axis_y) = stable_plane_basis(normal);
+        Some(WirePlane { origin, axis_x, axis_y, normal })
+    })?;
+
+    const PLANE_TOL: f64 = 1e-7;
+    let curve_a = curve_in_frame(wire_a, &frame, PLANE_TOL)?;
+    let curve_b = curve_in_frame(wire_b, &frame, PLANE_TOL)?;
+    // Two lines have nothing this path can improve on (the segment sweep is
+    // already exact for a straight pair); avoid the extra work.
+    if matches!(curve_a, Curve::Line(_)) && matches!(curve_b, Curve::Line(_)) {
+        return None;
+    }
+
+    let tolerance = cadkernel::geom2d::Tolerance::new(1e-9_f64.max(PLANE_TOL));
+    let crossings = cadkernel::geom2d::intersect(&curve_a, &curve_b, tolerance);
+    let points: Vec<DVec3> = crossings.into_iter().map(|c| frame.to_3d(c.point)).collect();
+    (!points.is_empty()).then_some(points)
+}
+
+/// Fallback plane-seeding helpers for `exact_curve_intersections`' rare
+/// "neither side has its own natural plane" branch (in practice: unreached
+/// today, since that only happens when both sides are lines, which returns
+/// `None` a step earlier — kept for robustness against a future caller that
+/// invokes `exact_curve_intersections` with weaker preconditions).
+fn curve_normal_only(wire: &WireModel) -> Option<DVec3> {
+    wire_plane(wire).map(|p| p.normal)
+}
+
+fn wp_f64_first(wire: &WireModel) -> Option<DVec3> {
+    (!wire.points.is_empty()).then(|| wp_f64(wire, 0))
 }
 
 /// XY-plane segment-segment intersection.  Returns `None` if parallel or outside.
@@ -3173,11 +3450,11 @@ mod ext_tests {
     #[test]
     fn wire_circle_is_none_for_a_plain_line_wire() {
         // A line wire carries no `TangentGeom::Circle`/`Arc` entry, so
-        // `wire_circle` (and `exact_circle_intersections` built on it) must
-        // not panic or, worse, silently misidentify a line as a circle — it
-        // should just decline, leaving a line-vs-circle pair to the ordinary
-        // tessellated sweep unchanged (this port doesn't add a general
-        // line-vs-round exact path — see `wire_circle`'s doc comment).
+        // `wire_circle` (and the fast `exact_circle_intersections` path built
+        // on it) must not panic or, worse, silently misidentify a line as a
+        // circle — it should just decline, leaving the line-vs-circle case to
+        // the more general `exact_curve_intersections`, covered separately by
+        // `exact_curve_intersections_handles_a_line_against_a_circle`.
         let line = WireModel {
             points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
             ..Default::default()
@@ -3187,7 +3464,7 @@ mod ext_tests {
             tangent_geoms: vec![TangentGeom::PlanarCircle { center: [0.0, 0.0, 0.0], axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius: 4.0 }],
             ..Default::default()
         };
-        assert!(exact_circle_intersections(&line, &circle).is_none(), "line-vs-circle falls back to the tessellated sweep in this port");
+        assert!(exact_circle_intersections(&line, &circle).is_none(), "line-vs-circle isn't this fast path's job — it's handled by exact_curve_intersections");
     }
 
     /// Each side's `contains_point` checks the candidate world point against
@@ -3253,5 +3530,193 @@ mod ext_tests {
         let pts = exact_circle_intersections(&arc_a_lower, &arc_b).expect("both sweeps cover (0,-4,0)");
         assert_eq!(pts.len(), 1);
         assert!((pts[0] - DVec3::new(0.0, -4.0, 0.0)).length() < 1e-9, "got {:?}", pts[0]);
+    }
+
+    fn plain_line(a: [f64; 3], b: [f64; 3]) -> WireModel {
+        WireModel { points: vec![[a[0] as f32, a[1] as f32, a[2] as f32], [b[0] as f32, b[1] as f32, b[2] as f32]], points_low: vec![], ..Default::default() }
+    }
+
+    #[test]
+    fn exact_curve_intersections_handles_a_line_against_a_circle() {
+        let line = plain_line([-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]);
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle { center: [0.0, 0.0, 0.0], axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius: 5.0 }],
+            ..Default::default()
+        };
+        let pts = exact_curve_intersections(&line, &circle).expect("a diameter line crosses its circle twice");
+        assert_eq!(pts.len(), 2);
+        let mut xs: Vec<f64> = pts.iter().map(|p| p.x).collect();
+        xs.sort_by(f64::total_cmp);
+        assert!((xs[0] - -5.0).abs() < 1e-9 && (xs[1] - 5.0).abs() < 1e-9, "expected x = -5 and +5, got {xs:?}");
+        for p in &pts {
+            assert!(p.y.abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn exact_curve_intersections_handles_a_line_against_an_arcs_own_sweep() {
+        // Same arc as `exact_circle_intersections_respects_an_arcs_own_sweep`
+        // (0..90° of a radius-4 circle at the origin), crossed by a vertical
+        // line at x=0: the full circle would cross it at (0,4,0) and
+        // (0,-4,0), but only the first is on the arc's own sweep.
+        let arc = WireModel {
+            tangent_geoms: vec![TangentGeom::Arc {
+                center: [0.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 4.0,
+                start_angle: 0.0,
+                end_angle: std::f64::consts::FRAC_PI_2,
+            }],
+            ..Default::default()
+        };
+        let line = plain_line([0.0, -10.0, 0.0], [0.0, 10.0, 0.0]);
+        let pts = exact_curve_intersections(&arc, &line).expect("the line crosses the arc's own sweep");
+        assert_eq!(pts.len(), 1);
+        assert!((pts[0] - DVec3::new(0.0, 4.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn exact_curve_intersections_handles_a_line_against_an_ellipse() {
+        // x^2/16 + y^2/4 = 1 -- a vertical line at x=0 crosses it exactly at
+        // y = +-2.
+        let ellipse = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [4.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                minor_axis_ratio: 0.5,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            }],
+            ..Default::default()
+        };
+        let line = plain_line([0.0, -10.0, 0.0], [0.0, 10.0, 0.0]);
+        let pts = exact_curve_intersections(&ellipse, &line).expect("the line crosses the ellipse");
+        assert_eq!(pts.len(), 2);
+        for p in &pts {
+            assert!(p.x.abs() < 1e-9);
+            assert!((p.y.abs() - 2.0).abs() < 1e-9, "expected y = +-2, got {p:?}");
+        }
+    }
+
+    #[test]
+    fn exact_curve_intersections_handles_a_circle_against_a_full_ellipse() {
+        // x^2/25 + y^2/9 = 1 against a radius-3 circle at (6,0,0): computed
+        // independently (not via this module's own math) as crossing at
+        // exactly x = 3.75, y = +-sqrt(63)/4.
+        let ellipse = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [5.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                minor_axis_ratio: 0.6,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            }],
+            ..Default::default()
+        };
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle { center: [6.0, 0.0, 0.0], axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius: 3.0 }],
+            ..Default::default()
+        };
+        let pts = exact_curve_intersections(&ellipse, &circle).expect("the circle crosses the ellipse");
+        assert_eq!(pts.len(), 2);
+        let expected_y = (63.0_f64).sqrt() / 4.0;
+        for p in &pts {
+            assert!((p.x - 3.75).abs() < 1e-6, "expected x=3.75, got {p:?}");
+            assert!((p.y.abs() - expected_y).abs() < 1e-6, "expected y=+-{expected_y}, got {p:?}");
+        }
+    }
+
+    /// The critical case for `ellipse_param_in_frame`: two elliptical arcs
+    /// (here degenerate to circles via `minor_axis_ratio: 1.0`, so the
+    /// *expected* crossing angles are plain circle trigonometry, independently
+    /// computed) sharing the SAME numeric start/end parameter range but with
+    /// ANTI-PARALLEL normals. Reusing a native parameter value unchanged
+    /// across a normal flip would silently pick the mirror-image point
+    /// instead — this proves it doesn't.
+    #[test]
+    fn exact_curve_intersections_ellipse_arc_respects_normal_direction() {
+        // Full ellipse x^2/25 + y^2/9 = 1, and a radius-3 "ellipse" (ratio
+        // 1.0, i.e. a circle) at (6,0,0) — same pair as the full-ellipse
+        // test above, crossing at (3.75, +-1.9843...).
+        let ellipse = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [5.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                minor_axis_ratio: 0.6,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            }],
+            ..Default::default()
+        };
+        let deg = std::f64::consts::PI / 180.0;
+        let make_arc = |normal_z: f64| WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                center: [6.0, 0.0, 0.0],
+                major_axis: [3.0, 0.0, 0.0],
+                normal: [0.0, 0.0, normal_z],
+                minor_axis_ratio: 1.0,
+                start_param: 100.0 * deg,
+                end_param: 170.0 * deg,
+            }],
+            ..Default::default()
+        };
+
+        // normal=+Z: independently computed, param range [100,170]deg holds
+        // only the UPPER crossing's own angle (~138.59deg under +Z).
+        let plus = exact_curve_intersections(&ellipse, &make_arc(1.0)).expect("normal=+Z arc crosses the ellipse");
+        assert_eq!(plus.len(), 1);
+        assert!(plus[0].y > 0.0, "expected the upper point, got {:?}", plus[0]);
+        assert!((plus[0] - DVec3::new(3.75, (63.0_f64).sqrt() / 4.0, 0.0)).length() < 1e-6);
+
+        // normal=-Z, SAME numeric [100,170]deg range: independently computed
+        // to hold only the LOWER crossing's own angle under this flipped
+        // convention (~138.59deg under -Z maps to the lower world point).
+        let minus = exact_curve_intersections(&ellipse, &make_arc(-1.0)).expect("normal=-Z arc crosses the ellipse");
+        assert_eq!(minus.len(), 1);
+        assert!(minus[0].y < 0.0, "expected the lower point (normal flip must change which physical arc this is), got {:?}", minus[0]);
+        assert!((minus[0] - DVec3::new(3.75, -(63.0_f64).sqrt() / 4.0, 0.0)).length() < 1e-6);
+    }
+
+    /// Same reflection hazard as the ellipse test above, but for `curve_in_frame`'s
+    /// `TangentGeom::Arc` branch: this only runs when the *other* side of the pair
+    /// isn't itself a circle/arc (so `exact_circle_intersections`'s own, already
+    /// normal-agnostic `WireCircle` path doesn't intercept it first) — paired here
+    /// against the same full ellipse so the frame comes from the ellipse's plane
+    /// (normal = +Z) while the arc's own normal is anti-parallel to it.
+    #[test]
+    fn exact_curve_intersections_arc_respects_normal_direction_against_an_ellipse_frame() {
+        let ellipse = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [5.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                minor_axis_ratio: 0.6,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            }],
+            ..Default::default()
+        };
+        let deg = std::f64::consts::PI / 180.0;
+        // normal=-Z arc: axis_x/axis_y chosen so axis_x x axis_y = (0,0,-1),
+        // mirroring the ellipse test's make_arc(-1.0) exactly.
+        let arc_minus_z = WireModel {
+            tangent_geoms: vec![TangentGeom::Arc {
+                center: [6.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, -1.0, 0.0],
+                radius: 3.0,
+                start_angle: 100.0 * deg,
+                end_angle: 170.0 * deg,
+            }],
+            ..Default::default()
+        };
+        let pts = exact_curve_intersections(&ellipse, &arc_minus_z).expect("the arc crosses the ellipse");
+        assert_eq!(pts.len(), 1);
+        assert!(pts[0].y < 0.0, "expected the lower point (normal flip must change which physical arc this is), got {:?}", pts[0]);
+        assert!((pts[0] - DVec3::new(3.75, -(63.0_f64).sqrt() / 4.0, 0.0)).length() < 1e-6);
     }
 }

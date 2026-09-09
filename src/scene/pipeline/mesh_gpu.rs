@@ -568,6 +568,20 @@ struct MeshSurfaceParams {
     flags: [u32; 4],
 }
 
+/// Downscale a decoded RGBA buffer so neither dimension exceeds `limit`,
+/// preserving aspect ratio (scaled by whichever dimension overshoots more).
+/// `None` only for genuinely malformed input (`rgba`'s length doesn't match
+/// `width * height * 4`) — the caller falls back to the 1x1 material color
+/// in that case, same as it already does for a missing image entirely.
+fn downscale_rgba_to_limit(width: u32, height: u32, rgba: &[u8], limit: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let buffer = image::RgbaImage::from_raw(width, height, rgba.to_vec())?;
+    let scale = (limit as f64 / width.max(height) as f64).min(1.0);
+    let new_width = ((width as f64 * scale).round() as u32).clamp(1, limit);
+    let new_height = ((height as f64 * scale).round() as u32).clamp(1, limit);
+    let resized = image::imageops::resize(&buffer, new_width, new_height, image::imageops::FilterType::Triangle);
+    Some((new_width, new_height, resized.into_raw()))
+}
+
 fn upload_rgba_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -576,9 +590,27 @@ fn upload_rgba_texture(
     fallback: [u8; 4],
     srgb: bool,
 ) -> wgpu::TextureView {
-    let (width, height, pixels) = image.map_or((1, 1, fallback.as_slice()), |image| {
-        (image.width, image.height, image.rgba.as_slice())
-    });
+    // A material map's decoded dimensions come straight from the source file
+    // (`material_model::load_map_image`), uncapped — an oversized image would
+    // otherwise fail `wgpu` texture-size validation and leave the material
+    // unusable (audit: raster-image rendering already tiles to this same
+    // limit in `image_gpu.rs`; a mesh material sampled by UV can't use that
+    // per-quad tiling trick, so downscale instead of tiling).
+    let limit = device.limits().max_texture_dimension_2d.max(1);
+    let resized;
+    let (width, height, pixels): (u32, u32, &[u8]) = match image {
+        Some(image) if image.width > limit || image.height > limit => {
+            match downscale_rgba_to_limit(image.width, image.height, &image.rgba, limit) {
+                Some((w, h, buf)) => {
+                    resized = buf;
+                    (w, h, resized.as_slice())
+                }
+                None => (1, 1, fallback.as_slice()),
+            }
+        }
+        Some(image) => (image.width, image.height, image.rgba.as_slice()),
+        None => (1, 1, fallback.as_slice()),
+    };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -2425,4 +2457,41 @@ pub fn build_mesh_batch_filtered(
         );
     }
     (chunks, total_tris)
+}
+
+#[cfg(test)]
+mod texture_limit_tests {
+    use super::downscale_rgba_to_limit;
+
+    #[test]
+    fn downscale_keeps_both_dimensions_within_the_limit() {
+        // A wide-and-short image: the limit is only crossed by width, but
+        // both dimensions must come out <= limit and aspect ratio preserved.
+        let (w, h) = (500u32, 10u32);
+        let rgba = vec![0u8; (w * h * 4) as usize];
+        let (new_w, new_h, buf) = downscale_rgba_to_limit(w, h, &rgba, 200).expect("well-formed input must resize");
+        assert!(new_w <= 200 && new_h <= 200, "both dimensions must respect the limit, got {new_w}x{new_h}");
+        assert_eq!(buf.len(), (new_w * new_h * 4) as usize, "the returned buffer must match its reported dimensions");
+        // Aspect ratio 50:1 should be preserved within rounding.
+        let ratio = new_w as f64 / new_h as f64;
+        assert!((ratio - 50.0).abs() < 1.0, "expected aspect ratio near 50:1, got {ratio}");
+    }
+
+    #[test]
+    fn downscale_handles_a_square_image_over_the_limit() {
+        let (w, h) = (300u32, 300u32);
+        let rgba = vec![255u8; (w * h * 4) as usize];
+        let (new_w, new_h, buf) = downscale_rgba_to_limit(w, h, &rgba, 128).expect("well-formed input must resize");
+        assert_eq!(new_w, 128);
+        assert_eq!(new_h, 128);
+        assert_eq!(buf.len(), (128 * 128 * 4) as usize);
+    }
+
+    #[test]
+    fn downscale_rejects_a_buffer_whose_length_does_not_match_its_dimensions() {
+        // Corrupt/mismatched input (audit's "validate decoded byte length" ask):
+        // must fail cleanly, not panic or silently misread the buffer.
+        let rgba = vec![0u8; 10];
+        assert!(downscale_rgba_to_limit(1000, 1000, &rgba, 512).is_none());
+    }
 }

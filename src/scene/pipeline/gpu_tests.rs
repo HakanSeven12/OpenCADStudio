@@ -662,6 +662,25 @@ fn test_tilted_3d_donut_and_thick_arc_gpu_rendering() {
     assert_eq!(circles[0].instance_count, 2);
     pipeline.gpu_circles = std::sync::Arc::new(circles);
 
+    // Wide straight polyline segment on the 3D plane
+    let mut straight_wide = WireModel::default();
+    straight_wide.name = "wide_straight".into();
+    straight_wide.points = vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]];
+    straight_wide.world_width = 10.0;
+    straight_wide.color = [0.9, 0.2, 0.3, 1.0];
+
+    let wide_wires = vec![straight_wide];
+    let gpu_wires = wire_gpu::WireGpu::from_run(
+        &device,
+        &queue,
+        &wide_wires,
+        &depth_map,
+        false,
+        pipeline.wire_const_bgl.as_ref(),
+    );
+    assert!(!gpu_wires.is_empty());
+    pipeline.gpu_wires = std::sync::Arc::new(gpu_wires);
+
     pipeline.ensure_depth_texture(&device, iced::Size::new(512, 512));
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("tilted_donut_target"),

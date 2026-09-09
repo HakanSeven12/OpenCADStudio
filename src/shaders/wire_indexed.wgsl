@@ -128,51 +128,89 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
 
     let rel_a = marker_relative(in.pos_a, in.pos_a_low, c);
     let rel_b = marker_relative(in.pos_b, in.pos_b_low, c);
-    let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
-    let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
-
-    let ndc_a = clip_a.xy / clip_a.w;
-    let ndc_b = clip_b.xy / clip_b.w;
-
-    let screen_a = ndc_a * u.viewport_size * 0.5;
-    let screen_b = ndc_b * u.viewport_size * 0.5;
-
-    let seg = screen_b - screen_a;
-    let seg_len = length(seg);
-    var dir: vec2<f32>;
-    if seg_len > 1e-4 {
-        dir = seg / seg_len;
-    } else {
-        dir = vec2<f32>(1.0, 0.0);
-    }
-    let perp = vec2<f32>(-dir.y, dir.x);
-
-    let clip_pos = mix(clip_a, clip_b, which_end);
-
-    // A wide polyline carries its band width in world units: expand the quad
-    // by `world_half_width / world_per_pixel` (screen pixels) so the band grows
-    // and shrinks with zoom. A normal wire (world_half_width == 0) uses the
-    // screen-pixel half-width, honouring the LWDISPLAY toggle.
-    // A tapered band carries normalized endpoint widths on the instance:
-    // interpolate across the segment so the band narrows/widens smoothly. A
-    // constant band uses the per-wire `world_half_width`. Both clamp to a
-    // half-pixel so a zoomed-out band stays a hairline instead of vanishing.
-    let hw_a = resolve_hw(in.taper_ratio.x, c.world_half_width, c.half_width);
-    let hw_b = resolve_hw(in.taper_ratio.y, c.world_half_width, c.half_width);
-    let hw = mix(hw_a, hw_b, which_end);
-
-    // Extend the quad longitudinally by the end half-width and let the
-    // fragment stage round the overhang off: adjoining segments then meet in
-    // overlapping round joints, closing the wedge gaps a perpendicular-only
-    // expansion leaves on the outside of corners and along tessellated arcs.
-    // Wide polylines have physical world-unit width (world_half_width or taper > 0);
-    // in CAD, wide polyline segments are flat/square-ended 2D rectangles (or
-    // trapezoids), not rounded pill shapes.
     let is_world = c.world_half_width > 0.0 || in.taper_ratio.x > 0.0 || in.taper_ratio.y > 0.0;
-    let ext = select(which_end * 2.0 - 1.0, 0.0, is_world);
-    let offset_px = perp * hw * side + dir * hw * ext;
-    let ndc_offset = offset_px / (u.viewport_size * 0.5);
-    let final_clip = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);
+
+    var final_clip: vec4<f32>;
+    var out_dist: f32;
+    var out_cap: vec2<f32>;
+    var out_cap_ends: vec3<f32>;
+
+    if is_world {
+        // Wide polylines have physical world-unit width (world_half_width or taper > 0).
+        // Expand the quad in 3D world space on the entity's plane (perpendicular to
+        // the segment and the plane normal), so the rectangle remains hosted rigidly
+        // on the 3D plane when the camera rotates, orbits, or tilts, matching CAD
+        // behavior and circle.wgsl planar arcs.
+        let world_hw_a = select(c.world_half_width, in.taper_ratio.x * c.world_half_width, in.taper_ratio.x > 0.0);
+        let world_hw_b = select(c.world_half_width, in.taper_ratio.y * c.world_half_width, in.taper_ratio.y > 0.0);
+        let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
+        let eff_hw = max(cur_world_hw, 0.5 * u.world_per_pixel);
+
+        let world_delta = rel_b - rel_a;
+        let world_len = length(world_delta);
+        var world_dir = vec3<f32>(1.0, 0.0, 0.0);
+        if world_len > 1e-6 {
+            world_dir = world_delta / world_len;
+        }
+
+        var norm = vec3<f32>(0.0, 0.0, 1.0);
+        if length(c.marker_normal_scale.xyz) > 1e-4 {
+            norm = normalize(c.marker_normal_scale.xyz);
+        }
+
+        var perp_world = cross(norm, world_dir);
+        if length(perp_world) < 1e-4 {
+            perp_world = cross(vec3<f32>(0.0, 1.0, 0.0), world_dir);
+            if length(perp_world) < 1e-4 {
+                perp_world = cross(vec3<f32>(1.0, 0.0, 0.0), world_dir);
+            }
+        }
+        perp_world = normalize(perp_world);
+
+        let pos_rel = mix(rel_a, rel_b, which_end);
+        let world_pos = pos_rel + perp_world * (eff_hw * side);
+        var clip_pos = u.view_rot * vec4<f32>(world_pos, 1.0);
+        clip_pos.z = clip_pos.z - c.draw_depth * DRAW_ORDER_BIAS * clip_pos.w;
+
+        final_clip = clip_pos;
+        out_dist = mix(in.distance_a, in.distance_b, which_end);
+        out_cap = vec2<f32>(which_end * world_len, eff_hw * side);
+        out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
+    } else {
+        // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
+        let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
+        let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
+
+        let ndc_a = clip_a.xy / clip_a.w;
+        let ndc_b = clip_b.xy / clip_b.w;
+
+        let screen_a = ndc_a * u.viewport_size * 0.5;
+        let screen_b = ndc_b * u.viewport_size * 0.5;
+
+        let seg = screen_b - screen_a;
+        let seg_len = length(seg);
+        var dir: vec2<f32>;
+        if seg_len > 1e-4 {
+            dir = seg / seg_len;
+        } else {
+            dir = vec2<f32>(1.0, 0.0);
+        }
+        let perp = vec2<f32>(-dir.y, dir.x);
+
+        let clip_pos = mix(clip_a, clip_b, which_end);
+
+        let hw = resolve_hw(0.0, 0.0, c.half_width);
+        let ext = which_end * 2.0 - 1.0;
+        let offset_px = perp * hw * side + dir * hw * ext;
+        let ndc_offset = offset_px / (u.viewport_size * 0.5);
+        var clip_pos_out = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);
+        clip_pos_out.z = clip_pos_out.z - c.draw_depth * DRAW_ORDER_BIAS * clip_pos_out.w;
+
+        final_clip = clip_pos_out;
+        out_dist = mix(in.distance_a, in.distance_b, which_end) + ext * hw * u.world_per_pixel;
+        out_cap = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
+        out_cap_ends = vec3<f32>(seg_len, hw, hw);
+    }
 
     let lt_scale = u.linetype_scale;
     var min_elem: f32 = c.pattern_length * lt_scale;
@@ -189,14 +227,10 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
 
     var out: VertexOut;
     out.clip_pos       = final_clip;
-    out.clip_pos.z     = out.clip_pos.z - c.draw_depth * DRAW_ORDER_BIAS * out.clip_pos.w;
     out.color          = c.color;
-    // Dash arc-length, extrapolated over the cap overhang so the pattern
-    // stays continuous through a joint.
-    out.distance       = mix(in.distance_a, in.distance_b, which_end)
-        + ext * hw * u.world_per_pixel;
-    out.cap            = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
-    out.cap_ends       = vec3<f32>(seg_len, hw_a, hw_b);
+    out.distance       = out_dist;
+    out.cap            = out_cap;
+    out.cap_ends       = out_cap_ends;
     out.pattern_length = c.pattern_length * lt_scale;
     out.pat0           = c.pat0 * lt_scale;
     out.pat1           = c.pat1 * lt_scale;

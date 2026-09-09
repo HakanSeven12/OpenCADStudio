@@ -532,7 +532,35 @@ fn finite3(p: [f32; 3]) -> bool {
 
 fn marker_metadata(wire: &WireModel) -> ([f32; 4], [f32; 4], [f32; 4]) {
     let Some(marker) = wire.point_marker else {
-        return ([0.0; 4], [0.0; 4], [0.0; 4]);
+        for tg in &wire.tangent_geoms {
+            match tg {
+                crate::scene::model::wire_model::TangentGeom::Arc { axis_x, axis_y, .. }
+                | crate::scene::model::wire_model::TangentGeom::PlanarCircle { axis_x, axis_y, .. } => {
+                    let ax = glam::DVec3::from_array(*axis_x);
+                    let ay = glam::DVec3::from_array(*axis_y);
+                    let n = ax.cross(ay).normalize_or(glam::DVec3::Z);
+                    return ([0.0; 4], [0.0; 4], [n.x as f32, n.y as f32, n.z as f32, 0.0]);
+                }
+                crate::scene::model::wire_model::TangentGeom::PlanarEllipse { normal, .. } => {
+                    let n = glam::DVec3::from_array(*normal).normalize_or(glam::DVec3::Z);
+                    return ([0.0; 4], [0.0; 4], [n.x as f32, n.y as f32, n.z as f32, 0.0]);
+                }
+                _ => {}
+            }
+        }
+        if wire.points.len() >= 3 {
+            let p0 = glam::Vec3::from_array(wire.points[0]);
+            for i in 1..wire.points.len() - 1 {
+                let v1 = glam::Vec3::from_array(wire.points[i]) - p0;
+                let v2 = glam::Vec3::from_array(wire.points[i + 1]) - p0;
+                let cross = v1.cross(v2);
+                if cross.length_squared() > 1e-6 {
+                    let n = cross.normalize();
+                    return ([0.0; 4], [0.0; 4], [n.x, n.y, n.z, 0.0]);
+                }
+            }
+        }
+        return ([0.0; 4], [0.0; 4], [0.0, 0.0, 1.0, 0.0]);
     };
     let origin = marker.origin;
     let (hx, lx) = WireModel::split_ds(origin.x);

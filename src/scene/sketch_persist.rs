@@ -17,8 +17,30 @@
 
 use super::sketch_constraints::SketchConstraintSet;
 use super::Scene;
+use acadrust::{CadDocument, Handle};
 
 const XRECORD_KEY: &str = "OCS_SKETCH_CONSTRAINTS";
+
+/// Removes a named XRecord from `owner`'s extension dictionary, if present.
+/// The dictionary itself is left in place even if now empty — other code may
+/// already reference it via `xdictionary_handle`, and an empty extension
+/// dictionary is harmless bookkeeping, unlike a stale XRecord that would
+/// resurrect deleted data on the next load.
+fn remove_xrecord(document: &mut CadDocument, owner: Handle, key: &str) {
+    let Some(dictionary_handle) = document.extension_dictionary_handle(owner) else {
+        return;
+    };
+    let Some(acadrust::objects::ObjectType::Dictionary(dictionary)) =
+        document.objects.get_mut(&dictionary_handle)
+    else {
+        return;
+    };
+    let Some(index) = dictionary.entries.iter().position(|(name, _)| name.eq_ignore_ascii_case(key)) else {
+        return;
+    };
+    let (_, record_handle) = dictionary.entries.remove(index);
+    document.objects.remove(&record_handle);
+}
 
 /// Prefixed onto every serialized blob so a future schema change can be
 /// detected and gracefully skipped (dropping just that one scope's
@@ -53,13 +75,20 @@ impl Scene {
     /// edits ride the ordinary object-delta undo path per §5.1(b), but this
     /// lazy model was the doc's own recommended first step).
     ///
-    /// A scope with an empty constraint set is skipped rather than writing
-    /// an empty XRecord — an unconstrained drawing (the common case) should
-    /// not gain persisted-but-empty bookkeeping on every save.
+    /// A scope with an empty constraint set writes no XRecord — an
+    /// unconstrained drawing (the common case) should not gain
+    /// persisted-but-empty bookkeeping on every save. If a *previous* save
+    /// already materialized a non-empty XRecord for that scope, the now-empty
+    /// set actively removes it instead: leaving the stale blob in place would
+    /// resurrect the deleted constraints the next time the document loads.
     pub(crate) fn materialize_sketch_constraints_for_save(&mut self) {
         for index in 0..self.sketch_constraints.len() {
             let set = &self.sketch_constraints[index];
             if set.constraints.is_empty() {
+                let owner = set.scope.owner_handle(&self.document);
+                if !owner.is_null() {
+                    remove_xrecord(&mut self.document, owner, XRECORD_KEY);
+                }
                 continue;
             }
             let owner = set.scope.owner_handle(&self.document);
@@ -237,6 +266,38 @@ mod tests {
 
         let owner = scene.document.header.model_space_block_handle;
         assert!(scene.document.xrecord(owner, XRECORD_KEY).is_none(), "an empty constraint set should not create an XRecord");
+    }
+
+    #[test]
+    fn clearing_a_previously_materialized_set_removes_its_stale_xrecord() {
+        // Regression for the audit-flagged case `an_empty_constraint_set_is_not_materialized`
+        // doesn't cover: a scope that already had a *non-empty* XRecord from a
+        // prior save must have that XRecord actively removed once its
+        // in-memory set goes back to empty — otherwise the stale blob
+        // survives the save and resurrects the deleted constraints on the
+        // next load.
+        let mut scene = Scene::new();
+        let a = scene.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        )));
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
+        scene.materialize_sketch_constraints_for_save();
+
+        let owner = scene.document.header.model_space_block_handle;
+        assert!(scene.document.xrecord(owner, XRECORD_KEY).is_some(), "sanity: the first save should have materialized an XRecord");
+
+        // Clear every constraint (mirrors deleting the constrained entity, or
+        // removing the last constraint by hand) and save again.
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).constraints.clear();
+        scene.materialize_sketch_constraints_for_save();
+
+        assert!(scene.document.xrecord(owner, XRECORD_KEY).is_none(), "the stale XRecord from the earlier non-empty save must be removed, not left behind");
+
+        // And the load path must agree: nothing resurrects on reload.
+        scene.sketch_constraints.clear();
+        scene.load_sketch_constraints_from_document();
+        assert!(scene.sketch_constraint_set(SketchScope::ModelSpace).is_none(), "no constraints should come back after the set was cleared and re-saved");
     }
 
     #[test]

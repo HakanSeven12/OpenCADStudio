@@ -85,7 +85,7 @@ pub type ConstraintId = u32;
 /// One persisted constraint record: a friendly [`ConstraintKind`], the
 /// entities/points it relates, and — for a dimensional kind — the value
 /// driving it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SketchConstraint {
     pub id: ConstraintId,
     pub kind: ConstraintKind,

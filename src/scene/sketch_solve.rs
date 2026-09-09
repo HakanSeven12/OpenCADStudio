@@ -383,12 +383,24 @@ impl Scene {
         // and unconditionally over every scope (not just ones a `touched`
         // check would catch), so a scope left with zero constraints after
         // this doesn't attempt a pointless resolve below.
+        //
+        // Recorded into the *same* undo transaction as the entity removal
+        // that caused it (audit finding: ERASE undo silently lost constraint
+        // state, since `sketch_constraints` lives outside `document`/
+        // `document.objects` and neither of those directories ever saw this
+        // mutation) — one undo press now restores both the entity and its
+        // constraints together.
         for (handle, kind) in changes {
             if *kind != ChangeKind::Removed {
                 continue;
             }
-            for set in &mut self.sketch_constraints {
-                set.remove_all_touching(*handle);
+            for i in 0..self.sketch_constraints.len() {
+                if self.sketch_constraints[i].constraints_touching(*handle).next().is_some() {
+                    let scope = self.sketch_constraints[i].scope;
+                    let before = self.sketch_constraints[i].clone();
+                    self.record_undo_sketch_constraints_before(scope, before);
+                    self.sketch_constraints[i].remove_all_touching(*handle);
+                }
             }
         }
 
@@ -504,10 +516,68 @@ mod tests {
         scene.bump_entities(&[(a, super::ChangeKind::Modified)]);
         let recording = scene.take_undo_recording().expect("an undo recording should still be open");
 
-        let (entities, _objects) = recording.into_recorded_images();
+        let (entities, _objects, _sketch_constraints) = recording.into_recorded_images();
         let touched: std::collections::HashSet<_> = entities.iter().map(|(h, _)| *h).collect();
         assert!(touched.contains(&a), "the directly-edited line must be in the undo delta");
         assert!(touched.contains(&b), "the constraint-solved neighbor must ride the same undo delta");
+    }
+
+    /// Audit-flagged gap: ERASE removing an entity takes its constraints with
+    /// it (design doc's deletion policy, above), but `sketch_constraints`
+    /// lives on `Scene`, outside `document`/`document.objects`, so nothing
+    /// used to capture that mutation for undo at all — the erased geometry
+    /// came back on undo, but its constraints didn't. This proves the fix at
+    /// the level it actually lives: `refresh_sketch_constraints`'s deletion
+    /// pass must record the scope's whole before-image into the same
+    /// `UndoRecording` the entity removal itself rides in, so one recovered
+    /// image is enough to restore both together (the app-level wiring that
+    /// turns this into one committed, one-undo-press `DeltaSnapshot` is
+    /// `OpenCADStudio::commit_undo_delta`/`apply_delta_state`, exercised by
+    /// the app, not `Scene`, so it's out of this test's reach — this covers
+    /// the root cause, not that outer plumbing).
+    #[test]
+    fn erasing_a_constrained_entity_records_its_scope_for_undo() {
+        let mut scene = Scene::new();
+        let a = scene.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        )));
+        let b = scene.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
+            Vector3::new(10.0, 0.0, 0.0),
+            Vector3::new(20.0, 5.0, 0.0),
+        )));
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Coincident,
+            vec![SketchRef::point(a, 1), SketchRef::point(b, 0)],
+            None,
+        );
+        assert_eq!(scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap().constraints.len(), 1);
+
+        scene.begin_undo_recording();
+        scene.erase_entities(&[a]);
+
+        // The live scope must already have lost the constraint (design doc's
+        // deletion policy) — this ensures the test actually exercises restore,
+        // not a no-op.
+        assert_eq!(
+            scene.sketch_constraint_set(SketchScope::ModelSpace).map_or(0, |s| s.constraints.len()),
+            0,
+            "the constraint touching the erased line should be gone from the live set"
+        );
+
+        let recording = scene.take_undo_recording().expect("an undo recording should still be open");
+        let (_entities, _objects, sketch_constraints) = recording.into_recorded_images();
+        assert_eq!(sketch_constraints.len(), 1, "the touched scope's before-image must be captured");
+        let (scope, before) = &sketch_constraints[0];
+        assert_eq!(*scope, SketchScope::ModelSpace);
+        assert_eq!(before.constraints.len(), 1, "the before-image must still hold the constraint as it was before the erase");
+        assert_eq!(before.constraints[0].kind, ConstraintKind::Coincident);
+        assert_eq!(before.constraints[0].refs, vec![SketchRef::point(a, 1), SketchRef::point(b, 0)]);
+
+        // What `apply_delta_state` does with this on undo: install the
+        // before-image back as the live scope state.
+        *scene.sketch_constraint_set_mut(*scope) = before.clone();
+        assert_eq!(scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap().constraints.len(), 1, "restoring the before-image must bring the constraint back");
     }
 
     /// Design doc §7 open question 6 (live-drag re-solve):

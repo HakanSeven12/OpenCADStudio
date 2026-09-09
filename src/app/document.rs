@@ -655,7 +655,11 @@ impl DocumentTab {
 /// full entity store.
 #[derive(Clone)]
 pub(super) enum HistorySnapshot {
-    Delta(DeltaSnapshot),
+    // Boxed: `DeltaSnapshot` grew past the other variants once
+    // `sketch_constraints` (ERASE-undo fix) was added, and every undo/redo
+    // stack slot costs as much as this enum's largest variant regardless of
+    // which one it actually holds.
+    Delta(Box<DeltaSnapshot>),
     ObjectVisibility(ObjectVisibilitySnapshot),
     SketchConstraints(SketchConstraintsSnapshot),
 }
@@ -689,6 +693,13 @@ impl HistorySnapshot {
                     d.active_layer
                         .as_ref()
                         .map_or(0, |(before, after)| before.len().saturating_add(after.len())),
+                )
+                .saturating_add(
+                    d.sketch_constraints
+                        .iter()
+                        .map(|entry| entry.before.constraints.len().saturating_add(entry.after.constraints.len()))
+                        .sum::<usize>()
+                        .saturating_mul(96), // matches HistorySnapshot::SketchConstraints's own rough per-constraint estimate
                 )
                 .saturating_add(d.label.len()),
             HistorySnapshot::ObjectVisibility(v) => v
@@ -776,6 +787,12 @@ pub(super) struct DeltaSnapshot {
     /// Opposite non-entity document state. `apply_delta_state` swaps this with
     /// the live structure, so the same allocation shuttles between undo/redo.
     pub(super) structure: Option<StructureSnapshot>,
+    /// Sketch-constraint scopes this same command changed alongside its
+    /// entities (e.g. ERASE removing a constraint set's touched constraints)
+    /// — `sketch_constraints` lives on `Scene`, not in `document`/
+    /// `document.objects`, so it needs its own channel here rather than
+    /// riding along with `entities`/`structure`. Almost always empty.
+    pub(super) sketch_constraints: Vec<SketchConstraintsEntryDelta>,
     pub(super) label: String,
 }
 
@@ -834,6 +851,23 @@ pub(super) struct ObjectEntryDelta {
     pub(super) handle: Handle,
     pub(super) before: Option<acadrust::objects::ObjectType>,
     pub(super) after: Option<acadrust::objects::ObjectType>,
+}
+
+/// One sketch-constraint scope's before/after image within an entity
+/// `DeltaSnapshot` — e.g. ERASE removing an entity's constraints along with
+/// it (`Scene::refresh_sketch_constraints`'s deletion policy). Distinct from
+/// [`SketchConstraintsSnapshot`]: that type is its own separate
+/// `HistorySnapshot` entry for a dedicated constraint add/remove command
+/// (still a deliberate two-step undo, design doc's own scope-down); this one
+/// rides inside the *same* delta as the entity change that caused it, so one
+/// undo restores both together. `before`/`after` are always `Some` scope
+/// state (never absent) — a scope's `Vec` entry, once created, is never
+/// removed, so there is no "scope didn't exist" case to represent here.
+#[derive(Clone)]
+pub(super) struct SketchConstraintsEntryDelta {
+    pub(super) scope: crate::scene::sketch_constraints::SketchScope,
+    pub(super) before: crate::scene::sketch_constraints::SketchConstraintSet,
+    pub(super) after: crate::scene::sketch_constraints::SketchConstraintSet,
 }
 
 #[derive(Default)]

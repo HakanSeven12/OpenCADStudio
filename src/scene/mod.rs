@@ -330,6 +330,15 @@ pub struct UndoRecording {
     /// by the command. `None` denotes a newly-created object.
     object_before: HashMap<Handle, Option<ObjectType>>,
     object_order: Vec<Handle>,
+    /// First-touch before-images of every sketch-constraint scope a command
+    /// changed (e.g. ERASE removing an entity's constraints along with it via
+    /// `refresh_sketch_constraints`'s deletion policy). `sketch_constraints`
+    /// lives on `Scene`, not in `document`/`document.objects`, so neither
+    /// directory above ever sees this change — it needs its own directory.
+    /// Unlike the two above, there is no "didn't exist before" case: a
+    /// scope's `Vec` entry, once created, is never removed.
+    sketch_constraints_before: HashMap<sketch_constraints::SketchScope, sketch_constraints::SketchConstraintSet>,
+    sketch_constraints_order: Vec<sketch_constraints::SketchScope>,
     poisoned: bool,
 }
 
@@ -339,18 +348,22 @@ impl UndoRecording {
         self.poisoned
     }
 
-    /// No entity or object entry was recorded (nothing to undo).
+    /// No entity, object, or sketch-constraint entry was recorded (nothing to undo).
     pub fn is_empty(&self) -> bool {
-        self.order.is_empty() && self.object_order.is_empty()
+        self.order.is_empty() && self.object_order.is_empty() && self.sketch_constraints_order.is_empty()
     }
 
-    /// Consume both recording directories in deterministic first-touch order.
-    /// A `None` image means the entity/object was added by the command.
+    /// Consume all three recording directories in deterministic first-touch
+    /// order. A `None` image means the entity/object was added by the
+    /// command; every sketch-constraint scope's before-image is a real
+    /// `SketchConstraintSet` (its `Vec` entry, once created, is never
+    /// removed, so there is no "didn't exist before" case there).
     pub fn into_recorded_images(
         mut self,
     ) -> (
         Vec<(Handle, Option<Arc<EntityType>>)>,
         Vec<(Handle, Option<ObjectType>)>,
+        Vec<(sketch_constraints::SketchScope, sketch_constraints::SketchConstraintSet)>,
     ) {
         let entities = self
             .order
@@ -362,7 +375,12 @@ impl UndoRecording {
             .drain(..)
             .map(|h| (h, self.object_before.remove(&h).flatten()))
             .collect();
-        (entities, objects)
+        let sketch_constraints = self
+            .sketch_constraints_order
+            .drain(..)
+            .filter_map(|scope| self.sketch_constraints_before.remove(&scope).map(|before| (scope, before)))
+            .collect();
+        (entities, objects, sketch_constraints)
     }
 
     /// Entity-only convenience used by the focused Scene delta tests.
@@ -2534,6 +2552,26 @@ impl Scene {
             if !rec.object_before.contains_key(&handle) {
                 rec.object_order.push(handle);
                 rec.object_before.insert(handle, before);
+            }
+        }
+    }
+
+    /// Record one sketch-constraint scope's whole-set image before its first
+    /// mutation within the open recording (first touch wins) — e.g. ERASE
+    /// about to remove some of a scope's constraints via
+    /// `refresh_sketch_constraints`'s deletion policy. `sketch_constraints`
+    /// lives on `Scene`, outside `document`/`document.objects`, so neither
+    /// `record_undo_before` nor `record_undo_object_before` ever sees this
+    /// change on their own.
+    pub(crate) fn record_undo_sketch_constraints_before(
+        &mut self,
+        scope: sketch_constraints::SketchScope,
+        before: sketch_constraints::SketchConstraintSet,
+    ) {
+        if let Some(rec) = self.undo_recording.as_mut() {
+            if !rec.sketch_constraints_before.contains_key(&scope) {
+                rec.sketch_constraints_order.push(scope);
+                rec.sketch_constraints_before.insert(scope, before);
             }
         }
     }
@@ -11007,7 +11045,7 @@ mod delta_undo_tests {
         let handle = scene.add_entity(EntityType::RasterImage(image));
         let rec = scene.take_undo_recording().unwrap();
         assert!(!rec.is_poisoned());
-        let (entities, objects) = rec.into_recorded_images();
+        let (entities, objects, _sketch_constraints) = rec.into_recorded_images();
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].0, handle);
         assert_eq!(objects.len(), 1);
@@ -11031,7 +11069,7 @@ mod delta_undo_tests {
         scene.erase_entities(&[h1]);
         let rec = scene.take_undo_recording().unwrap();
         assert!(!rec.is_poisoned());
-        let (entities, objects) = rec.into_recorded_images();
+        let (entities, objects, _sketch_constraints) = rec.into_recorded_images();
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].0, h1);
         assert_eq!(objects.len(), 1);

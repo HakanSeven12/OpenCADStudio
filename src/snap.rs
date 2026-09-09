@@ -1367,6 +1367,29 @@ impl Snapper {
             && (local_segments.is_some() || allow_unindexed_pairwise)
         {
             if let Some(segments) = &local_segments {
+                // Circle/arc pairs are solved exactly up front (bug #1052 —
+                // see `exact_circle_intersections`'s doc comment); the
+                // segment sweep below then skips any pair already resolved
+                // this way, so the stale tessellated approximation never
+                // competes with the true point as a candidate.
+                let mut local_wires: Vec<u32> = segments.iter().map(|s| s.wire).collect();
+                local_wires.sort_unstable();
+                local_wires.dedup();
+                let mut resolved_pairs: Vec<(u32, u32)> = Vec::new();
+                for (idx, &wi) in local_wires.iter().enumerate() {
+                    for &wj in &local_wires[idx + 1..] {
+                        let (Some(wire_i), Some(wire_j)) = (wires.source_wire(wi), wires.source_wire(wj)) else {
+                            continue;
+                        };
+                        if let Some(pts) = exact_circle_intersections(wire_i, wire_j) {
+                            for pt in pts {
+                                try_pt(pt, SnapType::Intersection);
+                            }
+                            resolved_pairs.push((wi, wj));
+                        }
+                    }
+                }
+
                 // Exact cursor-local sweep: never discard a valid intersection
                 // in dense geometry. Min-X ordering plus Y overlap avoids
                 // comparing segment pairs whose bounds cannot meet.
@@ -1380,6 +1403,9 @@ impl Snapper {
                                 break;
                             }
                             if a.wire == b.wire || a.max_y() < b.min_y() || a.min_y() > b.max_y() {
+                                continue;
+                            }
+                            if resolved_pairs.contains(&(a.wire.min(b.wire), a.wire.max(b.wire))) {
                                 continue;
                             }
                             if let Some(pt) = seg_intersect_3d(a.a, a.b, b.a, b.b) {
@@ -1408,6 +1434,14 @@ impl Snapper {
                             continue;
                         };
                         if !wire_in_range(wire_j) {
+                            continue;
+                        }
+                        // Circle/arc pairs are solved exactly (bug #1052);
+                        // see `exact_circle_intersections`'s doc comment.
+                        if let Some(pts) = exact_circle_intersections(wire_i, wire_j) {
+                            for pt in pts {
+                                try_pt(pt, SnapType::Intersection);
+                            }
                             continue;
                         }
                         for ai in 0..wire_i.points.len().saturating_sub(1) {
@@ -2299,6 +2333,155 @@ fn ray_segment_intersect_3d(
     ))
 }
 
+/// A full circle recovered from a wire's `tangent_geoms` — the entity's real
+/// definition, in world space — used to solve Intersection snap exactly for
+/// circle/arc pairs instead of falling back to `seg_intersect_3d` against
+/// their tessellated approximation.
+///
+/// Why this exists (GitHub discussion #1052): a chord of *any* tessellated
+/// circle sits strictly inside the true circle, so the "intersection" of two
+/// tessellated circles is never quite where the two real circles actually
+/// cross — the error is small but real, and does not shrink with zoom: the
+/// resident wire set OSNAP searches is built once per geometry edit with a
+/// fixed 48-segment tessellation for every circle regardless of radius, by
+/// design (`Scene::resident_wires_for`'s own doc comment: zoom-independent,
+/// so hit-testing/snap don't re-tessellate on every camera move). A r=100
+/// circle's chord sagitta at 48 segments is already ≈0.21 world units.
+struct WireCircle {
+    center: DVec3,
+    radius: f64,
+    /// Unit normal of the plane the circle lies in.
+    normal: DVec3,
+    /// `Some((axis_x, axis_y, start_angle, end_angle))` for an arc — used to
+    /// keep only the full circle's crossing points that actually fall
+    /// within the arc's own sweep. `None` for a full circle: every point
+    /// the circle-circle solve finds is valid. Angles follow this
+    /// codebase's own convention (`src/entities/arc.rs`): measured from
+    /// `axis_x` toward `axis_y`, equal start/end meaning a full turn.
+    arc_span: Option<(DVec3, DVec3, f64, f64)>,
+}
+
+/// The wire's underlying circle, if it's simple enough to have one: a single
+/// Circle or Arc entity as a whole, not a compound chain. Lines return
+/// `None` here and fall back to the ordinary tessellated sweep unchanged
+/// (line-vs-line is already exact via the segment sweep). This branch's
+/// `TangentGeom` has no `PlanarEllipse` variant yet (it predates that
+/// addition on `main`), so ellipse intersections aren't addressed by this
+/// port — see the equivalent fix on `main` (and the upstream PR) for the
+/// general `exact_curve_intersections` path once that variant lands here
+/// too. A polyline with a bulge segment still goes through the tessellated
+/// sweep: it isn't a single recognized curve.
+fn wire_circle(wire: &WireModel) -> Option<WireCircle> {
+    let [geom] = wire.tangent_geoms.as_slice() else {
+        return None;
+    };
+    match geom {
+        TangentGeom::PlanarCircle { center, axis_x, axis_y, radius } => {
+            let (axis_x, axis_y) = (DVec3::new(axis_x[0], axis_x[1], axis_x[2]), DVec3::new(axis_y[0], axis_y[1], axis_y[2]));
+            Some(WireCircle {
+                center: DVec3::new(center[0], center[1], center[2]),
+                radius: *radius,
+                normal: axis_x.cross(axis_y).normalize(),
+                arc_span: None,
+            })
+        }
+        TangentGeom::Circle { center, radius } => Some(WireCircle {
+            center: DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64),
+            radius: *radius as f64,
+            normal: DVec3::Z,
+            arc_span: None,
+        }),
+        TangentGeom::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => {
+            let (axis_x, axis_y) = (DVec3::new(axis_x[0], axis_x[1], axis_x[2]), DVec3::new(axis_y[0], axis_y[1], axis_y[2]));
+            Some(WireCircle {
+                center: DVec3::new(center[0], center[1], center[2]),
+                radius: *radius,
+                normal: axis_x.cross(axis_y).normalize(),
+                arc_span: Some((axis_x, axis_y, *start_angle, *end_angle)),
+            })
+        }
+        TangentGeom::Line { .. } => None,
+    }
+}
+
+impl WireCircle {
+    /// Whether world point `p` — assumed already on this circle — falls
+    /// within the arc's actual angular sweep. Always true for a full circle.
+    fn contains_point(&self, p: DVec3) -> bool {
+        let Some((axis_x, axis_y, start, end)) = self.arc_span else {
+            return true;
+        };
+        let rel = p - self.center;
+        let tau = std::f64::consts::TAU;
+        let angle = rel.dot(axis_y).atan2(rel.dot(axis_x)).rem_euclid(tau);
+        let span = (end - start).rem_euclid(tau);
+        let from_start = (angle - start).rem_euclid(tau);
+        // Equal start/end means a full turn (this codebase's own Arc
+        // convention), not zero sweep.
+        span == 0.0 || from_start <= span + 1e-9
+    }
+}
+
+/// Exact circle/arc intersection for one wire pair, bypassing their
+/// tessellated approximation entirely. `None` when neither side is a circle
+/// or arc (the segment sweep is already exact for pure lines/polylines), the
+/// two aren't coplanar (a genuinely-3D case the sweep already handles no
+/// worse than before), or they don't actually meet — in every `None` case
+/// the caller falls back to the ordinary segment sweep unchanged.
+///
+/// Correct for any circle/arc-vs-circle/arc pair regardless of whether the
+/// two sides' own local frames agree in orientation: the candidate points
+/// come from a frame-agnostic 3D construction (`a.normal`/`dir`/`perp`
+/// below), and each side's `WireCircle::contains_point` then checks a
+/// candidate against *that side's own* axis_x/axis_y independently — there
+/// is no step that re-expresses one arc's angle range in the other's frame,
+/// so this handles arc-vs-arc (even two arcs with differently-rotated
+/// frames — see the test below) exactly as directly as circle-vs-circle.
+///
+/// Scoped to circle/arc pairs: a line-vs-circle/arc pair and anything
+/// involving an ellipse are left to the existing sweep here (this branch's
+/// `TangentGeom` has no ellipse variant yet — see this function's sibling
+/// `wire_circle`'s doc comment).
+fn exact_circle_intersections(wire_a: &WireModel, wire_b: &WireModel) -> Option<Vec<DVec3>> {
+    let a = wire_circle(wire_a)?;
+    let b = wire_circle(wire_b)?;
+
+    let d_vec = b.center - a.center;
+    let d = d_vec.length();
+    if d < 1e-9 {
+        return None; // concentric: coincident or no isolated crossing either way
+    }
+
+    // Coplanarity: both circles' planes must agree (normals parallel, up to
+    // sign), and the vector between centers must actually lie in that plane
+    // — otherwise this is a genuinely-3D case the tessellated sweep already
+    // handles (via `seg_intersect_3d`'s own height-match check) no worse
+    // than an exact-but-wrong-plane answer would.
+    const PLANE_TOL: f64 = 1e-7;
+    if a.normal.cross(b.normal).length() > PLANE_TOL {
+        return None;
+    }
+    if d_vec.dot(a.normal).abs() > PLANE_TOL * d.max(1.0) {
+        return None;
+    }
+
+    let (r1, r2) = (a.radius, b.radius);
+    if d > r1 + r2 + PLANE_TOL || d < (r1 - r2).abs() - PLANE_TOL {
+        return None; // circles don't meet
+    }
+
+    let dir = d_vec / d;
+    let a_dist = ((d * d + r1 * r1 - r2 * r2) / (2.0 * d)).clamp(-r1, r1);
+    let h = (r1 * r1 - a_dist * a_dist).max(0.0).sqrt();
+    let mid = a.center + dir * a_dist;
+    let perp = a.normal.cross(dir).normalize();
+
+    let candidates = if h < 1e-9 { vec![mid] } else { vec![mid + perp * h, mid - perp * h] };
+    let points: Vec<DVec3> = candidates.into_iter().filter(|&p| a.contains_point(p) && b.contains_point(p)).collect();
+
+    (!points.is_empty()).then_some(points)
+}
+
 /// XY-plane segment-segment intersection.  Returns `None` if parallel or outside.
 /// True 3D intersection of two segments: the point where their plan (XY)
 /// projections cross **and** both segments are at the same height there. Returns
@@ -2877,5 +3060,198 @@ mod ext_tests {
             "z should be the true height, got {}",
             hi.z
         );
+    }
+
+    /// GitHub discussion #1052's own reproduction: a 3-unit base line, a
+    /// radius-4 circle at one end, a radius-5 circle at the other. The true
+    /// intersection is exactly (0, 4, 0) (a 3-4-5 right triangle) — the
+    /// tessellated segment sweep misses this by a small but real amount
+    /// (confirmed separately against `seg_intersect_3d` on the actual
+    /// tessellated wire); the exact solver must hit it exactly.
+    #[test]
+    fn exact_circle_intersections_matches_the_3_4_5_report() {
+        let c1 = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [0.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 4.0,
+            }],
+            ..Default::default()
+        };
+        let c2 = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [3.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 5.0,
+            }],
+            ..Default::default()
+        };
+        let pts = exact_circle_intersections(&c1, &c2).expect("two overlapping circles must intersect");
+        assert_eq!(pts.len(), 2, "two distinct circles crossing at two points");
+        let upper = pts.iter().copied().find(|p| p.y > 0.0).expect("an upper intersection");
+        assert!((upper - DVec3::new(0.0, 4.0, 0.0)).length() < 1e-9, "expected exactly (0,4,0), got {upper:?}");
+        for p in &pts {
+            assert!(((*p - DVec3::ZERO).length() - 4.0).abs() < 1e-9, "must be exactly radius 4 from c1's centre, got {p:?}");
+            assert!(((*p - DVec3::new(3.0, 0.0, 0.0)).length() - 5.0).abs() < 1e-9, "must be exactly radius 5 from c2's centre, got {p:?}");
+        }
+    }
+
+    #[test]
+    fn exact_circle_intersections_respects_an_arcs_own_sweep() {
+        // A quarter-circle arc from 0° to 90° (so it only covers the upper-
+        // right quadrant) against a full circle whose two true intersection
+        // points straddle that boundary: only the one actually on the arc's
+        // sweep should come back.
+        let arc = WireModel {
+            tangent_geoms: vec![TangentGeom::Arc {
+                center: [0.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 4.0,
+                start_angle: 0.0,
+                end_angle: std::f64::consts::FRAC_PI_2,
+            }],
+            ..Default::default()
+        };
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [3.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 5.0,
+            }],
+            ..Default::default()
+        };
+        // Full-circle math gives (0,4,0) [on the 0..90° arc] and (0,-4,0)
+        // [not on it].
+        let pts = exact_circle_intersections(&arc, &circle).expect("the circles still cross");
+        assert_eq!(pts.len(), 1, "only the point on the arc's own sweep");
+        assert!((pts[0] - DVec3::new(0.0, 4.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn exact_circle_intersections_is_none_for_non_coplanar_circles() {
+        let flat = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [0.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 4.0,
+            }],
+            ..Default::default()
+        };
+        let tilted = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [0.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 0.0, 1.0],
+                radius: 4.0,
+            }],
+            ..Default::default()
+        };
+        assert!(
+            exact_circle_intersections(&flat, &tilted).is_none(),
+            "a genuinely-3D pair must fall back to the ordinary sweep, not guess a plane"
+        );
+    }
+
+    #[test]
+    fn exact_circle_intersections_is_none_when_circles_dont_meet() {
+        let near = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle { center: [0.0, 0.0, 0.0], axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius: 1.0 }],
+            ..Default::default()
+        };
+        let far = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle { center: [100.0, 0.0, 0.0], axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius: 1.0 }],
+            ..Default::default()
+        };
+        assert!(exact_circle_intersections(&near, &far).is_none());
+    }
+
+    #[test]
+    fn wire_circle_is_none_for_a_plain_line_wire() {
+        // A line wire carries no `TangentGeom::Circle`/`Arc` entry, so
+        // `wire_circle` (and `exact_circle_intersections` built on it) must
+        // not panic or, worse, silently misidentify a line as a circle — it
+        // should just decline, leaving a line-vs-circle pair to the ordinary
+        // tessellated sweep unchanged (this port doesn't add a general
+        // line-vs-round exact path — see `wire_circle`'s doc comment).
+        let line = WireModel {
+            points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+            ..Default::default()
+        };
+        assert!(wire_circle(&line).is_none());
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle { center: [0.0, 0.0, 0.0], axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius: 4.0 }],
+            ..Default::default()
+        };
+        assert!(exact_circle_intersections(&line, &circle).is_none(), "line-vs-circle falls back to the tessellated sweep in this port");
+    }
+
+    /// Each side's `contains_point` checks the candidate world point against
+    /// *that side's own* native axis_x/axis_y independently — there is no
+    /// step that re-expresses one arc's angle range in the other's frame —
+    /// so two arcs whose local frames are rotated relative to each other
+    /// must still resolve correctly, not just the common case where both
+    /// happen to share the same axis_x.
+    #[test]
+    fn exact_circle_intersections_handles_two_arcs_in_differently_rotated_frames() {
+        // Arc A: quarter circle 0..90°, axis_x along world +X.
+        let arc_a = WireModel {
+            tangent_geoms: vec![TangentGeom::Arc {
+                center: [0.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 4.0,
+                start_angle: 0.0,
+                end_angle: std::f64::consts::FRAC_PI_2,
+            }],
+            ..Default::default()
+        };
+        // Arc B: same true geometry as the earlier "full circle" partner,
+        // but described in a frame rotated 90° from world axes (axis_x
+        // along world +Y, axis_y along world -X) — its own start/end angles
+        // are re-expressed accordingly so the arc still covers the same
+        // true half of the circle (the lower half, i.e. world angle
+        // 180..360°, which in this rotated frame is local angle 90..270°).
+        let arc_b = WireModel {
+            tangent_geoms: vec![TangentGeom::Arc {
+                center: [3.0, 0.0, 0.0],
+                axis_x: [0.0, 1.0, 0.0],
+                axis_y: [-1.0, 0.0, 0.0],
+                radius: 5.0,
+                start_angle: std::f64::consts::FRAC_PI_2,
+                end_angle: 3.0 * std::f64::consts::FRAC_PI_2,
+            }],
+            ..Default::default()
+        };
+        // True full-circle crossings are (0,4,0) [world angle 90° on B, so
+        // NOT on B's lower-half sweep] and (0,-4,0) [world angle 270°, IS on
+        // B's sweep, and also not on A's 0..90° sweep]. Independently
+        // filtering each side's own frame should therefore find nothing —
+        // proving the two arcs' angle checks aren't accidentally sharing or
+        // confusing each other's frame (a bug here would likely either
+        // wrongly accept one of the two points or wrongly accept both).
+        assert!(exact_circle_intersections(&arc_a, &arc_b).is_none());
+
+        // Flip A to cover the lower-right quadrant (270..360°) instead: now
+        // (0,-4,0) is on both A's and B's own sweep, independently checked
+        // in each one's own (differently rotated) frame.
+        let arc_a_lower = WireModel {
+            tangent_geoms: vec![TangentGeom::Arc {
+                center: [0.0, 0.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 4.0,
+                start_angle: 3.0 * std::f64::consts::FRAC_PI_2,
+                end_angle: std::f64::consts::TAU,
+            }],
+            ..Default::default()
+        };
+        let pts = exact_circle_intersections(&arc_a_lower, &arc_b).expect("both sweeps cover (0,-4,0)");
+        assert_eq!(pts.len(), 1);
+        assert!((pts[0] - DVec3::new(0.0, -4.0, 0.0)).length() < 1e-9, "got {:?}", pts[0]);
     }
 }

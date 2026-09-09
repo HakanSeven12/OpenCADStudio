@@ -2508,11 +2508,10 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
     }
 
     /// Rebuild the cached selected_grips from the current entity selection.
-    /// Selections larger than this get no grips, matching AutoCAD's
-    /// `GRIPOBJLIMIT` default. The DWG header does not carry the variable, so
-    /// the default stands in for it.
-    const GRIP_OBJECT_LIMIT: usize = 100;
-
+    ///
+    /// Selections past `GRIPOBJLIMIT` get no grips at all. That used to be a
+    /// constant here; it is now [`crate::app::settings::UserSettings::grip_object_limit`],
+    /// reachable from Options and from the sysvar of the same name.
     pub(super) fn refresh_selected_grips(&mut self) {
         let i = self.active_tab;
         let locked_active_grip = self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
@@ -2551,7 +2550,11 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             // consumers all iterate the list, so they simply find nothing, and
             // grip editing is unavailable for a selection far past the size
             // where dragging one is a sensible thing to do.
-            let selected = if selected.len() > Self::GRIP_OBJECT_LIMIT {
+            //
+            // The limit is `GRIPOBJLIMIT`, and 0 means no limit — which is why
+            // this cannot be a bare `>` against the stored value.
+            let limit = self.grip_object_limit;
+            let selected = if limit > 0 && selected.len() > limit as usize {
                 Vec::new()
             } else {
                 selected
@@ -4155,9 +4158,12 @@ mod grip_limit_tests {
         use acadrust::entities::{EntityType, Line};
         use acadrust::types::Vector3;
 
-        let select_n = |n: usize| -> usize {
+        let select_n = |n: usize, limit: Option<i32>| -> usize {
             let mut app = OpenCADStudio::new_for_test();
             app.automation_op(r#"{"op":"new"}"#);
+            if let Some(limit) = limit {
+                app.grip_object_limit = limit;
+            }
             let i = app.active_tab;
             let handles: Vec<_> = (0..n)
                 .map(|k| {
@@ -4178,13 +4184,70 @@ mod grip_limit_tests {
         };
 
         assert!(
-            select_n(OpenCADStudio::GRIP_OBJECT_LIMIT) > 0,
+            select_n(crate::app::settings::DEFAULT_GRIP_OBJECT_LIMIT as usize, None) > 0,
             "a selection at the limit must still show its grips",
         );
         assert_eq!(
-            select_n(OpenCADStudio::GRIP_OBJECT_LIMIT + 1),
+            select_n(crate::app::settings::DEFAULT_GRIP_OBJECT_LIMIT as usize + 1, None),
             0,
             "one past the limit must show none at all",
+        );
+    }
+
+    /// The Options card writes these four straight onto the app and relies on
+    /// the snapshot/restore pair to carry them across a restart. Three of them
+    /// had no UI until now and so no reason for anyone to notice if the pair
+    /// missed one.
+    #[test]
+    fn the_selection_settings_survive_a_save_and_load() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.pick_add = false;
+        app.pick_drag_rect = true;
+        app.pick_box = 11;
+        app.grip_object_limit = 0;
+
+        let saved = app.current_settings();
+        let mut restored = OpenCADStudio::new_for_test();
+        restored.apply_settings(&saved);
+
+        assert!(!restored.pick_add);
+        assert!(restored.pick_drag_rect);
+        assert_eq!(restored.pick_box, 11);
+        assert_eq!(
+            restored.grip_object_limit, 0,
+            "zero is a real value here, not an unset field",
+        );
+    }
+
+    /// `GRIPOBJLIMIT 0` means no limit, and the old comparison — a bare `>`
+    /// against the stored number — could not express that: zero would have
+    /// suppressed every grip instead of allowing all of them.
+    #[test]
+    fn a_limit_of_zero_means_no_limit() {
+        use acadrust::entities::{EntityType, Line};
+        use acadrust::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.grip_object_limit = 0;
+        let i = app.active_tab;
+        let over = crate::app::settings::DEFAULT_GRIP_OBJECT_LIMIT as usize * 3;
+        let handles: Vec<_> = (0..over)
+            .map(|k| {
+                let x = k as f64;
+                app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
+                    Vector3::new(x, 0.0, 0.0),
+                    Vector3::new(x + 1.0, 1.0, 0.0),
+                )))
+            })
+            .collect();
+        for handle in handles {
+            app.tabs[i].scene.select_entity(handle, false);
+        }
+        app.refresh_selected_grips();
+        assert!(
+            app.tabs[i].selected_grips.len() > 0,
+            "zero must read as unlimited, not as a limit of none",
         );
     }
 }

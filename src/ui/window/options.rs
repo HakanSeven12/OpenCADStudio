@@ -15,6 +15,24 @@ pub enum OptionsTab {
     Selection,
 }
 
+/// The Selection-card settings that live on `UserSettings` rather than on the
+/// model-space theme.
+///
+/// Gathered into one value instead of four more positional parameters: the
+/// function already takes seventeen, and `pick_add` / `pick_drag_rect` are two
+/// adjacent `bool`s that would swap silently at the call site.
+#[derive(Clone, Copy)]
+pub struct SelectionPrefs {
+    /// PICKBOX, 0..=50.
+    pub pick_box: i32,
+    /// PICKADD: true = a click adds to the selection.
+    pub pick_add: bool,
+    /// PICKDRAG: true = press-drag draws a rectangle instead of a lasso.
+    pub pick_drag_rect: bool,
+    /// GRIPOBJLIMIT, 0..=32767; 0 = no limit.
+    pub grip_object_limit: i32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Labelled<T> {
     value: T,
@@ -36,7 +54,7 @@ pub fn view_window<'a>(
     language: crate::i18n::Language,
     active_tab: OptionsTab,
     cursor_size: i32,
-    pick_box: i32,
+    selection: SelectionPrefs,
     cursor_type: CursorType,
     crosshair_color: Option<[u8; 3]>,
     crosshair_color_input: &'a str,
@@ -544,10 +562,12 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Pick box size")).size(12).width(140),
-            slider(0..=50, pick_box.clamp(0, 50), Message::PickBoxChanged)
+            slider(0..=50, selection.pick_box.clamp(0, 50), Message::PickBoxChanged)
                 .step(1)
                 .width(Fill),
-            text(pick_box.clamp(0, 50).to_string()).size(11).width(44),
+            text(selection.pick_box.clamp(0, 50).to_string())
+                .size(11)
+                .width(44),
         ]
         .spacing(10)
         .align_y(iced::Center),
@@ -557,6 +577,31 @@ pub fn view_window<'a>(
         ))
         .size(11)
         .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Selection Modes")).size(15),
+        Space::new().height(10),
+        row![
+            // Worded the way AutoCAD words it, which is the inverse of PICKADD:
+            // ticked means a plain click replaces the selection and Shift adds.
+            iced::widget::checkbox(!selection.pick_add)
+                .on_toggle(Message::ShiftToAddToggled)
+                .size(15),
+            text(crate::t!("Use Shift to add to selection (PICKADD)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(selection.pick_drag_rect)
+                .on_toggle(Message::PickDragRectToggled)
+                .size(15),
+            text(crate::t!(
+                "Press and drag draws a rectangle instead of a lasso (PICKDRAG)"
+            ))
+            .size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
         Space::new().height(24),
         row![
             text(crate::t!("Visual Effect Settings")).size(15),
@@ -627,6 +672,15 @@ pub fn view_window<'a>(
         .align_y(iced::Center),
         Space::new().height(10),
         row![
+            iced::widget::checkbox(model_space.selection_effect)
+                .on_toggle(Message::SelectionEffectToggled)
+                .size(15),
+            text(crate::t!("Show selection effect (SELECTIONEFFECT)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
             text(crate::t!("Selection highlight color")).size(12).width(140),
             iced::widget::pick_list(
                 Some(selected_highlight_color),
@@ -638,6 +692,34 @@ pub fn view_window<'a>(
         ]
         .spacing(10)
         .align_y(iced::Center),
+        Space::new().height(24),
+        text(crate::t!("Preview")).size(15),
+        Space::new().height(10),
+        row![
+            // SELECTIONPREVIEW is a bitmask; bit 1 is the idle rollover and
+            // bit 2 the one that runs while a command is gathering objects.
+            iced::widget::checkbox(model_space.selection_preview & 1 != 0)
+                .on_toggle(Message::SelectionPreviewIdleToggled)
+                .size(15),
+            text(crate::t!("Preview selection when no command is active")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(model_space.selection_preview & 2 != 0)
+                .on_toggle(Message::SelectionPreviewCommandToggled)
+                .size(15),
+            text(crate::t!("Preview selection during a command")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Highlights the object under the cursor before it is picked (SELECTIONPREVIEW)."
+        ))
+        .size(11)
+        .width(sizing.width),
         Space::new().height(24),
         text(crate::t!("Grip Settings")).size(15),
         Space::new().height(10),
@@ -656,6 +738,36 @@ pub fn view_window<'a>(
         ]
         .spacing(10)
         .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Object limit for grips")).size(12).width(140),
+            // The slider covers the range where the setting is worth changing;
+            // the sysvar accepts AutoCAD's full 0..=32767, so a larger value
+            // set from the command line parks the handle at the end while the
+            // read-out keeps showing the real number.
+            slider(
+                0..=1000,
+                selection.grip_object_limit.clamp(0, 1000),
+                Message::GripObjectLimitChanged,
+            )
+            .step(1)
+            .width(Fill),
+            text(if selection.grip_object_limit == 0 {
+                crate::t!("Unlimited").into_owned()
+            } else {
+                selection.grip_object_limit.to_string()
+            })
+            .size(11)
+            .width(44),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Past this many selected objects no grips are drawn; 0 removes the limit (GRIPOBJLIMIT)."
+        ))
+        .size(11)
+        .width(sizing.width),
         Space::new().height(10),
         row![
             text(crate::t!("Unselected grip color")).size(12).width(140),

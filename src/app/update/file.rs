@@ -365,6 +365,7 @@ impl OpenCADStudio {
             zoom_factor: self.zoom_factor,
             cursor_size: self.cursor_size,
             pick_box: self.pick_box,
+            grip_object_limit: self.grip_object_limit,
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
             lineweight_display_scale: self.lineweight_display_scale,
@@ -418,6 +419,7 @@ impl OpenCADStudio {
         self.zoom_factor = s.zoom_factor.clamp(3, 100);
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
+        self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
         self.cursor_type = s.cursor_type;
         self.crosshair_color = s.crosshair_color;
         self.crosshair_color_input = s

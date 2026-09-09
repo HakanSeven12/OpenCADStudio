@@ -918,6 +918,7 @@ impl OpenCADStudio {
                     | "GRIPCOLOR"
                     | "GRIPHOT"
                     | "GRIPHOVER"
+                    | "GRIPOBJLIMIT"
             ) =>
             {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
@@ -940,7 +941,7 @@ impl OpenCADStudio {
                 let value = it.next().map(|s| s.trim().to_string());
                 if name.is_empty() || name == "?" {
                     self.command_line.push_info(
-                        crate::t!("SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
+                        crate::t!("SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
                     if matches!(name.as_str(), "SHOWHIST" | "SOLIDHIST") {
@@ -1443,6 +1444,22 @@ impl OpenCADStudio {
                                     _ => Err("SETVAR: integer from 1 to 25 required.".into()),
                                 },
                                 None => Ok((format!("GRIPSIZE = {}", self.model_space.grip_size), false)),
+                            },
+                            "GRIPOBJLIMIT" => match &value {
+                                Some(v) => match v.parse::<i32>() {
+                                    Ok(limit @ 0..=32767) => {
+                                        self.grip_object_limit = limit;
+                                        Ok((format!("GRIPOBJLIMIT = {limit}"), true))
+                                    }
+                                    _ => Err(
+                                        "SETVAR: integer from 0 to 32767 required (0 = no limit)."
+                                            .into(),
+                                    ),
+                                },
+                                None => Ok((
+                                    format!("GRIPOBJLIMIT = {}", self.grip_object_limit),
+                                    false,
+                                )),
                             },
                             "GRIPCOLOR" => match &value {
                                 Some(v) => match v.parse::<u8>() {
@@ -2126,6 +2143,7 @@ impl OpenCADStudio {
                                         | "GRIPCOLOR"
                                         | "GRIPHOT"
                                         | "GRIPHOVER"
+                                        | "GRIPOBJLIMIT"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {

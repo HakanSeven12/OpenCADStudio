@@ -6103,6 +6103,50 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::GripObjectLimitChanged(limit) => {
+                self.grip_object_limit = limit.clamp(0, 32767);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionEffectToggled(enabled) => {
+                self.model_space.selection_effect = enabled;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // SELECTIONPREVIEW is a bitmask and the two checkboxes own one bit
+            // each: 1 = rollover while idle, 2 = rollover during a command.
+            Message::SelectionPreviewIdleToggled(enabled) => {
+                self.model_space.selection_preview =
+                    set_preview_bit(self.model_space.selection_preview, 1, enabled);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionPreviewCommandToggled(enabled) => {
+                self.model_space.selection_preview =
+                    set_preview_bit(self.model_space.selection_preview, 2, enabled);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // The checkbox is worded as AutoCAD words it — "use Shift to add"
+            // — which is the opposite of PICKADD, so it is inverted here rather
+            // than leaving a reader to work that out from the field name.
+            Message::ShiftToAddToggled(shift_to_add) => {
+                self.pick_add = !shift_to_add;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::PickDragRectToggled(rectangle) => {
+                self.pick_drag_rect = rectangle;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::RestoreSelectionVisualDefaults => {
                 self.model_space.selection_area = true;
                 self.model_space.selection_opacity = 12;
@@ -6115,6 +6159,10 @@ impl OpenCADStudio {
                 self.model_space.grip_color = 0;
                 self.model_space.grip_hot = 0;
                 self.model_space.grip_hover = 0;
+                // The button restores the *visual* defaults, which is why the
+                // grip limit is here and PICKADD / PICKDRAG are not — those are
+                // how selection behaves, not how it looks.
+                self.grip_object_limit = crate::app::settings::DEFAULT_GRIP_OBJECT_LIMIT;
                 self.sync_model_space_theme(false);
                 self.persist_settings_if_changed();
                 Task::none()
@@ -8625,5 +8673,39 @@ mod free_text_entry_tests {
         let _ = app.update(Message::CommandInput("LINE 0,0 10,10".into()));
         assert!(app.command_line.input.is_empty(), "Space submitted the line");
         assert_eq!(app.text_entry_mode(), TextEntryMode::Command);
+    }
+}
+
+/// Set or clear one bit of `SELECTIONPREVIEW`.
+///
+/// The variable is a bitmask — 1 = rollover while no command is running,
+/// 2 = rollover during a command — and the Options card gives each bit its own
+/// checkbox. Worth a named function rather than two inline `|` / `& !`
+/// expressions: the config comment used to describe these bits the wrong way
+/// round, so the one place that names them is the place to be careful.
+fn set_preview_bit(current: u8, bit: u8, enabled: bool) -> u8 {
+    if enabled {
+        current | bit
+    } else {
+        current & !bit
+    }
+}
+
+#[cfg(test)]
+mod selection_preview_bit_tests {
+    use super::set_preview_bit;
+
+    #[test]
+    fn each_checkbox_owns_its_own_bit() {
+        // Both on, then clear the idle bit: the in-command bit must survive.
+        assert_eq!(set_preview_bit(3, 1, false), 2);
+        assert_eq!(set_preview_bit(3, 2, false), 1);
+        // Setting a bit that is already set changes nothing.
+        assert_eq!(set_preview_bit(3, 1, true), 3);
+        // From off, each bit turns on alone.
+        assert_eq!(set_preview_bit(0, 1, true), 1);
+        assert_eq!(set_preview_bit(0, 2, true), 2);
+        // Clearing both reaches 0, which is SELECTIONPREVIEW off.
+        assert_eq!(set_preview_bit(set_preview_bit(3, 1, false), 2, false), 0);
     }
 }

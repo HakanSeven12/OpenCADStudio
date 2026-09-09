@@ -500,6 +500,9 @@ pub(super) struct OpenCADStudio {
     cursor_size: i32,
     /// Selection-box size setting (PICKBOX, 0..=50).
     pick_box: i32,
+    /// Selected-object count past which grips stop being generated
+    /// (GRIPOBJLIMIT, 0..=32767; 0 = no limit).
+    grip_object_limit: i32,
     /// Drawing viewport cursor style (CURSORTYPE).
     cursor_type: settings::CursorType,
     /// Explicit crosshair colour; `None` retains automatic contrast.
@@ -1977,6 +1980,20 @@ pub enum Message {
     GripHotChanged(u8),
     /// Change Hover/Warm Grip color ACI index (0 = Theme Primary Strong, 1..=255 = ACI, GRIPHOVER).
     GripHoverChanged(u8),
+    /// Change the selected-object count past which grips stop being drawn
+    /// (0..=32767, 0 = no limit, GRIPOBJLIMIT).
+    GripObjectLimitChanged(i32),
+    /// Toggle the solid selection highlight (SELECTIONEFFECT).
+    SelectionEffectToggled(bool),
+    /// Toggle rollover preview while no command is running (SELECTIONPREVIEW bit 1).
+    SelectionPreviewIdleToggled(bool),
+    /// Toggle rollover preview during a command (SELECTIONPREVIEW bit 2).
+    SelectionPreviewCommandToggled(bool),
+    /// Toggle "use Shift to add to selection" — the checkbox reads the way
+    /// AutoCAD words it, so it carries the *inverse* of PICKADD.
+    ShiftToAddToggled(bool),
+    /// Toggle press-and-drag drawing a rectangle instead of a lasso (PICKDRAG).
+    PickDragRectToggled(bool),
     /// Restore Model Space display/canvas appearance to defaults.
     RestoreModelSpaceDisplayDefaults,
     /// Restore Selection visual effect settings to defaults.
@@ -3369,6 +3386,7 @@ impl OpenCADStudio {
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
+            grip_object_limit: settings::DEFAULT_GRIP_OBJECT_LIMIT,
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),

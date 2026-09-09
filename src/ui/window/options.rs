@@ -13,6 +13,25 @@ pub enum OptionsTab {
     General,
     Display,
     Selection,
+    Drawing,
+}
+
+/// The Selection-card settings that live on `UserSettings` rather than on the
+/// model-space theme.
+///
+/// Gathered into one value instead of four more positional parameters: the
+/// function already takes seventeen, and `pick_add` / `pick_drag_rect` are two
+/// adjacent `bool`s that would swap silently at the call site.
+#[derive(Clone, Copy)]
+pub struct SelectionPrefs {
+    /// PICKBOX, 0..=50.
+    pub pick_box: i32,
+    /// PICKADD: true = a click adds to the selection.
+    pub pick_add: bool,
+    /// PICKDRAG: true = press-drag draws a rectangle instead of a lasso.
+    pub pick_drag_rect: bool,
+    /// GRIPOBJLIMIT, 0..=32767; 0 = no limit.
+    pub grip_object_limit: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,7 +56,9 @@ pub fn view_window<'a>(
     language: crate::i18n::Language,
     active_tab: OptionsTab,
     cursor_size: i32,
-    pick_box: i32,
+    selection: SelectionPrefs,
+    double_click_block_refedit: bool,
+    double_click_block_attedit: bool,
     cursor_type: CursorType,
     crosshair_color: Option<[u8; 3]>,
     crosshair_color_input: &'a str,
@@ -634,10 +655,12 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Pick box size")).size(12).width(140),
-            slider(0..=50, pick_box.clamp(0, 50), Message::PickBoxChanged)
+            slider(0..=50, selection.pick_box.clamp(0, 50), Message::PickBoxChanged)
                 .step(1)
                 .width(Fill),
-            text(pick_box.clamp(0, 50).to_string()).size(11).width(44),
+            text(selection.pick_box.clamp(0, 50).to_string())
+                .size(11)
+                .width(44),
         ]
         .spacing(10)
         .align_y(iced::Center),
@@ -647,6 +670,30 @@ pub fn view_window<'a>(
         ))
         .size(11)
         .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Selection Modes")).size(15),
+        Space::new().height(10),
+        row![
+            // Checked is the inverse of PICKADD: plain clicks replace and Shift adds.
+            iced::widget::checkbox(!selection.pick_add)
+                .on_toggle(Message::ShiftToAddToggled)
+                .size(15),
+            text(crate::t!("Use Shift to add to selection (PICKADD)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(selection.pick_drag_rect)
+                .on_toggle(Message::PickDragRectToggled)
+                .size(15),
+            text(crate::t!(
+                "Press and drag draws a rectangle instead of a lasso (PICKDRAG)"
+            ))
+            .size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
         Space::new().height(24),
         row![
             text(crate::t!("Visual Effect Settings")).size(15),
@@ -717,6 +764,15 @@ pub fn view_window<'a>(
         .align_y(iced::Center),
         Space::new().height(10),
         row![
+            iced::widget::checkbox(model_space.selection_effect)
+                .on_toggle(Message::SelectionEffectToggled)
+                .size(15),
+            text(crate::t!("Show selection effect (SELECTIONEFFECT)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
             text(crate::t!("Selection highlight color")).size(12).width(140),
             iced::widget::pick_list(
                 Some(selected_highlight_color),
@@ -728,6 +784,34 @@ pub fn view_window<'a>(
         ]
         .spacing(10)
         .align_y(iced::Center),
+        Space::new().height(24),
+        text(crate::t!("Preview")).size(15),
+        Space::new().height(10),
+        row![
+            // SELECTIONPREVIEW is a bitmask; bit 1 is the idle rollover and
+            // bit 2 the one that runs while a command is gathering objects.
+            iced::widget::checkbox(model_space.selection_preview & 1 != 0)
+                .on_toggle(Message::SelectionPreviewIdleToggled)
+                .size(15),
+            text(crate::t!("Preview selection when no command is active")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(model_space.selection_preview & 2 != 0)
+                .on_toggle(Message::SelectionPreviewCommandToggled)
+                .size(15),
+            text(crate::t!("Preview selection during a command")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Highlights the object under the cursor before it is picked (SELECTIONPREVIEW)."
+        ))
+        .size(11)
+        .width(sizing.width),
         Space::new().height(24),
         text(crate::t!("Grip Settings")).size(15),
         Space::new().height(10),
@@ -746,6 +830,33 @@ pub fn view_window<'a>(
         ]
         .spacing(10)
         .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Object limit for grips")).size(12).width(140),
+            // Values above the slider range remain available through SETVAR.
+            slider(
+                0..=1000,
+                selection.grip_object_limit.clamp(0, 1000),
+                Message::GripObjectLimitChanged,
+            )
+            .step(1)
+            .width(Fill),
+            text(if selection.grip_object_limit == 0 {
+                crate::t!("Unlimited").into_owned()
+            } else {
+                selection.grip_object_limit.to_string()
+            })
+            .size(11)
+            .width(44),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Past this many selected objects no grips are drawn; 0 removes the limit (GRIPOBJLIMIT)."
+        ))
+        .size(11)
+        .width(sizing.width),
         Space::new().height(10),
         row![
             text(crate::t!("Unselected grip color")).size(12).width(140),
@@ -789,10 +900,35 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
+    let drawing = column![
+        text(crate::t!("Block Edit")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(double_click_block_refedit)
+                .on_toggle(Message::DoubleClickBlockRefeditChanged)
+                .size(15),
+            text(crate::t!("Double-click to edit block in-place (REFEDIT)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(18),
+        row![
+            iced::widget::checkbox(double_click_block_attedit)
+                .on_toggle(Message::DoubleClickBlockAtteditChanged)
+                .size(15),
+            text(crate::t!("Double-click attributed blocks to edit attributes (ATTEDIT)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
     let content: Element<'a, Message> = match active_tab {
         OptionsTab::General => general.into(),
         OptionsTab::Display => display_element.into(),
         OptionsTab::Selection => selection.into(),
+        OptionsTab::Drawing => drawing.into(),
     };
 
     let tab_button = |label, tab| {
@@ -806,6 +942,7 @@ pub fn view_window<'a>(
         tab_button(crate::t!("General"), OptionsTab::General),
         tab_button(crate::t!("Display"), OptionsTab::Display),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
+        tab_button(crate::t!("Drawing"), OptionsTab::Drawing),
     ]
     .spacing(6);
 
@@ -821,10 +958,11 @@ pub fn view_window<'a>(
     .width(sizing.width)
     .height(sizing.height);
 
+    let intrinsic = sizing.width == crate::ui::modal::ModalSizing::INTRINSIC.width;
     container(body)
         .style(container::rounded_box)
         .padding([16, 18])
-        .width(sizing.width)
-        .height(sizing.height)
+        .width(if intrinsic { iced::Length::Fixed(540.0) } else { sizing.width })
+        .height(if intrinsic { iced::Length::Fixed(560.0) } else { sizing.height })
         .into()
 }

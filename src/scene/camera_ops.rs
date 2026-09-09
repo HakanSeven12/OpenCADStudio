@@ -9,26 +9,37 @@ fn rendered_wire_bounds(
 ) -> Option<(glam::DVec3, glam::DVec3)> {
     let mut min = glam::DVec3::splat(f64::INFINITY);
     let mut max = glam::DVec3::splat(f64::NEG_INFINITY);
-    let mut include = |point: glam::DVec3| {
-        if point.is_finite() {
-            min = min.min(point);
-            max = max.max(point);
-        }
-    };
+    macro_rules! include_bound {
+        ($p:expr) => {
+            let point: glam::DVec3 = $p;
+            if point.is_finite() {
+                min = min.min(point);
+                max = max.max(point);
+            }
+        };
+    }
 
     for wire in wires {
         let mut has_precise_position = false;
+        let hw = wire.world_width as f64 * 0.5;
+
         for (index, &[x, y, z]) in wire.points.iter().enumerate() {
             let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
-            include(glam::DVec3::new(
+            let p = glam::DVec3::new(
                 x as f64 + low[0] as f64,
                 y as f64 + low[1] as f64,
                 z as f64 + low[2] as f64,
-            ));
+            );
+            if hw > 0.0 {
+                include_bound!(p - glam::DVec3::splat(hw));
+                include_bound!(p + glam::DVec3::splat(hw));
+            } else {
+                include_bound!(p);
+            }
             has_precise_position = true;
         }
         for vertex in &wire.text_verts {
-            include(glam::DVec3::new(
+            include_bound!(glam::DVec3::new(
                 vertex.pos[0] as f64 + vertex.pos_low[0] as f64,
                 vertex.pos[1] as f64 + vertex.pos_low[1] as f64,
                 vertex.pos[2] as f64 + vertex.pos_low[2] as f64,
@@ -36,11 +47,17 @@ fn rendered_wire_bounds(
             has_precise_position = true;
         }
         for &[x, y, z] in &wire.key_vertices {
-            include(glam::DVec3::new(x, y, z));
+            let p = glam::DVec3::new(x, y, z);
+            if hw > 0.0 {
+                include_bound!(p - glam::DVec3::splat(hw));
+                include_bound!(p + glam::DVec3::splat(hw));
+            } else {
+                include_bound!(p);
+            }
             has_precise_position = true;
         }
         for &(point, _) in &wire.snap_pts {
-            include(point);
+            include_bound!(point);
             has_precise_position = true;
         }
 
@@ -51,8 +68,8 @@ fn rendered_wire_bounds(
                 && x0 <= x1
                 && y0 <= y1
             {
-                include(glam::DVec3::new(x0 as f64, y0 as f64, fallback_z));
-                include(glam::DVec3::new(x1 as f64, y1 as f64, fallback_z));
+                include_bound!(glam::DVec3::new(x0 as f64 - hw, y0 as f64 - hw, fallback_z - hw));
+                include_bound!(glam::DVec3::new(x1 as f64 + hw, y1 as f64 + hw, fallback_z + hw));
             }
         }
     }
@@ -1455,12 +1472,18 @@ impl Scene {
                 continue;
             }
             let wire = &wires[c.idx];
+            let hw = (wire.world_width * 0.5) as f32;
             for &[x, y, z] in &wire.points {
                 if !x.is_finite() || !y.is_finite() || !z.is_finite() {
                     continue;
                 }
-                min = min.min(glam::Vec3::new(x, y, z));
-                max = max.max(glam::Vec3::new(x, y, z));
+                if hw > 0.0 {
+                    min = min.min(glam::Vec3::new(x - hw, y - hw, z - hw));
+                    max = max.max(glam::Vec3::new(x + hw, y + hw, z + hw));
+                } else {
+                    min = min.min(glam::Vec3::new(x, y, z));
+                    max = max.max(glam::Vec3::new(x, y, z));
+                }
             }
         }
         // Fold in 3D-solid mesh AABBs (not subject to the wire IQR reject).

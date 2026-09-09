@@ -121,35 +121,83 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
 
     let rel_a = marker_relative(in.pos_a, in.pos_a_low, in.translation, in.translation_low);
     let rel_b = marker_relative(in.pos_b, in.pos_b_low, in.translation, in.translation_low);
-    let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
-    let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
-    let screen_a = clip_a.xy / clip_a.w * u.viewport_size * 0.5;
-    let screen_b = clip_b.xy / clip_b.w * u.viewport_size * 0.5;
-    let segment = screen_b - screen_a;
-    let segment_length = length(segment);
-    var direction = vec2<f32>(1.0, 0.0);
-    if segment_length > 1e-4 {
-        direction = segment / segment_length;
+    let is_world = wire_const.world_half_width > 0.0 || in.taper_ratio.x > 0.0 || in.taper_ratio.y > 0.0;
+
+    var final_clip: vec4<f32>;
+    var out_dist: f32;
+    var out_cap: vec2<f32>;
+    var out_cap_ends: vec3<f32>;
+
+    if is_world {
+        // Wide polylines have physical world-unit width (world_half_width or taper > 0).
+        // Expand the quad in 3D world space on the entity's plane (perpendicular to
+        // the segment and the plane normal), so the rectangle remains hosted rigidly
+        // on the 3D plane when the camera rotates, orbits, or tilts, matching CAD
+        // behavior and circle.wgsl planar arcs.
+        let world_hw_a = select(wire_const.world_half_width, in.taper_ratio.x * wire_const.world_half_width, in.taper_ratio.x > 0.0);
+        let world_hw_b = select(wire_const.world_half_width, in.taper_ratio.y * wire_const.world_half_width, in.taper_ratio.y > 0.0);
+        let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
+        let eff_hw = max(cur_world_hw, 0.5 * u.world_per_pixel);
+
+        let world_delta = rel_b - rel_a;
+        let world_len = length(world_delta);
+        var world_dir = vec3<f32>(1.0, 0.0, 0.0);
+        if world_len > 1e-6 {
+            world_dir = world_delta / world_len;
+        }
+
+        var norm = vec3<f32>(0.0, 0.0, 1.0);
+        if length(wire_const.marker_normal_scale.xyz) > 1e-4 {
+            norm = normalize(wire_const.marker_normal_scale.xyz);
+        }
+
+        var perp_world = cross(norm, world_dir);
+        if length(perp_world) < 1e-4 {
+            perp_world = cross(vec3<f32>(0.0, 1.0, 0.0), world_dir);
+            if length(perp_world) < 1e-4 {
+                perp_world = cross(vec3<f32>(1.0, 0.0, 0.0), world_dir);
+            }
+        }
+        perp_world = normalize(perp_world);
+
+        let pos_rel = mix(rel_a, rel_b, which_end);
+        let world_pos = pos_rel + perp_world * (eff_hw * side);
+        var clip_pos = u.view_rot * vec4<f32>(world_pos, 1.0);
+        clip_pos.z = clip_pos.z - in.depth.x * DRAW_ORDER_BIAS * clip_pos.w;
+
+        final_clip = clip_pos;
+        out_dist = mix(in.distances.x, in.distances.y, which_end);
+        out_cap = vec2<f32>(which_end * world_len, eff_hw * side);
+        out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
+    } else {
+        // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
+        let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
+        let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
+        let screen_a = clip_a.xy / clip_a.w * u.viewport_size * 0.5;
+        let screen_b = clip_b.xy / clip_b.w * u.viewport_size * 0.5;
+        let segment = screen_b - screen_a;
+        let segment_length = length(segment);
+        var direction = vec2<f32>(1.0, 0.0);
+        if segment_length > 1e-4 {
+            direction = segment / segment_length;
+        }
+        let perpendicular = vec2<f32>(-direction.y, direction.x);
+        let clip_position = mix(clip_a, clip_b, which_end);
+
+        let half_width = resolve_hw(0.0, 0.0, wire_const.half_width);
+        let extension = which_end * 2.0 - 1.0;
+        let offset_px = perpendicular * half_width * side
+            + direction * half_width * extension;
+        let ndc_offset = offset_px / (u.viewport_size * 0.5);
+        var clip_pos_out = clip_position + vec4<f32>(ndc_offset * clip_position.w, 0.0, 0.0);
+        clip_pos_out.z = clip_pos_out.z - in.depth.x * DRAW_ORDER_BIAS * clip_pos_out.w;
+
+        final_clip = clip_pos_out;
+        out_dist = mix(in.distances.x, in.distances.y, which_end)
+            + extension * half_width * u.world_per_pixel;
+        out_cap = vec2<f32>(which_end * segment_length + extension * half_width, half_width * side);
+        out_cap_ends = vec3<f32>(segment_length, half_width, half_width);
     }
-    let perpendicular = vec2<f32>(-direction.y, direction.x);
-    let clip_position = mix(clip_a, clip_b, which_end);
-    let half_width_a = resolve_hw(
-        in.taper_ratio.x,
-        wire_const.world_half_width,
-        wire_const.half_width,
-    );
-    let half_width_b = resolve_hw(
-        in.taper_ratio.y,
-        wire_const.world_half_width,
-        wire_const.half_width,
-    );
-    let half_width = mix(half_width_a, half_width_b, which_end);
-    let extension = which_end * 2.0 - 1.0;
-    let offset_px = perpendicular * half_width * side
-        + direction * half_width * extension;
-    let ndc_offset = offset_px / (u.viewport_size * 0.5);
-    let final_clip = clip_position
-        + vec4<f32>(ndc_offset * clip_position.w, 0.0, 0.0);
 
     let scale = u.linetype_scale;
     var min_element = wire_const.pattern_length * scale;
@@ -172,21 +220,16 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
 
     var out: VertexOut;
     out.clip_pos = final_clip;
-    out.clip_pos.z -= in.depth.x * DRAW_ORDER_BIAS * out.clip_pos.w;
     out.color = wire_const.color;
-    out.distance = mix(in.distances.x, in.distances.y, which_end)
-        + extension * half_width * u.world_per_pixel;
+    out.distance = out_dist;
+    out.cap = out_cap;
+    out.cap_ends = out_cap_ends;
     out.pattern_length = wire_const.pattern_length * scale;
     out.pat0 = wire_const.pat0 * scale;
     out.pat1 = wire_const.pat1 * scale;
     out.min_elem = min_element;
     out.align_end = wire_const.align_end * scale;
     out.align_total = wire_const.align_total;
-    out.cap = vec2<f32>(
-        which_end * segment_length + extension * half_width,
-        half_width * side,
-    );
-    out.cap_ends = vec3<f32>(segment_length, half_width_a, half_width_b);
     return out;
 }
 

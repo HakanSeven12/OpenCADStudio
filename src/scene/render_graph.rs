@@ -1042,15 +1042,6 @@ pub fn document_block_uses(document: &CadDocument) -> Vec<BlockUse> {
     uses
 }
 
-/// A MINSERT's row/column counts are parsed `u16`s whose unchecked product
-/// (`Insert::instance_count`) would otherwise drive this function's
-/// allocation and a full per-instance render-graph walk after it — a corrupt
-/// or adversarial 65535x65535 pair requests over four billion instances (tens
-/// of GiB) long before any GPU-side chunking limit could help. The primary
-/// defense is the load-time filter in `io::is_entity_corrupt` (kept in sync
-/// with this constant), which drops such an insert before it ever reaches a
-/// `Scene`; this is the failsafe for an insert built or edited some other way
-/// (API/scripting) that skips that path.
 const MAX_MINSERT_INSTANCES: usize = 20_000;
 
 pub fn array_offsets(insert: &Insert) -> Vec<[f64; 3]> {
@@ -1093,16 +1084,6 @@ pub fn insert_instance_transform(
     if offset == [0.0; 3] {
         transform
     } else {
-        // Row/column spacing is defined in the insert's rotated/OCS-oriented
-        // space but is NOT subject to the block's x/y/z scale — this matches
-        // the pinned CAD model's own `Insert::array_points`, which rotates
-        // the offset but never scales it. Composing the raw offset ahead of
-        // the full (scaled) transform, as this used to do, let the block
-        // scale multiply the spacing too (e.g. an x-scale-2 insert with
-        // column spacing 10 would render 20 units between columns). Instead,
-        // orient the offset by rotation + OCS only, then translate the
-        // already-composed (scaled) instance transform by that world-space
-        // vector, applied after — never scaled.
         let orientation = Transform::from_matrix(Matrix4::rotation_z(insert.rotation))
             .then(&Transform::from_matrix(Matrix4::from_matrix3(Matrix3::arbitrary_axis(insert.normal))));
         let world_offset = orientation.apply_rotation(Vector3::new(offset[0], offset[1], offset[2]));
@@ -1201,10 +1182,6 @@ mod tests {
 
     #[test]
     fn array_offsets_clamps_pathological_minsert_counts() {
-        // A corrupt or adversarial row/column pair (parsed as u16, so this is
-        // reachable from a malformed file) must not drive a multi-billion-
-        // element allocation; the primary defense is the load-time filter in
-        // `io::is_entity_corrupt`, this is the render-graph-side failsafe.
         let mut insert = Insert::new("BLOCK", Vector3::ZERO);
         insert.row_count = u16::MAX;
         insert.column_count = u16::MAX;
@@ -1230,10 +1207,6 @@ mod tests {
 
     #[test]
     fn insert_instance_transform_does_not_scale_the_row_column_spacing() {
-        // github discussion-derived report: an INSERT with x-scale 2 and
-        // column spacing 10 was rendering 20 drawing units between columns
-        // instead of 10, because the offset translation was composed ahead
-        // of (and thus multiplied by) the block scale.
         let document = CadDocument::new();
         let mut insert = Insert::new("BLOCK", Vector3::new(100.0, 0.0, 0.0));
         insert.set_x_scale(2.0);

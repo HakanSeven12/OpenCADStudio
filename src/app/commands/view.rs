@@ -1567,6 +1567,16 @@ mod tests {
     }
 
     #[test]
+    fn options_and_its_alias_dispatch_from_the_start_page() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        assert!(app.dispatch_view("OPTIONS", i).is_some());
+        assert!(app.dispatch_view("OP", i).is_some());
+        assert!(crate::app::commands::start_allowed("OPTIONS"));
+        assert!(crate::app::commands::start_allowed("OP"));
+    }
+
+    #[test]
     fn hatchtoback_no_hatches_warns_and_noop() {
         let mut app = fresh_app();
         let _ = app.run_command_line("HATCHTOBACK");

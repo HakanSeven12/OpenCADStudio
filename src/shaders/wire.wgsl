@@ -156,50 +156,89 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, instance: 
     // UTM-scale coordinates and after a cross-drawing paste, with no jitter.
     let rel_a = marker_relative(in.pos_a, in.pos_a_low, in);
     let rel_b = marker_relative(in.pos_b, in.pos_b_low, in);
-    let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
-    let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
+    let is_world = in.misc.w > 0.0 || in.taper.x > 0.0 || in.taper.y > 0.0;
 
-    // NDC of both endpoints.
-    let ndc_a = clip_a.xy / clip_a.w;
-    let ndc_b = clip_b.xy / clip_b.w;
+    var final_clip: vec4<f32>;
+    var out_dist: f32;
+    var out_cap: vec2<f32>;
+    var out_cap_ends: vec3<f32>;
 
-    // Screen-space pixel positions.
-    let screen_a = ndc_a * u.viewport_size * 0.5;
-    let screen_b = ndc_b * u.viewport_size * 0.5;
+    if is_world {
+        // Wide polylines have physical world-unit width (in.misc.w or in.taper > 0).
+        // Expand the quad in 3D world space on the entity's plane (perpendicular to
+        // the segment and the plane normal), so the rectangle remains hosted rigidly
+        // on the 3D plane when the camera rotates, orbits, or tilts, matching CAD
+        // behavior and circle.wgsl planar arcs.
+        let world_hw_a = select(in.misc.w, in.taper.x, in.taper.x > 0.0);
+        let world_hw_b = select(in.misc.w, in.taper.y, in.taper.y > 0.0);
+        let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
+        let eff_hw = max(cur_world_hw, 0.5 * u.world_per_pixel);
 
-    // Screen-space direction / perpendicular of the segment.
-    let seg = screen_b - screen_a;
-    let seg_len = length(seg);
-    var dir: vec2<f32>;
-    if seg_len > 1e-4 {
-        dir = seg / seg_len;
+        let world_delta = rel_b - rel_a;
+        let world_len = length(world_delta);
+        var world_dir = vec3<f32>(1.0, 0.0, 0.0);
+        if world_len > 1e-6 {
+            world_dir = world_delta / world_len;
+        }
+
+        var norm = vec3<f32>(0.0, 0.0, 1.0);
+        if length(in.marker_normal_scale.xyz) > 1e-4 {
+            norm = normalize(in.marker_normal_scale.xyz);
+        }
+
+        var perp_world = cross(norm, world_dir);
+        if length(perp_world) < 1e-4 {
+            perp_world = cross(vec3<f32>(0.0, 1.0, 0.0), world_dir);
+            if length(perp_world) < 1e-4 {
+                perp_world = cross(vec3<f32>(1.0, 0.0, 0.0), world_dir);
+            }
+        }
+        perp_world = normalize(perp_world);
+
+        let pos_rel = mix(rel_a, rel_b, which_end);
+        let world_pos = pos_rel + perp_world * (eff_hw * side);
+        var clip_pos = u.view_rot * vec4<f32>(world_pos, 1.0);
+        clip_pos.z = clip_pos.z - in.misc.x * DRAW_ORDER_BIAS * clip_pos.w;
+
+        final_clip = clip_pos;
+        out_dist = mix(in.dists.x, in.dists.y, which_end);
+        out_cap = vec2<f32>(which_end * world_len, eff_hw * side);
+        out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
     } else {
-        dir = vec2<f32>(1.0, 0.0);
+        // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
+        let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
+        let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
+
+        let ndc_a = clip_a.xy / clip_a.w;
+        let ndc_b = clip_b.xy / clip_b.w;
+
+        let screen_a = ndc_a * u.viewport_size * 0.5;
+        let screen_b = ndc_b * u.viewport_size * 0.5;
+
+        let seg = screen_b - screen_a;
+        let seg_len = length(seg);
+        var dir: vec2<f32>;
+        if seg_len > 1e-4 {
+            dir = seg / seg_len;
+        } else {
+            dir = vec2<f32>(1.0, 0.0);
+        }
+        let perp = vec2<f32>(-dir.y, dir.x);
+
+        let clip_pos = mix(clip_a, clip_b, which_end);
+
+        let hw = resolve_hw(0.0, 0.0, in.dists.z);
+        let ext = which_end * 2.0 - 1.0;
+        let offset_px = perp * hw * side + dir * hw * ext;
+        let ndc_offset = offset_px / (u.viewport_size * 0.5);
+        var clip_pos_out = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);
+        clip_pos_out.z = clip_pos_out.z - in.misc.x * DRAW_ORDER_BIAS * clip_pos_out.w;
+
+        final_clip = clip_pos_out;
+        out_dist = mix(in.dists.x, in.dists.y, which_end) + ext * hw * u.world_per_pixel;
+        out_cap = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
+        out_cap_ends = vec3<f32>(seg_len, hw, hw);
     }
-    let perp = vec2<f32>(-dir.y, dir.x);
-
-    // Select the clip-space position for this vertex's endpoint.
-    let clip_pos = mix(clip_a, clip_b, which_end);
-
-    // A wide polyline carries its band width in world units: expand the quad by
-    // `world_half_width / world_per_pixel` (pixels) so the band tracks zoom. A
-    // normal wire (world_half_width == 0) uses the screen-pixel half-width,
-    // honouring the LWDISPLAY toggle (off → collapse to a 1-pixel line).
-    // A tapered band interpolates a per-endpoint world half-width across the
-    // segment; a constant band uses `world_half_width`. Both clamp to a
-    // half-pixel so a zoomed-out band stays a hairline instead of vanishing.
-    let hw_a = resolve_hw(in.taper.x, in.misc.w, in.dists.z);
-    let hw_b = resolve_hw(in.taper.y, in.misc.w, in.dists.z);
-    let hw = mix(hw_a, hw_b, which_end);
-
-    // Extend the quad longitudinally by the end half-width and let the
-    // fragment stage round the overhang off: adjoining segments then meet in
-    // overlapping round joints, closing the wedge gaps a perpendicular-only
-    // expansion leaves on the outside of corners and along tessellated arcs.
-    let ext = which_end * 2.0 - 1.0; // -1 at the A end, +1 at the B end
-    let offset_px = perp * hw * side + dir * hw * ext;
-    let ndc_offset = offset_px / (u.viewport_size * 0.5);
-    let final_clip = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);
 
     // Smallest non-zero dash / gap element, in world units. Used by
     // the fragment stage to decide when the pattern's finest feature
@@ -219,14 +258,10 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, instance: 
 
     var out: VertexOut;
     out.clip_pos       = final_clip;
-    out.clip_pos.z     = out.clip_pos.z - in.misc.x * DRAW_ORDER_BIAS * out.clip_pos.w;
     out.color          = in.color;
-    // Dash arc-length, extrapolated over the cap overhang so the pattern
-    // stays continuous through a joint.
-    out.distance       = mix(in.dists.x, in.dists.y, which_end)
-        + ext * hw * u.world_per_pixel;
-    out.cap            = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
-    out.cap_ends       = vec3<f32>(seg_len, hw_a, hw_b);
+    out.distance       = out_dist;
+    out.cap            = out_cap;
+    out.cap_ends       = out_cap_ends;
     out.pattern_length = in.dists.w * lt_scale;
     out.pat0           = in.pat0 * lt_scale;
     out.pat1           = in.pat1 * lt_scale;

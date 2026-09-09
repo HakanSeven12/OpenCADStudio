@@ -25,3 +25,11 @@ vocabulary, not a reflected binary codec schema.
 To extend the API, update the DTO, backend, executor, facade and spec together,
 add a native behavior test, and rebuild the generated reference/schema. New
 backend methods must reject unsupported behavior explicitly.
+
+Extension workflow:
+
+1. Add the operation/query DTO and its name mapping, then update `spec/entities.toml`.
+2. Implement validation, backend preparation, executor dispatch and facade methods.
+3. Preserve each profile's plane and use cadkernel for geometry.
+4. Test native behavior, failed-operation atomicity and the binding transport payload.
+5. Run `cargo test -p ocs_doc_api --all-features` and rebuild the generated snapshots.

@@ -226,6 +226,13 @@ pub async fn read_clipboard_text() -> Option<String> {
     value.as_string()
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(module = "/web/clipboard.js")]
+extern "C" {
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = copyHistory)]
+    pub fn copy_history_text(text: &str, fallback_label: &str, close_label: &str) -> js_sys::Promise;
+}
+
 /// Web: write text to the system clipboard (fire-and-forget). Backs Ctrl+C in
 /// plain text_input fields, whose iced-internal copy is a no-op on the web
 /// (#346). The triggering keypress is a user gesture, so the write is allowed.

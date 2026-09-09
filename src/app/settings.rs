@@ -145,6 +145,9 @@ pub(crate) fn snaps_from_osmode(osmode: i32) -> (Vec<SnapType>, bool) {
     (modes, osmode & OSMODE_SUPPRESS == 0)
 }
 
+/// GRIPOBJLIMIT default: past this many selected objects, no grips are drawn.
+pub const DEFAULT_GRIP_OBJECT_LIMIT: i32 = 100;
+
 /// The "settings" section of the consolidated config ([`crate::app::config`]).
 /// Field defaults mirror the app's in-code defaults so a missing key restores
 /// the value the app boots with.
@@ -160,6 +163,13 @@ pub struct UserSettings {
     pub cursor_size: i32,
     /// PICKBOX: normalized visible-box and click-aperture size.
     pub pick_box: i32,
+    /// When true, double-clicking a block reference starts REFEDIT instead of BEDIT.
+    pub double_click_block_refedit: bool,
+    /// When true, double-clicking a block with attributes opens ATTEDIT.
+    pub double_click_block_attedit: bool,
+    /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
+    /// all. 0 means no limit. The drawing header carries no slot for it.
+    pub grip_object_limit: i32,
     /// CURSORTYPE: crosshair or the platform pointer over the drawing.
     pub cursor_type: CursorType,
     /// Explicit crosshair RGB. `None` keeps automatic background contrast.
@@ -324,6 +334,9 @@ impl Default for UserSettings {
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
+            double_click_block_refedit: false,
+            double_click_block_attedit: true,
+            grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,
             lineweight_display_scale: 100,

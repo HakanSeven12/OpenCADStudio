@@ -246,23 +246,16 @@ impl Camera {
     /// A symmetric range gives the bias half the depth buffer of headroom on
     /// each side; ortho permits a negative near.
     fn ortho_depth_range(&self) -> (f32, f32) {
-        // Prefer a drawing-sized, zoom-independent half-range so depth-buffer
-        // precision stays constant as the user zooms. A distance-scaled range
-        // (the `else`) balloons the near/far span when zoomed out — at large
-        // `distance` the f32 depth buffer can no longer separate coincident
-        // solids / meshes / wires, so they flip draw order (issue: meshes drew
-        // in front of solids only when zoomed out).
+        // Generous headroom based on the current screen size so that rotating any
+        // geometry visible on screen in 3D never penetrates the near/far planes.
+        let view_extent = (self.ortho_size() * 3.0).max(10.0);
+
         let r = if let Some((min, max)) = self.model_bounds {
-            // Depth extent along the CURRENT eye direction, recomputed each
-            // frame so orbiting a 3-D drawing never clips it (#473): as the
-            // view tilts off top, the box's width rotates onto the eye axis and
-            // the span grows to match. Same tight, zoom-independent precision as
-            // a fitted scalar, but always oriented to the live view.
-            self.depth_extent_in_view(min, max)
+            self.depth_extent_in_view(min, max).max(view_extent)
         } else if self.depth_half_range > 0.0 {
-            self.depth_half_range
+            self.depth_half_range.max(view_extent)
         } else {
-            (self.distance * 1000.0).max(1.0)
+            (self.distance * 1000.0).max(view_extent).max(10.0)
         };
         (self.distance - r, self.distance + r)
     }
@@ -590,7 +583,11 @@ impl Camera {
             .bounds_in_view(min, max)
             .iter()
             .fold(0.0_f32, |m, c| m.max(c.z.abs()));
-        (depth_r * 1.05).max(1.0)
+        let diag = (max - min).length() as f32;
+        // Generous headroom (1.5x depth extent + 25% of model diagonal + minimum clearance)
+        // so wide strokes, lineweights, camera orbit dynamics, and draw-order depth bias
+        // never penetrate the near clipping plane in orthographic 3D view.
+        (depth_r * 1.5 + diag * 0.25).max(10.0)
     }
 
     /// Fit the camera to `min..max` — pose and depth both.

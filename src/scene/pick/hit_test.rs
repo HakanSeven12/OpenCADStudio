@@ -13,7 +13,7 @@ use iced::{Point, Rectangle};
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::mesh_model::MeshModel;
 use crate::scene::model::wire_model::WireModel;
-use crate::scene::pick::interaction_index::WireSource;
+use crate::scene::pick::interaction_index::{SegmentRef, WireSource};
 
 /// Pick radius for one wire, in screen pixels.
 ///
@@ -1247,13 +1247,14 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
             || (0..4).any(|edge| segments_intersect(a, b, corners[edge], corners[(edge + 1) % 4]))
     };
 
-    for segment in wires.segments().unwrap_or_default() {
-        let Some(wire) = wires.source_wire(segment.wire) else {
-            continue;
-        };
+    // One projection pair per segment, reading nothing but the wire, the view
+    // and the box. Hoisted into a closure so the sequential and the parallel
+    // path below run identical code.
+    let hit_name = |segment: &SegmentRef| -> Option<&'a str> {
+        let wire = wires.source_wire(segment.wire)?;
         let start = segment.start as usize;
         if start + 1 >= wire.points.len() {
-            continue;
+            return None;
         }
         let a = world_to_screen(
             wire_point_world(wire, start, view_rot, eye),
@@ -1267,8 +1268,30 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
             eye,
             bounds,
         );
-        if segment_hits(a, b) && seen.insert(wire.name.as_str()) {
-            out.push(wire.name.as_str());
+        segment_hits(a, b).then_some(wire.name.as_str())
+    };
+
+    let mut wire_hit: Vec<bool> = Vec::new();
+    fn mark(wire_hit: &mut Vec<bool>, wire: u32) {
+        let index = wire as usize;
+        if index >= wire_hit.len() {
+            wire_hit.resize(index + 1, false);
+        }
+        wire_hit[index] = true;
+    }
+    fn already(wire_hit: &[bool], wire: u32) -> bool {
+        wire_hit.get(wire as usize).copied().unwrap_or(false)
+    }
+
+    for segment in wires.segments().unwrap_or_default() {
+        if already(&wire_hit, segment.wire) {
+            continue;
+        }
+        if let Some(name) = hit_name(segment) {
+            mark(&mut wire_hit, segment.wire);
+            if seen.insert(name) {
+                out.push(name);
+            }
         }
     }
     for wire in wires.iter().filter(|wire| wire.point_marker.is_some()) {
@@ -1287,7 +1310,7 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(triangle.wire) else {
                 continue;
             };
-            if seen.contains(wire.name.as_str()) {
+            if already(&wire_hit, triangle.wire) {
                 continue;
             }
             if projected_wire_triangle(
@@ -1299,9 +1322,11 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
                 bounds,
             )
             .is_some_and(|triangle| triangle_crosses_box(triangle, corners))
-                && seen.insert(wire.name.as_str())
             {
-                out.push(wire.name.as_str());
+                mark(&mut wire_hit, triangle.wire);
+                if seen.insert(wire.name.as_str()) {
+                    out.push(wire.name.as_str());
+                }
             }
         }
     }
@@ -1309,7 +1334,7 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
         let Some(wire) = wires.source_wire(glyph.wire) else {
             continue;
         };
-        if seen.contains(wire.name.as_str()) {
+        if already(&wire_hit, glyph.wire) {
             continue;
         }
         let Some(screen) =
@@ -1330,11 +1355,11 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
 
     // Degenerate point-only wires have no indexed segment or surface primitive.
     for wire in wires.iter() {
-        if seen.contains(wire.name.as_str())
-            || wire.points.len() >= 2
+        if wire.points.len() >= 2
             || !wire.fill_tris.is_empty()
             || !wire.pick_tris.is_empty()
             || !wire.text_verts.is_empty()
+            || seen.contains(wire.name.as_str())
         {
             continue;
         }
@@ -1540,11 +1565,11 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         }
     }
     for wire in wires.iter() {
-        if seen.contains(wire.name.as_str())
-            || wire.points.len() >= 2
+        if wire.points.len() >= 2
             || !wire.fill_tris.is_empty()
             || !wire.pick_tris.is_empty()
             || !wire.text_verts.is_empty()
+            || seen.contains(wire.name.as_str())
         {
             continue;
         }
@@ -2712,3 +2737,79 @@ mod aabb_reject_tests {
     }
 }
 
+#[cfg(test)]
+mod parallel_selection_tests {
+    use super::*;
+    use crate::scene::pick::interaction_index::{InteractionCandidates, InteractionIndex};
+    use std::sync::Arc;
+
+    fn many_wires_with_spans(count: usize, spans: usize) -> Vec<WireModel> {
+        (0..count)
+            .map(|i| {
+                let t = i as f32 / count as f32;
+                let x = -0.95 + 1.9 * t;
+                let y = -0.95 + 1.9 * t;
+                let points: Vec<[f32; 3]> = (0..=spans)
+                    .map(|s| {
+                        let f = s as f32 / spans as f32;
+                        [x + 0.01 * f, y + 0.01 * f, 0.0]
+                    })
+                    .collect();
+                let mut w = WireModel::solid(
+                    (i as u64 + 1).to_string(),
+                    points,
+                    [1.0; 4],
+                    false,
+                );
+                w.aabb = [x, y, x + 0.01, y + 0.01];
+                w
+            })
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "measurement, not a check"]
+    fn selection_scaling_numbers() {
+        use std::time::Instant;
+        let wires = many_wires_with_spans(186_468, 24);
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+        let aabb = [-2.0, -2.0, 2.0, 2.0];
+
+        let t = Instant::now();
+        let full = index.query_xy(Arc::clone(&arc), aabb);
+        let full_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+        let t = Instant::now();
+        let area = index.query_xy_area(Arc::clone(&arc), aabb);
+        let area_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 200.0,
+        };
+        let run = |candidates: &InteractionCandidates| {
+            let t = Instant::now();
+            let hits = box_hit(
+                Point::new(0.0, 0.0),
+                Point::new(200.0, 200.0),
+                true,
+                candidates,
+                Mat4::IDENTITY,
+                glam::DVec3::ZERO,
+                bounds,
+            );
+            (t.elapsed().as_secs_f64() * 1000.0, hits.len())
+        };
+        let (scan_ms, scan_n) = run(&area);
+
+        println!(
+            "candidates: full={full_ms:.1}ms ({} wires) area={area_ms:.1}ms ({} wires)",
+            full.len(),
+            area.len(),
+        );
+        println!("crossing scan: {scan_ms:.1}ms ({scan_n} hits)");
+    }
+}

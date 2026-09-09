@@ -4124,6 +4124,10 @@ impl OpenCADStudio {
                                         aabb
                                     },
                                 );
+                        // A 186 k-entity box selection sits at ~800 ms in this
+                        // handler and two guesses about which step owns it have
+                        // both been wrong. Split it.
+                        let t_sel = crate::perf::enabled().then(Instant::now);
                         let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
                             all_wires,
                             world_aabb,
@@ -4132,6 +4136,9 @@ impl OpenCADStudio {
                             eye,
                             bounds,
                         );
+                        let cand_ms = t_sel
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_hit = crate::perf::enabled().then(Instant::now);
                         let candidate_handles = self.tabs[i]
                             .scene
                             .interaction_candidate_handles(&area_candidates);
@@ -4192,20 +4199,31 @@ impl OpenCADStudio {
                         // selection, Shift+box removes the boxed
                         // entities. Esc / empty-space click still clears.
                         // PICKADD 0 (#226): a plain box REPLACES.
+                        let hit_ms = t_hit
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_apply = crate::perf::enabled().then(Instant::now);
                         if self.shift_down || self.select_remove_mode {
-                            for h in &handles {
-                                self.tabs[i].scene.deselect_entity(*h);
-                            }
+                            self.tabs[i].scene.deselect_entities(&handles);
                         } else {
                             if !selection_pick_add && !handles.is_empty() {
                                 self.tabs[i].scene.deselect_all();
                             }
-                            for h in &handles {
-                                self.tabs[i].scene.select_entity(*h, false);
-                            }
+                            self.tabs[i].scene.select_entities(&handles);
                             self.tabs[i].scene.expand_selection_for_groups(&handles);
                         }
+                        let apply_ms = t_apply
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_props = crate::perf::enabled().then(Instant::now);
                         self.refresh_properties();
+                        if crate::perf::enabled() {
+                            crate::perf_record!(
+                                "[perf] select-commit kind=drag-box crossing={crossing} \
+candidates={cand_ms:.1}ms hit={hit_ms:.1}ms apply={apply_ms:.1}ms \
+properties={:.1}ms picked={}",
+                                t_props.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0),
+                                handles.len(),
+                            );
+                        }
                         selection_just_completed = true;
                     }
                 } else {
@@ -4239,9 +4257,7 @@ impl OpenCADStudio {
                     // leaves the current selection untouched so a stray
                     // drag never discards hard-won picks.
                     if self.shift_down || self.select_remove_mode {
-                        for h in &handles {
-                            self.tabs[i].scene.deselect_entity(*h);
-                        }
+                        self.tabs[i].scene.deselect_entities(&handles);
                     } else {
                         // PICKADD 0 (#226): a plain marquee REPLACES
                         // the selection (empty results still leave it
@@ -4249,9 +4265,7 @@ impl OpenCADStudio {
                         if !selection_pick_add && !handles.is_empty() {
                             self.tabs[i].scene.deselect_all();
                         }
-                        for h in &handles {
-                            self.tabs[i].scene.select_entity(*h, false);
-                        }
+                        self.tabs[i].scene.select_entities(&handles);
                         self.tabs[i].scene.expand_selection_for_groups(&handles);
                     }
                     self.refresh_properties();
@@ -4268,6 +4282,8 @@ impl OpenCADStudio {
                 if box_anchor.is_none() {
                     let (view_rot, eye, all_wires) = self.pick_view(i, &edit_cam, bounds);
                     let click_world = self.cursor_model_point(i, &edit_cam, p, bounds);
+                    let t_arm = crate::perf::enabled().then(Instant::now);
+                    let prior_selection = self.tabs[i].scene.selected.len();
                     let click_candidates = self.tabs[i].scene.interaction_pick_candidates_near(
                         all_wires,
                         click_world,
@@ -4402,6 +4418,16 @@ impl OpenCADStudio {
                             // (#234). Computed before the selection
                             // borrow so the &self projection can't clash.
                             let anchor_world = self.cursor_model_point(i, &edit_cam, p, bounds);
+                            if let Some(t) = t_arm {
+                                let arm_ms = t.elapsed().as_secs_f64() * 1000.0;
+                                if arm_ms >= 5.0 {
+                                    crate::perf_record!(
+                                        "[perf] select-arm {arm_ms:>7.1}ms pick+clear, \
+was_selected={}",
+                                        prior_selection,
+                                    );
+                                }
+                            }
                             let mut sel = self.tabs[i].scene.selection.borrow_mut();
                             // Full-canvas space: ViewportMove updates
                             // box_current in canvas coords and the overlay
@@ -4485,6 +4511,10 @@ impl OpenCADStudio {
                                 aabb
                             },
                         );
+                    // This is the path a click-move-click window takes, as
+                    // opposed to a press-drag; it is the one a large selection
+                    // actually goes through.
+                    let t_sel = crate::perf::enabled().then(Instant::now);
                     let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
                         all_wires,
                         world_aabb,
@@ -4493,9 +4523,16 @@ impl OpenCADStudio {
                         eye,
                         bounds,
                     );
+                    let cand_ms =
+                        t_sel.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let t_hit = crate::perf::enabled().then(Instant::now);
                     let candidate_handles = self.tabs[i]
                         .scene
                         .interaction_candidate_handles(&area_candidates);
+                    // `hit` covers five things, and which of them owns it has
+                    // never been separated: resolving candidate handles, the wire
+                    // box test, the two hatch tests and the two mesh tests.
+                    let m_handles = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     let mut handles: Vec<Handle> = scene::pick::hit_test::box_hit(
                         a,
                         p,
@@ -4508,6 +4545,7 @@ impl OpenCADStudio {
                     .into_iter()
                     .filter_map(|s| Scene::handle_from_wire_name(s))
                     .collect();
+                    let m_wires = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     handles.extend(scene::pick::hit_test::box_hit_hatch(
                         a,
                         p,
@@ -4530,6 +4568,7 @@ impl OpenCADStudio {
                         bounds,
                         candidate_handles.as_ref(),
                     ));
+                    let m_hatch = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     handles.extend(self.tabs[i].scene.mesh_box_hit(
                         a,
                         p,
@@ -4548,27 +4587,45 @@ impl OpenCADStudio {
                         bounds,
                         candidate_handles.as_ref(),
                     ));
+                    let hit_ms = t_hit.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let t_filter = crate::perf::enabled().then(Instant::now);
                     // Selection filter: keep only allowed types.
                     handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
+                    let filter_ms =
+                        t_filter.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let t_apply = crate::perf::enabled().then(Instant::now);
                     // Accumulate (issue #83): a plain box adds to the
                     // current selection, Shift+box removes the boxed
                     // entities. An empty box leaves the selection alone
                     // so an accidental empty drag never discards it.
                     // PICKADD 0 (#226): a plain box REPLACES instead.
                     if self.shift_down || self.select_remove_mode {
-                        for h in &handles {
-                            self.tabs[i].scene.deselect_entity(*h);
-                        }
+                        self.tabs[i].scene.deselect_entities(&handles);
                     } else {
                         if !selection_pick_add && !handles.is_empty() {
                             self.tabs[i].scene.deselect_all();
                         }
-                        for h in &handles {
-                            self.tabs[i].scene.select_entity(*h, false);
-                        }
+                        self.tabs[i].scene.select_entities(&handles);
                         self.tabs[i].scene.expand_selection_for_groups(&handles);
                     }
+                    let apply_ms =
+                        t_apply.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let t_props = crate::perf::enabled().then(Instant::now);
                     self.refresh_properties();
+                    if crate::perf::enabled() {
+                        crate::perf_record!(
+                            "[perf] select-commit kind=window crossing={crossing} \
+candidates={cand_ms:.1}ms hit={hit_ms:.1}ms [handles={:.1} wires={:.1} \
+hatch={:.1} mesh={:.1}] filter={filter_ms:.1}ms apply={apply_ms:.1}ms \
+properties={:.1}ms picked={}",
+                            m_handles.unwrap_or(0.0),
+                            m_wires.unwrap_or(0.0) - m_handles.unwrap_or(0.0),
+                            m_hatch.unwrap_or(0.0) - m_wires.unwrap_or(0.0),
+                            hit_ms - m_hatch.unwrap_or(0.0),
+                            t_props.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0),
+                            handles.len(),
+                        );
+                    }
                     let mut sel = self.tabs[i].scene.selection.borrow_mut();
                     sel.box_last = Some((a, p));
                     sel.box_last_crossing = crossing;
@@ -4704,15 +4761,17 @@ impl OpenCADStudio {
                         return self.begin_text_edit(handle);
                     }
                     // Double-clicking a block with attributes opens the
-                    // attribute editor (edit its values); a block with
-                    // no attributes opens the block editor (BEDIT) — a
-                    // space tab scoped to the block's own geometry, so
-                    // edits reflect in every instance. (#136, #192, #261)
+                    // attribute editor (edit its values). For blocks without
+                    // attributes, Options > Drawing chooses BEDIT (default)
+                    // or in-place REFEDIT. (#136, #192, #261)
                     let insert_has_attrs = matches!(
                         self.tabs[i].scene.document.get_entity(handle),
                         Some(AcadEntityType::Insert(ins)) if !ins.attributes.is_empty()
                     );
-                    if insert_has_attrs && self.tabs[i].active_block_edit.is_none() {
+                    if insert_has_attrs
+                        && self.double_click_block_attedit
+                        && self.tabs[i].active_block_edit.is_none()
+                    {
                         return Task::done(Message::AttrEditorOpen(handle));
                     }
                     let is_insert = matches!(
@@ -4720,8 +4779,14 @@ impl OpenCADStudio {
                         Some(AcadEntityType::Insert(_))
                     );
                     if is_insert && self.tabs[i].refedit_session.is_none() {
+                        let command = if self.double_click_block_refedit {
+                            "REFEDIT_BEGIN"
+                        } else {
+                            "BEDIT_BEGIN"
+                        };
                         return Task::done(Message::Command(format!(
-                            "BEDIT_BEGIN:{}",
+                            "{}:{}",
+                            command,
                             handle.value()
                         )));
                     }
@@ -5742,5 +5807,59 @@ impl OpenCADStudio {
             }
         }
         Task::none()
+    }
+}
+
+#[cfg(test)]
+mod selection_preview_tests {
+    use super::*;
+    use crate::app::{HoverDwell, OpenCADStudio, HOVER_DWELL_MS};
+
+    /// Drive one settled rollover pick over a line and report what the scene
+    /// ended up highlighting.
+    fn rollover_hits(preview: u8) -> bool {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.model_space.selection_preview = preview;
+        let _ = app.run_command_line("LINE 0,0 10,10");
+        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        let _ = app.run_command_line("ZOOM EXTENTS");
+
+        // The pick only runs once the cursor has been still for the dwell
+        // window, so the arming timestamp is backdated past it.
+        app.hover_dwell = Some(HoverDwell {
+            last_move_at: Instant::now()
+                - std::time::Duration::from_millis(HOVER_DWELL_MS as u64 * 2),
+            point: iced::Point::new(400.0, 300.0),
+            tile_size: (800.0, 600.0),
+            tab: i,
+        });
+        let _ = app.on_hover_dwell_tick();
+        app.tabs[i].scene.hover_highlight.is_some()
+    }
+
+    /// Bit 1 of `SELECTIONPREVIEW` is the rollover that runs with no command
+    /// active, and the Options card gives it a checkbox. The config comment
+    /// used to describe the bits the wrong way round, so which bit does what
+    /// is worth asserting rather than reading.
+    #[test]
+    fn the_idle_rollover_follows_bit_one() {
+        assert!(
+            rollover_hits(1),
+            "bit 1 set: the line under the cursor must be highlighted",
+        );
+        assert!(
+            rollover_hits(3),
+            "both bits set: still highlighted",
+        );
+        assert!(
+            !rollover_hits(0),
+            "preview off: nothing may be highlighted",
+        );
+        assert!(
+            !rollover_hits(2),
+            "only the in-command bit: the idle rollover stays off",
+        );
     }
 }

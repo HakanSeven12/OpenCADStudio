@@ -145,7 +145,7 @@ pub fn create_pipelines(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth24PlusStencil8,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(false),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: content_stencil.clone(),
             bias: wgpu::DepthBiasState::default(),
@@ -254,7 +254,7 @@ pub fn extract_ellipse_instances(
 ) -> Option<Vec<EllipseInstance>> {
     if wire.tangent_geoms.is_empty()
         || !wire.fill_tris.is_empty()
-        || !wire.pick_tris.is_empty()
+        || wire.fill_is_3d
         || !wire.text_verts.is_empty()
         || wire.render_instance.is_some()
     {

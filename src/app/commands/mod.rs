@@ -465,6 +465,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "3DALIGN",
         "ALIGN3D",
         "SECTION",
+        "SECTIONPLANE",
         "PYRAMID",
         "PYR",
         "SPLINEFIT",
@@ -551,6 +552,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "GRIPCOLOR",
         "GRIPHOT",
         "GRIPHOVER",
+        "GRIPOBJLIMIT",
         // Reset selected entities' overrides to follow their layer.
         "SETBYLAYER",
         // Remove duplicate objects; set drawing base point; audit integrity;

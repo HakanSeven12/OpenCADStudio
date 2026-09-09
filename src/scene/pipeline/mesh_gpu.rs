@@ -568,12 +568,15 @@ struct MeshSurfaceParams {
     flags: [u32; 4],
 }
 
-/// Downscale a decoded RGBA buffer so neither dimension exceeds `limit`,
-/// preserving aspect ratio (scaled by whichever dimension overshoots more).
-/// `None` only for genuinely malformed input (`rgba`'s length doesn't match
-/// `width * height * 4`) — the caller falls back to the 1x1 material color
-/// in that case, same as it already does for a missing image entirely.
+fn valid_rgba_size(width: u32, height: u32, pixels: &[u8]) -> bool {
+    width > 0 && height > 0
+        && (width as usize).checked_mul(height as usize).and_then(|size| size.checked_mul(4)) == Some(pixels.len())
+}
+
 fn downscale_rgba_to_limit(width: u32, height: u32, rgba: &[u8], limit: u32) -> Option<(u32, u32, Vec<u8>)> {
+    if limit == 0 || !valid_rgba_size(width, height, rgba) {
+        return None;
+    }
     let buffer = image::RgbaImage::from_raw(width, height, rgba.to_vec())?;
     let scale = (limit as f64 / width.max(height) as f64).min(1.0);
     let new_width = ((width as f64 * scale).round() as u32).clamp(1, limit);
@@ -590,14 +593,9 @@ fn upload_rgba_texture(
     fallback: [u8; 4],
     srgb: bool,
 ) -> wgpu::TextureView {
-    // A material map's decoded dimensions come straight from the source file
-    // (`material_model::load_map_image`), uncapped — an oversized image would
-    // otherwise fail `wgpu` texture-size validation and leave the material
-    // unusable (audit: raster-image rendering already tiles to this same
-    // limit in `image_gpu.rs`; a mesh material sampled by UV can't use that
-    // per-quad tiling trick, so downscale instead of tiling).
     let limit = device.limits().max_texture_dimension_2d.max(1);
     let resized;
+    let image = image.filter(|image| valid_rgba_size(image.width, image.height, &image.rgba));
     let (width, height, pixels): (u32, u32, &[u8]) = match image {
         Some(image) if image.width > limit || image.height > limit => {
             match downscale_rgba_to_limit(image.width, image.height, &image.rgba, limit) {
@@ -2493,5 +2491,14 @@ mod texture_limit_tests {
         // must fail cleanly, not panic or silently misread the buffer.
         let rgba = vec![0u8; 10];
         assert!(downscale_rgba_to_limit(1000, 1000, &rgba, 512).is_none());
+    }
+
+    #[test]
+    fn malformed_material_images_are_rejected_even_below_the_texture_limit() {
+        for (width, height, pixels) in [(0, 1, vec![]), (1, 0, vec![]), (1, 1, vec![0; 3]), (1, 1, vec![0; 5])] {
+            assert!(!super::valid_rgba_size(width, height, &pixels));
+            assert!(downscale_rgba_to_limit(width, height, &pixels, 16).is_none());
+        }
+        assert!(downscale_rgba_to_limit(1, 1, &[0; 4], 0).is_none());
     }
 }

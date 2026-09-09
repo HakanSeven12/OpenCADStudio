@@ -387,6 +387,10 @@ pub(super) struct OpenCADStudio {
     /// though the three factors are currently equal — the user unchecked the
     /// "Uniform scale" box for them (#427). Keyed by entity handle.
     props_asym_scale: std::collections::HashSet<u64>,
+    /// Collapsed Properties-panel section titles. This belongs to the app,
+    /// rather than an individual document tab, so the same view preference is
+    /// used by every currently open drawing/project.
+    collapsed_property_sections: rustc_hash::FxHashSet<String>,
     /// Which Start-page section is shown when the page is too narrow for all
     /// three side by side and falls back to a tab bar.
     start_section: StartSection,
@@ -496,6 +500,13 @@ pub(super) struct OpenCADStudio {
     cursor_size: i32,
     /// Selection-box size setting (PICKBOX, 0..=50).
     pick_box: i32,
+    /// Use REFEDIT rather than BEDIT when double-clicking an attribute-free block.
+    double_click_block_refedit: bool,
+    /// Open ATTEDIT when double-clicking a block with attributes.
+    double_click_block_attedit: bool,
+    /// Selected-object count past which grips stop being generated
+    /// (GRIPOBJLIMIT, 0..=32767; 0 = no limit).
+    grip_object_limit: i32,
     /// Drawing viewport cursor style (CURSORTYPE).
     cursor_type: settings::CursorType,
     /// Explicit crosshair colour; `None` retains automatic contrast.
@@ -1962,6 +1973,10 @@ pub enum Message {
     CursorSizeChanged(i32),
     /// Set PICKBOX from the Selection-page slider.
     PickBoxChanged(i32),
+    /// Choose whether double-clicking a block starts BEDIT or REFEDIT.
+    DoubleClickBlockRefeditChanged(bool),
+    /// Choose whether double-clicking a block with attributes starts ATTEDIT.
+    DoubleClickBlockAtteditChanged(bool),
     /// Set CURSORTYPE from Options.
     CursorTypeChanged(settings::CursorType),
     /// Set the model-space lineweight preview scale from Options.
@@ -2008,6 +2023,19 @@ pub enum Message {
     GripHotChanged(u8),
     /// Change Hover/Warm Grip color ACI index (0 = Theme Primary Strong, 1..=255 = ACI, GRIPHOVER).
     GripHoverChanged(u8),
+    /// Change the selected-object count past which grips stop being drawn
+    /// (0..=32767, 0 = no limit, GRIPOBJLIMIT).
+    GripObjectLimitChanged(i32),
+    /// Toggle the solid selection highlight (SELECTIONEFFECT).
+    SelectionEffectToggled(bool),
+    /// Toggle rollover preview while no command is running (SELECTIONPREVIEW bit 1).
+    SelectionPreviewIdleToggled(bool),
+    /// Toggle rollover preview during a command (SELECTIONPREVIEW bit 2).
+    SelectionPreviewCommandToggled(bool),
+    /// Toggle "use Shift to add to selection"; this is the inverse of PICKADD.
+    ShiftToAddToggled(bool),
+    /// Toggle press-and-drag drawing a rectangle instead of a lasso (PICKDRAG).
+    PickDragRectToggled(bool),
     /// Restore Model Space display/canvas appearance to defaults.
     RestoreModelSpaceDisplayDefaults,
     /// Restore Selection visual effect settings to defaults.
@@ -2214,6 +2242,8 @@ pub enum Message {
     /// clipboard as plain text — issue #232, so output can be pasted for
     /// debugging instead of screenshotted.
     CommandHistoryCopy,
+    #[cfg(target_arch = "wasm32")]
+    CommandHistoryCopied(bool),
     /// Clear every line from the command-line history.
     CommandHistoryClear,
     /// Copy every line currently retained by the PERF panel.
@@ -2604,6 +2634,8 @@ pub enum Message {
     /// Toggle a collapsed coordinate group ("Position", "Scale", …) open or
     /// closed in the Properties panel, keyed `section:base`.
     PropGroupToggle(String),
+    /// Toggle an entire Properties-panel section, keyed by its title.
+    PropSectionToggle(String),
     /// Toggle the editable-dropdown (block Name) option list open/closed.
     PropEditChoiceToggle,
     /// User is typing in a block-attribute value field (live buffer update),
@@ -3378,6 +3410,7 @@ impl OpenCADStudio {
             discussions: Vec::new(),
             discussions_loading: false,
             props_asym_scale: std::collections::HashSet::new(),
+            collapsed_property_sections: rustc_hash::FxHashSet::default(),
             start_section: StartSection::default(),
             start_action_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             history_content: iced::widget::text_editor::Content::new(),
@@ -3426,6 +3459,9 @@ impl OpenCADStudio {
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
+            double_click_block_refedit: false,
+            double_click_block_attedit: true,
+            grip_object_limit: settings::DEFAULT_GRIP_OBJECT_LIMIT,
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),

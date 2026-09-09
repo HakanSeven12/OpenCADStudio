@@ -300,15 +300,12 @@ impl OpenCADStudio {
         match req["op"].as_str().unwrap_or("") {
             "new" => {
                 let i = self.active_tab;
-                self.tabs[i].scene.document = acadrust::CadDocument::new();
-                self.tabs[i].scene.sketch_constraints.clear();
-                self.tabs[i].scene.named_parameters = crate::scene::named_parameters::ParameterTable::new();
-                self.tabs[i].scene.deselect_all();
+                self.tabs[i].scene.clear();
+                self.tabs[i].scene.material_base_dir = None;
                 self.tabs[i].current_path = None;
                 // The headless session starts on the welcome (Start) tab, which
                 // blocks drawing commands; turn it into a real drawing.
                 self.tabs[i].is_start = false;
-                self.tabs[i].scene.bump_geometry();
                 self.entity_summary()
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -321,26 +318,21 @@ impl OpenCADStudio {
                     Ok(b) => b,
                     Err(e) => return err(format!("open: {e}")),
                 };
-                // Runs the same finalization (block-origin normalization,
-                // raster-path resolution, source_path) and corrupt-entity
-                // purge the UI open path always gets, using the real path —
-                // not just its basename — so an automation open behaves the
-                // same as opening the identical file from the UI instead of
-                // silently skipping that safety/normalization net.
                 match crate::io::load_bytes_finalized(&path_buf, bytes) {
                     Ok((doc, dropped)) => {
                         let i = self.active_tab;
+                        self.tabs[i].scene.clear();
                         self.tabs[i].scene.document = doc;
                         self.tabs[i].scene.load_sketch_constraints_from_document();
                         self.tabs[i].scene.load_named_parameters_from_document();
-                        self.tabs[i].scene.deselect_all();
+                        self.tabs[i].scene.material_base_dir = path_buf.parent().map(PathBuf::from);
                         crate::app::style_ops::ensure_standard_styles(
                             &mut self.tabs[i].scene.document,
                         );
                         self.tabs[i].adopt_active_ucs_from_header();
                         self.tabs[i].current_path = Some(path_buf);
                         self.tabs[i].is_start = false;
-                        self.tabs[i].scene.bump_geometry();
+                        self.tabs[i].scene.rebuild_derived_caches();
                         let mut summary = self.entity_summary();
                         if dropped > 0 {
                             if let Some(obj) = summary.as_object_mut() {
@@ -1409,16 +1401,13 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// Audit finding: automation's `"open"` used to call `io::load_bytes`
-    /// directly, skipping the finalization and corrupt-entity purge every UI
-    /// open runs — so the same file opened two ways behaved differently.
-    /// Proves both halves of the fix: `source_path` (only ever set by
-    /// finalization, never by `load_bytes` alone) is populated, and a
-    /// zero-radius circle — `io::is_entity_corrupt`'s own rejection case —
-    /// is purged and reported, exactly like a UI open of the same file.
     #[test]
     fn open_finalizes_and_purges_like_the_ui_open_path() {
         let mut app = OpenCADStudio::new_for_test();
+        let stale = acadrust::Handle::from(9999);
+        app.tabs[app.active_tab].scene.solid_models.insert(
+            stale, cadkernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
+        );
         let path = std::env::temp_dir().join(format!(
             "ocs_automation_finalize_test_{}.dxf",
             std::process::id()
@@ -1445,10 +1434,19 @@ mod tests {
         assert_eq!(result["purged"], 1, "the purge count must be reported, matching the UI open path's diagnostics");
 
         let i = app.active_tab;
+        assert!(!app.tabs[i].scene.solid_models.contains_key(&stale));
+        assert_eq!(app.tabs[i].scene.material_base_dir.as_deref(), path.parent());
         assert!(
             app.tabs[i].scene.document.source_path.is_some(),
             "automation open must run the same finalization as a path-based open, which sets source_path (load_bytes alone never does)"
         );
+
+        app.tabs[i].scene.solid_models.insert(
+            stale, cadkernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
+        );
+        assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
+        assert!(app.tabs[i].scene.solid_models.is_empty());
+        assert!(app.tabs[i].scene.material_base_dir.is_none());
 
         drop(app);
         let _ = std::fs::remove_file(&path);

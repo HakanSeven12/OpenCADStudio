@@ -1901,6 +1901,7 @@ pub struct Scene {
     entity_block_map_cache: RefCell<Option<(u64, HashMap<Handle, Handle>)>>,
     /// Candidate handles per block, in document order and keyed by geometry epoch.
     block_members_cache: RefCell<Option<BlockMembers>>,
+    leaders_by_annotation_cache: RefCell<Option<(u64, HashMap<Handle, Vec<Handle>>)>>,
     /// Insert/Viewport/Block/BlockEnd handles omitted by the spatial index.
     unindexable_cache: RefCell<Option<(u64, Vec<Handle>)>>,
     /// `(epoch, layout block, present type names, list exposed to the UI)`.
@@ -2069,6 +2070,90 @@ pub struct Scene {
     undo_recording: Option<UndoRecording>,
 }
 
+fn section_frame(
+    data: &acadrust::entities::SectionObjectData,
+) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3, glam::DVec3)> {
+    let first = data.vertices.first()?;
+    let last = data.vertices.last()?;
+    let origin = glam::DVec3::new(first.x, first.y, first.z);
+    let tangent = (glam::DVec3::new(last.x, last.y, last.z) - origin).try_normalize()?;
+    let raw_vertical = glam::DVec3::new(
+        data.vertical_direction.x,
+        data.vertical_direction.y,
+        data.vertical_direction.z,
+    );
+    let vertical = (raw_vertical - tangent * raw_vertical.dot(tangent)).try_normalize()?;
+    let base_view = vertical.cross(tangent).try_normalize()?;
+    let viewing = if data.flags & 4 != 0 { base_view } else { -base_view };
+    Some((origin, tangent, vertical, viewing))
+}
+
+#[derive(Clone)]
+struct LiveSection {
+    data: acadrust::entities::SectionObjectData,
+    slice_depth: Option<f64>,
+}
+
+fn section_plane(
+    origin: glam::DVec3,
+    tangent: glam::DVec3,
+    normal: glam::DVec3,
+    body_to_world: Option<&acadrust::types::Transform>,
+) -> Option<cadkernel::space::Plane> {
+    let Some(transform) = body_to_world else {
+        return cadkernel::space::Plane::orthonormal(
+            origin.to_array(),
+            tangent.to_array(),
+            normal.to_array(),
+        );
+    };
+    let matrix = transform.matrix.m;
+    let linear = acadrust::types::Matrix3::from_rows(
+        [matrix[0][0], matrix[0][1], matrix[0][2]],
+        [matrix[1][0], matrix[1][1], matrix[1][2]],
+        [matrix[2][0], matrix[2][1], matrix[2][2]],
+    );
+    let inverse = linear.inverse()?;
+    let translation = acadrust::types::Vector3::new(
+        matrix[0][3],
+        matrix[1][3],
+        matrix[2][3],
+    );
+    let origin = inverse.transform_point(
+        acadrust::types::Vector3::new(origin.x, origin.y, origin.z) - translation,
+    );
+    let tangent = inverse.transform_point(acadrust::types::Vector3::new(
+        tangent.x, tangent.y, tangent.z,
+    ));
+    let normal = linear
+        .transpose()
+        .transform_point(acadrust::types::Vector3::new(normal.x, normal.y, normal.z));
+    cadkernel::space::Plane::orthonormal(
+        [origin.x, origin.y, origin.z],
+        [tangent.x, tangent.y, tangent.z],
+        [normal.x, normal.y, normal.z],
+    )
+}
+
+fn keep_section_positive(
+    body: &cadkernel::brep::Body,
+    plane: cadkernel::space::Plane,
+) -> Result<Option<cadkernel::brep::Body>, ()> {
+    match cadkernel::brep::slice_by_plane(body, plane) {
+        Ok(Some(result)) => Ok(Some(result.positive)),
+        Ok(None) => {
+            let bounds = cadkernel::brep::body_bounds(body).ok_or(())?;
+            let centre = [
+                (bounds.min[0] + bounds.max[0]) * 0.5,
+                (bounds.min[1] + bounds.max[1]) * 0.5,
+                (bounds.min[2] + bounds.max[2]) * 0.5,
+            ];
+            Ok((plane.distance_to(centre).ok_or(())? >= 0.0).then(|| body.clone()))
+        }
+        Err(_) => Err(()),
+    }
+}
+
 impl Scene {
     pub fn new() -> Self {
         Self {
@@ -2176,6 +2261,7 @@ impl Scene {
             model_extents_cache: RefCell::new(None),
             entity_block_map_cache: RefCell::new(None),
             block_members_cache: RefCell::new(None),
+            leaders_by_annotation_cache: RefCell::new(None),
             unindexable_cache: RefCell::new(None),
             layout_type_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
@@ -2481,7 +2567,17 @@ impl Scene {
             bits |= CACHE_CATEGORY_IMAGE;
         }
         let is_insert = matches!(entity, EntityType::Insert(_));
-        if self.meshes.contains_key(&handle) || self.block_meshes.contains_key(&handle) || is_insert
+        let is_section = matches!(
+            entity,
+            EntityType::Extended(acadrust::entities::ExtendedEntity {
+                data: acadrust::entities::ExtendedEntityData::SectionObject(_),
+                ..
+            })
+        );
+        if self.meshes.contains_key(&handle)
+            || self.block_meshes.contains_key(&handle)
+            || is_insert
+            || is_section
         {
             bits |= CACHE_CATEGORY_MESH | CACHE_CATEGORY_INTERACTION;
         }
@@ -6671,6 +6767,12 @@ impl Scene {
                                     || matches!(
                                         self.document.get_entity(h),
                                         Some(EntityType::Insert(_))
+                                            | Some(EntityType::Extended(
+                                                acadrust::entities::ExtendedEntity {
+                                                    data: acadrust::entities::ExtendedEntityData::SectionObject(_),
+                                                    ..
+                                                }
+                                            ))
                                     )
                             },
                         ) =>
@@ -6857,6 +6959,7 @@ impl Scene {
         all_visible: bool,
         viewport: Option<Handle>,
     ) -> Vec<MeshLodSet> {
+        let live_section = self.active_live_section(target_block);
         // Top-level solids: drop those whose layer is off/frozen or that are
         // flagged invisible / isolated-hidden, mirroring the 2D wire path, plus
         // any whose layer is frozen in the requesting viewport.
@@ -6878,8 +6981,19 @@ impl Scene {
                         })
                         .unwrap_or(false)
             })
-            .map(|(&handle, set)| {
-                let mut set = set.clone();
+            .filter_map(|(&handle, set)| {
+                let mut set = if let Some(section) = live_section.as_ref() {
+                    match self.sectioned_body(handle, section) {
+                        Ok(Some(body)) => self
+                            .prepare_solid_model_display(handle, &body)
+                            .map(|display| display.0)
+                            .unwrap_or_else(|| set.clone()),
+                        Ok(None) => return None,
+                        Err(()) => set.clone(),
+                    }
+                } else {
+                    set.clone()
+                };
                 if let Some(entity) = self.document.get_entity(handle) {
                     let style = crate::scene::view::render::render_style_for_viewport(
                         &self.document,
@@ -6903,7 +7017,7 @@ impl Scene {
                         material.diffuse[3] = style.0[3];
                     }
                 }
-                set
+                Some(set)
             })
             .collect();
         // Block-definition solids are instanced per INSERT of the ACTIVE space's
@@ -6916,8 +7030,177 @@ impl Scene {
             annotation_scale_handle,
             all_visible,
             viewport,
+            live_section.as_ref(),
         ));
         all
+    }
+
+    fn active_live_section(
+        &self,
+        target_block: Handle,
+    ) -> Option<LiveSection> {
+        self.document
+            .entities()
+            .filter_map(|entity| {
+                let EntityType::Extended(extended) = entity else {
+                    return None;
+                };
+                let acadrust::entities::ExtendedEntityData::SectionObject(data) = &extended.data else {
+                    return None;
+                };
+                let owner = extended.common.owner_handle;
+                (data.flags & 1 != 0
+                    && !extended.common.invisible
+                    && (owner.is_null() || owner == target_block))
+                    .then(|| LiveSection {
+                        data: data.clone(),
+                        slice_depth: crate::entities::extended::section_is_slice(extended)
+                            .then(|| {
+                                crate::entities::extended::section_slice_depth(extended)
+                                    .unwrap_or(0.0)
+                            }),
+                    })
+            })
+            .last()
+    }
+
+    fn sectioned_body(
+        &self,
+        handle: Handle,
+        section: &LiveSection,
+    ) -> Result<Option<cadkernel::brep::Body>, ()> {
+        let body = self.section_source_body(handle).ok_or(())?;
+        Self::section_body(&body, &section.data, section.slice_depth, None)
+    }
+
+    fn section_source_body(
+        &self,
+        handle: Handle,
+    ) -> Option<std::borrow::Cow<'_, cadkernel::brep::Body>> {
+        if let Some(body) = self.solid_models.get(&handle) {
+            return Some(std::borrow::Cow::Borrowed(body));
+        }
+        let body = match self.document.get_entity(handle) {
+            Some(EntityType::Solid3D(solid)) => {
+                crate::scene::convert::solid3d_tess::kernel_body(solid)
+            }
+            Some(EntityType::Region(region)) => {
+                crate::scene::convert::solid3d_tess::kernel_region_body(region)
+            }
+            Some(EntityType::Body(body)) => {
+                crate::scene::convert::solid3d_tess::kernel_acis_body(&body.acis_data)
+            }
+            Some(EntityType::Surface(surface)) => {
+                crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
+            }
+            _ => None,
+        }?;
+        Some(std::borrow::Cow::Owned(body))
+    }
+
+    fn section_body(
+        body: &cadkernel::brep::Body,
+        data: &acadrust::entities::SectionObjectData,
+        slice_depth: Option<f64>,
+        body_to_world: Option<&acadrust::types::Transform>,
+    ) -> Result<Option<cadkernel::brep::Body>, ()> {
+        let Some((origin, tangent, vertical, viewing)) = section_frame(data) else {
+            return Err(());
+        };
+        let front = section_plane(origin, tangent, viewing, body_to_world).ok_or(())?;
+        let mut clipped = keep_section_positive(body, front)?;
+        let Some(mut current) = clipped.take() else {
+            return Ok(None);
+        };
+        if data.state == 1 && slice_depth.is_none() {
+            return Ok(Some(current));
+        }
+
+        let depth = slice_depth.unwrap_or_else(|| {
+            data.vertices
+                .first()
+                .zip(data.back_line_vertices.first())
+                .map_or(0.0, |(front, back)| {
+                    (glam::DVec3::new(back.x, back.y, back.z)
+                        - glam::DVec3::new(front.x, front.y, front.z))
+                    .dot(viewing)
+                    .abs()
+                })
+        });
+        if depth <= 1e-12 {
+            return Ok(Some(current));
+        }
+        let back = section_plane(
+            origin + viewing * depth,
+            tangent,
+            -viewing,
+            body_to_world,
+        )
+        .ok_or(())?;
+        let Some(next) = keep_section_positive(&current, back)? else {
+            return Ok(None);
+        };
+        current = next;
+
+        if data.state == 1 {
+            return Ok(Some(current));
+        }
+
+        let span = data
+            .vertices
+            .first()
+            .zip(data.vertices.last())
+            .map_or(0.0, |(first, last)| {
+                (glam::DVec3::new(last.x, last.y, last.z)
+                    - glam::DVec3::new(first.x, first.y, first.z))
+                .length()
+            });
+        if span <= 1e-12 {
+            return Ok(Some(current));
+        }
+
+        let first = data.vertices.first().map(|point| glam::DVec3::new(point.x, point.y, point.z)).ok_or(())?;
+        let last = data.vertices.last().map(|point| glam::DVec3::new(point.x, point.y, point.z)).ok_or(())?;
+        for plane in [
+            section_plane(first, vertical, tangent, body_to_world),
+            section_plane(last, vertical, -tangent, body_to_world),
+        ] {
+            let Some(plane) = plane else {
+                return Err(());
+            };
+            let Some(next) = keep_section_positive(&current, plane)? else {
+                return Ok(None);
+            };
+            current = next;
+        }
+
+        if data.state != 4 {
+            return Ok(Some(current));
+        }
+
+        for plane in [
+            section_plane(
+                origin - vertical * data.bottom_height,
+                tangent,
+                vertical,
+                body_to_world,
+            ),
+            section_plane(
+                origin + vertical * data.top_height,
+                tangent,
+                -vertical,
+                body_to_world,
+            ),
+        ] {
+            let Some(plane) = plane else {
+                return Err(());
+            };
+            let Some(next) = keep_section_positive(&current, plane)? else {
+                return Ok(None);
+            };
+            current = next;
+        }
+        Ok(Some(current))
     }
 
     /// True when `layer` is turned off or frozen — entities on it never render.
@@ -7199,6 +7482,7 @@ impl Scene {
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
         viewport: Option<Handle>,
+        live_section: Option<&LiveSection>,
     ) -> Vec<MeshLodSet> {
         if self.block_meshes.is_empty() {
             return Vec::new();
@@ -7225,8 +7509,36 @@ impl Scene {
                     return;
                 }
                 let handle = entity.common().handle;
-                let Some(set) = self.block_meshes.get(&handle) else {
+                let Some(original) = self.block_meshes.get(&handle) else {
                     return;
+                };
+                let sectioned;
+                let set = if let Some((section, body)) = live_section.and_then(|section| {
+                    self.section_source_body(handle)
+                        .map(|body| (section, body))
+                }) {
+                    match Self::section_body(
+                        &body,
+                        &section.data,
+                        section.slice_depth,
+                        Some(&context.transform),
+                    ) {
+                        Ok(Some(body)) => {
+                            if let Some((mut mesh, _, _)) =
+                                self.prepare_solid_model_display(handle, &body)
+                            {
+                                mesh.prepare_instance_source(handle);
+                                sectioned = mesh;
+                                &sectioned
+                            } else {
+                                original
+                            }
+                        }
+                        Ok(None) => return,
+                        Err(()) => original,
+                    }
+                } else {
+                    original
                 };
                 let inherit = self.mesh_inherit_for_path(&context.insert_path);
                 let own_alpha = set.display_color().map_or(1.0, |color| color[3]);
@@ -7939,6 +8251,7 @@ impl Scene {
         wires: Arc<Vec<WireModel>>,
         aabb: [f64; 4],
         allow_pending_empty: bool,
+        area_only: bool,
     ) -> crate::scene::pick::interaction_index::InteractionCandidates {
         if let Some((base_epoch, base, changes)) = self.interaction_overlay_base() {
             let perf = crate::perf::enabled();
@@ -7957,11 +8270,20 @@ impl Scene {
             );
             let local_ms = t_local.elapsed().as_secs_f64() * 1000.0;
             let t_remap = iced::time::Instant::now();
-            let mut result =
-                base.query_remapped_xy(Arc::clone(&local), &base_slots, aabb);
-            result.extend_indexed(
-                changed_index.query_remapped_xy(local, &changed_slots, aabb),
-            );
+            let mut result = if area_only {
+                base.query_remapped_xy_area(Arc::clone(&local), &base_slots, aabb)
+            } else {
+                base.query_remapped_xy(Arc::clone(&local), &base_slots, aabb)
+            };
+            if area_only {
+                result.extend_indexed_area(
+                    changed_index.query_remapped_xy_area(local, &changed_slots, aabb),
+                );
+            } else {
+                result.extend_indexed(
+                    changed_index.query_remapped_xy(local, &changed_slots, aabb),
+                );
+            }
             let remap_ms = t_remap.elapsed().as_secs_f64() * 1000.0;
             let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
             if perf && total_ms >= 50.0 {
@@ -7979,7 +8301,11 @@ impl Scene {
             return result;
         }
         if let Some(index) = self.cached_interaction_index(&wires) {
-            index.query_xy(wires, aabb)
+            if area_only {
+                index.query_xy_area(wires, aabb)
+            } else {
+                index.query_xy(wires, aabb)
+            }
         } else if allow_pending_empty
             && self.interaction_index_pending_key.get()
             == Some((self.geometry_epoch, Arc::as_ptr(&wires) as usize))
@@ -8302,12 +8628,18 @@ impl Scene {
             cursor.x + radius,
             cursor.y + radius,
         ];
-        self.indexed_interaction_candidates_xy(wires, query, allow_pending_empty)
+        self.indexed_interaction_candidates_xy(wires, query, allow_pending_empty, false)
     }
 
     /// Shared rectangular broad phase for box/lasso/fence and command windows.
     /// Flat orthographic views query world XY; tilted/perspective views query
     /// projected 3D bounds using the supplied screen rectangle.
+    /// Candidates for an area selection: box, crossing, fence and lasso.
+    ///
+    /// Every caller feeds the result to the box/fence hit tests and to
+    /// `interaction_candidate_handles`, none of which snap, so the flat-ortho
+    /// path asks for the reduced category set. A caller that needs snapping
+    /// belongs on `interaction_candidates_near` instead.
     pub fn interaction_candidates_in_aabb(
         &self,
         wires: Arc<Vec<WireModel>>,
@@ -8344,6 +8676,7 @@ impl Scene {
                 wires,
                 [aabb[0] - pad, aabb[1] - pad, aabb[2] + pad, aabb[3] + pad],
                 false,
+                true,
             )
         } else {
             self.indexed_interaction_candidates_screen(
@@ -8399,7 +8732,7 @@ impl Scene {
 
     pub fn interaction_handles_in_world_aabb(&self, aabb: [f64; 4]) -> HashSet<Handle> {
         let wires = self.hit_test_wires();
-        let candidates = self.indexed_interaction_candidates_xy(wires, aabb, false);
+        let candidates = self.indexed_interaction_candidates_xy(wires, aabb, false, false);
         let mut handles: HashSet<Handle> = candidates
             .iter()
             .filter_map(|wire| Self::handle_from_wire_name(&wire.name))
@@ -10578,6 +10911,169 @@ impl Default for Scene {
 }
 
 #[cfg(test)]
+mod section_tests {
+    use super::*;
+    use acadrust::entities::{
+        EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData, Solid3D,
+    };
+    use acadrust::objects::ClassObjectData;
+    use acadrust::types::{Color, Vector3};
+
+    fn section(state: i32, depth: f64) -> SectionObjectData {
+        let vertices = vec![Vector3::new(5.0, 2.0, 5.0), Vector3::new(5.0, 8.0, 5.0)];
+        SectionObjectData {
+            state,
+            flags: 5,
+            name: "Section Plane (1)".to_string(),
+            vertical_direction: Vector3::UNIT_Z,
+            top_height: 1.0,
+            bottom_height: 2.0,
+            indicator_alpha: 70,
+            indicator_color: Color::from_index(9),
+            back_line_vertices: (depth > 0.0)
+                .then(|| {
+                    vertices
+                        .iter()
+                        .map(|point| *point + Vector3::new(-depth, 0.0, 0.0))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            vertices,
+            settings_handle: Handle::NULL,
+        }
+    }
+
+    fn bounds(body: Option<cadkernel::brep::Body>) -> ([f64; 3], [f64; 3]) {
+        let body = body.expect("section should retain material");
+        assert!(body.validate().is_empty());
+        let bounds = cadkernel::brep::body_bounds(&body).expect("sectioned body should be bounded");
+        (bounds.min, bounds.max)
+    }
+
+    fn assert_near(actual: [f64; 3], expected: [f64; 3]) {
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-8, "{actual} != {expected}");
+        }
+    }
+
+    #[test]
+    fn kernel_clipping_obeys_plane_slice_boundary_and_volume_limits() {
+        let body = cadkernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+
+        let (min, max) = bounds(Scene::section_body(&body, &section(1, 0.0), None, None).unwrap());
+        assert_near(min, [0.0, 0.0, 0.0]);
+        assert_near(max, [5.0, 10.0, 10.0]);
+
+        let (min, max) = bounds(
+            Scene::section_body(&body, &section(1, 0.0), Some(2.0), None).unwrap(),
+        );
+        assert_near(min, [3.0, 0.0, 0.0]);
+        assert_near(max, [5.0, 10.0, 10.0]);
+
+        let (min, max) = bounds(Scene::section_body(&body, &section(2, 4.0), None, None).unwrap());
+        assert_near(min, [1.0, 2.0, 0.0]);
+        assert_near(max, [5.0, 8.0, 10.0]);
+
+        let (min, max) = bounds(Scene::section_body(&body, &section(4, 4.0), None, None).unwrap());
+        assert_near(min, [1.0, 2.0, 3.0]);
+        assert_near(max, [5.0, 8.0, 6.0]);
+    }
+
+    #[test]
+    fn instance_transform_pulls_the_section_plane_into_body_space() {
+        let body = cadkernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let transform = acadrust::types::Transform::from_scaling(
+            acadrust::types::Vector3::new(2.0, 1.0, 1.0),
+        )
+        .then(&acadrust::types::Transform::from_translation(
+            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        ));
+        let mut data = section(1, 0.0);
+        for point in &mut data.vertices {
+            point.x = 20.0;
+        }
+
+        let (min, max) = bounds(
+            Scene::section_body(&body, &data, None, Some(&transform)).unwrap(),
+        );
+        assert_near(min, [0.0, 0.0, 0.0]);
+        assert_near(max, [5.0, 10.0, 10.0]);
+    }
+
+    #[test]
+    fn adding_and_erasing_a_section_keeps_its_object_graph_consistent() {
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(EntityType::Extended(ExtendedEntity {
+            common: EntityCommon::new(),
+            data: ExtendedEntityData::SectionObject(section(1, 0.0)),
+        }));
+        let settings_handle = match scene.document.get_entity(handle).unwrap() {
+            EntityType::Extended(ExtendedEntity {
+                data: ExtendedEntityData::SectionObject(data),
+                ..
+            }) => data.settings_handle,
+            _ => unreachable!(),
+        };
+        assert!(matches!(
+            scene.document.objects.get(&settings_handle),
+            Some(ObjectType::ClassObject(object))
+                if object.owner == handle
+                    && matches!(&object.data, ClassObjectData::SectionSettings(_))
+        ));
+
+        let root = scene.document.header.named_objects_dict_handle;
+        let manager_handle = match scene.document.objects.get(&root).unwrap() {
+            ObjectType::Dictionary(dictionary) => dictionary
+                .entries
+                .iter()
+                .find(|(name, _)| name == "ACAD_SECTION_MANAGER")
+                .map(|(_, handle)| *handle)
+                .unwrap(),
+            _ => panic!("root must be a dictionary"),
+        };
+        assert!(matches!(
+            scene.document.objects.get(&manager_handle),
+            Some(ObjectType::ClassObject(object))
+                if matches!(&object.data, ClassObjectData::SectionManager(manager)
+                    if manager.sections == vec![handle])
+        ));
+
+        scene.erase_entities(&[handle]);
+        assert!(!scene.document.objects.contains_key(&settings_handle));
+        assert!(matches!(
+            scene.document.objects.get(&manager_handle),
+            Some(ObjectType::ClassObject(object))
+                if matches!(&object.data, ClassObjectData::SectionManager(manager)
+                    if manager.sections.is_empty())
+        ));
+    }
+
+    #[test]
+    fn live_section_rebuilds_an_uncached_persisted_solid() {
+        let body = cadkernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let sat = crate::scene::convert::acis_export::solid_to_sat(&body).unwrap();
+        let mut solid = Solid3D::new();
+        solid.set_sat_document(&sat);
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(EntityType::Solid3D(solid));
+        assert!(!scene.solid_models.contains_key(&handle));
+
+        let clipped = scene
+            .sectioned_body(
+                handle,
+                &LiveSection {
+                    data: section(1, 0.0),
+                    slice_depth: None,
+                },
+            )
+            .unwrap();
+        let (min, max) = bounds(clipped);
+        assert_near(min, [0.0, 0.0, 0.0]);
+        assert_near(max, [5.0, 10.0, 10.0]);
+    }
+}
+
+#[cfg(test)]
 mod journal_tests {
     use super::*;
 
@@ -10874,6 +11370,8 @@ mod journal_tests {
         assert_eq!(folded.len(), before.len() + 1);
     }
 
+    // Differential oracle: the incrementally-patched entity index must always
+    // equal a from-scratch rebuild after any add / move / erase.
     #[test]
     fn block_member_index_matches_the_full_scan() {
         use acadrust::entities::Line;
@@ -12089,5 +12587,130 @@ mod layout_cache_tests {
         println!("100 Camera Zoom Navigations:    {:.2?}", zoom_100_duration);
         println!("Zoom Frame Overhead:            {:.3} ms ({:.0} FPS)", per_zoom_ms, 1000.0 / per_zoom_ms.max(0.001));
         println!("============================================================================\n");
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_wide_and_tapered_arc_rendering() {
+        use std::time::Instant;
+        use acadrust::entities::LwPolyline;
+        use acadrust::types::Vector2;
+
+        let n_wide_arcs = 2500;
+        let n_tapered_arcs = 2500;
+        let n_donuts = 2500;
+        let total_entities = n_wide_arcs + n_tapered_arcs + n_donuts;
+
+        let mut scene = Scene::new();
+
+        // 1. Wide polyline arcs (constant width 6.0)
+        for i in 0..n_wide_arcs {
+            let x = (i % 50) as f64 * 80.0;
+            let y = (i / 50) as f64 * 80.0;
+            let mut pline = LwPolyline::new();
+            pline.constant_width = 6.0;
+            pline.vertices = vec![
+                acadrust::entities::LwVertex {
+                    location: Vector2::new(x, y),
+                    bulge: 0.5,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                    vertex_id: 0,
+                },
+                acadrust::entities::LwVertex {
+                    location: Vector2::new(x + 40.0, y),
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                    vertex_id: 1,
+                },
+            ];
+            scene.add_entity(EntityType::LwPolyline(pline));
+        }
+
+        // 2. Tapered arcs (width: 2.0 -> 12.0)
+        for i in 0..n_tapered_arcs {
+            let x = (i % 50) as f64 * 80.0;
+            let y = (i / 50) as f64 * 80.0 + 4500.0;
+            let mut pline = LwPolyline::new();
+            pline.vertices = vec![
+                acadrust::entities::LwVertex {
+                    location: Vector2::new(x, y),
+                    bulge: 0.7,
+                    start_width: 2.0,
+                    end_width: 12.0,
+                    vertex_id: 0,
+                },
+                acadrust::entities::LwVertex {
+                    location: Vector2::new(x + 35.0, y + 10.0),
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                    vertex_id: 1,
+                },
+            ];
+            scene.add_entity(EntityType::LwPolyline(pline));
+        }
+
+        // 3. Donuts (2 semicircular arc segments, constant width 16.0)
+        for i in 0..n_donuts {
+            let cx = (i % 50) as f64 * 80.0;
+            let cy = (i / 50) as f64 * 80.0 + 9000.0;
+            let donut = crate::modules::draw::draw::donut::make_donut(cx, cy, 0.0, 10.0, 26.0);
+            scene.add_entity(donut);
+        }
+
+        let cam = Camera::default();
+        let t_tess_start = Instant::now();
+        let wires = scene.model_tile_wires_arc(0, &cam, 1.0, 1000.0);
+        let tess_duration = t_tess_start.elapsed();
+
+        let total_wires = wires.len();
+        let mut chord_points = 0usize;
+        let mut analytical_tangents = 0usize;
+        for w in wires.iter() {
+            chord_points += w.points.len();
+            analytical_tangents += w.tangent_geoms.len();
+        }
+
+        let depths = rustc_hash::FxHashMap::default();
+        let t_part_start = Instant::now();
+        let iters = 100;
+        let mut part = None;
+        for _ in 0..iters {
+            part = Some(crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths));
+        }
+        let part_duration = t_part_start.elapsed() / (iters as u32);
+        let p = part.unwrap();
+
+        // Zoom simulation
+        let zoom_levels = [0.1f32, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 1000.0];
+        let t_zoom_start = Instant::now();
+        let mut dynamic_cam = Camera::default();
+        for &zoom in zoom_levels.iter().cycle().take(100) {
+            dynamic_cam.distance = 1000.0 / zoom;
+            let _w = scene.model_tile_wires_arc(0, &dynamic_cam, 1.0, 1000.0);
+        }
+        let zoom_100_duration = t_zoom_start.elapsed();
+        let per_zoom_ms = zoom_100_duration.as_secs_f64() * 1000.0 / 100.0;
+
+        let line_vram_mb = (chord_points * 36) as f64 / (1024.0 * 1024.0);
+        let inst_vram_mb = (p.circle_instances.len() * 128) as f64 / (1024.0 * 1024.0);
+
+        println!("\n=== BENCHMARK REPORT: THICK & TAPERED ANALYTICAL ARCS ===");
+        println!("Thick & Tapered Entities:       {total_entities}");
+        println!("Initial Wire Build Time:        {:.2?}", tess_duration);
+        println!("Total Wires:                    {total_wires}");
+        println!("Tessellated Chord Vertices:     {chord_points}");
+        println!("Analytical Tangent Geometries:  {analytical_tangents}");
+        println!("Partitioning Time (per frame):  {:.3?}", part_duration);
+        println!("Regular Line Wires:             {}", p.regular.len());
+        println!("GPU Circle/Arc Instances:       {}", p.circle_instances.len());
+        println!("Line Arena VRAM (chord lines):  {:.2} MB", line_vram_mb);
+        println!("GPU Analytical VRAM:            {:.2} MB", inst_vram_mb);
+        println!("VRAM Reduction Ratio:           {:.1}x", if inst_vram_mb > 0.0 { line_vram_mb / inst_vram_mb } else { 0.0 });
+        println!("100 Camera Zoom Navigations:    {:.2?}", zoom_100_duration);
+        println!("Zoom Frame Overhead:            {:.3} ms ({:.0} FPS)", per_zoom_ms, 1000.0 / per_zoom_ms.max(0.001));
+        println!("========================================================\n");
     }
 }

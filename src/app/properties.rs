@@ -32,6 +32,10 @@ impl OpenCADStudio {
     /// Rebuild the PropertiesPanel from the current entity selection.
     /// Preserves UI state (open pickers, edit buffer) across refreshes.
     pub(super) fn refresh_properties(&mut self) {
+        // A 186 468-entity selection spends ~112 ms in here. Split it into the
+        // three phases that can own that: resolving the selected handles,
+        // building the panel, and syncing the ribbon.
+        let t_all = crate::perf::enabled().then(iced::time::Instant::now);
         let i = self.active_tab;
         if !crate::entities::object_data::cache_is_prepared(
             &self.tabs[i].scene.object_data_cache,
@@ -47,6 +51,10 @@ impl OpenCADStudio {
         // Expanded coordinate groups persist across rebuilds AND selection
         // changes — it's a per-user view preference, not per-entity state.
         let expanded_groups = std::mem::take(&mut self.tabs[i].properties.expanded_groups);
+        // Section state belongs to the app, not a drawing tab, so the user's
+        // collapsed sections carry across every currently open drawing/project.
+        // The empty app-level default keeps a first-run palette fully expanded.
+        let collapsed_sections = self.collapsed_property_sections.clone();
         // Which entities the previous panel was built for — an uncommitted
         // edit buffer only survives a rebuild for the *same* selection.
         let prev_handles = std::mem::take(&mut self.tabs[i].properties.source_handles);
@@ -101,12 +109,17 @@ impl OpenCADStudio {
         // Current-Vertex focus survives only while the same object stays
         // selected; a changed selection resets to the first vertex. Seed the
         // per-thread focus so the polyline property builder / editor targets it.
+        // Everything before this is the prelude: the object-data cache, the
+        // unit context, the layer and linetype lists.
+        let m_prelude = t_all.map(|t| t.elapsed().as_secs_f64() * 1000.0);
+        let t_handles = crate::perf::enabled().then(iced::time::Instant::now);
         let cur_handles: Vec<acadrust::Handle> = self.tabs[i]
             .scene
-            .selected_entities()
-            .iter()
-            .map(|(h, _)| *h)
+            .selected_handles_in_order()
+            .into_iter()
+            .filter(|h| self.tabs[i].scene.document.get_entity(*h).is_some())
             .collect();
+        let handles_ms = t_handles.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
         let prop_vertex = if cur_handles == prev_handles {
             self.tabs[i].properties.prop_vertex
         } else {
@@ -2175,7 +2188,9 @@ impl OpenCADStudio {
                     ..Default::default()
                 },
                 _ => {
+                    let t_arm = crate::perf::enabled().then(iced::time::Instant::now);
                     let groups = build_selection_groups(&selected);
+                    let t_groups = t_arm.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     let active_group = selected_group
                         .and_then(|group| groups.iter().find(|g| g.label == group.label).cloned())
                         .or_else(|| groups.first().cloned());
@@ -2183,30 +2198,57 @@ impl OpenCADStudio {
                     let filtered: Vec<(Handle, &EntityType)> = active_group
                         .as_ref()
                         .map(|group| {
+                            let wanted: rustc_hash::FxHashSet<Handle> =
+                                group.handles.iter().copied().collect();
                             selected
                                 .iter()
-                                .filter(|(handle, _)| group.handles.contains(handle))
+                                .filter(|(handle, _)| wanted.contains(handle))
                                 .copied()
                                 .collect()
                         })
                         .unwrap_or_default();
+                    let t_filter = t_arm.map(|t| t.elapsed().as_secs_f64() * 1000.0);
 
                     let plane = if self.tabs[i].editing_model_space() {
                         self.tabs[i].ucs_xform().working_plane()
                     } else {
                         crate::command::WorkingPlane::default()
                     };
-                    let local_entities: Vec<(Handle, EntityType)> = filtered
-                        .iter()
-                        .map(|(handle, entity)| {
-                            (*handle, dispatch::entity_in_working_plane(entity, plane))
-                        })
-                        .collect();
+                    let local_entities: Vec<(Handle, std::borrow::Cow<'_, EntityType>)> =
+                        filtered
+                            .iter()
+                            .map(|(handle, entity)| {
+                                let local = if plane.is_identity() {
+                                    std::borrow::Cow::Borrowed(*entity)
+                                } else {
+                                    std::borrow::Cow::Owned(
+                                        dispatch::entity_in_working_plane(entity, plane),
+                                    )
+                                };
+                                (*handle, local)
+                            })
+                            .collect();
                     let local_refs: Vec<(Handle, &EntityType)> = local_entities
                         .iter()
-                        .map(|(handle, entity)| (*handle, entity))
+                        .map(|(handle, entity)| (*handle, entity.as_ref()))
                         .collect();
+                    let t_local = t_arm.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     let mut sections = aggregate_sections(&local_refs, &text_style_names);
+                    if let (Some(t), Some(groups_ms), Some(filter_ms), Some(local_ms)) =
+                        (t_arm, t_groups, t_filter, t_local)
+                    {
+                        let total = t.elapsed().as_secs_f64() * 1000.0;
+                        if total >= 5.0 {
+                            crate::perf_record!(
+                                "[perf] properties-panel {total:>7.1}ms groups={groups_ms:.1} \
+filter={:.1} local={:.1} aggregate={:.1} entities={}",
+                                filter_ms - groups_ms,
+                                local_ms - filter_ms,
+                                total - local_ms,
+                                local_refs.len(),
+                            );
+                        }
+                    }
                     if local_refs.iter().all(|(handle, _)| {
                         crate::scene::model::solid_history::has_compact_solid_properties(
                             &self.tabs[i].scene.document,
@@ -2278,6 +2320,7 @@ impl OpenCADStudio {
                 None
             };
             panel.expanded_groups = expanded_groups;
+            panel.collapsed_sections = collapsed_sections;
             panel.source_handles = new_handles;
             panel.prop_vertex = prop_vertex;
             panel.prop_vertex_indicator_active = prop_vertex_indicator_active;
@@ -2310,7 +2353,24 @@ impl OpenCADStudio {
 
         self.tabs[i].properties = new_panel;
         self.refresh_selected_grips();
+        let m_panel = t_all.map(|t| t.elapsed().as_secs_f64() * 1000.0);
+        let t_ribbon = crate::perf::enabled().then(iced::time::Instant::now);
         self.sync_ribbon_from_selection();
+        if let Some(t) = t_all {
+            let ribbon_ms = t_ribbon.map_or(0.0, |r| r.elapsed().as_secs_f64() * 1000.0);
+            let total_ms = t.elapsed().as_secs_f64() * 1000.0;
+            if total_ms >= 5.0 {
+                let prelude = m_prelude.unwrap_or(0.0);
+                let panel = m_panel.unwrap_or(0.0);
+                crate::perf_record!(
+                    "[perf] properties-detail {total_ms:>7.1}ms prelude={prelude:.1} \
+handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}",
+                    panel - prelude - handles_ms,
+                    total_ms - panel - ribbon_ms,
+                    cur_handles.len(),
+                );
+            }
+        }
     }
 
     /// Drive the Home-ribbon Layer / Color / Linetype / Lineweight dropdowns
@@ -2371,11 +2431,16 @@ impl OpenCADStudio {
         let mut lineweight_mixed = false;
 
         for (_h, e) in &selected {
+            if layer_mixed && color_mixed && linetype_mixed && lineweight_mixed {
+                break;
+            }
             let c = e.common();
+            // Borrowed, not cloned: this only ever gets compared, and cloning
+            // it here was one heap allocation per selected entity.
             let lt = if c.linetype.is_empty() {
-                "ByLayer".to_string()
+                "ByLayer"
             } else {
-                c.linetype.clone()
+                c.linetype.as_str()
             };
             match &layer {
                 None => layer = Some(c.layer.clone()),
@@ -2388,8 +2453,8 @@ impl OpenCADStudio {
                 _ => {}
             }
             match &linetype {
-                None => linetype = Some(lt),
-                Some(prev) if prev != &lt => linetype_mixed = true,
+                None => linetype = Some(lt.to_string()),
+                Some(prev) if prev.as_str() != lt => linetype_mixed = true,
                 _ => {}
             }
             match &lineweight {
@@ -2421,6 +2486,10 @@ impl OpenCADStudio {
     }
 
     /// Rebuild the cached selected_grips from the current entity selection.
+    ///
+    /// Selections past `GRIPOBJLIMIT` get no grips at all. That used to be a
+    /// constant here; it is now [`crate::app::settings::UserSettings::grip_object_limit`],
+    /// reachable from Options and from the sysvar of the same name.
     pub(super) fn refresh_selected_grips(&mut self) {
         let i = self.active_tab;
         let locked_active_grip = self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
@@ -2448,6 +2517,14 @@ impl OpenCADStudio {
                 .then(|| selected[0].0);
             let mut grips = Vec::new();
             let mut handles = Vec::new();
+            // Avoid rebuilding every entity's grip markers above the configured
+            // limit. Zero disables the limit.
+            let limit = self.grip_object_limit;
+            let selected = if limit > 0 && selected.len() > limit as usize {
+                Vec::new()
+            } else {
+                selected
+            };
             for (handle, entity) in selected {
                 if self.tabs[i].scene.is_layer_locked(handle) {
                     continue;
@@ -3068,13 +3145,18 @@ pub(super) fn aggregate_sections(
         return vec![];
     }
 
-    let mut all_sections: Vec<Vec<crate::scene::model::object::PropSection>> = selected
-        .iter()
-        .map(|(handle, entity)| dispatch::properties_sectioned(*handle, entity, text_style_names))
-        .collect();
-
-    let mut result = all_sections.remove(0);
-    for sections in all_sections {
+    let mut entities = selected.iter();
+    let Some((handle, entity)) = entities.next() else {
+        return vec![];
+    };
+    let mut result = dispatch::properties_sectioned(*handle, entity, text_style_names);
+    for (handle, entity) in entities {
+        // Nothing in common left to narrow: every later entity can only
+        // intersect against an empty set.
+        if result.is_empty() {
+            break;
+        }
+        let sections = dispatch::properties_sectioned(*handle, entity, text_style_names);
         result = merge_sections(&result, &sections);
     }
     // Sum the filled area while individual Area rows may still vary.
@@ -3135,8 +3217,7 @@ fn retain_compact_solid_sections(
                     | "transparency"
                     | "hyperlink"
                     | "material"
-            ) || property.field.starts_with("mesh_")
-                || crate::scene::model::solid_history::is_specialized_property(property.field)
+            ) || crate::scene::model::solid_history::is_specialized_property(property.field)
         });
     });
     sections.retain(|section| !section.props.is_empty());
@@ -4020,5 +4101,170 @@ mod chprop_integration_tests {
         let new_lw = LineWeight::from_value(50);
         let _ = app.update(Message::RibbonLineweightChanged(new_lw));
         assert_eq!(app.ribbon.active_lineweight, new_lw);
+    }
+}
+
+#[cfg(test)]
+mod grip_limit_tests {
+    use super::*;
+
+    #[test]
+    fn a_selection_past_the_limit_gets_no_grips() {
+        use acadrust::entities::{EntityType, Line};
+        use acadrust::types::Vector3;
+
+        let select_n = |n: usize, limit: Option<i32>| -> usize {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            if let Some(limit) = limit {
+                app.grip_object_limit = limit;
+            }
+            let i = app.active_tab;
+            let handles: Vec<_> = (0..n)
+                .map(|k| {
+                    let x = k as f64;
+                    app.tabs[i].scene.add_entity(EntityType::Line(
+                        Line::from_points(
+                            Vector3::new(x, 0.0, 0.0),
+                            Vector3::new(x + 1.0, 1.0, 0.0),
+                        ),
+                    ))
+                })
+                .collect();
+            for handle in handles {
+                app.tabs[i].scene.select_entity(handle, false);
+            }
+            app.refresh_selected_grips();
+            app.tabs[i].selected_grips.len()
+        };
+
+        assert!(
+            select_n(crate::app::settings::DEFAULT_GRIP_OBJECT_LIMIT as usize, None) > 0,
+            "a selection at the limit must still show its grips",
+        );
+        assert_eq!(
+            select_n(crate::app::settings::DEFAULT_GRIP_OBJECT_LIMIT as usize + 1, None),
+            0,
+            "one past the limit must show none at all",
+        );
+    }
+
+    /// The Options card writes these four straight onto the app and relies on
+    /// the snapshot/restore pair to carry them across a restart. Three of them
+    /// had no UI until now and so no reason for anyone to notice if the pair
+    /// missed one.
+    #[test]
+    fn the_selection_settings_survive_a_save_and_load() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.pick_add = false;
+        app.pick_drag_rect = true;
+        app.pick_box = 11;
+        app.grip_object_limit = 0;
+
+        let saved = app.current_settings();
+        let mut restored = OpenCADStudio::new_for_test();
+        restored.apply_settings(&saved);
+
+        assert!(!restored.pick_add);
+        assert!(restored.pick_drag_rect);
+        assert_eq!(restored.pick_box, 11);
+        assert_eq!(
+            restored.grip_object_limit, 0,
+            "zero is a real value here, not an unset field",
+        );
+    }
+
+    /// `GRIPOBJLIMIT 0` means no limit, and the old comparison — a bare `>`
+    /// against the stored number — could not express that: zero would have
+    /// suppressed every grip instead of allowing all of them.
+    #[test]
+    fn a_limit_of_zero_means_no_limit() {
+        use acadrust::entities::{EntityType, Line};
+        use acadrust::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.grip_object_limit = 0;
+        let i = app.active_tab;
+        let over = crate::app::settings::DEFAULT_GRIP_OBJECT_LIMIT as usize * 3;
+        let handles: Vec<_> = (0..over)
+            .map(|k| {
+                let x = k as f64;
+                app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
+                    Vector3::new(x, 0.0, 0.0),
+                    Vector3::new(x + 1.0, 1.0, 0.0),
+                )))
+            })
+            .collect();
+        for handle in handles {
+            app.tabs[i].scene.select_entity(handle, false);
+        }
+        app.refresh_selected_grips();
+        assert!(
+            app.tabs[i].selected_grips.len() > 0,
+            "zero must read as unlimited, not as a limit of none",
+        );
+    }
+}
+
+#[cfg(test)]
+mod aggregation_tests {
+    use super::*;
+    use acadrust::EntityType;
+
+    fn line(layer: &str, color: i16) -> EntityType {
+        let mut line = acadrust::entities::line::Line::default();
+        line.common.layer = layer.to_string();
+        line.common.color = acadrust::types::Color::from_index(color);
+        EntityType::Line(line)
+    }
+
+    fn row<'a>(
+        sections: &'a [crate::scene::model::object::PropSection],
+        field: &str,
+    ) -> Option<&'a crate::scene::model::object::Property> {
+        sections
+            .iter()
+            .flat_map(|section| section.props.iter())
+            .find(|property| property.field == field)
+    }
+
+    #[test]
+    fn shared_values_survive_the_fold_and_differing_ones_do_not() {
+        let entities = [line("WALLS", 1), line("WALLS", 3), line("WALLS", 1)];
+        let selected: Vec<(Handle, &EntityType)> = entities
+            .iter()
+            .enumerate()
+            .map(|(i, entity)| (Handle::new(i as u64 + 1), entity))
+            .collect();
+
+        let sections = aggregate_sections(&selected, &[]);
+        assert!(!sections.is_empty(), "three lines share their layer rows");
+
+        // A colour the entities disagree on has its own variant rather than
+        // the text label, so the two rows are checked on their own terms.
+        let layer = row(&sections, "layer").expect("a layer row");
+        assert!(
+            format!("{:?}", layer.value).contains("WALLS"),
+            "one layer across all three: {:?}",
+            layer.value,
+        );
+        let color = row(&sections, "color").expect("a color row");
+        assert!(
+            format!("{:?}", color.value).contains("Varies"),
+            "two colours across three lines: {:?}",
+            color.value,
+        );
+    }
+
+    // One entity folds to its own properties, and the fold must not depend on
+    // there being a second one to merge against.
+    #[test]
+    fn a_single_entity_aggregates_to_its_own_rows() {
+        let entity = line("WALLS", 1);
+        let selected = [(Handle::new(1), &entity)];
+        let sections = aggregate_sections(&selected, &[]);
+        let layer = row(&sections, "layer").expect("a layer row");
+        assert!(format!("{:?}", layer.value).contains("WALLS"));
     }
 }

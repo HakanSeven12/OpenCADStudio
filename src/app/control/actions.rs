@@ -171,6 +171,7 @@ impl OpenCADStudio {
                         | "text_color"
                         | "block_content_color"
                         | "background_fill_color"
+                        | "indicator_fill_color"
                 ) {
                     self.update(Message::PropColorFieldChanged {
                         field: p.field.into(),

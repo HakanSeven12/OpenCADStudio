@@ -32,12 +32,12 @@ const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
 const TAU: f32 = 6.283185307179586;
 
 struct InstanceIn {
-    @location(0) center_high: vec4<f32>, // xyz = center_high, w = unused
+    @location(0) center_high: vec4<f32>, // xyz = center_high, w = start_width
     @location(1) center_low:  vec4<f32>, // xyz = center_low, w = radius
     @location(2) axis_x:      vec4<f32>, // xyz = axis_x, w = start_angle
     @location(3) axis_y:      vec4<f32>, // xyz = axis_y, w = end_angle
     @location(4) color:       vec4<f32>, // rgba
-    @location(5) params:      vec4<f32>, // half_width_px, pattern_length, draw_depth, unused
+    @location(5) params:      vec4<f32>, // half_width_px, pattern_length, draw_depth, end_width
     @location(6) pat0:        vec4<f32>,
     @location(7) pat1:        vec4<f32>,
 }
@@ -46,7 +46,7 @@ struct VertexOut {
     @builtin(position) clip_pos:       vec4<f32>,
     @location(0)       local_pos:      vec2<f32>,
     @location(1)       radius:         f32,
-    @location(2)       hw_px:          f32,
+    @location(2) @interpolate(flat) hw_ends: vec2<f32>,
     @location(3)       color:          vec4<f32>,
     @location(4)       pattern_length: f32,
     @location(5)       pat0:           vec4<f32>,
@@ -54,9 +54,10 @@ struct VertexOut {
     @location(7) @interpolate(flat) min_elem:       f32,
     @location(8) @interpolate(flat) start_angle:    f32,
     @location(9) @interpolate(flat) end_angle:      f32,
+    @location(10) @interpolate(flat) is_world:     f32,
 }
 
-fn resolve_hw(px_hw: f32) -> f32 {
+fn resolve_px_hw(px_hw: f32) -> f32 {
     var display_hw = max(px_hw * u.lineweight_scale, 0.5);
     if u.lineweight_scale < 0.0 {
         let scale = -u.lineweight_scale;
@@ -85,13 +86,31 @@ fn resolve_hw(px_hw: f32) -> f32 {
     let axis_x = in.axis_x.xyz;
     let axis_y = in.axis_y.xyz;
     let color = in.color;
-    let hw_px = resolve_hw(in.params.x);
+    let world_w_a = in.center_high.w;
+    let world_w_b = in.params.w;
+    let is_world = select(0.0, 1.0, world_w_a > 0.0 || world_w_b > 0.0);
+
+    var hw_a: f32;
+    var hw_b: f32;
+    var ext: f32;
+
+    if is_world > 0.5 {
+        hw_a = world_w_a * 0.5;
+        hw_b = world_w_b * 0.5;
+        let max_hw = max(hw_a, hw_b);
+        // Expand bounding quad so anti-aliasing margin and physical width never clip under 3D tilt
+        let margin_world = max_hw + 16.0 * max(u.world_per_pixel, 1e-6);
+        ext = radius + margin_world;
+    } else {
+        let px_hw = resolve_px_hw(in.params.x);
+        hw_a = px_hw;
+        hw_b = px_hw;
+        let margin_world = (px_hw + 2.0) * max(u.world_per_pixel, 1e-6);
+        ext = radius + margin_world;
+    }
+
     let pattern_length = in.params.y;
     let draw_depth = in.params.z;
-
-    // Expand bounding quad so anti-aliasing margin and lineweight never clip
-    let margin_world = (hw_px + 2.0) * max(u.world_per_pixel, 1e-6);
-    let ext = radius + margin_world;
 
     let center_rel = (center_high - u.eye_high) + (center_low - u.eye_low);
     let world_pos_rel = center_rel + (u_val * axis_x + v_val * axis_y) * ext;
@@ -103,7 +122,7 @@ fn resolve_hw(px_hw: f32) -> f32 {
     out.clip_pos = clip_pos;
     out.local_pos = vec2<f32>(u_val * ext, v_val * ext);
     out.radius = radius;
-    out.hw_px = hw_px;
+    out.hw_ends = vec2<f32>(hw_a, hw_b);
     out.color = color;
     out.pattern_length = pattern_length;
     out.pat0 = in.pat0;
@@ -122,6 +141,7 @@ fn resolve_hw(px_hw: f32) -> f32 {
 
     out.start_angle = in.axis_x.w;
     out.end_angle = in.axis_y.w;
+    out.is_world = is_world;
 
     return out;
 }
@@ -181,30 +201,60 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>) -> bool {
     let theta = select(angle, angle + TAU, angle < 0.0);
     let d_theta = mod_tau(theta - sa);
 
-    var d_world: f32;
-    var arc_dist: f32;
+    var alpha_cov: f32 = 0.0;
+    var arc_dist: f32 = 0.0;
 
-    if sweep >= TAU - 1e-5 || d_theta <= sweep {
-        // Inside arc sweep or full circle
-        d_world = abs(r - in.radius);
-        arc_dist = in.radius * d_theta;
-    } else {
-        // Outside sweep: measure distance to start and end endpoints for round end caps
-        let p_start = in.radius * vec2<f32>(cos(sa), sin(sa));
-        let p_end = in.radius * vec2<f32>(cos(ea), sin(ea));
-        let d_start = length(in.local_pos - p_start);
-        let d_end = length(in.local_pos - p_end);
-        if d_start < d_end {
-            d_world = d_start;
-            arc_dist = 0.0;
+    let is_full_or_in_sweep = (sweep >= TAU - 1e-5) || (d_theta <= sweep);
+
+    if in.is_world > 0.5 {
+        // Physical world-unit width (thick analytical circular arcs, donuts, tapered segments).
+        // Distance-to-edge calculations are strictly performed in the circle plane's world units
+        // so that 3D perspective projection yields exact concentric ellipses with invariant
+        // physical stroke widths across any camera tilt or acute perspective angle.
+        if is_full_or_in_sweep {
+            let t = select(0.0, clamp(d_theta / sweep, 0.0, 1.0), sweep > 1e-5);
+            let world_hw = mix(in.hw_ends.x, in.hw_ends.y, t);
+            let eff_hw = max(world_hw, 0.5 * fw);
+            let d_world = abs(r - in.radius);
+            let delta_px = (eff_hw - d_world) / fw;
+            let cov = clamp(0.5 + delta_px, 0.0, 1.0);
+            let subpixel_fade = min(1.0, (2.0 * world_hw) / fw);
+            alpha_cov = cov * subpixel_fade;
+            arc_dist = in.radius * d_theta;
         } else {
-            d_world = d_end;
-            arc_dist = in.radius * sweep;
+            // Outside sweep: evaluate distance to start and end endpoints for smooth round end caps
+            let p_start = in.radius * vec2<f32>(cos(sa), sin(sa));
+            let p_end = in.radius * vec2<f32>(cos(ea), sin(ea));
+            let d_start = length(in.local_pos - p_start);
+            let d_end = length(in.local_pos - p_end);
+            let eff_hw_a = max(in.hw_ends.x, 0.5 * fw);
+            let eff_hw_b = max(in.hw_ends.y, 0.5 * fw);
+            let cov_start = clamp(0.5 + (eff_hw_a - d_start) / fw, 0.0, 1.0) * min(1.0, (2.0 * in.hw_ends.x) / fw);
+            let cov_end = clamp(0.5 + (eff_hw_b - d_end) / fw, 0.0, 1.0) * min(1.0, (2.0 * in.hw_ends.y) / fw);
+            alpha_cov = max(cov_start, cov_end);
+            arc_dist = select(in.radius * sweep, 0.0, cov_start >= cov_end);
+        }
+    } else {
+        // Lineweight stroke (screen-pixel width)
+        if is_full_or_in_sweep {
+            let t = select(0.0, clamp(d_theta / sweep, 0.0, 1.0), sweep > 1e-5);
+            let cur_hw = mix(in.hw_ends.x, in.hw_ends.y, t);
+            let d_world = abs(r - in.radius);
+            let d_px = d_world / fw;
+            alpha_cov = clamp(0.5 + cur_hw - d_px, 0.0, 1.0);
+            arc_dist = in.radius * d_theta;
+        } else {
+            let p_start = in.radius * vec2<f32>(cos(sa), sin(sa));
+            let p_end = in.radius * vec2<f32>(cos(ea), sin(ea));
+            let d_start_px = length(in.local_pos - p_start) / fw;
+            let d_end_px = length(in.local_pos - p_end) / fw;
+            let cov_start = clamp(0.5 + in.hw_ends.x - d_start_px, 0.0, 1.0);
+            let cov_end = clamp(0.5 + in.hw_ends.y - d_end_px, 0.0, 1.0);
+            alpha_cov = max(cov_start, cov_end);
+            arc_dist = select(in.radius * sweep, 0.0, cov_start >= cov_end);
         }
     }
 
-    let d_px = d_world / fw;
-    let alpha_cov = clamp(0.5 + in.hw_px - d_px, 0.0, 1.0);
     if alpha_cov <= 0.0 {
         discard;
     }

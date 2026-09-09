@@ -202,6 +202,66 @@ pub(crate) fn points_to_ds(
     (high, low)
 }
 
+fn polyline_segment_widths(entity: &EntityType) -> Vec<(f32, f32)> {
+    match entity {
+        EntityType::LwPolyline(p) => {
+            let count = p.vertices.len();
+            let seg_count = if p.is_closed {
+                count
+            } else {
+                count.saturating_sub(1)
+            };
+            let c = p.constant_width;
+            (0..seg_count)
+                .map(|i| {
+                    let v = &p.vertices[i];
+                    let sw = if v.start_width > 1e-9 {
+                        v.start_width
+                    } else {
+                        c
+                    } as f32;
+                    let ew = if v.end_width > 1e-9 {
+                        v.end_width
+                    } else {
+                        c
+                    } as f32;
+                    (sw, ew)
+                })
+                .collect()
+        }
+        EntityType::Polyline2D(p) => {
+            let filtered = crate::entities::polyline::drawn_vertices2d(p);
+            let verts: &[acadrust::entities::Vertex2D] =
+                filtered.as_deref().unwrap_or(&p.vertices);
+            let count = verts.len();
+            let seg_count = if p.is_closed() {
+                count
+            } else {
+                count.saturating_sub(1)
+            };
+            let def_start = p.start_width;
+            let def_end = p.end_width;
+            (0..seg_count)
+                .map(|i| {
+                    let v = &verts[i];
+                    let sw = if v.start_width > 1e-9 {
+                        v.start_width
+                    } else {
+                        def_start
+                    } as f32;
+                    let ew = if v.end_width > 1e-9 {
+                        v.end_width
+                    } else {
+                        def_end
+                    } as f32;
+                    (sw, ew)
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn split_mixed_polyline(
     tangent_geoms: &[TangentGeom],
     key_vertices: &[[f64; 3]],
@@ -214,11 +274,15 @@ fn split_mixed_polyline(
     snap_pts: Vec<(glam::DVec3, SnapHint)>,
     point_marker: Option<crate::scene::model::wire_model::PointMarker>,
     plinegen: bool,
+    seg_widths: &[(f32, f32)],
+    global_world_width: f32,
+    mut pick_tris: Vec<[f32; 3]>,
+    mut pick_tris_low: Vec<[f32; 3]>,
 ) -> Vec<WireModel> {
     let mut out = Vec::new();
 
     // Emit each arc segment as an analytical wire (CircleGpu target)
-    for tg in tangent_geoms {
+    for (i, tg) in tangent_geoms.iter().enumerate() {
         if let TangentGeom::Arc {
             center,
             axis_x,
@@ -246,20 +310,48 @@ fn split_mixed_polyline(
                 arc_pts.push(p);
             }
             let (points, points_low) = points_to_ds(arc_pts);
+
+            let (sw, ew) = if let Some(&(w0, w1)) = seg_widths.get(i) {
+                if w0 > 1e-9 || w1 > 1e-9 {
+                    (w0, w1)
+                } else if global_world_width > 1e-9 {
+                    (global_world_width, global_world_width)
+                } else {
+                    (0.0, 0.0)
+                }
+            } else if global_world_width > 1e-9 {
+                (global_world_width, global_world_width)
+            } else {
+                (0.0, 0.0)
+            };
+
+            let taper_widths = if (sw - ew).abs() > 1e-6 {
+                vec![sw, ew]
+            } else {
+                Vec::new()
+            };
+            let world_width = sw.max(ew);
+
+            let (arc_pt, arc_ptl) = if out.is_empty() && !pick_tris.is_empty() {
+                (std::mem::take(&mut pick_tris), std::mem::take(&mut pick_tris_low))
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
             out.push(WireModel {
                 bg_adapt: None,
                 point_marker: None,
-                taper_widths: Vec::new(),
+                taper_widths,
                 pattern_stations: Vec::new(),
-                world_width: 0.0,
+                world_width,
                 depth_override: None,
                 display_visible: true,
                 plot_visible: true,
                 fill_is_3d: false,
                 fill_is_2d_solid: false,
                 render_instance: None,
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
+                pick_tris: arc_pt,
+                pick_tris_low: arc_ptl,
                 dash_from_start: false,
                 dash_align_end: None,
                 text_verts: Vec::new(),
@@ -330,20 +422,25 @@ fn split_mixed_polyline(
 
     let (line_pts, line_pts_low) = points_to_ds(straight_pts);
     if !line_pts.is_empty() {
+        let (pt, ptl) = if !pick_tris.is_empty() {
+            (pick_tris, pick_tris_low)
+        } else {
+            (Vec::new(), Vec::new())
+        };
         out.push(WireModel {
             bg_adapt: None,
             point_marker,
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
-            world_width: 0.0,
+            world_width: global_world_width,
             depth_override: None,
             display_visible: true,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
             render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
+            pick_tris: pt,
+            pick_tris_low: ptl,
             dash_from_start: false,
             dash_align_end: None,
             text_verts: Vec::new(),
@@ -367,6 +464,10 @@ fn split_mixed_polyline(
     } else if let Some(first_arc) = out.first_mut() {
         first_arc.snap_pts = snap_pts;
         first_arc.key_vertices = key_vertices.to_vec();
+        if first_arc.pick_tris.is_empty() && !pick_tris.is_empty() {
+            first_arc.pick_tris = pick_tris;
+            first_arc.pick_tris_low = pick_tris_low;
+        }
     }
 
     out
@@ -1744,17 +1845,13 @@ pub fn tessellate(
                         .tangent_geoms
                         .iter()
                         .any(|tg| matches!(tg, TangentGeom::Arc { .. }));
-                    let has_line = te
-                        .tangent_geoms
-                        .iter()
-                        .any(|tg| matches!(tg, TangentGeom::Line { .. }));
-                    let is_thin_polyline = !is_thick_extrusion
-                        && polyline_band_width(entity, document.header.fill_mode) <= 1e-9
+                    let can_split = !is_thick_extrusion
                         && fill_tris.is_empty()
-                        && pick_tris.is_empty()
                         && matches!(entity, EntityType::LwPolyline(_) | EntityType::Polyline2D(_));
 
-                    if has_arc && has_line && is_thin_polyline {
+                    if has_arc && can_split {
+                        let seg_widths = polyline_segment_widths(entity);
+                        let ww = polyline_band_width(entity, document.header.fill_mode);
                         out.extend(split_mixed_polyline(
                             &te.tangent_geoms,
                             &keys,
@@ -1767,6 +1864,10 @@ pub fn tessellate(
                             snap,
                             point_marker,
                             true,
+                            &seg_widths,
+                            ww,
+                            pick_tris,
+                            pick_tris_low,
                         ));
                     } else {
                         out.push(WireModel {
@@ -1966,20 +2067,14 @@ pub fn tessellate(
                     entity,
                     EntityType::Polyline2D(p) if p.thickness.abs() > 1e-10
                 );
-                let is_thin_polyline = !is_thick_extrusion
-                    && polyline_band_width(entity, document.header.fill_mode) <= 1e-9
-                    && pick_tris.is_empty()
+                let can_split = !is_thick_extrusion
                     && matches!(entity, EntityType::LwPolyline(_) | EntityType::Polyline2D(_));
                 let has_arc = te
                     .tangent_geoms
                     .iter()
                     .any(|tg| matches!(tg, TangentGeom::Arc { .. }));
-                let has_line = te
-                    .tangent_geoms
-                    .iter()
-                    .any(|tg| matches!(tg, TangentGeom::Line { .. }));
 
-                if has_arc && has_line && is_thin_polyline {
+                if has_arc && can_split {
                     let edge_color = if is_thick_extrusion {
                         [0.0, 0.0, 0.0, 1.0]
                     } else {
@@ -1987,6 +2082,8 @@ pub fn tessellate(
                     };
                     let point_marker =
                         crate::entities::point::relative_marker_spec(entity, document);
+                    let seg_widths = polyline_segment_widths(entity);
+                    let ww = polyline_band_width(entity, document.header.fill_mode);
                     return split_mixed_polyline(
                         &te.tangent_geoms,
                         &key_vertices,
@@ -1999,6 +2096,10 @@ pub fn tessellate(
                         snap_pts,
                         point_marker,
                         false,
+                        &seg_widths,
+                        ww,
+                        pick_tris,
+                        pick_tris_low,
                     );
                 }
                 return vec![WireModel {
@@ -2038,6 +2139,40 @@ pub fn tessellate(
             }
 
             RenderObject::TaperedLines(points, widths) => {
+                let has_arc = te
+                    .tangent_geoms
+                    .iter()
+                    .any(|tg| matches!(tg, TangentGeom::Arc { .. }));
+                let can_split = matches!(entity, EntityType::LwPolyline(_) | EntityType::Polyline2D(_));
+                let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
+                let world_width = widths.iter().copied().fold(0.0f32, f32::max);
+                let key_vertices: Vec<[f64; 3]> = te
+                    .key_vertices
+                    .into_iter()
+                    .map(|[x, y, z]| [x, y, z])
+                    .collect();
+
+                if has_arc && can_split {
+                    let seg_widths = polyline_segment_widths(entity);
+                    return split_mixed_polyline(
+                        &te.tangent_geoms,
+                        &key_vertices,
+                        &name,
+                        color,
+                        selected,
+                        pattern_length,
+                        pattern,
+                        line_weight_px,
+                        te.snap_pts,
+                        None,
+                        true,
+                        &seg_widths,
+                        world_width,
+                        pick_tris,
+                        pick_tris_low,
+                    );
+                }
+
                 // A wide polyline whose width varies: one continuous band wire
                 // carrying a per-point width; the shader interpolates each
                 // segment's two endpoint widths. `world_width` (the widest edge)
@@ -2045,13 +2180,6 @@ pub fn tessellate(
                 // floor when zoomed out.
                 let (local_pts, local_pts_low) = points_to_ds(points);
                 let snap_pts = te.snap_pts;
-                let key_vertices: Vec<[f64; 3]> = te
-                    .key_vertices
-                    .into_iter()
-                    .map(|[x, y, z]| [x, y, z])
-                    .collect();
-                let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
-                let world_width = widths.iter().copied().fold(0.0f32, f32::max);
                 return vec![WireModel {
                     bg_adapt: None,
                     point_marker: None,

@@ -523,6 +523,199 @@ fn test_selected_circle_arc_ellipse_highlight_overlay() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
+fn test_thick_and_tapered_arc_gpu_rendering() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+
+    // 1. Wide circular arc with pick triangles
+    let mut wide_arc = WireModel::default();
+    wide_arc.name = "wide_arc".into();
+    wide_arc.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
+        center: [50.0, 50.0, 0.0],
+        axis_x: [1.0, 0.0, 0.0],
+        axis_y: [0.0, 1.0, 0.0],
+        radius: 30.0,
+        start_angle: 0.0,
+        end_angle: std::f64::consts::PI,
+    });
+    wide_arc.world_width = 10.0;
+    wide_arc.color = [1.0, 0.2, 0.2, 1.0];
+    wide_arc.pick_tris = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    wide_arc.pick_tris_low = vec![[0.0; 3]; 3];
+
+    // 2. Tapered circular arc
+    let mut tapered_arc = WireModel::default();
+    tapered_arc.name = "tapered_arc".into();
+    tapered_arc.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
+        center: [150.0, 50.0, 0.0],
+        axis_x: [1.0, 0.0, 0.0],
+        axis_y: [0.0, 1.0, 0.0],
+        radius: 40.0,
+        start_angle: 0.2,
+        end_angle: 2.8,
+    });
+    tapered_arc.world_width = 16.0;
+    tapered_arc.taper_widths = vec![2.0, 16.0];
+    tapered_arc.color = [0.2, 0.8, 1.0, 1.0];
+
+    let wires = vec![wide_arc, tapered_arc];
+    let depth_map = rustc_hash::FxHashMap::default();
+    let circles = pipeline.upload_circles(&device, &queue, &wires, &depth_map);
+
+    // Both curves must be routed to GPU analytical circle instances!
+    assert!(!circles.is_empty(), "analytical circles must be uploaded");
+    assert_eq!(circles[0].instance_count, 2);
+    pipeline.gpu_circles = std::sync::Arc::new(circles);
+    assert_eq!(pipeline.gpu_circles.len(), 1);
+    assert_eq!(pipeline.gpu_circles[0].instance_count, 2);
+
+    pipeline.ensure_depth_texture(&device, iced::Size::new(512, 512));
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("thick_arc_target"),
+        size: wgpu::Extent3d {
+            width: 512,
+            height: 512,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let target = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("thick_arc_encoder"),
+    });
+    pipeline.render(
+        &mut encoder,
+        &target,
+        iced::Size::new(512, 512),
+        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+        [0.0, 0.0, 0.0, 1.0],
+        false,
+        false,
+        false,
+    );
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn test_tilted_3d_donut_and_thick_arc_gpu_rendering() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+
+    // Setup 3D perspective camera with acute tilt
+    let mut camera = crate::scene::view::camera::Camera::default();
+    camera.projection = crate::scene::view::camera::Projection::Perspective;
+    camera.distance = 200.0;
+    camera.target = glam::DVec3::new(50.0, 50.0, 0.0);
+    camera.rotation = glam::Quat::from_axis_angle(glam::Vec3::X, 1.1); // ~63 degree tilt (acute perspective)
+    let bounds = iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(512.0, 512.0));
+    let uniforms = Uniforms::new(&camera, bounds, false);
+    pipeline.upload_uniforms(&device, &queue, &uniforms);
+
+    // Donut circular arc segments
+    let mut donut = WireModel::default();
+    donut.name = "donut".into();
+    donut.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
+        center: [50.0, 50.0, 0.0],
+        axis_x: [1.0, 0.0, 0.0],
+        axis_y: [0.0, 1.0, 0.0],
+        radius: 30.0,
+        start_angle: 0.0,
+        end_angle: std::f64::consts::PI,
+    });
+    donut.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
+        center: [50.0, 50.0, 0.0],
+        axis_x: [1.0, 0.0, 0.0],
+        axis_y: [0.0, 1.0, 0.0],
+        radius: 30.0,
+        start_angle: std::f64::consts::PI,
+        end_angle: std::f64::consts::TAU,
+    });
+    donut.world_width = 12.0;
+    donut.color = [0.2, 0.9, 0.3, 1.0];
+
+    let wires = vec![donut];
+    let depth_map = rustc_hash::FxHashMap::default();
+    let circles = pipeline.upload_circles(&device, &queue, &wires, &depth_map);
+
+    assert_eq!(circles.len(), 1);
+    assert_eq!(circles[0].instance_count, 2);
+    pipeline.gpu_circles = std::sync::Arc::new(circles);
+
+    // Wide straight polyline segment on the 3D plane
+    let mut straight_wide = WireModel::default();
+    straight_wide.name = "wide_straight".into();
+    straight_wide.points = vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]];
+    straight_wide.world_width = 10.0;
+    straight_wide.color = [0.9, 0.2, 0.3, 1.0];
+
+    let wide_wires = vec![straight_wide];
+    let gpu_wires = wire_gpu::WireGpu::from_run(
+        &device,
+        &queue,
+        &wide_wires,
+        &depth_map,
+        false,
+        pipeline.wire_const_bgl.as_ref(),
+    );
+    assert!(!gpu_wires.is_empty());
+    pipeline.gpu_wires = std::sync::Arc::new(gpu_wires);
+
+    pipeline.ensure_depth_texture(&device, iced::Size::new(512, 512));
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("tilted_donut_target"),
+        size: wgpu::Extent3d {
+            width: 512,
+            height: 512,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let target = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("tilted_donut_encoder"),
+    });
+    pipeline.render(
+        &mut encoder,
+        &target,
+        iced::Size::new(512, 512),
+        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+        [0.0, 0.0, 0.0, 1.0],
+        false,
+        false,
+        false,
+    );
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
 fn test_selected_ellipse_overlay() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))

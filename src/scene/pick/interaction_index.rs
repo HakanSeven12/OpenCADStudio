@@ -458,6 +458,62 @@ impl SpatialGrid {
         }
     }
 
+    fn query_unordered<T: Copy>(&self, entries: &[Entry3<T>], query: [f64; 4]) -> Vec<T> {
+        let mut indices = Vec::new();
+        self.oversized.query(entries, query, &mut indices);
+        let mut out: Vec<T> = indices
+            .into_iter()
+            .filter_map(|idx| {
+                let entry = entries.get(idx as usize)?;
+                aabb_overlaps(entry_aabb2(entry), query).then_some(entry.value)
+            })
+            .collect();
+
+        let grid_max_x = self.min[0] + self.cols as f64 * self.cell;
+        let grid_max_y = self.min[1] + self.rows as f64 * self.cell;
+        if query[2] < self.min[0]
+            || query[3] < self.min[1]
+            || query[0] > grid_max_x
+            || query[1] > grid_max_y
+        {
+            return out;
+        }
+        let col = |x: f64| {
+            (((x - self.min[0]) / self.cell).floor()).clamp(0.0, (self.cols - 1) as f64) as u32
+        };
+        let row = |y: f64| {
+            (((y - self.min[1]) / self.cell).floor()).clamp(0.0, (self.rows - 1) as f64) as u32
+        };
+        let (row_lo, row_hi) = (row(query[1]), row(query[3]));
+        let (col_lo, col_hi) = (col(query[0]), col(query[2]));
+
+        // One growth instead of a chain of reallocations: a box over the whole
+        // drawing lands nearly every entry here.
+        let spanned: usize = (row_lo..=row_hi)
+            .map(|r| {
+                let base = r as usize * self.cols as usize;
+                let start = self.cell_offsets[base + col_lo as usize] as usize;
+                let end = self.cell_offsets[base + col_hi as usize + 1] as usize;
+                end.saturating_sub(start)
+            })
+            .sum();
+        out.reserve(spanned);
+
+        for r in row_lo..=row_hi {
+            let base = r as usize * self.cols as usize;
+            for c in col_lo..=col_hi {
+                let cell_idx = base + c as usize;
+                let start = self.cell_offsets[cell_idx] as usize;
+                let end = self.cell_offsets[cell_idx + 1] as usize;
+                out.extend(self.cell_entries[start..end].iter().filter_map(|&idx| {
+                    let entry = entries.get(idx as usize)?;
+                    aabb_overlaps(entry_aabb2(entry), query).then_some(entry.value)
+                }));
+            }
+        }
+        out
+    }
+
     fn query<T: Copy + Ord>(&self, entries: &[Entry3<T>], query: [f64; 4]) -> Vec<T> {
         let mut entry_indices = Vec::new();
         self.oversized.query(entries, query, &mut entry_indices);
@@ -518,6 +574,11 @@ impl<T: Copy + Ord + Sync> SpatialSet<T> {
 
     fn query_xy(&self, aabb: [f64; 4]) -> Vec<T> {
         self.xy.query(&self.entries, aabb)
+    }
+
+    /// See [`SpatialGrid::query_unordered`] — same set, no sort, duplicates in.
+    fn query_xy_unordered(&self, aabb: [f64; 4]) -> Vec<T> {
+        self.xy.query_unordered(&self.entries, aabb)
     }
 
     fn prepare_screen(&self) {
@@ -839,17 +900,17 @@ impl InteractionIndex {
         let (
             ((segment_entries, snap_point_entries), (key_vertex_entries, key_segment_entries)),
             ((fill_triangle_entries, pick_triangle_entries), glyph_entries),
-        ) = rayon::join(
+        ) = crate::par::join(
             || {
-                rayon::join(
+                crate::par::join(
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || flatten_entry_parts(segment_parts),
                             || flatten_entry_parts(snap_point_parts),
                         )
                     },
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || flatten_entry_parts(key_vertex_parts),
                             || flatten_entry_parts(key_segment_parts),
                         )
@@ -857,7 +918,7 @@ impl InteractionIndex {
                 )
             },
             || {
-                let (fill, pick) = rayon::join(
+                let (fill, pick) = crate::par::join(
                     || flatten_entry_parts(fill_triangle_parts),
                     || flatten_entry_parts(pick_triangle_parts),
                 );
@@ -891,17 +952,17 @@ impl InteractionIndex {
         let (
             ((wires, segments), (snap_points, key_vertices)),
             ((key_segments, fill_triangles), (pick_triangles, glyphs)),
-        ) = rayon::join(
+        ) = crate::par::join(
             || {
-                rayon::join(
+                crate::par::join(
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || SpatialSet::build(wire_entries),
                             || SpatialSet::build(segment_entries),
                         )
                     },
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || SpatialSet::build(snap_point_entries),
                             || SpatialSet::build(key_vertex_entries),
                         )
@@ -909,15 +970,15 @@ impl InteractionIndex {
                 )
             },
             || {
-                rayon::join(
+                crate::par::join(
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || SpatialSet::build(key_segment_entries),
                             || SpatialSet::build(fill_triangle_entries),
                         )
                     },
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || SpatialSet::build(pick_triangle_entries),
                             || SpatialSet::build(glyph_entries),
                         )
@@ -979,12 +1040,12 @@ impl InteractionIndex {
     /// thread. Perspective/orbit hover must never pay this one-time cost.
     pub fn prepare_screen(&self) {
         #[cfg(not(target_arch = "wasm32"))]
-        rayon::join(
+        crate::par::join(
             || {
-                rayon::join(
-                    || rayon::join(|| self.wires.prepare_screen(), || self.segments.prepare_screen()),
+                crate::par::join(
+                    || crate::par::join(|| self.wires.prepare_screen(), || self.segments.prepare_screen()),
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || self.snap_points.prepare_screen(),
                             || self.key_vertices.prepare_screen(),
                         )
@@ -992,15 +1053,15 @@ impl InteractionIndex {
                 )
             },
             || {
-                rayon::join(
+                crate::par::join(
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || self.key_segments.prepare_screen(),
                             || self.fill_triangles.prepare_screen(),
                         )
                     },
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || self.pick_triangles.prepare_screen(),
                             || self.glyphs.prepare_screen(),
                         )
@@ -1136,6 +1197,52 @@ impl InteractionIndex {
             .collect()
     }
 
+    pub(crate) fn query_remapped_xy_area(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        slots: &rustc_hash::FxHashMap<(u64, u32), u32>,
+        aabb: [f64; 4],
+    ) -> InteractionCandidates {
+        InteractionCandidates {
+            wires,
+            wire_indices: Some(self.remap_wire_indices(
+                self.wires.query_xy_unordered(aabb),
+                slots,
+                false,
+            )),
+            segments: Some(self.remap_refs(
+                self.segments.query_xy_unordered(aabb),
+                slots,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            snap_points: None,
+            key_vertices: None,
+            key_segments: None,
+            fill_triangles: Some(self.remap_refs(
+                self.fill_triangles.query_xy_unordered(aabb),
+                slots,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            pick_triangles: Some(self.remap_refs(
+                self.pick_triangles.query_xy_unordered(aabb),
+                slots,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            glyphs: Some(self.remap_refs(
+                self.glyphs.query_xy_unordered(aabb),
+                slots,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            query_aabb: Some(aabb),
+            screen_rect: None,
+            screen_view: None,
+        }
+    }
+
     pub(crate) fn query_remapped_xy(
         &self,
         wires: Arc<Vec<WireModel>>,
@@ -1266,6 +1373,53 @@ impl InteractionIndex {
             query_aabb: None,
             screen_rect: Some(screen_rect),
             screen_view: Some((view_rot, eye, bounds)),
+        }
+    }
+
+    pub fn query_xy_area(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+    ) -> InteractionCandidates {
+        let ((wire_indices, segments), ((fill_triangles, pick_triangles), glyphs)) =
+            crate::par::join(
+                || {
+                    crate::par::join(
+                        || {
+                            let mut indices = self.wires.query_xy_unordered(aabb);
+                            indices.extend_from_slice(&self.unbounded_wires);
+                            indices.sort_unstable();
+                            indices.dedup();
+                            indices
+                        },
+                        || self.segments.query_xy_unordered(aabb),
+                    )
+                },
+                || {
+                    crate::par::join(
+                        || {
+                            crate::par::join(
+                                || self.fill_triangles.query_xy_unordered(aabb),
+                                || self.pick_triangles.query_xy_unordered(aabb),
+                            )
+                        },
+                        || self.glyphs.query_xy_unordered(aabb),
+                    )
+                },
+            );
+        InteractionCandidates {
+            wires,
+            wire_indices: Some(wire_indices),
+            segments: Some(segments),
+            snap_points: None,
+            key_vertices: None,
+            key_segments: None,
+            fill_triangles: Some(fill_triangles),
+            pick_triangles: Some(pick_triangles),
+            glyphs: Some(glyphs),
+            query_aabb: Some(aabb),
+            screen_rect: None,
+            screen_view: None,
         }
     }
 
@@ -1503,6 +1657,29 @@ impl InteractionCandidates {
         self.screen_rect
             .zip(self.screen_view)
             .map(|(rect, (view, eye, bounds))| (rect, view, eye, bounds))
+    }
+
+    pub(crate) fn extend_indexed_area(&mut self, other: Self) {
+        debug_assert!(Arc::ptr_eq(&self.wires, &other.wires));
+
+        fn append<T>(target: &mut Option<Vec<T>>, incoming: Option<Vec<T>>) {
+            let (Some(target), Some(incoming)) = (target.as_mut(), incoming) else {
+                return;
+            };
+            target.extend(incoming);
+        }
+
+        if let (Some(target), Some(incoming)) =
+            (self.wire_indices.as_mut(), other.wire_indices)
+        {
+            target.extend(incoming);
+            target.sort_unstable();
+            target.dedup();
+        }
+        append(&mut self.segments, other.segments);
+        append(&mut self.fill_triangles, other.fill_triangles);
+        append(&mut self.pick_triangles, other.pick_triangles);
+        append(&mut self.glyphs, other.glyphs);
     }
 
     pub(crate) fn extend_indexed(&mut self, other: Self) {
@@ -1829,4 +2006,139 @@ fn aabb3_projects_into(
 
 fn aabb_overlaps(a: [f64; 4], b: [f64; 4]) -> bool {
     a[2] >= b[0] && a[0] <= b[2] && a[3] >= b[1] && a[1] <= b[3]
+}
+
+#[cfg(test)]
+mod area_query_tests {
+    use super::*;
+    use iced::{Point, Rectangle};
+
+    fn wire(name: &str, pts: Vec<[f32; 3]>, aabb: [f32; 4]) -> WireModel {
+        let mut w = WireModel::solid(name.to_string(), pts, [1.0; 4], false);
+        w.aabb = aabb;
+        w
+    }
+
+    fn sample() -> Vec<WireModel> {
+        vec![
+            wire("5", vec![[-0.5, -0.5, 0.0], [0.5, 0.5, 0.0]], [-0.5, -0.5, 0.5, 0.5]),
+            wire("9", vec![[0.1, -0.9, 0.0], [0.9, -0.1, 0.0]], [0.1, -0.9, 0.9, -0.1]),
+            wire("13", vec![[-0.9, 0.2, 0.0], [-0.2, 0.9, 0.0]], [-0.9, 0.2, -0.2, 0.9]),
+        ]
+    }
+
+    #[test]
+    fn area_query_matches_full_query_where_it_is_read() {
+        let wires = sample();
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+        let aabb = [-2.0, -2.0, 2.0, 2.0];
+
+        let full = index.query_xy(Arc::clone(&arc), aabb);
+        let area = index.query_xy_area(Arc::clone(&arc), aabb);
+
+        fn normalise<T: Copy + Ord>(v: &Option<Vec<T>>) -> Option<Vec<T>> {
+            v.as_ref().map(|items| {
+                let mut items = items.clone();
+                items.sort_unstable();
+                items.dedup();
+                items
+            })
+        }
+        assert_eq!(area.wire_indices, full.wire_indices);
+        assert_eq!(normalise(&area.segments), normalise(&full.segments));
+        assert_eq!(
+            normalise(&area.fill_triangles),
+            normalise(&full.fill_triangles),
+        );
+        assert_eq!(
+            normalise(&area.pick_triangles),
+            normalise(&full.pick_triangles),
+        );
+        assert_eq!(normalise(&area.glyphs), normalise(&full.glyphs));
+        assert_eq!(area.query_aabb, full.query_aabb);
+
+        // The sample carries no hatches or text, so the equality above is
+        // thin for those three. What matters is that they stay indexed at all:
+        // dropping one to `None` is what would silently unselect a hatch.
+        assert!(area.fill_triangles.is_some());
+        assert!(area.pick_triangles.is_some());
+        assert!(area.glyphs.is_some());
+
+        assert!(area.snap_points.is_none());
+        assert!(area.key_vertices.is_none());
+        assert!(area.key_segments.is_none());
+        assert!(full.snap_points.is_some(), "the full query still snaps");
+    }
+
+    #[test]
+    fn the_area_merge_dedups_wire_indices_and_nothing_else() {
+        let arc = Arc::new(sample());
+        let base = |indices: Vec<u32>, segments: Vec<SegmentRef>| InteractionCandidates {
+            wires: Arc::clone(&arc),
+            wire_indices: Some(indices),
+            segments: Some(segments),
+            snap_points: None,
+            key_vertices: None,
+            key_segments: None,
+            fill_triangles: Some(Vec::new()),
+            pick_triangles: Some(Vec::new()),
+            glyphs: Some(Vec::new()),
+            query_aabb: Some([-2.0, -2.0, 2.0, 2.0]),
+            screen_rect: None,
+            screen_view: None,
+        };
+        let seg = |wire: u32| SegmentRef { wire, start: 0 };
+
+        let mut merged = base(vec![2, 0], vec![seg(2), seg(0)]);
+        merged.extend_indexed_area(base(vec![1, 0], vec![seg(1), seg(0)]));
+
+        assert_eq!(merged.wire_indices, Some(vec![0, 1, 2]));
+        assert_eq!(
+            merged.segments,
+            Some(vec![seg(2), seg(0), seg(1), seg(0)]),
+            "the other categories are appended as they come",
+        );
+    }
+
+    // World (x,y) → screen ((x+1)*100, (1-y)*100) over a 200×200 viewport, the
+    // same identity ortho view the hit-test tests use.
+    #[test]
+    fn box_selection_picks_the_same_handles_from_either_query() {
+        let wires = sample();
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+        let aabb = [-2.0, -2.0, 2.0, 2.0];
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 200.0,
+        };
+        let eye = glam::DVec3::ZERO;
+
+        for crossing in [false, true] {
+            let full = index.query_xy(Arc::clone(&arc), aabb);
+            let area = index.query_xy_area(Arc::clone(&arc), aabb);
+            let hit = |c: &InteractionCandidates| {
+                let mut names = crate::scene::pick::hit_test::box_hit(
+                    Point::new(0.0, 0.0),
+                    Point::new(200.0, 200.0),
+                    crossing,
+                    c,
+                    glam::Mat4::IDENTITY,
+                    eye,
+                    bounds,
+                )
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+                names.sort();
+                names
+            };
+            let from_full = hit(&full);
+            assert!(!from_full.is_empty(), "the box covers the whole sample");
+            assert_eq!(hit(&area), from_full, "crossing={crossing}");
+        }
+    }
 }

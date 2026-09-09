@@ -458,20 +458,6 @@ impl SpatialGrid {
         }
     }
 
-    /// The same set as [`SpatialGrid::query`], in cell order and with
-    /// duplicates left in.
-    ///
-    /// `query` sorts twice over the result — once to dedup the entry indices an
-    /// entry gets for spanning several cells, once to dedup the values — which
-    /// over a box covering the drawing is two O(n log n) passes across 4.4 M
-    /// elements to remove a handful of repeats. Everything an area selection
-    /// does with the result is order-independent and dedups anyway: the
-    /// crossing scan keys wires by index and names by string, and the box test
-    /// on a segment does not care when it runs.
-    ///
-    /// Click picking keeps [`SpatialGrid::query`]: it resolves ties between
-    /// overlapping geometry by scan order, so its order is part of which entity
-    /// a click selects.
     fn query_unordered<T: Copy>(&self, entries: &[Entry3<T>], query: [f64; 4]) -> Vec<T> {
         let mut indices = Vec::new();
         self.oversized.query(entries, query, &mut indices);
@@ -1211,13 +1197,6 @@ impl InteractionIndex {
             .collect()
     }
 
-    /// [`InteractionIndex::query_remapped_xy`] for an area selection.
-    ///
-    /// The overlay path runs whenever the drawing has been edited since the
-    /// interaction index was built — that is, for most of a working session —
-    /// so leaving it on the full query would have meant the area selection got
-    /// its saving only until the user drew something. Same five categories,
-    /// same unordered gather.
     pub(crate) fn query_remapped_xy_area(
         &self,
         wires: Arc<Vec<WireModel>>,
@@ -1397,34 +1376,11 @@ impl InteractionIndex {
         }
     }
 
-    /// Candidates for an area selection — box, crossing or fence.
-    ///
-    /// `query_xy` runs eight spatial queries because hover and snapping need
-    /// them all. An area selection needs five: the wires and their segments,
-    /// and — because `indexed_box_crossing_hits` reads them to catch hatches
-    /// and text inside the box — the fill triangles, pick triangles and
-    /// glyphs. Only the three that exist for snapping (`snap_points`,
-    /// `key_vertices`, `key_segments`, read solely by `pick::snap::snap`) go
-    /// unread, so only those are skipped.
-    ///
-    /// Over a box covering the whole drawing each query gathers nearly
-    /// everything, which is why this is worth splitting: gathering candidates
-    /// was 407 ms of an 825 ms selection of 186 468 entities.
-    ///
-    /// The skipped categories stay `None`. That is safe *only* for consumers
-    /// that never read them — `snap` would silently stop snapping rather than
-    /// fail, since the accessors treat `None` as "no index". Route anything
-    /// that snaps through `query_xy`.
     pub fn query_xy_area(
         &self,
         wires: Arc<Vec<WireModel>>,
         aabb: [f64; 4],
     ) -> InteractionCandidates {
-        // The five are independent tree walks over the same box, and over a box
-        // covering the drawing each one gathers nearly everything — 259 ms
-        // together. Running them concurrently costs the largest instead of the
-        // sum. Each closure still calls the same query, so the results are
-        // identical to the sequential ones, order included.
         let ((wire_indices, segments), ((fill_triangles, pick_triangles), glyphs)) =
             crate::par::join(
                 || {
@@ -1703,16 +1659,6 @@ impl InteractionCandidates {
             .map(|(rect, (view, eye, bounds))| (rect, view, eye, bounds))
     }
 
-    /// [`InteractionCandidates::extend_indexed`] for an area selection.
-    ///
-    /// `extend_indexed` sorts and dedups every category it merges, which over a
-    /// box covering the drawing would put back exactly the sorts the unordered
-    /// query exists to avoid.
-    ///
-    /// `wire_indices` keeps its dedup, and must: the window branch of `box_hit`
-    /// walks it directly, so a wire listed twice would be selected twice. The
-    /// other categories are read by scans that dedup by wire index and by name
-    /// already, so a repeat there costs one extra test and changes nothing.
     pub(crate) fn extend_indexed_area(&mut self, other: Self) {
         debug_assert!(Arc::ptr_eq(&self.wires, &other.wires));
 
@@ -2081,11 +2027,6 @@ mod area_query_tests {
         ]
     }
 
-    // The area query drops the three snap-only categories and must leave every
-    // category an area selection reads untouched. `unwrap_or_default()` in
-    // `indexed_box_crossing_hits` would turn a wrongly-dropped category into a
-    // silent miss — a hatch or a text that stops being selectable — rather than
-    // a failure, so the equivalence is asserted rather than assumed.
     #[test]
     fn area_query_matches_full_query_where_it_is_read() {
         let wires = sample();
@@ -2096,13 +2037,6 @@ mod area_query_tests {
         let full = index.query_xy(Arc::clone(&arc), aabb);
         let area = index.query_xy_area(Arc::clone(&arc), aabb);
 
-        // The area query skips the sort and the dedup `query` pays for, so it
-        // returns the same *set* in cell order, with an entry repeated once per
-        // cell it spans. Every consumer on this path dedups already — the
-        // crossing scan by wire index and by name — so the set is the contract,
-        // and comparing sequences here would only pin down an order nothing
-        // reads. `wire_indices` is the exception: `query_xy_area` sorts and
-        // dedups it before returning, so it must match exactly.
         fn normalise<T: Copy + Ord>(v: &Option<Vec<T>>) -> Option<Vec<T>> {
             v.as_ref().map(|items| {
                 let mut items = items.clone();
@@ -2137,11 +2071,6 @@ mod area_query_tests {
         assert!(full.snap_points.is_some(), "the full query still snaps");
     }
 
-    // The overlay merge drops the sort on every category but one. That one
-    // matters: the window branch of `box_hit` walks `wire_indices` directly, so
-    // a wire left in twice would be selected twice — a duplicate handle rather
-    // than an error, which is the kind of thing that surfaces as a wrong count
-    // somewhere far away.
     #[test]
     fn the_area_merge_dedups_wire_indices_and_nothing_else() {
         let arc = Arc::new(sample());

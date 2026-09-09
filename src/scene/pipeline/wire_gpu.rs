@@ -1148,11 +1148,6 @@ impl WireGpu {
 
         let _ = const_bgl;
         let max_packed_instances = super::gpu_budget::max_elements::<PackedWireInstance>(device);
-        // Same fan-out the native path above uses: emitting a wire reads that
-        // wire and the depth map and writes nothing shared, and a selection
-        // large enough to be slow is exactly where it pays. `collect` on an
-        // indexed parallel iterator keeps the order, which the instance indices
-        // depend on.
         use crate::par::prelude::*;
         let per: Vec<Vec<PackedWireInstance>> = wires
             .par_iter()

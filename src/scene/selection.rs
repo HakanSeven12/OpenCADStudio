@@ -37,12 +37,6 @@ impl Scene {
         })
     }
 
-    /// The handles plus their leader/annotation partners, in the order given.
-    ///
-    /// Kept separate from the sorted, deduplicated form because a bulk
-    /// selection has to preserve pick order — `selected_handles_in_order`
-    /// reports it — and because sorting per handle is what made selecting
-    /// 186 000 entities one call at a time expensive.
     fn expanded_with_leaders(&self, handles: &[Handle]) -> Vec<Handle> {
         let leaders = self.leaders_by_annotation();
         let mut expanded = Vec::with_capacity(handles.len());
@@ -62,11 +56,6 @@ impl Scene {
         expanded
     }
 
-    /// Select many handles in one pass.
-    ///
-    /// The single-handle path allocates, sorts and deduplicates for every
-    /// entity, and a box selection called it once per entity — most of the
-    /// remaining 786 ms of a 186 460-entity selection.
     pub fn select_entities(&mut self, handles: &[Handle]) {
         if handles.is_empty() {
             return;
@@ -84,10 +73,6 @@ impl Scene {
         }
     }
 
-    /// Deselect many handles in one pass.
-    ///
-    /// `deselect_entity` rebuilds `selected_order` with a `retain` per handle,
-    /// so removing N of M selected entities walked the order list N times.
     pub fn deselect_entities(&mut self, handles: &[Handle]) {
         if handles.is_empty() {
             return;
@@ -1082,10 +1067,6 @@ impl Scene {
 mod tests {
     use super::*;
 
-    /// A box selection used to call `select_entity` once per entity. The bulk
-    /// path has to land on the same selection, in the same pick order —
-    /// `selected_handles_in_order` is read by commands such as DIM, where the
-    /// order the user picked things in decides what they mean.
     #[test]
     fn bulk_selection_matches_selecting_one_at_a_time() {
         use acadrust::entities::Line;
@@ -1141,11 +1122,6 @@ mod tests {
         );
     }
 
-    /// Selecting an entity pulls in any LEADER pointing at it, and that was
-    /// answered by walking the whole document once per selected handle —
-    /// selecting 471 583 entities in a 585 786-entity drawing did not finish
-    /// inside eight minutes. The reverse index has to give exactly what the
-    /// walk gave.
     #[test]
     fn the_leader_index_matches_a_document_walk() {
         use acadrust::entities::Leader;
@@ -1207,10 +1183,6 @@ mod tests {
         );
     }
 
-    /// The reason the cache carries a set as well as a list: drawing into a
-    /// drawing that already has that type must not rebuild either, because the
-    /// rebuild walks every entity the layout owns — 444 937 of them on the
-    /// reproducer, ~100 ms, on every single drawn point.
     #[test]
     fn adding_a_type_already_present_reuses_the_list() {
         use acadrust::entities::{Circle, EntityType, Line};

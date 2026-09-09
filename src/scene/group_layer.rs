@@ -183,14 +183,6 @@ impl Scene {
         handles: &[Handle],
     ) -> HashSet<Handle> {
         let mut expanded: HashSet<Handle> = handles.iter().copied().collect();
-        // Asked the other way round, this was quadratic: for every group, scan
-        // every selected handle, and `Group::contains` is a linear scan of the
-        // group's own entity list. A box selection of 185 096 entities spent
-        // seconds here.
-        //
-        // The membership set is the *input* handles, not `expanded` — a group
-        // must match because something the user selected is in it, not because
-        // an earlier group already contributed one of its members.
         let wanted: HashSet<Handle> = handles.iter().copied().collect();
         for obj in self.document.objects.values() {
             if let ObjectType::Group(g) = obj {
@@ -218,10 +210,6 @@ mod group_expansion_tests {
     use super::*;
     use crate::scene::Scene;
 
-    /// Selecting one member of a selectable group selects the whole group, and
-    /// a group nobody touched stays out. The lookup was inverted for speed —
-    /// it asked every group about every selected handle, and `Group::contains`
-    /// scans the group's own list — so the answer has to be shown unchanged.
     #[test]
     fn group_expansion_pulls_in_siblings_and_nothing_else() {
         use acadrust::entities::{EntityType, Line};

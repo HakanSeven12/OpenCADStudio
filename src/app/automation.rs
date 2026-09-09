@@ -319,12 +319,6 @@ impl OpenCADStudio {
                     Ok(b) => b,
                     Err(e) => return err(format!("open: {e}")),
                 };
-                // Runs the same finalization (block-origin normalization,
-                // raster-path resolution, source_path) and corrupt-entity
-                // purge the UI open path always gets, using the real path —
-                // not just its basename — so an automation open behaves the
-                // same as opening the identical file from the UI instead of
-                // silently skipping that safety/normalization net.
                 match crate::io::load_bytes_finalized(&path_buf, bytes) {
                     Ok((doc, dropped)) => {
                         let i = self.active_tab;
@@ -1404,13 +1398,6 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// Audit finding: automation's `"open"` used to call `io::load_bytes`
-    /// directly, skipping the finalization and corrupt-entity purge every UI
-    /// open runs — so the same file opened two ways behaved differently.
-    /// Proves both halves of the fix: `source_path` (only ever set by
-    /// finalization, never by `load_bytes` alone) is populated, and a
-    /// zero-radius circle — `io::is_entity_corrupt`'s own rejection case —
-    /// is purged and reported, exactly like a UI open of the same file.
     #[test]
     fn open_finalizes_and_purges_like_the_ui_open_path() {
         let mut app = OpenCADStudio::new_for_test();

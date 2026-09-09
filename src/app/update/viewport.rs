@@ -4251,10 +4251,6 @@ properties={:.1}ms picked={}",
                 if box_anchor.is_none() {
                     let (view_rot, eye, all_wires) = self.pick_view(i, &edit_cam, bounds);
                     let click_world = self.cursor_model_point(i, &edit_cam, p, bounds);
-                    // The click that *starts* a window: the pick under the cursor decides
-                    // whether this selects an entity or arms a box, and it runs before the
-                    // rubber band can appear. Timed separately from the commit, which is
-                    // what `select-commit` covers.
                     let t_arm = crate::perf::enabled().then(Instant::now);
                     let prior_selection = self.tabs[i].scene.selected.len();
                     let click_candidates = self.tabs[i].scene.interaction_pick_candidates_near(

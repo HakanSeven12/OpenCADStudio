@@ -1271,28 +1271,6 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
         segment_hits(a, b).then_some(wire.name.as_str())
     };
 
-    // A crossing selection over a whole drawing spends its time here, not in
-    // the window branch of `box_hit`: every measured `select-commit` line read
-    // `crossing=true`.
-    //
-    // The scan stops projecting a wire once that wire is in. A circle or a
-    // polyline contributes one segment per tessellated span, and every span
-    // after the first that hits can only re-add a name already present — at 24
-    // spans per wire that is 23 projection pairs out of 24 skipped, which took
-    // a 4.4 M-segment scan from ~1 s to 42 ms. The wire is keyed by index, an
-    // integer to hash rather than a string, and the name set still runs behind
-    // it because one entity can produce several wires sharing a name.
-    //
-    // Fanning this out across cores was tried and removed: with the early-out
-    // the remaining work is small enough that per-chunk sets, which cannot see
-    // wires already hit in another chunk, measured *slower* than one pass
-    // (45.6 ms against 42.4 ms at 186 468 wires).
-    // A bitmap over wire indices rather than a hash set: this is consulted once
-    // per segment, triangle and glyph inside the box — millions of times on a
-    // whole-drawing selection — and an array index beats hashing a `u32`, let
-    // alone hashing the wire's name, which is what the primitive loops below
-    // used to do. `seen` stays for the names, because several wires can share
-    // one entity's name and the output dedups by name.
     let mut wire_hit: Vec<bool> = Vec::new();
     fn mark(wire_hit: &mut Vec<bool>, wire: u32) {
         let index = wire as usize;
@@ -1377,10 +1355,6 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
 
     // Degenerate point-only wires have no indexed segment or surface primitive.
     for wire in wires.iter() {
-        // Structural tests first: `||` short-circuits, so putting the name
-        // lookup last means a wire with two or more points — very nearly all
-        // of them — is dropped without hashing its name. This loop walks every
-        // candidate, so that was one string hash per wire in the box.
         if wire.points.len() >= 2
             || !wire.fill_tris.is_empty()
             || !wire.pick_tris.is_empty()
@@ -1591,10 +1565,6 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         }
     }
     for wire in wires.iter() {
-        // Structural tests first: `||` short-circuits, so putting the name
-        // lookup last means a wire with two or more points — very nearly all
-        // of them — is dropped without hashing its name. This loop walks every
-        // candidate, so that was one string hash per wire in the box.
         if wire.points.len() >= 2
             || !wire.fill_tris.is_empty()
             || !wire.pick_tris.is_empty()
@@ -2773,13 +2743,6 @@ mod parallel_selection_tests {
     use crate::scene::pick::interaction_index::{InteractionCandidates, InteractionIndex};
     use std::sync::Arc;
 
-    // Enough wires to clear the 4096 default several times over, laid on a
-    // diagonal so the selection box catches a known prefix of them rather than
-    // all or nothing — an "everything hits" case would not notice a reordering.
-    // A drawing is not made of single segments: a circle or an arc tessellates
-    // into dozens of spans, and a polyline carries as many as it has vertices.
-    // A one-segment-per-wire sample makes the per-wire early-out invisible and
-    // the whole measurement optimistic, so the benchmark uses `spans` per wire.
     fn many_wires_with_spans(count: usize, spans: usize) -> Vec<WireModel> {
         (0..count)
             .map(|i| {
@@ -2804,10 +2767,6 @@ mod parallel_selection_tests {
             .collect()
     }
 
-    // Not a correctness test — a measurement, at the size the user's drawing
-    // actually is. Run it deliberately:
-    //
-    //     cargo test --release --lib selection_scaling -- --ignored --nocapture
     #[test]
     #[ignore = "measurement, not a check"]
     fn selection_scaling_numbers() {

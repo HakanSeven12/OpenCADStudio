@@ -2701,13 +2701,6 @@ impl Pipeline {
         // O(highlighted), no per-wire string parse or deep geometry clone.
         let mut selected_wires: Vec<&WireModel> = Vec::new();
         let mut hover_wires: Vec<&WireModel> = Vec::new();
-        // The index is built by walking the wires in order, so each handle's
-        // slots come out ascending, and `patch_handle_index` only shifts them
-        // by a constant, which keeps that. Cloning and re-sorting per handle
-        // was one allocation and one sort for every selected entity — 186 468
-        // of each on a whole-drawing selection. The assert holds the invariant
-        // in place: if it ever breaks, a debug build says so here rather than
-        // drawing the highlight in the wrong order.
         for h in selected {
             if let Some(idxs) = self.wire_handle_index.get(&h.value()) {
                 debug_assert!(
@@ -2747,25 +2740,6 @@ impl Pipeline {
             }
         }
         let t_gather = perf_started.map(|t| t.elapsed().as_secs_f64() * 1000.0);
-        // One extraction pass per wire, where there used to be four.
-        //
-        // The old shape asked each extractor twice: once at the draw depth to
-        // build the instances, then once more at depth 0.0 purely to ask
-        // *whether* the wire is a circle or an ellipse — allocating a vector
-        // each time and dropping it. Neither extractor's `Some`/`None` answer
-        // depends on the depth: every `return None` in them turns on the
-        // geometry (which `TangentGeom` variant, the radius, the axis lengths,
-        // the parameters), and the depth is only written into the instance,
-        // never read to decide. So the extraction that builds the instances
-        // already answers the classification, and the second pair is pure
-        // waste — 116 ms of shapes plus 57 ms of splitting, out of a 299 ms
-        // highlight at 186 468 entities.
-        //
-        // A wire with a `render_instance` is a block wire, and both extractors
-        // reject those outright, so it skips extraction altogether.
-        // Selected keeps its colour unless a tint is configured; hover is
-        // always recoloured. Both vectors carry selected first, then hover,
-        // exactly as the four separate loops produced them.
         let (mut selected_circles, mut selected_ellipses, selected_regular, selected_blocks) =
             Self::classify_highlight_wires(
                 &selected_wires,
@@ -2857,12 +2831,6 @@ impl Pipeline {
         if let Some(started) = perf_started {
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
             if elapsed_ms >= 1.0 {
-                // Cumulative marks, differenced here: gathering the wires
-                // from the handle index, classifying them and extracting their
-                // analytic instances, uploading those, building the regular
-                // wire instances, and the block ones. A one-time cost when the
-                // selection changes, which puts it directly between the user's
-                // second click and seeing the selection.
                 let gather = t_gather.unwrap_or(0.0);
                 let classify = t_shapes.unwrap_or(0.0);
                 let analytic = t_split.unwrap_or(0.0);
@@ -5725,12 +5693,6 @@ mod highlight_classification_tests {
         wire
     }
 
-    // The classification used to be a second pair of extractions at depth 0.0,
-    // run purely to ask which bucket a wire belongs in. It now rides the
-    // extraction that builds the instances. Nothing renders in a test, so a
-    // wrong answer here would show up only as circles drawn wrong when
-    // selected — this asserts the buckets directly, against the predicate the
-    // old code used.
     #[test]
     fn each_wire_lands_in_the_bucket_the_old_predicate_chose() {
         let wires = vec![plain("1"), circle("2"), ellipse("3"), plain("4")];

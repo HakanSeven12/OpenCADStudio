@@ -113,10 +113,6 @@ impl OpenCADStudio {
         // unit context, the layer and linetype lists.
         let m_prelude = t_all.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         let t_handles = crate::perf::enabled().then(iced::time::Instant::now);
-        // `selected_entities` resolves every handle to an entity and builds a
-        // vector of pairs; only the handles are wanted here, but the resolution
-        // is what decides membership — a handle whose entity is gone is not in
-        // the list — so it is kept, and only the pair vector avoided.
         let cur_handles: Vec<acadrust::Handle> = self.tabs[i]
             .scene
             .selected_handles_in_order()
@@ -2192,10 +2188,6 @@ impl OpenCADStudio {
                     ..Default::default()
                 },
                 _ => {
-                    // The panel for a multi-selection: grouping, filtering to
-                    // the active group, moving into the working plane, and
-                    // aggregating into "varies" rows. `properties-detail`
-                    // reports this whole arm as `rest`; this splits it.
                     let t_arm = crate::perf::enabled().then(iced::time::Instant::now);
                     let groups = build_selection_groups(&selected);
                     let t_groups = t_arm.map(|t| t.elapsed().as_secs_f64() * 1000.0);
@@ -2203,11 +2195,6 @@ impl OpenCADStudio {
                         .and_then(|group| groups.iter().find(|g| g.label == group.label).cloned())
                         .or_else(|| groups.first().cloned());
 
-                    // `group.handles` is a `Vec`, so `contains` scans it. Run
-                    // per selected entity that is O(selected x group), which on
-                    // a whole-drawing selection is 186 468 squared — the "All"
-                    // group holds every handle, so both factors are the full
-                    // selection. Hashing the group once makes it linear.
                     let filtered: Vec<(Handle, &EntityType)> = active_group
                         .as_ref()
                         .map(|group| {
@@ -2227,11 +2214,6 @@ impl OpenCADStudio {
                     } else {
                         crate::command::WorkingPlane::default()
                     };
-                    // `entity_in_working_plane` clones before it checks
-                    // whether the plane is the identity, so with no UCS in
-                    // play — the ordinary case — this deep-cloned every
-                    // selected entity to hand back what it was given. Borrow
-                    // instead, and clone only where a transform is applied.
                     let local_entities: Vec<(Handle, std::borrow::Cow<'_, EntityType>)> =
                         filtered
                             .iter()
@@ -2449,10 +2431,6 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         let mut lineweight_mixed = false;
 
         for (_h, e) in &selected {
-            // Once every field is mixed nothing further can change: a mixed
-            // field is already `Some`, so the remaining entities would only
-            // re-set flags that are set. Selecting a whole drawing reaches this
-            // within the first few entities instead of walking 186 468 of them.
             if layer_mixed && color_mixed && linetype_mixed && lineweight_mixed {
                 break;
             }
@@ -2507,10 +2485,6 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         }
     }
 
-    /// Rebuild the cached selected_grips from the current entity selection.
-    /// Selections larger than this get no grips, matching AutoCAD's
-    /// `GRIPOBJLIMIT` default. The DWG header does not carry the variable, so
-    /// the default stands in for it.
     const GRIP_OBJECT_LIMIT: usize = 100;
 
     pub(super) fn refresh_selected_grips(&mut self) {
@@ -2540,17 +2514,6 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 .then(|| selected[0].0);
             let mut grips = Vec::new();
             let mut handles = Vec::new();
-            // Above the limit, no grips at all — the same rule AutoCAD applies
-            // through GRIPOBJLIMIT, and for the same reason. Every selected
-            // entity contributes several grips, the whole list is projected and
-            // rebuilt into markers on **every frame**, and a 185 096-entity
-            // selection put ~3.9 s in this function and then held the view at
-            // ~10 fps for as long as the selection stood.
-            //
-            // Downstream this reads as "this selection has no grips": the
-            // consumers all iterate the list, so they simply find nothing, and
-            // grip editing is unavailable for a selection far past the size
-            // where dragging one is a sensible thing to do.
             let selected = if selected.len() > Self::GRIP_OBJECT_LIMIT {
                 Vec::new()
             } else {
@@ -3176,11 +3139,6 @@ pub(super) fn aggregate_sections(
         return vec![];
     }
 
-    // Built one at a time and folded as they come. Collecting them first held
-    // a property list — sections, labels, formatted values, every one of them
-    // an allocation — for every selected entity at once, so selecting a whole
-    // drawing put 186 468 of them in memory simultaneously to read each one
-    // exactly once. The fold order is unchanged, so the result is too.
     let mut entities = selected.iter();
     let Some((handle, entity)) = entities.next() else {
         return vec![];
@@ -4144,11 +4102,6 @@ mod chprop_integration_tests {
 mod grip_limit_tests {
     use super::*;
 
-    /// Every selected entity contributes grips, and the whole list is projected
-    /// and rebuilt into markers on every frame. A 185 096-entity selection put
-    /// ~3.9 s in `refresh_selected_grips` and then held the view at ~10 fps for
-    /// as long as the selection stood, which is what AutoCAD's `GRIPOBJLIMIT`
-    /// exists to prevent.
     #[test]
     fn a_selection_past_the_limit_gets_no_grips() {
         use acadrust::entities::{EntityType, Line};
@@ -4210,10 +4163,6 @@ mod aggregation_tests {
             .find(|property| property.field == field)
     }
 
-    // The aggregation folds one entity at a time rather than building every
-    // entity's property list first. This pins the behaviour that fold produces:
-    // a field all the entities agree on keeps its value, one they differ on
-    // reads as varying.
     #[test]
     fn shared_values_survive_the_fold_and_differing_ones_do_not() {
         let entities = [line("WALLS", 1), line("WALLS", 3), line("WALLS", 1)];

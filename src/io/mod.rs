@@ -744,18 +744,6 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
     }
 }
 
-/// [`load_bytes`] plus the same finalization and corruption handling the
-/// canonical path-based open (`load_file_for_open`/`finalize_loaded_outcome`)
-/// already runs — for a byte-based open that nonetheless has a real
-/// filesystem path behind it (automation's `"open"` op reads the file into
-/// memory itself, e.g. to go through an edit lease, but the drawing still
-/// lives at `path`). Without this, automation-opened documents kept
-/// legacy non-zero block origins un-normalized, left relative raster/material
-/// paths unresolved, carried no `source_path`, and skipped the corrupt-entity
-/// purge the UI open path always runs — silently behaving differently from a
-/// UI open of the exact same file. `load_bytes` itself is unchanged (and
-/// still used directly by the byte round-trip tests, which have no real path
-/// and don't want this finalization).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_bytes_finalized(path: &Path, bytes: Vec<u8>) -> Result<(CadDocument, usize), String> {
     let name = path
@@ -2061,17 +2049,7 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
     // rarely use this many — and parser desync produces exactly-100_000-vertex
     // junk records.
     const MAX_VERTS: usize = 100_000;
-    // A MINSERT's row/column counts are parsed `u16`s whose unchecked product
-    // (`Insert::instance_count`) drives a per-instance allocation in
-    // `render_graph::array_offsets` and a full per-instance render-graph walk
-    // for every one — a corrupt or adversarial 65535x65535 pair requests over
-    // four billion instances (tens of GiB) long before any GPU-side chunking
-    // limit could help. Kept in sync with the identical failsafe clamp in
-    // `render_graph::array_offsets`, which guards inserts that reach the
-    // render graph some other way (e.g. built at runtime, not loaded).
-    const MAX_MINSERT_INSTANCES: usize = 20_000;
     match e {
-        E::Insert(i) => i.instance_count() > MAX_MINSERT_INSTANCES,
         E::LwPolyline(p) => {
             !finite_unit_normal(&p.normal)
                 || p.vertices.len() >= MAX_VERTS
@@ -2451,11 +2429,11 @@ mod corrupt_guard_tests {
     // product can reach into the billions) must be rejected before it can
     // drive the render graph's per-instance allocation and expansion.
     #[test]
-    fn rejects_pathological_minsert_counts() {
+    fn preserves_large_minsert_data_while_rendering_is_bounded() {
         let mut i = acadrust::entities::Insert::new("BLOCK", Vector3::ZERO);
         i.row_count = u16::MAX;
         i.column_count = u16::MAX;
-        assert!(is_entity_corrupt(&EntityType::Insert(i)));
+        assert!(!is_entity_corrupt(&EntityType::Insert(i)));
     }
 
     // An ordinary array insert, well under the budget, is valid source data.

@@ -1877,12 +1877,6 @@ pub struct Scene {
     entity_block_map_cache: RefCell<Option<(u64, HashMap<Handle, Handle>)>>,
     /// Candidate handles per block, in document order and keyed by geometry epoch.
     block_members_cache: RefCell<Option<BlockMembers>>,
-    /// Annotation handle -> the LEADERs that point at it, resolved once per
-    /// `geometry_epoch`.
-    ///
-    /// Selecting an entity has to pull in a LEADER whose annotation it is, and
-    /// that used to be answered by walking the whole document — per selected
-    /// handle. Selecting N entities cost N document walks.
     leaders_by_annotation_cache: RefCell<Option<(u64, HashMap<Handle, Vec<Handle>>)>>,
     /// Insert/Viewport/Block/BlockEnd handles omitted by the spatial index.
     unindexable_cache: RefCell<Option<(u64, Vec<Handle>)>>,
@@ -7865,12 +7859,6 @@ impl Scene {
         (Arc::new(wires), base_slots, changed_slots)
     }
 
-    /// `area_only` skips the snap-only categories and gathers the rest without
-    /// sorting; see [`InteractionIndex::query_xy_area`]. Both the overlay path
-    /// and the plain indexed path honour it — the overlay runs whenever the
-    /// drawing has been edited since the index was built, which is most of a
-    /// working session, so a saving that stopped there would stop the first
-    /// time the user drew something.
     fn indexed_interaction_candidates_xy(
         &self,
         wires: Arc<Vec<WireModel>>,

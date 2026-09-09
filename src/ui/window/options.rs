@@ -761,9 +761,9 @@ pub fn view_window<'a>(
     .height(sizing.height);
 
     container(body)
-        .width(540)
-        .height(560)
         .style(container::rounded_box)
         .padding([16, 18])
+        .width(sizing.width)
+        .height(sizing.height)
         .into()
 }

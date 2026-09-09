@@ -2930,7 +2930,7 @@ pub(super) fn doc_tab_bar<'a>(
     let new_btn = button(text("+").size(14))
         .on_press(Message::TabNew)
         .height(iced::Length::Fixed(28.0))
-        .padding([5, 10])
+        .padding([4, 8])
         .style(|theme: &Theme, status| {
             let palette = theme.palette();
             let hovered = matches!(
@@ -2960,7 +2960,7 @@ pub(super) fn doc_tab_bar<'a>(
                 top: 0.0,
                 right: 0.0,
                 bottom: 0.0,
-                left: 6.0,
+                left: 2.0,
             })
             .into(),
     );

@@ -744,6 +744,32 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
     }
 }
 
+/// [`load_bytes`] plus the same finalization and corruption handling the
+/// canonical path-based open (`load_file_for_open`/`finalize_loaded_outcome`)
+/// already runs — for a byte-based open that nonetheless has a real
+/// filesystem path behind it (automation's `"open"` op reads the file into
+/// memory itself, e.g. to go through an edit lease, but the drawing still
+/// lives at `path`). Without this, automation-opened documents kept
+/// legacy non-zero block origins un-normalized, left relative raster/material
+/// paths unresolved, carried no `source_path`, and skipped the corrupt-entity
+/// purge the UI open path always runs — silently behaving differently from a
+/// UI open of the exact same file. `load_bytes` itself is unchanged (and
+/// still used directly by the byte round-trip tests, which have no real path
+/// and don't want this finalization).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_bytes_finalized(path: &Path, bytes: Vec<u8>) -> Result<(CadDocument, usize), String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    let mut doc = load_bytes(&name, bytes)?;
+    normalize_block_origins(&mut doc);
+    resolve_raster_image_paths(&mut doc, path.parent());
+    doc.source_path = Some(path.to_string_lossy().into_owned());
+    let dropped = purge_corrupt_entities(&mut doc);
+    Ok((doc, dropped))
+}
+
 /// Load a DWG or DXF file directly from a path (auto-detect by extension).
 /// Peek at a file's leading bytes to tell a DWG (version tag "AC10xx") from a
 /// DXF. Used for `.bak` copies, whose extension hides the real format.

@@ -314,16 +314,19 @@ impl OpenCADStudio {
                 let Some(path) = req["path"].as_str() else {
                     return err("open: missing \"path\"");
                 };
-                let bytes = match self.read_drawing(std::path::Path::new(path)) {
+                let path_buf = PathBuf::from(path);
+                let bytes = match self.read_drawing(&path_buf) {
                     Ok(b) => b,
                     Err(e) => return err(format!("open: {e}")),
                 };
-                let name = PathBuf::from(path)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.to_string());
-                match crate::io::load_bytes(&name, bytes) {
-                    Ok(doc) => {
+                // Runs the same finalization (block-origin normalization,
+                // raster-path resolution, source_path) and corrupt-entity
+                // purge the UI open path always gets, using the real path —
+                // not just its basename — so an automation open behaves the
+                // same as opening the identical file from the UI instead of
+                // silently skipping that safety/normalization net.
+                match crate::io::load_bytes_finalized(&path_buf, bytes) {
+                    Ok((doc, dropped)) => {
                         let i = self.active_tab;
                         self.tabs[i].scene.document = doc;
                         self.tabs[i].scene.deselect_all();
@@ -331,10 +334,16 @@ impl OpenCADStudio {
                             &mut self.tabs[i].scene.document,
                         );
                         self.tabs[i].adopt_active_ucs_from_header();
-                        self.tabs[i].current_path = Some(PathBuf::from(path));
+                        self.tabs[i].current_path = Some(path_buf);
                         self.tabs[i].is_start = false;
                         self.tabs[i].scene.bump_geometry();
-                        self.entity_summary()
+                        let mut summary = self.entity_summary();
+                        if dropped > 0 {
+                            if let Some(obj) = summary.as_object_mut() {
+                                obj.insert("purged".to_string(), json!(dropped));
+                            }
+                        }
+                        summary
                     }
                     Err(e) => err(format!("open: {e}")),
                 }
@@ -1392,6 +1401,51 @@ mod tests {
             path.file_name().unwrap().to_string_lossy()
         ));
         let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Audit finding: automation's `"open"` used to call `io::load_bytes`
+    /// directly, skipping the finalization and corrupt-entity purge every UI
+    /// open runs — so the same file opened two ways behaved differently.
+    /// Proves both halves of the fix: `source_path` (only ever set by
+    /// finalization, never by `load_bytes` alone) is populated, and a
+    /// zero-radius circle — `io::is_entity_corrupt`'s own rejection case —
+    /// is purged and reported, exactly like a UI open of the same file.
+    #[test]
+    fn open_finalizes_and_purges_like_the_ui_open_path() {
+        let mut app = OpenCADStudio::new_for_test();
+        let path = std::env::temp_dir().join(format!(
+            "ocs_automation_finalize_test_{}.dxf",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let mut doc = acadrust::CadDocument::new();
+        let mut good = acadrust::entities::Circle::new();
+        good.center = acadrust::types::Vector3::new(5.0, 5.0, 0.0);
+        good.radius = 2.0;
+        doc.add_entity(acadrust::EntityType::Circle(good)).unwrap();
+        let mut corrupt = acadrust::entities::Circle::new();
+        corrupt.center = acadrust::types::Vector3::new(1.0, 1.0, 0.0);
+        corrupt.radius = 0.0; // io::is_entity_corrupt rejects a zero-radius circle
+        doc.add_entity(acadrust::EntityType::Circle(corrupt)).unwrap();
+        let bytes = crate::io::save_to_bytes(&doc, "dxf", doc.version)
+            .expect("save a document containing a corrupt entity");
+        std::fs::write(&path, bytes).unwrap();
+
+        let p = path.to_string_lossy().replace('\\', "\\\\");
+        let result = app.automation_op(&format!(r#"{{"op":"open","path":"{p}"}}"#));
+        assert_eq!(result["ok"], true, "{}", result["error"]);
+        assert_eq!(result["total"], 1, "the corrupt circle must not survive the open");
+        assert_eq!(result["purged"], 1, "the purge count must be reported, matching the UI open path's diagnostics");
+
+        let i = app.active_tab;
+        assert!(
+            app.tabs[i].scene.document.source_path.is_some(),
+            "automation open must run the same finalization as a path-based open, which sets source_path (load_bytes alone never does)"
+        );
+
+        drop(app);
         let _ = std::fs::remove_file(&path);
     }
 

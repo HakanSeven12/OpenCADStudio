@@ -1212,6 +1212,64 @@ impl OpenCADStudio {
                 }
             }
 
+            "SECTIONPLANE" => {
+                use crate::modules::model::sectionplane_cmd::SectionPlaneCommand;
+                let (bounds, next_name) = {
+                    let scene = &mut self.tabs[i].scene;
+                    let solid_handles = scene
+                        .document
+                        .entities()
+                        .filter_map(|entity| {
+                            matches!(
+                                entity,
+                                acadrust::EntityType::Solid3D(_)
+                                    | acadrust::EntityType::Surface(_)
+                                    | acadrust::EntityType::Region(_)
+                                    | acadrust::EntityType::Body(_)
+                            )
+                            .then_some(entity.common().handle)
+                        })
+                        .collect::<Vec<_>>();
+                    scene.restore_solid_models(&solid_handles);
+                    let bounds = solid_handles
+                        .iter()
+                        .filter_map(|handle| scene.solid_models.get(handle))
+                        .filter_map(crate::scene::model::solid_model::extent)
+                        .fold(None::<(glam::DVec3, glam::DVec3)>, |bounds, (low, high)| {
+                            let low = glam::DVec3::from_array(low);
+                            let high = glam::DVec3::from_array(high);
+                            Some(match bounds {
+                                None => (low, high),
+                                Some((min, max)) => (min.min(low), max.max(high)),
+                            })
+                        });
+                    let next_name = scene
+                        .document
+                        .entities()
+                        .filter_map(|entity| {
+                            let acadrust::EntityType::Extended(extended) = entity else {
+                                return None;
+                            };
+                            let acadrust::entities::ExtendedEntityData::SectionObject(data) =
+                                &extended.data
+                            else {
+                                return None;
+                            };
+                            data.name
+                                .strip_prefix("Section Plane (")
+                                .and_then(|name| name.strip_suffix(')'))
+                                .and_then(|name| name.parse::<usize>().ok())
+                        })
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
+                    (bounds, next_name)
+                };
+                let command = SectionPlaneCommand::new(bounds, next_name);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
             // 3DALIGN <18 numbers> — align the selected solid by 3 source→3 dest points.
             cmd if cmd == "3DALIGN"
                 || cmd == "ALIGN3D"

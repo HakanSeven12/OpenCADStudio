@@ -921,6 +921,7 @@ impl PropertiesPanel {
                 | "text_color"
                 | "block_content_color"
                 | "background_fill_color"
+                | "indicator_fill_color"
         ) {
             let open = self.open_color_field.as_deref() == Some(field);
             let fsel = field.to_string();

@@ -462,6 +462,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "3DALIGN",
         "ALIGN3D",
         "SECTION",
+        "SECTIONPLANE",
         "PYRAMID",
         "PYR",
         "SPLINEFIT",

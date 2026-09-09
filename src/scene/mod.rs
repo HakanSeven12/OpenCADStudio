@@ -2021,6 +2021,43 @@ pub struct Scene {
     undo_recording: Option<UndoRecording>,
 }
 
+fn section_frame(
+    data: &acadrust::entities::SectionObjectData,
+) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3, glam::DVec3)> {
+    let first = data.vertices.first()?;
+    let last = data.vertices.last()?;
+    let origin = glam::DVec3::new(first.x, first.y, first.z);
+    let tangent = (glam::DVec3::new(last.x, last.y, last.z) - origin).try_normalize()?;
+    let raw_vertical = glam::DVec3::new(
+        data.vertical_direction.x,
+        data.vertical_direction.y,
+        data.vertical_direction.z,
+    );
+    let vertical = (raw_vertical - tangent * raw_vertical.dot(tangent)).try_normalize()?;
+    let base_view = vertical.cross(tangent).try_normalize()?;
+    let viewing = if data.flags & 4 != 0 { base_view } else { -base_view };
+    Some((origin, tangent, vertical, viewing))
+}
+
+fn keep_section_positive(
+    body: &cadkernel::brep::Body,
+    plane: cadkernel::space::Plane,
+) -> Result<Option<cadkernel::brep::Body>, ()> {
+    match cadkernel::brep::slice_by_plane(body, plane) {
+        Ok(Some(result)) => Ok(Some(result.positive)),
+        Ok(None) => {
+            let bounds = cadkernel::brep::body_bounds(body).ok_or(())?;
+            let centre = [
+                (bounds.min[0] + bounds.max[0]) * 0.5,
+                (bounds.min[1] + bounds.max[1]) * 0.5,
+                (bounds.min[2] + bounds.max[2]) * 0.5,
+            ];
+            Ok((plane.distance_to(centre).ok_or(())? >= 0.0).then(|| body.clone()))
+        }
+        Err(_) => Err(()),
+    }
+}
+
 impl Scene {
     pub fn new() -> Self {
         Self {
@@ -2431,7 +2468,17 @@ impl Scene {
             bits |= CACHE_CATEGORY_IMAGE;
         }
         let is_insert = matches!(entity, EntityType::Insert(_));
-        if self.meshes.contains_key(&handle) || self.block_meshes.contains_key(&handle) || is_insert
+        let is_section = matches!(
+            entity,
+            EntityType::Extended(acadrust::entities::ExtendedEntity {
+                data: acadrust::entities::ExtendedEntityData::SectionObject(_),
+                ..
+            })
+        );
+        if self.meshes.contains_key(&handle)
+            || self.block_meshes.contains_key(&handle)
+            || is_insert
+            || is_section
         {
             bits |= CACHE_CATEGORY_MESH | CACHE_CATEGORY_INTERACTION;
         }
@@ -6594,6 +6641,12 @@ impl Scene {
                                     || matches!(
                                         self.document.get_entity(h),
                                         Some(EntityType::Insert(_))
+                                            | Some(EntityType::Extended(
+                                                acadrust::entities::ExtendedEntity {
+                                                    data: acadrust::entities::ExtendedEntityData::SectionObject(_),
+                                                    ..
+                                                }
+                                            ))
                                     )
                             },
                         ) =>
@@ -6780,6 +6833,7 @@ impl Scene {
         all_visible: bool,
         viewport: Option<Handle>,
     ) -> Vec<MeshLodSet> {
+        let live_section = self.active_live_section(target_block);
         // Top-level solids: drop those whose layer is off/frozen or that are
         // flagged invisible / isolated-hidden, mirroring the 2D wire path, plus
         // any whose layer is frozen in the requesting viewport.
@@ -6801,8 +6855,19 @@ impl Scene {
                         })
                         .unwrap_or(false)
             })
-            .map(|(&handle, set)| {
-                let mut set = set.clone();
+            .filter_map(|(&handle, set)| {
+                let mut set = if let Some(section) = live_section.as_ref() {
+                    match self.sectioned_body(handle, section) {
+                        Ok(Some(body)) => self
+                            .prepare_solid_model_display(handle, &body)
+                            .map(|display| display.0)
+                            .unwrap_or_else(|| set.clone()),
+                        Ok(None) => return None,
+                        Err(()) => set.clone(),
+                    }
+                } else {
+                    set.clone()
+                };
                 if let Some(entity) = self.document.get_entity(handle) {
                     let style = crate::scene::view::render::render_style_for_viewport(
                         &self.document,
@@ -6826,7 +6891,7 @@ impl Scene {
                         material.diffuse[3] = style.0[3];
                     }
                 }
-                set
+                Some(set)
             })
             .collect();
         // Block-definition solids are instanced per INSERT of the ACTIVE space's
@@ -6841,6 +6906,116 @@ impl Scene {
             viewport,
         ));
         all
+    }
+
+    fn active_live_section(
+        &self,
+        target_block: Handle,
+    ) -> Option<acadrust::entities::SectionObjectData> {
+        self.document
+            .entities()
+            .filter_map(|entity| {
+                let EntityType::Extended(extended) = entity else {
+                    return None;
+                };
+                let acadrust::entities::ExtendedEntityData::SectionObject(data) = &extended.data else {
+                    return None;
+                };
+                let owner = extended.common.owner_handle;
+                (data.flags & 1 != 0
+                    && !extended.common.invisible
+                    && (owner.is_null() || owner == target_block))
+                    .then(|| data.clone())
+            })
+            .last()
+    }
+
+    fn sectioned_body(
+        &self,
+        handle: Handle,
+        data: &acadrust::entities::SectionObjectData,
+    ) -> Result<Option<cadkernel::brep::Body>, ()> {
+        let body = self.solid_models.get(&handle).ok_or(())?;
+        let Some((origin, tangent, vertical, viewing)) = section_frame(data) else {
+            return Err(());
+        };
+        let front = cadkernel::space::Plane::orthonormal(
+            origin.to_array(),
+            tangent.to_array(),
+            viewing.to_array(),
+        )
+        .ok_or(())?;
+        let mut clipped = keep_section_positive(body, front)?;
+        let Some(mut current) = clipped.take() else {
+            return Ok(None);
+        };
+        if data.state == 1 {
+            return Ok(Some(current));
+        }
+
+        let depth = data
+            .vertices
+            .first()
+            .zip(data.back_line_vertices.first())
+            .map_or(0.0, |(front, back)| {
+                (glam::DVec3::new(back.x, back.y, back.z)
+                    - glam::DVec3::new(front.x, front.y, front.z))
+                .dot(viewing)
+                .abs()
+            });
+        if depth <= 1e-12 {
+            return Ok(Some(current));
+        }
+        let back = cadkernel::space::Plane::orthonormal(
+            (origin + viewing * depth).to_array(),
+            tangent.to_array(),
+            (-viewing).to_array(),
+        )
+        .ok_or(())?;
+        let Some(next) = keep_section_positive(&current, back)? else {
+            return Ok(None);
+        };
+        current = next;
+
+        let span = data
+            .vertices
+            .first()
+            .zip(data.vertices.last())
+            .map_or(0.0, |(first, last)| {
+                (glam::DVec3::new(last.x, last.y, last.z)
+                    - glam::DVec3::new(first.x, first.y, first.z))
+                .length()
+            });
+        let bounded = data.state == 4 || (data.state == 2 && depth >= span * 0.25);
+        if !bounded || span <= 1e-12 {
+            return Ok(Some(current));
+        }
+
+        let first = data.vertices.first().map(|point| glam::DVec3::new(point.x, point.y, point.z)).ok_or(())?;
+        let last = data.vertices.last().map(|point| glam::DVec3::new(point.x, point.y, point.z)).ok_or(())?;
+        for plane in [
+            cadkernel::space::Plane::orthonormal(first.to_array(), vertical.to_array(), tangent.to_array()),
+            cadkernel::space::Plane::orthonormal(last.to_array(), vertical.to_array(), (-tangent).to_array()),
+            cadkernel::space::Plane::orthonormal(
+                (origin - vertical * data.bottom_height).to_array(),
+                tangent.to_array(),
+                vertical.to_array(),
+            ),
+            cadkernel::space::Plane::orthonormal(
+                (origin + vertical * data.top_height).to_array(),
+                tangent.to_array(),
+                (-vertical).to_array(),
+            ),
+        ] {
+            let Some(plane) = plane else {
+                return Err(());
+            };
+            let Some(next) = keep_section_positive(&current, plane)? else {
+                return Ok(None);
+            };
+            current = next;
+        }
+        Ok(Some(current))
     }
 
     /// True when `layer` is turned off or frozen — entities on it never render.

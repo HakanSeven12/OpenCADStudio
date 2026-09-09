@@ -46,6 +46,22 @@ fn bool_prop(label: &str, field: &'static str, value: bool) -> Property {
     }
 }
 
+fn choice_prop(
+    label: &str,
+    field: &'static str,
+    selected: &str,
+    options: &[&str],
+) -> Property {
+    Property {
+        label: label.into(),
+        field,
+        value: PropValue::Choice {
+            selected: selected.to_string(),
+            options: options.iter().map(|option| (*option).to_string()).collect(),
+        },
+    }
+}
+
 fn push_segment(points: &mut Vec<[f64; 3]>, first: [f64; 3], second: [f64; 3]) {
     if !points.is_empty() {
         points.push(NAN);
@@ -211,14 +227,73 @@ fn append_arc_aligned_text(points: &mut Vec<[f64; 3]>, data: &ArcAlignedTextData
 
 fn section_lines(data: &SectionObjectData) -> Vec<[f64; 3]> {
     let mut points = Vec::new();
+    let vertical = normalized(data.vertical_direction, Vector3::UNIT_Z);
+    let offset = |point: &Vector3, distance: f64| {
+        [
+            point.x + vertical.x * distance,
+            point.y + vertical.y * distance,
+            point.z + vertical.z * distance,
+        ]
+    };
     push_chain(
         &mut points,
         data.vertices.iter().map(|p| [p.x, p.y, p.z]),
     );
     push_chain(
         &mut points,
+        data.vertices.iter().map(|point| offset(point, data.top_height)),
+    );
+    push_chain(
+        &mut points,
+        data.vertices.iter().map(|point| offset(point, -data.bottom_height)),
+    );
+    for point in &data.vertices {
+        push_segment(
+            &mut points,
+            offset(point, -data.bottom_height),
+            offset(point, data.top_height),
+        );
+    }
+    push_chain(
+        &mut points,
         data.back_line_vertices.iter().map(|p| [p.x, p.y, p.z]),
     );
+    if !data.back_line_vertices.is_empty() {
+        push_chain(
+            &mut points,
+            data.back_line_vertices
+                .iter()
+                .map(|point| offset(point, data.top_height)),
+        );
+        push_chain(
+            &mut points,
+            data.back_line_vertices
+                .iter()
+                .map(|point| offset(point, -data.bottom_height)),
+        );
+        for point in &data.back_line_vertices {
+            push_segment(
+                &mut points,
+                offset(point, -data.bottom_height),
+                offset(point, data.top_height),
+            );
+        }
+        if let (Some(front), Some(back)) = (
+            data.vertices.first().zip(data.vertices.last()),
+            data.back_line_vertices
+                .first()
+                .zip(data.back_line_vertices.last()),
+        ) {
+            for (a, b) in [(front.0, back.0), (front.1, back.1)] {
+                push_segment(&mut points, offset(a, data.top_height), offset(b, data.top_height));
+                push_segment(
+                    &mut points,
+                    offset(a, -data.bottom_height),
+                    offset(b, -data.bottom_height),
+                );
+            }
+        }
+    }
     points
 }
 
@@ -487,52 +562,220 @@ fn section_properties(data: &SectionObjectData) -> Vec<PropSection> {
     let vertices = data
         .vertices
         .iter()
-        .enumerate()
-        .map(|(index, point)| format!("{}: {}", index + 1, vector_text(*point)))
+        .map(|point| vector_text(*point))
         .collect::<Vec<_>>()
-        .join("\n");
-    let back_vertices = data
-        .back_line_vertices
+        .join("; ");
+    let kind = section_kind(data);
+    let viewing = section_viewing_direction(data);
+    let offset = section_plane_offset(data);
+    let depth = section_depth(data);
+    vec![PropSection {
+        title: t!("Section Plane").into_owned(),
+        props: vec![
+            text_prop(t!("Name").as_ref(), "ext_section_name", &data.name),
+            choice_prop(
+                t!("State").as_ref(),
+                "ext_section_state",
+                kind,
+                &["Plane", "Slice", "Boundary", "Volume"],
+            ),
+            text_prop(
+                t!("Viewing Direction").as_ref(),
+                "ext_section_viewing",
+                &vector_text(viewing),
+            ),
+            text_prop(
+                t!("Vertical Direction").as_ref(),
+                "ext_section_vertical",
+                &vector_text(data.vertical_direction),
+            ),
+            ro_prop(t!("Normal").as_ref(), "ext_section_normal", vector_text(viewing)),
+            bool_prop(
+                t!("Live Section Enabled").as_ref(),
+                "ext_section_live",
+                data.flags & 1 != 0,
+            ),
+            edit_prop(
+                t!("Indicator Transparency").as_ref(),
+                "ext_section_alpha",
+                f64::from(data.indicator_alpha),
+            ),
+            Property {
+                label: t!("Indicator Fill Color").into_owned(),
+                field: "indicator_fill_color",
+                value: PropValue::ColorChoice(data.indicator_color),
+            },
+            edit_prop(t!("Elevation").as_ref(), "ext_section_elevation", offset),
+            edit_prop(t!("Top Height").as_ref(), "ext_section_top", data.top_height),
+            edit_prop(t!("Bottom Height").as_ref(), "ext_section_bottom", data.bottom_height),
+            ro_prop(
+                t!("Number of Vertices").as_ref(),
+                "ext_section_vertex_count",
+                data.vertices.len().to_string(),
+            ),
+            text_prop(t!("Vertices").as_ref(), "ext_section_vertices", &vertices),
+            ro_prop(
+                t!("Settings").as_ref(),
+                "ext_section_settings",
+                handle_text(data.settings_handle),
+            ),
+            choice_prop(
+                t!("State2").as_ref(),
+                "ext_section_state2",
+                kind,
+                &["Plane", "Slice", "Boundary", "Volume"],
+            ),
+            edit_prop(t!("Slice Depth").as_ref(), "ext_section_depth", depth),
+            edit_prop(
+                t!("Section Plane Offset").as_ref(),
+                "ext_section_offset",
+                offset,
+            ),
+        ],
+    }]
+}
+
+fn section_tangent(data: &SectionObjectData) -> Vector3 {
+    let Some((first, last)) = data.vertices.first().zip(data.vertices.last()) else {
+        return Vector3::UNIT_X;
+    };
+    normalized(*last - *first, Vector3::UNIT_X)
+}
+
+fn section_viewing_direction(data: &SectionObjectData) -> Vector3 {
+    let tangent = section_tangent(data);
+    let vertical = normalized(data.vertical_direction, Vector3::UNIT_Z);
+    let base = normalized(vertical.cross(&tangent), Vector3::new(0.0, 0.0, -1.0));
+    if data.flags & 4 != 0 { base } else { -base }
+}
+
+fn section_depth(data: &SectionObjectData) -> f64 {
+    data.vertices
+        .first()
+        .zip(data.back_line_vertices.first())
+        .map_or(0.0, |(front, back)| (*back - *front).length())
+}
+
+fn section_kind(data: &SectionObjectData) -> &'static str {
+    match data.state {
+        1 => "Plane",
+        4 => "Volume",
+        2 => {
+            let span = data
+                .vertices
+                .first()
+                .zip(data.vertices.last())
+                .map_or(1.0, |(first, last)| (*last - *first).length().max(1e-9));
+            if section_depth(data) < span * 0.25 { "Slice" } else { "Boundary" }
+        }
+        _ => "Plane",
+    }
+}
+
+fn section_plane_offset(data: &SectionObjectData) -> f64 {
+    let Some(first) = data.vertices.first() else {
+        return 0.0;
+    };
+    -section_viewing_direction(data).dot(first)
+}
+
+fn parse_vector(value: &str) -> Option<Vector3> {
+    let values = value
+        .split(|character: char| character == ',' || character == ';' || character.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .map(str::parse::<f64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    (values.len() == 3).then(|| Vector3::new(values[0], values[1], values[2]))
+}
+
+fn parse_vertices(value: &str) -> Option<Vec<Vector3>> {
+    let values = value
+        .split(|character: char| {
+            character == ',' || character == ';' || character == ':' || character.is_whitespace()
+        })
+        .filter(|part| !part.trim().is_empty())
+        .map(str::parse::<f64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if values.len() < 6 || values.len() % 3 != 0 {
+        return None;
+    }
+    let vertices = values
+            .chunks_exact(3)
+            .map(|point| Vector3::new(point[0], point[1], point[2]))
+            .collect::<Vec<_>>();
+    let valid = vertices
+        .first()
+        .zip(vertices.last())
+        .is_some_and(|(first, last)| (*last - *first).length() > 1e-12);
+    valid.then_some(vertices)
+}
+
+fn set_section_depth(data: &mut SectionObjectData, depth: f64) {
+    let depth = depth.max(0.0);
+    if depth <= 1e-12 || data.vertices.is_empty() {
+        data.back_line_vertices.clear();
+        return;
+    }
+    let viewing = section_viewing_direction(data);
+    data.back_line_vertices = data
+        .vertices
         .iter()
-        .enumerate()
-        .map(|(index, point)| format!("{}: {}", index + 1, vector_text(*point)))
-        .collect::<Vec<_>>()
-        .join("\n");
-    vec![
-        PropSection {
-            title: t!("Section Object").into_owned(),
-            props: vec![
-                text_prop(t!("Name").as_ref(), "ext_section_name", &data.name),
-                ro_prop(t!("State").as_ref(), "ext_section_state", data.state.to_string()),
-                ro_prop(t!("Flags").as_ref(), "ext_section_flags", data.flags.to_string()),
-                ro_prop(t!("Vertical Direction").as_ref(),
-                    "ext_section_vertical",
-                    vector_text(data.vertical_direction),
-                ),
-                edit_prop(t!("Top Height").as_ref(), "ext_section_top", data.top_height),
-                edit_prop(t!("Bottom Height").as_ref(), "ext_section_bottom", data.bottom_height),
-                ro_prop(t!("Indicator Alpha").as_ref(),
-                    "ext_section_alpha",
-                    data.indicator_alpha.to_string(),
-                ),
-                ro_prop(t!("Indicator Color").as_ref(),
-                    "ext_section_color",
-                    format!("{:?}", data.indicator_color),
-                ),
-                ro_prop(t!("Settings").as_ref(),
-                    "ext_section_settings",
-                    handle_text(data.settings_handle),
-                ),
-            ],
-        },
-        PropSection {
-            title: t!("Section Vertices").into_owned(),
-            props: vec![
-                ro_prop(t!("Cutting Line").as_ref(), "ext_section_vertices", vertices),
-                ro_prop(t!("Back Line").as_ref(), "ext_section_back_vertices", back_vertices),
-            ],
-        },
-    ]
+        .map(|point| *point + viewing * depth)
+        .collect();
+}
+
+fn set_section_kind(data: &mut SectionObjectData, value: &str) {
+    let span = data
+        .vertices
+        .first()
+        .zip(data.vertices.last())
+        .map_or(1.0, |(first, last)| (*last - *first).length().max(1e-4));
+    match value.trim().to_ascii_uppercase().as_str() {
+        "SLICE" => {
+            data.state = 2;
+            set_section_depth(data, span / 60.0);
+        }
+        "BOUNDARY" => {
+            data.state = 2;
+            set_section_depth(data, span);
+        }
+        "VOLUME" => {
+            data.state = 4;
+            set_section_depth(data, span);
+        }
+        _ => {
+            data.state = 1;
+            data.back_line_vertices.clear();
+        }
+    }
+}
+
+fn move_section_to_offset(data: &mut SectionObjectData, desired: f64) {
+    let current = section_plane_offset(data);
+    let delta = section_viewing_direction(data) * (current - desired);
+    for point in data.vertices.iter_mut().chain(data.back_line_vertices.iter_mut()) {
+        *point = *point + delta;
+    }
+}
+
+fn set_viewing_direction(data: &mut SectionObjectData, value: Vector3) {
+    if value.length() <= 1e-12 || data.vertices.len() < 2 {
+        return;
+    }
+    let desired = normalized(value, section_viewing_direction(data));
+    let tangent = section_tangent(data);
+    let vertical = tangent.cross(&desired);
+    if vertical.length() <= 1e-12 {
+        return;
+    }
+    data.vertical_direction = normalized(vertical, data.vertical_direction);
+    data.flags |= 4;
+    let depth = section_depth(data);
+    if depth > 0.0 {
+        set_section_depth(data, depth);
+    }
 }
 
 fn arc_text_properties(data: &ArcAlignedTextData) -> Vec<PropSection> {
@@ -1043,8 +1286,59 @@ fn apply_geom_prop(entity: &mut ExtendedEntity, field: &str, value: &str) {
     match &mut entity.data {
         ExtendedEntityData::SectionObject(data) => match field {
             "ext_section_name" => data.name = value.to_string(),
-            "ext_section_top" => set_f64(value, &mut data.top_height),
-            "ext_section_bottom" => set_f64(value, &mut data.bottom_height),
+            "ext_section_state" | "ext_section_state2" => set_section_kind(data, value),
+            "ext_section_viewing" => {
+                if let Some(direction) = parse_vector(value) {
+                    set_viewing_direction(data, direction);
+                }
+            }
+            "ext_section_vertical" => {
+                if let Some(direction) = parse_vector(value) {
+                    let depth = section_depth(data);
+                    let direction = normalized(direction, data.vertical_direction);
+                    if direction.dot(&section_tangent(data)).abs() < 1.0 - 1e-9 {
+                        data.vertical_direction = direction;
+                        if depth > 0.0 {
+                            set_section_depth(data, depth);
+                        }
+                    }
+                }
+            }
+            "ext_section_live" => data.flags ^= 1,
+            "ext_section_alpha" => {
+                if let Ok(alpha) = value.trim().parse::<i16>() {
+                    data.indicator_alpha = alpha.clamp(0, 100);
+                }
+            }
+            "ext_section_elevation" | "ext_section_offset" => {
+                if let Some(offset) = parse_f64(value) {
+                    move_section_to_offset(data, offset);
+                }
+            }
+            "ext_section_top" => {
+                if let Some(height) = parse_f64(value).filter(|height| *height >= 0.0) {
+                    data.top_height = height;
+                }
+            }
+            "ext_section_bottom" => {
+                if let Some(height) = parse_f64(value).filter(|height| *height >= 0.0) {
+                    data.bottom_height = height;
+                }
+            }
+            "ext_section_vertices" => {
+                if let Some(vertices) = parse_vertices(value) {
+                    let depth = section_depth(data);
+                    data.vertices = vertices;
+                    if depth > 0.0 {
+                        set_section_depth(data, depth);
+                    }
+                }
+            }
+            "ext_section_depth" => {
+                if let Some(depth) = parse_f64(value) {
+                    set_section_depth(data, depth);
+                }
+            }
             _ => {}
         },
         ExtendedEntityData::ArcAlignedText(data) => match field {

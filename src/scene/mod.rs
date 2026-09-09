@@ -7865,11 +7865,18 @@ impl Scene {
         (Arc::new(wires), base_slots, changed_slots)
     }
 
+    /// `area_only` skips the snap-only categories and gathers the rest without
+    /// sorting; see [`InteractionIndex::query_xy_area`]. Both the overlay path
+    /// and the plain indexed path honour it — the overlay runs whenever the
+    /// drawing has been edited since the index was built, which is most of a
+    /// working session, so a saving that stopped there would stop the first
+    /// time the user drew something.
     fn indexed_interaction_candidates_xy(
         &self,
         wires: Arc<Vec<WireModel>>,
         aabb: [f64; 4],
         allow_pending_empty: bool,
+        area_only: bool,
     ) -> crate::scene::pick::interaction_index::InteractionCandidates {
         if let Some((base_epoch, base, changes)) = self.interaction_overlay_base() {
             let perf = crate::perf::enabled();
@@ -7888,11 +7895,20 @@ impl Scene {
             );
             let local_ms = t_local.elapsed().as_secs_f64() * 1000.0;
             let t_remap = iced::time::Instant::now();
-            let mut result =
-                base.query_remapped_xy(Arc::clone(&local), &base_slots, aabb);
-            result.extend_indexed(
-                changed_index.query_remapped_xy(local, &changed_slots, aabb),
-            );
+            let mut result = if area_only {
+                base.query_remapped_xy_area(Arc::clone(&local), &base_slots, aabb)
+            } else {
+                base.query_remapped_xy(Arc::clone(&local), &base_slots, aabb)
+            };
+            if area_only {
+                result.extend_indexed_area(
+                    changed_index.query_remapped_xy_area(local, &changed_slots, aabb),
+                );
+            } else {
+                result.extend_indexed(
+                    changed_index.query_remapped_xy(local, &changed_slots, aabb),
+                );
+            }
             let remap_ms = t_remap.elapsed().as_secs_f64() * 1000.0;
             let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
             if perf && total_ms >= 50.0 {
@@ -7910,7 +7926,11 @@ impl Scene {
             return result;
         }
         if let Some(index) = self.cached_interaction_index(&wires) {
-            index.query_xy(wires, aabb)
+            if area_only {
+                index.query_xy_area(wires, aabb)
+            } else {
+                index.query_xy(wires, aabb)
+            }
         } else if allow_pending_empty
             && self.interaction_index_pending_key.get()
             == Some((self.geometry_epoch, Arc::as_ptr(&wires) as usize))
@@ -8233,12 +8253,18 @@ impl Scene {
             cursor.x + radius,
             cursor.y + radius,
         ];
-        self.indexed_interaction_candidates_xy(wires, query, allow_pending_empty)
+        self.indexed_interaction_candidates_xy(wires, query, allow_pending_empty, false)
     }
 
     /// Shared rectangular broad phase for box/lasso/fence and command windows.
     /// Flat orthographic views query world XY; tilted/perspective views query
     /// projected 3D bounds using the supplied screen rectangle.
+    /// Candidates for an area selection: box, crossing, fence and lasso.
+    ///
+    /// Every caller feeds the result to the box/fence hit tests and to
+    /// `interaction_candidate_handles`, none of which snap, so the flat-ortho
+    /// path asks for the reduced category set. A caller that needs snapping
+    /// belongs on `interaction_candidates_near` instead.
     pub fn interaction_candidates_in_aabb(
         &self,
         wires: Arc<Vec<WireModel>>,
@@ -8275,6 +8301,7 @@ impl Scene {
                 wires,
                 [aabb[0] - pad, aabb[1] - pad, aabb[2] + pad, aabb[3] + pad],
                 false,
+                true,
             )
         } else {
             self.indexed_interaction_candidates_screen(
@@ -8330,7 +8357,7 @@ impl Scene {
 
     pub fn interaction_handles_in_world_aabb(&self, aabb: [f64; 4]) -> HashSet<Handle> {
         let wires = self.hit_test_wires();
-        let candidates = self.indexed_interaction_candidates_xy(wires, aabb, false);
+        let candidates = self.indexed_interaction_candidates_xy(wires, aabb, false, false);
         let mut handles: HashSet<Handle> = candidates
             .iter()
             .filter_map(|wire| Self::handle_from_wire_name(&wire.name))

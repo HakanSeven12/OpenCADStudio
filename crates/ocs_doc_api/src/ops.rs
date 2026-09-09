@@ -90,6 +90,67 @@ pub enum BoolOp {
     Difference,
 }
 
+/// A plain-data color value. Mirrors `acadrust::types::Color` for wire
+/// independence from the host dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Color {
+    ByLayer,
+    None,
+    ByBlock,
+    Index(u8),
+    Rgb { r: u8, g: u8, b: u8 },
+}
+
+impl Color {
+    pub const WHITE: Color = Color::Index(7);
+}
+
+/// A plain-data line weight. Mirrors `acadrust::types::LineWeight`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LineWeight {
+    #[default]
+    ByLayer,
+    ByBlock,
+    Default,
+    /// Specific line weight in 1/100 mm.
+    Value(i16),
+}
+
+/// Layer visibility/lock flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct LayerFlags {
+    pub frozen: bool,
+    pub locked: bool,
+    pub frozen_in_new_viewport: bool,
+    pub off: bool,
+}
+
+/// A plain-data layer table entry. Mirrors `acadrust::tables::Layer`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LayerInfo {
+    pub name: String,
+    pub flags: LayerFlags,
+    pub color: Color,
+    pub line_type: String,
+    pub line_weight: LineWeight,
+    pub plot_style: String,
+    pub is_plottable: bool,
+}
+
+impl LayerInfo {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            flags: LayerFlags::default(),
+            color: Color::WHITE,
+            line_type: "Continuous".to_string(),
+            line_weight: LineWeight::Default,
+            plot_style: String::new(),
+            is_plottable: true,
+        }
+    }
+}
+
 /// Construction spec for a B-rep solid primitive (plain-data mirror of the
 /// non-serde `cadkernel::brep::make::*` arguments).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -368,6 +429,10 @@ impl crate::gen::Operation {
             SetXData { .. } => "SetXData",
             CreateXRecord(_) => "CreateXRecord",
             SetXRecord { .. } => "SetXRecord",
+            CreateLayer(_) => "CreateLayer",
+            UpdateLayer { .. } => "UpdateLayer",
+            DeleteLayer { .. } => "DeleteLayer",
+            SetEntityLayer { .. } => "SetEntityLayer",
         }
     }
 }

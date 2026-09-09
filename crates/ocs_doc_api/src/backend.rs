@@ -173,6 +173,25 @@ pub trait DocApiBackend {
     /// Read an existing `XRECORD` object's payload (`None` if `id` is not an XRecord).
     fn xrecord(&self, id: ObjectId) -> ApiResult<Option<crate::ops::XRecordSpec>>;
 
+    // ── layer CRUD ─────────────────────────────────────────────────────────
+    /// Create a new layer. Fails with `Validation` if the name already exists or is reserved.
+    fn create_layer(&mut self, info: &crate::ops::LayerInfo) -> ApiResult<()>;
+
+    /// Update an existing layer's properties by name. Fails with `UnknownId` if absent.
+    fn update_layer(&mut self, name: &str, info: &crate::ops::LayerInfo) -> ApiResult<()>;
+
+    /// Delete a layer by name. Fails if the layer is "0", the current layer, or has entities.
+    fn delete_layer(&mut self, name: &str) -> ApiResult<()>;
+
+    /// Move an entity to a different layer. The target layer must exist.
+    fn set_entity_layer(&mut self, id: ObjectId, layer: &str) -> ApiResult<()>;
+
+    /// List all layers in the document.
+    fn layers(&self) -> ApiResult<Vec<crate::ops::LayerInfo>>;
+
+    /// The layer name of an entity.
+    fn entity_layer(&self, id: ObjectId) -> ApiResult<String>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

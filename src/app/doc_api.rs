@@ -5,8 +5,8 @@ use acadrust::objects::ObjectType;
 use acadrust::{EntityType, Handle};
 use ocs_doc_api::backend::{DocApiBackend, KernelBody};
 use ocs_doc_api::{
-    Aabb, ApiError, ApiResult, Curve2Spec, EntityView, GeometryErrorKind, GeometryRevision,
-    ObjectId, PlacementSpec,
+    Aabb, ApiError, ApiResult, Color, Curve2Spec, EntityView, GeometryErrorKind, GeometryRevision,
+    LayerFlags, LayerInfo, LineWeight, ObjectId, PlacementSpec,
 };
 
 use crate::scene::convert::acis_export;
@@ -740,6 +740,135 @@ impl DocApiBackend for HostSession<'_> {
         }))
     }
 
+    fn create_layer(&mut self, info: &LayerInfo) -> ApiResult<()> {
+        let name = info.name.trim();
+        if name.is_empty() {
+            return Err(ApiError::validation("CreateLayer", "empty layer name"));
+        }
+        if self.document().layers.contains(name) {
+            return Err(ApiError::validation(
+                "CreateLayer",
+                format!("layer '{name}' already exists"),
+            ));
+        }
+        let mut layer = acadrust::tables::Layer::new(name);
+        layer.handle = self.document_mut().allocate_handle();
+        apply_layer_info(&mut layer, info);
+        self.document_mut()
+            .layers
+            .add(layer)
+            .map_err(|e| ApiError::validation("CreateLayer", e))?;
+        Ok(())
+    }
+
+    fn update_layer(&mut self, name: &str, info: &LayerInfo) -> ApiResult<()> {
+        let deps = {
+            let doc = self.document_mut();
+            let Some(existing) = doc.layers.get(name).cloned() else {
+                return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+            };
+            let new_name = info.name.trim();
+            if new_name.is_empty() {
+                return Err(ApiError::validation("UpdateLayer", "empty layer name"));
+            }
+            // Rename if the key changed (preserves handle and table position).
+            if acadrust::tables::normalize_name(name)
+                != acadrust::tables::normalize_name(new_name)
+            {
+                doc.layers
+                    .rename(name, new_name.to_string())
+                    .map_err(|e| ApiError::validation("UpdateLayer", e))?;
+            }
+            let Some(layer) = doc.layers.get_mut(new_name) else {
+                return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+            };
+            apply_layer_info(layer, info);
+            [existing.name.clone(), layer.name.clone()]
+        };
+        // By-layer appearance changed: rebuild derived geometry that resolved it.
+        self.scene_mut().invalidate_layer_dependencies(&deps);
+        Ok(())
+    }
+
+    fn delete_layer(&mut self, name: &str) -> ApiResult<()> {
+        let name_upper = acadrust::tables::normalize_name(name);
+        if name_upper == "0" {
+            return Err(ApiError::validation("DeleteLayer", "cannot delete layer 0"));
+        }
+        if !self.document().layers.contains(name) {
+            return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+        }
+        if acadrust::tables::normalize_name(&self.document().header.current_layer_name) == name_upper
+        {
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                "cannot delete the current layer",
+            ));
+        }
+        if self
+            .document()
+            .entities()
+            .any(|e| acadrust::tables::normalize_name(&e.common().layer) == name_upper)
+        {
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                format!("layer '{name}' is still in use"),
+            ));
+        }
+        self.document_mut().layers.remove(name);
+        Ok(())
+    }
+
+    fn set_entity_layer(&mut self, id: ObjectId, layer: &str) -> ApiResult<()> {
+        self.can_modify(id)?;
+        let handle = obj_to_handle(id);
+        let layer_upper = acadrust::tables::normalize_name(layer);
+        let target = self.document().layers.get(&layer_upper).cloned();
+        let Some(target) = target else {
+            return Err(ApiError::validation(
+                "SetEntityLayer",
+                format!("layer '{layer}' does not exist"),
+            ));
+        };
+        if target.is_locked() {
+            return Err(ApiError::Unsupported(format!(
+                "entity {id:?} cannot be moved to locked layer '{layer}'"
+            )));
+        }
+        let mut entity = self
+            .document()
+            .get_entity(handle)
+            .cloned()
+            .ok_or(ApiError::UnknownId(id))?;
+        entity.common_mut().layer = target.name.clone();
+        if !self.scene_mut().update_entity(entity) {
+            return Err(ApiError::Unsupported(format!(
+                "entity {id:?} is on a locked layer"
+            )));
+        }
+        Ok(())
+    }
+
+    fn layers(&self) -> ApiResult<Vec<LayerInfo>> {
+        let mut v: Vec<_> = self
+            .document()
+            .layers
+            .iter()
+            .map(layer_info_from_acadrust)
+            .collect();
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(v)
+    }
+
+    fn entity_layer(&self, id: ObjectId) -> ApiResult<String> {
+        let handle = obj_to_handle(id);
+        let entity = self
+            .document()
+            .get_entity(handle)
+            .ok_or(ApiError::UnknownId(id))?;
+        Ok(entity.common().layer.clone())
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -1242,12 +1371,99 @@ fn xrecord_entry_from_acadrust(
     }
 }
 
+// ── layer conversions ─────────────────────────────────────────────────────
+
+fn color_to_acadrust(c: Color) -> acadrust::types::Color {
+    use acadrust::types::Color as A;
+    match c {
+        Color::ByLayer => A::ByLayer,
+        Color::None => A::None,
+        Color::ByBlock => A::ByBlock,
+        Color::Index(i) => A::Index(i),
+        Color::Rgb { r, g, b } => A::Rgb { r, g, b },
+    }
+}
+
+fn color_from_acadrust(c: acadrust::types::Color) -> Color {
+    use acadrust::types::Color as A;
+    match c {
+        A::ByLayer => Color::ByLayer,
+        A::None => Color::None,
+        A::ByBlock => Color::ByBlock,
+        A::Index(i) => Color::Index(i),
+        A::Rgb { r, g, b } => Color::Rgb { r, g, b },
+    }
+}
+
+fn line_weight_to_acadrust(lw: LineWeight) -> acadrust::types::LineWeight {
+    use acadrust::types::LineWeight as A;
+    match lw {
+        LineWeight::ByLayer => A::ByLayer,
+        LineWeight::ByBlock => A::ByBlock,
+        LineWeight::Default => A::Default,
+        LineWeight::Value(v) => A::Value(v),
+    }
+}
+
+fn line_weight_from_acadrust(lw: acadrust::types::LineWeight) -> LineWeight {
+    use acadrust::types::LineWeight as A;
+    match lw {
+        A::ByLayer => LineWeight::ByLayer,
+        A::ByBlock => LineWeight::ByBlock,
+        A::Default => LineWeight::Default,
+        A::Value(v) => LineWeight::Value(v),
+    }
+}
+
+fn layer_flags_to_acadrust(f: LayerFlags) -> acadrust::tables::LayerFlags {
+    acadrust::tables::LayerFlags {
+        frozen: f.frozen,
+        locked: f.locked,
+        frozen_in_new_viewport: f.frozen_in_new_viewport,
+        off: f.off,
+        xref_dependent: false,
+    }
+}
+
+fn layer_flags_from_acadrust(f: acadrust::tables::LayerFlags) -> LayerFlags {
+    LayerFlags {
+        frozen: f.frozen,
+        locked: f.locked,
+        frozen_in_new_viewport: f.frozen_in_new_viewport,
+        off: f.off,
+    }
+}
+
+fn apply_layer_info(layer: &mut acadrust::tables::Layer, info: &LayerInfo) {
+    layer.name = info.name.trim().to_string();
+    layer.flags = layer_flags_to_acadrust(info.flags);
+    layer.color = color_to_acadrust(info.color);
+    layer.color_name = None;
+    layer.book_name = None;
+    layer.line_type = info.line_type.clone();
+    layer.line_weight = line_weight_to_acadrust(info.line_weight);
+    layer.plot_style = info.plot_style.clone();
+    layer.is_plottable = info.is_plottable;
+}
+
+fn layer_info_from_acadrust(layer: &acadrust::tables::Layer) -> LayerInfo {
+    LayerInfo {
+        name: layer.name.clone(),
+        flags: layer_flags_from_acadrust(layer.flags),
+        color: color_from_acadrust(layer.color),
+        line_type: layer.line_type.clone(),
+        line_weight: line_weight_from_acadrust(layer.line_weight),
+        plot_style: layer.plot_style.clone(),
+        is_plottable: layer.is_plottable,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::plugin_host::HostSession;
     use crate::app::OpenCADStudio;
-    use ocs_doc_api::ops::{BoolOp, SolidPrimitive};
+    use ocs_doc_api::ops::{BoolOp, Color, LayerFlags, LayerInfo, LineWeight, SolidPrimitive};
     use ocs_doc_api::{DocApiEnvelope, HasId, ObjectId, Operation, Query, QueryResult, Receipt};
 
     fn dispatch(host: &mut HostSession<'_>, env: DocApiEnvelope) -> ApiResult<Receipt> {
@@ -3715,5 +3931,102 @@ mod tests {
             .get_entity(obj_to_handle(id))
             .is_some());
         assert!(app.tabs[0].scene.document.objects.len() > objects);
+    }
+
+    #[test]
+    fn doc_api_layer_crud_roundtrip_and_entity_assignment() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Create a line to assign to a layer later.
+        let line = new_id(
+            &dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateCurve(ocs_doc_api::Curve2Spec::Line {
+                    start: [0.0; 3],
+                    end: [1.0; 3],
+                })),
+            )
+            .unwrap(),
+        );
+
+        // List default layers — must include "0".
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::ListLayers])).unwrap();
+        let QueryResult::Layers(list) = &receipt.query_results[0] else {
+            panic!("expected Layers result");
+        };
+        assert!(list.iter().any(|l| l.name == "0"));
+
+        // Create a new layer.
+        let mut info = LayerInfo::new("Walls");
+        info.color = Color::Index(1);
+        info.line_weight = LineWeight::Value(25);
+        info.flags = LayerFlags {
+            frozen: false,
+            locked: false,
+            frozen_in_new_viewport: false,
+            off: false,
+        };
+        dispatch(&mut host, DocApiEnvelope::op(Operation::CreateLayer(info.clone()))).unwrap();
+
+        // Update the layer color.
+        let mut updated = info.clone();
+        updated.color = Color::Index(2);
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::UpdateLayer {
+                name: "Walls".into(),
+                info: updated.clone(),
+            }),
+        )
+        .unwrap();
+
+        // Assign the line to the new layer.
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetEntityLayer {
+                id: line,
+                layer: "Walls".into(),
+            }),
+        )
+        .unwrap();
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::GetEntityLayer { id: line }]),
+        )
+        .unwrap();
+        assert!(matches!(&receipt.query_results[0], QueryResult::EntityLayer(name) if name == "Walls"));
+
+        // Deleting a layer still in use fails.
+        let err = dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::DeleteLayer {
+                name: "Walls".into(),
+            }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ApiError::Validation { .. }));
+
+        // Move the line back to "0", then delete the layer.
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetEntityLayer {
+                id: line,
+                layer: "0".into(),
+            }),
+        )
+        .unwrap();
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::DeleteLayer {
+                name: "Walls".into(),
+            }),
+        )
+        .unwrap();
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::ListLayers])).unwrap();
+        let QueryResult::Layers(list) = &receipt.query_results[0] else {
+            panic!("expected Layers result");
+        };
+        assert!(!list.iter().any(|l| l.name == "Walls"));
     }
 }

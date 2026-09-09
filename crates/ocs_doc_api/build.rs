@@ -168,6 +168,9 @@ Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
 - **`transform(placement)`** — in-place rigid similarity (same `ObjectId`). **v1:
   solids only.**
 - **`delete()`** — remove the entity (one undo step).
+- **`layer()` -> `String`** — the name of the layer the entity is on.
+- **`set_layer(layer)`** — move the entity to an existing layer (one undo step;
+  blocked if the entity or target layer is locked).
 
 `Entity` additionally has `view()` (id + kind + bounds) and `as_solid()` (typed
 downcast when `kind == "Solid3D"`).
@@ -177,7 +180,7 @@ downcast when `kind == "Solid3D"`).
 - **`DocApi`** — root: `document(tab)`, `active_tab()`, `alive()`.
 - **`Document`** — `solids()` / `curves()` / `entities()` factories + lookup,
   `revision()`, `assert_revision(rev)` (read-guard), `query_batch(|q| …)` (read-only
-  batch, one round-trip, **no revision bump**).
+  batch, one round-trip, **no revision bump**), `layers()` -> `Vec<LayerInfo>`.
 - **`EntityCollection`** — `get(id) -> Entity`, `delete(id)`,
   `transform_many(&ids, placement)`, `delete_many(&ids)`.
 - **`OpGroup`** — best-effort client-side failure cleanup (`track` / `commit` /

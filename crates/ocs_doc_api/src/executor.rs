@@ -353,6 +353,31 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::CreateLayer(info) => {
+            b.push_undo(name);
+            b.create_layer(info)?;
+            b.finalize_op();
+            OpOutcome::Updated(ObjectId::NULL)
+        }
+        Operation::UpdateLayer { name, info } => {
+            b.push_undo(name);
+            b.update_layer(name, info)?;
+            b.finalize_op();
+            OpOutcome::Updated(ObjectId::NULL)
+        }
+        Operation::DeleteLayer { name } => {
+            b.push_undo(name);
+            b.delete_layer(name)?;
+            b.finalize_op();
+            OpOutcome::Updated(ObjectId::NULL)
+        }
+        Operation::SetEntityLayer { id, layer } => {
+            require_exists(b, *id, name)?;
+            b.push_undo(name);
+            b.set_entity_layer(*id, layer)?;
+            b.finalize_op();
+            OpOutcome::Updated(*id)
+        }
         Operation::SetXData {
             id,
             application_name,
@@ -458,6 +483,10 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
                         )
                     },
                 )?)
+            }
+            Query::ListLayers => QueryResult::Layers(b.layers().map_err(|e| label(qname, e))?),
+            Query::GetEntityLayer { id } => {
+                QueryResult::EntityLayer(b.entity_layer(*id).map_err(|e| label(qname, e))?)
             }
         };
         results.push(r);

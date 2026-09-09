@@ -64,4 +64,10 @@ pub enum Query {
     GetXRecord {
         id: ObjectId,
     },
+    /// List all layers in the document.
+    ListLayers,
+    /// The layer name of an entity.
+    GetEntityLayer {
+        id: ObjectId,
+    },
 }

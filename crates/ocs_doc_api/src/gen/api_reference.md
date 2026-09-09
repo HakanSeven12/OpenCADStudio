@@ -207,6 +207,17 @@ Extended record (XRecord): arbitrary DXF group-code/value pairs. Roundtripped ve
 - **xdata**(application_name: &str) -> `Option<XDataRecord>` — query `GetXData`
 - **set_xdata**(application_name: &str, record: Option<XDataRecord>) -> `()` — op `SetXData`
 
+## `Layer` (acadrust `-`, collection `layers`)
+
+Named drawing layer (color, linetype, lineweight, visibility). Not an entity handle; accessed through Document::layers().
+
+### Methods
+
+- **list**() -> `Vec<LayerInfo>` — query `ListLayers`
+- **create**(info: LayerInfo) -> `()` — op `CreateLayer`
+- **update**(name: String, info: LayerInfo) -> `()` — op `UpdateLayer`
+- **delete**(name: String) -> `()` — op `DeleteLayer`
+
 ## Generic methods (every handle)
 
 Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
@@ -219,6 +230,9 @@ Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
 - **`transform(placement)`** — in-place rigid similarity (same `ObjectId`). **v1:
   solids only.**
 - **`delete()`** — remove the entity (one undo step).
+- **`layer()` -> `String`** — the name of the layer the entity is on.
+- **`set_layer(layer)`** — move the entity to an existing layer (one undo step;
+  blocked if the entity or target layer is locked).
 
 `Entity` additionally has `view()` (id + kind + bounds) and `as_solid()` (typed
 downcast when `kind == "Solid3D"`).
@@ -228,7 +242,7 @@ downcast when `kind == "Solid3D"`).
 - **`DocApi`** — root: `document(tab)`, `active_tab()`, `alive()`.
 - **`Document`** — `solids()` / `curves()` / `entities()` factories + lookup,
   `revision()`, `assert_revision(rev)` (read-guard), `query_batch(|q| …)` (read-only
-  batch, one round-trip, **no revision bump**).
+  batch, one round-trip, **no revision bump**), `layers()` -> `Vec<LayerInfo>`.
 - **`EntityCollection`** — `get(id) -> Entity`, `delete(id)`,
   `transform_many(&ids, placement)`, `delete_many(&ids)`.
 - **`OpGroup`** — best-effort client-side failure cleanup (`track` / `commit` /
@@ -302,6 +316,10 @@ Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-
 - `SetXData { id: ObjectId, application_name: String, record: Option<XDataRecord> }`
 - `CreateXRecord(XRecordSpec)`
 - `SetXRecord { id: ObjectId, spec: XRecordSpec }`
+- `CreateLayer(LayerInfo)`
+- `UpdateLayer { name: String, info: LayerInfo }`
+- `DeleteLayer { name: String }`
+- `SetEntityLayer { id: ObjectId, layer: String }`
 
 ### `Query`
 
@@ -319,6 +337,8 @@ Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-
 - `GetViewportView { id: ObjectId }`
 - `GetXData { id: ObjectId, application_name: String }`
 - `GetXRecord { id: ObjectId }`
+- `ListLayers`
+- `GetEntityLayer { id: ObjectId }`
 
 ## Errors (`ApiError`)
 

@@ -32,7 +32,11 @@
       "CreateDimensionAngular2Ln(DimensionAngularSpec)",
       "SetXData { id: ObjectId, application_name: String, record: Option<XDataRecord> }",
       "CreateXRecord(XRecordSpec)",
-      "SetXRecord { id: ObjectId, spec: XRecordSpec }"
+      "SetXRecord { id: ObjectId, spec: XRecordSpec }",
+      "CreateLayer(LayerInfo)",
+      "UpdateLayer { name: String, info: LayerInfo }",
+      "DeleteLayer { name: String }",
+      "SetEntityLayer { id: ObjectId, layer: String }"
     ]
   },
   "Query": {
@@ -50,7 +54,9 @@
       "GetBlockEntities { block_name: String }",
       "GetViewportView { id: ObjectId }",
       "GetXData { id: ObjectId, application_name: String }",
-      "GetXRecord { id: ObjectId }"
+      "GetXRecord { id: ObjectId }",
+      "ListLayers",
+      "GetEntityLayer { id: ObjectId }"
     ]
   }
 }

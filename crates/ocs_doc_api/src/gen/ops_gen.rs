@@ -110,4 +110,17 @@ pub enum Operation {
         id: ObjectId,
         spec: XRecordSpec,
     },
+    // layer CRUD
+    CreateLayer(crate::ops::LayerInfo),
+    UpdateLayer {
+        name: String,
+        info: crate::ops::LayerInfo,
+    },
+    DeleteLayer {
+        name: String,
+    },
+    SetEntityLayer {
+        id: ObjectId,
+        layer: String,
+    },
 }

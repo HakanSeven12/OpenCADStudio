@@ -72,6 +72,10 @@ pub enum QueryResult {
     XData(Option<crate::ops::XDataRecord>),
     /// An XRECORD object payload.
     XRecord(crate::ops::XRecordSpec),
+    /// All layers in the document.
+    Layers(Vec<crate::ops::LayerInfo>),
+    /// The layer name of an entity.
+    EntityLayer(String),
 }
 
 /// Convenience: the query name for diagnostics.
@@ -93,6 +97,8 @@ impl crate::gen::Query {
             GetViewportView { .. } => "GetViewportView",
             GetXData { .. } => "GetXData",
             GetXRecord { .. } => "GetXRecord",
+            ListLayers => "ListLayers",
+            GetEntityLayer { .. } => "GetEntityLayer",
         }
     }
 }

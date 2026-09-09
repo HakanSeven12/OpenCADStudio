@@ -38,7 +38,8 @@ fn spec() -> Spec {
 /// The variant names of the `Operation` enum, in declaration order.
 fn operation_variants() -> Vec<String> {
     use ocs_doc_api::ops::{
-        BoolOp, Curve2Spec, InsertSpec, Operation, PlacementSpec, SolidPrimitive, ViewportSpec,
+        BoolOp, Curve2Spec, InsertSpec, LayerInfo, Operation, PlacementSpec, SolidPrimitive,
+        ViewportSpec,
     };
     use ocs_doc_api::ObjectId;
     let _marker: Vec<Operation> = vec![
@@ -185,6 +186,18 @@ fn operation_variants() -> Vec<String> {
                 entries: vec![],
             },
         },
+        Operation::CreateLayer(LayerInfo::new("LAYER")),
+        Operation::UpdateLayer {
+            name: String::new(),
+            info: LayerInfo::new("LAYER"),
+        },
+        Operation::DeleteLayer {
+            name: String::new(),
+        },
+        Operation::SetEntityLayer {
+            id: ObjectId::from_u64(0),
+            layer: String::new(),
+        },
     ];
     _marker
         .iter()
@@ -249,6 +262,10 @@ fn query_variants() -> Vec<String> {
             application_name: String::new(),
         },
         Query::GetXRecord {
+            id: ObjectId::from_u64(0),
+        },
+        Query::ListLayers,
+        Query::GetEntityLayer {
             id: ObjectId::from_u64(0),
         },
     ];
@@ -337,6 +354,10 @@ const OPERATION_BASELINE: &[&str] = &[
     "SetXData",
     "CreateXRecord",
     "SetXRecord",
+    "CreateLayer",
+    "UpdateLayer",
+    "DeleteLayer",
+    "SetEntityLayer",
 ];
 
 /// Recorded baseline of the `Query` variant order.
@@ -355,6 +376,8 @@ const QUERY_BASELINE: &[&str] = &[
     "GetViewportView",
     "GetXData",
     "GetXRecord",
+    "ListLayers",
+    "GetEntityLayer",
 ];
 
 #[test]

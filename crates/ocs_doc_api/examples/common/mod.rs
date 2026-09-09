@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use ocs_doc_api::backend::{DocApiBackend, KernelBody};
 use ocs_doc_api::{
     Aabb, ApiError, ApiResult, Curve2Spec, EntityView, GeometryErrorKind, GeometryRevision,
-    ObjectId, PlacementSpec,
+    LayerInfo, ObjectId, PlacementSpec,
 };
 
 #[derive(Default, Clone)]
@@ -35,6 +35,10 @@ pub struct MockBackend {
     xdata_store: HashMap<(ObjectId, String), ocs_doc_api::XDataRecord>,
     /// Stored XRECORD payloads keyed by entity id.
     xrecord_store: HashMap<ObjectId, ocs_doc_api::XRecordSpec>,
+    /// Stored layer table.
+    layers: HashMap<String, LayerInfo>,
+    /// Layer name assigned to each entity.
+    entity_layers: HashMap<ObjectId, String>,
 }
 
 impl MockBackend {
@@ -403,6 +407,77 @@ impl DocApiBackend for MockBackend {
         }
         Ok(self.xrecord_store.get(&id).cloned())
     }
+    fn create_layer(&mut self, info: &LayerInfo) -> ApiResult<()> {
+        let name = info.name.to_ascii_uppercase();
+        if name.is_empty() {
+            return Err(ApiError::validation("CreateLayer", "empty layer name"));
+        }
+        if self.layers.contains_key(&name) {
+            return Err(ApiError::validation(
+                "CreateLayer",
+                format!("layer '{name}' already exists"),
+            ));
+        }
+        let mut stored = info.clone();
+        stored.name = name.clone();
+        self.layers.insert(name, stored);
+        Ok(())
+    }
+    fn update_layer(&mut self, name: &str, info: &LayerInfo) -> ApiResult<()> {
+        let name_upper = name.to_ascii_uppercase();
+        if !self.layers.contains_key(&name_upper) {
+            return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+        }
+        let mut stored = info.clone();
+        stored.name = name_upper.clone();
+        self.layers.insert(name_upper, stored);
+        Ok(())
+    }
+    fn delete_layer(&mut self, name: &str) -> ApiResult<()> {
+        let name_upper = name.to_ascii_uppercase();
+        if name_upper == "0" {
+            return Err(ApiError::validation("DeleteLayer", "cannot delete layer 0"));
+        }
+        if self
+            .entity_layers
+            .values()
+            .any(|l| l.to_ascii_uppercase() == name_upper)
+        {
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                format!("layer '{name_upper}' still in use"),
+            ));
+        }
+        if self.layers.remove(&name_upper).is_none() {
+            return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+        }
+        Ok(())
+    }
+    fn set_entity_layer(&mut self, id: ObjectId, layer: &str) -> ApiResult<()> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        let layer_upper = layer.to_ascii_uppercase();
+        if !self.layers.contains_key(&layer_upper) {
+            return Err(ApiError::validation(
+                "SetEntityLayer",
+                format!("layer '{layer_upper}' does not exist"),
+            ));
+        }
+        self.entity_layers.insert(id, layer_upper);
+        Ok(())
+    }
+    fn layers(&self) -> ApiResult<Vec<LayerInfo>> {
+        let mut v: Vec<_> = self.layers.values().cloned().collect();
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(v)
+    }
+    fn entity_layer(&self, id: ObjectId) -> ApiResult<String> {
+        self.entity_layers
+            .get(&id)
+            .cloned()
+            .ok_or(ApiError::UnknownId(id))
+    }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {
             Ok(())
@@ -414,6 +489,7 @@ impl DocApiBackend for MockBackend {
         self.bodies.remove(&id);
         self.xdata_store.retain(|(k, _), _| *k != id);
         self.xrecord_store.remove(&id);
+        self.entity_layers.remove(&id);
         Ok(self.kinds.remove(&id).is_some())
     }
     fn get_entity(&mut self, id: ObjectId) -> ApiResult<EntityView> {

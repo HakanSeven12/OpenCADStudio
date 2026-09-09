@@ -181,6 +181,14 @@ impl Document {
         }
     }
 
+    /// List all layers in the document.
+    pub fn layers(&self) -> ApiResult<Vec<crate::ops::LayerInfo>> {
+        match self.session.one_query(Query::ListLayers)? {
+            QueryResult::Layers(v) => Ok(v),
+            _ => Err(ApiError::Transport("unexpected layers result".into())),
+        }
+    }
+
     /// Batch of read-only queries in ONE round-trip (safe: no mutation/undo).
     /// The closure records queries on a [`QueryBatch`]; the results are returned
     /// in the same order as a [`QueryResults`] view the caller destructures.
@@ -424,6 +432,24 @@ impl Entity {
             value: value.to_string(),
         })?;
         Ok(())
+    }
+    /// Move this entity to `layer` (the target layer must exist). One undo step.
+    pub fn set_layer(&self, layer: &str) -> ApiResult<()> {
+        self.session.apply_op(Operation::SetEntityLayer {
+            id: self.id,
+            layer: layer.to_string(),
+        })?;
+        Ok(())
+    }
+    /// The layer name this entity is on.
+    pub fn layer(&self) -> ApiResult<String> {
+        match self
+            .session
+            .one_query(Query::GetEntityLayer { id: self.id })?
+        {
+            QueryResult::EntityLayer(s) => Ok(s),
+            _ => Err(ApiError::Transport("unexpected entity-layer result".into())),
+        }
     }
     /// This viewport's view (target WCS + zoom height). Viewport-only.
     pub fn viewport_view(&self) -> ApiResult<([f64; 3], f64)> {

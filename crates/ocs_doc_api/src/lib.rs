@@ -44,8 +44,9 @@ pub use facade::{
     Solid, SolidCollection, Spline, Text, XLine, XRecord,
 };
 pub use ops::{
-    BoolOp, Curve2Spec, EntitySpec, Operation, PlacementSpec, SolidPrimitive, XDataRecord,
-    XDataValue, XRecordCloningFlags, XRecordEntry, XRecordSpec, XRecordValue,
+    BoolOp, Color, Curve2Spec, EntitySpec, LayerFlags, LayerInfo, LineWeight, Operation,
+    PlacementSpec, SolidPrimitive, XDataRecord, XDataValue, XRecordCloningFlags, XRecordEntry,
+    XRecordSpec, XRecordValue,
 };
 pub use query::{Aabb, EntityView, Query, QueryResult};
 

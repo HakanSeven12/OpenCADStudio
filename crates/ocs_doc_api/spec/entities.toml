@@ -513,6 +513,42 @@ returns = "()"
 # - Read-only batching: query_batch(|q| ...) — one round-trip, no revision bump.
 # - OpGroup: best-effort client-side failure cleanup (NOT a transaction).
 
+# ============================================================================
+# LAYER family (named drawing layers)
+# ============================================================================
+[[family]]
+name = "Layer"
+handle = "Layer"
+collection = "layers"
+description = "Named drawing layer (color, linetype, lineweight, visibility). Not an entity handle; accessed through Document::layers()."
+
+[[family.method]]
+name = "list"
+kind = "query"
+query = "ListLayers"
+returns = "Vec<LayerInfo>"
+
+[[family.method]]
+name = "create"
+kind = "op"
+op = "CreateLayer"
+args = [{ name = "info", ty = "LayerInfo" }]
+returns = "()"
+
+[[family.method]]
+name = "update"
+kind = "op"
+op = "UpdateLayer"
+args = [{ name = "name", ty = "String" }, { name = "info", ty = "LayerInfo" }]
+returns = "()"
+
+[[family.method]]
+name = "delete"
+kind = "op"
+op = "DeleteLayer"
+args = [{ name = "name", ty = "String" }]
+returns = "()"
+
 # ---- Kernel/op mapping (reference for the executor + docs) ----
 [[kernel_map]]
 op = "CreateSolid.Cuboid"

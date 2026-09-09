@@ -4,6 +4,12 @@
 `Transport::apply` carries one operation or a read-only query batch to the
 executor. The native adapter binds each request to its existing `HostSession`.
 
+For out-of-process / worker-thread plugins, `doc_api_for_host(host)` constructs a
+`DocApi` backed by `OcsPluginApiIpc`, which sends `PluginRequest::DocApiRequest`
+through the host's `PluginRequestSender` and deserializes
+`PluginResponse::DocApiResponse`. This keeps plugin code free of manual envelope
+serialization while reusing the same executor that the in-process transport uses.
+
 The executor validates inputs and dispatches through `DocApiBackend`. Backends
 must prepare fallible geometry and serialization before changing the document.
 Bulk writes prepare all entities, begin one undo record, apply the prepared

@@ -21,6 +21,28 @@ The bridge converts these objects to the Rust DTOs and bincode 1.3 wire format,
 sends `DocApiRequest { tab_id, bytes }`, and decodes `Result<Receipt, ApiError>`.
 Host plugin API version 6 and document envelope version 1 are required.
 
+For Rust plugins compiled against `ocs_doc_api` with the `doc_api_host` feature,
+use the `doc_api_for_host` helper to build a typed `DocApi` from any
+`ocs_plugin_api::host::HostApi` that exposes a `PluginRequestSender`
+(out-of-process / worker-thread hosts):
+
+```rust
+use ocs_doc_api::doc_api_for_host;
+use ocs_plugin_api::host::HostApi;
+
+fn on_dispatch(host: &mut dyn HostApi) -> Option<()> {
+    let doc_api = doc_api_for_host(host)?;
+    let doc = doc_api.document(host.tab_id());
+    let cube = doc.solids().create_cuboid([0.0; 3], [10.0; 3]).ok()?;
+    // ...
+    Some(())
+}
+```
+
+In-process plugins should use `DocApi::in_process(backend, tab_id)` with a
+concrete `DocApiBackend`; `doc_api_for_host` returns `None` for hosts that do not
+expose a `PluginRequestSender`.
+
 Decode receipt outcomes as `{"NewId": 42}` or `{"NewIds": [42, 43]}` and query
 results as externally tagged dictionaries such as `{"Volume": 12.5}`. The facade
 unwraps these into typed handles or values. Layer results use `{"Layers": [...]}`

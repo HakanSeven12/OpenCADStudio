@@ -55,6 +55,9 @@ pub use convert::{
     bulge_arc_segment, curve_spec_to_entity, entity_bounds, entity_kind_name,
     entity_to_profile_curves, transform_entity_geometry,
 };
+#[cfg(feature = "doc_api_host")]
+pub use transport::ipc::doc_api_for_host;
+
 pub use transport::Transport;
 
 /// The crate's own wire-envelope protocol version (`DocApiEnvelope::version`).

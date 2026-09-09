@@ -50,6 +50,30 @@ and updated through the `XRecord` handle.
 | Default | DTOs, facade, transport trait and binding schema |
 | `host` | Kernel and entity adapters, executor, `DocApiBackend`, `InProcess` |
 | `ipc` | `OcsPluginApiIpc` adapter for a plugin connected to the host |
+| `doc_api_host` | Convenience `doc_api_for_host(&dyn HostApi) -> Option<DocApi>` for out-of-process / worker-thread plugins |
+
+### Connecting from a plugin
+
+For out-of-process or worker-thread plugins that receive `&dyn HostApi` (or any
+`ocs_plugin_api::host::HostApi` implementor), enable the `doc_api_host` feature
+and use the helper instead of manually serializing `DocApiEnvelope`s:
+
+```rust
+use ocs_doc_api::doc_api_for_host;
+use ocs_plugin_api::host::HostApi;
+
+fn on_dispatch(host: &mut dyn HostApi) -> Option<()> {
+    let doc_api = doc_api_for_host(host)?;
+    let doc = doc_api.document(host.tab_id());
+    let cube = doc.solids().create_cuboid([0.0; 3], [10.0; 3]).ok()?;
+    Some(())
+}
+```
+
+`doc_api_for_host` returns `None` for hosts that do not expose a
+`PluginRequestSender` (for example the in-process `HostSession`). In-process code
+should use `DocApi::in_process(backend, tab_id)` with a concrete
+`DocApiBackend`.
 
 See the [API reference](src/gen/api_reference.md) for constructors and methods,
 [architecture](ARCHITECTURE.md) for backend rules, and

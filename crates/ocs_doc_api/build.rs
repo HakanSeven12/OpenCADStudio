@@ -184,6 +184,16 @@ returns the layer name and `Entity::set_layer(layer)` moves the entity to an
 existing layer. The host rejects duplicate names, deletion of layer "0" or the
 current layer, and removing a layer that still has entities assigned.
 
+## Transports
+
+- **`InProcess`** (feature `host`) — drives a `DocApiBackend` directly in the host.
+- **`OcsPluginApiIpc`** (feature `ipc`) — serializes envelopes over the
+  `ocs_plugin_api` `PluginRequestSender`/`PluginRequest` channel. The host routes
+  `DocApiRequest { tab_id, bytes }` to the same executor.
+- **`doc_api_for_host(host)`** (feature `doc_api_host`) — convenience helper that
+  builds a `DocApi` from any `ocs_plugin_api::host::HostApi` exposing a
+  `PluginRequestSender` (out-of-process / worker-thread plugins).
+
 ## Collections & cross-cutting
 
 - **`DocApi`** — root: `document(tab)`, `active_tab()`, `alive()`.

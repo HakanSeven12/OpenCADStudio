@@ -5,11 +5,12 @@
 
 use std::sync::Arc;
 
-use ocs_plugin_api::host::{PluginRequestError, PluginRequestSender};
+use ocs_plugin_api::host::{HostApi, PluginRequestError, PluginRequestSender};
 use ocs_plugin_api::ipc::protocol::{PluginRequest, PluginResponse};
 
 use crate::envelope::{DocApiEnvelope, Receipt};
 use crate::error::{ApiError, ApiResult};
+use crate::facade::DocApi;
 use crate::transport::Transport;
 
 /// Out-of-process IPC transport over the `ocs_plugin_api` channel. `Send + Sync`;
@@ -27,6 +28,21 @@ impl OcsPluginApiIpc {
     fn transport_err(e: PluginRequestError) -> ApiError {
         ApiError::Transport(e.0)
     }
+}
+
+/// Build a typed [`DocApi`] from any host that can provide a
+/// [`PluginRequestSender`] (out-of-process / V4 worker plugins).
+///
+/// Returns `None` for hosts that do not expose a request sender (e.g. in-process
+/// hosts). In-process code should use [`crate::DocApi::in_process`] with a
+/// concrete [`crate::backend::DocApiBackend`].
+pub fn doc_api_for_host(host: &dyn HostApi) -> Option<DocApi> {
+    let sender = host.plugin_request_sender()?;
+    let tab_id = host.tab_id();
+    Some(DocApi::connect(
+        Arc::new(OcsPluginApiIpc::new(sender.into(), tab_id)),
+        tab_id,
+    ))
 }
 
 impl Transport for OcsPluginApiIpc {

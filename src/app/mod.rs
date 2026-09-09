@@ -2180,6 +2180,8 @@ pub enum Message {
     /// clipboard as plain text — issue #232, so output can be pasted for
     /// debugging instead of screenshotted.
     CommandHistoryCopy,
+    #[cfg(target_arch = "wasm32")]
+    CommandHistoryCopied(bool),
     /// Clear every line from the command-line history.
     CommandHistoryClear,
     /// Copy every line currently retained by the PERF panel.

@@ -1839,10 +1839,32 @@ impl OpenCADStudio {
             Message::CommandHistoryCopy => {
                 let text = self.command_line.history_plain_text();
                 if text.is_empty() {
-                    Task::none()
-                } else {
-                    iced::clipboard::write(text).discard()
+                    return Task::none();
                 }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let promise = crate::sys::copy_history_text(
+                        &text,
+                        crate::t!("Clipboard access is unavailable. Press Ctrl+C or Command+C to copy the selected history.").as_ref(),
+                        crate::t!("Close").as_ref(),
+                    );
+                    Task::perform(async move {
+                        wasm_bindgen_futures::JsFuture::from(promise).await
+                            .ok().and_then(|value| value.as_bool()).unwrap_or(false)
+                    }, Message::CommandHistoryCopied)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                iced::clipboard::write(text).discard()
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            Message::CommandHistoryCopied(copied) => {
+                if copied {
+                    self.command_line.push_info(crate::t!("Copied").as_ref());
+                } else {
+                    self.command_line.push_error(crate::t!("Clipboard access is unavailable. Press Ctrl+C or Command+C to copy the selected history.").as_ref());
+                }
+                Task::none()
             }
 
             Message::CommandHistoryClear => {

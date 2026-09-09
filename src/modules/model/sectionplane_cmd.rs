@@ -26,8 +26,8 @@ impl SectionKind {
 
     fn state(self) -> i32 {
         match self {
-            Self::Plane => 1,
-            Self::Slice | Self::Boundary => 2,
+            Self::Plane | Self::Slice => 1,
+            Self::Boundary => 2,
             Self::Volume => 4,
         }
     }
@@ -140,12 +140,12 @@ impl SectionPlaneCommand {
             SectionKind::Slice => (span / 60.0).max(1e-4),
             SectionKind::Boundary | SectionKind::Volume => span,
         };
-        let back_line_vertices = if depth > 0.0 {
+        let back_line_vertices = if matches!(self.kind, SectionKind::Boundary | SectionKind::Volume) {
             vertices.iter().map(|point| *point + viewing * depth).collect()
         } else {
             Vec::new()
         };
-        EntityType::Extended(ExtendedEntity {
+        let mut entity = ExtendedEntity {
             common: EntityCommon::new(),
             data: ExtendedEntityData::SectionObject(SectionObjectData {
                 state: self.kind.state(),
@@ -166,7 +166,13 @@ impl SectionPlaneCommand {
                     .collect(),
                 settings_handle: Handle::NULL,
             }),
-        })
+        };
+        crate::entities::extended::set_section_slice_metadata(
+            &mut entity,
+            self.kind == SectionKind::Slice,
+            depth,
+        );
+        EntityType::Extended(entity)
     }
 
     fn line_at(&self, point: DVec3, viewing: DVec3, vertical_hint: DVec3) -> (Vec<DVec3>, DVec3) {
@@ -482,3 +488,50 @@ impl CadCommand for SectionPlaneCommand {
 inventory::submit!(crate::command::CommandRegistration {
     names: &["SECTIONPLANE"]
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn data(entity: &EntityType) -> (&ExtendedEntity, &SectionObjectData) {
+        let EntityType::Extended(entity) = entity else {
+            panic!("expected extended entity");
+        };
+        let ExtendedEntityData::SectionObject(data) = &entity.data else {
+            panic!("expected section object");
+        };
+        (entity, data)
+    }
+
+    #[test]
+    fn slice_uses_persistent_thickness_without_boundary_geometry() {
+        let mut command = SectionPlaneCommand::new(
+            Some((DVec3::ZERO, DVec3::splat(10.0))),
+            3,
+        );
+        command.kind = SectionKind::Slice;
+        let entity = command.entity(vec![DVec3::ZERO, DVec3::Y * 6.0], DVec3::Z, true);
+        let (entity, section) = data(&entity);
+
+        assert_eq!(section.state, 1);
+        assert!(section.back_line_vertices.is_empty());
+        assert!(crate::entities::extended::section_is_slice(entity));
+        assert!((crate::entities::extended::section_slice_depth(entity).unwrap() - 0.1).abs()
+            < 1e-12);
+    }
+
+    #[test]
+    fn boundary_keeps_a_real_back_line_and_no_slice_marker() {
+        let mut command = SectionPlaneCommand::new(
+            Some((DVec3::ZERO, DVec3::splat(10.0))),
+            1,
+        );
+        command.kind = SectionKind::Boundary;
+        let entity = command.entity(vec![DVec3::ZERO, DVec3::Y * 6.0], DVec3::Z, true);
+        let (entity, section) = data(&entity);
+
+        assert_eq!(section.state, 2);
+        assert_eq!(section.back_line_vertices.len(), section.vertices.len());
+        assert!(!crate::entities::extended::section_is_slice(entity));
+    }
+}

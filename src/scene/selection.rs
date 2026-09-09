@@ -938,12 +938,57 @@ impl Scene {
             if respect_layer_locks && self.is_layer_locked(h) {
                 continue;
             }
+            let settings_handle = self.document.get_entity(h).and_then(|entity| match entity {
+                EntityType::Extended(acadrust::entities::ExtendedEntity {
+                    data: acadrust::entities::ExtendedEntityData::SectionObject(data),
+                    ..
+                }) if !data.settings_handle.is_null() => Some(data.settings_handle),
+                _ => None,
+            });
+            let section_managers: Vec<Handle> = self
+                .document
+                .objects
+                .iter()
+                .filter_map(|(handle, object)| match object {
+                    ObjectType::ClassObject(object) => match &object.data {
+                        acadrust::objects::ClassObjectData::SectionManager(manager)
+                            if manager.sections.contains(&h) =>
+                        {
+                            Some(*handle)
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect();
             // Delta-undo: capture the removed entity so an undo can re-insert it.
             if self.is_recording_undo() {
                 let before = self.document.get_entity_arc(h);
                 self.record_undo_before(h, before);
+                if let Some(settings_handle) = settings_handle {
+                    let before = self.document.objects.get(&settings_handle).cloned();
+                    self.record_undo_object_before(settings_handle, before);
+                }
+                for &manager_handle in &section_managers {
+                    let before = self.document.objects.get(&manager_handle).cloned();
+                    self.record_undo_object_before(manager_handle, before);
+                }
             }
             self.delete_solid_history(h);
+            if let Some(settings_handle) = settings_handle {
+                self.document.objects.remove(&settings_handle);
+            }
+            for manager_handle in section_managers {
+                if let Some(ObjectType::ClassObject(object)) =
+                    self.document.objects.get_mut(&manager_handle)
+                {
+                    if let acadrust::objects::ClassObjectData::SectionManager(manager) =
+                        &mut object.data
+                    {
+                        manager.sections.retain(|section| *section != h);
+                    }
+                }
+            }
             self.remember_removed_cache_categories(h);
             self.document.remove_entity_arc(h);
             selection_changed |= self.selected.remove(&h);

@@ -3,6 +3,7 @@ use acadrust::entities::{
     PointCloudData, PointCloudExData, RemoteTextData, SectionObjectData,
 };
 use acadrust::types::{Handle, Transform, Vector3};
+use acadrust::xdata::{ExtendedDataRecord, XDataValue};
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -17,6 +18,69 @@ use crate::scene::model::object::{
 use crate::scene::model::wire_model::SnapHint;
 
 const NAN: [f64; 3] = [f64::NAN; 3];
+const SECTION_SLICE_APP: &str = "IsSlice";
+const SECTION_THICKNESS_APP: &str = "ThicknessDepth";
+
+pub(crate) fn section_is_slice(entity: &ExtendedEntity) -> bool {
+    entity
+        .common
+        .extended_data
+        .get_record(SECTION_SLICE_APP)
+        .is_some_and(|record| {
+            record
+                .values
+                .iter()
+                .rev()
+                .find_map(|value| match value {
+                    XDataValue::Integer16(value) => Some(*value != 0),
+                    XDataValue::Integer32(value) => Some(*value != 0),
+                    _ => None,
+                })
+                .unwrap_or(false)
+        })
+}
+
+pub(crate) fn section_slice_depth(entity: &ExtendedEntity) -> Option<f64> {
+    entity
+        .common
+        .extended_data
+        .get_record(SECTION_THICKNESS_APP)?
+        .values
+        .iter()
+        .find_map(|value| match value {
+            XDataValue::Real(value) | XDataValue::Distance(value) => Some(*value),
+            _ => None,
+        })
+        .filter(|value| value.is_finite())
+        .map(f64::abs)
+}
+
+pub(crate) fn set_section_slice_metadata(
+    entity: &mut ExtendedEntity,
+    enabled: bool,
+    depth: f64,
+) {
+    if !enabled {
+        entity.common.extended_data.remove_record(SECTION_SLICE_APP);
+        entity
+            .common
+            .extended_data
+            .remove_record(SECTION_THICKNESS_APP);
+        return;
+    }
+
+    let mut slice = ExtendedDataRecord::new(SECTION_SLICE_APP);
+    slice.values = vec![XDataValue::Integer16(0), XDataValue::Integer16(1)];
+    entity.common.extended_data.upsert_record(slice);
+
+    let mut thickness = ExtendedDataRecord::new(SECTION_THICKNESS_APP);
+    thickness.values = vec![XDataValue::Real(if depth.is_finite() {
+        depth.abs()
+    } else {
+        0.0
+    })];
+    entity.common.extended_data.upsert_record(thickness);
+}
 
 fn vector_text(value: Vector3) -> String {
     format!("{:.6}, {:.6}, {:.6}", value.x, value.y, value.z)
@@ -558,17 +622,17 @@ fn to_render(entity: &ExtendedEntity, document: &acadrust::CadDocument) -> Optio
     })
 }
 
-fn section_properties(data: &SectionObjectData) -> Vec<PropSection> {
+fn section_properties(entity: &ExtendedEntity, data: &SectionObjectData) -> Vec<PropSection> {
     let vertices = data
         .vertices
         .iter()
         .map(|point| vector_text(*point))
         .collect::<Vec<_>>()
         .join("; ");
-    let kind = section_kind(data);
+    let kind = section_kind(entity, data);
     let viewing = section_viewing_direction(data);
     let offset = section_plane_offset(data);
-    let depth = section_depth(data);
+    let depth = section_slice_depth(entity).unwrap_or_else(|| section_depth(data));
     vec![PropSection {
         title: t!("Section Plane").into_owned(),
         props: vec![
@@ -656,18 +720,14 @@ fn section_depth(data: &SectionObjectData) -> f64 {
         .map_or(0.0, |(front, back)| (*back - *front).length())
 }
 
-fn section_kind(data: &SectionObjectData) -> &'static str {
+fn section_kind(entity: &ExtendedEntity, data: &SectionObjectData) -> &'static str {
+    if section_is_slice(entity) {
+        return "Slice";
+    }
     match data.state {
         1 => "Plane",
         4 => "Volume",
-        2 => {
-            let span = data
-                .vertices
-                .first()
-                .zip(data.vertices.last())
-                .map_or(1.0, |(first, last)| (*last - *first).length().max(1e-9));
-            if section_depth(data) < span * 0.25 { "Slice" } else { "Boundary" }
-        }
+        2 => "Boundary",
         _ => "Plane",
     }
 }
@@ -734,8 +794,8 @@ fn set_section_kind(data: &mut SectionObjectData, value: &str) {
         .map_or(1.0, |(first, last)| (*last - *first).length().max(1e-4));
     match value.trim().to_ascii_uppercase().as_str() {
         "SLICE" => {
-            data.state = 2;
-            set_section_depth(data, span / 60.0);
+            data.state = 1;
+            data.back_line_vertices.clear();
         }
         "BOUNDARY" => {
             data.state = 2;
@@ -1135,7 +1195,7 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
             title: t!("Camera").into_owned(),
             props: vec![ro_prop(t!("View").as_ref(), "ext_camera_view", handle_text(*view_handle))],
         }],
-        ExtendedEntityData::SectionObject(data) => section_properties(data),
+        ExtendedEntityData::SectionObject(data) => section_properties(entity, data),
         ExtendedEntityData::ArcAlignedText(data) => arc_text_properties(data),
         ExtendedEntityData::RemoteText(data) => remote_text_properties(data),
         ExtendedEntityData::GeoPositionMarker(data) => geo_marker_properties(data),
@@ -1282,65 +1342,97 @@ fn set_f64(value: &str, target: &mut f64) {
     }
 }
 
-fn apply_geom_prop(entity: &mut ExtendedEntity, field: &str, value: &str) {
-    match &mut entity.data {
-        ExtendedEntityData::SectionObject(data) => match field {
-            "ext_section_name" => data.name = value.to_string(),
-            "ext_section_state" | "ext_section_state2" => set_section_kind(data, value),
-            "ext_section_viewing" => {
-                if let Some(direction) = parse_vector(value) {
-                    set_viewing_direction(data, direction);
-                }
+fn apply_section_prop(entity: &mut ExtendedEntity, field: &str, value: &str) {
+    let was_slice = section_is_slice(entity);
+    let stored_slice_depth = section_slice_depth(entity).unwrap_or(0.0);
+    let ExtendedEntityData::SectionObject(data) = &mut entity.data else {
+        return;
+    };
+    let mut slice_update = None;
+    match field {
+        "ext_section_name" => data.name = value.to_string(),
+        "ext_section_state" | "ext_section_state2" => {
+            let kind = value.trim().to_ascii_uppercase();
+            let span = data
+                .vertices
+                .first()
+                .zip(data.vertices.last())
+                .map_or(1.0, |(first, last)| (*last - *first).length().max(1e-4));
+            set_section_kind(data, &kind);
+            slice_update = Some((kind == "SLICE", (span / 60.0).max(1e-4)));
+        }
+        "ext_section_viewing" => {
+            if let Some(direction) = parse_vector(value) {
+                set_viewing_direction(data, direction);
             }
-            "ext_section_vertical" => {
-                if let Some(direction) = parse_vector(value) {
-                    let depth = section_depth(data);
-                    let direction = normalized(direction, data.vertical_direction);
-                    if direction.dot(&section_tangent(data)).abs() < 1.0 - 1e-9 {
-                        data.vertical_direction = direction;
-                        if depth > 0.0 {
-                            set_section_depth(data, depth);
-                        }
-                    }
-                }
-            }
-            "ext_section_live" => data.flags ^= 1,
-            "ext_section_alpha" => {
-                if let Ok(alpha) = value.trim().parse::<i16>() {
-                    data.indicator_alpha = alpha.clamp(0, 100);
-                }
-            }
-            "ext_section_elevation" | "ext_section_offset" => {
-                if let Some(offset) = parse_f64(value) {
-                    move_section_to_offset(data, offset);
-                }
-            }
-            "ext_section_top" => {
-                if let Some(height) = parse_f64(value).filter(|height| *height >= 0.0) {
-                    data.top_height = height;
-                }
-            }
-            "ext_section_bottom" => {
-                if let Some(height) = parse_f64(value).filter(|height| *height >= 0.0) {
-                    data.bottom_height = height;
-                }
-            }
-            "ext_section_vertices" => {
-                if let Some(vertices) = parse_vertices(value) {
-                    let depth = section_depth(data);
-                    data.vertices = vertices;
+        }
+        "ext_section_vertical" => {
+            if let Some(direction) = parse_vector(value) {
+                let depth = section_depth(data);
+                let direction = normalized(direction, data.vertical_direction);
+                if direction.dot(&section_tangent(data)).abs() < 1.0 - 1e-9 {
+                    data.vertical_direction = direction;
                     if depth > 0.0 {
                         set_section_depth(data, depth);
                     }
                 }
             }
-            "ext_section_depth" => {
-                if let Some(depth) = parse_f64(value) {
+        }
+        "ext_section_live" => data.flags ^= 1,
+        "ext_section_alpha" => {
+            if let Ok(alpha) = value.trim().parse::<i16>() {
+                data.indicator_alpha = alpha.clamp(0, 100);
+            }
+        }
+        "ext_section_elevation" | "ext_section_offset" => {
+            if let Some(offset) = parse_f64(value) {
+                move_section_to_offset(data, offset);
+            }
+        }
+        "ext_section_top" => {
+            if let Some(height) = parse_f64(value).filter(|height| *height >= 0.0) {
+                data.top_height = height;
+            }
+        }
+        "ext_section_bottom" => {
+            if let Some(height) = parse_f64(value).filter(|height| *height >= 0.0) {
+                data.bottom_height = height;
+            }
+        }
+        "ext_section_vertices" => {
+            if let Some(vertices) = parse_vertices(value) {
+                let depth = section_depth(data);
+                data.vertices = vertices;
+                if depth > 0.0 {
                     set_section_depth(data, depth);
                 }
             }
-            _ => {}
-        },
+        }
+        "ext_section_depth" => {
+            if let Some(depth) = parse_f64(value) {
+                if was_slice {
+                    slice_update = Some((true, depth));
+                } else {
+                    set_section_depth(data, depth);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if let Some((enabled, depth)) = slice_update {
+        set_section_slice_metadata(entity, enabled, depth);
+    } else if was_slice && field != "ext_section_depth" {
+        set_section_slice_metadata(entity, true, stored_slice_depth);
+    }
+}
+
+fn apply_geom_prop(entity: &mut ExtendedEntity, field: &str, value: &str) {
+    if matches!(entity.data, ExtendedEntityData::SectionObject(_)) {
+        apply_section_prop(entity, field, value);
+        return;
+    }
+    match &mut entity.data {
         ExtendedEntityData::ArcAlignedText(data) => match field {
             "ext_arc_text" => data.text = value.to_string(),
             "ext_arc_font" => data.font_name = value.to_string(),
@@ -1692,6 +1784,8 @@ fn transformed_planar_angle(
 fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
     let transform = entity_transform(requested);
     let scale = scalar_scale(requested);
+    let slice_depth = section_is_slice(entity)
+        .then(|| section_slice_depth(entity).unwrap_or(0.0) * scale);
     match &mut entity.data {
         ExtendedEntityData::SectionObject(data) => {
             for point in data
@@ -1829,6 +1923,9 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
             }
         }
         _ => {}
+    }
+    if let Some(depth) = slice_depth {
+        set_section_slice_metadata(entity, true, depth);
     }
 }
 

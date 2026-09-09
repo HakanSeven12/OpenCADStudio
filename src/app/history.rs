@@ -675,6 +675,10 @@ impl OpenCADStudio {
             entity,
             EntityType::Block(_)
                 | EntityType::BlockEnd(_)
+                | EntityType::Extended(acadrust::entities::ExtendedEntity {
+                    data: acadrust::entities::ExtendedEntityData::SectionObject(_),
+                    ..
+                })
         ) {
             return false;
         }

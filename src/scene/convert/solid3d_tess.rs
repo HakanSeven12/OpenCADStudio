@@ -167,7 +167,7 @@ pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
     kernel_acis_body(&surface.acis_data)
 }
 
-fn kernel_acis_body(acis: &acadrust::entities::AcisData) -> Option<KernelBody> {
+pub(crate) fn kernel_acis_body(acis: &acadrust::entities::AcisData) -> Option<KernelBody> {
     let sat = parse_acis(
         || acis.parse(),
         acis.is_binary,

@@ -3253,8 +3253,7 @@ fn retain_compact_solid_sections(
                     | "transparency"
                     | "hyperlink"
                     | "material"
-            ) || property.field.starts_with("mesh_")
-                || crate::scene::model::solid_history::is_specialized_property(property.field)
+            ) || crate::scene::model::solid_history::is_specialized_property(property.field)
         });
     });
     sections.retain(|section| !section.props.is_empty());

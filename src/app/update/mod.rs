@@ -5916,6 +5916,18 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::DoubleClickBlockRefeditChanged(enabled) => {
+                self.double_click_block_refedit = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::DoubleClickBlockAtteditChanged(enabled) => {
+                self.double_click_block_attedit = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::CursorTypeChanged(value) => {
                 self.cursor_type = value;
                 self.persist_settings_if_changed();

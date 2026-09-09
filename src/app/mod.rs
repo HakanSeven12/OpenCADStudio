@@ -500,6 +500,10 @@ pub(super) struct OpenCADStudio {
     cursor_size: i32,
     /// Selection-box size setting (PICKBOX, 0..=50).
     pick_box: i32,
+    /// Use REFEDIT rather than BEDIT when double-clicking an attribute-free block.
+    double_click_block_refedit: bool,
+    /// Open ATTEDIT when double-clicking a block with attributes.
+    double_click_block_attedit: bool,
     /// Drawing viewport cursor style (CURSORTYPE).
     cursor_type: settings::CursorType,
     /// Explicit crosshair colour; `None` retains automatic contrast.
@@ -1937,6 +1941,10 @@ pub enum Message {
     CursorSizeChanged(i32),
     /// Set PICKBOX from the Selection-page slider.
     PickBoxChanged(i32),
+    /// Choose whether double-clicking a block starts BEDIT or REFEDIT.
+    DoubleClickBlockRefeditChanged(bool),
+    /// Choose whether double-clicking a block with attributes starts ATTEDIT.
+    DoubleClickBlockAtteditChanged(bool),
     /// Set CURSORTYPE from Options.
     CursorTypeChanged(settings::CursorType),
     /// Set the model-space lineweight preview scale from Options.
@@ -3371,6 +3379,8 @@ impl OpenCADStudio {
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
+            double_click_block_refedit: false,
+            double_click_block_attedit: true,
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),

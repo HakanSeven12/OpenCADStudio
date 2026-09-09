@@ -13,6 +13,7 @@ pub enum OptionsTab {
     General,
     Display,
     Selection,
+    Drawing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +38,8 @@ pub fn view_window<'a>(
     active_tab: OptionsTab,
     cursor_size: i32,
     pick_box: i32,
+    double_click_block_refedit: bool,
+    double_click_block_attedit: bool,
     cursor_type: CursorType,
     crosshair_color: Option<[u8; 3]>,
     crosshair_color_input: &'a str,
@@ -699,10 +702,35 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
+    let drawing = column![
+        text(crate::t!("Block Edit")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(double_click_block_refedit)
+                .on_toggle(Message::DoubleClickBlockRefeditChanged)
+                .size(15),
+            text(crate::t!("Double-click to edit block in-place (REFEDIT)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(18),
+        row![
+            iced::widget::checkbox(double_click_block_attedit)
+                .on_toggle(Message::DoubleClickBlockAtteditChanged)
+                .size(15),
+            text(crate::t!("Double-click attributed blocks to edit attributes (ATTEDIT)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
     let content: Element<'a, Message> = match active_tab {
         OptionsTab::General => general.into(),
         OptionsTab::Display => display_element.into(),
         OptionsTab::Selection => selection.into(),
+        OptionsTab::Drawing => drawing.into(),
     };
 
     let tab_button = |label, tab| {
@@ -716,6 +744,7 @@ pub fn view_window<'a>(
         tab_button(crate::t!("General"), OptionsTab::General),
         tab_button(crate::t!("Display"), OptionsTab::Display),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
+        tab_button(crate::t!("Drawing"), OptionsTab::Drawing),
     ]
     .spacing(6);
 
@@ -732,9 +761,9 @@ pub fn view_window<'a>(
     .height(sizing.height);
 
     container(body)
+        .width(540)
+        .height(560)
         .style(container::rounded_box)
         .padding([16, 18])
-        .width(sizing.width)
-        .height(sizing.height)
         .into()
 }

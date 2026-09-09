@@ -187,6 +187,8 @@ impl OpenCADStudio {
                         self.options_tab,
                         self.cursor_size,
                         self.pick_box,
+                        self.double_click_block_refedit,
+                        self.double_click_block_attedit,
                         self.cursor_type,
                         self.crosshair_color,
                         &self.crosshair_color_input,

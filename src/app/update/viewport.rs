@@ -4734,15 +4734,17 @@ properties={:.1}ms picked={}",
                         return self.begin_text_edit(handle);
                     }
                     // Double-clicking a block with attributes opens the
-                    // attribute editor (edit its values); a block with
-                    // no attributes opens the block editor (BEDIT) — a
-                    // space tab scoped to the block's own geometry, so
-                    // edits reflect in every instance. (#136, #192, #261)
+                    // attribute editor (edit its values). For blocks without
+                    // attributes, Options > Drawing chooses BEDIT (default)
+                    // or in-place REFEDIT. (#136, #192, #261)
                     let insert_has_attrs = matches!(
                         self.tabs[i].scene.document.get_entity(handle),
                         Some(AcadEntityType::Insert(ins)) if !ins.attributes.is_empty()
                     );
-                    if insert_has_attrs && self.tabs[i].active_block_edit.is_none() {
+                    if insert_has_attrs
+                        && self.double_click_block_attedit
+                        && self.tabs[i].active_block_edit.is_none()
+                    {
                         return Task::done(Message::AttrEditorOpen(handle));
                     }
                     let is_insert = matches!(
@@ -4750,8 +4752,14 @@ properties={:.1}ms picked={}",
                         Some(AcadEntityType::Insert(_))
                     );
                     if is_insert && self.tabs[i].refedit_session.is_none() {
+                        let command = if self.double_click_block_refedit {
+                            "REFEDIT_BEGIN"
+                        } else {
+                            "BEDIT_BEGIN"
+                        };
                         return Task::done(Message::Command(format!(
-                            "BEDIT_BEGIN:{}",
+                            "{}:{}",
+                            command,
                             handle.value()
                         )));
                     }

@@ -254,7 +254,7 @@ pub fn extract_ellipse_instances(
 ) -> Option<Vec<EllipseInstance>> {
     if wire.tangent_geoms.is_empty()
         || !wire.fill_tris.is_empty()
-        || !wire.pick_tris.is_empty()
+        || wire.fill_is_3d
         || !wire.text_verts.is_empty()
         || wire.render_instance.is_some()
     {

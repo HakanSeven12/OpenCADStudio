@@ -11,7 +11,7 @@ use iced::wgpu;
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CircleInstance {
     pub center_high: [f32; 3],
-    pub _pad0: f32,
+    pub start_width: f32,
     pub center_low: [f32; 3],
     pub radius: f32,
     pub axis_x: [f32; 3],
@@ -19,7 +19,7 @@ pub struct CircleInstance {
     pub axis_y: [f32; 3],
     pub end_angle: f32,
     pub color: [f32; 4],
-    /// `[half_width, pattern_length, draw_depth, padding]`
+    /// `[half_width, pattern_length, draw_depth, end_width]`
     pub params: [f32; 4],
     pub pat0: [f32; 4],
     pub pat1: [f32; 4],
@@ -205,6 +205,16 @@ pub fn extract_circle_instance_from_geom(
     wire: &crate::scene::WireModel,
     draw_depth: f32,
 ) -> Option<CircleInstance> {
+    extract_circle_instance_from_geom_indexed(geom, wire, draw_depth, 0)
+}
+
+/// Helper to extract an analytical circle or circular arc instance at a specific segment index.
+pub fn extract_circle_instance_from_geom_indexed(
+    geom: &crate::scene::model::wire_model::TangentGeom,
+    wire: &crate::scene::WireModel,
+    draw_depth: f32,
+    geom_index: usize,
+) -> Option<CircleInstance> {
     let (center, axis_x, axis_y, radius, start_angle, end_angle) = match *geom {
         crate::scene::model::wire_model::TangentGeom::Circle { center, radius } => (
             [center[0] as f64, center[1] as f64, center[2] as f64],
@@ -246,9 +256,25 @@ pub fn extract_circle_instance_from_geom(
     let pat0 = [wire.pattern[0], wire.pattern[1], wire.pattern[2], wire.pattern[3]];
     let pat1 = [wire.pattern[4], wire.pattern[5], wire.pattern[6], wire.pattern[7]];
 
+    let (start_width, end_width) = if !wire.taper_widths.is_empty() {
+        if wire.taper_widths.len() >= 2 && wire.tangent_geoms.len() == 1 {
+            (wire.taper_widths[0], wire.taper_widths[1])
+        } else if wire.taper_widths.len() > geom_index {
+            let sw = wire.taper_widths[geom_index];
+            let ew = wire.taper_widths.get(geom_index + 1).copied().unwrap_or(sw);
+            (sw, ew)
+        } else {
+            (wire.world_width, wire.world_width)
+        }
+    } else if wire.world_width > 0.0 {
+        (wire.world_width, wire.world_width)
+    } else {
+        (0.0, 0.0)
+    };
+
     Some(CircleInstance {
         center_high: ch,
-        _pad0: 0.0,
+        start_width,
         center_low: cl,
         radius: radius as f32,
         axis_x: [axis_x[0] as f32, axis_x[1] as f32, axis_x[2] as f32],
@@ -256,7 +282,7 @@ pub fn extract_circle_instance_from_geom(
         axis_y: [axis_y[0] as f32, axis_y[1] as f32, axis_y[2] as f32],
         end_angle,
         color: wire.color,
-        params: [hw, wire.pattern_length, draw_depth, 0.0],
+        params: [hw, wire.pattern_length, draw_depth, end_width],
         pat0,
         pat1,
     })
@@ -265,14 +291,14 @@ pub fn extract_circle_instance_from_geom(
 /// Helper to extract all analytical circle/arc instances from a `WireModel`.
 ///
 /// Returns `Some(instances)` if the wire is non-empty, contains solely analytical
-/// circle/arc tangent geometries, and has no mesh/pick fills, text, or block instance.
+/// circle/arc tangent geometries, and has no mesh fills, text, or block instance.
 pub fn extract_circle_instances(
     wire: &crate::scene::WireModel,
     draw_depth: f32,
 ) -> Option<Vec<CircleInstance>> {
     if wire.tangent_geoms.is_empty()
         || !wire.fill_tris.is_empty()
-        || !wire.pick_tris.is_empty()
+        || wire.fill_is_3d
         || !wire.text_verts.is_empty()
         || wire.render_instance.is_some()
     {
@@ -280,8 +306,8 @@ pub fn extract_circle_instances(
     }
 
     let mut instances = Vec::with_capacity(wire.tangent_geoms.len());
-    for geom in &wire.tangent_geoms {
-        if let Some(inst) = extract_circle_instance_from_geom(geom, wire, draw_depth) {
+    for (i, geom) in wire.tangent_geoms.iter().enumerate() {
+        if let Some(inst) = extract_circle_instance_from_geom_indexed(geom, wire, draw_depth, i) {
             instances.push(inst);
         } else {
             return None;
@@ -409,5 +435,101 @@ mod tests {
             radius: -5.0,
         };
         assert!(extract_circle_instance(&wire, 0.0).is_none());
+    }
+
+    #[test]
+    fn extract_circle_instance_constant_wide_arc() {
+        let mut wire = crate::scene::WireModel::default();
+        wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
+            center: [100.0, 50.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 40.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::PI,
+        });
+        wire.world_width = 12.0;
+        wire.color = [1.0, 0.5, 0.0, 1.0];
+
+        let inst = extract_circle_instance(&wire, 0.0).expect("extract constant wide arc");
+        assert_eq!(inst.start_width, 12.0);
+        assert_eq!(inst.params[3], 12.0); // end_width
+        assert_eq!(inst.radius, 40.0);
+    }
+
+    #[test]
+    fn extract_circle_instance_tapered_arc() {
+        let mut wire = crate::scene::WireModel::default();
+        wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
+            center: [0.0, 0.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 30.0,
+            start_angle: 0.2,
+            end_angle: 1.8,
+        });
+        wire.world_width = 20.0;
+        wire.taper_widths = vec![4.0, 20.0];
+        wire.color = [0.2, 0.8, 1.0, 1.0];
+
+        let inst = extract_circle_instance(&wire, 0.0).expect("extract tapered arc");
+        assert_eq!(inst.start_width, 4.0);
+        assert_eq!(inst.params[3], 20.0); // end_width
+        assert_eq!(inst.radius, 30.0);
+    }
+
+    #[test]
+    fn extract_circle_instance_accepts_pick_tris() {
+        let mut wire = crate::scene::WireModel::default();
+        wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Circle {
+            center: [5.0, 5.0, 0.0],
+            radius: 15.0,
+        });
+        wire.world_width = 6.0;
+        wire.pick_tris = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        wire.pick_tris_low = vec![[0.0; 3]; 3];
+
+        let insts = extract_circle_instances(&wire, 0.0).expect("wide curve with pick_tris should extract");
+        assert_eq!(insts.len(), 1);
+        assert_eq!(insts[0].start_width, 6.0);
+        assert_eq!(insts[0].params[3], 6.0);
+    }
+
+    #[test]
+    fn test_donut_polyline_tessellates_to_analytical_arcs() {
+        use acadrust::CadDocument;
+        let mut doc = CadDocument::new();
+        let donut = crate::modules::draw::draw::donut::make_donut(10.0, 20.0, 0.0, 10.0, 30.0);
+        let h = doc.add_entity(donut).unwrap();
+        let entity = doc.get_entity(h).unwrap();
+        let selected = rustc_hash::FxHashSet::default();
+        let wires = crate::scene::convert::tess::tessellate_entity(
+            &doc,
+            &selected,
+            None,
+            [0.0, 0.0, 0.0, 1.0],
+            1.0,
+            None,
+            entity,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert_eq!(wires.len(), 2, "donut should split into 2 analytical arc wires");
+        for w in &wires {
+            assert_eq!(w.world_width, 20.0);
+            assert_eq!(w.tangent_geoms.len(), 1);
+            assert!(matches!(w.tangent_geoms[0], crate::scene::model::wire_model::TangentGeom::Arc { .. }));
+        }
+
+        let depth_map = rustc_hash::FxHashMap::default();
+        let partitioned = crate::scene::pipeline::wire_arena::partition_wires(&wires, &depth_map);
+        assert_eq!(partitioned.circle_instances.len(), 2);
+        assert_eq!(partitioned.regular.len(), 0);
+        assert_eq!(partitioned.circle_instances[0].start_width, 20.0);
+        assert_eq!(partitioned.circle_instances[0].params[3], 20.0);
+        assert_eq!(partitioned.circle_instances[1].start_width, 20.0);
+        assert_eq!(partitioned.circle_instances[1].params[3], 20.0);
     }
 }

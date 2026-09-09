@@ -146,7 +146,7 @@ pub fn classify_wire(wire: &WireModel) -> WireKind {
     }
     if !wire.tangent_geoms.is_empty()
         && wire.fill_tris.is_empty()
-        && wire.pick_tris.is_empty()
+        && !wire.fill_is_3d
         && wire.text_verts.is_empty()
     {
         if super::circle_gpu::extract_circle_instances(wire, 0.0).is_some() {
@@ -219,7 +219,7 @@ pub fn partition_wires<'a>(
         // Resolve draw depth only for wires eligible for analytical extraction.
         if !wire.tangent_geoms.is_empty()
             && wire.fill_tris.is_empty()
-            && wire.pick_tris.is_empty()
+            && !wire.fill_is_3d
             && wire.text_verts.is_empty()
         {
             let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
@@ -1708,5 +1708,48 @@ mod tests {
         assert_eq!(partitioned.circle_instances.len(), 2);
         assert_eq!(partitioned.ellipse_instances.len(), 1);
         assert_eq!(partitioned.regular.len(), 1);
+    }
+
+    #[test]
+    fn partition_wires_partitions_thick_and_tapered_arcs() {
+        use crate::scene::model::wire_model::TangentGeom;
+
+        // Wide arc with pick triangles
+        let mut wide_arc = WireModel::default();
+        wide_arc.tangent_geoms.push(TangentGeom::Arc {
+            center: [10.0, 20.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 25.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::PI,
+        });
+        wide_arc.world_width = 8.0;
+        wide_arc.pick_tris = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        wide_arc.pick_tris_low = vec![[0.0; 3]; 3];
+
+        // Tapered arc
+        let mut tapered_arc = WireModel::default();
+        tapered_arc.tangent_geoms.push(TangentGeom::Arc {
+            center: [50.0, 60.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 15.0,
+            start_angle: 0.5,
+            end_angle: 2.5,
+        });
+        tapered_arc.world_width = 10.0;
+        tapered_arc.taper_widths = vec![2.0, 10.0];
+
+        let wires = vec![wide_arc, tapered_arc];
+        let depth_map = rustc_hash::FxHashMap::default();
+        let partitioned = partition_wires(&wires, &depth_map);
+
+        assert_eq!(partitioned.circle_instances.len(), 2);
+        assert_eq!(partitioned.regular.len(), 0);
+        assert_eq!(partitioned.circle_instances[0].start_width, 8.0);
+        assert_eq!(partitioned.circle_instances[0].params[3], 8.0);
+        assert_eq!(partitioned.circle_instances[1].start_width, 2.0);
+        assert_eq!(partitioned.circle_instances[1].params[3], 10.0);
     }
 }

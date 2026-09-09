@@ -253,7 +253,7 @@ fn donut_wire(
     WireModel::solid_f64("rubber_band".into(), points, WireModel::CYAN, false)
 }
 
-fn make_donut(cx: f64, cy: f64, elevation: f64, inner_r: f64, outer_r: f64) -> EntityType {
+pub(crate) fn make_donut(cx: f64, cy: f64, elevation: f64, inner_r: f64, outer_r: f64) -> EntityType {
     use acadrust::types::Vector2;
     let r_avg = (inner_r + outer_r) / 2.0;
     let width = outer_r - inner_r;

@@ -12038,4 +12038,129 @@ mod layout_cache_tests {
         println!("Zoom Frame Overhead:            {:.3} ms ({:.0} FPS)", per_zoom_ms, 1000.0 / per_zoom_ms.max(0.001));
         println!("============================================================================\n");
     }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_wide_and_tapered_arc_rendering() {
+        use std::time::Instant;
+        use acadrust::entities::LwPolyline;
+        use acadrust::types::Vector2;
+
+        let n_wide_arcs = 2500;
+        let n_tapered_arcs = 2500;
+        let n_donuts = 2500;
+        let total_entities = n_wide_arcs + n_tapered_arcs + n_donuts;
+
+        let mut scene = Scene::new();
+
+        // 1. Wide polyline arcs (constant width 6.0)
+        for i in 0..n_wide_arcs {
+            let x = (i % 50) as f64 * 80.0;
+            let y = (i / 50) as f64 * 80.0;
+            let mut pline = LwPolyline::new();
+            pline.constant_width = 6.0;
+            pline.vertices = vec![
+                acadrust::entities::LwVertex {
+                    location: Vector2::new(x, y),
+                    bulge: 0.5,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                    vertex_id: 0,
+                },
+                acadrust::entities::LwVertex {
+                    location: Vector2::new(x + 40.0, y),
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                    vertex_id: 1,
+                },
+            ];
+            scene.add_entity(EntityType::LwPolyline(pline));
+        }
+
+        // 2. Tapered arcs (width: 2.0 -> 12.0)
+        for i in 0..n_tapered_arcs {
+            let x = (i % 50) as f64 * 80.0;
+            let y = (i / 50) as f64 * 80.0 + 4500.0;
+            let mut pline = LwPolyline::new();
+            pline.vertices = vec![
+                acadrust::entities::LwVertex {
+                    location: Vector2::new(x, y),
+                    bulge: 0.7,
+                    start_width: 2.0,
+                    end_width: 12.0,
+                    vertex_id: 0,
+                },
+                acadrust::entities::LwVertex {
+                    location: Vector2::new(x + 35.0, y + 10.0),
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                    vertex_id: 1,
+                },
+            ];
+            scene.add_entity(EntityType::LwPolyline(pline));
+        }
+
+        // 3. Donuts (2 semicircular arc segments, constant width 16.0)
+        for i in 0..n_donuts {
+            let cx = (i % 50) as f64 * 80.0;
+            let cy = (i / 50) as f64 * 80.0 + 9000.0;
+            let donut = crate::modules::draw::draw::donut::make_donut(cx, cy, 0.0, 10.0, 26.0);
+            scene.add_entity(donut);
+        }
+
+        let cam = Camera::default();
+        let t_tess_start = Instant::now();
+        let wires = scene.model_tile_wires_arc(0, &cam, 1.0, 1000.0);
+        let tess_duration = t_tess_start.elapsed();
+
+        let total_wires = wires.len();
+        let mut chord_points = 0usize;
+        let mut analytical_tangents = 0usize;
+        for w in wires.iter() {
+            chord_points += w.points.len();
+            analytical_tangents += w.tangent_geoms.len();
+        }
+
+        let depths = rustc_hash::FxHashMap::default();
+        let t_part_start = Instant::now();
+        let iters = 100;
+        let mut part = None;
+        for _ in 0..iters {
+            part = Some(crate::scene::pipeline::wire_arena::partition_wires(&wires, &depths));
+        }
+        let part_duration = t_part_start.elapsed() / (iters as u32);
+        let p = part.unwrap();
+
+        // Zoom simulation
+        let zoom_levels = [0.1f32, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 1000.0];
+        let t_zoom_start = Instant::now();
+        let mut dynamic_cam = Camera::default();
+        for &zoom in zoom_levels.iter().cycle().take(100) {
+            dynamic_cam.distance = 1000.0 / zoom;
+            let _w = scene.model_tile_wires_arc(0, &dynamic_cam, 1.0, 1000.0);
+        }
+        let zoom_100_duration = t_zoom_start.elapsed();
+        let per_zoom_ms = zoom_100_duration.as_secs_f64() * 1000.0 / 100.0;
+
+        let line_vram_mb = (chord_points * 36) as f64 / (1024.0 * 1024.0);
+        let inst_vram_mb = (p.circle_instances.len() * 128) as f64 / (1024.0 * 1024.0);
+
+        println!("\n=== BENCHMARK REPORT: THICK & TAPERED ANALYTICAL ARCS ===");
+        println!("Thick & Tapered Entities:       {total_entities}");
+        println!("Initial Wire Build Time:        {:.2?}", tess_duration);
+        println!("Total Wires:                    {total_wires}");
+        println!("Tessellated Chord Vertices:     {chord_points}");
+        println!("Analytical Tangent Geometries:  {analytical_tangents}");
+        println!("Partitioning Time (per frame):  {:.3?}", part_duration);
+        println!("Regular Line Wires:             {}", p.regular.len());
+        println!("GPU Circle/Arc Instances:       {}", p.circle_instances.len());
+        println!("Line Arena VRAM (chord lines):  {:.2} MB", line_vram_mb);
+        println!("GPU Analytical VRAM:            {:.2} MB", inst_vram_mb);
+        println!("VRAM Reduction Ratio:           {:.1}x", if inst_vram_mb > 0.0 { line_vram_mb / inst_vram_mb } else { 0.0 });
+        println!("100 Camera Zoom Navigations:    {:.2?}", zoom_100_duration);
+        println!("Zoom Frame Overhead:            {:.3} ms ({:.0} FPS)", per_zoom_ms, 1000.0 / per_zoom_ms.max(0.001));
+        println!("========================================================\n");
+    }
 }

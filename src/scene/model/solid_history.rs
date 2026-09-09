@@ -1013,44 +1013,9 @@ fn brep_properties(
         history_flags(document, handle).unwrap_or((false, false, 1));
     let (show_history, show_history_editable) =
         displayed_history_state(object_show_history, show_history_mode);
-    let mut geometry = vec![Property {
-        label: t!("Solid type").into_owned(),
-        field: "solid_history_type",
-        value: PropValue::ReadOnly(t!("3D Solid").into_owned()),
-    }];
-    if let Some(position) = document
-        .solid_history_operation(handle)
-        .and_then(|operation| match operation {
-            SolidHistoryOperation::Brep(value) => world_point(value.base.transform, [0.0; 3]),
-            _ => None,
-        })
-    {
-        geometry.extend([
-            crate::entities::common::edit_prop(
-                t!("Position X").as_ref(),
-                PROP_POSITION_X,
-                position.x,
-            ),
-            crate::entities::common::edit_prop(
-                t!("Position Y").as_ref(),
-                PROP_POSITION_Y,
-                position.y,
-            ),
-            crate::entities::common::edit_prop(
-                t!("Position Z").as_ref(),
-                PROP_POSITION_Z,
-                position.z,
-            ),
-        ]);
-    }
-    vec![
-        PropSection {
-            title: t!("Geometry").into_owned(),
-            props: geometry,
-        },
-        PropSection {
-            title: t!("Solid History").into_owned(),
-            props: vec![
+    vec![PropSection {
+        title: t!("Solid History").into_owned(),
+        props: vec![
             Property {
                 label: t!("History").into_owned(),
                 field: PROP_HISTORY,
@@ -1072,8 +1037,7 @@ fn brep_properties(
                 },
             },
         ],
-        },
-    ]
+    }]
 }
 
 fn cylinder_properties(

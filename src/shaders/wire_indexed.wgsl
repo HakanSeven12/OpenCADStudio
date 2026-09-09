@@ -165,7 +165,11 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
     // fragment stage round the overhang off: adjoining segments then meet in
     // overlapping round joints, closing the wedge gaps a perpendicular-only
     // expansion leaves on the outside of corners and along tessellated arcs.
-    let ext = which_end * 2.0 - 1.0; // -1 at the A end, +1 at the B end
+    // Wide polylines have physical world-unit width (world_half_width or taper > 0);
+    // in CAD, wide polyline segments are flat/square-ended 2D rectangles (or
+    // trapezoids), not rounded pill shapes.
+    let is_world = c.world_half_width > 0.0 || in.taper_ratio.x > 0.0 || in.taper_ratio.y > 0.0;
+    let ext = select(which_end * 2.0 - 1.0, 0.0, is_world);
     let offset_px = perp * hw * side + dir * hw * ext;
     let ndc_offset = offset_px / (u.viewport_size * 0.5);
     let final_clip = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);

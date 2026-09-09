@@ -144,7 +144,8 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         wire_const.half_width,
     );
     let half_width = mix(half_width_a, half_width_b, which_end);
-    let extension = which_end * 2.0 - 1.0;
+    let is_world = wire_const.world_half_width > 0.0 || in.taper_ratio.x > 0.0 || in.taper_ratio.y > 0.0;
+    let extension = select(which_end * 2.0 - 1.0, 0.0, is_world);
     let offset_px = perpendicular * half_width * side
         + direction * half_width * extension;
     let ndc_offset = offset_px / (u.viewport_size * 0.5);

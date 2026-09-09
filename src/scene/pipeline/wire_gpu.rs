@@ -1464,4 +1464,30 @@ mod block_wire_storage_tests {
         };
         assert_eq!(names(&packed), names(&storage));
     }
+
+    #[test]
+    fn wire_shader_validates_with_naga() {
+        let source = include_str!("../../shaders/wire.wgsl");
+        let module = naga::front::wgsl::parse_str(source).expect("wire.wgsl parses cleanly");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        );
+        validator
+            .validate(&module)
+            .expect("wire.wgsl validates cleanly with naga");
+    }
+
+    #[test]
+    fn wire_indexed_shader_validates_with_naga() {
+        let source = include_str!("../../shaders/wire_indexed.wgsl");
+        let module = naga::front::wgsl::parse_str(source).expect("wire_indexed.wgsl parses cleanly");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        );
+        validator
+            .validate(&module)
+            .expect("wire_indexed.wgsl validates cleanly with naga");
+    }
 }

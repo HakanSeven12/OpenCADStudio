@@ -14,8 +14,8 @@ bincode = "1.3"
 thiserror = "1"
 
 # Host adapters convert ObjectId to acadrust handles; kernel handles stay local.
-acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "f1ef57eddb6ffba91bc529e16b5dc39e2aef975c", features = ["serde"], optional = true }
-cadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "b5e5ac39accecef4cd379562957df8fcddb65e0d", features = ["acis", "offset"], optional = true }
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "62628c41670a914d1598a14faafc3c6e3aa4a270", features = ["serde"], optional = true }
+cadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "ee9df07d524b7744242bdef135d9c61f2f713797", features = ["acis", "offset"], optional = true }
 ocs_plugin_api = { path = "../ocs_plugin_api", optional = true, features = ["host"] }
 
 [build-dependencies]

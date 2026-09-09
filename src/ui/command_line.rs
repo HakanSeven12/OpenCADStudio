@@ -849,7 +849,7 @@ impl CommandLine {
                     .align_y(iced::Center),
             )
             .width(Length::Fill)
-            .padding([2, 6]);
+            .padding([2, 8]);
             let panel = container(column![header, log])
                 .width(Length::Fill)
                 .padding([4, 8]);

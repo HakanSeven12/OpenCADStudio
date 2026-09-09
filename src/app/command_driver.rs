@@ -5814,8 +5814,8 @@ fn resample_widths(source: &[(f64, f64)], count: usize) -> Vec<(f64, f64)> {
 mod thicken_tests {
     use super::*;
     use acadrust::entities::{Surface, SurfaceKind};
-    use cadkernel::geom2d::{Circle, Curve};
-    use cadkernel::space::Plane;
+    use cadkernel::geom2d::{Circle, Curve, NurbsCurve};
+    use cadkernel::space::{Parameterization, Plane};
 
     #[test]
     fn thicken_preserves_sources_and_round_trips_results_with_one_undo() {
@@ -5856,5 +5856,54 @@ mod thicken_tests {
         assert!(app.tabs[i].scene.document.get_entity(result).is_some());
         assert!(app.tabs[i].scene.document.solid_history_operation(result).is_some());
         assert_eq!(serde_json::to_value(app.tabs[i].scene.document.get_entity(source).unwrap()).unwrap(), original);
+    }
+
+    #[test]
+    fn thicken_creates_a_solid_from_a_free_form_surface() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let profile = NurbsCurve::interpolate(
+            &[[0.0, 0.0], [0.7, 0.15], [1.3, -0.1], [2.0, 0.0]],
+            None,
+            None,
+            Parameterization::Chord,
+        )
+        .unwrap();
+        let body = cadkernel::brep::extrude_surface(
+            Plane::XY,
+            &[Curve::Nurbs(profile)],
+            [0.0, 0.0, 2.0],
+        )
+        .unwrap();
+        let source = app.add_surface_model(
+            acadrust::EntityType::Surface(Surface::new(SurfaceKind::Generic)),
+            body,
+        );
+        let i = app.active_tab;
+
+        let _ = app.apply_cmd_result(CmdResult::ThickenEntities {
+            handles: vec![source],
+            distance: 0.15,
+        });
+
+        let solids = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| {
+                matches!(entity, acadrust::EntityType::Solid3D(_))
+                    .then_some(entity.common().handle)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(solids.len(), 1);
+        let solid = &app.tabs[i].scene.solid_models[&solids[0]];
+        assert!(solid.validate().is_empty());
+        assert!(solid.edges.iter().all(|(_, edge)| edge.coedges.len() == 2));
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .solid_history_operation(solids[0])
+            .is_some());
+        assert!(app.tabs[i].scene.document.get_entity(source).is_some());
     }
 }

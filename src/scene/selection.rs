@@ -47,6 +47,7 @@ impl Scene {
         let leaders = self.leaders_by_annotation();
         let mut expanded = Vec::with_capacity(handles.len());
         for &handle in handles {
+            let start = expanded.len();
             expanded.push(handle);
             if let Some(EntityType::Leader(leader)) = self.document.get_entity(handle) {
                 if !leader.annotation_handle.is_null() {
@@ -56,6 +57,7 @@ impl Scene {
             if let Some(pointing) = leaders.1.get(&handle) {
                 expanded.extend(pointing.iter().copied());
             }
+            expanded[start..].sort_unstable_by_key(Handle::value);
         }
         expanded
     }
@@ -106,23 +108,7 @@ impl Scene {
         &self,
         handles: &[Handle],
     ) -> Vec<Handle> {
-        let mut expanded = handles.to_vec();
-        let leaders = self.leaders_by_annotation();
-
-        for &handle in handles {
-            // LEADER -> annotation.
-            if let Some(EntityType::Leader(leader)) = self.document.get_entity(handle) {
-                if !leader.annotation_handle.is_null() {
-                    expanded.push(leader.annotation_handle);
-                }
-            }
-
-            // Annotation -> LEADER.
-            if let Some(pointing) = leaders.1.get(&handle) {
-                expanded.extend(pointing.iter().copied());
-            }
-        }
-
+        let mut expanded = self.expanded_with_leaders(handles);
         expanded.sort_unstable_by_key(|handle| handle.value());
         expanded.dedup();
         expanded

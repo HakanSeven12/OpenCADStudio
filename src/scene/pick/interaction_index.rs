@@ -914,17 +914,17 @@ impl InteractionIndex {
         let (
             ((segment_entries, snap_point_entries), (key_vertex_entries, key_segment_entries)),
             ((fill_triangle_entries, pick_triangle_entries), glyph_entries),
-        ) = rayon::join(
+        ) = crate::par::join(
             || {
-                rayon::join(
+                crate::par::join(
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || flatten_entry_parts(segment_parts),
                             || flatten_entry_parts(snap_point_parts),
                         )
                     },
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || flatten_entry_parts(key_vertex_parts),
                             || flatten_entry_parts(key_segment_parts),
                         )
@@ -932,7 +932,7 @@ impl InteractionIndex {
                 )
             },
             || {
-                let (fill, pick) = rayon::join(
+                let (fill, pick) = crate::par::join(
                     || flatten_entry_parts(fill_triangle_parts),
                     || flatten_entry_parts(pick_triangle_parts),
                 );
@@ -966,17 +966,17 @@ impl InteractionIndex {
         let (
             ((wires, segments), (snap_points, key_vertices)),
             ((key_segments, fill_triangles), (pick_triangles, glyphs)),
-        ) = rayon::join(
+        ) = crate::par::join(
             || {
-                rayon::join(
+                crate::par::join(
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || SpatialSet::build(wire_entries),
                             || SpatialSet::build(segment_entries),
                         )
                     },
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || SpatialSet::build(snap_point_entries),
                             || SpatialSet::build(key_vertex_entries),
                         )
@@ -984,15 +984,15 @@ impl InteractionIndex {
                 )
             },
             || {
-                rayon::join(
+                crate::par::join(
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || SpatialSet::build(key_segment_entries),
                             || SpatialSet::build(fill_triangle_entries),
                         )
                     },
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || SpatialSet::build(pick_triangle_entries),
                             || SpatialSet::build(glyph_entries),
                         )
@@ -1054,12 +1054,12 @@ impl InteractionIndex {
     /// thread. Perspective/orbit hover must never pay this one-time cost.
     pub fn prepare_screen(&self) {
         #[cfg(not(target_arch = "wasm32"))]
-        rayon::join(
+        crate::par::join(
             || {
-                rayon::join(
-                    || rayon::join(|| self.wires.prepare_screen(), || self.segments.prepare_screen()),
+                crate::par::join(
+                    || crate::par::join(|| self.wires.prepare_screen(), || self.segments.prepare_screen()),
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || self.snap_points.prepare_screen(),
                             || self.key_vertices.prepare_screen(),
                         )
@@ -1067,15 +1067,15 @@ impl InteractionIndex {
                 )
             },
             || {
-                rayon::join(
+                crate::par::join(
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || self.key_segments.prepare_screen(),
                             || self.fill_triangles.prepare_screen(),
                         )
                     },
                     || {
-                        rayon::join(
+                        crate::par::join(
                             || self.pick_triangles.prepare_screen(),
                             || self.glyphs.prepare_screen(),
                         )
@@ -1426,9 +1426,9 @@ impl InteractionIndex {
         // sum. Each closure still calls the same query, so the results are
         // identical to the sequential ones, order included.
         let ((wire_indices, segments), ((fill_triangles, pick_triangles), glyphs)) =
-            rayon::join(
+            crate::par::join(
                 || {
-                    rayon::join(
+                    crate::par::join(
                         || {
                             let mut indices = self.wires.query_xy_unordered(aabb);
                             indices.extend_from_slice(&self.unbounded_wires);
@@ -1440,9 +1440,9 @@ impl InteractionIndex {
                     )
                 },
                 || {
-                    rayon::join(
+                    crate::par::join(
                         || {
-                            rayon::join(
+                            crate::par::join(
                                 || self.fill_triangles.query_xy_unordered(aabb),
                                 || self.pick_triangles.query_xy_unordered(aabb),
                             )

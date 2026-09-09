@@ -106,14 +106,6 @@ impl OpenCADStudio {
                         &handles,
                     );
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
-                    // Copy to system clipboard as JSON for web/cross-platform support
-                    if let Ok(clipboard_data) = serde_json::to_string(&self.clipboard) {
-                        return Some(iced::clipboard::write(format!(
-                            "OCS_CLIPBOARD_JSON\n{}\n{}",
-                            serde_json::json!([base.x, base.y, base.z]).to_string(),
-                            clipboard_data
-                        )).discard());
-                    }
                     self.command_line.push_info(crate::tf!(
                         "{} object(s) copied to clipboard.",
                         count
@@ -159,14 +151,6 @@ impl OpenCADStudio {
                 if coords.len() == 3 && !handles.is_empty() {
                     let base = glam::DVec3::new(coords[0], coords[1], coords[2]);
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
-                    // Copy to system clipboard as JSON for web/cross-platform support
-                    if let Ok(clipboard_data) = serde_json::to_string(&self.clipboard) {
-                        let _ = iced::clipboard::write(format!(
-                            "OCS_CLIPBOARD_JSON\n{}\n{}",
-                            serde_json::json!([base.x, base.y, base.z]).to_string(),
-                            clipboard_data
-                        ));
-                    }
                     self.command_line.push_info(crate::tf!(
                         "{} object(s) copied to clipboard (base {:.3},{:.3}).",
                         count,
@@ -195,14 +179,6 @@ impl OpenCADStudio {
                         &handles,
                     );
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
-                    // Copy to system clipboard as JSON for web/cross-platform support
-                    if let Ok(clipboard_data) = serde_json::to_string(&self.clipboard) {
-                        let _ = iced::clipboard::write(format!(
-                            "OCS_CLIPBOARD_JSON\n{}\n{}",
-                            serde_json::json!([base.x, base.y, base.z]).to_string(),
-                            clipboard_data
-                        ));
-                    }
                     self.push_undo_snapshot(i, "CUTCLIP");
                     self.tabs[i].scene.erase_entities(&handles);
                     self.tabs[i].scene.deselect_all();

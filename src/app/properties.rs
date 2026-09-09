@@ -35,7 +35,7 @@ impl OpenCADStudio {
         // A 186 468-entity selection spends ~112 ms in here. Split it into the
         // three phases that can own that: resolving the selected handles,
         // building the panel, and syncing the ribbon.
-        let t_all = crate::perf::enabled().then(std::time::Instant::now);
+        let t_all = crate::perf::enabled().then(iced::time::Instant::now);
         let i = self.active_tab;
         if !crate::entities::object_data::cache_is_prepared(
             &self.tabs[i].scene.object_data_cache,
@@ -112,7 +112,7 @@ impl OpenCADStudio {
         // Everything before this is the prelude: the object-data cache, the
         // unit context, the layer and linetype lists.
         let m_prelude = t_all.map(|t| t.elapsed().as_secs_f64() * 1000.0);
-        let t_handles = crate::perf::enabled().then(std::time::Instant::now);
+        let t_handles = crate::perf::enabled().then(iced::time::Instant::now);
         // `selected_entities` resolves every handle to an entity and builds a
         // vector of pairs; only the handles are wanted here, but the resolution
         // is what decides membership — a handle whose entity is gone is not in
@@ -2196,7 +2196,7 @@ impl OpenCADStudio {
                     // the active group, moving into the working plane, and
                     // aggregating into "varies" rows. `properties-detail`
                     // reports this whole arm as `rest`; this splits it.
-                    let t_arm = crate::perf::enabled().then(std::time::Instant::now);
+                    let t_arm = crate::perf::enabled().then(iced::time::Instant::now);
                     let groups = build_selection_groups(&selected);
                     let t_groups = t_arm.map(|t| t.elapsed().as_secs_f64() * 1000.0);
                     let active_group = selected_group
@@ -2372,7 +2372,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
         self.tabs[i].properties = new_panel;
         self.refresh_selected_grips();
         let m_panel = t_all.map(|t| t.elapsed().as_secs_f64() * 1000.0);
-        let t_ribbon = crate::perf::enabled().then(std::time::Instant::now);
+        let t_ribbon = crate::perf::enabled().then(iced::time::Instant::now);
         self.sync_ribbon_from_selection();
         if let Some(t) = t_all {
             let ribbon_ms = t_ribbon.map_or(0.0, |r| r.elapsed().as_secs_f64() * 1000.0);

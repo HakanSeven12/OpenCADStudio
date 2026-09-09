@@ -75,3 +75,11 @@ pub mod prelude {
 
     impl<I: Iterator> IterParExt for I {}
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use rayon::join;
+
+#[cfg(target_arch = "wasm32")]
+pub fn join<A, B>(a: impl FnOnce() -> A, b: impl FnOnce() -> B) -> (A, B) {
+    (a(), b())
+}

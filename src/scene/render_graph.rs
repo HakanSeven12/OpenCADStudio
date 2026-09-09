@@ -7,7 +7,7 @@
 //! producing their normal wire, hatch, image, wipeout, or mesh model.
 
 use acadrust::entities::Insert;
-use acadrust::types::{Color, Transform, Vector3};
+use acadrust::types::{Color, Matrix3, Matrix4, Transform, Vector3};
 use acadrust::{CadDocument, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -1042,11 +1042,34 @@ pub fn document_block_uses(document: &CadDocument) -> Vec<BlockUse> {
     uses
 }
 
+/// A MINSERT's row/column counts are parsed `u16`s whose unchecked product
+/// (`Insert::instance_count`) would otherwise drive this function's
+/// allocation and a full per-instance render-graph walk after it — a corrupt
+/// or adversarial 65535x65535 pair requests over four billion instances (tens
+/// of GiB) long before any GPU-side chunking limit could help. The primary
+/// defense is the load-time filter in `io::is_entity_corrupt` (kept in sync
+/// with this constant), which drops such an insert before it ever reaches a
+/// `Scene`; this is the failsafe for an insert built or edited some other way
+/// (API/scripting) that skips that path.
+const MAX_MINSERT_INSTANCES: usize = 20_000;
+
 pub fn array_offsets(insert: &Insert) -> Vec<[f64; 3]> {
     if !insert.is_minsert() {
         return vec![[0.0; 3]];
     }
-    let mut offsets = Vec::with_capacity(insert.instance_count());
+    let instance_count = insert.instance_count();
+    if instance_count > MAX_MINSERT_INSTANCES {
+        eprintln!(
+            "MINSERT '{}' requests {} instances ({}x{}), exceeding the {} budget; rendering a single instance instead",
+            insert.block_name,
+            instance_count,
+            insert.row_count,
+            insert.column_count,
+            MAX_MINSERT_INSTANCES
+        );
+        return vec![[0.0; 3]];
+    }
+    let mut offsets = Vec::with_capacity(instance_count);
     for row in 0..insert.row_count {
         for column in 0..insert.column_count {
             offsets.push([
@@ -1070,8 +1093,20 @@ pub fn insert_instance_transform(
     if offset == [0.0; 3] {
         transform
     } else {
-        Transform::from_translation(Vector3::new(offset[0], offset[1], offset[2]))
-            .then(&transform)
+        // Row/column spacing is defined in the insert's rotated/OCS-oriented
+        // space but is NOT subject to the block's x/y/z scale — this matches
+        // the pinned CAD model's own `Insert::array_points`, which rotates
+        // the offset but never scales it. Composing the raw offset ahead of
+        // the full (scaled) transform, as this used to do, let the block
+        // scale multiply the spacing too (e.g. an x-scale-2 insert with
+        // column spacing 10 would render 20 units between columns). Instead,
+        // orient the offset by rotation + OCS only, then translate the
+        // already-composed (scaled) instance transform by that world-space
+        // vector, applied after — never scaled.
+        let orientation = Transform::from_matrix(Matrix4::rotation_z(insert.rotation))
+            .then(&Transform::from_matrix(Matrix4::from_matrix3(Matrix3::arbitrary_axis(insert.normal))));
+        let world_offset = orientation.apply_rotation(Vector3::new(offset[0], offset[1], offset[2]));
+        transform.then(&Transform::from_translation(world_offset))
     }
 }
 
@@ -1162,5 +1197,87 @@ mod tests {
 
         assert!((from_insert.x - 12.0).abs() < 1.0e-9);
         assert!((applied.x - 11.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn array_offsets_clamps_pathological_minsert_counts() {
+        // A corrupt or adversarial row/column pair (parsed as u16, so this is
+        // reachable from a malformed file) must not drive a multi-billion-
+        // element allocation; the primary defense is the load-time filter in
+        // `io::is_entity_corrupt`, this is the render-graph-side failsafe.
+        let mut insert = Insert::new("BLOCK", Vector3::ZERO);
+        insert.row_count = u16::MAX;
+        insert.column_count = u16::MAX;
+        insert.row_spacing = 1.0;
+        insert.column_spacing = 1.0;
+        let offsets = array_offsets(&insert);
+        assert_eq!(offsets, vec![[0.0; 3]], "pathological instance count must clamp to a single instance");
+    }
+
+    #[test]
+    fn array_offsets_is_unaffected_for_a_reasonable_minsert() {
+        let mut insert = Insert::new("BLOCK", Vector3::ZERO);
+        insert.row_count = 3;
+        insert.column_count = 4;
+        insert.row_spacing = 5.0;
+        insert.column_spacing = 2.0;
+        let offsets = array_offsets(&insert);
+        assert_eq!(offsets.len(), 12);
+        assert_eq!(offsets[0], [0.0, 0.0, 0.0]);
+        assert_eq!(offsets[1], [2.0, 0.0, 0.0]);
+        assert_eq!(offsets[4], [0.0, 5.0, 0.0]);
+    }
+
+    #[test]
+    fn insert_instance_transform_does_not_scale_the_row_column_spacing() {
+        // github discussion-derived report: an INSERT with x-scale 2 and
+        // column spacing 10 was rendering 20 drawing units between columns
+        // instead of 10, because the offset translation was composed ahead
+        // of (and thus multiplied by) the block scale.
+        let document = CadDocument::new();
+        let mut insert = Insert::new("BLOCK", Vector3::new(100.0, 0.0, 0.0));
+        insert.set_x_scale(2.0);
+        insert.row_count = 1;
+        insert.column_count = 2;
+        insert.column_spacing = 10.0;
+
+        let transform = insert_instance_transform(
+            &document,
+            &insert,
+            [10.0, 0.0, 0.0],
+            1.0,
+            BlockScalePolicy::Applied,
+        );
+        // The block's own origin (local point 0,0,0) placed at this instance
+        // must land 10 units from the insert point, not 20.
+        let world = transform.apply(Vector3::ZERO);
+        assert!((world.x - 110.0).abs() < 1.0e-9, "expected spacing 10, got offset {}", world.x - 100.0);
+
+        // Block-local geometry must still pick up the block scale normally.
+        let block_point = transform.apply(Vector3::new(1.0, 0.0, 0.0));
+        assert!((block_point.x - 112.0).abs() < 1.0e-9, "block-local geometry should still be scaled by x_scale 2");
+    }
+
+    #[test]
+    fn insert_instance_transform_rotates_the_spacing_with_the_insert() {
+        // Matches the pinned CAD model's own `Insert::array_points`: spacing
+        // is rotated with the insert but never scaled.
+        let document = CadDocument::new();
+        let mut insert = Insert::new("BLOCK", Vector3::ZERO);
+        insert.rotation = std::f64::consts::FRAC_PI_2;
+        insert.row_count = 1;
+        insert.column_count = 2;
+        insert.column_spacing = 10.0;
+
+        let transform = insert_instance_transform(
+            &document,
+            &insert,
+            [10.0, 0.0, 0.0],
+            1.0,
+            BlockScalePolicy::Applied,
+        );
+        let world = transform.apply(Vector3::ZERO);
+        assert!(world.x.abs() < 1.0e-9, "a 90deg rotation should turn column spacing into Y, got x={}", world.x);
+        assert!((world.y - 10.0).abs() < 1.0e-9, "expected the spacing rotated onto Y, got y={}", world.y);
     }
 }

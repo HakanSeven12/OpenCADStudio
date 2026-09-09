@@ -215,17 +215,12 @@ fn polyline_segment_widths(entity: &EntityType) -> Vec<(f32, f32)> {
             (0..seg_count)
                 .map(|i| {
                     let v = &p.vertices[i];
-                    let sw = if v.start_width > 1e-9 {
-                        v.start_width
+                    let (sw, ew) = if v.start_width > 1e-9 || v.end_width > 1e-9 {
+                        (v.start_width, v.end_width)
                     } else {
-                        c
-                    } as f32;
-                    let ew = if v.end_width > 1e-9 {
-                        v.end_width
-                    } else {
-                        c
-                    } as f32;
-                    (sw, ew)
+                        (c, c)
+                    };
+                    (sw as f32, ew as f32)
                 })
                 .collect()
         }
@@ -244,17 +239,12 @@ fn polyline_segment_widths(entity: &EntityType) -> Vec<(f32, f32)> {
             (0..seg_count)
                 .map(|i| {
                     let v = &verts[i];
-                    let sw = if v.start_width > 1e-9 {
-                        v.start_width
+                    let (sw, ew) = if v.start_width > 1e-9 || v.end_width > 1e-9 {
+                        (v.start_width, v.end_width)
                     } else {
-                        def_start
-                    } as f32;
-                    let ew = if v.end_width > 1e-9 {
-                        v.end_width
-                    } else {
-                        def_end
-                    } as f32;
-                    (sw, ew)
+                        (def_start, def_end)
+                    };
+                    (sw as f32, ew as f32)
                 })
                 .collect()
         }

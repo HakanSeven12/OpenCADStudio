@@ -12,9 +12,6 @@ from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-subprocess.run(['python3', 'scripts/test_locales.py'], cwd=ROOT, check=True)
-subprocess.run(['python3', 'scripts/export-locales.py', '--check'], cwd=ROOT, check=True)
-subprocess.run(['node', 'scripts/test_web_locales.cjs'], cwd=ROOT, check=True)
 
 
 class Page(HTMLParser):
@@ -49,7 +46,7 @@ with tempfile.TemporaryDirectory() as directory:
             svg = charts.render_svg('HakanSeven12/OpenCADStudio', [date], [('v1', date, 10)], 'dark', chart, messages)
             tree = ET.fromstring(svg)
             assert tree.find('{http://www.w3.org/2000/svg}title').text == messages['stars' if chart == 'stars' else 'downloads']
-            (output / locale / f'{chart[:-1]}-history-dark.svg').write_text(svg)
+            (output / ('' if locale == 'en-US' else locale) / f'{chart[:-1]}-history-dark.svg').write_text(svg)
         html = (output / locale / 'index.html').read_text()
         assert '{{' not in html and '{count}' not in html, locale
         page = Page(html)

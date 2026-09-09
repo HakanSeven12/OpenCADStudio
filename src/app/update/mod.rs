@@ -6137,6 +6137,48 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::GripObjectLimitChanged(limit) => {
+                self.grip_object_limit = limit.clamp(0, 32767);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionEffectToggled(enabled) => {
+                self.model_space.selection_effect = enabled;
+                self.sync_model_space_theme(false);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // SELECTIONPREVIEW is a bitmask and the two checkboxes own one bit
+            // each: 1 = rollover while idle, 2 = rollover during a command.
+            Message::SelectionPreviewIdleToggled(enabled) => {
+                self.model_space.selection_preview =
+                    set_preview_bit(self.model_space.selection_preview, 1, enabled);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::SelectionPreviewCommandToggled(enabled) => {
+                self.model_space.selection_preview =
+                    set_preview_bit(self.model_space.selection_preview, 2, enabled);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // "Use Shift to add" is the inverse of PICKADD.
+            Message::ShiftToAddToggled(shift_to_add) => {
+                self.pick_add = !shift_to_add;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::PickDragRectToggled(rectangle) => {
+                self.pick_drag_rect = rectangle;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::RestoreSelectionVisualDefaults => {
                 self.model_space.selection_area = true;
                 self.model_space.selection_opacity = 12;
@@ -6149,6 +6191,10 @@ impl OpenCADStudio {
                 self.model_space.grip_color = 0;
                 self.model_space.grip_hot = 0;
                 self.model_space.grip_hover = 0;
+                // The button restores the *visual* defaults, which is why the
+                // grip limit is here and PICKADD / PICKDRAG are not — those are
+                // how selection behaves, not how it looks.
+                self.grip_object_limit = crate::app::settings::DEFAULT_GRIP_OBJECT_LIMIT;
                 self.sync_model_space_theme(false);
                 self.persist_settings_if_changed();
                 Task::none()
@@ -8659,5 +8705,14 @@ mod free_text_entry_tests {
         let _ = app.update(Message::CommandInput("LINE 0,0 10,10".into()));
         assert!(app.command_line.input.is_empty(), "Space submitted the line");
         assert_eq!(app.text_entry_mode(), TextEntryMode::Command);
+    }
+}
+
+/// Set or clear one bit of `SELECTIONPREVIEW`.
+fn set_preview_bit(current: u8, bit: u8, enabled: bool) -> u8 {
+    if enabled {
+        current | bit
+    } else {
+        current & !bit
     }
 }

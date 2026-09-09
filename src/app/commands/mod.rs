@@ -294,6 +294,10 @@ pub fn start_allowed(cmd: &str) -> bool {
             | "ALIASEDIT"
             | "CUILOAD"
             | "CUIIMPORT"
+            // The start page already offers Options as a button, so the
+            // command that opens the same dialog belongs here too.
+            | "OPTIONS"
+            | "OP"
     )
 }
 
@@ -548,6 +552,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "GRIPCOLOR",
         "GRIPHOT",
         "GRIPHOVER",
+        "GRIPOBJLIMIT",
         // Reset selected entities' overrides to follow their layer.
         "SETBYLAYER",
         // Remove duplicate objects; set drawing base point; audit integrity;

@@ -367,6 +367,7 @@ impl OpenCADStudio {
             pick_box: self.pick_box,
             double_click_block_refedit: self.double_click_block_refedit,
             double_click_block_attedit: self.double_click_block_attedit,
+            grip_object_limit: self.grip_object_limit,
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
             lineweight_display_scale: self.lineweight_display_scale,
@@ -422,6 +423,7 @@ impl OpenCADStudio {
         self.pick_box = s.pick_box.clamp(0, 50);
         self.double_click_block_refedit = s.double_click_block_refedit;
         self.double_click_block_attedit = s.double_click_block_attedit;
+        self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
         self.cursor_type = s.cursor_type;
         self.crosshair_color = s.crosshair_color;
         self.crosshair_color_input = s

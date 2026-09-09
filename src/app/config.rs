@@ -270,7 +270,7 @@ pub struct ModelSpaceThemeConfig {
     pub selection_highlight_color: u8,
     /// SELECTIONEFFECT: whether selected objects glow with solid highlight (true) or dash (false).
     pub selection_effect: bool,
-    /// SELECTIONPREVIEW: rollover/hover highlight mode (0 = off, 1 = in cmd, 2 = idle, 3 = both).
+    /// SELECTIONPREVIEW bitmask: 1 = idle, 2 = during a command, 3 = both.
     pub selection_preview: u8,
     /// GRIPSIZE: grip marker half-size in pixels (1–25, default 5).
     pub grip_size: u8,

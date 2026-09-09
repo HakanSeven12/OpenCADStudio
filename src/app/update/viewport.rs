@@ -5778,3 +5778,57 @@ properties={:.1}ms picked={}",
         Task::none()
     }
 }
+
+#[cfg(test)]
+mod selection_preview_tests {
+    use super::*;
+    use crate::app::{HoverDwell, OpenCADStudio, HOVER_DWELL_MS};
+
+    /// Drive one settled rollover pick over a line and report what the scene
+    /// ended up highlighting.
+    fn rollover_hits(preview: u8) -> bool {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.model_space.selection_preview = preview;
+        let _ = app.run_command_line("LINE 0,0 10,10");
+        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        let _ = app.run_command_line("ZOOM EXTENTS");
+
+        // The pick only runs once the cursor has been still for the dwell
+        // window, so the arming timestamp is backdated past it.
+        app.hover_dwell = Some(HoverDwell {
+            last_move_at: Instant::now()
+                - std::time::Duration::from_millis(HOVER_DWELL_MS as u64 * 2),
+            point: iced::Point::new(400.0, 300.0),
+            tile_size: (800.0, 600.0),
+            tab: i,
+        });
+        let _ = app.on_hover_dwell_tick();
+        app.tabs[i].scene.hover_highlight.is_some()
+    }
+
+    /// Bit 1 of `SELECTIONPREVIEW` is the rollover that runs with no command
+    /// active, and the Options card gives it a checkbox. The config comment
+    /// used to describe the bits the wrong way round, so which bit does what
+    /// is worth asserting rather than reading.
+    #[test]
+    fn the_idle_rollover_follows_bit_one() {
+        assert!(
+            rollover_hits(1),
+            "bit 1 set: the line under the cursor must be highlighted",
+        );
+        assert!(
+            rollover_hits(3),
+            "both bits set: still highlighted",
+        );
+        assert!(
+            !rollover_hits(0),
+            "preview off: nothing may be highlighted",
+        );
+        assert!(
+            !rollover_hits(2),
+            "only the in-command bit: the idle rollover stays off",
+        );
+    }
+}

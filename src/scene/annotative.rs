@@ -435,6 +435,10 @@ pub fn create_annotation_context(
         is_default,
         scale: scale_handle,
         kind,
+        raw_dwg_data: None,
+        raw_dwg_handle_bits: 0,
+        raw_dwg_version: None,
+        raw_dwg_snapshot: None,
     };
     doc.objects
         .insert(leaf_h, ObjectType::ObjectContextData(leaf));

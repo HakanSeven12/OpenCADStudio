@@ -22,6 +22,12 @@ do not reorder them. The consistency tests verify their bincode discriminants.
 generates the API reference and binding schema. The layout snapshot is curated
 vocabulary, not a reflected binary codec schema.
 
+Layer CRUD is a document-table family, not an entity family. The API carries
+layer properties in the plain-data `LayerInfo` DTO and the host translates them
+to/from `acadrust::tables::Layer`. Layer names are case-insensitive. The host
+rejects duplicate names, deletion of layer "0" or the current layer, and removal
+of a layer that still has entities assigned.
+
 XDATA and XRECORD are serialization roundtrip families: the API carries their
 payloads as plain-data DTOs and the host stores/retrieves them without semantic
 interpretation. XDATA records are keyed by registered application name on any

@@ -23,9 +23,15 @@ Host plugin API version 6 and document envelope version 1 are required.
 
 Decode receipt outcomes as `{"NewId": 42}` or `{"NewIds": [42, 43]}` and query
 results as externally tagged dictionaries such as `{"Volume": 12.5}`. The facade
-unwraps these into typed handles or values. XDATA and XRECORD payloads appear as
-nested externally tagged dictionaries (e.g. `{"XData": {"application_name": ...,
-"values": [...]}}` or `{"XRecord": {"name": ..., "entries": [...]}}`). The bridge
-must raise an exception for an error response. Transport binding determines the
-tab; requesting another tab or combining typed handles from different documents
-raises an error.
+unwraps these into typed handles or values. Layer results use `{"Layers": [...]}`
+and `{"EntityLayer": "WALLS"}`. Layer properties (`LayerInfo`, `LayerFlags`,
+`Color`, `LineWeight`) appear as plain dictionaries in operation payloads, e.g.
+`{"CreateLayer": {"name": "Walls", "flags": {"frozen": false, "locked": false,
+"frozen_in_new_viewport": false, "off": false}, "color": {"Index": 7},
+"line_type": "Continuous", "line_weight": {"Default": null},
+"plot_style": "", "is_plottable": true}}`.
+XDATA and XRECORD payloads appear as nested externally tagged dictionaries
+(e.g. `{"XData": {"application_name": ..., "values": [...]}}` or
+`{"XRecord": {"name": ..., "entries": [...]}}`). The bridge must raise an
+exception for an error response. Transport binding determines the tab; requesting
+another tab or combining typed handles from different documents raises an error.

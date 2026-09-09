@@ -298,6 +298,13 @@ impl Scene {
         };
 
         if !handle.is_null() {
+            // New geometry drawn during REFEDIT belongs to the edited block,
+            // so it must stay bright along with the copied block entities.
+            // The remaining model-space entities are only visible as faded
+            // context.
+            if let Some(keep) = self.refedit_keep.as_mut() {
+                keep.insert(handle);
+            }
             self.invalidate_dependency_index();
             if let Some(model) = hatch_seed {
                 self.hatches.insert(handle, model);

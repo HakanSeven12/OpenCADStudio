@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "f1ef57eddb6ffba91bc529e16b5dc39e2aef975c", features = ["serde"] }
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "62628c41670a914d1598a14faafc3c6e3aa4a270", features = ["serde"] }
 bincode = "1.3"
 serde = { version = "1", features = ["derive"] }
 console_error_panic_hook = "0.1"

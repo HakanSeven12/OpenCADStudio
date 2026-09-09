@@ -22,6 +22,12 @@ do not reorder them. The consistency tests verify their bincode discriminants.
 generates the API reference and binding schema. The layout snapshot is curated
 vocabulary, not a reflected binary codec schema.
 
+XDATA and XRECORD are serialization roundtrip families: the API carries their
+payloads as plain-data DTOs and the host stores/retrieves them without semantic
+interpretation. XDATA records are keyed by registered application name on any
+entity; XRECORD objects are standalone named dictionaries of group-code/value
+entries. Both preserve exact bytes/values across save and reload.
+
 To extend the API, update the DTO, backend, executor, facade and spec together,
 add a native behavior test, and rebuild the generated reference/schema. New
 backend methods must reject unsupported behavior explicitly.

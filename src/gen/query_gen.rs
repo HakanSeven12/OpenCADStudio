@@ -55,4 +55,13 @@ pub enum Query {
     GetViewportView {
         id: ObjectId,
     },
+    /// The XDATA record for `application_name` attached to an entity (`None` if absent).
+    GetXData {
+        id: ObjectId,
+        application_name: String,
+    },
+    /// The XRECORD object payload by id.
+    GetXRecord {
+        id: ObjectId,
+    },
 }

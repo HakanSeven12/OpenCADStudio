@@ -152,6 +152,27 @@ pub trait DocApiBackend {
         sections: &[(cadkernel::space::Plane, Vec<cadkernel::geom2d::Curve>)],
     ) -> ApiResult<ObjectId>;
 
+    /// Attach or replace an XDATA record for `application_name` on `id`.
+    /// `None` removes any existing record for that application.
+    fn set_xdata(
+        &mut self,
+        id: ObjectId,
+        application_name: &str,
+        record: Option<&crate::ops::XDataRecord>,
+    ) -> ApiResult<()>;
+
+    /// Read the XDATA record for `application_name` on `id` (`None` if absent).
+    fn xdata(&self, id: ObjectId, application_name: &str) -> ApiResult<Option<crate::ops::XDataRecord>>;
+
+    /// Create a standalone `XRECORD` object from a spec; returns the fresh `ObjectId`.
+    fn add_xrecord(&mut self, spec: &crate::ops::XRecordSpec) -> ApiResult<ObjectId>;
+
+    /// Replace an existing `XRECORD` object's payload in place.
+    fn set_xrecord(&mut self, id: ObjectId, spec: &crate::ops::XRecordSpec) -> ApiResult<()>;
+
+    /// Read an existing `XRECORD` object's payload (`None` if `id` is not an XRecord).
+    fn xrecord(&self, id: ObjectId) -> ApiResult<Option<crate::ops::XRecordSpec>>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

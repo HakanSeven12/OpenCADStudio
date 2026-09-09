@@ -8,6 +8,80 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::gen::Operation;
 
+/// An XDATA record payload: one registered application name plus its typed
+/// value list. This is a plain-data, serde-compatible mirror of
+/// `acadrust::xdata::ExtendedDataRecord` so the wire DTO stays independent of
+/// the host dependency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XDataRecord {
+    pub application_name: String,
+    pub values: Vec<XDataValue>,
+}
+
+/// A single XDATA value. Mirrors `acadrust::xdata::XDataValue`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum XDataValue {
+    String(String),
+    ControlString(String),
+    LayerName(String),
+    BinaryData(Vec<u8>),
+    Handle(u64),
+    Point3D([f64; 3]),
+    Position3D([f64; 3]),
+    Displacement3D([f64; 3]),
+    Direction3D([f64; 3]),
+    Real(f64),
+    Distance(f64),
+    ScaleFactor(f64),
+    Integer16(i16),
+    Integer32(i32),
+}
+
+/// Construction spec for an `XRECORD` object. Mirrors the acadrust
+/// `XRecord` payload (name + cloning flags + group-code entries) in a
+/// serde-compatible, host-independent form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XRecordSpec {
+    pub name: String,
+    pub cloning_flags: XRecordCloningFlags,
+    pub entries: Vec<XRecordEntry>,
+}
+
+/// XRecord cloning behavior flags. Mirror of
+/// `acadrust::objects::DictionaryCloningFlags`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum XRecordCloningFlags {
+    #[default]
+    NotApplicable,
+    KeepExisting,
+    UseClone,
+    XrefName,
+    Name,
+    UnmangleName,
+}
+
+/// One XRECORD group-code entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XRecordEntry {
+    pub code: i32,
+    pub value: XRecordValue,
+}
+
+/// A single XRECORD value. Mirrors `acadrust::objects::XRecordValue`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum XRecordValue {
+    String(String),
+    Double(f64),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Byte(u8),
+    Bool(bool),
+    Handle(u64),
+    Point3D([f64; 3]),
+    Chunk(Vec<u8>),
+}
+
 /// Boolean operation kind for [`Operation::SolidBoolean`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoolOp {
@@ -291,6 +365,9 @@ impl crate::gen::Operation {
             CreateAttributeDefinition(_) => "CreateAttributeDefinition",
             CreateTable(_) => "CreateTable",
             CreateDimensionAngular2Ln(_) => "CreateDimensionAngular2Ln",
+            SetXData { .. } => "SetXData",
+            CreateXRecord(_) => "CreateXRecord",
+            SetXRecord { .. } => "SetXRecord",
         }
     }
 }

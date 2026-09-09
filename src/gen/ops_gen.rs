@@ -10,7 +10,7 @@ use crate::id::ObjectId;
 use crate::ops::{
     AttributeDefinitionSpec, BoolOp, Curve2Spec, DimensionAngularSpec, DimensionRadialSpec,
     DimensionSpec, EntitySpec, HatchSpec, InsertSpec, MTextSpec, PlacementSpec, RasterImageSpec,
-    SolidPrimitive, TableSpec, TextSpec, ViewportSpec,
+    SolidPrimitive, TableSpec, TextSpec, ViewportSpec, XDataRecord, XRecordSpec,
 };
 
 /// A typed write operation. Each variant is ONE atomic host call = one
@@ -99,4 +99,15 @@ pub enum Operation {
     CreateTable(TableSpec),
     // dimension sub-types (2-line angular)
     CreateDimensionAngular2Ln(DimensionAngularSpec),
+    // xdata / xrecord roundtrip
+    SetXData {
+        id: ObjectId,
+        application_name: String,
+        record: Option<XDataRecord>,
+    },
+    CreateXRecord(XRecordSpec),
+    SetXRecord {
+        id: ObjectId,
+        spec: XRecordSpec,
+    },
 }

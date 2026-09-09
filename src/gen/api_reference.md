@@ -192,6 +192,21 @@ Table: create_table(insertion_point, data[row][col]) builds rows x columns of te
 
 - **create_table**(insertion_point: [f64; 3], data: &[Vec<String>]) -> `Entity` — `CreateTable`
 
+## `XRecord` (acadrust `XRecord`, collection `entities`)
+
+Extended record (XRecord): arbitrary DXF group-code/value pairs. Roundtripped verbatim as an XRecordSpec payload.
+
+### Constructors (`doc.entities()`)
+
+- **create_xrecord**(spec: XRecordSpec) -> `Entity` — `CreateXRecord`
+
+### Methods
+
+- **payload**() -> `XRecordSpec` — query `GetXRecord`
+- **set_payload**(spec: XRecordSpec) -> `()` — op `SetXRecord`
+- **xdata**(application_name: &str) -> `Option<XDataRecord>` — query `GetXData`
+- **set_xdata**(application_name: &str, record: Option<XDataRecord>) -> `()` — op `SetXData`
+
 ## Generic methods (every handle)
 
 Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
@@ -284,6 +299,9 @@ Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-
 - `CreateAttributeDefinition(AttributeDefinitionSpec)`
 - `CreateTable(TableSpec)`
 - `CreateDimensionAngular2Ln(DimensionAngularSpec)`
+- `SetXData { id: ObjectId, application_name: String, record: Option<XDataRecord> }`
+- `CreateXRecord(XRecordSpec)`
+- `SetXRecord { id: ObjectId, spec: XRecordSpec }`
 
 ### `Query`
 
@@ -299,6 +317,8 @@ Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-
 - `GetAttributes { id: ObjectId }`
 - `GetBlockEntities { block_name: String }`
 - `GetViewportView { id: ObjectId }`
+- `GetXData { id: ObjectId, application_name: String }`
+- `GetXRecord { id: ObjectId }`
 
 ## Errors (`ApiError`)
 

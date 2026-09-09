@@ -398,10 +398,7 @@ jobs:
           APP=OpenCADStudio.app
           rm -rf "$APP"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/PlugIns"
-          # The launcher is CFBundleExecutable (Finder always launches it,
-          # for both document opens and plain launches); it execs into the
-          # real GUI binary, renamed alongside it, over argv. See
-          # src/bin/ocs_launcher.rs.
+          # Finder opens the launcher, which relays files to the sibling GUI.
           cp target/aarch64-apple-darwin/release/ocs_launcher "$APP/Contents/MacOS/OpenCADStudio"
           cp target/aarch64-apple-darwin/release/OpenCADStudio "$APP/Contents/MacOS/OpenCADStudio-App"
           chmod +x "$APP/Contents/MacOS/OpenCADStudio" "$APP/Contents/MacOS/OpenCADStudio-App"

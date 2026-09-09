@@ -98,14 +98,14 @@ def main() -> None:
         if active.get("start"):
             client.tool(
                 "ocs_execute",
-                {"session_id": session, "request": {"op": "new", "request_id": "eval-new"}},
+                {"ocs_session_id": session, "request": {"op": "new", "request_id": "eval-new"}},
             )
 
         base = 1_000_000 + int(time.time()) % 100_000
         draw = client.tool(
             "ocs_execute",
             {
-                "session_id": session,
+                "ocs_session_id": session,
                 "response_detail": "changed_entities",
                 "wait_seconds": 0,
                 "request": {
@@ -129,19 +129,19 @@ def main() -> None:
 
         crossings = client.tool(
             "ocs_read",
-            {"session_id": session, "op": "query", "parameters": {"intersections": line_handles}},
+            {"ocs_session_id": session, "op": "query", "parameters": {"intersections": line_handles}},
         )
         assert crossings["count"] == 1 and crossings["intersections"][0]["point"] == [base, 0.0]
 
         nearest = client.tool(
             "ocs_read",
-            {"session_id": session, "op": "query", "parameters": {"near": [base + 20, 0], "handles": handles, "limit": 1}},
+            {"ocs_session_id": session, "op": "query", "parameters": {"near": [base + 20, 0], "handles": handles, "limit": 1}},
         )
         assert nearest["entities"][0]["handle"] == circle_handles[0]
 
         measured = client.tool(
             "ocs_read",
-            {"session_id": session, "op": "measure", "parameters": {"handles": circle_handles}},
+            {"ocs_session_id": session, "op": "measure", "parameters": {"handles": circle_handles}},
         )
         assert abs(measured["measurements"][0]["curve"]["area"] - 12.566370614359172) < 1e-9
         succeeded = True
@@ -151,7 +151,7 @@ def main() -> None:
                 client.tool(
                     "ocs_execute",
                     {
-                        "session_id": session,
+                        "ocs_session_id": session,
                         "request": {
                             "op": "batch",
                             "request_id": f"eval-clean-{base}",

@@ -1082,54 +1082,95 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "SHELL" | "SOLIDEDIT" => {
+                use crate::modules::model::shell_cmd::ShellCommand;
+                let selected = self.tabs[i]
+                    .scene
+                    .selected_handles_in_order()
+                    .into_iter()
+                    .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+                    .filter(|handle| {
+                        matches!(
+                            self.tabs[i].scene.document.get_entity(*handle),
+                            Some(acadrust::EntityType::Solid3D(_))
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let target = (selected.len() == 1).then_some(selected[0]);
+                let new_cmd = if cmd == "SHELL" {
+                    ShellCommand::direct(target)
+                } else {
+                    ShellCommand::solid_edit(target)
+                };
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             // ── Solid booleans ─────────────────────────────────────────────
-            "UNION" | "INTERSECT" => {
+            "UNION" => {
                 use crate::modules::model::boolean_cmd::BoolOp;
-                if let Some(op) = BoolOp::from_id(cmd) {
-                    let solid_count = {
-                        let scene = &self.tabs[i].scene;
-                        scene
-                            .selected_handles_in_order()
-                            .into_iter()
-                            .filter(|handle| !scene.is_layer_locked(*handle))
-                            .filter(|handle| {
-                                matches!(
-                                    scene.document.get_entity(*handle),
-                                    Some(acadrust::EntityType::Solid3D(_))
-                                )
-                            })
-                            .take(2)
-                            .count()
-                    };
-                    if solid_count < 2 {
-                        use crate::modules::draw::select::SelectObjectsCommand;
-                        let selection = SelectObjectsCommand::new(cmd);
-                        self.command_line.push_info(&selection.prompt());
-                        self.tabs[i].active_cmd = Some(Box::new(selection));
-                    } else {
-                        return Some(self.solid_boolean(op));
-                    }
+                if self.union_ready() {
+                    return Some(self.solid_boolean(BoolOp::Union));
+                }
+                use crate::modules::draw::select::SelectObjectsCommand;
+                let selection = SelectObjectsCommand::plain("UNION", "UNIONAPPLY");
+                self.command_line.push_info(&selection.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(selection));
+            }
+
+            "UNIONAPPLY" => {
+                use crate::modules::model::boolean_cmd::BoolOp;
+                return Some(self.solid_boolean(BoolOp::Union));
+            }
+
+            "INTERSECT" => {
+                use crate::modules::model::boolean_cmd::BoolOp;
+                if !self.intersect_ready() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                } else {
+                    return Some(self.solid_boolean(BoolOp::Intersect));
                 }
             }
 
             "SUBTRACT" => {
                 use crate::modules::model::boolean_cmd::SubtractCommand;
-                let bases = {
+                let (bases, bases_have_mesh) = {
                     let scene = &self.tabs[i].scene;
-                    scene
+                    let bases = scene
                         .selected_handles_in_order()
                         .into_iter()
                         .filter(|handle| !scene.is_layer_locked(*handle))
                         .filter(|handle| {
                             matches!(
                                 scene.document.get_entity(*handle),
-                                Some(acadrust::EntityType::Solid3D(_))
+                                Some(
+                                    acadrust::EntityType::Solid3D(_)
+                                        | acadrust::EntityType::Region(_)
+                                        | acadrust::EntityType::Surface(_)
+                                        | acadrust::EntityType::Mesh(_)
+                                        | acadrust::EntityType::PolygonMesh(_)
+                                        | acadrust::EntityType::PolyfaceMesh(_)
+                                )
                             )
                         })
-                        .collect()
+                        .collect::<Vec<_>>();
+                    let bases_have_mesh = bases.iter().any(|handle| {
+                        matches!(
+                            scene.document.get_entity(*handle),
+                            Some(
+                                acadrust::EntityType::Mesh(_)
+                                    | acadrust::EntityType::PolygonMesh(_)
+                                    | acadrust::EntityType::PolyfaceMesh(_)
+                            )
+                        )
+                    });
+                    (bases, bases_have_mesh)
                 };
                 self.tabs[i].scene.deselect_all();
-                let subtract = SubtractCommand::new(bases);
+                let subtract = SubtractCommand::new(bases, bases_have_mesh);
                 self.command_line.push_info(&subtract.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(subtract));
             }
@@ -1180,9 +1221,9 @@ impl OpenCADStudio {
             // REGION — convert selected closed boundaries (closed polylines /
             // circles) into Region entities (one wire loop each).
             "REGION" | "REG" => {
-                use acadrust::entities::{Region, Wire};
+                use acadrust::entities::Region;
                 use acadrust::types::Vector3;
-                let mut loops: Vec<Vec<Vector3>> = Vec::new();
+                let mut regions = Vec::new();
                 for (_, e) in self.tabs[i].scene.selected_entities().iter() {
                     let supported = matches!(
                         e,
@@ -1190,32 +1231,39 @@ impl OpenCADStudio {
                             if pl.is_closed && pl.vertices.len() >= 3
                     ) || matches!(e, acadrust::EntityType::Circle(_));
                     if supported {
-                        let Some(curve) = crate::entities::curve::entity_curve(e) else {
+                        let Some((plane, loops, true)) =
+                            crate::scene::model::presspull_model::profile_geometry(e)
+                        else {
                             continue;
                         };
-                        loops.push(
-                            crate::entities::curve::curve_points(&curve)
-                                .into_iter()
-                                .map(|point| Vector3::new(point[0], point[1], point[2]))
-                                .collect(),
+                        let Some(body) = cadkernel::brep::planar_region(plane, &loops) else {
+                            continue;
+                        };
+                        let mut region = Region::new();
+                        region.point_of_reference = Vector3::new(
+                            plane.origin[0],
+                            plane.origin[1],
+                            plane.origin[2],
                         );
+                        region.common.layer = self.tabs[i].active_layer.clone();
+                        regions.push((region, body));
                     }
                 }
-                if loops.is_empty() {
+                if regions.is_empty() {
                     self.command_line
                         .push_error(crate::t!("REGION: select closed polylines or circles.").as_ref());
                 } else {
                     self.push_undo_snapshot(i, "REGION");
-                    let count = loops.len();
-                    for pts in loops {
-                        let mut w = Wire::new();
-                        let first = pts.first().copied().unwrap_or(Vector3::new(0.0, 0.0, 0.0));
-                        w.points = pts;
-                        let mut r = Region::new();
-                        r.point_of_reference = first;
-                        r.wires = vec![w];
-                        r.common.layer = self.tabs[i].active_layer.clone();
-                        self.tabs[i].scene.add_entity(acadrust::EntityType::Region(r));
+                    let count = regions.len();
+                    let mut created = Vec::with_capacity(count);
+                    for (region, body) in regions {
+                        let handle = self.add_region_model(region, body);
+                        if handle.is_null() {
+                            self.tabs[i].scene.rollback_new_entities(&created);
+                            self.discard_last_undo_entry(i);
+                            return Some(iced::Task::none());
+                        }
+                        created.push(handle);
                     }
                     self.tabs[i].dirty = true;
                     self.command_line
@@ -1370,21 +1418,51 @@ impl OpenCADStudio {
                 }
             }
 
-            // SLICE [X|Y|Z] <value> [TOP|BOTTOM] — cut the selected solid with an
-            // axis-aligned plane, keeping the lower half by default.
             "SLICE" | "SL" => {
-                use crate::command::SelectThenKeywordCommand;
-                let has_sel = !self.tabs[i].scene.selected_entities().is_empty();
-                let c = SelectThenKeywordCommand::new(
-                    "SLICE",
-                    "SLICE  cutting-plane axis  [X / Y / Z]  (add TOP/BOTTOM by typing):",
-                    vec![
-                        ("X", "X", Some("SLICE  offset along X:")),
-                        ("Y", "Y", Some("SLICE  offset along Y:")),
-                        ("Z", "Z", Some("SLICE  offset along Z:")),
-                    ],
-                    has_sel,
-                );
+                use crate::modules::model::slice_cmd::SliceCommand;
+                let (targets, centre, radius, view_normal) = {
+                    let scene = &mut self.tabs[i].scene;
+                    let mut targets = scene
+                        .selected_handles_in_order()
+                        .into_iter()
+                        .filter(|handle| !scene.is_layer_locked(*handle))
+                        .filter(|handle| {
+                            matches!(
+                                scene.document.get_entity(*handle),
+                                Some(
+                                    acadrust::EntityType::Solid3D(_)
+                                        | acadrust::EntityType::Surface(_)
+                                )
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    scene.restore_solid_models(&targets);
+                    targets.retain(|handle| scene.solid_models.contains_key(handle));
+                    let bounds = targets
+                        .iter()
+                        .filter_map(|handle| {
+                            crate::scene::model::solid_model::extent(&scene.solid_models[handle])
+                        })
+                        .fold(None::<([f64; 3], [f64; 3])>, |bounds, (low, high)| {
+                            Some(match bounds {
+                                None => (low, high),
+                                Some((mut min, mut max)) => {
+                                    for axis in 0..3 {
+                                        min[axis] = min[axis].min(low[axis]);
+                                        max[axis] = max[axis].max(high[axis]);
+                                    }
+                                    (min, max)
+                                }
+                            })
+                        });
+                    let (centre, radius) = bounds.map_or((glam::DVec3::ZERO, 10.0), |(min, max)| {
+                        let min = glam::DVec3::from_array(min);
+                        let max = glam::DVec3::from_array(max);
+                        ((min + max) * 0.5, (max - min).length().max(2.0) * 0.65)
+                    });
+                    (targets, centre, radius, scene.active_gaze_dir().as_dvec3())
+                };
+                let c = SliceCommand::new(targets, view_normal, centre, radius);
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
@@ -1403,7 +1481,18 @@ impl OpenCADStudio {
                 let value: Option<f64> = parts.get(val_idx).and_then(|s| s.parse().ok());
                 let keep_low = !parts.iter().any(|s| s == "TOP");
                 match value {
-                    Some(v) => return Some(self.solid_slice(axis, v, keep_low)),
+                    Some(v) => {
+                        let (origin, x, normal) = match axis {
+                            0 => ([v, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
+                            1 => ([0.0, v, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+                            _ => ([0.0, 0.0, v], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+                        };
+                        let plane = cadkernel::space::Plane::orthonormal(origin, x, normal)
+                            .expect("fixed world axes define a plane");
+                        let side = glam::DVec3::from_array(origin)
+                            + glam::DVec3::from_array(normal) * if keep_low { -1.0 } else { 1.0 };
+                        return Some(self.slice_selected(plane, Some(side)));
+                    }
                     None => self.command_line.push_info(
                         crate::t!("Usage: SLICE [X|Y|Z] <value> [TOP|BOTTOM]   (cuts the selected solid)").as_ref(),
                     ),

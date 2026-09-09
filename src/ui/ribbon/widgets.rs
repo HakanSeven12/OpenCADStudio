@@ -165,16 +165,20 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str, label_size: f32) 
         .to_absolute(Pixels(label_size))
         .0;
 
+    // `Wrapping::Word` (not `WordOrGlyph`): a label that doesn't fit at this
+    // width wraps at the next word boundary instead of splitting mid-word.
+    // The width check catches the rare case Word-wrapping can't help — a
+    // single unbreakable "word" wider than the box — so that case correctly
+    // falls through to the wider stage below instead of reporting a false fit.
     let fits_one_line = |width: f32| {
-        ribbon_label_bounds(
+        let bounds = ribbon_label_bounds(
             renderer,
             label,
             width,
-            advanced_text::Wrapping::WordOrGlyph,
+            advanced_text::Wrapping::Word,
             label_size,
-        )
-        .height
-            <= line_height + 0.5
+        );
+        bounds.width <= width + 0.5 && bounds.height <= line_height + 0.5
     };
     if fits_one_line(base_inner) {
         return LARGE_W;
@@ -198,15 +202,14 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str, label_size: f32) 
     // same cap) that fits.
     let max_label_height = line_height * LARGE_LABEL_LINES + 0.5;
     let fits_two_lines = |width: f32| {
-        ribbon_label_bounds(
+        let bounds = ribbon_label_bounds(
             renderer,
             label,
             width,
-            advanced_text::Wrapping::WordOrGlyph,
+            advanced_text::Wrapping::Word,
             label_size,
-        )
-        .height
-            <= max_label_height
+        );
+        bounds.width <= width + 0.5 && bounds.height <= max_label_height
     };
     let mut low = base_inner;
     let mut high = LARGE_LABEL_MAX_SINGLE_LINE_W;
@@ -745,7 +748,7 @@ pub(super) fn render_large_dropdown<'a>(
                 .size(ctx.label_font_size)
                 .width(Fill)
                 .align_x(iced::Center)
-                .wrapping(advanced_text::Wrapping::WordOrGlyph),
+                .wrapping(advanced_text::Wrapping::Word),
         ]
         .align_x(iced::Center)
         .spacing(0)
@@ -878,7 +881,7 @@ pub(super) fn render_large<'a>(
                         .size(ctx.label_font_size)
                         .width(Fill)
                         .align_x(iced::Center)
-                        .wrapping(advanced_text::Wrapping::WordOrGlyph),
+                        .wrapping(advanced_text::Wrapping::Word),
                 ]
                 .align_x(iced::Center)
                 .spacing(0)

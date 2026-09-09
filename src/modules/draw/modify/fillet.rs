@@ -77,7 +77,122 @@ fn project_click(click: [f64; 2], p1: [f64; 2], unit: [f64; 2]) -> f64 {
 }
 
 // ── Fillet ─────────────────────────────────────────────────────────────────
+/// Fillet two parallel lines with a semicircle tangent to both.
+///
+/// The current FILLET radius is intentionally ignored for parallel lines:
+/// the effective radius is half the perpendicular distance between them.
+///
+/// The endpoint of the first line nearest its pick determines where the
+/// semicircle is placed. The second line is trimmed or extended to the
+/// corresponding perpendicular tangent point.
+fn fillet_parallel_lines(
+    l1: &LineEnt,
+    click1: [f64; 2],
+    l2: &LineEnt,
+    click2: [f64; 2],
+) -> Option<(EntityType, EntityType, Option<EntityType>)> {
+    let (p1, p2, u1, len1) = line_geom(l1);
+    let (p3, _p4, u2, len2) = line_geom(l2);
 
+    if len1 <= 1.0e-12 || len2 <= 1.0e-12 {
+        return None;
+    }
+
+    // This helper is only for parallel / anti-parallel lines.
+    let cross = u1[0] * u2[1] - u1[1] * u2[0];
+    if cross.abs() > 1.0e-6 {
+        return None;
+    }
+
+    // The pick on the first line determines which end receives the round.
+    let dist_sq = |a: [f64; 2], b: [f64; 2]| {
+        let dx = a[0] - b[0];
+        let dy = a[1] - b[1];
+        dx * dx + dy * dy
+    };
+
+    let (tangent1, other1) = if dist_sq(click1, p1) <= dist_sq(click1, p2) {
+        (p1, p2)
+    } else {
+        (p2, p1)
+    };
+
+    // Unit normal to line 1. Project tangent1 perpendicularly onto line 2.
+    let normal = [-u1[1], u1[0]];
+    let separation =
+        (p3[0] - tangent1[0]) * normal[0] + (p3[1] - tangent1[1]) * normal[1];
+
+    if separation.abs() <= 1.0e-9 {
+        // Coincident lines do not define a useful semicircle.
+        return None;
+    }
+
+    let tangent2 = [
+        tangent1[0] + normal[0] * separation,
+        tangent1[1] + normal[1] * separation,
+    ];
+
+    let centre = [
+        (tangent1[0] + tangent2[0]) * 0.5,
+        (tangent1[1] + tangent2[1]) * 0.5,
+    ];
+
+    let radius = separation.abs() * 0.5;
+
+    // Keep the existing part of each selected line and trim/extend the picked
+    // end to its tangent point.
+    let new_l1 = trim_line_to_point(l1, tangent1, click1)?;
+    let new_l2 = trim_line_to_point(l2, tangent2, click2)?;
+
+    // The semicircle must bulge away from the retained portion of line 1.
+    // `other1 - tangent1` points back into the line, so negate it.
+    let keep = [
+        other1[0] - tangent1[0],
+        other1[1] - tangent1[1],
+    ];
+    let keep_len = (keep[0] * keep[0] + keep[1] * keep[1]).sqrt();
+
+    if keep_len <= 1.0e-12 {
+        return None;
+    }
+
+    let bulge_dir = [-keep[0] / keep_len, -keep[1] / keep_len];
+
+    let a1 = norm_angle(
+        (tangent1[1] - centre[1]).atan2(tangent1[0] - centre[0]),
+    );
+    let a2 = norm_angle(
+        (tangent2[1] - centre[1]).atan2(tangent2[0] - centre[0]),
+    );
+
+    // Between two antipodal points there are two possible semicircles.
+    // Determine which CCW orientation bulges toward the selected end.
+    let midpoint_angle = a1 + std::f64::consts::FRAC_PI_2;
+    let midpoint_dir = [midpoint_angle.cos(), midpoint_angle.sin()];
+
+    let candidate_matches =
+        midpoint_dir[0] * bulge_dir[0] + midpoint_dir[1] * bulge_dir[1] >= 0.0;
+
+    let (start_angle, end_angle) = if candidate_matches {
+        (a1, a2)
+    } else {
+        (a2, a1)
+    };
+
+    let mut arc = ArcEnt::new();
+    arc.common = l1.common.clone();
+    arc.common.handle = Handle::NULL;
+    arc.center = Vector3::new(centre[0], centre[1], l1.start.z);
+    arc.radius = radius;
+    arc.start_angle = start_angle;
+    arc.end_angle = end_angle;
+
+    Some((
+        EntityType::Line(new_l1),
+        EntityType::Line(new_l2),
+        Some(EntityType::Arc(arc)),
+    ))
+}
 /// Compute fillet: trim l1/l2 and insert a tangent arc of `radius`.
 /// Returns (trimmed_l1, trimmed_l2, fillet_arc).
 fn compute_fillet(
@@ -90,8 +205,18 @@ fn compute_fillet(
     let (p1, p2, u1, _len1) = line_geom(l1);
     let (p3, p4, u2, _len2) = line_geom(l2);
 
-    // Intersection of infinite lines
-    let (t_p, _u_p) = ll(p1[0], p1[1], u1[0], u1[1], p3[0], p3[1], u2[0], u2[1])?;
+    // Parallel lines are a special FILLET case: there is no intersection.
+    // Build the tangent semicircle directly, temporarily ignoring the
+    // configured radius.
+    let cross = u1[0] * u2[1] - u1[1] * u2[0];
+
+    if cross.abs() <= 1.0e-6 {
+        return fillet_parallel_lines(l1, click1, l2, click2);
+    }
+
+    // Intersection of infinite non-parallel lines.
+    let (t_p, _u_p) =
+        ll(p1[0], p1[1], u1[0], u1[1], p3[0], p3[1], u2[0], u2[1])?;
 
     // Intersection point
     let px = p1[0] + t_p * u1[0];
@@ -123,14 +248,6 @@ fn compute_fillet(
         [-u2[0], -u2[1]]
     };
 
-    // Angle between the two keep-directions
-    let cos_a = (dir1[0] * dir2[0] + dir1[1] * dir2[1]).clamp(-1.0, 1.0);
-    let angle = cos_a.acos();
-
-    // Lines are parallel / anti-parallel
-    if angle < 1e-6 || (angle - std::f64::consts::PI).abs() < 1e-6 {
-        return None;
-    }
 
     let z = l1.start.z;
 
@@ -337,7 +454,194 @@ fn compute_bulge(t1: [f64; 2], t2: [f64; 2], arc_center: [f64; 2]) -> f64 {
         -(span_cw / 4.0).tan() // CW arc
     }
 }
+#[derive(Clone, Copy)]
+struct PolylineCornerFillet {
+    incoming: [f64; 2],
+    outgoing: [f64; 2],
+    bulge: f64,
+}
 
+fn segment_parameter(point: [f64; 2], start: [f64; 2], end: [f64; 2]) -> Option<f64> {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let len2 = dx * dx + dy * dy;
+
+    if len2 <= 1.0e-20 {
+        return None;
+    }
+
+    Some(
+        ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / len2,
+    )
+}
+
+/// Apply the current FILLET radius to every eligible corner of a 2D polyline.
+///
+/// Initial scope deliberately handles straight-segment corners only. Corners
+/// adjacent to an existing bulge arc are preserved unchanged.
+fn fillet_entire_lwpolyline(poly: &LwPolyline, radius: f64) -> Option<LwPolyline> {
+    let n = poly.vertices.len();
+
+    if n < 3 || radius <= 1.0e-9 {
+        return None;
+    }
+
+    let mut corners: Vec<Option<PolylineCornerFillet>> = vec![None; n];
+
+    let first_corner = if poly.is_closed { 0 } else { 1 };
+    let end_corner = if poly.is_closed {
+        n
+    } else {
+        n.saturating_sub(1)
+    };
+
+    for i in first_corner..end_corner {
+        let prev = if i == 0 { n - 1 } else { i - 1 };
+
+        // A bulge belongs to the segment starting at that vertex.
+        // For now only fillet corners where both adjacent segments are straight.
+        if poly.vertices[prev].bulge.abs() >= 1.0e-9
+            || poly.vertices[i].bulge.abs() >= 1.0e-9
+        {
+            continue;
+        }
+
+        let incoming = lwpoly_seg_as_line(poly, prev);
+        let outgoing = lwpoly_seg_as_line(poly, i);
+
+        // Pick points halfway along each segment, away from the corner.
+        // This tells the existing line-line FILLET code which side to keep.
+        let click_in = [
+            (incoming.start.x + incoming.end.x) * 0.5,
+            (incoming.start.y + incoming.end.y) * 0.5,
+        ];
+        let click_out = [
+            (outgoing.start.x + outgoing.end.x) * 0.5,
+            (outgoing.start.y + outgoing.end.y) * 0.5,
+        ];
+
+        let Some((trimmed_in, trimmed_out, maybe_arc)) =
+            compute_fillet(&incoming, click_in, &outgoing, click_out, radius)
+        else {
+            continue;
+        };
+
+        let (
+            EntityType::Line(trimmed_in),
+            EntityType::Line(trimmed_out),
+            Some(EntityType::Arc(arc)),
+        ) = (trimmed_in, trimmed_out, maybe_arc)
+        else {
+            continue;
+        };
+
+        let tangent_in = [trimmed_in.end.x, trimmed_in.end.y];
+        let tangent_out = [trimmed_out.start.x, trimmed_out.start.y];
+
+        let in_start = [incoming.start.x, incoming.start.y];
+        let in_end = [incoming.end.x, incoming.end.y];
+        let out_start = [outgoing.start.x, outgoing.start.y];
+        let out_end = [outgoing.end.x, outgoing.end.y];
+
+        let Some(t_in) = segment_parameter(tangent_in, in_start, in_end) else {
+            continue;
+        };
+        let Some(t_out) = segment_parameter(tangent_out, out_start, out_end) else {
+            continue;
+        };
+
+        // Whole-polyline FILLET should not extend past neighbouring vertices.
+        // If this radius cannot fit at this corner, leave that corner unchanged.
+        if !(-1.0e-9..=1.0 + 1.0e-9).contains(&t_in)
+            || !(-1.0e-9..=1.0 + 1.0e-9).contains(&t_out)
+        {
+            continue;
+        }
+
+        corners[i] = Some(PolylineCornerFillet {
+            incoming: tangent_in,
+            outgoing: tangent_out,
+            bulge: compute_bulge(
+                tangent_in,
+                tangent_out,
+                [arc.center.x, arc.center.y],
+            ),
+        });
+    }
+
+    if corners.iter().all(Option::is_none) {
+        return None;
+    }
+
+    // Adjacent fillets must not consume more than the shared segment.
+    // Reject the operation rather than producing an inverted/overlapping edge.
+    let segment_count = if poly.is_closed { n } else { n - 1 };
+
+    for i in 0..segment_count {
+        let next = (i + 1) % n;
+
+        let start = corners[i]
+            .map(|corner| corner.outgoing)
+            .unwrap_or([
+                poly.vertices[i].location.x,
+                poly.vertices[i].location.y,
+            ]);
+
+        let end = corners[next]
+            .map(|corner| corner.incoming)
+            .unwrap_or([
+                poly.vertices[next].location.x,
+                poly.vertices[next].location.y,
+            ]);
+
+        let original_start = [
+            poly.vertices[i].location.x,
+            poly.vertices[i].location.y,
+        ];
+        let original_end = [
+            poly.vertices[next].location.x,
+            poly.vertices[next].location.y,
+        ];
+
+        let Some(start_t) = segment_parameter(start, original_start, original_end) else {
+            continue;
+        };
+        let Some(end_t) = segment_parameter(end, original_start, original_end) else {
+            continue;
+        };
+
+        if start_t > end_t + 1.0e-9 {
+            return None;
+        }
+    }
+
+    let mut result = poly.clone();
+    result.common.handle = Handle::NULL;
+    result.vertices.clear();
+
+    for (i, original) in poly.vertices.iter().enumerate() {
+        if let Some(corner) = corners[i] {
+            let mut tangent_in = original.clone();
+            tangent_in.location.x = corner.incoming[0];
+            tangent_in.location.y = corner.incoming[1];
+            tangent_in.bulge = corner.bulge;
+
+            let mut tangent_out = original.clone();
+            tangent_out.location.x = corner.outgoing[0];
+            tangent_out.location.y = corner.outgoing[1];
+
+            // This corner is only eligible when its outgoing segment is straight.
+            tangent_out.bulge = 0.0;
+
+            result.vertices.push(tangent_in);
+            result.vertices.push(tangent_out);
+        } else {
+            result.vertices.push(original.clone());
+        }
+    }
+
+    Some(result)
+}
 /// Rebuild a LwPolyline, replacing the corner vertex at `corner_idx` with two
 /// new vertices T1 (start of fillet arc) and T2 (end of fillet arc).
 /// `bulge` encodes the direction and span of the arc (T1 → T2).
@@ -991,6 +1295,7 @@ fn compute_chamfer(
 
 enum FilletStep {
     First,
+    Polyline,
     WaitingForRadius,
     Second {
         h1: Handle,
@@ -1072,7 +1377,12 @@ impl CadCommand for FilletCommand {
     fn prompt(&self) -> String {
         match &self.step {
             FilletStep::First => crate::tf!(
-                "FILLET  Select first object (Line/Arc/LwPolyline)  [R={:.4}]:",
+                "FILLET  Select first object or [Polyline/Radius]  [R={:.4}]:",
+                self.radius
+            )
+            .into_owned(),
+            FilletStep::Polyline => crate::tf!(
+                "FILLET  Select 2D polyline  [R={:.4}]:",
                 self.radius
             )
             .into_owned(),
@@ -1091,11 +1401,16 @@ impl CadCommand for FilletCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
+
         match self.step {
-            // Offer the radius keyword while selecting objects; the "R" token is
-            // already handled by on_text_input.
-            FilletStep::First | FilletStep::Second { .. } => vec![CmdOption::new("Radius", "R")],
-            FilletStep::WaitingForRadius => vec![],
+            FilletStep::First => vec![
+                CmdOption::new("Polyline", "P"),
+                CmdOption::new("Radius", "R"),
+            ],
+            FilletStep::Second { .. } => {
+                vec![CmdOption::new("Radius", "R")]
+            }
+            FilletStep::Polyline | FilletStep::WaitingForRadius => vec![],
         }
     }
 
@@ -1134,6 +1449,10 @@ impl CadCommand for FilletCommand {
             FilletStep::First | FilletStep::Second { .. } => {
                 let t = text.trim();
                 let upper = t.to_uppercase();
+                if matches!(self.step, FilletStep::First) && upper == "P" {
+                    self.step = FilletStep::Polyline;
+                    return Some(CmdResult::NeedPoint);
+                }
                 // "R" alone → enter sub-step to collect radius
                 if upper == "R" {
                     self.enter_radius_substep();
@@ -1156,6 +1475,7 @@ impl CadCommand for FilletCommand {
                 }
                 None
             }
+            FilletStep::Polyline => None,
         }
     }
 
@@ -1171,6 +1491,28 @@ impl CadCommand for FilletCommand {
 
         match &self.step {
             FilletStep::WaitingForRadius => return CmdResult::NeedPoint,
+            FilletStep::Polyline => {
+                let poly = self
+                    .entity_index
+                    .get(&self.all_entities, handle)
+                    .and_then(|entity| match entity {
+                        EntityType::LwPolyline(poly) => Some(poly.clone()),
+                        _ => None,
+                    });
+
+                let Some(poly) = poly else {
+                    return CmdResult::NeedPoint;
+                };
+
+                let Some(result) = fillet_entire_lwpolyline(&poly, self.radius) else {
+                    return CmdResult::NeedPoint;
+                };
+
+                self.continue_after_fillet(vec![(
+                    handle,
+                    vec![EntityType::LwPolyline(result)],
+                )])
+            }
             FilletStep::First => {
                 let e1 = self
                     .entity_index
@@ -1245,6 +1587,28 @@ impl CadCommand for FilletCommand {
 
         match &self.step {
             FilletStep::WaitingForRadius => vec![],
+            FilletStep::Polyline => {
+                let preview = self
+                    .entity_index
+                    .get(&self.all_entities, handle)
+                    .and_then(|entity| match entity {
+                        EntityType::LwPolyline(poly) => {
+                            fillet_entire_lwpolyline(poly, self.radius)
+                        }
+                        _ => None,
+                    });
+
+                preview
+                    .map(|poly| {
+                        vec![WireModel::solid(
+                            "fillet_polyline_preview".into(),
+                            lwpoly_pts(&poly),
+                            WireModel::CYAN,
+                            false,
+                        )]
+                    })
+                    .unwrap_or_default()
+            }
             FilletStep::First => {
                 let pts = self
                     .entity_index
@@ -1515,12 +1879,13 @@ impl CadCommand for ChamferCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
+
         match self.step {
-            // Offer the distance keyword while selecting objects; the "D" token
-            // is already handled by on_text_input.
             ChamferStep::First
             | ChamferStep::Second { .. }
-            | ChamferStep::SecondPoly { .. } => vec![CmdOption::new(t!("Distance").as_ref(), "D")],
+            | ChamferStep::SecondPoly { .. } => {
+                vec![CmdOption::new(t!("Distance").as_ref(), "D")]
+            }
             ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => vec![],
         }
     }

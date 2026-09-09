@@ -1195,6 +1195,15 @@ pub struct LoftOptions {
     pub align_direction: bool,
 }
 
+/// One face-selection edit made while collecting a solid shell operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ShellFaceAction {
+    Remove(DVec3),
+    Add(DVec3),
+    RemoveAll,
+    AddAll,
+}
+
 impl Default for LoftOptions {
     fn default() -> Self {
         Self {
@@ -1403,6 +1412,8 @@ pub enum CmdResult {
     Measurement(String),
     /// Print a measurement result and keep the command active.
     ReportMeasurement(String),
+    /// Print an input error and keep the command active.
+    ReportError(String),
     /// Print a measurement result, clear the current selection, and keep the command active.
     ReportMeasurementAndDeselect(String),
     /// Clear the current selection and keep the command active at its updated step.
@@ -1576,16 +1587,39 @@ pub enum CmdResult {
         options: LoftOptions,
         color: [f32; 4],
     },
-    /// Round or bevel the straight edge nearest `pick` on a solid.
+    /// Round or bevel one or more resolved B-rep edges on a solid.
     SolidEdgeBlend {
         handle: Handle,
-        pick: DVec3,
+        edges: Vec<cadkernel::brep::EdgeKey>,
+        base_face: Option<cadkernel::brep::FaceKey>,
         value: f64,
+        other_value: f64,
         fillet: bool,
+    },
+    /// Offset a solid and optionally open selected faces.
+    SolidShell {
+        handle: Handle,
+        actions: Vec<ShellFaceAction>,
+        distance: f64,
     },
     SolidSubtract {
         bases: Vec<Handle>,
         cutters: Vec<Handle>,
+        convert_meshes: bool,
+    },
+    /// Split every selected solid or surface with one arbitrary plane.
+    /// `keep_point == None` retains both sides; otherwise it selects the side
+    /// containing that WCS point.
+    SliceEntities {
+        targets: Vec<Handle>,
+        plane: cadkernel::space::Plane,
+        keep_point: Option<DVec3>,
+    },
+    /// Split selected solids or surfaces with one selected analytic sheet.
+    SliceSurfaceEntities {
+        targets: Vec<Handle>,
+        cutter: Box<cadkernel::brep::Body>,
+        keep_point: Option<DVec3>,
     },
     /// INSERT landed on a block that has AttributeDefinitions.
     /// The host should look up the attdefs for `block_name` from the document

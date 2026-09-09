@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod gpu_tests;
 mod device_capabilities;
+pub mod circle_gpu;
+pub mod ellipse_gpu;
 pub mod face3d_gpu;
 pub mod gpu_budget;
 pub mod gpu_upload;
@@ -20,6 +22,8 @@ pub mod wire_gpu;
 use iced::wgpu;
 use iced::{Rectangle, Size};
 
+pub use circle_gpu::{CircleGpu, CircleInstance};
+pub use ellipse_gpu::{EllipseGpu, EllipseInstance};
 pub use face3d_gpu::Face3DGpu;
 pub use wipeout_gpu::WipeoutGpu;
 pub use image_gpu::ImageGpu;
@@ -79,6 +83,8 @@ pub struct Pipeline {
     shadow_pipeline: wgpu::RenderPipeline,
     shadow_plain_pipeline: wgpu::RenderPipeline,
     wire_pipeline: wgpu::RenderPipeline,
+    circle_pipeline: wgpu::RenderPipeline,
+    ellipse_pipeline: wgpu::RenderPipeline,
     block_wire_pipeline: wgpu::RenderPipeline,
     /// Stamps clip-boundary polygons into the stencil buffer (viewports + XCLIP).
     clip_mask_pipeline: wgpu::RenderPipeline,
@@ -89,6 +95,8 @@ pub struct Pipeline {
     /// Same shader as wire_pipeline but depth_compare=Greater, depth_write_enabled=false.
     /// Used to draw ghost copies of selected wires through occluding geometry.
     wire_xray_pipeline: wgpu::RenderPipeline,
+    circle_xray_pipeline: wgpu::RenderPipeline,
+    ellipse_xray_pipeline: wgpu::RenderPipeline,
     block_wire_xray_pipeline: wgpu::RenderPipeline,
     /// Layout for the per-wire `WireConst` storage buffer (group 1 of the wire /
     /// xray pipelines). `Some` on any storage-capable device; `None` in packed
@@ -225,6 +233,8 @@ pub struct Pipeline {
     /// replace this thin draw-range list on camera changes without touching the
     /// shared resident buffer.
     pub(crate) gpu_wires: std::sync::Arc<Vec<WireGpu>>,
+    pub(crate) gpu_circles: std::sync::Arc<Vec<CircleGpu>>,
+    pub(crate) gpu_ellipses: std::sync::Arc<Vec<EllipseGpu>>,
     pub(crate) gpu_block_wires: std::sync::Arc<Vec<BlockWireGpu>>,
     /// Persistent per-entity wire instance arena (capability-selected format).
     /// When active, `gpu_wires` is a thin wrapper over this arena's buffers and an
@@ -241,6 +251,11 @@ pub struct Pipeline {
     pub(crate) wire_arena_fallback_handles: rustc_hash::FxHashSet<acadrust::Handle>,
     /// The Model content id both arenas currently mirror (`u64::MAX` = none).
     pub(crate) wire_arena_id: u64,
+    /// Handles that contributed to this slot's retained analytical uploads.
+    pub(crate) partition_contributors: rustc_hash::FxHashSet<acadrust::Handle>,
+    /// The draw-depth generation those uploads baked. A full depth rebuild
+    /// reassigns every label, so they stop being reusable when it moves.
+    pub(crate) partition_depth_generation: u64,
     /// Last content/camera/viewport tuple used to derive visible instance
     /// ranges from the resident arena.
     pub(crate) wire_cull_key: (u64, u64, u32, u32),
@@ -256,11 +271,15 @@ pub struct Pipeline {
     clip_boundary: Option<(wgpu::Buffer, u32)>,
     /// Ghost copies (25% alpha) of selected wires for the X-ray depth pass.
     gpu_selected_wires: Vec<WireGpu>,
+    gpu_selected_circles: Vec<CircleGpu>,
+    gpu_selected_ellipses: Vec<EllipseGpu>,
     gpu_selected_block_wires: Vec<BlockWireGpu>,
     /// Command-preview / interim / grip-drag overlay wires. Re-uploaded every
     /// frame they are present (small), drawn on top of the base wire pass — so
     /// a live drag never re-uploads the resident base buffer.
     gpu_preview_wires: Vec<WireGpu>,
+    gpu_preview_circles: Vec<CircleGpu>,
+    gpu_preview_ellipses: Vec<EllipseGpu>,
     /// Wipeout masks — solid fills rendered after wires in a separate pass via
     /// the legacy per-primitive `WipeoutGpu` renderer.
     gpu_wipeouts: Vec<WipeoutGpu>,
@@ -2083,6 +2102,22 @@ impl Pipeline {
                 &content_stencil,
             );
 
+        let (circle_pipeline, circle_xray_pipeline) = circle_gpu::create_pipelines(
+            device,
+            &frame_bgl,
+            format,
+            MSAA_SAMPLES,
+            &content_stencil,
+        );
+
+        let (ellipse_pipeline, ellipse_xray_pipeline) = ellipse_gpu::create_pipelines(
+            device,
+            &frame_bgl,
+            format,
+            MSAA_SAMPLES,
+            &content_stencil,
+        );
+
         let viewcube = ViewCubePipeline::new(device, queue, format);
 
         let init_size = Size::new(1, 1);
@@ -2223,6 +2258,10 @@ impl Pipeline {
             wire_black_pipeline,
             block_wire_black_pipeline,
             wire_xray_pipeline,
+            circle_pipeline,
+            circle_xray_pipeline,
+            ellipse_pipeline,
+            ellipse_xray_pipeline,
             block_wire_xray_pipeline,
             wire_const_bgl,
             block_wire_const_bgl,
@@ -2295,6 +2334,8 @@ impl Pipeline {
             blit_uniform_buffer,
             surface_format: format,
             gpu_wires: std::sync::Arc::new(vec![]),
+            gpu_circles: std::sync::Arc::new(vec![]),
+            gpu_ellipses: std::sync::Arc::new(vec![]),
             gpu_block_wires: std::sync::Arc::new(vec![]),
             wire_arena: None,
             wire_arena_mesh: None,
@@ -2302,14 +2343,20 @@ impl Pipeline {
             wire_arena_fallback_kind: None,
             wire_arena_fallback_handles: rustc_hash::FxHashSet::default(),
             wire_arena_id: u64::MAX,
+            partition_contributors: rustc_hash::FxHashSet::default(),
+            partition_depth_generation: u64::MAX,
             wire_cull_key: (u64::MAX, u64::MAX, 0, 0),
             hatch_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
             wipeout_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
             silhouette_key: (usize::MAX, u64::MAX, [u32::MAX; 3], false),
             clip_boundary: None,
             gpu_selected_wires: vec![],
+            gpu_selected_circles: vec![],
+            gpu_selected_ellipses: vec![],
             gpu_selected_block_wires: vec![],
             gpu_preview_wires: vec![],
+            gpu_preview_circles: vec![],
+            gpu_preview_ellipses: vec![],
             gpu_wipeouts: vec![],
             wipeout_skip_flags: vec![],
             gpu_images: vec![],
@@ -2371,6 +2418,86 @@ impl Pipeline {
         )
     }
 
+    /// Upload GPU-instanced analytical circles from a wire slice.
+    pub fn upload_circles(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[WireModel],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+    ) -> Vec<CircleGpu> {
+        let mut instances: Vec<CircleInstance> = Vec::new();
+        for wire in wires {
+            if !wire.display_visible {
+                continue;
+            }
+            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
+                instances.extend(insts);
+            }
+        }
+        self.upload_circles_from_instances(device, queue, &instances)
+    }
+
+    /// Upload GPU-instanced analytical circles from pre-extracted instances.
+    pub fn upload_circles_from_instances(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[CircleInstance],
+    ) -> Vec<CircleGpu> {
+        if instances.is_empty() {
+            vec![]
+        } else {
+            vec![CircleGpu::from_instances(
+                device,
+                queue,
+                "viewer.circles",
+                instances,
+            )]
+        }
+    }
+
+    /// Upload GPU-instanced analytical ellipses from a wire slice.
+    pub fn upload_ellipses(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[WireModel],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+    ) -> Vec<EllipseGpu> {
+        let mut instances: Vec<EllipseInstance> = Vec::new();
+        for wire in wires {
+            if !wire.display_visible {
+                continue;
+            }
+            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                instances.extend(insts);
+            }
+        }
+        self.upload_ellipses_from_instances(device, queue, &instances)
+    }
+
+    /// Upload GPU-instanced analytical ellipses from pre-extracted instances.
+    pub fn upload_ellipses_from_instances(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[EllipseInstance],
+    ) -> Vec<EllipseGpu> {
+        if instances.is_empty() {
+            vec![]
+        } else {
+            vec![EllipseGpu::from_instances(
+                device,
+                queue,
+                "viewer.ellipses",
+                instances,
+            )]
+        }
+    }
+
     /// Build resident batches and a handle index shared across viewport slots.
     pub fn build_wire_buffers(
         &mut self,
@@ -2383,6 +2510,8 @@ impl Pipeline {
         std::sync::Arc<Vec<WireGpu>>,
         std::sync::Arc<Vec<BlockWireGpu>>,
         std::sync::Arc<rustc_hash::FxHashMap<u64, Vec<u32>>>,
+        std::sync::Arc<Vec<CircleGpu>>,
+        std::sync::Arc<Vec<EllipseGpu>>,
     ) {
         // Batch the wire pass: instead of one GPU buffer + one draw call per
         // WireModel (tens of thousands on a large drawing), merge maximal runs
@@ -2392,40 +2521,42 @@ impl Pipeline {
         // wire order — already sorted by draw order — is preserved; depth bias
         // and alpha blending both depend on it. Scissor and mesh-edge stay
         // grouping keys because the draw loop sets one scissor per batch and
-        // skips whole mesh-edge batches in shaded modes.
-        let is_mesh_edge = |w: &WireModel| !w.points.is_empty() && w.fill_is_3d;
         let mut batches: Vec<WireGpu> = Vec::new();
         let mut block_wires: Vec<&WireModel> = Vec::new();
         let mut i = 0;
         while i < wires.len() {
-            if !wires[i].display_visible {
-                i += 1;
-                continue;
+            let kind = wire_arena::classify_wire(&wires[i]);
+            match kind {
+                wire_arena::WireKind::Invisible
+                | wire_arena::WireKind::Circle
+                | wire_arena::WireKind::Ellipse
+                | wire_arena::WireKind::Empty => {
+                    i += 1;
+                    continue;
+                }
+                wire_arena::WireKind::Block => {
+                    block_wires.push(&wires[i]);
+                    i += 1;
+                    continue;
+                }
+                wire_arena::WireKind::Regular | wire_arena::WireKind::MeshEdge => {
+                    let mesh_edge = kind == wire_arena::WireKind::MeshEdge;
+                    let mut j = i + 1;
+                    while j < wires.len() && wire_arena::classify_wire(&wires[j]) == kind {
+                        j += 1;
+                    }
+                    let refs: Vec<&WireModel> = wires[i..j].iter().collect();
+                    batches.extend(WireGpu::from_run_refs(
+                        device,
+                        queue,
+                        &refs,
+                        depth_map,
+                        mesh_edge,
+                        self.wire_const_bgl.as_ref(),
+                    ));
+                    i = j;
+                }
             }
-            if wires[i].render_instance.is_some() {
-                block_wires.push(&wires[i]);
-                i += 1;
-                continue;
-            }
-            let mesh_edge = is_mesh_edge(&wires[i]);
-            let mut j = i + 1;
-            while j < wires.len()
-                && wires[j].display_visible
-                && wires[j].render_instance.is_none()
-                && is_mesh_edge(&wires[j]) == mesh_edge
-            {
-                j += 1;
-            }
-            let refs: Vec<&WireModel> = wires[i..j].iter().collect();
-            batches.extend(WireGpu::from_run_refs(
-                device,
-                queue,
-                &refs,
-                depth_map,
-                mesh_edge,
-                self.wire_const_bgl.as_ref(),
-            ));
-            i = j;
         }
         let block_batches = BlockWireGpu::from_wires(
             device,
@@ -2462,10 +2593,14 @@ impl Pipeline {
                 wires.len(),
             );
         }
+        let circle_batches = self.upload_circles(device, queue, wires, depth_map);
+        let ellipse_batches = self.upload_ellipses(device, queue, wires, depth_map);
         (
             std::sync::Arc::new(batches),
             std::sync::Arc::new(block_batches),
             std::sync::Arc::new(index),
+            std::sync::Arc::new(circle_batches),
+            std::sync::Arc::new(ellipse_batches),
         )
     }
 
@@ -2492,6 +2627,8 @@ impl Pipeline {
         if selected.is_empty() && hovered.is_empty() && annotation_context_wires.is_empty() {
             self.gpu_selected_wires = vec![];
             self.gpu_selected_block_wires = vec![];
+            self.gpu_selected_circles = vec![];
+            self.gpu_selected_ellipses = vec![];
             return;
         }
         // Gather borrowed highlighted wires via the prebuilt index —
@@ -2504,6 +2641,9 @@ impl Pipeline {
                 slots.sort_unstable();
                 for &i in &slots {
                     if let Some(w) = wires.get(i as usize) {
+                        if !w.display_visible {
+                            continue;
+                        }
                         selected_wires.push(w);
                     }
                 }
@@ -2515,27 +2655,103 @@ impl Pipeline {
                 slots.sort_unstable();
                 for &i in &slots {
                     if let Some(w) = wires.get(i as usize) {
+                        if !w.display_visible {
+                            continue;
+                        }
                         hover_wires.push(w);
                     }
                 }
             }
         }
         for wire in annotation_context_wires {
+            if !wire.display_visible {
+                continue;
+            }
             if wire.selected {
                 selected_wires.push(wire);
             } else {
                 hover_wires.push(wire);
             }
         }
+        let mut selected_circles: Vec<CircleInstance> = Vec::new();
+        let circle_sel_tint = selected_tint.unwrap_or(WireModel::SELECTED);
+        for &wire in &selected_wires {
+            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
+                for mut inst in insts {
+                    inst.color = circle_sel_tint;
+                    selected_circles.push(inst);
+                }
+            }
+        }
+        for &wire in &hover_wires {
+            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = circle_gpu::extract_circle_instances(wire, depth) {
+                for mut inst in insts {
+                    inst.color = WireModel::HOVER;
+                    selected_circles.push(inst);
+                }
+            }
+        }
+        self.gpu_selected_circles = if selected_circles.is_empty() {
+            vec![]
+        } else {
+            vec![CircleGpu::from_instances(
+                device,
+                queue,
+                "viewer.selected_circles",
+                &selected_circles,
+            )]
+        };
+
+        let mut selected_ellipses: Vec<EllipseInstance> = Vec::new();
+        let ellipse_sel_tint = selected_tint.unwrap_or(WireModel::SELECTED);
+        for &wire in &selected_wires {
+            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                for mut inst in insts {
+                    inst.color = ellipse_sel_tint;
+                    selected_ellipses.push(inst);
+                }
+            }
+        }
+        for &wire in &hover_wires {
+            let depth = wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                for mut inst in insts {
+                    inst.color = WireModel::HOVER;
+                    selected_ellipses.push(inst);
+                }
+            }
+        }
+        self.gpu_selected_ellipses = if selected_ellipses.is_empty() {
+            vec![]
+        } else {
+            vec![EllipseGpu::from_instances(
+                device,
+                queue,
+                "viewer.selected_ellipses",
+                &selected_ellipses,
+            )]
+        };
+
         let selected_regular: Vec<&WireModel> = selected_wires
             .iter()
             .copied()
-            .filter(|wire| wire.render_instance.is_none())
+            .filter(|wire| {
+                wire.render_instance.is_none()
+                    && circle_gpu::extract_circle_instances(wire, 0.0).is_none()
+                    && ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_none()
+            })
             .collect();
         let hover_regular: Vec<&WireModel> = hover_wires
             .iter()
             .copied()
-            .filter(|wire| wire.render_instance.is_none())
+            .filter(|wire| {
+                wire.render_instance.is_none()
+                    && circle_gpu::extract_circle_instances(wire, 0.0).is_none()
+                    && ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_none()
+            })
             .collect();
         let selected_blocks: Vec<&WireModel> = selected_wires
             .iter()
@@ -2742,11 +2958,47 @@ impl Pipeline {
         wires: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
-        self.gpu_preview_wires = if wires.is_empty() {
-            vec![]
+        if wires.is_empty() {
+            self.gpu_preview_wires.clear();
+            self.gpu_preview_circles.clear();
+            self.gpu_preview_ellipses.clear();
         } else {
-            WireGpu::from_run(device, queue, wires, depth_map, false, self.wire_const_bgl.as_ref())
-        };
+            let partitioned = wire_arena::partition_wires(wires, depth_map);
+            let mut non_analytical = partitioned.regular;
+            non_analytical.extend(partitioned.mesh);
+            self.gpu_preview_wires = if non_analytical.is_empty() {
+                vec![]
+            } else {
+                WireGpu::from_run_refs(
+                    device,
+                    queue,
+                    &non_analytical,
+                    depth_map,
+                    false,
+                    self.wire_const_bgl.as_ref(),
+                )
+            };
+            self.gpu_preview_circles = if partitioned.circle_instances.is_empty() {
+                vec![]
+            } else {
+                vec![CircleGpu::from_instances(
+                    device,
+                    queue,
+                    "preview.circles",
+                    &partitioned.circle_instances,
+                )]
+            };
+            self.gpu_preview_ellipses = if partitioned.ellipse_instances.is_empty() {
+                vec![]
+            } else {
+                vec![EllipseGpu::from_instances(
+                    device,
+                    queue,
+                    "preview.ellipses",
+                    &partitioned.ellipse_instances,
+                )]
+            };
+        }
     }
 
     /// Upload the live grip-drag / command-preview SDF glyph quads. Re-uploaded
@@ -4373,6 +4625,26 @@ impl Pipeline {
                 }
                 bind_and_draw_block_wire(&mut pass, wire);
             }
+            // Analytical GPU circles (instanced screen-space quads)
+            if self.gpu_circles.iter().any(|cg| cg.instance_count > 0) {
+                pass.set_pipeline(&self.circle_pipeline);
+                for cg in self.gpu_circles.iter() {
+                    if cg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..cg.instance_count);
+                    }
+                }
+            }
+            // Analytical GPU ellipses (instanced screen-space quads)
+            if self.gpu_ellipses.iter().any(|eg| eg.instance_count > 0) {
+                pass.set_pipeline(&self.ellipse_pipeline);
+                for eg in self.gpu_ellipses.iter() {
+                    if eg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..eg.instance_count);
+                    }
+                }
+            }
             // Live overlay wires (command preview / interim / grip drag) always
             // on top: the xray pipeline (depth_compare=Always, no depth write)
             // keeps them visible through any occluding geometry — a 3D solid, or
@@ -4390,6 +4662,24 @@ impl Pipeline {
                             0..6,
                             pw.first_instance..pw.first_instance + pw.instance_count,
                         );
+                    }
+                }
+            }
+            if self.gpu_preview_circles.iter().any(|cg| cg.instance_count > 0) {
+                pass.set_pipeline(&self.circle_xray_pipeline);
+                for cg in &self.gpu_preview_circles {
+                    if cg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..cg.instance_count);
+                    }
+                }
+            }
+            if self.gpu_preview_ellipses.iter().any(|eg| eg.instance_count > 0) {
+                pass.set_pipeline(&self.ellipse_xray_pipeline);
+                for eg in &self.gpu_preview_ellipses {
+                    if eg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..eg.instance_count);
                     }
                 }
             }
@@ -4503,6 +4793,8 @@ impl Pipeline {
                 || !self.block_text_highlight_gpu.is_empty();
         if !self.gpu_selected_wires.is_empty()
             || !self.gpu_selected_block_wires.is_empty()
+            || !self.gpu_selected_circles.is_empty()
+            || !self.gpu_selected_ellipses.is_empty()
             || have_text_highlight
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -4561,6 +4853,34 @@ impl Pipeline {
                         continue;
                     }
                     bind_and_draw_block_wire(&mut pass, wire);
+                }
+            }
+            if !self.gpu_selected_circles.is_empty() {
+                pass.set_pipeline(if hidden_line {
+                    &self.circle_pipeline
+                } else {
+                    &self.circle_xray_pipeline
+                });
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                for cg in &self.gpu_selected_circles {
+                    if cg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..cg.instance_count);
+                    }
+                }
+            }
+            if !self.gpu_selected_ellipses.is_empty() {
+                pass.set_pipeline(if hidden_line {
+                    &self.ellipse_pipeline
+                } else {
+                    &self.ellipse_xray_pipeline
+                });
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                for eg in &self.gpu_selected_ellipses {
+                    if eg.instance_count > 0 {
+                        pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
+                        pass.draw(0..6, 0..eg.instance_count);
+                    }
                 }
             }
             if let Some(atlas) = &self.text_atlas_gpu {
@@ -4648,12 +4968,7 @@ impl Pipeline {
         }
     }
 
-    /// Forget every cache key that describes this slot's uploaded content.
-    ///
-    /// Shared by slot reuse and by [`Self::release_heavy_resources`] so the two
-    /// cannot disagree about what "this slot holds nothing you can trust"
-    /// means. Keys only — the buffers themselves are dropped by the caller that
-    /// wants the memory back.
+    /// Reset every cache key that describes this slot's uploaded content.
     pub(crate) fn forget_cached_keys(&mut self) {
         self.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
         self.cached_wire_id = u64::MAX;
@@ -4676,6 +4991,9 @@ impl Pipeline {
         self.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);
         self.silhouette_source_key = (usize::MAX, usize::MAX, u64::MAX);
         self.render_sig = u64::MAX;
+        // The retained-upload record is part of the slot's cached state.
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
     }
 
     /// Catch errors delivered after the previous upload/submit completed.
@@ -4689,6 +5007,8 @@ impl Pipeline {
         self.wire_arena = None;
         self.wire_arena_mesh = None;
         self.wire_arena_id = u64::MAX;
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
         self.alloc_size = Size::new(0, 0);
         self.shadow_full = None;
         self.background_source_id = usize::MAX;
@@ -4711,6 +5031,8 @@ impl Pipeline {
 
         self.gpu_wires = std::sync::Arc::new(Vec::new());
         self.gpu_block_wires = std::sync::Arc::new(Vec::new());
+        self.gpu_circles = std::sync::Arc::new(Vec::new());
+        self.gpu_ellipses = std::sync::Arc::new(Vec::new());
         self.wire_handle_index = std::sync::Arc::new(rustc_hash::FxHashMap::default());
         self.wire_arena = None;
         self.wire_arena_mesh = None;
@@ -4718,10 +5040,16 @@ impl Pipeline {
         self.wire_arena_fallback_kind = None;
         self.wire_arena_fallback_handles.clear();
         self.wire_arena_id = u64::MAX;
+        self.partition_contributors.clear();
+        self.partition_depth_generation = u64::MAX;
 
         self.gpu_selected_wires.clear();
         self.gpu_selected_block_wires.clear();
+        self.gpu_selected_circles.clear();
+        self.gpu_selected_ellipses.clear();
         self.gpu_preview_wires.clear();
+        self.gpu_preview_circles.clear();
+        self.gpu_preview_ellipses.clear();
         self.hatch_gpu.clear();
         self.gpu_wipeouts.clear();
         self.wipeout_skip_flags.clear();
@@ -4990,6 +5318,7 @@ impl MultiPipeline {
             self.wire_buffer_cache.retain(|_, entry| {
                 std::sync::Arc::strong_count(&entry.0) > 1
                     || std::sync::Arc::strong_count(&entry.1) > 1
+                    || std::sync::Arc::strong_count(&entry.3) > 1
             });
             self.block_geometry.retain(|_, chunks| {
                 chunks.iter().any(|chunk| std::sync::Arc::strong_count(&chunk.bind_group) > 1)
@@ -5140,6 +5469,8 @@ pub struct MultiPipeline {
             std::sync::Arc<Vec<WireGpu>>,
             std::sync::Arc<Vec<BlockWireGpu>>,
             std::sync::Arc<rustc_hash::FxHashMap<u64, Vec<u32>>>,
+            std::sync::Arc<Vec<CircleGpu>>,
+            std::sync::Arc<Vec<EllipseGpu>>,
         ),
     >,
 }

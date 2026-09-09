@@ -596,11 +596,14 @@ impl Scene {
             .filter_map(|&handle| {
                 let from_history = self
                     .document
-                    .solid_history_operation(handle)
-                    .and_then(|operation| cadkernel::acis::rebuild_body(operation).ok());
+                    .solid_history_operations(handle)
+                    .and_then(|operations| cadkernel::acis::rebuild_history(&operations).ok());
                 let body = from_history.or_else(|| match self.document.get_entity(handle) {
                     Some(EntityType::Solid3D(solid)) => {
                         crate::scene::convert::solid3d_tess::kernel_body(solid)
+                    }
+                    Some(EntityType::Region(region)) => {
+                        crate::scene::convert::solid3d_tess::kernel_region_body(region)
                     }
                     Some(EntityType::Surface(surface)) => {
                         crate::scene::convert::solid3d_tess::kernel_surface_body(surface)

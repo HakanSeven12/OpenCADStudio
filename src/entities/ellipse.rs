@@ -294,16 +294,16 @@ fn apply_axis_grip(ell: &mut Ellipse, grip_id: usize, point: glam::DVec3) {
 fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
     match (grip_id, apply) {
         (0, GripApply::Translate(d)) => {
-            ell.center.x += d.x as f64;
-            ell.center.y += d.y as f64;
-            ell.center.z += d.z as f64;
+            ell.center.x += d.x;
+            ell.center.y += d.y;
+            ell.center.z += d.z;
         }
         (0, GripApply::Absolute(p)) => {
-            ell.center.x = p.x as f64;
-            ell.center.y = p.y as f64;
-            ell.center.z = p.z as f64;
+            ell.center.x = p.x;
+            ell.center.y = p.y;
+            ell.center.z = p.z;
         }
-        (1 | 2 | 3 | 4, GripApply::Absolute(p)) => apply_axis_grip(ell, grip_id, p),
+        (1..=4, GripApply::Absolute(p)) => apply_axis_grip(ell, grip_id, p),
         (5 | 6, GripApply::Absolute(p)) => {
             let Some(parameter) = parameter_at_point(ell, p) else {
                 return;

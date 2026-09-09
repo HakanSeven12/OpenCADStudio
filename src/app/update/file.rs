@@ -133,6 +133,9 @@ fn plot_dialog_sheet_mm(d: &crate::ui::window::plot::PlotDialogState) -> (f64, f
         "A1" => Some(PaperSize::A1),
         "A0" => Some(PaperSize::A0),
         "A4" => Some(PaperSize::A4),
+        "Letter" => Some(PaperSize::Letter),
+        "Legal" => Some(PaperSize::Legal),
+        "Tabloid" => Some(PaperSize::Tabloid),
         _ => None,
     };
     if let Some(paper) = standard {
@@ -4297,7 +4300,10 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 .as_deref()
                 .is_some_and(|name| name.eq_ignore_ascii_case(&style_name));
         let (mut paper, orient) = paper_label_from_dims(ps.paper_width, ps.paper_height);
-        if !matches!(paper.as_str(), "A4" | "A3" | "A2" | "A1" | "A0")
+        if !matches!(
+            paper.as_str(),
+            "A4" | "A3" | "A2" | "A1" | "A0" | "Letter" | "Legal" | "Tabloid"
+        )
             && !ps.paper_size.is_empty()
         {
             paper = ps.paper_size.clone();
@@ -4401,6 +4407,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
             "A2" => PaperSize::A2,
             "A1" => PaperSize::A1,
             "A0" => PaperSize::A0,
+            "Letter" => PaperSize::Letter,
+            "Legal" => PaperSize::Legal,
+            "Tabloid" => PaperSize::Tabloid,
             _ => PaperSize::A4,
         };
         let orient = if d.orientation == "Portrait" {

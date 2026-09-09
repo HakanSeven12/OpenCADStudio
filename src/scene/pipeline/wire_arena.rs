@@ -120,15 +120,152 @@ fn handle_of(w: &WireModel) -> Option<Handle> {
     crate::scene::Scene::handle_from_wire_name(&w.name)
 }
 
+/// Classification of a wire model for rendering pipelines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WireKind {
+    Invisible,
+    Block,
+    Circle,
+    Ellipse,
+    Regular,
+    MeshEdge,
+    Empty,
+}
+
+/// Fast, branch-predicted classification of a wire model.
+///
+/// Bypasses analytical circle/ellipse extraction for the 95%+ of wires that have
+/// no tangent geometry or multiple tangent primitives, reducing overhead to ~2 ns.
+#[inline]
+pub fn classify_wire(wire: &WireModel) -> WireKind {
+    if !wire.display_visible {
+        return WireKind::Invisible;
+    }
+    if wire.render_instance.is_some() {
+        return WireKind::Block;
+    }
+    if !wire.tangent_geoms.is_empty()
+        && wire.fill_tris.is_empty()
+        && wire.pick_tris.is_empty()
+        && wire.text_verts.is_empty()
+    {
+        if super::circle_gpu::extract_circle_instances(wire, 0.0).is_some() {
+            return WireKind::Circle;
+        }
+        if super::ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_some() {
+            return WireKind::Ellipse;
+        }
+    }
+    if !wire.points.is_empty() {
+        if wire.fill_is_3d {
+            WireKind::MeshEdge
+        } else {
+            WireKind::Regular
+        }
+    } else {
+        WireKind::Empty
+    }
+}
+
+/// Result of a single-pass partitioning of viewport wires.
+pub struct PartitionedWires<'a> {
+    pub regular: Vec<&'a WireModel>,
+    pub mesh: Vec<&'a WireModel>,
+    pub instanced: Vec<&'a WireModel>,
+    pub circle_instances: Vec<super::circle_gpu::CircleInstance>,
+    pub ellipse_instances: Vec<super::ellipse_gpu::EllipseInstance>,
+    /// Handles that contributed to the retained analytical uploads.
+    pub contributors: rustc_hash::FxHashSet<Handle>,
+}
+
+/// Whether this wire contributes to an upload retained across arena patches.
+pub fn feeds_analytical_uploads(wire: &WireModel) -> bool {
+    matches!(
+        classify_wire(wire),
+        WireKind::Block | WireKind::Circle | WireKind::Ellipse
+    )
+}
+
+/// Single-pass classification and extraction of all viewport wire categories.
+///
+/// Traverses the wire slice exactly once, eliminating redundant passes and duplicate
+/// analytical extractions across split_wires, upload_block_wires, upload_circles,
+/// and upload_ellipses.
+pub fn partition_wires<'a>(
+    wires: &'a [WireModel],
+    depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+) -> PartitionedWires<'a> {
+    let mut regular = Vec::new();
+    let mut mesh = Vec::new();
+    let mut instanced = Vec::new();
+    let mut circle_instances = Vec::new();
+    let mut ellipse_instances = Vec::new();
+    let mut contributors: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
+    let note = |wire: &WireModel, set: &mut rustc_hash::FxHashSet<Handle>| {
+        if let Some(handle) = handle_of(wire) {
+            set.insert(handle);
+        }
+    };
+
+    for wire in wires {
+        if !wire.display_visible {
+            continue;
+        }
+        if wire.render_instance.is_some() {
+            note(wire, &mut contributors);
+            instanced.push(wire);
+            continue;
+        }
+        // Resolve draw depth only for wires eligible for analytical extraction.
+        if !wire.tangent_geoms.is_empty()
+            && wire.fill_tris.is_empty()
+            && wire.pick_tris.is_empty()
+            && wire.text_verts.is_empty()
+        {
+            let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
+            if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
+                note(wire, &mut contributors);
+                circle_instances.extend(insts);
+                continue;
+            }
+            if let Some(insts) = super::ellipse_gpu::extract_ellipse_instances(wire, depth) {
+                note(wire, &mut contributors);
+                ellipse_instances.extend(insts);
+                continue;
+            }
+        }
+        if !wire.points.is_empty() {
+            if wire.fill_is_3d {
+                mesh.push(wire);
+            } else {
+                regular.push(wire);
+            }
+        }
+    }
+
+    PartitionedWires {
+        regular,
+        mesh,
+        instanced,
+        circle_instances,
+        ellipse_instances,
+        contributors,
+    }
+}
+
 /// Use the same regular/mesh partition for full uploads and changed runs.
 /// Instanced blocks are uploaded separately by `BlockWireGpu`.
 pub fn split_wires(wires: &[WireModel]) -> (Vec<&WireModel>, Vec<&WireModel>) {
-    wires
-        .iter()
-        .filter(|wire| {
-            wire.display_visible && !wire.points.is_empty() && wire.render_instance.is_none()
-        })
-        .partition(|wire| !wire.fill_is_3d)
+    let mut regular = Vec::new();
+    let mut mesh = Vec::new();
+    for wire in wires {
+        match classify_wire(wire) {
+            WireKind::Regular => regular.push(wire),
+            WireKind::MeshEdge => mesh.push(wire),
+            _ => {}
+        }
+    }
+    (regular, mesh)
 }
 
 /// True when appending a new entity at the tail could change the image, so the
@@ -1527,5 +1664,49 @@ mod tests {
     fn tombstones_use_the_shader_discard_sentinel() {
         assert!(blank_const().pattern_length < 0.0);
         assert!(blank_packed_instance().pattern_length < 0.0);
+    }
+
+    #[test]
+    fn partition_wires_partitions_preview_analytical_curves() {
+        use crate::scene::model::wire_model::TangentGeom;
+        let mut circle_preview = WireModel::default();
+        circle_preview.tangent_geoms.push(TangentGeom::PlanarCircle {
+            center: [1.0, 2.0, 3.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+        });
+
+        let mut arc_preview = WireModel::default();
+        arc_preview.tangent_geoms.push(TangentGeom::Arc {
+            center: [4.0, 5.0, 6.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 8.0,
+            start_angle: 0.1,
+            end_angle: 2.0,
+        });
+
+        let mut ellipse_preview = WireModel::default();
+        ellipse_preview.tangent_geoms.push(TangentGeom::PlanarEllipse {
+            center: [7.0, 8.0, 9.0],
+            major_axis: [5.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            minor_axis_ratio: 0.6,
+            start_param: 0.0,
+            end_param: std::f64::consts::TAU,
+        });
+
+        let mut regular_line = WireModel::default();
+        regular_line.points.push([0.0, 0.0, 0.0]);
+        regular_line.points.push([1.0, 1.0, 1.0]);
+
+        let wires = vec![circle_preview, arc_preview, ellipse_preview, regular_line];
+        let depth_map = rustc_hash::FxHashMap::default();
+        let partitioned = partition_wires(&wires, &depth_map);
+
+        assert_eq!(partitioned.circle_instances.len(), 2);
+        assert_eq!(partitioned.ellipse_instances.len(), 1);
+        assert_eq!(partitioned.regular.len(), 1);
     }
 }

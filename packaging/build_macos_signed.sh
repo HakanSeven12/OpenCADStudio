@@ -103,9 +103,11 @@ if [ "$DEVELOPER_ID" = "-" ]; then
     # CI-parity ad-hoc signature; cannot be notarized.
     codesign --force --deep --sign - --timestamp=none "$APP"
 else
-    # Inside-out: the appex first (sandbox entitlement is REQUIRED for a
-    # QuickLook extension to run), then the outer bundle. Hardened runtime
+    # Sign nested code before the outer bundle. The sandbox entitlement is
+    # required for the QuickLook extension. Use hardened runtime
     # and a secure timestamp on every layer for notarization.
+    codesign --force --timestamp --options runtime \
+        -s "$DEVELOPER_ID" "$APP/Contents/MacOS/OpenCADStudio-App"
     codesign --force --timestamp --options runtime \
         --entitlements crates/dwg-thumbnailer/macos/entitlements.plist \
         -s "$DEVELOPER_ID" "$APP/Contents/PlugIns/DWGThumbnail.appex"

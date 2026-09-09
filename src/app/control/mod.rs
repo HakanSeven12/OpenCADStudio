@@ -2,7 +2,7 @@
 use super::{Message, OpenCADStudio};
 use crate::command::{InputKind, StepInput};
 use iced::Task;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::OnceLock};
 #[cfg(not(target_arch = "wasm32"))]
 mod transport;
@@ -361,7 +361,7 @@ impl OpenCADStudio {
             "mtext_editor":self.mtext_editor.as_ref().map(|e|json!({"text":e.content.text(),"height":e.height,"style":e.style})),
             "text_editor":self.text_inline.is_some(),"event_cursor":self.control.serial,
             "operation":self.control.pending.as_ref().map(|p| &p.id),
-            "capabilities":["commands","command_manifest","step_input","batch","compact_results","entity_pick","structure_pick","selection","properties","layers","history","documents","events","capture","viewport_capture","measure","spatial_query"]
+            "capabilities":["commands","command_manifest","step_input","batch","compact_results","entity_pick","structure_pick","selection","properties","records","record_schemas","record_filters","atomic_record_updates","layers","history","documents","events","capture","viewport_capture","measure","spatial_query"]
         })
     }
 
@@ -377,6 +377,9 @@ impl OpenCADStudio {
                 | "properties"
                 | "measure"
                 | "query"
+                | "records"
+                | "record_schema"
+                | "capabilities"
                 | "entities"
                 | "layers"
                 | "header"
@@ -449,7 +452,9 @@ impl OpenCADStudio {
                     return (
                         failure(
                             "unknown_command",
-                            format!("Unknown command {requested}; call commands without name to list commands"),
+                            format!(
+                                "Unknown command {requested}; call commands without name to list commands"
+                            ),
                         ),
                         Task::none(),
                     );
@@ -511,7 +516,7 @@ impl OpenCADStudio {
                             "Supply a unique request_id (maximum 128 bytes)",
                         ),
                         Task::none(),
-                    )
+                    );
                 }
             };
             if let Some((_, old, result)) = self.control.completed.iter().find(|(i, _, _)| i == &id)
@@ -773,6 +778,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             "property" => self.control_set_property(req)?,
+            "set_properties" => self.control_set_record_properties(req)?,
             "action" => self.control_ui_action(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "save" => {
@@ -812,6 +818,12 @@ impl OpenCADStudio {
             }
             _ => return Err(failure("unknown_operation", "Unknown operation")),
         })
+    }
+
+    pub(super) fn set_control_result(&mut self, value: Value) {
+        if let Some(operation) = self.control.pending.as_mut() {
+            operation.result = value;
+        }
     }
 
     pub(super) fn control_track(&mut self, task: Task<Message>) -> Task<Message> {
@@ -982,7 +994,7 @@ impl OpenCADStudio {
                     "area":planar.curve.is_closed().then(|| planar.curve.enclosed_area().abs())
                 })
             });
-            out.push(json!({"handle":format!("{:X}",handle.value()),"type":crate::entities::names::ui_name(entity),"bounds":{"min":[bb.min.x,bb.min.y,bb.min.z],"max":[bb.max.x,bb.max.y,bb.max.z]},"curve":curve,"mesh":metrics.map(|m|json!({"vertices":m.metrics.vertices,"triangles":m.metrics.triangles,"surface_area":m.metrics.surface_area,"volume":m.metrics.volume,"centroid":m.metrics.centroid}))}));
+            out.push(json!({"handle":format!("{:X}",handle.value()),"type":crate::entities::names::ui_name(entity),"bounds":{"min":[bb.min.x,bb.min.y,bb.min.z],"max":[bb.max.x,bb.max.y,bb.max.z]},"curve":curve,"mesh":metrics.map(|m|json!({"vertices":m.metrics.vertices,"triangles":m.metrics.triangles,"surface_area":m.metrics.surface_area,"volume":m.metrics.volume,"centroid":m.metrics.centroid,"moment_of_inertia":m.metrics.moment_of_inertia,"principal_directions":m.metrics.principal_directions,"principal_moments":m.metrics.principal_moments,"product_of_inertia":m.metrics.product_of_inertia,"radii_of_gyration":m.metrics.radii_of_gyration}))}));
         }
         json!({"ok":true,"document_id":tab.id,"geometry_revision":tab.scene.geometry_epoch,"measurements":out})
     }
@@ -1101,10 +1113,12 @@ mod tests {
         );
         let started = request(&mut app, json!({"op":"start","cmd":"LINE"}));
         assert_eq!(started["status"], "waiting_input");
-        assert!(started["state"]["command"]["accepts"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("point")));
+        assert!(
+            started["state"]["command"]["accepts"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("point"))
+        );
         assert_eq!(
             started["state"]["command"]["input_example"]["kind"],
             "point"
@@ -1129,10 +1143,12 @@ mod tests {
         );
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 1);
         request(&mut app, json!({"op":"select","type":"LINE"}));
-        assert!(!app.control_properties()["sections"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !app.control_properties()["sections"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         let changed = request(&mut app, json!({"op":"property","field":"color","value":1}));
         assert_eq!(changed["ok"], true, "{changed}");
         assert_eq!(
@@ -1222,6 +1238,92 @@ mod tests {
         assert!((curve["length"].as_f64().unwrap() - std::f64::consts::TAU * 2.0).abs() < 1e-9);
         assert!((curve["area"].as_f64().unwrap() - std::f64::consts::PI * 4.0).abs() < 1e-9);
     }
+
+    #[test]
+    fn control_shell_roundtrips_with_kernel_mass_properties() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"start","cmd":"BOX"}));
+        request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[0.0,0.0,0.0]}),
+        );
+        request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[6.0,5.0,0.0]}),
+        );
+        assert_eq!(
+            request(&mut app, json!({"op":"input","kind":"token","text":"4"}))["status"],
+            "completed"
+        );
+        let handle = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| {
+                matches!(entity, acadrust::EntityType::Solid3D(_)).then(|| entity.common().handle)
+            })
+            .unwrap();
+        let handle_text = format!("{:X}", handle.value());
+
+        request(&mut app, json!({"op":"select","handles":[handle_text]}));
+        request(&mut app, json!({"op":"start","cmd":"SHELL"}));
+        request(
+            &mut app,
+            json!({"op":"input","kind":"entity","handle":handle_text,"point":[3.0,2.5,4.0]}),
+        );
+        request(&mut app, json!({"op":"input","kind":"enter"}));
+        assert_eq!(
+            request(&mut app, json!({"op":"input","kind":"token","text":"0.5"}))["status"],
+            "completed"
+        );
+
+        let measured = app.control_measure(&json!({"handles":[handle_text]}));
+        let mesh = &measured["measurements"][0]["mesh"];
+        assert!((mesh["volume"].as_f64().unwrap() - 50.0).abs() < 1e-9);
+        assert_eq!(mesh["principal_moments"].as_array().unwrap().len(), 3);
+        assert!(matches!(
+            app.tabs[app.active_tab]
+                .scene
+                .document
+                .solid_history_operation(handle),
+            Some(acadrust::objects::SolidHistoryOperation::Brep(_))
+        ));
+
+        assert_eq!(request(&mut app, json!({"op":"undo"}))["ok"], true);
+        let restored = app.control_measure(&json!({"handles":[handle_text]}));
+        assert!(
+            (restored["measurements"][0]["mesh"]["volume"]
+                .as_f64()
+                .unwrap()
+                - 120.0)
+                .abs()
+                < 1e-9
+        );
+        assert_eq!(request(&mut app, json!({"op":"redo"}))["ok"], true);
+
+        let path = std::env::temp_dir().join(format!("ocs-shell-{}.dwg", session_id()));
+        assert_eq!(
+            request(&mut app, json!({"op":"save","path":path}))["ok"],
+            true
+        );
+        request(&mut app, json!({"op":"new"}));
+        assert_eq!(
+            request(&mut app, json!({"op":"open","path":path}))["status"],
+            "completed"
+        );
+        let reopened = app.control_measure(&json!({"handles":[handle_text]}));
+        assert!(
+            (reopened["measurements"][0]["mesh"]["volume"]
+                .as_f64()
+                .unwrap()
+                - 50.0)
+                .abs()
+                < 1e-9
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
     #[test]
     fn control_retry_is_idempotent_and_stale_state_rejected() {
         let mut app = OpenCADStudio::new_for_test();

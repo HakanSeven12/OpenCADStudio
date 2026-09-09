@@ -248,7 +248,7 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
                 );
             }
             let (tangent_geoms, key_vertices) =
-                centerline_metadata_2d(verts, pl.is_closed(), &to_wcs);
+                centerline_metadata_2d(verts, pl.is_closed(), &to_wcs, normal);
             return RenderEntity {
                 pick_tris: Vec::new(),
                 object: RenderObject::BoundaryLines {
@@ -296,11 +296,7 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
             } else if let Some(arc) =
                 crate::entities::common::BulgeArc::from_bulge([ox0, oy0], [ox1, oy1], bulge)
             {
-                let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
-                tgs.push(TangentGeom::Circle {
-                    center: [wcx as f32, wcy as f32, wcz as f32],
-                    radius: arc.radius as f32,
-                });
+                tgs.push(crate::entities::common::bulge_arc_to_tangent(&arc, &to_wcs, normal));
                 for s in arc
                     .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
                     .into_iter()
@@ -378,11 +374,7 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
             [v1.location.x, v1.location.y],
             bulge,
         ) {
-            let (wcx, wcy, wcz) = to_wcs(arc.center[0], arc.center[1]);
-            tangents.push(TangentGeom::Circle {
-                center: [wcx as f32, wcy as f32, wcz as f32],
-                radius: arc.radius as f32,
-            });
+            tangents.push(crate::entities::common::bulge_arc_to_tangent(&arc, &to_wcs, normal));
         }
 
         if i == 0 {
@@ -464,6 +456,7 @@ fn centerline_metadata_2d(
     verts: &[acadrust::entities::Vertex2D],
     closed: bool,
     to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+    normal: (f64, f64, f64),
 ) -> (Vec<TangentGeom>, Vec<[f64; 3]>) {
     let count = verts.len();
     let segment_count = if closed {
@@ -488,11 +481,7 @@ fn centerline_metadata_2d(
             [end.location.x, end.location.y],
             start.bulge,
         ) {
-            let center = to_wcs(arc.center[0], arc.center[1]);
-            tangents.push(TangentGeom::Circle {
-                center: [center.0 as f32, center.1 as f32, center.2 as f32],
-                radius: arc.radius as f32,
-            });
+            tangents.push(crate::entities::common::bulge_arc_to_tangent(&arc, to_wcs, normal));
         }
         if index == 0 {
             key_vertices.push([p0.0, p0.1, p0.2]);

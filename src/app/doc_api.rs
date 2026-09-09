@@ -999,14 +999,6 @@ fn kernel_placement(p: &PlacementSpec) -> cadkernel::brep::Placement {
     }
 }
 
-/// Signed volume and centroid of a closed triangle mesh via the divergence
-/// theorem: V = Σ v0·(v1×v2)/6, C = Σ (v0+v1+v2)·tetra_vol / (4V). Single source
-/// of truth for both (used by the cold-cache `volume`/`centroid` fallback).
-fn mesh_volume_centroid(mesh: &cadkernel::brep::Mesh) -> (f64, [f64; 3]) {
-    // Delegate to the crate's single source of truth (divergence theorem).
-    ocs_doc_api::geom::mesh_volume_centroid(mesh)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3235,7 +3227,7 @@ mod tests {
         let body = crate::scene::convert::solid3d_tess::kernel_body(solid)
             .expect("re-lift reloaded solid failed");
         let mesh = cadkernel::brep::mesh_body(&body, 0.5, 1e-3);
-        let vol = mesh_volume_centroid(&mesh).0;
+        let vol = ocs_doc_api::geom::mesh_volume_centroid(&mesh).0;
         assert!(
             (vol - 125.0).abs() < 1.0,
             "reloaded intersection volume {vol}"

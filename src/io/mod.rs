@@ -9,8 +9,6 @@ pub mod edit_lock;
 pub mod obj;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod single_instance;
-#[cfg(target_os = "macos")]
-pub mod macos_open_events;
 pub mod pdf_export;
 pub mod plot_style;
 pub mod print_to_printer;
@@ -2116,33 +2114,8 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
                 || !finite_coord(a.radius)
                 || !a.start_angle.is_finite()
                 || !a.end_angle.is_finite()
-                // Same degenerate-curve guard as Circle.
                 || a.radius.abs() < 1.0e-10
                 || a.radius.abs() > 1.0e10
-                // Zero-sweep arc (start_angle == end_angle, modulo 2π) collapses
-                // to a single point in WCS — a three-point circle fit on
-                // coincident vertices recurses unboundedly in parameter_division.
-                || (a.end_angle - a.start_angle).abs() < 1.0e-9
-                // Near-zero sweep is the same trap with a wider mouth: a tiny but
-                // non-zero sweep (e.g. 1.6e-6 rad) still places start/mid/end
-                // within the coincidence tolerance, so sampling
-                // recurses and allocates until OOM. Gate on arc *length*
-                // (radius × sweep), not sweep alone, so a legitimately large-
-                // radius small-sweep arc (still a visible curve) survives while
-                // sub-precision arcs are dropped.
-                || a.radius.abs() * (a.end_angle - a.start_angle).abs() < 1.0e-6
-                // Near-collinear sample points: even when the arc *length* clears
-                // the floor above, a small sweep over a modest radius leaves
-                // start/mid/end almost on one line (a 35-unit, 6.5e-7-rad arc has
-                // arc length 2.3e-5 — past the gate — yet bows off its chord by
-                // only ~2e-12). A three-point circle fit then returns a
-                // near-infinite radius and `parameter_division` subdivides without
-                // bound. Gate on the sagitta (chord height = r·(1−cos(sweep/2))),
-                // the true measure of how far the arc departs a straight line and
-                // of the fit's conditioning.
-                || a.radius.abs()
-                    * (1.0 - ((a.end_angle - a.start_angle).abs() * 0.5).cos())
-                    < 1.0e-6
                 || !finite_unit_normal(&a.normal)
         }
         E::Ellipse(e) => {
@@ -2172,32 +2145,15 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
             let n = s.control_points.len();
             let degree_bad = s.degree < 1;
             let deg = s.degree.max(0) as usize;
+            let compact_periodic_knots = s.flags.periodic && s.knots.len() == n.saturating_add(1);
             let knots_bad = !s.knots.is_empty()
                 && (s.knots.iter().any(|k| !k.is_finite())
                     || s.knots.windows(2).any(|w| w[1] < w[0])
-                    || s.knots.len() != n + deg + 1);
-            // Degenerate: every control point collapses onto (nearly) the same
-            // point, so the curve has zero length. A three-point fit
-            // `parameter_division` never converges on it and the tessellation
-            // hangs — a periodic 9-point spline pinned at the origin is the seen
-            // case. Reject when the control-point extent is sub-precision.
-            let degenerate_extent = n >= 2 && {
-                let (mut mn, mut mx) = ([f64::MAX; 3], [f64::MIN; 3]);
-                for p in &s.control_points {
-                    mn[0] = mn[0].min(p.x);
-                    mx[0] = mx[0].max(p.x);
-                    mn[1] = mn[1].min(p.y);
-                    mx[1] = mx[1].max(p.y);
-                    mn[2] = mn[2].min(p.z);
-                    mx[2] = mx[2].max(p.z);
-                }
-                (mx[0] - mn[0]).max(mx[1] - mn[1]).max(mx[2] - mn[2]) < 1.0e-6
-            };
+                    || (!compact_periodic_knots && s.knots.len() != n + deg + 1));
             n >= MAX_VERTS
                 || degree_bad
                 || s.control_points.iter().any(|p| !finite_vec3(p))
                 || knots_bad
-                || degenerate_extent
         }
         _ => false,
     }
@@ -2411,38 +2367,29 @@ mod corrupt_guard_tests {
     use acadrust::entities::{Arc, EntityType, Spline};
     use acadrust::types::Vector3;
 
-    // A near-zero-sweep arc: sweep 1.56e-6 rad on a 3.9e-3 radius. The angles
-    // are individually finite and the radius is in range, so the old
-    // (end-start) < 1e-9 check passed it through — but start/mid/end land
-    // within the coincidence tolerance and sampling allocates
-    // until OOM. The arc-length floor must reject it.
+    // Small but finite arcs are valid records. Kernel tessellation is bounded,
+    // so opening must retain them instead of treating their size as corruption.
     #[test]
-    fn rejects_near_degenerate_arc() {
+    fn keeps_small_finite_arc() {
         let mut a = Arc::new();
         a.center = Vector3::new(2880.84, 891.83, 0.0);
         a.radius = 0.0038974142851181423;
         a.start_angle = 1.0401656235942365;
         a.end_angle = 1.0401671831670538;
         a.normal = Vector3::new(0.0, 0.0, 1.0);
-        assert!(is_entity_corrupt(&EntityType::Arc(a)));
+        assert!(!is_entity_corrupt(&EntityType::Arc(a)));
     }
 
-    // A 35-unit-radius arc sweeping 6.5e-7 rad has arc length 2.3e-5 — past the
-    // arc-length floor — yet its start/mid/end bow off the chord by only ~2e-12,
-    // so a three-point circle fit blows up and sampling hangs. The
-    // sagitta floor must reject it where the arc-length floor alone does not.
+    // A nearly straight arc still carries valid source geometry.
     #[test]
-    fn rejects_near_collinear_arc() {
+    fn keeps_nearly_straight_arc() {
         let mut a = Arc::new();
         a.center = Vector3::new(551435.3071786845, 4051623.7156955916, 0.0);
         a.radius = 35.0;
         a.start_angle = 5.823361856481176;
         a.end_angle = 5.823362506017916;
         a.normal = Vector3::new(0.0, 0.0, 1.0);
-        // Sanity: arc length clears the old gate, proving the sagitta gate is
-        // what catches this one.
-        assert!(a.radius * (a.end_angle - a.start_angle).abs() > 1.0e-6);
-        assert!(is_entity_corrupt(&EntityType::Arc(a)));
+        assert!(!is_entity_corrupt(&EntityType::Arc(a)));
     }
 
     // A large-radius small-sweep arc is still a visible curve and must survive:
@@ -2466,14 +2413,25 @@ mod corrupt_guard_tests {
         assert!(is_entity_corrupt(&EntityType::Spline(s)));
     }
 
-    // A periodic spline whose control points all collapse onto (nearly) one
-    // point has zero length; sampling never converges and the
-    // tessellation hangs. The control-point extent floor must reject it.
+    // A collapsed spline is still a valid source record. Kernel subdivision
+    // has a fixed depth bound and can process it safely.
     #[test]
-    fn rejects_degenerate_point_spline() {
+    fn keeps_degenerate_point_spline() {
         let pts = vec![Vector3::new(1e-12, -1e-12, 0.0); 9];
         let s = Spline::from_control_points(3, pts);
-        assert!(is_entity_corrupt(&EntityType::Spline(s)));
+        assert!(!is_entity_corrupt(&EntityType::Spline(s)));
+    }
+
+    #[test]
+    fn keeps_compact_periodic_spline_knots() {
+        let pts = (0..12)
+            .map(|index| Vector3::new(index as f64, (index % 3) as f64, 0.0))
+            .collect();
+        let mut s = Spline::from_control_points(2, pts);
+        s.flags.closed = true;
+        s.flags.periodic = true;
+        s.knots = (0..13).map(|value| value as f64).collect();
+        assert!(!is_entity_corrupt(&EntityType::Spline(s)));
     }
 
     // A normal cubic spline (4 control points, valid clamped knots) survives.

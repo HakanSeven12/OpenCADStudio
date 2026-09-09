@@ -17,7 +17,7 @@ use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
-use crate::scene::model::wire_model::WireModel;
+use crate::scene::model::wire_model::{TangentGeom, WireModel};
 
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
@@ -443,6 +443,7 @@ impl CadCommand for PlineCommand {
         let pt = self.plane.to_local(pt_world).as_vec3();
 
         let mut pts: Vec<[f32; 3]> = Vec::new();
+        let mut tangent_geom = None;
         match self.mode {
             SegMode::Line => {
                 pts.push([last.x, last.y, last.z]);
@@ -456,8 +457,44 @@ impl CadCommand for PlineCommand {
                     .map(|t| t.as_dvec2())
                     .unwrap_or(DVec2::new(1.0, 0.0));
                 let bulge = compute_bulge(a, tangent, b);
-                let arc_pts = arc_sample_points(last, bulge, pt, 16);
-                pts.extend_from_slice(&arc_pts);
+                if bulge.abs() >= 1e-9 && (b - a).length_squared() >= 1e-12 {
+                    if let Some(arc) =
+                        crate::entities::common::BulgeArc::from_bulge([a.x, a.y], [b.x, b.y], bulge)
+                    {
+                        for s in arc.tessellate_angle(std::f64::consts::TAU / 64.0) {
+                            pts.push([s[0] as f32, s[1] as f32, last.z]);
+                        }
+                        let (sa, ea) = if arc.sweep >= 0.0 {
+                            (arc.start_angle, arc.end_angle)
+                        } else {
+                            (arc.end_angle, arc.start_angle)
+                        };
+                        let world_center = self
+                            .plane
+                            .to_world(DVec3::new(arc.center[0], arc.center[1], last.z as f64));
+                        if arc.radius > 0.0
+                            && arc.radius.is_finite()
+                            && arc.radius <= 1e6
+                            && sa.is_finite()
+                            && ea.is_finite()
+                        {
+                            tangent_geom = Some(TangentGeom::Arc {
+                                center: world_center.to_array(),
+                                axis_x: self.plane.x.to_array(),
+                                axis_y: self.plane.y.to_array(),
+                                radius: arc.radius,
+                                start_angle: sa,
+                                end_angle: ea,
+                            });
+                        }
+                    } else {
+                        let arc_pts = arc_sample_points(last, bulge, pt, 64);
+                        pts.extend_from_slice(&arc_pts);
+                    }
+                } else {
+                    pts.push([last.x, last.y, last.z]);
+                    pts.push([pt.x, pt.y, pt.z]);
+                }
             }
         }
 
@@ -465,12 +502,16 @@ impl CadCommand for PlineCommand {
             .into_iter()
             .map(|point| self.plane.to_world(Vec3::from_array(point).as_dvec3()).as_vec3().to_array())
             .collect();
-        Some(WireModel::solid(
+        let mut wire = WireModel::solid(
             "rubber_band".into(),
             world_points,
             WireModel::CYAN,
             false,
-        ))
+        );
+        if let Some(tg) = tangent_geom {
+            wire.tangent_geoms.push(tg);
+        }
+        Some(wire)
     }
 }
 
@@ -547,5 +588,21 @@ mod tests {
             escape.on_escape(),
             CmdResult::FinalizeLiveEntity(h) if h == handle
         ));
+    }
+
+    #[test]
+    fn test_draw_line_then_arc() {
+        let mut cmd = PlineCommand::new();
+        cmd.on_point(DVec3::new(0.0, 0.0, 0.0));
+        let res = cmd.on_point(DVec3::new(10.0, 0.0, 0.0));
+        assert!(matches!(res, CmdResult::CommitLiveEntity(_)));
+        cmd.set_live_handle(Handle::new(1));
+        cmd.on_text_input("A");
+        let wire = cmd.on_mouse_move(DVec3::new(10.0, 5.0, 0.0)).expect("arc wire");
+        assert_eq!(wire.tangent_geoms.len(), 1);
+        assert!(matches!(wire.tangent_geoms[0], TangentGeom::Arc { .. }));
+        assert!(wire.points.len() >= 16);
+        let res2 = cmd.on_point(DVec3::new(10.0, 5.0, 0.0));
+        assert!(matches!(res2, CmdResult::UpdateLiveEntity { .. }));
     }
 }

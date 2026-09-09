@@ -807,11 +807,39 @@ impl Scene {
         true
     }
 
+    pub fn append_solid_history(
+        &mut self,
+        handle: Handle,
+        operation: acadrust::objects::SolidHistoryOperation,
+    ) -> bool {
+        let previous = self
+            .document
+            .solid_history_graph(handle)
+            .map(|graph| graph.nodes)
+            .unwrap_or_default();
+        self.record_solid_history_before(handle);
+        let Some(graph) = self.document.append_solid_history(handle, operation) else {
+            return false;
+        };
+        for node in graph.nodes {
+            if !previous.contains(&node) {
+                self.record_undo_object_before(node, None);
+            }
+        }
+        self.sync_solid_reference_point(handle);
+        true
+    }
+
     pub(crate) fn sync_solid_reference_point(&mut self, handle: Handle) {
         let reference = self
             .document
-            .solid_history_operation(handle)
-            .and_then(crate::scene::model::solid_history::reference_point);
+            .solid_history_operations(handle)
+            .and_then(|operations| {
+                operations
+                    .iter()
+                    .rev()
+                    .find_map(crate::scene::model::solid_history::reference_point)
+            });
         let Some(reference) = reference else {
             return;
         };
@@ -860,8 +888,31 @@ impl Scene {
             (EntityType::Surface(_), SolidHistoryOperation::Extrusion(value)) => {
                 cadkernel::acis::rebuild_extrusion_with_mode(value, true).ok()
             }
-            (EntityType::Surface(_), SolidHistoryOperation::Loft(_))
-                | (EntityType::Solid3D(_), _) => cadkernel::acis::rebuild_body(operation).ok(),
+            (EntityType::Surface(_), SolidHistoryOperation::Loft(_)) => {
+                cadkernel::acis::rebuild_body(operation).ok()
+            }
+            (EntityType::Solid3D(_), _) => {
+                let mut operations = self.document.solid_history_operations(handle)?;
+                let replacement_id = operation.base().map(|base| {
+                    if base.eval.node_id > 0 {
+                        base.eval.node_id
+                    } else {
+                        base.step_id
+                    }
+                })?;
+                let target = operations.iter_mut().find(|candidate| {
+                    candidate.base().is_some_and(|base| {
+                        let node_id = if base.eval.node_id > 0 {
+                            base.eval.node_id
+                        } else {
+                            base.step_id
+                        };
+                        node_id == replacement_id
+                    })
+                })?;
+                *target = operation.clone();
+                cadkernel::acis::rebuild_history(&operations).ok()
+            }
             _ => None,
         }
     }
@@ -914,7 +965,7 @@ impl Scene {
         self.record_solid_history_before(handle);
         if self
             .document
-            .update_solid_history(handle, operation)
+            .update_solid_history_step(handle, operation)
             .is_none()
         {
             return false;
@@ -1051,16 +1102,71 @@ impl Scene {
         value: &str,
     ) -> bool {
         self.record_solid_history_before(handle);
+        let mut created = false;
+        if self.document.solid_history_graph(handle).is_none() {
+            let create = match field {
+                crate::scene::model::solid_history::PROP_HISTORY => {
+                    if value.eq_ignore_ascii_case("Record") {
+                        true
+                    } else if value.eq_ignore_ascii_case("None") {
+                        return false;
+                    } else {
+                        return false;
+                    }
+                }
+                crate::scene::model::solid_history::PROP_SHOW_HISTORY
+                    if self.document.header.show_solid_history.clamp(0, 2) == 1 =>
+                {
+                    if value.eq_ignore_ascii_case("Yes") {
+                        true
+                    } else if value.eq_ignore_ascii_case("No") {
+                        return false;
+                    } else {
+                        return false;
+                    }
+                }
+                _ => return false,
+            };
+            if create {
+                if !matches!(self.document.get_entity(handle), Some(EntityType::Solid3D(_))) {
+                    return false;
+                }
+                self.restore_solid_models(&[handle]);
+                let Some(body) = self.solid_models.get(&handle).cloned() else {
+                    return false;
+                };
+                if self.is_recording_undo() {
+                    let before = self.document.get_entity_arc(handle);
+                    self.record_undo_before(handle, before);
+                }
+                if !self.create_solid_history(
+                    handle,
+                    crate::scene::model::solid_history::brep_op(&body),
+                ) {
+                    return false;
+                }
+                // A solid without a graph was displayed as History=None.
+                // Preserve that object state before applying the requested
+                // choice, independent of the drawing-wide SOLIDHIST setting.
+                crate::scene::model::solid_history::apply_history_choice(
+                    &mut self.document,
+                    handle,
+                    crate::scene::model::solid_history::PROP_HISTORY,
+                    "None",
+                );
+                created = true;
+            }
+        }
         let applied = crate::scene::model::solid_history::apply_history_choice(
             &mut self.document,
             handle,
             field,
             value,
         );
-        if applied {
+        if created || applied {
             self.bump_entities(&[(handle, ChangeKind::Modified)]);
         }
-        applied
+        created || applied
     }
 
     fn apply_solid_history_grip(
@@ -1072,6 +1178,79 @@ impl Scene {
         let Some(mut operation) = self.document.solid_history_operation(handle).cloned() else {
             return false;
         };
+        if grip_id == crate::scene::model::solid_history::GRIP_FILLET_RADIUS {
+            let acadrust::objects::SolidHistoryOperation::Fillet(value) = &mut operation else {
+                return false;
+            };
+            let Some(radius) = value.radii.first().copied() else {
+                return false;
+            };
+            self.restore_solid_models(&[handle]);
+            let Some(definition) = self
+                .solid_models
+                .get(&handle)
+                .and_then(|body| {
+                    crate::scene::model::solid_history::fillet_radius_grip(body, radius)
+                })
+            else {
+                return false;
+            };
+            let Some(axis) = definition.axis else {
+                return false;
+            };
+            let change = match apply {
+                GripApply::Absolute(world) => (world - definition.world).dot(axis),
+                GripApply::Translate(delta) => delta.dot(axis),
+            };
+            let radius = radius + change;
+            if !radius.is_finite() || radius <= 1.0e-6 {
+                return false;
+            }
+            value.radii.clear();
+            value.radii.push(radius);
+            return self.preview_solid_history(handle, operation);
+        }
+        if matches!(
+            grip_id,
+            crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE1
+                | crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE2
+        ) {
+            let definitions = {
+                let acadrust::objects::SolidHistoryOperation::Chamfer(value) = &operation else {
+                    return false;
+                };
+                crate::scene::model::solid_history::chamfer_distance_grips(
+                    &self.document,
+                    handle,
+                    value,
+                )
+            };
+            let Some(definition) = definitions.into_iter().find(|grip| grip.id == grip_id) else {
+                return false;
+            };
+            let Some(axis) = definition.axis else {
+                return false;
+            };
+            let change = match apply {
+                GripApply::Absolute(world) => (world - definition.world).dot(axis),
+                GripApply::Translate(delta) => delta.dot(axis),
+            };
+            let acadrust::objects::SolidHistoryOperation::Chamfer(value) = &mut operation else {
+                return false;
+            };
+            let distance = if grip_id
+                == crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE1
+            {
+                &mut value.base_distance
+            } else {
+                &mut value.other_distance
+            };
+            *distance += change;
+            if !distance.is_finite() || *distance <= 1.0e-6 {
+                return false;
+            }
+            return self.preview_solid_history(handle, operation);
+        }
         if !crate::scene::model::solid_history::apply_primitive_grip(
             &mut operation,
             grip_id,
@@ -1088,7 +1267,12 @@ impl Scene {
         field: &str,
         value: &str,
     ) -> bool {
-        let Some(mut operation) = self.document.solid_history_operation(handle).cloned() else {
+        let Some(mut operation) =
+            crate::scene::model::solid_history::primitive_property_operation(
+                &self.document,
+                handle,
+            )
+        else {
             return false;
         };
         if !crate::scene::model::solid_history::apply_primitive_property(
@@ -1185,9 +1369,7 @@ impl Scene {
                 generator.source = source;
             }
         }
-        set.metrics.centroid[0] += delta[0];
-        set.metrics.centroid[1] += delta[1];
-        set.metrics.centroid[2] += delta[2];
+        set.metrics.translate(delta);
         set.recompute_aabb();
     }
 
@@ -1336,6 +1518,15 @@ impl Scene {
             if let Some(model) = model {
                 self.images.insert(handle, model);
             }
+        }
+        // A grip edit can move geometry used as the boundary of an associative hatch.
+        // The source entity has already been mutated above, so rebuild any dependent
+        // hatch from the live document geometry immediately.
+        let source_change = [(handle, ChangeKind::Modified)];
+        let hatch_changes = self.refresh_associative_hatches(&source_change);
+
+        if !hatch_changes.is_empty() {
+            self.bump_entities(&hatch_changes);
         }
     }
 }

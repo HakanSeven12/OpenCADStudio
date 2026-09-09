@@ -34,11 +34,42 @@ fn generate_type_registry(out_dir: &Path) {
     let mut samples = Samples::new();
     add_enum_samples(&mut tracer, &mut samples);
 
-    // Curated allow-list of acadrust types. We intentionally exclude
-    // EntityType here to avoid pulling in all 41+ entity variants and any
-    // custom-serializer edge cases.
+    // Trace the complete record roots used by the editor and MCP API. Nested
+    // entity/object variants and their enums are added to the same registry.
     type TraceFn = fn(&mut Tracer, &Samples);
     let types: Vec<(&str, TraceFn)> = vec![
+        ("EntityType", trace::<acadrust::EntityType>),
+        ("ObjectType", trace::<acadrust::objects::ObjectType>),
+        (
+            "HeaderVariables",
+            trace::<acadrust::document::HeaderVariables>,
+        ),
+        ("SummaryInfo", trace::<acadrust::document::SummaryInfo>),
+        ("LineType", trace::<acadrust::LineType>),
+        ("TextStyle", trace::<acadrust::TextStyle>),
+        ("BlockRecord", trace::<acadrust::BlockRecord>),
+        ("DimStyle", trace::<acadrust::DimStyle>),
+        ("AppId", trace::<acadrust::AppId>),
+        ("View", trace::<acadrust::View>),
+        ("VPort", trace::<acadrust::VPort>),
+        ("Ucs", trace::<acadrust::Ucs>),
+        ("VxTableRecord", trace::<acadrust::VxTableRecord>),
+        ("DxfClass", trace::<acadrust::classes::DxfClass>),
+        (
+            "BlockVisibilityParameter",
+            trace::<acadrust::objects::BlockVisibilityParameter>,
+        ),
+        ("FieldDef", trace::<acadrust::document::FieldDef>),
+        (
+            "DgnLsDefinition",
+            trace::<acadrust::objects::DgnLsDefinition>,
+        ),
+        ("DgnLsComponent", trace::<acadrust::objects::DgnLsComponent>),
+        (
+            "NotificationCollection",
+            trace::<acadrust::notification::NotificationCollection>,
+        ),
+        ("Preview", trace::<acadrust::document::Preview>),
         ("Point", trace::<acadrust::Point>),
         ("Line", trace::<acadrust::Line>),
         ("Circle", trace::<acadrust::Circle>),
@@ -93,10 +124,366 @@ fn generate_type_registry(out_dir: &Path) {
         );
     }
 
+    type TraceSimpleFn = fn(&mut Tracer);
+    let enums: Vec<(&str, TraceSimpleFn)> = vec![
+        (
+            "AssocAnnotationKind",
+            trace_simple::<acadrust::objects::AssocAnnotationKind>,
+        ),
+        (
+            "AssocConstraintNodeData",
+            trace_simple::<acadrust::objects::AssocConstraintNodeData>,
+        ),
+        (
+            "AssocEvalValue",
+            trace_simple::<acadrust::objects::AssocEvalValue>,
+        ),
+        (
+            "AssocSubcurveKind",
+            trace_simple::<acadrust::objects::AssocSubcurveKind>,
+        ),
+        (
+            "AssocSurfaceActionKind",
+            trace_simple::<acadrust::objects::AssocSurfaceActionKind>,
+        ),
+        (
+            "AssocViewObjectActionParamKind",
+            trace_simple::<acadrust::objects::AssocViewObjectActionParamKind>,
+        ),
+        (
+            "AcisVersion",
+            trace_simple::<acadrust::entities::AcisVersion>,
+        ),
+        (
+            "AssociativeData",
+            trace_simple::<acadrust::objects::AssociativeData>,
+        ),
+        (
+            "AttachmentPointType",
+            trace_simple::<acadrust::entities::AttachmentPointType>,
+        ),
+        (
+            "BlockContentConnectionType",
+            trace_simple::<acadrust::entities::BlockContentConnectionType>,
+        ),
+        (
+            "BlockEvalValue",
+            trace_simple::<acadrust::objects::BlockEvalValue>,
+        ),
+        ("BorderType", trace_simple::<acadrust::entities::BorderType>),
+        (
+            "BoundaryEdge",
+            trace_simple::<acadrust::entities::BoundaryEdge>,
+        ),
+        (
+            "BreakFlowDirection",
+            trace_simple::<acadrust::entities::BreakFlowDirection>,
+        ),
+        (
+            "CellAlignment",
+            trace_simple::<acadrust::objects::CellAlignment>,
+        ),
+        (
+            "CellStyleType",
+            trace_simple::<acadrust::entities::CellStyleType>,
+        ),
+        ("CellType", trace_simple::<acadrust::entities::CellType>),
+        (
+            "CellValueType",
+            trace_simple::<acadrust::entities::CellValueType>,
+        ),
+        (
+            "ClassObjectData",
+            trace_simple::<acadrust::objects::ClassObjectData>,
+        ),
+        ("ClipMode", trace_simple::<acadrust::entities::ClipMode>),
+        ("ClipType", trace_simple::<acadrust::entities::ClipType>),
+        (
+            "CompoundEntry",
+            trace_simple::<acadrust::compound_file::CompoundEntry>,
+        ),
+        (
+            "CompoundPropertyValue",
+            trace_simple::<acadrust::compound_file::CompoundPropertyValue>,
+        ),
+        (
+            "CompoundStreamContent",
+            trace_simple::<acadrust::compound_file::CompoundStreamContent>,
+        ),
+        (
+            "DataObjectData",
+            trace_simple::<acadrust::objects::DataObjectData>,
+        ),
+        (
+            "DgnLineStyleData",
+            trace_simple::<acadrust::objects::DgnLineStyleData>,
+        ),
+        (
+            "DgnLsComponentData",
+            trace_simple::<acadrust::objects::DgnLsComponentData>,
+        ),
+        (
+            "DgnLsComponentType",
+            trace_simple::<acadrust::objects::DgnLsComponentType>,
+        ),
+        (
+            "DgnLsPhaseMode",
+            trace_simple::<acadrust::objects::DgnLsPhaseMode>,
+        ),
+        ("DimSubtype", trace_simple::<acadrust::objects::DimSubtype>),
+        ("Dimension", trace_simple::<acadrust::entities::Dimension>),
+        (
+            "DimensionType",
+            trace_simple::<acadrust::entities::DimensionType>,
+        ),
+        (
+            "DynamicBlockData",
+            trace_simple::<acadrust::objects::DynamicBlockData>,
+        ),
+        (
+            "EmbeddedEntity",
+            trace_simple::<acadrust::entities::EmbeddedEntity>,
+        ),
+        (
+            "ExtendedEntityData",
+            trace_simple::<acadrust::entities::ExtendedEntityData>,
+        ),
+        (
+            "FlowDirectionType",
+            trace_simple::<acadrust::entities::FlowDirectionType>,
+        ),
+        (
+            "HatchPatternType",
+            trace_simple::<acadrust::entities::HatchPatternType>,
+        ),
+        (
+            "HatchStyleType",
+            trace_simple::<acadrust::entities::HatchStyleType>,
+        ),
+        (
+            "HelixConstraint",
+            trace_simple::<acadrust::entities::HelixConstraint>,
+        ),
+        (
+            "HooklineDirection",
+            trace_simple::<acadrust::entities::HooklineDirection>,
+        ),
+        (
+            "HorizontalAlignment",
+            trace_simple::<acadrust::entities::HorizontalAlignment>,
+        ),
+        (
+            "LeaderContentType",
+            trace_simple::<acadrust::entities::LeaderContentType>,
+        ),
+        (
+            "LeaderCreationType",
+            trace_simple::<acadrust::entities::LeaderCreationType>,
+        ),
+        (
+            "LeaderDrawOrderType",
+            trace_simple::<acadrust::objects::LeaderDrawOrderType>,
+        ),
+        (
+            "LeaderPathType",
+            trace_simple::<acadrust::entities::LeaderPathType>,
+        ),
+        (
+            "LineTypeComplexContent",
+            trace_simple::<acadrust::tables::LineTypeComplexContent>,
+        ),
+        (
+            "LegacyEntityData",
+            trace_simple::<acadrust::entities::LegacyEntityData>,
+        ),
+        (
+            "MLineJustification",
+            trace_simple::<acadrust::entities::MLineJustification>,
+        ),
+        ("MTextFlag", trace_simple::<acadrust::entities::MTextFlag>),
+        (
+            "MaterialProceduralValue",
+            trace_simple::<acadrust::objects::MaterialProceduralValue>,
+        ),
+        (
+            "MultiLeaderDrawOrderType",
+            trace_simple::<acadrust::objects::MultiLeaderDrawOrderType>,
+        ),
+        (
+            "MultiLeaderPathType",
+            trace_simple::<acadrust::entities::MultiLeaderPathType>,
+        ),
+        (
+            "ObjectContextKind",
+            trace_simple::<acadrust::objects::ObjectContextKind>,
+        ),
+        (
+            "NotificationType",
+            trace_simple::<acadrust::notification::NotificationType>,
+        ),
+        (
+            "OleFrameEnvelope",
+            trace_simple::<acadrust::entities::OleFrameEnvelope>,
+        ),
+        (
+            "OleObjectType",
+            trace_simple::<acadrust::entities::OleObjectType>,
+        ),
+        (
+            "PlotPaperUnits",
+            trace_simple::<acadrust::objects::PlotPaperUnits>,
+        ),
+        (
+            "PlotRotation",
+            trace_simple::<acadrust::objects::PlotRotation>,
+        ),
+        ("PlotType", trace_simple::<acadrust::objects::PlotType>),
+        (
+            "PreviewFormat",
+            trace_simple::<acadrust::document::PreviewFormat>,
+        ),
+        (
+            "PolyfaceSmoothType",
+            trace_simple::<acadrust::entities::PolyfaceSmoothType>,
+        ),
+        (
+            "ProxyPayloadEncoding",
+            trace_simple::<acadrust::objects::ProxyPayloadEncoding>,
+        ),
+        (
+            "ResolutionUnit",
+            trace_simple::<acadrust::objects::ResolutionUnit>,
+        ),
+        ("ScaledType", trace_simple::<acadrust::objects::ScaledType>),
+        (
+            "SemanticPropertyValue",
+            trace_simple::<acadrust::objects::SemanticPropertyValue>,
+        ),
+        (
+            "ShadePlotMode",
+            trace_simple::<acadrust::objects::ShadePlotMode>,
+        ),
+        (
+            "ShadePlotResolutionLevel",
+            trace_simple::<acadrust::objects::ShadePlotResolutionLevel>,
+        ),
+        (
+            "SolidHistoryOperation",
+            trace_simple::<acadrust::objects::SolidHistoryOperation>,
+        ),
+        (
+            "SurfaceData",
+            trace_simple::<acadrust::entities::SurfaceData>,
+        ),
+        (
+            "SurfaceKind",
+            trace_simple::<acadrust::entities::SurfaceKind>,
+        ),
+        (
+            "SurfaceSmoothType",
+            trace_simple::<acadrust::entities::SurfaceSmoothType>,
+        ),
+        (
+            "TableBorderType",
+            trace_simple::<acadrust::objects::TableBorderType>,
+        ),
+        (
+            "TableCellContentType",
+            trace_simple::<acadrust::entities::TableCellContentType>,
+        ),
+        (
+            "TableFlowDirection",
+            trace_simple::<acadrust::objects::TableFlowDirection>,
+        ),
+        (
+            "TextAlignmentType",
+            trace_simple::<acadrust::entities::TextAlignmentType>,
+        ),
+        (
+            "TextAngleType",
+            trace_simple::<acadrust::entities::TextAngleType>,
+        ),
+        (
+            "TextAttachmentDirectionType",
+            trace_simple::<acadrust::entities::TextAttachmentDirectionType>,
+        ),
+        (
+            "TextAttachmentPointType",
+            trace_simple::<acadrust::entities::TextAttachmentPointType>,
+        ),
+        (
+            "TextAttachmentType",
+            trace_simple::<acadrust::entities::TextAttachmentType>,
+        ),
+        (
+            "TextHorizontalAlignment",
+            trace_simple::<acadrust::entities::TextHorizontalAlignment>,
+        ),
+        (
+            "TextVerticalAlignment",
+            trace_simple::<acadrust::entities::TextVerticalAlignment>,
+        ),
+        (
+            "UnderlayType",
+            trace_simple::<acadrust::entities::UnderlayType>,
+        ),
+        (
+            "ValueUnitType",
+            trace_simple::<acadrust::entities::ValueUnitType>,
+        ),
+        (
+            "VbaDirectoryValue",
+            trace_simple::<acadrust::vba::VbaDirectoryValue>,
+        ),
+        (
+            "VerticalAlignment",
+            trace_simple::<acadrust::entities::VerticalAlignment>,
+        ),
+        (
+            "ViewportRenderMode",
+            trace_simple::<acadrust::entities::ViewportRenderMode>,
+        ),
+        (
+            "VisualStylePropertyValue",
+            trace_simple::<acadrust::objects::VisualStylePropertyValue>,
+        ),
+        (
+            "ViewRepSketchGeometry",
+            trace_simple::<acadrust::objects::ViewRepSketchGeometry>,
+        ),
+        (
+            "WipeoutClipMode",
+            trace_simple::<acadrust::entities::WipeoutClipMode>,
+        ),
+        (
+            "WipeoutClipType",
+            trace_simple::<acadrust::entities::WipeoutClipType>,
+        ),
+        ("WireType", trace_simple::<acadrust::entities::WireType>),
+    ];
+    for (name, trace) in enums {
+        trace(&mut tracer);
+        eprintln!("[ocs_plugin_api build] traced enum variants: {name}");
+    }
+
     let traced = tracer
         .registry()
         .expect("type registry tracing failed; see stderr for individual errors");
-    let registry = map_to_custom_schema(&traced);
+    let mut registry = map_to_custom_schema(&traced);
+    let mut section_style_tracer = Tracer::new(TracerConfig::default());
+    section_style_tracer
+        .trace_simple_type::<acadrust::entities::SectionViewStyle>()
+        .expect("section view style tracing failed");
+    let section_style_registry = section_style_tracer
+        .registry()
+        .expect("section view style registry failed");
+    let section_style = section_style_registry
+        .get("SectionViewStyle")
+        .expect("section view style registry entry");
+    registry.types.insert(
+        TypeId::new("EntitySectionViewStyle"),
+        map_container("EntitySectionViewStyle", section_style),
+    );
     let json = serde_json::to_string_pretty(&registry).unwrap();
     fs::write(out_dir.join("type_registry.json"), json).unwrap();
 }
@@ -114,10 +501,22 @@ where
     }
 }
 
+fn trace_simple<T>(tracer: &mut Tracer)
+where
+    T: DeserializeOwned,
+{
+    if let Err(error) = tracer.trace_simple_type::<T>() {
+        panic!(
+            "type registry enum tracing failed for {}: {error}",
+            std::any::type_name::<T>()
+        );
+    }
+}
+
 fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
     // serde-reflection needs at least one sample value per enum variant in
     // order to reconstruct the full schema. Provide samples for the enums that
-    // appear inside the allow-list types below.
+    // need concrete serialized values.
     let _ = tracer.trace_value(samples, &acadrust::LineWeight::ByLayer);
     let _ = tracer.trace_value(samples, &acadrust::LineWeight::ByBlock);
     let _ = tracer.trace_value(samples, &acadrust::LineWeight::Default);

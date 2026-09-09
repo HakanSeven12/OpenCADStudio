@@ -746,10 +746,13 @@ mod repl {
             error: Option<String>,
             error_type: Option<String>,
             traceback: Option<String>,
-            line_number: Option<u32>,
-            column_number: Option<u32>,
+            position: Option<(u32, u32)>,
             duration_ms: f64,
         ) -> Self {
+            let (line_number, column_number) = match position {
+                Some((l, c)) => (Some(l), Some(c)),
+                None => (None, None),
+            };
             Self {
                 success,
                 output,

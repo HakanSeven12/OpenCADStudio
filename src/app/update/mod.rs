@@ -265,6 +265,11 @@ impl OpenCADStudio {
         self.control_observe_user_message(&msg);
         let perf_started = crate::perf::enabled().then(Instant::now);
         let perf_label = perf_message_label(&msg);
+        // Keep the stable tab id because dispatch may switch or close tabs.
+        let perf_edit_before = perf_started.map(|started| {
+            let tab = &self.tabs[self.active_tab];
+            (started, tab.id, tab.scene.geometry_epoch)
+        });
         // A modal dialog must capture the keyboard the same way it already
         // captures the mouse. Otherwise keystrokes from the global key
         // subscription leak past the modal into the command line and fire as
@@ -323,6 +328,17 @@ impl OpenCADStudio {
             self.snapper.clear_tracking();
             self.otrack_active = None;
             self.otrack_kind = None;
+        }
+        if let Some((started, tab_id, before)) = perf_edit_before {
+            if let Some(tab) = self.tabs.iter().find(|tab| tab.id == tab_id) {
+                if tab.scene.geometry_epoch != before {
+                    tab.scene.record_nav_perf_caused(
+                        crate::scene::NavPerfOp::Edit,
+                        perf_label,
+                        started,
+                    );
+                }
+            }
         }
         if let Some(started) = perf_started {
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -1951,6 +1967,14 @@ impl OpenCADStudio {
                     self.close_active_modal();
                 }
                 self.dispatch_command(&cmd)
+            }
+
+            Message::ScriptLine(line) => {
+                if line.trim().is_empty() {
+                    self.feed_command(crate::command::StepInput::Enter)
+                } else {
+                    self.run_command_line(&line)
+                }
             }
 
             Message::ToggleLayers => {

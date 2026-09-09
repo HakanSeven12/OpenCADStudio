@@ -2393,15 +2393,6 @@ impl OpenCADStudio {
         let single_instance = crate::io::single_instance::subscribe().map(Message::OpenExternal);
         #[cfg(target_arch = "wasm32")]
         let single_instance = Subscription::none();
-        // A second file opened via Finder while this process is already
-        // running (#1039) — delivered as a warm Apple Event straight to this
-        // process, bypassing `src/bin/ocs_launcher.rs` entirely (that only
-        // runs for the initial cold launch). See `io::macos_open_events`.
-        #[cfg(target_os = "macos")]
-        let macos_open_events =
-            crate::io::macos_open_events::subscribe().map(Message::OpenExternal);
-        #[cfg(not(target_os = "macos"))]
-        let macos_open_events = Subscription::none();
         // Drain plugin-to-host requests on a timer when any plugin is loaded.
         // This lets long-lived plugin sessions (e.g. the Python REPL) mutate the
         // host document without requiring a user-generated message.
@@ -2577,7 +2568,6 @@ impl OpenCADStudio {
             autosave,
             plugin_drain,
             single_instance,
-            macos_open_events,
             hatch_pattern_keys,
             keyboard_events,
         ])

@@ -10,7 +10,39 @@ use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, R
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::TangentGeom;
 
-fn to_render(circle: &Circle) -> RenderEntity {
+/// The number of segments to tessellate a circle into, based on its radius and the
+/// current viewport's world units per pixel (`wpp`).
+///
+/// Targets a maximum chord sagitta of ~0.25 pixels on screen so circles stay visually
+/// round at any zoom level, while bounded between a minimum of 48 (preventing
+/// coarse polygons when small or far away) and a maximum of 4096 (capping buffer size
+/// on extreme zoom).
+pub fn circle_segments(radius: f64, wpp: Option<f32>) -> usize {
+    const MIN_SEGMENTS: usize = 48;
+    const MAX_SEGMENTS: usize = 4096;
+    let Some(w) = wpp.filter(|&w| w.is_finite() && w > 0.0) else {
+        return MIN_SEGMENTS;
+    };
+    let r = radius.abs();
+    if !r.is_finite() || r <= 0.0 {
+        return MIN_SEGMENTS;
+    }
+    // Target chord sagitta of ~0.25 px on screen:
+    // sag = r * (1 - cos(theta / 2)) <= tolerance
+    let tolerance = (w as f64) * 0.25;
+    if r <= tolerance {
+        return MIN_SEGMENTS;
+    }
+    let cos_half = (1.0 - tolerance / r).clamp(-1.0, 1.0);
+    let step = 2.0 * cos_half.acos();
+    if step <= 0.0 {
+        return MAX_SEGMENTS;
+    }
+    let n = (std::f64::consts::TAU / step).ceil() as usize;
+    n.clamp(MIN_SEGMENTS, MAX_SEGMENTS)
+}
+
+pub fn to_render_with_wpp(circle: &Circle, wpp: Option<f32>) -> RenderEntity {
     let cx = circle.center.x;
     let cy = circle.center.y;
     let cz = circle.center.z;
@@ -31,10 +63,12 @@ fn to_render(circle: &Circle) -> RenderEntity {
         radius: r,
     };
 
+    let n = circle_segments(r, wpp);
+
     if circle.thickness.abs() > 1e-10 {
         let t = circle.thickness;
         let (nx, ny, nz) = normal;
-        let n = 64usize;
+        let n = n.max(64);
         let tau = std::f64::consts::TAU;
         let circ_pt = |a: f64| -> (f64, f64, f64) {
             let (c, s) = (a.cos(), a.sin());
@@ -76,7 +110,8 @@ fn to_render(circle: &Circle) -> RenderEntity {
     }
 
     // Keep tessellation on the entity curve for large-coordinate precision.
-    let pts = crate::entities::curve::curve_points(&curve);
+    let max_angle = std::f64::consts::TAU / (n as f64);
+    let pts = curve.tessellate_angle(max_angle);
 
     RenderEntity {
         pick_tris: Vec::new(),
@@ -86,6 +121,22 @@ fn to_render(circle: &Circle) -> RenderEntity {
         key_vertices: vec![],
         fill_tris: vec![],
     }
+}
+
+fn to_render(circle: &Circle) -> RenderEntity {
+    to_render_with_wpp(circle, None)
+}
+
+/// Zoom-aware render converter for EntityType::Circle.
+pub fn relative_render(
+    entity: &acadrust::EntityType,
+    _document: &acadrust::CadDocument,
+    wpp: Option<f32>,
+) -> Option<RenderEntity> {
+    let acadrust::EntityType::Circle(circle) = entity else {
+        return None;
+    };
+    Some(to_render_with_wpp(circle, wpp))
 }
 
 fn grips(circle: &Circle) -> Vec<GripDef> {
@@ -220,3 +271,94 @@ impl crate::entities::traits::MassPropsCalc for Circle {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_circle_segments_scales_with_zoom() {
+        let r = 10.0;
+        // Default / invalid cases return baseline floor of 48.
+        assert_eq!(circle_segments(r, None), 48);
+        assert_eq!(circle_segments(r, Some(-1.0)), 48);
+        assert_eq!(circle_segments(r, Some(0.0)), 48);
+        assert_eq!(circle_segments(r, Some(f32::NAN)), 48);
+        assert_eq!(circle_segments(r, Some(f32::INFINITY)), 48);
+
+        // Zoomed far out: screen radius is tiny, capped at floor 48.
+        assert_eq!(circle_segments(r, Some(10.0)), 48);
+        assert_eq!(circle_segments(r, Some(2.0)), 48);
+
+        // Zooming closer increases segments monotonically.
+        let seg_0_1 = circle_segments(r, Some(0.1));
+        let seg_0_01 = circle_segments(r, Some(0.01));
+        let seg_0_001 = circle_segments(r, Some(0.001));
+        let seg_0_0001 = circle_segments(r, Some(0.0001));
+
+        assert!(seg_0_1 >= 48, "seg_0_1 was {seg_0_1}");
+        assert!(seg_0_01 > seg_0_1, "seg_0_01 ({seg_0_01}) <= seg_0_1 ({seg_0_1})");
+        assert!(seg_0_001 > seg_0_01, "seg_0_001 ({seg_0_001}) <= seg_0_01 ({seg_0_01})");
+        assert!(seg_0_0001 > seg_0_001, "seg_0_0001 ({seg_0_0001}) <= seg_0_001 ({seg_0_001})");
+
+        // Extreme zoom in hits maximum cap of 4096.
+        assert_eq!(circle_segments(r, Some(1e-9)), 4096);
+    }
+
+    #[test]
+    fn test_circle_segments_scales_with_radius() {
+        let wpp = Some(0.1);
+        let seg_small = circle_segments(1.0, wpp);
+        let seg_med = circle_segments(20.0, wpp);
+        let seg_large = circle_segments(100.0, wpp);
+        let seg_huge = circle_segments(500.0, wpp);
+
+        assert_eq!(seg_small, 48);
+        assert!(seg_med > seg_small, "{seg_med} <= {seg_small}");
+        assert!(seg_large > seg_med, "{seg_large} <= {seg_med}");
+        assert!(seg_huge > seg_large, "{seg_huge} <= {seg_large}");
+    }
+
+    #[test]
+    fn test_circle_to_render_points_increase_with_zoom() {
+        let mut circle = Circle::default();
+        circle.radius = 10.0;
+
+        let far_render = to_render_with_wpp(&circle, Some(1.0));
+        let close_render = to_render_with_wpp(&circle, Some(0.01));
+
+        let far_count = match far_render.object {
+            RenderObject::Lines(pts) => pts.len(),
+            _ => panic!("Expected RenderObject::Lines"),
+        };
+        let close_count = match close_render.object {
+            RenderObject::Lines(pts) => pts.len(),
+            _ => panic!("Expected RenderObject::Lines"),
+        };
+
+        assert_eq!(far_count, 49); // 48 segments + 1 closing vertex
+        assert!(close_count > far_count, "close_count was {close_count} vs far_count {far_count}");
+    }
+
+    #[test]
+    fn test_thick_circle_to_render_points_increase_with_zoom() {
+        let mut circle = Circle::default();
+        circle.radius = 10.0;
+        circle.thickness = 2.0;
+
+        let far_render = to_render_with_wpp(&circle, Some(1.0));
+        let close_render = to_render_with_wpp(&circle, Some(0.01));
+
+        let far_count = match far_render.object {
+            RenderObject::Lines(pts) => pts.len(),
+            _ => panic!("Expected RenderObject::Lines"),
+        };
+        let close_count = match close_render.object {
+            RenderObject::Lines(pts) => pts.len(),
+            _ => panic!("Expected RenderObject::Lines"),
+        };
+
+        assert!(close_count > far_count, "{close_count} <= {far_count}");
+    }
+}
+

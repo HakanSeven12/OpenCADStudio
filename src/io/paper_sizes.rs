@@ -1,4 +1,4 @@
-//! ISO paper sizes and sheet orientation for window plotting.
+//! Standard paper sizes and sheet orientation for window plotting.
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum PaperSize {
@@ -7,15 +7,21 @@ pub enum PaperSize {
     A2,
     A1,
     A0,
+    Letter,
+    Legal,
+    Tabloid,
 }
 
 impl PaperSize {
-    pub const ALL: [PaperSize; 5] = [
+    pub const ALL: [PaperSize; 8] = [
         PaperSize::A4,
         PaperSize::A3,
         PaperSize::A2,
         PaperSize::A1,
         PaperSize::A0,
+        PaperSize::Letter,
+        PaperSize::Legal,
+        PaperSize::Tabloid,
     ];
 
     pub fn label(self) -> &'static str {
@@ -25,6 +31,9 @@ impl PaperSize {
             PaperSize::A2 => "A2",
             PaperSize::A1 => "A1",
             PaperSize::A0 => "A0",
+            PaperSize::Letter => "Letter",
+            PaperSize::Legal => "Legal",
+            PaperSize::Tabloid => "Tabloid",
         }
     }
 
@@ -36,6 +45,9 @@ impl PaperSize {
             PaperSize::A2 => (420.0, 594.0),
             PaperSize::A1 => (594.0, 841.0),
             PaperSize::A0 => (841.0, 1189.0),
+            PaperSize::Letter => (215.9, 279.4),
+            PaperSize::Legal => (215.9, 355.6),
+            PaperSize::Tabloid => (279.4, 431.8),
         }
     }
 }
@@ -94,10 +106,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn iso_dimensions_and_orientation() {
+    fn paper_dimensions_and_orientation() {
         assert_eq!(PaperSize::A4.dimensions_mm(), (210.0, 297.0));
         assert_eq!(PaperSize::A0.dimensions_mm(), (841.0, 1189.0));
-        assert_eq!(PaperSize::ALL.len(), 5);
+        assert_eq!(PaperSize::Letter.dimensions_mm(), (215.9, 279.4));
+        assert_eq!(PaperSize::Legal.dimensions_mm(), (215.9, 355.6));
+        assert_eq!(PaperSize::Tabloid.dimensions_mm(), (279.4, 431.8));
+        assert_eq!(PaperSize::ALL.len(), 8);
         assert_eq!(PaperSize::A3.label(), "A3");
         // Portrait keeps (w,h); landscape swaps.
         assert_eq!(sheet_mm(PaperSize::A4, Orientation::Portrait), (210.0, 297.0));

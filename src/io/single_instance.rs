@@ -59,16 +59,8 @@ pub enum Claim {
     Existing(TcpStream),
 }
 
-/// The stable path this rendezvous is anchored to: normally the running
-/// executable itself, but on macOS, when it lives inside a `.app` bundle's
-/// `Contents/MacOS/`, the bundle's own path instead. That makes this
-/// launcher shim (`src/bin/ocs_launcher.rs`) and the real `OpenCADStudio-App`
-/// binary it relays to — two different executables inside the same bundle —
-/// rendezvous on the same port (#1039), rather than each computing a
-/// different one from their own distinct `current_exe()`. Falls back to the
-/// executable path itself when there's no enclosing bundle (a `cargo run`
-/// dev binary, or a non-macOS platform), preserving the anti-collision
-/// guarantee below unchanged there.
+/// Use the app bundle path on macOS so its launcher and GUI share a port.
+/// Development builds and other platforms remain scoped by executable path.
 fn rendezvous_anchor() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     #[cfg(target_os = "macos")]
@@ -148,13 +140,7 @@ pub fn claim() -> Claim {
     }
 }
 
-/// Try to reach an already-running editor, without attempting to bind the
-/// port ourselves. Unlike [`claim`], this never competes for the port — for
-/// a caller that isn't itself prepared to serve it and go on to become
-/// Primary (the macOS launcher shim, `src/bin/ocs_launcher.rs`, which relays
-/// to a real editor process rather than being one), calling `claim` would
-/// risk binding the port out from under the GUI process that's about to
-/// start up and claim it for itself.
+/// Reach an editor without claiming its port. Used by the macOS launcher.
 pub fn try_connect_existing() -> Option<TcpStream> {
     TcpStream::connect_timeout(&addr(), IO_TIMEOUT).ok()
 }
@@ -338,15 +324,15 @@ mod tests {
     }
 
     #[test]
-    fn rendezvous_key_carries_user_session_and_exe() {
+    fn rendezvous_key_carries_user_session_and_anchor() {
         // All three parts must be present, or the isolation the key exists for
         // is silently gone.
         let k = rendezvous_key();
         assert_eq!(k.matches('|').count(), 2, "key shape changed: {k:?}");
-        let exe = std::env::current_exe().unwrap();
+        let anchor = rendezvous_anchor();
         assert!(
-            k.ends_with(&*exe.to_string_lossy()),
-            "key must pin the executable: {k:?}"
+            k.ends_with(&*anchor.to_string_lossy()),
+            "key must pin the rendezvous anchor: {k:?}"
         );
     }
 

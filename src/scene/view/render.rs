@@ -149,6 +149,9 @@ pub struct ViewportData {
     /// by the wire / face3d pipelines as a clip-z bias. WireModels carry no
     /// depth field (84 construction sites); the bias is looked up by handle
     /// at GPU-upload time from this map instead.
+    /// See `Scene::draw_depth_generation`. Cached uploads that bake a depth are
+    /// only reusable while this is unchanged.
+    pub(in crate::scene) draw_depth_generation: u64,
     pub(in crate::scene) draw_depths:
         std::sync::Weak<rustc_hash::FxHashMap<u64, [f32; 2]>>,
     pub(in crate::scene) hatches: Arc<Vec<HatchModel>>,
@@ -839,20 +842,83 @@ impl shader::Primitive for Primitive {
                             gpus.extend(arena.wire_gpus());
                         }
                         inner.gpu_wires = std::sync::Arc::new(gpus);
-                        // Blocks keep their own cached geometry and placements.
-                        let instanced: Vec<&crate::scene::WireModel> = vp_wires
-                            .iter()
-                            .filter(|w| w.render_instance.is_some())
-                            .collect();
-                        inner.gpu_block_wires = std::sync::Arc::new(
-                            inner.upload_block_wires(
-                                device,
-                                queue,
-                                &instanced,
-                                &draw_depths,
-                                &mut pipeline.block_geometry,
-                            ),
-                        );
+                        // Retain analytical uploads when a patch changes neither
+                        // their contributors nor their baked draw depths.
+                        let analytical_untouched = _patched
+                            && inner.partition_depth_generation == vp.draw_depth_generation
+                            && patch.is_some_and(|patch| {
+                                patch.changes.iter().all(|(handle, _)| {
+                                    !inner.partition_contributors.contains(handle)
+                                        && !patch.runs.get(handle).is_some_and(|run| {
+                                            run.iter()
+                                                .any(wire_arena::feeds_analytical_uploads)
+                                        })
+                                })
+                            });
+                        let t_part = _perf.then(iced::time::Instant::now);
+                        let partitioned = (!analytical_untouched)
+                            .then(|| wire_arena::partition_wires(&vp_wires, &draw_depths));
+                        let part_ms = t_part
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_blk = _perf.then(iced::time::Instant::now);
+                        let mut blk_ms = 0.0f64;
+                        let mut curve_ms = 0.0f64;
+                        // `None` means the three uploads this slot holds are
+                        // still the answer, so they are left alone.
+                        if let Some(partitioned) = &partitioned {
+                            inner.gpu_block_wires = std::sync::Arc::new(
+                                inner.upload_block_wires(
+                                    device,
+                                    queue,
+                                    &partitioned.instanced,
+                                    &draw_depths,
+                                    &mut pipeline.block_geometry,
+                                ),
+                            );
+                            blk_ms = t_blk
+                                .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                            let t_curve = _perf.then(iced::time::Instant::now);
+                            inner.gpu_circles = std::sync::Arc::new(
+                                inner.upload_circles_from_instances(
+                                    device,
+                                    queue,
+                                    &partitioned.circle_instances,
+                                ),
+                            );
+                            inner.gpu_ellipses = std::sync::Arc::new(
+                                inner.upload_ellipses_from_instances(
+                                    device,
+                                    queue,
+                                    &partitioned.ellipse_instances,
+                                ),
+                            );
+                            inner
+                                .partition_contributors
+                                .clone_from(&partitioned.contributors);
+                            inner.partition_depth_generation = vp.draw_depth_generation;
+                            curve_ms = t_curve
+                                .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        }
+                        if _perf {
+                            // Report counts only when partitioning ran.
+                            match &partitioned {
+                                Some(partitioned) => crate::perf_record!(
+                                    "[perf] arena-post partition={part_ms:.1}ms \
+blocks={blk_ms:.1}ms curves={curve_ms:.1}ms skipped=false wires={} instanced={} \
+circles={} ellipses={}",
+                                    vp_wires.len(),
+                                    partitioned.instanced.len(),
+                                    partitioned.circle_instances.len(),
+                                    partitioned.ellipse_instances.len(),
+                                ),
+                                None => crate::perf_record!(
+                                    "[perf] arena-post skipped=true wires={} \
+retained_contributors={}",
+                                    vp_wires.len(),
+                                    inner.partition_contributors.len(),
+                                ),
+                            }
+                        }
                         if _patched {
                             wire_arena::patch_handle_index(
                                 &mut inner.wire_handle_index,
@@ -911,10 +977,14 @@ impl shader::Primitive for Primitive {
                             // Other panes retain their own references to shared geometry.
                             inner.gpu_wires = std::sync::Arc::new(Vec::new());
                             inner.gpu_block_wires = std::sync::Arc::new(Vec::new());
+                            inner.gpu_circles = std::sync::Arc::new(Vec::new());
+                            inner.gpu_ellipses = std::sync::Arc::new(Vec::new());
                             let held_before = pipeline.wire_buffer_cache.len();
-                            pipeline.wire_buffer_cache.retain(|_, (w, b, _)| {
+                            pipeline.wire_buffer_cache.retain(|_, (w, b, _, c, e)| {
                                 std::sync::Arc::strong_count(w) > 1
                                     || std::sync::Arc::strong_count(b) > 1
+                                    || std::sync::Arc::strong_count(c) > 1
+                                    || std::sync::Arc::strong_count(e) > 1
                             });
                             if _perf {
                                 crate::perf_record!(
@@ -959,6 +1029,8 @@ impl shader::Primitive for Primitive {
                     inner.gpu_wires = built.0;
                     inner.gpu_block_wires = built.1;
                     inner.wire_handle_index = built.2;
+                    inner.gpu_circles = built.3;
+                    inner.gpu_ellipses = built.4;
                 } // end !arena_served
                 inner.cached_wire_id = vp.wire_content_id;
                 if _perf {
@@ -1199,8 +1271,9 @@ impl shader::Primitive for Primitive {
         let prepare_ms = nav_prepare_started.elapsed().as_secs_f64() * 1000.0;
         if let Some(sample) = self.nav_perf {
             crate::perf::record(format_args!(
-                "[perf] nav-prepare op={} space={} mode={} input={:.2}ms build={:.2}ms prepare={:.2}ms elapsed={:.2}ms viewports={}",
+                "[perf] nav-prepare op={} cause={} space={} mode={} input={:.2}ms build={:.2}ms prepare={:.2}ms elapsed={:.2}ms viewports={}",
                 sample.op.label(),
+                sample.cause,
                 sample.space,
                 sample.mode,
                 sample.input_ms,
@@ -4221,6 +4294,7 @@ impl Scene {
             face3d_wires,
             text_verts,
             preview_text_verts,
+            draw_depth_generation: self.draw_depth_generation(),
             draw_depths: Arc::downgrade(&draw_depths),
             hatches,
             wipeout_hatches,

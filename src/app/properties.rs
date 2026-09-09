@@ -440,15 +440,15 @@ impl OpenCADStudio {
                     let display_entity = dispatch::entity_in_working_plane(contextual.as_ref(), plane);
                     let entity = &display_entity;
                     let group_names = self.tabs[i].scene.group_names_for_entity(handle);
-                    let specialized_primitive =
-                        crate::scene::model::solid_history::has_specialized_primitive_properties(
+                    let compact_solid =
+                        crate::scene::model::solid_history::has_compact_solid_properties(
                             &self.tabs[i].scene.document,
                             handle,
                         );
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
-                    if specialized_primitive {
-                        retain_specialized_primitive_sections(&mut sections);
+                    if compact_solid {
+                        retain_compact_solid_sections(&mut sections);
                     }
                     sections.extend(
                         crate::scene::model::solid_history::primitive_properties(
@@ -636,7 +636,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !specialized_primitive && matches!(
+                    if matches!(
                         entity,
                         acadrust::EntityType::Solid3D(_)
                             | acadrust::EntityType::Region(_)
@@ -654,38 +654,44 @@ impl OpenCADStudio {
                         {
                             use crate::entities::common::ro_prop;
                             let metrics = mesh.metrics;
-                            let mut props = vec![
-                                ro_prop(
-                                    t!("Vertices").as_ref(),
-                                    "mesh_vertices",
-                                    metrics.vertices.to_string(),
-                                ),
-                                ro_prop(
-                                    t!("Triangles").as_ref(),
-                                    "mesh_triangles",
-                                    metrics.triangles.to_string(),
-                                ),
-                                ro_prop(
-                                    t!("Surface Area").as_ref(),
-                                    "mesh_surface_area",
-                                    format!("{:.6}", metrics.surface_area),
-                                ),
-                                ro_prop(
+                            let triple = |values: [f64; 3]| {
+                                format!("{:.6}, {:.6}, {:.6}", values[0], values[1], values[2])
+                            };
+                            let mut props = if compact_solid {
+                                vec![ro_prop(
                                     t!("Centroid").as_ref(),
                                     "mesh_centroid",
-                                    format!(
-                                        "{:.6}, {:.6}, {:.6}",
-                                        metrics.centroid[0],
-                                        metrics.centroid[1],
-                                        metrics.centroid[2]
+                                    triple(metrics.centroid),
+                                )]
+                            } else {
+                                vec![
+                                    ro_prop(
+                                        t!("Vertices").as_ref(),
+                                        "mesh_vertices",
+                                        metrics.vertices.to_string(),
                                     ),
-                                ),
-                                ro_prop(
-                                    t!("Tessellation").as_ref(),
-                                    "mesh_complete",
-                                    if mesh.complete { "Complete" } else { "Partial" },
-                                ),
-                            ];
+                                    ro_prop(
+                                        t!("Triangles").as_ref(),
+                                        "mesh_triangles",
+                                        metrics.triangles.to_string(),
+                                    ),
+                                    ro_prop(
+                                        t!("Surface Area").as_ref(),
+                                        "mesh_surface_area",
+                                        format!("{:.6}", metrics.surface_area),
+                                    ),
+                                    ro_prop(
+                                        t!("Centroid").as_ref(),
+                                        "mesh_centroid",
+                                        triple(metrics.centroid),
+                                    ),
+                                    ro_prop(
+                                        t!("Tessellation").as_ref(),
+                                        "mesh_complete",
+                                        if mesh.complete { "Complete" } else { "Partial" },
+                                    ),
+                                ]
+                            };
                             if mesh.complete
                                 && matches!(
                                     entity,
@@ -694,14 +700,50 @@ impl OpenCADStudio {
                                         | acadrust::EntityType::Body(_)
                                 )
                             {
-                                props.insert(
-                                    3,
+                                let closed_props = vec![
+                                    ro_prop(
+                                        t!("Moment of inertia").as_ref(),
+                                        "mesh_moment_of_inertia",
+                                        triple(metrics.moment_of_inertia),
+                                    ),
+                                    ro_prop(
+                                        t!("Principal directions").as_ref(),
+                                        "mesh_principal_directions",
+                                        metrics
+                                            .principal_directions
+                                            .chunks_exact(3)
+                                            .map(|axis| format!("({:.6}, {:.6}, {:.6})", axis[0], axis[1], axis[2]))
+                                            .collect::<Vec<_>>()
+                                            .join(", "),
+                                    ),
+                                    ro_prop(
+                                        t!("Principal moments").as_ref(),
+                                        "mesh_principal_moments",
+                                        triple(metrics.principal_moments),
+                                    ),
+                                    ro_prop(
+                                        t!("Product of inertia").as_ref(),
+                                        "mesh_product_of_inertia",
+                                        triple(metrics.product_of_inertia),
+                                    ),
+                                    ro_prop(
+                                        t!("Radii of gyration").as_ref(),
+                                        "mesh_radii_of_gyration",
+                                        triple(metrics.radii_of_gyration),
+                                    ),
                                     ro_prop(
                                         t!("Volume").as_ref(),
                                         "mesh_volume",
                                         format!("{:.6}", metrics.volume),
                                     ),
-                                );
+                                ];
+                                if compact_solid {
+                                    props.extend(closed_props);
+                                } else {
+                                    let volume = closed_props.last().cloned().unwrap();
+                                    props.insert(3, volume);
+                                    props.extend(closed_props.into_iter().take(5));
+                                }
                             }
                             sections.push(crate::scene::model::object::PropSection {
                                 title: t!("Mass Properties").into_owned(),
@@ -710,7 +752,7 @@ impl OpenCADStudio {
                         }
                     }
 
-                    if !specialized_primitive {
+                    if !compact_solid {
                         sections.extend(crate::entities::object_data::sections(
                             &self.tabs[i].scene.document,
                             &self.tabs[i].scene.object_data_cache,
@@ -2068,8 +2110,8 @@ impl OpenCADStudio {
                             });
                         }
                     }
-                    if specialized_primitive {
-                        retain_specialized_primitive_sections(&mut sections);
+                    if compact_solid {
+                        retain_compact_solid_sections(&mut sections);
                     }
                     let title = match entity {
                         acadrust::EntityType::Insert(ins) => {
@@ -2166,7 +2208,7 @@ impl OpenCADStudio {
                         .collect();
                     let mut sections = aggregate_sections(&local_refs, &text_style_names);
                     if local_refs.iter().all(|(handle, _)| {
-                        crate::scene::model::solid_history::has_specialized_primitive_properties(
+                        crate::scene::model::solid_history::has_compact_solid_properties(
                             &self.tabs[i].scene.document,
                             *handle,
                         )
@@ -2591,7 +2633,7 @@ impl OpenCADStudio {
         &mut self,
         entity: acadrust::EntityType,
     ) -> Option<Handle> {
-        self.commit_entity_handle_with_policies(entity, false, false)
+        self.commit_entity_handle_with_policies(entity, false, false, false)
     }
 
     pub(super) fn commit_entity_handle_with_dimension_policy(
@@ -2603,6 +2645,7 @@ impl OpenCADStudio {
             entity,
             preserve_dimension_layer_and_style,
             false,
+            false,
         )
     }
 
@@ -2610,7 +2653,14 @@ impl OpenCADStudio {
         &mut self,
         entity: acadrust::EntityType,
     ) -> Option<Handle> {
-        self.commit_entity_handle_with_policies(entity, false, true)
+        self.commit_entity_handle_with_policies(entity, false, true, false)
+    }
+
+    pub(super) fn commit_entity_handle_preserve_style(
+        &mut self,
+        entity: acadrust::EntityType,
+    ) -> Option<Handle> {
+        self.commit_entity_handle_with_policies(entity, false, true, true)
     }
 
     fn commit_entity_handle_with_policies(
@@ -2618,6 +2668,7 @@ impl OpenCADStudio {
         mut entity: acadrust::EntityType,
         preserve_dimension_layer_and_style: bool,
         preserve_entity_layer: bool,
+        preserve_entity_style: bool,
     ) -> Option<Handle> {
         let i = self.active_tab;
         let tracks_dimension_chain = matches!(
@@ -2735,25 +2786,32 @@ impl OpenCADStudio {
             }
         }
 
-        crate::scene::view::dispatch::apply_color(&mut entity, self.ribbon.active_color);
-        crate::scene::view::dispatch::apply_common_prop(
-            &mut entity,
-            "linetype",
-            &self.ribbon.active_linetype.clone(),
-        );
-        crate::scene::view::dispatch::apply_line_weight(&mut entity, self.ribbon.active_lineweight);
-        // CELTSCALE (header.current_entity_linetype_scale): new entities
-        // pick up the document's saved per-entity linetype scale. The user
-        // can override per entity later via the properties panel.
-        let celtscale = self.tabs[i].scene.document.header.current_entity_linetype_scale;
-        if (celtscale - 1.0).abs() > 1e-9 && celtscale.abs() > 1e-9 {
-            entity.common_mut().linetype_scale = celtscale;
+        if !preserve_entity_style {
+            crate::scene::view::dispatch::apply_color(&mut entity, self.ribbon.active_color);
+            crate::scene::view::dispatch::apply_common_prop(
+                &mut entity,
+                "linetype",
+                &self.ribbon.active_linetype.clone(),
+            );
+            crate::scene::view::dispatch::apply_line_weight(
+                &mut entity,
+                self.ribbon.active_lineweight,
+            );
+            // CELTSCALE (header.current_entity_linetype_scale): new entities
+            // pick up the document's saved per-entity linetype scale. The user
+            // can override per entity later via the properties panel.
+            let celtscale = self.tabs[i].scene.document.header.current_entity_linetype_scale;
+            if (celtscale - 1.0).abs() > 1e-9 && celtscale.abs() > 1e-9 {
+                entity.common_mut().linetype_scale = celtscale;
+            }
         }
 
-        crate::scene::creation_style::apply_current_creation_styles(
-            &self.tabs[i].scene.document,
-            &mut entity,
-        );
+        if !preserve_entity_style {
+            crate::scene::creation_style::apply_current_creation_styles(
+                &self.tabs[i].scene.document,
+                &mut entity,
+            );
+        }
         if let (Some((layer, style_name)), acadrust::EntityType::Dimension(dimension)) =
             (inherited_dimension, &mut entity)
         {
@@ -3061,7 +3119,7 @@ fn aggregate_solid_history_sections(
     merged
 }
 
-fn retain_specialized_primitive_sections(
+fn retain_compact_solid_sections(
     sections: &mut Vec<crate::scene::model::object::PropSection>,
 ) {
     sections.iter_mut().for_each(|section| {
@@ -3077,7 +3135,8 @@ fn retain_specialized_primitive_sections(
                     | "transparency"
                     | "hyperlink"
                     | "material"
-            ) || crate::scene::model::solid_history::is_specialized_property(property.field)
+            ) || property.field.starts_with("mesh_")
+                || crate::scene::model::solid_history::is_specialized_property(property.field)
         });
     });
     sections.retain(|section| !section.props.is_empty());

@@ -114,7 +114,11 @@ pub fn format_length(value: f64) -> String {
             let per_foot = 12.0 * scale;
             let feet = (total / per_foot).trunc();
             let rem = (total - feet * per_foot) / scale;
-            format!("{}{:.0}'-{:.*}\"", sign, feet, prec, rem)
+            if feet == 0.0 {
+                format!("{}{:.*}\"", sign, prec, rem)
+            } else {
+                format!("{}{:.0}'-{:.*}\"", sign, feet, prec, rem)
+            }
         }
         4 | 5 => {
             // Architectural and fractional formats use 1/64-inch resolution.
@@ -142,6 +146,9 @@ pub fn format_length(value: f64) -> String {
             };
             let unit_suffix = if ctx.lunits == 4 { "\"" } else { "" };
             match feet {
+                Some(f) if f == 0.0 => {
+                    format!("{}{:.0}{}{}", sign, whole, frac_str, unit_suffix)
+                }
                 Some(f) => format!("{}{:.0}'-{:.0}{}{}", sign, f, whole, frac_str, unit_suffix),
                 None => format!("{}{:.0}{}", sign, whole, frac_str),
             }
@@ -702,6 +709,30 @@ pub fn parse_angle_deg(value: &str) -> Option<f64> {
 /// there is one obvious place to see that the maths moved out.
 pub use cadkernel::geom2d::BulgeArc;
 
+/// Convert a 2D BulgeArc into a 3D TangentGeom::Arc with its world center,
+/// plane axes, radius, and counter-clockwise start/end sweep angles.
+pub fn bulge_arc_to_tangent(
+    arc: &BulgeArc,
+    to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
+    normal: (f64, f64, f64),
+) -> crate::scene::model::wire_model::TangentGeom {
+    let (cwx, cwy, cwz) = to_wcs(arc.center[0], arc.center[1]);
+    let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
+    let (sa, ea) = if arc.sweep >= 0.0 {
+        (arc.start_angle, arc.end_angle)
+    } else {
+        (arc.end_angle, arc.start_angle)
+    };
+    crate::scene::model::wire_model::TangentGeom::Arc {
+        center: [cwx, cwy, cwz],
+        axis_x: [ax.0, ax.1, ax.2],
+        axis_y: [ay.0, ay.1, ay.2],
+        radius: arc.radius,
+        start_angle: sa,
+        end_angle: ea,
+    }
+}
+
 /// Triangulate the solid bands a `wide_fills` returns into the flat WCS f64
 /// triangle list `RenderEntity::pick_tris` carries, so a wide polyline is
 /// selectable across the band it draws and not just along its centreline.
@@ -1078,7 +1109,9 @@ mod length_format_tests {
 
     #[test]
     fn architectural_carries_into_feet() {
-        assert_eq!(with_units(4, 4, 11.99), "0'-11 63/64\"");
+        assert_eq!(with_units(4, 4, 11.99), "11 63/64\"");
+        assert_eq!(with_units(4, 4, 0.5), "0 1/2\"");
+        assert_eq!(with_units(4, 4, -9.25), "-9 1/4\"");
         assert_eq!(with_units(4, 4, 11.999), "1'-0\"");
         assert_eq!(with_units(4, 4, 23.999), "2'-0\"");
         assert_eq!(with_units(4, 4, 66.5), "5'-6 1/2\"");
@@ -1087,7 +1120,9 @@ mod length_format_tests {
 
     #[test]
     fn engineering_carries_into_feet() {
-        assert_eq!(with_units(3, 1, 11.94), "0'-11.9\"");
+        assert_eq!(with_units(3, 1, 11.94), "11.9\"");
+        assert_eq!(with_units(3, 1, 0.5), "0.5\"");
+        assert_eq!(with_units(3, 1, -9.25), "-9.3\"");
         assert_eq!(with_units(3, 1, 11.99), "1'-0.0\"");
         assert_eq!(with_units(3, 1, 23.99), "2'-0.0\"");
         assert_eq!(with_units(3, 2, 11.999), "1'-0.00\"");

@@ -495,6 +495,56 @@ impl DocApiBackend for MockBackend {
             .cloned()
             .ok_or(ApiError::UnknownId(id))
     }
+    fn enumerate_entities(
+        &self,
+        kind: Option<&str>,
+        layer: Option<&str>,
+    ) -> ApiResult<Vec<EntityView>> {
+        let mut out = Vec::new();
+        for (id, kind_name) in &self.kinds {
+            if let Some(k) = kind {
+                if !k.eq_ignore_ascii_case(kind_name) {
+                    continue;
+                }
+            }
+            let entity_layer = self
+                .entity_layers
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| "0".to_string());
+            if let Some(l) = layer {
+                if !l.eq_ignore_ascii_case(&entity_layer) {
+                    continue;
+                }
+            }
+            let bounds = self.curves.get(id).map(curve_bounds);
+            out.push(EntityView {
+                id: *id,
+                kind: kind_name.clone(),
+                layer: entity_layer,
+                bounds,
+            });
+        }
+        Ok(out)
+    }
+    fn point_position(&self, id: ObjectId) -> ApiResult<[f64; 3]> {
+        let spec = self.curves.get(&id).ok_or(ApiError::UnknownId(id))?;
+        match spec {
+            Curve2Spec::Point { position } => Ok(*position),
+            _ => Err(ApiError::Unsupported(
+                "GetPointPosition is only for Point entities".into(),
+            )),
+        }
+    }
+    fn line_geometry(&self, id: ObjectId) -> ApiResult<([f64; 3], [f64; 3])> {
+        let spec = self.curves.get(&id).ok_or(ApiError::UnknownId(id))?;
+        match spec {
+            Curve2Spec::Line { start, end } => Ok((*start, *end)),
+            _ => Err(ApiError::Unsupported(
+                "GetLineGeometry is only for Line entities".into(),
+            )),
+        }
+    }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {
             Ok(())
@@ -517,7 +567,17 @@ impl DocApiBackend for MockBackend {
                 max: bb.max,
             })
         });
-        Ok(EntityView { id, kind, bounds })
+        let layer = self
+            .entity_layers
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| "0".to_string());
+        Ok(EntityView {
+            id,
+            kind,
+            layer,
+            bounds,
+        })
     }
     fn transform_entity(&mut self, id: ObjectId, placement: &PlacementSpec) -> ApiResult<()> {
         if !self.entity_exists(id) {

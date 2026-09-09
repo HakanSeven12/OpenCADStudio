@@ -70,4 +70,17 @@ pub enum Query {
     GetEntityLayer {
         id: ObjectId,
     },
+    /// Enumerate first-class entities, optionally filtered by kind and/or layer.
+    EnumerateEntities {
+        kind: Option<String>,
+        layer: Option<String>,
+    },
+    /// The WCS location of a Point entity.
+    GetPointPosition {
+        id: ObjectId,
+    },
+    /// The start and end WCS points of a Line entity.
+    GetLineGeometry {
+        id: ObjectId,
+    },
 }

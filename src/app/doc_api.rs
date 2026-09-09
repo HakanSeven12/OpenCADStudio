@@ -64,6 +64,10 @@ fn handle_to_obj(h: Handle) -> ObjectId {
     ObjectId::from_handle(h)
 }
 
+fn v3_to_array(v: acadrust::types::Vector3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
 impl DocApiBackend for HostSession<'_> {
     fn resolve_body(&mut self, id: ObjectId) -> ApiResult<KernelBody> {
         let handle = obj_to_handle(id);
@@ -544,7 +548,16 @@ impl DocApiBackend for HostSession<'_> {
                 ),
                 None => ("Missing".to_string(), None),
             };
-            out.push(EntityView { id, kind, bounds });
+            let layer = match self.document().get_entity(*h) {
+                Some(e) => e.common().layer.clone(),
+                None => String::new(),
+            };
+            out.push(EntityView {
+                id,
+                kind,
+                layer,
+                bounds,
+            });
         }
         Ok(out)
     }
@@ -869,6 +882,65 @@ impl DocApiBackend for HostSession<'_> {
         Ok(entity.common().layer.clone())
     }
 
+    fn enumerate_entities(
+        &self,
+        kind: Option<&str>,
+        layer: Option<&str>,
+    ) -> ApiResult<Vec<EntityView>> {
+        let doc = self.document();
+        let mut out = Vec::new();
+        for entity in doc.entities() {
+            let handle = entity.common().handle;
+            let id = handle_to_obj(handle);
+            let entity_kind = convert::entity_kind_name(entity);
+            if let Some(k) = kind {
+                if !entity_kind.eq_ignore_ascii_case(k) {
+                    continue;
+                }
+            }
+            if let Some(l) = layer {
+                if !entity.common().layer.eq_ignore_ascii_case(l) {
+                    continue;
+                }
+            }
+            out.push(EntityView {
+                id,
+                kind: entity_kind.to_string(),
+                layer: entity.common().layer.clone(),
+                bounds: convert::entity_bounds(Some(entity), id).ok(),
+            });
+        }
+        Ok(out)
+    }
+
+    fn point_position(&self, id: ObjectId) -> ApiResult<[f64; 3]> {
+        let handle = obj_to_handle(id);
+        let entity = self
+            .document()
+            .get_entity(handle)
+            .ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Point(pt) = entity else {
+            return Err(ApiError::Unsupported(
+                "GetPointPosition is only for Point entities".into(),
+            ));
+        };
+        Ok(v3_to_array(pt.location))
+    }
+
+    fn line_geometry(&self, id: ObjectId) -> ApiResult<([f64; 3], [f64; 3])> {
+        let handle = obj_to_handle(id);
+        let entity = self
+            .document()
+            .get_entity(handle)
+            .ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Line(line) = entity else {
+            return Err(ApiError::Unsupported(
+                "GetLineGeometry is only for Line entities".into(),
+            ));
+        };
+        Ok((v3_to_array(line.start), v3_to_array(line.end)))
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -989,6 +1061,7 @@ impl DocApiBackend for HostSession<'_> {
         Ok(EntityView {
             id,
             kind: convert::entity_kind_name(entity).to_string(),
+            layer: entity.common().layer.clone(),
             bounds: self.bounds(id).ok(),
         })
     }
@@ -4028,5 +4101,119 @@ mod tests {
             panic!("expected Layers result");
         };
         assert!(!list.iter().any(|l| l.name == "Walls"));
+    }
+
+    #[test]
+    fn doc_api_enumerate_entities_and_geometry_queries() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Create entities on different layers.
+        let line_id = new_id(
+            &dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateCurve(ocs_doc_api::Curve2Spec::Line {
+                    start: [1.0, 2.0, 3.0],
+                    end: [4.0, 5.0, 6.0],
+                })),
+            )
+            .unwrap(),
+        );
+        let point_id = new_id(
+            &dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateCurve(ocs_doc_api::Curve2Spec::Point {
+                    position: [7.0, 8.0, 9.0],
+                })),
+            )
+            .unwrap(),
+        );
+
+        // Create a layer and move the point to it.
+        let mut info = LayerInfo::new("Markers");
+        info.color = Color::Index(3);
+        dispatch(&mut host, DocApiEnvelope::op(Operation::CreateLayer(info))).unwrap();
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetEntityLayer {
+                id: point_id,
+                layer: "Markers".into(),
+            }),
+        )
+        .unwrap();
+
+        // Enumerate all entities.
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::EnumerateEntities {
+                kind: None,
+                layer: None,
+            }]),
+        )
+        .unwrap();
+        let QueryResult::Entities(all) = &receipt.query_results[0] else {
+            panic!("expected Entities result");
+        };
+        assert!(all.iter().any(|e| e.id == line_id && e.kind == "Line" && e.layer == "0"));
+        assert!(all.iter().any(|e| e.id == point_id && e.kind == "Point" && e.layer == "Markers"));
+
+        // Filter by kind.
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::EnumerateEntities {
+                kind: Some("Line".into()),
+                layer: None,
+            }]),
+        )
+        .unwrap();
+        let QueryResult::Entities(lines) = &receipt.query_results[0] else {
+            panic!("expected Entities result");
+        };
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].id, line_id);
+
+        // Filter by layer.
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::EnumerateEntities {
+                kind: None,
+                layer: Some("Markers".into()),
+            }]),
+        )
+        .unwrap();
+        let QueryResult::Entities(markers) = &receipt.query_results[0] else {
+            panic!("expected Entities result");
+        };
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].id, point_id);
+
+        // Geometry queries.
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![
+                Query::GetPointPosition { id: point_id },
+                Query::GetLineGeometry { id: line_id },
+            ]),
+        )
+        .unwrap();
+        let QueryResult::PointPosition(pos) = &receipt.query_results[0] else {
+            panic!("expected PointPosition result");
+        };
+        assert!((pos[0] - 7.0).abs() < 1e-9);
+        assert!((pos[1] - 8.0).abs() < 1e-9);
+        assert!((pos[2] - 9.0).abs() < 1e-9);
+        let QueryResult::LineGeometry((start, end)) = &receipt.query_results[1] else {
+            panic!("expected LineGeometry result");
+        };
+        assert!((start[0] - 1.0).abs() < 1e-9);
+        assert!((end[0] - 4.0).abs() < 1e-9);
+
+        // Wrong entity family is rejected.
+        let err = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::GetPointPosition { id: line_id }]),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ApiError::Unsupported { .. }));
     }
 }

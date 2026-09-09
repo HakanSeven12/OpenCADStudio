@@ -483,6 +483,17 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
             Query::GetEntityLayer { id } => {
                 QueryResult::EntityLayer(b.entity_layer(*id).map_err(|e| label(qname, e))?)
             }
+            Query::EnumerateEntities { kind, layer } => QueryResult::Entities(
+                b.enumerate_entities(kind.as_deref(), layer.as_deref())
+                    .map_err(|e| label(qname, e))?,
+            ),
+            Query::GetPointPosition { id } => QueryResult::PointPosition(
+                b.point_position(*id).map_err(|e| label(qname, e))?,
+            ),
+            Query::GetLineGeometry { id } => {
+                let (start, end) = b.line_geometry(*id).map_err(|e| label(qname, e))?;
+                QueryResult::LineGeometry((start, end))
+            }
         };
         results.push(r);
     }

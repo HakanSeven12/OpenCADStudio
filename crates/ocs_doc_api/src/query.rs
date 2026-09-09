@@ -41,6 +41,8 @@ pub struct EntityView {
     /// The acadrust `EntityType` variant name (e.g. "Solid3D", "Line").
     pub kind: String,
     pub bounds: Option<Aabb>,
+    /// The normalized (uppercase) layer name the entity is on.
+    pub layer: String,
 }
 
 /// The result of a single [`Query`] (one per query in a `Queries` batch).
@@ -76,6 +78,12 @@ pub enum QueryResult {
     Layers(Vec<crate::ops::LayerInfo>),
     /// The layer name of an entity.
     EntityLayer(String),
+    /// A filtered list of entity views.
+    Entities(Vec<EntityView>),
+    /// The WCS location of a Point entity.
+    PointPosition([f64; 3]),
+    /// The start and end WCS points of a Line entity.
+    LineGeometry(([f64; 3], [f64; 3])),
 }
 
 /// Convenience: the query name for diagnostics.
@@ -99,6 +107,9 @@ impl crate::gen::Query {
             GetXRecord { .. } => "GetXRecord",
             ListLayers => "ListLayers",
             GetEntityLayer { .. } => "GetEntityLayer",
+            EnumerateEntities { .. } => "EnumerateEntities",
+            GetPointPosition { .. } => "GetPointPosition",
+            GetLineGeometry { .. } => "GetLineGeometry",
         }
     }
 }

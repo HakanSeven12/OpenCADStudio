@@ -237,12 +237,21 @@ Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
 `Entity` additionally has `view()` (id + kind + bounds) and `as_solid()` (typed
 downcast when `kind == "Solid3D"`).
 
+## Layer table
+
+Layers are a named document table, not an entity family. `Document::layers()`
+lists all layers as `Vec<LayerInfo>`. Table-level ops are `CreateLayer(info)`,
+`UpdateLayer { name, info }` and `DeleteLayer { name }`. `Entity::layer()`
+returns the layer name and `Entity::set_layer(layer)` moves the entity to an
+existing layer. The host rejects duplicate names, deletion of layer "0" or the
+current layer, and removing a layer that still has entities assigned.
+
 ## Collections & cross-cutting
 
 - **`DocApi`** — root: `document(tab)`, `active_tab()`, `alive()`.
 - **`Document`** — `solids()` / `curves()` / `entities()` factories + lookup,
   `revision()`, `assert_revision(rev)` (read-guard), `query_batch(|q| …)` (read-only
-  batch, one round-trip, **no revision bump**), `layers()` -> `Vec<LayerInfo>`.
+  batch, one round-trip, **no revision bump**).
 - **`EntityCollection`** — `get(id) -> Entity`, `delete(id)`,
   `transform_many(&ids, placement)`, `delete_many(&ids)`.
 - **`OpGroup`** — best-effort client-side failure cleanup (`track` / `commit` /

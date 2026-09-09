@@ -196,6 +196,19 @@ pub trait DocApiBackend {
     /// The layer name of an entity.
     fn entity_layer(&self, id: ObjectId) -> ApiResult<String>;
 
+    /// Enumerate first-class entities, optionally filtered by kind and/or layer.
+    fn enumerate_entities(
+        &self,
+        kind: Option<&str>,
+        layer: Option<&str>,
+    ) -> ApiResult<Vec<EntityView>>;
+
+    /// The WCS location of a Point entity.
+    fn point_position(&self, id: ObjectId) -> ApiResult<[f64; 3]>;
+
+    /// The start and end WCS points of a Line entity.
+    fn line_geometry(&self, id: ObjectId) -> ApiResult<([f64; 3], [f64; 3])>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).

@@ -1,6 +1,7 @@
 //! Native document API adapter over the existing scene, history and kernel paths.
 
 use acadrust::entities::Solid3D;
+use acadrust::objects::ObjectType;
 use acadrust::{EntityType, Handle};
 use ocs_doc_api::backend::{DocApiBackend, KernelBody};
 use ocs_doc_api::{
@@ -626,6 +627,119 @@ impl DocApiBackend for HostSession<'_> {
         self.store_solid(&body)
     }
 
+    fn set_xdata(
+        &mut self,
+        id: ObjectId,
+        application_name: &str,
+        record: Option<&ocs_doc_api::XDataRecord>,
+    ) -> ApiResult<()> {
+        self.can_modify(id)?;
+        let handle = obj_to_handle(id);
+        let values = record.map(|r| {
+            r.values
+                .iter()
+                .map(|v| xdata_value_to_acadrust(v, self.document()))
+                .collect::<Vec<_>>()
+        });
+        crate::scene::view::dispatch::set_entity_xdata(
+            self.document_mut(),
+            handle,
+            application_name,
+            values,
+        );
+        Ok(())
+    }
+
+    fn xdata(&self, id: ObjectId, application_name: &str) -> ApiResult<Option<ocs_doc_api::XDataRecord>> {
+        let handle = obj_to_handle(id);
+        let entity = self
+            .document()
+            .get_entity(handle)
+            .ok_or(ApiError::UnknownId(id))?;
+        let Some(rec) = entity.common().extended_data.get_record(application_name) else {
+            return Ok(None);
+        };
+        Ok(Some(ocs_doc_api::XDataRecord {
+            application_name: rec.application_name.clone(),
+            values: rec
+                .values
+                .iter()
+                .map(xdata_value_from_acadrust)
+                .collect(),
+        }))
+    }
+
+    fn add_xrecord(&mut self, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<ObjectId> {
+        use acadrust::objects::{Dictionary, ObjectType, XRecord};
+        let mut record = XRecord::named(spec.name.clone());
+        record.cloning_flags = cloning_flags_to_acadrust(spec.cloning_flags);
+        record.entries = spec
+            .entries
+            .iter()
+            .map(xrecord_entry_to_acadrust)
+            .collect();
+        let record_handle = {
+            let doc = self.document_mut();
+            let handle = doc.allocate_handle();
+            record.handle = handle;
+            doc.objects
+                .insert(handle, ObjectType::XRecord(record));
+            handle
+        };
+        // Attach the new XRecord to a root-level dictionary so it is reachable
+        // as a standalone named object (model-space owner, no entity owner).
+        let mut root_dict = Dictionary::new();
+        let root_handle = {
+            let doc = self.document_mut();
+            let h = doc.allocate_handle();
+            root_dict.handle = h;
+            root_dict.owner = doc.header.model_space_block_handle;
+            root_dict.hard_owner = true;
+            root_dict.entries.push((spec.name.clone(), record_handle));
+            doc.objects.insert(h, ObjectType::Dictionary(root_dict));
+            h
+        };
+        let _ = root_handle;
+        Ok(handle_to_obj(record_handle))
+    }
+
+    fn set_xrecord(&mut self, id: ObjectId, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<()> {
+        self.can_modify(id)?;
+        let handle = obj_to_handle(id);
+        let Some(ObjectType::XRecord(record)) = self.document().objects.get(&handle) else {
+            return Err(ApiError::Unsupported(format!("ObjectId {id:?} is not an XRecord")));
+        };
+        let mut updated = record.clone();
+        updated.name = spec.name.clone();
+        updated.cloning_flags = cloning_flags_to_acadrust(spec.cloning_flags);
+        updated.entries = spec
+            .entries
+            .iter()
+            .map(xrecord_entry_to_acadrust)
+            .collect();
+        updated.synchronize_object_references();
+        self.document_mut()
+            .objects
+            .insert(handle, acadrust::objects::ObjectType::XRecord(updated));
+        Ok(())
+    }
+
+    fn xrecord(&self, id: ObjectId) -> ApiResult<Option<ocs_doc_api::XRecordSpec>> {
+        let handle = obj_to_handle(id);
+        let Some(ObjectType::XRecord(record)) = self.document().objects.get(&handle) else {
+            return Ok(None);
+        };
+        Ok(Some(ocs_doc_api::XRecordSpec {
+            name: record.name.clone(),
+            cloning_flags: cloning_flags_from_acadrust(record.cloning_flags),
+            entries: record
+                .entries
+                .iter()
+                .map(xrecord_entry_from_acadrust)
+                .collect(),
+        }))
+    }
+
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
         let handle = obj_to_handle(id);
         let Some(entity) = self.document().get_entity(handle).cloned() else {
@@ -996,6 +1110,135 @@ fn kernel_placement(p: &PlacementSpec) -> cadkernel::brep::Placement {
         y_axis: p.y_axis,
         z_axis: p.z_axis,
         origin: p.origin,
+    }
+}
+
+// Conversions between ocs_doc_api plain-data DTOs and acadrust types.
+// Kept in this file because they are host-side implementation details.
+
+fn cloning_flags_to_acadrust(
+    flags: ocs_doc_api::XRecordCloningFlags,
+) -> acadrust::objects::DictionaryCloningFlags {
+    use acadrust::objects::DictionaryCloningFlags as F;
+    match flags {
+        ocs_doc_api::XRecordCloningFlags::NotApplicable => F::NotApplicable,
+        ocs_doc_api::XRecordCloningFlags::KeepExisting => F::KeepExisting,
+        ocs_doc_api::XRecordCloningFlags::UseClone => F::UseClone,
+        ocs_doc_api::XRecordCloningFlags::XrefName => F::XrefName,
+        ocs_doc_api::XRecordCloningFlags::Name => F::Name,
+        ocs_doc_api::XRecordCloningFlags::UnmangleName => F::UnmangleName,
+    }
+}
+
+fn cloning_flags_from_acadrust(
+    flags: acadrust::objects::DictionaryCloningFlags,
+) -> ocs_doc_api::XRecordCloningFlags {
+    use acadrust::objects::DictionaryCloningFlags as F;
+    match flags {
+        F::NotApplicable => ocs_doc_api::XRecordCloningFlags::NotApplicable,
+        F::KeepExisting => ocs_doc_api::XRecordCloningFlags::KeepExisting,
+        F::UseClone => ocs_doc_api::XRecordCloningFlags::UseClone,
+        F::XrefName => ocs_doc_api::XRecordCloningFlags::XrefName,
+        F::Name => ocs_doc_api::XRecordCloningFlags::Name,
+        F::UnmangleName => ocs_doc_api::XRecordCloningFlags::UnmangleName,
+    }
+}
+
+fn xdata_value_to_acadrust(
+    value: &ocs_doc_api::XDataValue,
+    _doc: &acadrust::CadDocument,
+) -> acadrust::xdata::XDataValue {
+    use acadrust::types::Vector3;
+    use ocs_doc_api::XDataValue as V;
+    match value {
+        V::String(s) => acadrust::xdata::XDataValue::String(s.clone()),
+        V::ControlString(s) => acadrust::xdata::XDataValue::ControlString(s.clone()),
+        V::LayerName(s) => acadrust::xdata::XDataValue::LayerName(s.clone()),
+        V::BinaryData(b) => acadrust::xdata::XDataValue::BinaryData(b.clone()),
+        V::Handle(h) => acadrust::xdata::XDataValue::Handle(acadrust::Handle::new(*h)),
+        V::Point3D(p) => acadrust::xdata::XDataValue::Point3D(Vector3::new(p[0], p[1], p[2])),
+        V::Position3D(p) => acadrust::xdata::XDataValue::Position3D(Vector3::new(p[0], p[1], p[2])),
+        V::Displacement3D(p) => {
+            acadrust::xdata::XDataValue::Displacement3D(Vector3::new(p[0], p[1], p[2]))
+        }
+        V::Direction3D(p) => acadrust::xdata::XDataValue::Direction3D(Vector3::new(p[0], p[1], p[2])),
+        V::Real(r) => acadrust::xdata::XDataValue::Real(*r),
+        V::Distance(d) => acadrust::xdata::XDataValue::Distance(*d),
+        V::ScaleFactor(s) => acadrust::xdata::XDataValue::ScaleFactor(*s),
+        V::Integer16(i) => acadrust::xdata::XDataValue::Integer16(*i),
+        V::Integer32(i) => acadrust::xdata::XDataValue::Integer32(*i),
+    }
+}
+
+fn xdata_value_from_acadrust(value: &acadrust::xdata::XDataValue) -> ocs_doc_api::XDataValue {
+    use acadrust::xdata::XDataValue as V;
+    match value {
+        V::String(s) => ocs_doc_api::XDataValue::String(s.clone()),
+        V::ControlString(s) => ocs_doc_api::XDataValue::ControlString(s.clone()),
+        V::LayerName(s) => ocs_doc_api::XDataValue::LayerName(s.clone()),
+        V::BinaryData(b) => ocs_doc_api::XDataValue::BinaryData(b.clone()),
+        V::Handle(h) => ocs_doc_api::XDataValue::Handle(h.value()),
+        V::Point3D(v) => ocs_doc_api::XDataValue::Point3D([v.x, v.y, v.z]),
+        V::Position3D(v) => ocs_doc_api::XDataValue::Position3D([v.x, v.y, v.z]),
+        V::Displacement3D(v) => ocs_doc_api::XDataValue::Displacement3D([v.x, v.y, v.z]),
+        V::Direction3D(v) => ocs_doc_api::XDataValue::Direction3D([v.x, v.y, v.z]),
+        V::Real(r) => ocs_doc_api::XDataValue::Real(*r),
+        V::Distance(d) => ocs_doc_api::XDataValue::Distance(*d),
+        V::ScaleFactor(s) => ocs_doc_api::XDataValue::ScaleFactor(*s),
+        V::Integer16(i) => ocs_doc_api::XDataValue::Integer16(*i),
+        V::Integer32(i) => ocs_doc_api::XDataValue::Integer32(*i),
+    }
+}
+
+fn xrecord_value_to_acadrust(value: &ocs_doc_api::XRecordValue) -> acadrust::objects::XRecordValue {
+    use ocs_doc_api::XRecordValue as V;
+    match value {
+        V::String(s) => acadrust::objects::XRecordValue::String(s.clone()),
+        V::Double(d) => acadrust::objects::XRecordValue::Double(*d),
+        V::Int16(i) => acadrust::objects::XRecordValue::Int16(*i),
+        V::Int32(i) => acadrust::objects::XRecordValue::Int32(*i),
+        V::Int64(i) => acadrust::objects::XRecordValue::Int64(*i),
+        V::Byte(b) => acadrust::objects::XRecordValue::Byte(*b),
+        V::Bool(b) => acadrust::objects::XRecordValue::Bool(*b),
+        V::Handle(h) => acadrust::objects::XRecordValue::Handle(acadrust::Handle::new(*h)),
+        V::Point3D(p) => acadrust::objects::XRecordValue::Point3D(p[0], p[1], p[2]),
+        V::Chunk(c) => acadrust::objects::XRecordValue::Chunk(c.clone()),
+    }
+}
+
+fn xrecord_value_from_acadrust(
+    value: &acadrust::objects::XRecordValue,
+) -> ocs_doc_api::XRecordValue {
+    use acadrust::objects::XRecordValue as V;
+    match value {
+        V::String(s) => ocs_doc_api::XRecordValue::String(s.clone()),
+        V::Double(d) => ocs_doc_api::XRecordValue::Double(*d),
+        V::Int16(i) => ocs_doc_api::XRecordValue::Int16(*i),
+        V::Int32(i) => ocs_doc_api::XRecordValue::Int32(*i),
+        V::Int64(i) => ocs_doc_api::XRecordValue::Int64(*i),
+        V::Byte(b) => ocs_doc_api::XRecordValue::Byte(*b),
+        V::Bool(b) => ocs_doc_api::XRecordValue::Bool(*b),
+        V::Handle(h) => ocs_doc_api::XRecordValue::Handle(h.value()),
+        V::Point3D(x, y, z) => ocs_doc_api::XRecordValue::Point3D([*x, *y, *z]),
+        V::Chunk(c) => ocs_doc_api::XRecordValue::Chunk(c.clone()),
+    }
+}
+
+fn xrecord_entry_to_acadrust(
+    entry: &ocs_doc_api::XRecordEntry,
+) -> acadrust::objects::XRecordEntry {
+    acadrust::objects::XRecordEntry {
+        code: entry.code,
+        value: xrecord_value_to_acadrust(&entry.value),
+    }
+}
+
+fn xrecord_entry_from_acadrust(
+    entry: &acadrust::objects::XRecordEntry,
+) -> ocs_doc_api::XRecordEntry {
+    ocs_doc_api::XRecordEntry {
+        code: entry.code,
+        value: xrecord_value_from_acadrust(&entry.value),
     }
 }
 

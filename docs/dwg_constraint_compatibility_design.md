@@ -342,11 +342,73 @@ still fail to open correctly elsewhere.
 
 ## 9. Progress
 
-Design only — no implementation yet. Of the original five open questions,
-three are now resolved from Autodesk's own primary documentation (§7.1, 7.2,
-7.4) rather than inference — the network's dictionary key, `ImplicitPoint`'s
-addressing enum, and the `AssocVariable` evaluator default are no longer
-guesses. Two remain (§7.3 partial-graph tolerance, §7.5 version gating) and
-both genuinely need a real write-then-open test rather than more reading.
-Next action per §8 is stage 1's narrowest slice — the design for it no
-longer rests on an unconfirmed foundation, only on an unverified one.
+**Implemented** (`src/scene/dwg_native_constraints.rs`, wired into both save
+paths in `src/app/update/file.rs` alongside the existing
+`materialize_sketch_constraints_for_save`/`materialize_named_parameters_for_save`
+calls). All 4 stages from §8 landed together rather than incrementally, since
+`ConstraintKind` only has the 10 variants already covered — there was no
+narrower slice left once Horizontal/Vertical's plumbing (network/dictionary
+creation, the two-pass builder, class-table registration) was in place.
+Covers: every `ConstraintKind` (`Coincident`, `Horizontal`, `Vertical`,
+`Parallel`, `Perpendicular`, `Equal`'s line/circle split, `Distance`,
+`Angle`, `Radius`, `Tangent`), `AssocGeomDependency` for whole-geometry nodes,
+`AssocValueDependency`/`AssocVariable` for dimensional constraints including
+`DrivingValue::Named`, and a resave-clears-and-rebuilds cleanup pass
+(`remove_owned_recursive`) so materializing twice doesn't accumulate orphans.
+Verified via real `save_to_bytes`/`load_bytes` round trips through
+`acadrust`'s own reader/writer (5 tests in that module) — this confirms
+self-consistency with `acadrust`'s implementation of the documented format,
+**not** real-world AutoCAD/BricsCAD compatibility (§7.3/§7.5 below remain
+unverified; no such software is available in this environment).
+
+Two implementation-time findings not anticipated by the design above:
+
+- **The top-level NOD-anchored network was dropped from scope.**
+  `named_parameters_persist.rs`'s own doc comment already documents a real
+  `acadrust` bug: a `Dictionary`-type object (like the database's Named
+  Object Dictionary) used as an XRecord/dictionary owner loses its extension
+  data through a DXF save specifically (`CadDocument::ensure_xrecord` only
+  patches the owner's `xdictionary_handle` when `get_entity_mut(owner)`
+  succeeds — a Dictionary isn't an entity, so it silently falls back to a
+  DWG-only side map). Rather than hit that bug, this module only creates a
+  network per `SketchScope::owner_handle()` (a real `BlockRecord` entity) —
+  the same already-proven-safe attachment point `sketch_persist.rs` uses. No
+  top-level network is created at all.
+- **DXF cannot carry the dependency chain — DWG is the only fully-faithful
+  format.** Confirmed by reading `acadrust`'s DXF writer
+  (`io/dxf/writer/section_writer.rs`'s `is_unrestorable_assoc_object`): it
+  deliberately skips writing `AssocDependency`/`AssocValueDependency`/
+  `AssocGeomDependency`/`AssocVariable` objects to DXF at all
+  ("Unrestorable associative-framework objects are not written") — DWG has
+  no equivalent filter. A DXF save keeps the `Assoc2dConstraintGroup`/
+  `AssocNetwork` shell and every node's own embedded geometry, but loses live
+  geometry/value linkage and every `AssocVariable`. This module still
+  materializes the same graph for both formats (the shell that survives DXF
+  is strictly more than nothing, and dangling handles are an ordinary,
+  tolerated pattern in both formats) rather than special-casing DXF to write
+  less. Demonstrated directly by
+  `a_dwg_save_keeps_the_full_dependency_chain_including_the_named_variable`
+  vs. `a_dxf_save_keeps_only_the_constraint_group_shell` in that module's
+  test suite.
+
+Also confirmed while implementing (not previously documented): the DWG
+writer's `Assoc2dConstraintGroup` arm only emits node data at all when
+`nodes.first()` is `Some` — an empty `nodes` `Vec` skips node serialization
+entirely — so `nodes[0]` must always be a synthetic root pseudo-node (empty
+`class_name`, connected to every real node) even for a single-constraint
+graph; and a multi-geometry constraint (e.g. `Parallel`) references its
+second geometry via the generic `connections: Vec<i32>` field on
+`AssocConstraintNode`, not a second dedicated field on
+`AssocConstraintNodeData::Parallel` — confirmed from `AcConstraintGroupNode`'s
+own doc comment ("the connection between two nodes is not directed").
+
+Of the original five open questions, three were resolved from Autodesk's own
+primary documentation (§7.1, 7.2, 7.4) before implementation started — the
+network's dictionary key, `ImplicitPoint`'s addressing enum, and the
+`AssocVariable` evaluator default were confirmed, not guessed. Two remain
+open (§7.3 partial-graph tolerance, §7.5 version gating) and still genuinely
+need a real AutoCAD/BricsCAD open, not just more reading — self-consistency
+through `acadrust`'s own round trip can't settle either one. Next action is
+opening a saved DWG in real software (or at minimum a third-party DWG
+inspector) to make progress on those two, and posting the GitHub Discussion
+Hakan asked for once that's done.

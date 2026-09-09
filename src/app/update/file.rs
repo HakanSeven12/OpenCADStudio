@@ -1668,6 +1668,10 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         // named_parameters_design.md stage 2: same save-time hook, for the
         // document-wide parameter table.
         self.tabs[i].scene.materialize_named_parameters_for_save();
+        // docs/dwg_constraint_compatibility_design.md: additive DWG/DXF-
+        // native constraint graph, alongside (not instead of) the XRecord
+        // above — same save-time hook.
+        self.tabs[i].scene.materialize_dwg_native_constraints_for_save();
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2620,6 +2624,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     self.sync_solid_models_for_save(i);
                     self.tabs[i].scene.materialize_sketch_constraints_for_save();
                     self.tabs[i].scene.materialize_named_parameters_for_save();
+                    self.tabs[i].scene.materialize_dwg_native_constraints_for_save();
                     let tab_id = self.tabs[i].id;
                     let bounds = crate::ui::wrap_bar::dropdown_bounds(
                         crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,

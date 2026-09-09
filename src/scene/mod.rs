@@ -1877,6 +1877,13 @@ pub struct Scene {
     entity_block_map_cache: RefCell<Option<(u64, HashMap<Handle, Handle>)>>,
     /// Candidate handles per block, in document order and keyed by geometry epoch.
     block_members_cache: RefCell<Option<BlockMembers>>,
+    /// Annotation handle -> the LEADERs that point at it, resolved once per
+    /// `geometry_epoch`.
+    ///
+    /// Selecting an entity has to pull in a LEADER whose annotation it is, and
+    /// that used to be answered by walking the whole document — per selected
+    /// handle. Selecting N entities cost N document walks.
+    leaders_by_annotation_cache: RefCell<Option<(u64, HashMap<Handle, Vec<Handle>>)>>,
     /// Insert/Viewport/Block/BlockEnd handles omitted by the spatial index.
     unindexable_cache: RefCell<Option<(u64, Vec<Handle>)>>,
     /// `(epoch, layout block, present type names, list exposed to the UI)`.
@@ -2128,6 +2135,7 @@ impl Scene {
             model_extents_cache: RefCell::new(None),
             entity_block_map_cache: RefCell::new(None),
             block_members_cache: RefCell::new(None),
+            leaders_by_annotation_cache: RefCell::new(None),
             unindexable_cache: RefCell::new(None),
             layout_type_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
@@ -10797,6 +10805,8 @@ mod journal_tests {
         assert_eq!(folded.len(), before.len() + 1);
     }
 
+    // Differential oracle: the incrementally-patched entity index must always
+    // equal a from-scratch rebuild after any add / move / erase.
     #[test]
     fn block_member_index_matches_the_full_scan() {
         use acadrust::entities::Line;

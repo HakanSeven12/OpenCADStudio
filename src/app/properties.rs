@@ -2426,6 +2426,11 @@ impl OpenCADStudio {
     }
 
     /// Rebuild the cached selected_grips from the current entity selection.
+    /// Selections larger than this get no grips, matching AutoCAD's
+    /// `GRIPOBJLIMIT` default. The DWG header does not carry the variable, so
+    /// the default stands in for it.
+    const GRIP_OBJECT_LIMIT: usize = 100;
+
     pub(super) fn refresh_selected_grips(&mut self) {
         let i = self.active_tab;
         let locked_active_grip = self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
@@ -2453,6 +2458,22 @@ impl OpenCADStudio {
                 .then(|| selected[0].0);
             let mut grips = Vec::new();
             let mut handles = Vec::new();
+            // Above the limit, no grips at all — the same rule AutoCAD applies
+            // through GRIPOBJLIMIT, and for the same reason. Every selected
+            // entity contributes several grips, the whole list is projected and
+            // rebuilt into markers on **every frame**, and a 185 096-entity
+            // selection put ~3.9 s in this function and then held the view at
+            // ~10 fps for as long as the selection stood.
+            //
+            // Downstream this reads as "this selection has no grips": the
+            // consumers all iterate the list, so they simply find nothing, and
+            // grip editing is unavailable for a selection far past the size
+            // where dragging one is a sensible thing to do.
+            let selected = if selected.len() > Self::GRIP_OBJECT_LIMIT {
+                Vec::new()
+            } else {
+                selected
+            };
             for (handle, entity) in selected {
                 if self.tabs[i].scene.is_layer_locked(handle) {
                     continue;
@@ -4025,5 +4046,53 @@ mod chprop_integration_tests {
         let new_lw = LineWeight::from_value(50);
         let _ = app.update(Message::RibbonLineweightChanged(new_lw));
         assert_eq!(app.ribbon.active_lineweight, new_lw);
+    }
+}
+
+#[cfg(test)]
+mod grip_limit_tests {
+    use super::*;
+
+    /// Every selected entity contributes grips, and the whole list is projected
+    /// and rebuilt into markers on every frame. A 185 096-entity selection put
+    /// ~3.9 s in `refresh_selected_grips` and then held the view at ~10 fps for
+    /// as long as the selection stood, which is what AutoCAD's `GRIPOBJLIMIT`
+    /// exists to prevent.
+    #[test]
+    fn a_selection_past_the_limit_gets_no_grips() {
+        use acadrust::entities::{EntityType, Line};
+        use acadrust::types::Vector3;
+
+        let select_n = |n: usize| -> usize {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let handles: Vec<_> = (0..n)
+                .map(|k| {
+                    let x = k as f64;
+                    app.tabs[i].scene.add_entity(EntityType::Line(
+                        Line::from_points(
+                            Vector3::new(x, 0.0, 0.0),
+                            Vector3::new(x + 1.0, 1.0, 0.0),
+                        ),
+                    ))
+                })
+                .collect();
+            for handle in handles {
+                app.tabs[i].scene.select_entity(handle, false);
+            }
+            app.refresh_selected_grips();
+            app.tabs[i].selected_grips.len()
+        };
+
+        assert!(
+            select_n(OpenCADStudio::GRIP_OBJECT_LIMIT) > 0,
+            "a selection at the limit must still show its grips",
+        );
+        assert_eq!(
+            select_n(OpenCADStudio::GRIP_OBJECT_LIMIT + 1),
+            0,
+            "one past the limit must show none at all",
+        );
     }
 }

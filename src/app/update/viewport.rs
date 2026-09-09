@@ -4093,6 +4093,10 @@ impl OpenCADStudio {
                                         aabb
                                     },
                                 );
+                        // A 186 k-entity box selection sits at ~800 ms in this
+                        // handler and two guesses about which step owns it have
+                        // both been wrong. Split it.
+                        let t_sel = crate::perf::enabled().then(Instant::now);
                         let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
                             all_wires,
                             world_aabb,
@@ -4101,6 +4105,9 @@ impl OpenCADStudio {
                             eye,
                             bounds,
                         );
+                        let cand_ms = t_sel
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_hit = crate::perf::enabled().then(Instant::now);
                         let candidate_handles = self.tabs[i]
                             .scene
                             .interaction_candidate_handles(&area_candidates);
@@ -4161,20 +4168,30 @@ impl OpenCADStudio {
                         // selection, Shift+box removes the boxed
                         // entities. Esc / empty-space click still clears.
                         // PICKADD 0 (#226): a plain box REPLACES.
+                        let hit_ms = t_hit
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_apply = crate::perf::enabled().then(Instant::now);
                         if self.shift_down || self.select_remove_mode {
-                            for h in &handles {
-                                self.tabs[i].scene.deselect_entity(*h);
-                            }
+                            self.tabs[i].scene.deselect_entities(&handles);
                         } else {
                             if !selection_pick_add && !handles.is_empty() {
                                 self.tabs[i].scene.deselect_all();
                             }
-                            for h in &handles {
-                                self.tabs[i].scene.select_entity(*h, false);
-                            }
+                            self.tabs[i].scene.select_entities(&handles);
                             self.tabs[i].scene.expand_selection_for_groups(&handles);
                         }
+                        let apply_ms = t_apply
+                            .map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let t_props = crate::perf::enabled().then(Instant::now);
                         self.refresh_properties();
+                        if crate::perf::enabled() {
+                            crate::perf_record!(
+                                "[perf] select-commit kind=drag-box candidates={cand_ms:.1}ms \
+hit={hit_ms:.1}ms apply={apply_ms:.1}ms properties={:.1}ms picked={}",
+                                t_props.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0),
+                                handles.len(),
+                            );
+                        }
                         selection_just_completed = true;
                     }
                 } else {
@@ -4208,9 +4225,7 @@ impl OpenCADStudio {
                     // leaves the current selection untouched so a stray
                     // drag never discards hard-won picks.
                     if self.shift_down || self.select_remove_mode {
-                        for h in &handles {
-                            self.tabs[i].scene.deselect_entity(*h);
-                        }
+                        self.tabs[i].scene.deselect_entities(&handles);
                     } else {
                         // PICKADD 0 (#226): a plain marquee REPLACES
                         // the selection (empty results still leave it
@@ -4218,9 +4233,7 @@ impl OpenCADStudio {
                         if !selection_pick_add && !handles.is_empty() {
                             self.tabs[i].scene.deselect_all();
                         }
-                        for h in &handles {
-                            self.tabs[i].scene.select_entity(*h, false);
-                        }
+                        self.tabs[i].scene.select_entities(&handles);
                         self.tabs[i].scene.expand_selection_for_groups(&handles);
                     }
                     self.refresh_properties();
@@ -4454,6 +4467,10 @@ impl OpenCADStudio {
                                 aabb
                             },
                         );
+                    // This is the path a click-move-click window takes, as
+                    // opposed to a press-drag; it is the one a large selection
+                    // actually goes through.
+                    let t_sel = crate::perf::enabled().then(Instant::now);
                     let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
                         all_wires,
                         world_aabb,
@@ -4462,6 +4479,9 @@ impl OpenCADStudio {
                         eye,
                         bounds,
                     );
+                    let cand_ms =
+                        t_sel.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let t_hit = crate::perf::enabled().then(Instant::now);
                     let candidate_handles = self.tabs[i]
                         .scene
                         .interaction_candidate_handles(&area_candidates);
@@ -4517,27 +4537,39 @@ impl OpenCADStudio {
                         bounds,
                         candidate_handles.as_ref(),
                     ));
+                    let hit_ms = t_hit.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let t_filter = crate::perf::enabled().then(Instant::now);
                     // Selection filter: keep only allowed types.
                     handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
+                    let filter_ms =
+                        t_filter.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let t_apply = crate::perf::enabled().then(Instant::now);
                     // Accumulate (issue #83): a plain box adds to the
                     // current selection, Shift+box removes the boxed
                     // entities. An empty box leaves the selection alone
                     // so an accidental empty drag never discards it.
                     // PICKADD 0 (#226): a plain box REPLACES instead.
                     if self.shift_down || self.select_remove_mode {
-                        for h in &handles {
-                            self.tabs[i].scene.deselect_entity(*h);
-                        }
+                        self.tabs[i].scene.deselect_entities(&handles);
                     } else {
                         if !selection_pick_add && !handles.is_empty() {
                             self.tabs[i].scene.deselect_all();
                         }
-                        for h in &handles {
-                            self.tabs[i].scene.select_entity(*h, false);
-                        }
+                        self.tabs[i].scene.select_entities(&handles);
                         self.tabs[i].scene.expand_selection_for_groups(&handles);
                     }
+                    let apply_ms =
+                        t_apply.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let t_props = crate::perf::enabled().then(Instant::now);
                     self.refresh_properties();
+                    if crate::perf::enabled() {
+                        crate::perf_record!(
+                            "[perf] select-commit kind=window candidates={cand_ms:.1}ms \
+hit={hit_ms:.1}ms filter={filter_ms:.1}ms apply={apply_ms:.1}ms properties={:.1}ms picked={}",
+                            t_props.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0),
+                            handles.len(),
+                        );
+                    }
                     let mut sel = self.tabs[i].scene.selection.borrow_mut();
                     sel.box_last = Some((a, p));
                     sel.box_last_crossing = crossing;

@@ -183,21 +183,22 @@ impl Scene {
         handles: &[Handle],
     ) -> HashSet<Handle> {
         let mut expanded: HashSet<Handle> = handles.iter().copied().collect();
-        expanded.extend(
-            self.document
-                .objects
-                .values()
-                .filter_map(|obj| match obj {
-                    ObjectType::Group(g)
-                        if g.selectable
-                            && handles.iter().any(|handle| g.contains(*handle)) =>
-                    {
-                        Some(g.entities.clone())
-                    }
-                    _ => None,
-                })
-                .flatten(),
-        );
+        // Asked the other way round, this was quadratic: for every group, scan
+        // every selected handle, and `Group::contains` is a linear scan of the
+        // group's own entity list. A box selection of 185 096 entities spent
+        // seconds here.
+        //
+        // The membership set is the *input* handles, not `expanded` — a group
+        // must match because something the user selected is in it, not because
+        // an earlier group already contributed one of its members.
+        let wanted: HashSet<Handle> = handles.iter().copied().collect();
+        for obj in self.document.objects.values() {
+            if let ObjectType::Group(g) = obj {
+                if g.selectable && g.entities.iter().any(|e| wanted.contains(e)) {
+                    expanded.extend(g.entities.iter().copied());
+                }
+            }
+        }
         expanded
     }
 
@@ -209,5 +210,53 @@ impl Scene {
         if self.selected.len() != previous_len {
             self.bump_selection_set();
         }
+    }
+}
+
+#[cfg(test)]
+mod group_expansion_tests {
+    use super::*;
+    use crate::scene::Scene;
+
+    /// Selecting one member of a selectable group selects the whole group, and
+    /// a group nobody touched stays out. The lookup was inverted for speed —
+    /// it asked every group about every selected handle, and `Group::contains`
+    /// scans the group's own list — so the answer has to be shown unchanged.
+    #[test]
+    fn group_expansion_pulls_in_siblings_and_nothing_else() {
+        use acadrust::entities::{EntityType, Line};
+        use acadrust::types::Vector3;
+
+        let mut scene = Scene::new();
+        let mut line = |x: f64| {
+            scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x + 1.0, 0.0, 0.0),
+            )))
+        };
+        let (a, b, c) = (line(0.0), line(1.0), line(2.0));
+        let (d, e) = (line(3.0), line(4.0));
+        let lonely = line(9.0);
+        scene.create_group("GRUPPO".to_string(), vec![a, b, c]);
+        scene.create_group("ALTRO".to_string(), vec![d, e]);
+
+        // One member pulls in its siblings, and only its own group's.
+        let from_a = scene.handles_expanded_for_selectable_groups(&[a]);
+        assert_eq!(
+            from_a,
+            [a, b, c].into_iter().collect::<HashSet<_>>(),
+            "selecting a member must select that group and no other",
+        );
+
+        // An entity in no group expands to itself.
+        assert_eq!(
+            scene.handles_expanded_for_selectable_groups(&[lonely]),
+            [lonely].into_iter().collect::<HashSet<_>>(),
+        );
+
+        // Touching both groups pulls in both, and nothing outside them.
+        let both = scene.handles_expanded_for_selectable_groups(&[a, e]);
+        assert_eq!(both, [a, b, c, d, e].into_iter().collect::<HashSet<_>>());
+        assert!(!both.contains(&lonely));
     }
 }

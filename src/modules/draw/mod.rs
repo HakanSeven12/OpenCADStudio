@@ -34,7 +34,11 @@ impl CadModule for DrawModule {
         };
         use crate::modules::insert::{create_block, insert_block};
         use clipboard::{copy_clip, cut, paste};
-        use constrain::{angle_tool, coincident_tool, distance_tool, equal, horizontal, parallel, perpendicular, tangent, vertical};
+        use constrain::{
+            angle_tool, center_point_tool, coincident_tool, colinear, concentric, distance_tool, equal,
+            equal_distance_tool, fixed, horizontal, midpoint_tool, parallel, perpendicular, point_on_curve_tool,
+            symmetric, tangent, vertical,
+        };
         use draw::{arc, circle, ellipse, hatch, line, polyline, shapes};
         use groups::{group, ungroup};
         use layers::{
@@ -134,6 +138,14 @@ impl CadModule for DrawModule {
                         coincident_tool::tool().into(),
                         distance_tool::tool().into(),
                         angle_tool::tool().into(),
+                        concentric::tool().into(),
+                        colinear::tool().into(),
+                        fixed::tool().into(),
+                        symmetric::tool().into(),
+                        center_point_tool::tool().into(),
+                        midpoint_tool::tool().into(),
+                        point_on_curve_tool::tool().into(),
+                        equal_distance_tool::tool().into(),
                     ],
                 },
                 RibbonGroup {

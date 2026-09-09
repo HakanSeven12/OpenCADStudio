@@ -533,6 +533,19 @@ pub(super) struct OpenCADStudio {
     /// When true (default), the app registers itself as a .dwg/.dxf/.bak file
     /// handler on each launch. Toggle with the FILEASSOC command.
     pub file_assoc_enabled: bool,
+    /// When true, saving a drawing with sketch constraints also materializes
+    /// them as AutoCAD's own native `AssocNetwork`/`Assoc2dConstraintGroup`
+    /// object graph (`scene::dwg_native_constraints`), so AutoCAD/BricsCAD
+    /// recognize them as real constraints rather than an opaque OCS-only
+    /// XRecord. Off by default (#opt-in — adds objects/file weight every
+    /// user pays for save-after-save, whether or not they need AutoCAD
+    /// interop). A drawing that already carries this native graph (from a
+    /// prior save with this on, or from real AutoCAD) keeps it synced on
+    /// every save regardless of this setting — see
+    /// `Scene::materialize_dwg_native_constraints_for_save`'s doc comment;
+    /// this only governs whether the graph is *created* in a scope that
+    /// doesn't have one yet.
+    pub write_dwg_native_constraints: bool,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
     pub savetime_min: i32,
@@ -2002,6 +2015,9 @@ pub enum Message {
     /// Register or unregister as the .dwg/.dxf handler, from Options. Same
     /// setting the FILEASSOC command carries.
     FileAssocChanged(bool),
+    /// Toggle writing AutoCAD-native constraint objects on save, from
+    /// Options. See `write_dwg_native_constraints`'s doc comment.
+    WriteDwgNativeConstraintsChanged(bool),
     /// Switch the interface language and redraw localized views.
     LanguageChanged(crate::i18n::Language),
     /// Drop every entity from the active drawing.
@@ -3426,6 +3442,7 @@ impl OpenCADStudio {
             dimension_continue_mode: 1,
             backup_on_save: true,
             file_assoc_enabled: true,
+            write_dwg_native_constraints: false,
             savetime_min: 10,
             default_bg_color: None,
             default_paper_bg_color: None,

@@ -79,6 +79,41 @@ pub enum ConstraintKind {
     Angle,
     Radius,
     Tangent,
+    /// Two circles/arcs share a center — `refs`: `[center(a), center(b)]`.
+    /// Solves identically to `Coincident` (`sketch_solve.rs` broadens that
+    /// match arm rather than duplicating it) — only the DWG-native class
+    /// name (`ACCONCENTRICCONSTRAINT` vs `ACPOINTCOINCIDENCECONSTRAINT`)
+    /// and the UI entry point differ.
+    Concentric,
+    /// A point sits at a circle/arc's center — `refs`: `[point, center(circle)]`.
+    /// Same solver math as `Coincident`/`Concentric`, different DWG class
+    /// name (`ACCENTERPOINTCONSTRAINT`).
+    CenterPoint,
+    /// Two lines share the same infinite line — `refs`: `[whole(a), whole(b)]`.
+    Colinear,
+    /// A point sits at another line's midpoint — `refs`: `[point, whole(line)]`.
+    Midpoint,
+    /// Locks a whole entity at its current position — `refs`: `[whole(entity)]`.
+    /// No `driving_param`: the target is the entity's own live geometry at
+    /// solve time, not a typed value (see `sketch_solve.rs`'s `Fixed` arm).
+    Fixed,
+    /// A point lies anywhere along a line's or circle's curve (not
+    /// restricted to an endpoint/center) — `refs`: `[point, whole(entity)]`.
+    PointOnCurve,
+    /// The distance between one point pair equals the distance between
+    /// another — `refs`: `[p1, p2, p3, p4]` (`dist(p1,p2) == dist(p3,p4)`).
+    /// AutoCAD's fourth `Equal` sub-kind (`ACEQUALDISTANCECONSTRAINT`) —
+    /// see the design doc for why `EqualCurvature`, the other missing
+    /// sub-kind, isn't modeled: for the only entity types this system
+    /// solves (Line, Circle), it would be mathematically identical to this
+    /// `Equal`'s existing circle/circle (radius) branch.
+    EqualDistance,
+    /// Two circles/arcs are mirror images of each other across a line —
+    /// `refs`: `[center(a), center(b), whole(mirror_line)]`. Scoped to the
+    /// circle-center-pair case (unambiguous with whole-entity selection);
+    /// point-symmetry about a point, and symmetry between two lines, aren't
+    /// modeled.
+    Symmetric,
 }
 
 pub type ConstraintId = u32;
@@ -345,6 +380,14 @@ impl ConstraintKind {
             ConstraintKind::Angle => "∠",
             ConstraintKind::Radius => "R",
             ConstraintKind::Tangent => "T",
+            ConstraintKind::Concentric => "◎",
+            ConstraintKind::CenterPoint => "⊕",
+            ConstraintKind::Colinear => "L",
+            ConstraintKind::Midpoint => "M",
+            ConstraintKind::Fixed => "F",
+            ConstraintKind::PointOnCurve => "∈",
+            ConstraintKind::EqualDistance => "≐",
+            ConstraintKind::Symmetric => "S",
         }
     }
 }

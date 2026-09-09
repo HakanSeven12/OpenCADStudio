@@ -393,6 +393,7 @@ impl OpenCADStudio {
             textfill: crate::scene::text::sdf_atlas::textfill(),
             backup_on_save: self.backup_on_save,
             file_assoc_enabled: self.file_assoc_enabled,
+            write_dwg_native_constraints: self.write_dwg_native_constraints,
             savetime_min: self.savetime_min,
             default_save_format: self.default_save_format.clone(),
             pick_add: self.pick_add,
@@ -459,6 +460,7 @@ impl OpenCADStudio {
         crate::scene::text::sdf_atlas::set_textfill(s.textfill);
         self.backup_on_save = s.backup_on_save;
         self.file_assoc_enabled = s.file_assoc_enabled;
+        self.write_dwg_native_constraints = s.write_dwg_native_constraints;
         self.savetime_min = s.savetime_min;
         self.default_save_format =
             crate::io::canonical_save_format(&s.default_save_format).to_string();
@@ -1671,7 +1673,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         // docs/dwg_constraint_compatibility_design.md: additive DWG/DXF-
         // native constraint graph, alongside (not instead of) the XRecord
         // above — same save-time hook.
-        self.tabs[i].scene.materialize_dwg_native_constraints_for_save();
+        self.tabs[i].scene.materialize_dwg_native_constraints_for_save(self.write_dwg_native_constraints);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2624,7 +2626,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     self.sync_solid_models_for_save(i);
                     self.tabs[i].scene.materialize_sketch_constraints_for_save();
                     self.tabs[i].scene.materialize_named_parameters_for_save();
-                    self.tabs[i].scene.materialize_dwg_native_constraints_for_save();
+                    self.tabs[i].scene.materialize_dwg_native_constraints_for_save(self.write_dwg_native_constraints);
                     let tab_id = self.tabs[i].id;
                     let bounds = crate::ui::wrap_bar::dropdown_bounds(
                         crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,

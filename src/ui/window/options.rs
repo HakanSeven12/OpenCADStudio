@@ -31,6 +31,7 @@ impl<T> fmt::Display for Labelled<T> {
 pub fn view_window<'a>(
     default_save_format: &'a str,
     file_assoc_enabled: bool,
+    write_dwg_native_constraints: bool,
     ui_theme: &'a UiThemeConfig,
     theme_color_inputs: &'a [String; 6],
     language: crate::i18n::Language,
@@ -187,6 +188,24 @@ pub fn view_window<'a>(
         Space::new().height(6),
         text(crate::t!(
             "Also installs the application and file-type icons the desktop shows."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(14),
+        row![
+            iced::widget::checkbox(write_dwg_native_constraints)
+                .on_toggle(Message::WriteDwgNativeConstraintsChanged)
+                .size(15),
+            text(crate::t!("Write AutoCAD-compatible constraint objects on save")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Saves sketch constraints as AutoCAD/BricsCAD's own native objects too, alongside \
+             this app's own format, so other CAD software recognizes them. Off by default — \
+             adds some file size on every save. A drawing that already has these objects keeps \
+             them up to date regardless of this setting."
         ))
         .size(11)
         .width(sizing.width),

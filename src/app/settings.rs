@@ -225,6 +225,15 @@ pub struct UserSettings {
     /// When true (default), the app (re)registers itself as a .dwg/.dxf/.bak
     /// handler on every launch. Toggle with the FILEASSOC command.
     pub file_assoc_enabled: bool,
+    /// When true, saving a drawing also writes its sketch constraints as
+    /// AutoCAD's own native object graph (`scene::dwg_native_constraints`),
+    /// not just the app's own XRecord format. Off by default — opt-in, since
+    /// it adds file weight every save whether or not AutoCAD/BricsCAD
+    /// interop is needed. See `write_dwg_native_constraints` on the app
+    /// struct for the full contract (a drawing that already has this native
+    /// graph keeps it synced regardless of this setting).
+    #[serde(default)]
+    pub write_dwg_native_constraints: bool,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command).
     /// 0 disables autosave.
     pub savetime_min: i32,
@@ -338,6 +347,7 @@ impl Default for UserSettings {
             textfill: true,
             backup_on_save: true,
             file_assoc_enabled: true,
+            write_dwg_native_constraints: false,
             savetime_min: 10,
             default_save_format: crate::io::DEFAULT_SAVE_FORMAT.to_string(),
             pick_add: true,

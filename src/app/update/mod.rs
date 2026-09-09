@@ -6198,6 +6198,11 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::WriteDwgNativeConstraintsChanged(enabled) => {
+                self.write_dwg_native_constraints = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
             Message::LanguageChanged(language) => {
                 if self.language == language {
                     return Task::none();

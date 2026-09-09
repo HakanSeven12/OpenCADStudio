@@ -2375,6 +2375,62 @@ impl OpenCADStudio {
                     }
                 }
             }
+            CmdResult::AddPointOnEntityConstraint { point, target, kind, label } => {
+                let scope = self.tabs[i].current_sketch_scope();
+                let to_world = |p: glam::DVec3| acadrust::types::Vector3::new(p.x, p.y, p.z);
+                let resolved = crate::scene::sketch_constraints::nearest_sketch_point(&self.tabs[i].scene.document, scope, to_world(point), Some(target));
+                match resolved {
+                    Some(point_ref) => {
+                        use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                        // `CenterPoint` addresses its whole-entity side via
+                        // the center marker (same solve as Coincident /
+                        // Concentric — `ConstraintKind::CenterPoint`'s own
+                        // doc comment); `Midpoint`/`PointOnCurve` address it
+                        // as a whole entity.
+                        let target_ref =
+                            if kind == ConstraintKind::CenterPoint { SketchRef::center(target) } else { SketchRef::whole(target) };
+                        return self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                            kind,
+                            refs: vec![point_ref, target_ref],
+                            driving_param: None,
+                            label,
+                        });
+                    }
+                    None => {
+                        self.command_line.push_error(
+                            "Pick didn't land on a point (endpoint, center, or vertex) — enable an Endpoint/Center object snap and try again.",
+                        );
+                        self.tabs[i].active_cmd = None;
+                        self.tabs[i].snap_result = None;
+                    }
+                }
+            }
+            CmdResult::AddEqualDistanceConstraint { points, label } => {
+                let scope = self.tabs[i].current_sketch_scope();
+                let to_world = |p: glam::DVec3| acadrust::types::Vector3::new(p.x, p.y, p.z);
+                let mut refs = Vec::with_capacity(4);
+                for p in points {
+                    let Some(r) = crate::scene::sketch_constraints::nearest_sketch_point(&self.tabs[i].scene.document, scope, to_world(p), None)
+                    else {
+                        refs.clear();
+                        break;
+                    };
+                    refs.push(r);
+                }
+                if refs.len() == 4 {
+                    return self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind: crate::scene::sketch_constraints::ConstraintKind::EqualDistance,
+                        refs,
+                        driving_param: None,
+                        label,
+                    });
+                }
+                self.command_line.push_error(
+                    "Equal Distance: a pick didn't land on a point (endpoint, center, or vertex) — enable an Endpoint/Center object snap and try again.",
+                );
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+            }
             CmdResult::ReassociateCenterMark { target, source, point } => {
                 if self.reject_locked_edit(i, target) {
                     return Task::none();

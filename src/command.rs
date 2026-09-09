@@ -1360,6 +1360,32 @@ pub enum CmdResult {
         point_b: DVec3,
         label: &'static str,
     },
+    /// Add a persistent `CenterPoint`/`Midpoint`/`PointOnCurve` constraint
+    /// (`crate::modules::draw::constrain::point_on_entity`) between one
+    /// picked point and `target`, a whole entity selected before the tool
+    /// ran. Like `AddCoincidentConstraint`, the host resolves `point` via
+    /// `sketch_constraints::nearest_sketch_point` (a `CadCommand` has no
+    /// document access) and, for `CenterPoint` specifically, addresses
+    /// `target` via its center marker rather than as a whole entity — see
+    /// `ConstraintKind::CenterPoint`'s own doc comment for why it's the
+    /// same solve as `Coincident`/`Concentric` under a different DWG-native
+    /// class name.
+    AddPointOnEntityConstraint {
+        point: DVec3,
+        target: Handle,
+        kind: crate::scene::sketch_constraints::ConstraintKind,
+        label: &'static str,
+    },
+    /// Add a persistent `EqualDistance` constraint
+    /// (`crate::modules::draw::constrain::equal_distance`): the distance
+    /// between `points[0]`/`points[1]` equals the distance between
+    /// `points[2]`/`points[3]`. The host resolves each point via
+    /// `sketch_constraints::nearest_sketch_point`, same reasoning as
+    /// `AddCoincidentConstraint`.
+    AddEqualDistanceConstraint {
+        points: [DVec3; 4],
+        label: &'static str,
+    },
     /// Attach one smart centre mark to a newly selected circular source.
     ReassociateCenterMark {
         target: Handle,

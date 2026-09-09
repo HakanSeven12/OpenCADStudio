@@ -354,3 +354,212 @@ fn two_conflicting_distance_targets_are_reported_as_conflicting() {
     assert!(flagged_id == first || flagged_id == second, "the flagged id should be one of the two conflicting Distance constraints");
     assert_eq!(kind, RedundancyKind::Conflicting);
 }
+
+fn set_circle_center(scene: &mut Scene, handle: Handle, center: Vector3) {
+    if let Some(EntityType::Circle(c)) = scene.document.get_entity_mut(handle) {
+        c.center = center;
+    }
+}
+
+fn set_line_start(scene: &mut Scene, handle: Handle, start: Vector3) {
+    if let Some(EntityType::Line(l)) = scene.document.get_entity_mut(handle) {
+        l.start = start;
+    }
+}
+
+#[test]
+fn concentric_constraint_pulls_the_second_circles_center_onto_the_firsts() {
+    let mut scene = Scene::new();
+    let a = add_circle(&mut scene, 0.0, 0.0, 3.0);
+    let b = add_circle(&mut scene, 5.0, 5.0, 1.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Concentric,
+        vec![SketchRef::center(a), SketchRef::center(b)],
+        None,
+    );
+
+    set_circle_center(&mut scene, a, Vector3::new(2.0, -3.0, 0.0));
+    scene.bump_entities(&[(a, ChangeKind::Modified)]);
+
+    let (ca, ra) = circle_geom(&scene, a);
+    let (cb, rb) = circle_geom(&scene, b);
+    assert!((ca.x - cb.x).abs() < 1e-6 && (ca.y - cb.y).abs() < 1e-6, "centers should coincide: a={ca:?} b={cb:?}");
+    // Radii are untouched by Concentric — only centers move.
+    assert!((ra - 3.0).abs() < 1e-6 && (rb - 1.0).abs() < 1e-6, "radii must not change: ra={ra} rb={rb}");
+}
+
+#[test]
+fn center_point_constraint_pulls_a_lines_endpoint_onto_a_circles_center() {
+    let mut scene = Scene::new();
+    let circle = add_circle(&mut scene, 0.0, 0.0, 4.0);
+    let line = add_line(&mut scene, 10.0, 10.0, 20.0, 20.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::CenterPoint,
+        vec![SketchRef::point(line, 0), SketchRef::center(circle)],
+        None,
+    );
+
+    set_circle_center(&mut scene, circle, Vector3::new(-6.0, 9.0, 0.0));
+    scene.bump_entities(&[(circle, ChangeKind::Modified)]);
+
+    let (center, _) = circle_geom(&scene, circle);
+    let (line_start, _) = line_endpoints(&scene, line);
+    assert!(
+        (center.x - line_start.x).abs() < 1e-6 && (center.y - line_start.y).abs() < 1e-6,
+        "the line's start should sit exactly at the circle's center: center={center:?} start={line_start:?}"
+    );
+}
+
+#[test]
+fn colinear_constraint_pulls_the_second_line_onto_the_firsts_infinite_line() {
+    let mut scene = Scene::new();
+    let a = add_line(&mut scene, 0.0, 0.0, 10.0, 0.0);
+    let b = add_line(&mut scene, 3.0, 4.0, 7.0, 6.0); // off-axis, not on a's line
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Colinear,
+        vec![SketchRef::whole(a), SketchRef::whole(b)],
+        None,
+    );
+
+    scene.bump_entities(&[(b, ChangeKind::Modified)]);
+
+    let (a1, a2) = line_endpoints(&scene, a);
+    let (b1, b2) = line_endpoints(&scene, b);
+    // Both of b's endpoints should land on a's infinite line: the signed
+    // area of (a2-a1) × (bN-a1) is ~0 for a point exactly on that line.
+    let area = |p: Vector3| (a2.x - a1.x) * (p.y - a1.y) - (a2.y - a1.y) * (p.x - a1.x);
+    assert!(area(b1).abs() < 1e-5, "b.start should land on a's line, area={}", area(b1));
+    assert!(area(b2).abs() < 1e-5, "b.end should land on a's line, area={}", area(b2));
+}
+
+#[test]
+fn midpoint_constraint_pulls_a_point_onto_a_lines_midpoint() {
+    let mut scene = Scene::new();
+    let base = add_line(&mut scene, 0.0, 0.0, 10.0, 0.0);
+    let marker = add_line(&mut scene, 20.0, 20.0, 21.0, 21.0); // marker.start is the tracked point
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Midpoint,
+        vec![SketchRef::point(marker, 0), SketchRef::whole(base)],
+        None,
+    );
+
+    set_line_end(&mut scene, base, Vector3::new(10.0, 8.0, 0.0));
+    scene.bump_entities(&[(base, ChangeKind::Modified)]);
+
+    let (b1, b2) = line_endpoints(&scene, base);
+    let (marker_start, _) = line_endpoints(&scene, marker);
+    let expected = Vector3::new((b1.x + b2.x) / 2.0, (b1.y + b2.y) / 2.0, 0.0);
+    assert!(
+        (marker_start.x - expected.x).abs() < 1e-6 && (marker_start.y - expected.y).abs() < 1e-6,
+        "marker point should sit at base's midpoint: expected={expected:?} got={marker_start:?}"
+    );
+}
+
+#[test]
+fn fixed_constraint_holds_an_entity_in_place_despite_a_connected_edit() {
+    let mut scene = Scene::new();
+    let fixed_line = add_line(&mut scene, 0.0, 0.0, 10.0, 0.0);
+    let moving_line = add_line(&mut scene, 10.0, 0.0, 10.0, 10.0);
+
+    let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+    set.add(ConstraintKind::Fixed, vec![SketchRef::whole(fixed_line)], None);
+    set.add(ConstraintKind::Coincident, vec![SketchRef::point(fixed_line, 1), SketchRef::point(moving_line, 0)], None);
+
+    let (before_start, before_end) = line_endpoints(&scene, fixed_line);
+
+    // Drag the shared point — without Fixed this would pull fixed_line's
+    // end along with it; Fixed should hold fixed_line exactly in place and
+    // let moving_line's start follow back to it instead.
+    set_line_start(&mut scene, moving_line, Vector3::new(15.0, 5.0, 0.0));
+    scene.bump_entities(&[(moving_line, ChangeKind::Modified)]);
+
+    let (after_start, after_end) = line_endpoints(&scene, fixed_line);
+    assert_eq!(before_start, after_start, "Fixed entity's start must not move");
+    assert_eq!(before_end, after_end, "Fixed entity's end must not move");
+    let (moving_start, _) = line_endpoints(&scene, moving_line);
+    assert!(
+        (moving_start.x - before_end.x).abs() < 1e-6 && (moving_start.y - before_end.y).abs() < 1e-6,
+        "moving_line's start should have been pulled back to fixed_line's (unmoved) end"
+    );
+}
+
+#[test]
+fn point_on_curve_constraint_pulls_a_point_onto_a_circles_circumference() {
+    let mut scene = Scene::new();
+    let circle = add_circle(&mut scene, 0.0, 0.0, 5.0);
+    let marker = add_line(&mut scene, 100.0, 100.0, 101.0, 101.0); // marker.start is the tracked point
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::PointOnCurve,
+        vec![SketchRef::point(marker, 0), SketchRef::whole(circle)],
+        None,
+    );
+
+    scene.bump_entities(&[(marker, ChangeKind::Modified)]);
+
+    let (center, radius) = circle_geom(&scene, circle);
+    let (marker_start, _) = line_endpoints(&scene, marker);
+    let dist = ((marker_start.x - center.x).powi(2) + (marker_start.y - center.y).powi(2)).sqrt();
+    assert!((dist - radius).abs() < 1e-5, "point should land on the circumference: dist={dist} radius={radius}");
+}
+
+#[test]
+fn equal_distance_constraint_matches_a_second_point_pairs_separation() {
+    let mut scene = Scene::new();
+    // Reference pair: fixed 6 units apart.
+    let a = add_line(&mut scene, 0.0, 0.0, 6.0, 0.0);
+    // Tracked pair: starts at some other separation, should be pulled to 6.
+    let b = add_line(&mut scene, 20.0, 20.0, 25.0, 20.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::EqualDistance,
+        vec![SketchRef::point(b, 0), SketchRef::point(b, 1), SketchRef::point(a, 0), SketchRef::point(a, 1)],
+        None,
+    );
+
+    scene.bump_entities(&[(b, ChangeKind::Modified)]);
+
+    let (a1, a2) = line_endpoints(&scene, a);
+    let (b1, b2) = line_endpoints(&scene, b);
+    let dist_a = ((a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2)).sqrt();
+    let dist_b = ((b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2)).sqrt();
+    assert!((dist_a - dist_b).abs() < 1e-6, "the two pairs' separations should match: dist_a={dist_a} dist_b={dist_b}");
+}
+
+#[test]
+fn symmetric_constraint_mirrors_one_circles_center_across_the_axis_line() {
+    let mut scene = Scene::new();
+    let axis = add_line(&mut scene, 0.0, 0.0, 0.0, 10.0); // the Y axis
+    let a = add_circle(&mut scene, 3.0, 4.0, 1.0);
+    // Starts well off the mirrored position (and not coincident with `a` —
+    // a zero-length a/b segment would leave `Perpendicular`'s precomputed
+    // scale dividing by zero at the very first solve iteration).
+    let b = add_circle(&mut scene, 8.0, 9.0, 1.0);
+
+    let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+    // Pin the axis and `a` in place — otherwise they're just as free to move
+    // as `b`'s center, and with only 2 equations (MidpointOnLine +
+    // Perpendicular) against that many more unknowns the solver is free to
+    // converge on any of infinitely many valid configurations, not
+    // necessarily "only b moves, to a's exact mirror" (which is the one
+    // deterministic outcome this test actually wants to check).
+    set.add(ConstraintKind::Fixed, vec![SketchRef::whole(axis)], None);
+    set.add(ConstraintKind::Fixed, vec![SketchRef::whole(a)], None);
+    set.add(ConstraintKind::Symmetric, vec![SketchRef::center(a), SketchRef::center(b), SketchRef::whole(axis)], None);
+
+    scene.bump_entities(&[(b, ChangeKind::Modified)]);
+
+    let (ca, _) = circle_geom(&scene, a);
+    let (cb, _) = circle_geom(&scene, b);
+    assert_eq!(ca, Vector3::new(3.0, 4.0, 0.0), "Fixed a's center must not have moved");
+    // With both a and the axis pinned, b's center has a unique valid
+    // position left: a's exact mirror across the Y axis, (-3, 4).
+    assert!(
+        (cb.x - -3.0).abs() < 1e-5 && (cb.y - 4.0).abs() < 1e-5,
+        "b's center should have been pulled to a's mirror image across the axis: expected (-3, 4), got {cb:?}"
+    );
+}

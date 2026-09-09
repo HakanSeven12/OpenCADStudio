@@ -73,3 +73,51 @@ pub mod tangent {
         }
     }
 }
+
+pub mod concentric {
+    use super::*;
+    pub fn tool() -> ToolDef {
+        ToolDef {
+            id: "NCONSTRAINT",
+            label: "Concentric",
+            icon: IconKind::Glyph("◎"),
+            event: ModuleEvent::Command("NCONSTRAINT".to_string()),
+        }
+    }
+}
+
+pub mod colinear {
+    use super::*;
+    pub fn tool() -> ToolDef {
+        ToolDef {
+            id: "LCONSTRAINT",
+            label: "Colinear",
+            icon: IconKind::Glyph("L"),
+            event: ModuleEvent::Command("LCONSTRAINT".to_string()),
+        }
+    }
+}
+
+pub mod fixed {
+    use super::*;
+    pub fn tool() -> ToolDef {
+        ToolDef {
+            id: "FXCONSTRAINT",
+            label: "Fixed",
+            icon: IconKind::Glyph("F"),
+            event: ModuleEvent::Command("FXCONSTRAINT".to_string()),
+        }
+    }
+}
+
+pub mod symmetric {
+    use super::*;
+    pub fn tool() -> ToolDef {
+        ToolDef {
+            id: "SYCONSTRAINT",
+            label: "Symmetric",
+            icon: IconKind::Glyph("S"),
+            event: ModuleEvent::Command("SYCONSTRAINT".to_string()),
+        }
+    }
+}

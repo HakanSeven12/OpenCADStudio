@@ -269,6 +269,18 @@ fn geometrical_class_name(kind: ConstraintKind) -> Option<&'static str> {
         ConstraintKind::Vertical => Some("ACVERTICALCONSTRAINT"),
         ConstraintKind::Perpendicular => Some("ACPERPENDICULARCONSTRAINT"),
         ConstraintKind::Tangent => Some("ACTANGENTCONSTRAINT"),
+        ConstraintKind::Concentric => Some("ACCONCENTRICCONSTRAINT"),
+        ConstraintKind::CenterPoint => Some("ACCENTERPOINTCONSTRAINT"),
+        ConstraintKind::Colinear => Some("ACCOLINEARCONSTRAINT"),
+        ConstraintKind::Fixed => Some("ACFIXEDCONSTRAINT"),
+        ConstraintKind::Midpoint => Some("ACMIDPOINTCONSTRAINT"),
+        ConstraintKind::PointOnCurve => Some("ACPOINTCURVECONSTRAINT"),
+        ConstraintKind::Symmetric => Some("ACSYMMETRICCONSTRAINT"),
+        // Also a plain `Geometrical`-shaped node in AutoCAD's own class list
+        // (`is_plain_geometrical_constraint`) — unlike `Equal`, its class
+        // name never branches on entity type, so it belongs here rather
+        // than in the caller's per-entity-type dispatch.
+        ConstraintKind::EqualDistance => Some("ACEQUALDISTANCECONSTRAINT"),
         // `Equal` isn't one native kind — the line/circle split below
         // (design doc §5) needs the resolved entity types, not just the
         // ConstraintKind, so it's handled by the caller instead of here.
@@ -664,6 +676,24 @@ fn remove_owned_recursive(document: &mut CadDocument, root: Handle) {
     document.objects.remove(&root);
 }
 
+/// Whether `owner`'s scope already carries a materialized native graph —
+/// from an earlier save with the setting on, or from a file that came from
+/// real AutoCAD/BricsCAD. Drives the "sync-if-present, create-only-if-
+/// enabled" rule in [`Scene::materialize_dwg_native_constraints_for_save`]:
+/// a scope that already has this graph keeps getting it rebuilt on every
+/// save regardless of the current setting, so turning the setting off never
+/// leaves a stale, out-of-sync graph behind — only a scope that doesn't have
+/// one yet is gated by the setting.
+fn has_native_network(document: &CadDocument, owner: Handle) -> bool {
+    let Some(dictionary_handle) = document.extension_dictionary_handle(owner) else {
+        return false;
+    };
+    let Some(ObjectType::Dictionary(dictionary)) = document.objects.get(&dictionary_handle) else {
+        return false;
+    };
+    dictionary.get(NETWORK_DICTIONARY_KEY).is_some()
+}
+
 /// One scope's worth of
 /// [`Scene::materialize_dwg_native_constraints_for_save`] — see that
 /// method's doc comment for the save-time contract this implements.
@@ -784,13 +814,29 @@ impl Scene {
     /// "materialize right before save, from scratch every time" convention
     /// `sketch_persist.rs`'s `materialize_sketch_constraints_for_save` uses,
     /// called alongside it, not instead of it (design doc §6: additive).
-    pub(crate) fn materialize_dwg_native_constraints_for_save(&mut self) {
-        ensure_associative_classes_registered(&mut self.document);
+    ///
+    /// `enabled` is the app's `write_dwg_native_constraints` Options toggle
+    /// (off by default — this graph adds file weight every save, whether or
+    /// not AutoCAD/BricsCAD interop is wanted). It only gates *creating* the
+    /// graph in a scope that doesn't have one yet: a scope that already
+    /// carries one — from an earlier save with the setting on, or from a
+    /// file that came from real AutoCAD — keeps getting it rebuilt in sync
+    /// regardless of the current setting ([`has_native_network`]), so
+    /// toggling this off never leaves a stale graph sitting in the file.
+    pub(crate) fn materialize_dwg_native_constraints_for_save(&mut self, enabled: bool) {
+        let mut classes_registered = false;
         for index in 0..self.sketch_constraints.len() {
             let set = self.sketch_constraints[index].clone();
             let owner = set.scope.owner_handle(&self.document);
             if owner.is_null() {
                 continue;
+            }
+            if !enabled && !has_native_network(&self.document, owner) {
+                continue;
+            }
+            if !classes_registered {
+                ensure_associative_classes_registered(&mut self.document);
+                classes_registered = true;
             }
             materialize_scope(&mut self.document, owner, &set, &self.named_parameters);
         }
@@ -801,13 +847,17 @@ impl Scene {
 mod tests {
     use super::super::sketch_constraints::SketchScope;
     use super::*;
-    use acadrust::entities::Line;
+    use acadrust::entities::{Circle, Line};
 
     fn line_entity(scene: &mut Scene, start: (f64, f64), end: (f64, f64)) -> Handle {
         scene.add_entity(EntityType::Line(Line::from_points(
             Vector3::new(start.0, start.1, 0.0),
             Vector3::new(end.0, end.1, 0.0),
         )))
+    }
+
+    fn circle_entity(scene: &mut Scene, center: (f64, f64), radius: f64) -> Handle {
+        scene.add_entity(EntityType::Circle(Circle::from_center_radius(Vector3::new(center.0, center.1, 0.0), radius)))
     }
 
     /// Digs a scope's materialized native graph back out of `document`:
@@ -854,7 +904,7 @@ mod tests {
                 None,
             );
 
-            scene.materialize_dwg_native_constraints_for_save();
+            scene.materialize_dwg_native_constraints_for_save(true);
             let owner = scene.document.header.model_space_block_handle;
             // Sanity before the round trip even happens: root + 2 geometry
             // nodes + 2 constraint nodes.
@@ -915,7 +965,7 @@ mod tests {
     #[test]
     fn a_dwg_save_keeps_the_full_dependency_chain_including_the_named_variable() {
         let (mut scene, owner) = distance_with_named_parameter_scene();
-        scene.materialize_dwg_native_constraints_for_save();
+        scene.materialize_dwg_native_constraints_for_save(true);
         assert!(has_variable_named(&scene.document, "gap"), "expected an AssocVariable BEFORE serialization");
 
         let bytes = crate::io::save_to_bytes(&scene.document, "dwg", scene.document.version)
@@ -951,7 +1001,7 @@ mod tests {
     #[test]
     fn a_dxf_save_keeps_only_the_constraint_group_shell() {
         let (mut scene, owner) = distance_with_named_parameter_scene();
-        scene.materialize_dwg_native_constraints_for_save();
+        scene.materialize_dwg_native_constraints_for_save(true);
 
         let bytes = crate::io::save_to_bytes(&scene.document, "dxf", scene.document.version)
             .unwrap_or_else(|e| panic!("save to dxf: {e}"));
@@ -981,9 +1031,9 @@ mod tests {
             None,
         );
 
-        scene.materialize_dwg_native_constraints_for_save();
+        scene.materialize_dwg_native_constraints_for_save(true);
         let first_count = scene.document.objects.len();
-        scene.materialize_dwg_native_constraints_for_save();
+        scene.materialize_dwg_native_constraints_for_save(true);
         let second_count = scene.document.objects.len();
         assert_eq!(first_count, second_count, "a resave with the same constraints must not accumulate new objects");
     }
@@ -992,7 +1042,7 @@ mod tests {
     fn an_empty_constraint_set_leaves_no_native_network() {
         let mut scene = Scene::new();
         let _ = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
-        scene.materialize_dwg_native_constraints_for_save();
+        scene.materialize_dwg_native_constraints_for_save(true);
 
         let owner = scene.document.header.model_space_block_handle;
         let dict = scene.document.extension_dictionary_handle(owner);
@@ -1002,6 +1052,143 @@ mod tests {
                     dictionary.get(NETWORK_DICTIONARY_KEY).is_none(),
                     "an unconstrained scope should not materialize a native network"
                 );
+            }
+        }
+    }
+
+    fn model_space_has_native_network(scene: &Scene) -> bool {
+        has_native_network(&scene.document, scene.document.header.model_space_block_handle)
+    }
+
+    #[test]
+    fn the_setting_off_skips_a_scope_with_no_existing_native_graph() {
+        let mut scene = Scene::new();
+        let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Horizontal,
+            vec![SketchRef::whole(a)],
+            None,
+        );
+
+        scene.materialize_dwg_native_constraints_for_save(false);
+        assert!(
+            !model_space_has_native_network(&scene),
+            "a scope with no prior native graph should stay untouched while the setting is off"
+        );
+    }
+
+    /// The "sync-if-present, create-only-if-enabled" rule from
+    /// `Scene::materialize_dwg_native_constraints_for_save`'s doc comment:
+    /// once a scope has the native graph (here, from an earlier save with
+    /// the setting on), turning the setting off must not freeze that graph
+    /// out of date — it should keep tracking the current constraints.
+    #[test]
+    fn the_setting_off_still_resyncs_a_scope_that_already_has_a_native_graph() {
+        let mut scene = Scene::new();
+        let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Horizontal,
+            vec![SketchRef::whole(a)],
+            None,
+        );
+        scene.materialize_dwg_native_constraints_for_save(true);
+        assert!(model_space_has_native_network(&scene), "sanity: the graph should exist after the first, enabled save");
+
+        let b = line_entity(&mut scene, (0.0, 0.0), (0.0, 10.0));
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Vertical,
+            vec![SketchRef::whole(b)],
+            None,
+        );
+        scene.materialize_dwg_native_constraints_for_save(false);
+
+        let owner = scene.document.header.model_space_block_handle;
+        let group = native_group(&scene.document, owner);
+        assert!(
+            group.nodes.iter().any(|n| n.class_name == "ACVERTICALCONSTRAINT"),
+            "the second, disabled-setting save should still pick up the new Vertical constraint, got {:?}",
+            group.nodes.iter().map(|n| &n.class_name).collect::<Vec<_>>()
+        );
+    }
+
+    /// The other half of the same rule: disabling the setting after a scope
+    /// already has the graph must not make that graph disappear either —
+    /// only remove it by clearing the scope's constraints (existing
+    /// `an_empty_constraint_set_leaves_no_native_network` behavior), not by
+    /// toggling the setting off.
+    #[test]
+    fn the_setting_off_does_not_remove_an_existing_native_graph() {
+        let mut scene = Scene::new();
+        let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Horizontal,
+            vec![SketchRef::whole(a)],
+            None,
+        );
+        scene.materialize_dwg_native_constraints_for_save(true);
+        scene.materialize_dwg_native_constraints_for_save(false);
+        assert!(
+            model_space_has_native_network(&scene),
+            "an existing native graph must survive a disabled-setting resave, not be silently dropped"
+        );
+    }
+
+    /// The 8 new `ConstraintKind`s all reuse the same generic
+    /// `Geometrical`-shaped node path `geometrical_class_name` drives (see
+    /// its own doc comment) — one representative mix of ref shapes (2 whole
+    /// entities, an asymmetric point+whole pair, and a 3-ref case) is
+    /// enough to confirm that path handles them all, without one dedicated
+    /// test per kind.
+    #[test]
+    fn new_constraint_kinds_round_trip_with_their_own_dwg_native_class_names() {
+        for ext in ["dxf", "dwg"] {
+            let mut scene = Scene::new();
+            let circle_a = circle_entity(&mut scene, (0.0, 0.0), 3.0);
+            let circle_b = circle_entity(&mut scene, (5.0, 5.0), 1.0);
+            let line_a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
+            let line_b = line_entity(&mut scene, (3.0, 4.0), (7.0, 6.0));
+            let marker = line_entity(&mut scene, (20.0, 20.0), (21.0, 21.0));
+            let axis = line_entity(&mut scene, (0.0, 0.0), (0.0, 10.0));
+
+            let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+            set.add(ConstraintKind::Concentric, vec![SketchRef::center(circle_a), SketchRef::center(circle_b)], None);
+            set.add(ConstraintKind::Colinear, vec![SketchRef::whole(line_a), SketchRef::whole(line_b)], None);
+            set.add(ConstraintKind::Fixed, vec![SketchRef::whole(line_a)], None);
+            set.add(ConstraintKind::CenterPoint, vec![SketchRef::point(marker, 0), SketchRef::center(circle_a)], None);
+            set.add(ConstraintKind::Midpoint, vec![SketchRef::point(marker, 1), SketchRef::whole(line_a)], None);
+            set.add(ConstraintKind::PointOnCurve, vec![SketchRef::point(marker, 0), SketchRef::whole(circle_a)], None);
+            set.add(
+                ConstraintKind::EqualDistance,
+                vec![SketchRef::point(line_b, 0), SketchRef::point(line_b, 1), SketchRef::point(line_a, 0), SketchRef::point(line_a, 1)],
+                None,
+            );
+            set.add(
+                ConstraintKind::Symmetric,
+                vec![SketchRef::center(circle_a), SketchRef::center(circle_b), SketchRef::whole(axis)],
+                None,
+            );
+
+            scene.materialize_dwg_native_constraints_for_save(true);
+            let owner = scene.document.header.model_space_block_handle;
+
+            let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
+                .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
+            let reloaded = crate::io::load_bytes(&format!("new_kinds.{ext}"), bytes)
+                .unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+
+            let group = native_group(&reloaded, owner);
+            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            for expected in [
+                "ACCONCENTRICCONSTRAINT",
+                "ACCOLINEARCONSTRAINT",
+                "ACFIXEDCONSTRAINT",
+                "ACCENTERPOINTCONSTRAINT",
+                "ACMIDPOINTCONSTRAINT",
+                "ACPOINTCURVECONSTRAINT",
+                "ACEQUALDISTANCECONSTRAINT",
+                "ACSYMMETRICCONSTRAINT",
+            ] {
+                assert!(class_names.contains(&expected), "{ext}: missing {expected} node, got {class_names:?}");
             }
         }
     }

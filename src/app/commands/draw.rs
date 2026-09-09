@@ -959,7 +959,7 @@ impl OpenCADStudio {
             // ── Constraints (persistent: added to the scope's SketchConstraintSet,
             // solved via Scene::bump_entities, re-solved on every later edit —
             // see docs/parametric_system_design.md §6.1) ──
-            "HCONSTRAINT" | "VCONSTRAINT" => {
+            "HCONSTRAINT" | "VCONSTRAINT" | "FXCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -968,14 +968,14 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = Some(Box::new(sel));
                 } else if handles.len() != 1 {
                     self.command_line
-                        .push_output("Select exactly one line, then run this constraint again.");
+                        .push_output("Select exactly one entity, then run this constraint again.");
                 } else {
                     use crate::command::CmdResult;
                     use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
-                    let (kind, label) = if cmd == "HCONSTRAINT" {
-                        (ConstraintKind::Horizontal, "Horizontal constraint")
-                    } else {
-                        (ConstraintKind::Vertical, "Vertical constraint")
+                    let (kind, label) = match cmd {
+                        "HCONSTRAINT" => (ConstraintKind::Horizontal, "Horizontal constraint"),
+                        "VCONSTRAINT" => (ConstraintKind::Vertical, "Vertical constraint"),
+                        _ => (ConstraintKind::Fixed, "Fixed constraint"),
                     };
                     return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
                         kind,
@@ -993,7 +993,14 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" => {
+            "EDCONSTRAINT" => {
+                use crate::modules::draw::constrain::EqualDistanceConstraintCommand;
+                let new_cmd = EqualDistanceConstraintCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" | "LCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1011,6 +1018,7 @@ impl OpenCADStudio {
                         "PCONSTRAINT" => (ConstraintKind::Parallel, "Parallel constraint"),
                         "QCONSTRAINT" => (ConstraintKind::Perpendicular, "Perpendicular constraint"),
                         "TCONSTRAINT" => (ConstraintKind::Tangent, "Tangent constraint"),
+                        "LCONSTRAINT" => (ConstraintKind::Colinear, "Colinear constraint"),
                         _ => (ConstraintKind::Equal, "Equal constraint"),
                     };
                     return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
@@ -1019,6 +1027,75 @@ impl OpenCADStudio {
                         driving_param: None,
                         label,
                     }));
+                }
+            }
+
+            "NCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 2 {
+                    self.command_line.push_output("Select exactly two circles/arcs, then run this constraint again.");
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                    return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind: ConstraintKind::Concentric,
+                        refs: vec![SketchRef::center(handles[0]), SketchRef::center(handles[1])],
+                        driving_param: None,
+                        label: "Concentric constraint",
+                    }));
+                }
+            }
+
+            "SYCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 3 {
+                    self.command_line.push_output(
+                        "Select exactly three entities (two circles/arcs, then the mirror line), then run this constraint again.",
+                    );
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                    return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind: ConstraintKind::Symmetric,
+                        refs: vec![SketchRef::center(handles[0]), SketchRef::center(handles[1]), SketchRef::whole(handles[2])],
+                        driving_param: None,
+                        label: "Symmetric constraint",
+                    }));
+                }
+            }
+
+            "CPCONSTRAINT" | "MPCONSTRAINT" | "OCCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 1 {
+                    self.command_line.push_output(
+                        "Select exactly one entity (the circle or line the point should attach to), then run this constraint again.",
+                    );
+                } else {
+                    use crate::modules::draw::constrain::PointOnEntityConstraintCommand;
+                    use crate::scene::sketch_constraints::ConstraintKind;
+                    let (name, kind, label) = match cmd {
+                        "CPCONSTRAINT" => ("CPCONSTRAINT", ConstraintKind::CenterPoint, "Center point constraint"),
+                        "MPCONSTRAINT" => ("MPCONSTRAINT", ConstraintKind::Midpoint, "Midpoint constraint"),
+                        _ => ("OCCONSTRAINT", ConstraintKind::PointOnCurve, "Point on curve constraint"),
+                    };
+                    let new_cmd = PointOnEntityConstraintCommand::new(name, kind, handles[0], label);
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 }
             }
 

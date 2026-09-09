@@ -29,9 +29,10 @@ use acadrust::entities::EntityType;
 use acadrust::types::Handle;
 
 use ocs_gcs::constraints::angle_distance::L2LAngle;
-use ocs_gcs::constraints::circle_arc::{C2LDistance, TangentCircumf};
+use ocs_gcs::constraints::circle_arc::{C2LDistance, P2CDistance, TangentCircumf};
 use ocs_gcs::constraints::point_line::{
-    Equal, EqualLineLength, Parallel as ParallelConstraint, Perpendicular as PerpendicularConstraint, P2PDistance,
+    CenterOfGravity, Equal, EqualLineLength, MidpointOnLine, Parallel as ParallelConstraint,
+    Perpendicular as PerpendicularConstraint, PointOnLine, P2PDistance,
 };
 use ocs_gcs::constraints::Constraint;
 use ocs_gcs::geo::{Circle as GCircle, Line as GLine, Point as GPoint};
@@ -111,14 +112,18 @@ fn resolve_ref(
     Some(*cache.get(&r.entity)?)
 }
 
-/// One [`SketchConstraint`]'s `ocs_gcs` construction, or `None` if it can't
-/// be built (an unsupported/not-yet-mapped kind, a dangling ref, a ref
-/// shape the kind doesn't expect — e.g. `Parallel` needs two whole-line
-/// refs — or, for a dimensional kind, a `driving_param` that fails to
-/// resolve: an undefined named-parameter reference or a division by zero in
-/// its formula, design doc `named_parameters_design.md` stage 3). A
-/// constraint that can't be built is simply skipped for this solve, not an
-/// error: geometry it would have constrained is left alone, matching how a
+/// One [`SketchConstraint`]'s `ocs_gcs` construction: every system-level
+/// constraint it contributes (most kinds contribute exactly one; a few —
+/// `Coincident`/`Concentric`/`CenterPoint`'s X+Y halves, `Colinear`'s two
+/// endpoints, `Midpoint`'s X+Y, `Symmetric`'s midpoint+perpendicular pair,
+/// `Fixed`'s per-coordinate pins — contribute more). Empty means it can't be
+/// built (an unsupported/not-yet-mapped kind, a dangling ref, a ref shape
+/// the kind doesn't expect — e.g. `Parallel` needs two whole-line refs — or,
+/// for a dimensional kind, a `driving_param` that fails to resolve: an
+/// undefined named-parameter reference or a division by zero in its
+/// formula, design doc `named_parameters_design.md` stage 3). A constraint
+/// that can't be built is simply skipped for this solve, not an error:
+/// geometry it would have constrained is left alone, matching how a
 /// dangling associative-dimension reference degrades today rather than
 /// aborting the whole recompute. (A named-parameter *cycle* should be
 /// unreachable here — `ParameterTable::set` already refuses to create one —
@@ -130,9 +135,9 @@ fn build_constraint(
     cache: &mut HashMap<Handle, EntityGeom>,
     params: &ParameterTable,
     c: &SketchConstraint,
-) -> Option<Rc<dyn Constraint>> {
+) -> Vec<Rc<dyn Constraint>> {
     if !c.enabled {
-        return None;
+        return Vec::new();
     }
 
     let whole_line = |sys: &mut System, cache: &mut HashMap<_, _>, r: SketchRef| match resolve_ref(document, sys, cache, r)? {
@@ -148,64 +153,159 @@ fn build_constraint(
         resolve_ref(document, sys, cache, r)?.point_for_marker(marker)
     };
 
+    // `Coincident`/`Concentric`/`CenterPoint` all solve identically — two
+    // points (an endpoint, a circle's center via the existing `-3` marker,
+    // or a plain point) held equal on both axes. Only the DWG-native class
+    // name and the UI entry point that produces their `refs` differ.
+    let point_pair_equal = |sys: &mut System, cache: &mut HashMap<_, _>, refs: &[SketchRef]| -> Vec<Rc<dyn Constraint>> {
+        let [a, b] = refs else { return Vec::new() };
+        let (Some(pa), Some(pb)) = (point_ref(sys, cache, *a), point_ref(sys, cache, *b)) else { return Vec::new() };
+        vec![Rc::new(Equal::new(pa.x, pb.x, 1.0)), Rc::new(Equal::new(pa.y, pb.y, 1.0))]
+    };
+
     match c.kind {
-        ConstraintKind::Coincident => {
-            let [a, b] = c.refs.as_slice() else { return None };
-            let (pa, pb) = (point_ref(sys, cache, *a)?, point_ref(sys, cache, *b)?);
-            // Two coordinate-equal constraints packaged as one via a small
-            // local combinator isn't worth it for a single call site — the
-            // caller (`solve_scope`) already `extend`s a `Vec` per
-            // constraint, so this returns just the X constraint and Y is
-            // added as a second, independent `SketchConstraint`-less
-            // push — see `solve_scope`'s handling of this arm specifically.
-            Some(Rc::new(Equal::new(pa.x, pb.x, 1.0)))
+        ConstraintKind::Coincident | ConstraintKind::Concentric | ConstraintKind::CenterPoint => {
+            point_pair_equal(sys, cache, &c.refs)
         }
         ConstraintKind::Horizontal => {
-            let l = whole_line(sys, cache, *c.refs.first()?)?;
-            Some(Rc::new(Equal::new(l.p1.y, l.p2.y, 1.0)))
+            let Some(r) = c.refs.first() else { return Vec::new() };
+            let Some(l) = whole_line(sys, cache, *r) else { return Vec::new() };
+            vec![Rc::new(Equal::new(l.p1.y, l.p2.y, 1.0))]
         }
         ConstraintKind::Vertical => {
-            let l = whole_line(sys, cache, *c.refs.first()?)?;
-            Some(Rc::new(Equal::new(l.p1.x, l.p2.x, 1.0)))
+            let Some(r) = c.refs.first() else { return Vec::new() };
+            let Some(l) = whole_line(sys, cache, *r) else { return Vec::new() };
+            vec![Rc::new(Equal::new(l.p1.x, l.p2.x, 1.0))]
         }
         ConstraintKind::Parallel => {
-            let [a, b] = c.refs.as_slice() else { return None };
-            let (fixed, moving) = (whole_line(sys, cache, *a)?, whole_line(sys, cache, *b)?);
-            Some(Rc::new(ParallelConstraint::new(sys.store(), moving, fixed)))
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(fixed), Some(moving)) = (whole_line(sys, cache, *a), whole_line(sys, cache, *b)) else { return Vec::new() };
+            vec![Rc::new(ParallelConstraint::new(sys.store(), moving, fixed))]
         }
         ConstraintKind::Perpendicular => {
-            let [a, b] = c.refs.as_slice() else { return None };
-            let (fixed, moving) = (whole_line(sys, cache, *a)?, whole_line(sys, cache, *b)?);
-            Some(Rc::new(PerpendicularConstraint::new(sys.store(), moving, fixed)))
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(fixed), Some(moving)) = (whole_line(sys, cache, *a), whole_line(sys, cache, *b)) else { return Vec::new() };
+            vec![Rc::new(PerpendicularConstraint::new(sys.store(), moving, fixed))]
         }
         ConstraintKind::Equal => {
-            let [a, b] = c.refs.as_slice() else { return None };
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
             if let (Some(la), Some(lb)) = (whole_line(sys, cache, *a), whole_line(sys, cache, *b)) {
-                return Some(Rc::new(EqualLineLength::new(lb, la)));
+                return vec![Rc::new(EqualLineLength::new(lb, la))];
             }
-            let (ca, cb) = (whole_circle(sys, cache, *a)?, whole_circle(sys, cache, *b)?);
-            Some(Rc::new(Equal::new(cb.rad, ca.rad, 1.0)))
+            let (Some(ca), Some(cb)) = (whole_circle(sys, cache, *a), whole_circle(sys, cache, *b)) else { return Vec::new() };
+            vec![Rc::new(Equal::new(cb.rad, ca.rad, 1.0))]
+        }
+        ConstraintKind::EqualDistance => {
+            let [a, b, c2, d] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(pa), Some(pb), Some(pc), Some(pd)) =
+                (point_ref(sys, cache, *a), point_ref(sys, cache, *b), point_ref(sys, cache, *c2), point_ref(sys, cache, *d))
+            else {
+                return Vec::new();
+            };
+            vec![Rc::new(EqualLineLength::new(GLine { p1: pc, p2: pd }, GLine { p1: pa, p2: pb }))]
+        }
+        ConstraintKind::Colinear => {
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(onto), Some(moving)) = (whole_line(sys, cache, *a), whole_line(sys, cache, *b)) else { return Vec::new() };
+            // Pinning both of `moving`'s endpoints onto `onto`'s infinite
+            // line forces the two to coincide (as long as `moving`'s own
+            // two points stay distinct) — no dedicated "colinear" primitive
+            // needed, `PointOnLine` applied twice does it.
+            vec![Rc::new(PointOnLine::new(moving.p1, onto)), Rc::new(PointOnLine::new(moving.p2, onto))]
+        }
+        ConstraintKind::Midpoint => {
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(p), Some(l)) = (point_ref(sys, cache, *a), whole_line(sys, cache, *b)) else { return Vec::new() };
+            vec![
+                Rc::new(CenterOfGravity::new(p.x, vec![l.p1.x, l.p2.x], vec![0.5, 0.5])),
+                Rc::new(CenterOfGravity::new(p.y, vec![l.p1.y, l.p2.y], vec![0.5, 0.5])),
+            ]
+        }
+        ConstraintKind::PointOnCurve => {
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(p), Some(geom)) = (point_ref(sys, cache, *a), resolve_ref(document, sys, cache, *b)) else {
+                return Vec::new();
+            };
+            match geom {
+                EntityGeom::Line(l) => vec![Rc::new(PointOnLine::new(p, l))],
+                EntityGeom::Circle(circ) => {
+                    let zero = sys.add_param(0.0, true);
+                    vec![Rc::new(P2CDistance::new(circ, p, zero))]
+                }
+            }
+        }
+        ConstraintKind::Symmetric => {
+            let [a, b, m] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(pa), Some(pb), Some(mirror)) =
+                (point_ref(sys, cache, *a), point_ref(sys, cache, *b), whole_line(sys, cache, *m))
+            else {
+                return Vec::new();
+            };
+            let pair = GLine { p1: pa, p2: pb };
+            vec![
+                Rc::new(MidpointOnLine::new(pair, mirror)),
+                Rc::new(PerpendicularConstraint::new(sys.store(), pair, mirror)),
+            ]
+        }
+        ConstraintKind::Fixed => {
+            let Some(r) = c.refs.first() else { return Vec::new() };
+            let Some(geom) = resolve_ref(document, sys, cache, *r) else {
+                return Vec::new();
+            };
+            match geom {
+                EntityGeom::Line(l) => {
+                    let (x1, y1, x2, y2) = {
+                        let store = sys.store();
+                        (store.get(l.p1.x), store.get(l.p1.y), store.get(l.p2.x), store.get(l.p2.y))
+                    };
+                    vec![
+                        Rc::new(Equal::new(l.p1.x, sys.add_param(x1, true), 1.0)),
+                        Rc::new(Equal::new(l.p1.y, sys.add_param(y1, true), 1.0)),
+                        Rc::new(Equal::new(l.p2.x, sys.add_param(x2, true), 1.0)),
+                        Rc::new(Equal::new(l.p2.y, sys.add_param(y2, true), 1.0)),
+                    ]
+                }
+                EntityGeom::Circle(circ) => {
+                    let (cx, cy, r) = {
+                        let store = sys.store();
+                        (store.get(circ.center.x), store.get(circ.center.y), store.get(circ.rad))
+                    };
+                    vec![
+                        Rc::new(Equal::new(circ.center.x, sys.add_param(cx, true), 1.0)),
+                        Rc::new(Equal::new(circ.center.y, sys.add_param(cy, true), 1.0)),
+                        Rc::new(Equal::new(circ.rad, sys.add_param(r, true), 1.0)),
+                    ]
+                }
+            }
         }
         ConstraintKind::Distance => {
-            let [a, b] = c.refs.as_slice() else { return None };
-            let (pa, pb) = (point_ref(sys, cache, *a)?, point_ref(sys, cache, *b)?);
-            let target = sys.add_param(c.driving_param.as_ref()?.resolve(params).ok()?, true);
-            Some(Rc::new(P2PDistance::new(pa, pb, target)))
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(pa), Some(pb)) = (point_ref(sys, cache, *a), point_ref(sys, cache, *b)) else { return Vec::new() };
+            let Some(Ok(resolved)) = c.driving_param.as_ref().map(|d| d.resolve(params)) else { return Vec::new() };
+            let target = sys.add_param(resolved, true);
+            vec![Rc::new(P2PDistance::new(pa, pb, target))]
         }
         ConstraintKind::Angle => {
-            let [a, b] = c.refs.as_slice() else { return None };
-            let (fixed, moving) = (whole_line(sys, cache, *a)?, whole_line(sys, cache, *b)?);
-            let angle = sys.add_param(c.driving_param.as_ref()?.resolve(params).ok()?.to_radians(), true);
-            Some(Rc::new(L2LAngle::new(fixed, moving, angle)))
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(fixed), Some(moving)) = (whole_line(sys, cache, *a), whole_line(sys, cache, *b)) else { return Vec::new() };
+            let Some(Ok(resolved)) = c.driving_param.as_ref().map(|d| d.resolve(params)) else { return Vec::new() };
+            let angle = sys.add_param(resolved.to_radians(), true);
+            vec![Rc::new(L2LAngle::new(fixed, moving, angle))]
         }
         ConstraintKind::Radius => {
-            let circle = whole_circle(sys, cache, *c.refs.first()?)?;
-            let target = sys.add_param(c.driving_param.as_ref()?.resolve(params).ok()?, true);
-            Some(Rc::new(Equal::new(circle.rad, target, 1.0)))
+            let Some(r) = c.refs.first() else { return Vec::new() };
+            let Some(circle) = whole_circle(sys, cache, *r) else {
+                return Vec::new();
+            };
+            let Some(Ok(resolved)) = c.driving_param.as_ref().map(|d| d.resolve(params)) else { return Vec::new() };
+            let target = sys.add_param(resolved, true);
+            vec![Rc::new(Equal::new(circle.rad, target, 1.0))]
         }
         ConstraintKind::Tangent => {
-            let [a, b] = c.refs.as_slice() else { return None };
-            let (ga, gb) = (resolve_ref(document, sys, cache, *a)?, resolve_ref(document, sys, cache, *b)?);
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(ga), Some(gb)) = (resolve_ref(document, sys, cache, *a), resolve_ref(document, sys, cache, *b)) else {
+                return Vec::new();
+            };
             match (ga, gb) {
                 (EntityGeom::Circle(c1), EntityGeom::Circle(c2)) => {
                     let store = sys.store();
@@ -217,7 +317,7 @@ fn build_constraint(
                     // the first solve doesn't have to cross the singularity
                     // between the two tangency configurations.
                     let internal = center_dist < (r1 - r2).abs();
-                    Some(Rc::new(TangentCircumf::new(c1.center, c2.center, c1.rad, c2.rad, internal)))
+                    vec![Rc::new(TangentCircumf::new(c1.center, c2.center, c1.rad, c2.rad, internal))]
                 }
                 (EntityGeom::Circle(circ), EntityGeom::Line(line)) | (EntityGeom::Line(line), EntityGeom::Circle(circ)) => {
                     let store = sys.store();
@@ -234,11 +334,11 @@ fn build_constraint(
                     // (see its `error_grad`), i.e. plain tangency rather than
                     // an offset distance.
                     let zero = sys.add_param(0.0, true);
-                    Some(Rc::new(C2LDistance::new(circ, line, zero, ccw, false)))
+                    vec![Rc::new(C2LDistance::new(circ, line, zero, ccw, false))]
                 }
                 // Line-Line tangency has no meaning; Arc isn't a supported
                 // `EntityGeom` yet (see that type's own doc comment).
-                _ => None,
+                _ => Vec::new(),
             }
         }
     }
@@ -265,35 +365,20 @@ fn solve_scope(
 ) -> Option<(Vec<(Handle, EntityType)>, usize, Vec<(ConstraintId, ocs_gcs::diagnosis::RedundancyKind)>)> {
     let mut sys = System::new();
     let mut cache: HashMap<Handle, EntityGeom> = HashMap::new();
-    // Tracks which system-level `ocs_gcs` constraint came from which
+    // Tracks which system-level `ocs_gcs` constraint(s) came from which
     // `SketchConstraint` — a `SubSystem`'s redundant-row indices (from
     // `ocs_gcs::diagnosis`) are local to that partition's own constraint
-    // list, not `set.constraints`' indices, and Coincident contributes two
-    // system-level constraints (X and Y halves) for one `SketchConstraint`.
-    // `Rc::ptr_eq` against this after partitioning resolves a row back to
-    // the `ConstraintId` the UI actually names.
+    // list, not `set.constraints`' indices, and several kinds contribute
+    // more than one system-level constraint per `SketchConstraint` (see
+    // `build_constraint`'s doc comment). `Rc::ptr_eq` against this after
+    // partitioning resolves a row back to the `ConstraintId` the UI
+    // actually names.
     let mut owner: Vec<(Rc<dyn Constraint>, ConstraintId)> = Vec::new();
 
     for c in &set.constraints {
-        let Some(constraint) = build_constraint(document, &mut sys, &mut cache, params, c) else { continue };
-        owner.push((constraint.clone(), c.id));
-        sys.add_constraint(constraint);
-        // Coincident needs both X and Y equal; `build_constraint` returns
-        // only the X half (see its doc comment there) since one
-        // `SketchConstraint` maps to one `Rc<dyn Constraint>` everywhere
-        // else — add the Y half here instead of complicating that
-        // one-constraint-per-kind contract for a single kind.
-        if c.kind == ConstraintKind::Coincident {
-            if let [a, b] = c.refs.as_slice() {
-                if let (Some(pa), Some(pb)) = (
-                    a.marker.and_then(|m| cache.get(&a.entity).and_then(|g| g.point_for_marker(m))),
-                    b.marker.and_then(|m| cache.get(&b.entity).and_then(|g| g.point_for_marker(m))),
-                ) {
-                    let y_half: Rc<dyn Constraint> = Rc::new(Equal::new(pa.y, pb.y, 1.0));
-                    owner.push((y_half.clone(), c.id));
-                    sys.add_constraint(y_half);
-                }
-            }
+        for constraint in build_constraint(document, &mut sys, &mut cache, params, c) {
+            owner.push((constraint.clone(), c.id));
+            sys.add_constraint(constraint);
         }
     }
 

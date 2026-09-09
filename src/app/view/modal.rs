@@ -13,6 +13,7 @@ impl OpenCADStudio {
             Some(K::About) => crate::tr!("modal", "about"),
             Some(K::Shortcuts) => crate::tr!("modal", "keyboard-shortcuts"),
             Some(K::Aliases) => crate::tr!("modal", "command-aliases"),
+            Some(K::NamedParameters) => crate::t!("Named Parameters").into_owned(),
             Some(K::Options) => crate::tr!("action", "options"),
             Some(K::FindReplace) => crate::tr!("modal", "find-replace"),
             Some(K::PluginManager) => crate::tr!("modal", "plugin-manager"),
@@ -173,6 +174,19 @@ impl OpenCADStudio {
                     },
                 )
             }
+            super::super::ModalKind::NamedParameters => {
+                sized_flow(
+                    ex,
+                    620,
+                    520,
+                    |flow| {
+                        crate::ui::window::named_parameters::view_window(
+                            &self.named_parameter_editor_rows,
+                            flow,
+                        )
+                    },
+                )
+            }
             super::super::ModalKind::Options => sized_flow(
                 ex,
                 540,
@@ -191,6 +205,7 @@ impl OpenCADStudio {
                         self.crosshair_color,
                         &self.crosshair_color_input,
                         self.lineweight_display_scale,
+                        self.ui_scale,
                         self.ribbon.label_font_size(),
                         self.ribbon.group_title_font_size(),
                         &self.model_space,

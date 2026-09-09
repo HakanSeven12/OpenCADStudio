@@ -5,6 +5,7 @@
 // (save/load integration, the "lazy" persistence model) is gated on this
 // test passing — see the design doc §8 stage 2 and §7 open question 1.
 
+use OpenCADStudio::scene::named_parameters::DrivingValue;
 use OpenCADStudio::scene::sketch_constraints::{ConstraintKind, SketchConstraintSet, SketchRef, SketchScope};
 use OpenCADStudio::scene::Scene;
 use acadrust::entities::EntityType;
@@ -20,9 +21,13 @@ fn sample_set(scope: SketchScope) -> SketchConstraintSet {
         vec![SketchRef::point(Handle::new(101), 0), SketchRef::point(Handle::new(102), 1)],
         None,
     );
-    set.add(ConstraintKind::Distance, vec![SketchRef::whole(Handle::new(103))], Some(25.0));
-    set.add(ConstraintKind::Angle, vec![SketchRef::whole(Handle::new(104)), SketchRef::whole(Handle::new(105))], Some(45.0));
-    set.add(ConstraintKind::Radius, vec![SketchRef::whole(Handle::new(106))], Some(3.5));
+    set.add(ConstraintKind::Distance, vec![SketchRef::whole(Handle::new(103))], Some(DrivingValue::Literal(25.0)));
+    set.add(
+        ConstraintKind::Angle,
+        vec![SketchRef::whole(Handle::new(104)), SketchRef::whole(Handle::new(105))],
+        Some(DrivingValue::Literal(45.0)),
+    );
+    set.add(ConstraintKind::Radius, vec![SketchRef::whole(Handle::new(106))], Some(DrivingValue::Literal(3.5)));
     set
 }
 

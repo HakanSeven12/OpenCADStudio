@@ -38,6 +38,7 @@ use ocs_gcs::geo::{Circle as GCircle, Line as GLine, Point as GPoint};
 use ocs_gcs::solvers::dogleg::solve_dl;
 use ocs_gcs::system::System;
 
+use super::named_parameters::ParameterTable;
 use super::sketch_constraints::{ConstraintId, ConstraintKind, SketchConstraint, SketchConstraintSet, SketchRef};
 use super::{ChangeKind, Scene};
 
@@ -113,14 +114,21 @@ fn resolve_ref(
 /// One [`SketchConstraint`]'s `ocs_gcs` construction, or `None` if it can't
 /// be built (an unsupported/not-yet-mapped kind, a dangling ref, a ref
 /// shape the kind doesn't expect — e.g. `Parallel` needs two whole-line
-/// refs). A constraint that can't be built is simply skipped for this
-/// solve, not an error: geometry it would have constrained is left alone,
-/// matching how a dangling associative-dimension reference degrades today
-/// rather than aborting the whole recompute.
+/// refs — or, for a dimensional kind, a `driving_param` that fails to
+/// resolve: an undefined named-parameter reference or a division by zero in
+/// its formula, design doc `named_parameters_design.md` stage 3). A
+/// constraint that can't be built is simply skipped for this solve, not an
+/// error: geometry it would have constrained is left alone, matching how a
+/// dangling associative-dimension reference degrades today rather than
+/// aborting the whole recompute. (A named-parameter *cycle* should be
+/// unreachable here — `ParameterTable::set` already refuses to create one —
+/// so it gets the same treatment as any other resolve failure rather than a
+/// special case.)
 fn build_constraint(
     document: &acadrust::CadDocument,
     sys: &mut System,
     cache: &mut HashMap<Handle, EntityGeom>,
+    params: &ParameterTable,
     c: &SketchConstraint,
 ) -> Option<Rc<dyn Constraint>> {
     if !c.enabled {
@@ -181,18 +189,18 @@ fn build_constraint(
         ConstraintKind::Distance => {
             let [a, b] = c.refs.as_slice() else { return None };
             let (pa, pb) = (point_ref(sys, cache, *a)?, point_ref(sys, cache, *b)?);
-            let target = sys.add_param(c.driving_param?, true);
+            let target = sys.add_param(c.driving_param.as_ref()?.resolve(params).ok()?, true);
             Some(Rc::new(P2PDistance::new(pa, pb, target)))
         }
         ConstraintKind::Angle => {
             let [a, b] = c.refs.as_slice() else { return None };
             let (fixed, moving) = (whole_line(sys, cache, *a)?, whole_line(sys, cache, *b)?);
-            let angle = sys.add_param(c.driving_param?.to_radians(), true);
+            let angle = sys.add_param(c.driving_param.as_ref()?.resolve(params).ok()?.to_radians(), true);
             Some(Rc::new(L2LAngle::new(fixed, moving, angle)))
         }
         ConstraintKind::Radius => {
             let circle = whole_circle(sys, cache, *c.refs.first()?)?;
-            let target = sys.add_param(c.driving_param?, true);
+            let target = sys.add_param(c.driving_param.as_ref()?.resolve(params).ok()?, true);
             Some(Rc::new(Equal::new(circle.rad, target, 1.0)))
         }
         ConstraintKind::Tangent => {
@@ -252,6 +260,7 @@ const MOVE_EPS: f64 = 1e-9;
 /// on a successful solve.
 fn solve_scope(
     document: &acadrust::CadDocument,
+    params: &ParameterTable,
     set: &SketchConstraintSet,
 ) -> Option<(Vec<(Handle, EntityType)>, usize, Vec<(ConstraintId, ocs_gcs::diagnosis::RedundancyKind)>)> {
     let mut sys = System::new();
@@ -266,7 +275,7 @@ fn solve_scope(
     let mut owner: Vec<(Rc<dyn Constraint>, ConstraintId)> = Vec::new();
 
     for c in &set.constraints {
-        let Some(constraint) = build_constraint(document, &mut sys, &mut cache, c) else { continue };
+        let Some(constraint) = build_constraint(document, &mut sys, &mut cache, params, c) else { continue };
         owner.push((constraint.clone(), c.id));
         sys.add_constraint(constraint);
         // Coincident needs both X and Y equal; `build_constraint` returns
@@ -412,7 +421,9 @@ impl Scene {
             if !touched {
                 continue;
             }
-            let Some((solved, dof, conflicts)) = solve_scope(&self.document, &self.sketch_constraints[i]) else { continue };
+            let Some((solved, dof, conflicts)) = solve_scope(&self.document, &self.named_parameters, &self.sketch_constraints[i]) else {
+                continue;
+            };
             self.sketch_constraints[i].dof = Some(dof);
             self.sketch_constraints[i].conflicts = conflicts;
             for (handle, new_entity) in solved {
@@ -470,7 +481,7 @@ impl Scene {
             if !is_touched {
                 continue;
             }
-            let Some((solved, _dof, _conflicts)) = solve_scope(&self.document, set) else { continue };
+            let Some((solved, _dof, _conflicts)) = solve_scope(&self.document, &self.named_parameters, set) else { continue };
             result.extend(solved);
         }
         result

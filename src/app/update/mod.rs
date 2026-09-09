@@ -5861,6 +5861,43 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            // ── Named Parameters (PARAMETERS) ─────────────────────────────────
+            Message::NamedParametersOpen => {
+                let i = self.active_tab;
+                self.named_parameter_editor_rows = self.tabs[i]
+                    .scene
+                    .named_parameters()
+                    .iter()
+                    .map(|p| crate::ui::window::named_parameters::ParamEditorRow { name: p.name.clone(), formula: p.source.clone() })
+                    .collect();
+                self.active_modal = Some(super::ModalKind::NamedParameters);
+                Task::none()
+            }
+            Message::NamedParametersInput { idx, field, value } => {
+                use crate::ui::window::named_parameters::ParamField;
+                if let Some(row) = self.named_parameter_editor_rows.get_mut(idx) {
+                    match field {
+                        ParamField::Name => row.name = value,
+                        ParamField::Formula => row.formula = value,
+                    }
+                }
+                Task::none()
+            }
+            Message::NamedParametersAdd => {
+                self.named_parameter_editor_rows.push(crate::ui::window::named_parameters::ParamEditorRow::default());
+                Task::none()
+            }
+            Message::NamedParametersRemove(idx) => {
+                if idx < self.named_parameter_editor_rows.len() {
+                    self.named_parameter_editor_rows.remove(idx);
+                }
+                Task::none()
+            }
+            Message::NamedParametersApply => {
+                self.apply_named_parameter_editor_rows();
+                Task::none()
+            }
+
             // ── Options / About windows ───────────────────────────────────
             Message::OptionsOpen => {
                 self.active_modal = Some(super::ModalKind::Options);
@@ -5896,6 +5933,12 @@ impl OpenCADStudio {
                 for tab in &mut self.tabs {
                     tab.scene.model_lineweight_scale = scale;
                 }
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::UiScaleChanged(value) => {
+                self.ui_scale = value.clamp(50, 200);
                 self.persist_settings_if_changed();
                 Task::none()
             }

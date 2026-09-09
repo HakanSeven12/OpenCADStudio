@@ -368,6 +368,7 @@ impl OpenCADStudio {
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
             lineweight_display_scale: self.lineweight_display_scale,
+            ui_scale: self.ui_scale,
             isometric_drafting: self.isometric_drafting,
             iso_plane: self.iso_plane,
             snap_angle_deg: self.snap_angle_deg,
@@ -425,6 +426,7 @@ impl OpenCADStudio {
             .map(crate::app::config::rgb_to_hex)
             .unwrap_or_default();
         self.lineweight_display_scale = s.lineweight_display_scale.clamp(25, 200);
+        self.ui_scale = s.ui_scale.clamp(50, 200);
         self.isometric_drafting = s.isometric_drafting;
         self.iso_plane = s.iso_plane;
         self.snap_angle_deg = if s.snap_angle_deg.is_finite() {
@@ -1394,6 +1396,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 // Design doc §8 stage 4: read back any persisted sketch
                 // constraint sets right after the document is installed.
                 self.tabs[i].scene.load_sketch_constraints_from_document();
+                // named_parameters_design.md stage 2: same load-time hook,
+                // for the document-wide parameter table.
+                self.tabs[i].scene.load_named_parameters_from_document();
                 self.tabs[i].active_layer = self.tabs[i]
                     .scene
                     .document
@@ -1660,6 +1665,9 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         // Design doc §8 stage 4: write any sketch constraint sets into the
         // document right before it's serialized.
         self.tabs[i].scene.materialize_sketch_constraints_for_save();
+        // named_parameters_design.md stage 2: same save-time hook, for the
+        // document-wide parameter table.
+        self.tabs[i].scene.materialize_named_parameters_for_save();
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2611,6 +2619,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                     self.stamp_header_sysvars(i);
                     self.sync_solid_models_for_save(i);
                     self.tabs[i].scene.materialize_sketch_constraints_for_save();
+                    self.tabs[i].scene.materialize_named_parameters_for_save();
                     let tab_id = self.tabs[i].id;
                     let bounds = crate::ui::wrap_bar::dropdown_bounds(
                         crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,

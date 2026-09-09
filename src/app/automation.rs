@@ -302,6 +302,7 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 self.tabs[i].scene.document = acadrust::CadDocument::new();
                 self.tabs[i].scene.sketch_constraints.clear();
+                self.tabs[i].scene.named_parameters = crate::scene::named_parameters::ParameterTable::new();
                 self.tabs[i].scene.deselect_all();
                 self.tabs[i].current_path = None;
                 // The headless session starts on the welcome (Start) tab, which
@@ -331,6 +332,7 @@ impl OpenCADStudio {
                         let i = self.active_tab;
                         self.tabs[i].scene.document = doc;
                         self.tabs[i].scene.load_sketch_constraints_from_document();
+                        self.tabs[i].scene.load_named_parameters_from_document();
                         self.tabs[i].scene.deselect_all();
                         crate::app::style_ops::ensure_standard_styles(
                             &mut self.tabs[i].scene.document,
@@ -1063,6 +1065,7 @@ mod tests {
             "CHANGELOG",
             "CUI",
             "ALIASEDIT",
+            "OPTIONS",
         ];
         for cmd in standalone {
             assert!(

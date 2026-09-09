@@ -504,6 +504,12 @@ pub(super) struct OpenCADStudio {
     crosshair_color_input: String,
     /// Model-space lineweight preview scale, in percent (25..=200).
     lineweight_display_scale: i32,
+    /// Whole-interface scale, in percent (50..=200) — drives iced's own
+    /// per-window `scale_factor` (`run`'s `.scale_factor(...)` hook), so it
+    /// resizes every panel, dialog, the ribbon, and their text uniformly
+    /// rather than needing a separate font-size knob threaded through each
+    /// panel's own view code.
+    ui_scale: i32,
     /// Isometric drafting state and active axis pair.
     isometric_drafting: bool,
     iso_plane: settings::IsoPlane,
@@ -1017,6 +1023,15 @@ pub(super) struct OpenCADStudio {
     /// Working buffer for the ALIASEDIT modal: `(alias, command)` rows being
     /// edited. Seeded from `command_aliases` on open, committed back on close.
     alias_editor_rows: Vec<(String, String)>,
+
+    // ── Named Parameters (docs/named_parameters_design.md, stage 4) ────────
+    /// Working buffer for the PARAMETERS modal. Unlike `alias_editor_rows`,
+    /// this isn't a copy of a separate app-level store — the real state
+    /// lives per-document at `Scene::named_parameters`; this buffer is
+    /// seeded from the active tab's table on open and only written back to
+    /// it on Apply (`apply_named_parameter_editor_rows`,
+    /// `src/app/named_parameters.rs`).
+    named_parameter_editor_rows: Vec<crate::ui::window::named_parameters::ParamEditorRow>,
 
     // ── Layout Manager Panel ──────────────────────────────────────────────
     layout_manager_selected: String,
@@ -1695,6 +1710,7 @@ pub enum ModalKind {
     AttributeEditor,
     LayerDeleteWarning,
     Aliases,
+    NamedParameters,
     ScaleManager,
     /// Add / remove the annotation scales a single selected object has a
     /// per-object representation for.
@@ -1937,6 +1953,8 @@ pub enum Message {
     CursorTypeChanged(settings::CursorType),
     /// Set the model-space lineweight preview scale from Options.
     LineweightDisplayScaleChanged(i32),
+    /// Set the whole-interface scale (`ui_scale`) from Options.
+    UiScaleChanged(i32),
     /// Set the ribbon's large-button icon-label font size from Options.
     RibbonLabelFontSizeChanged(i32),
     /// Set the ribbon's panel-title ("Draw", "Modify", …) font size from Options.
@@ -2706,6 +2724,24 @@ pub enum Message {
     AliasEditorRemove(usize),
     /// Commit the edited rows to the alias table (Apply button); stays open.
     AliasEditorApply,
+    // ── Named Parameters (PARAMETERS) ───────────────────────────────────
+    /// Open the named-parameter editor, seeding rows from the active tab's
+    /// `Scene::named_parameters`.
+    NamedParametersOpen,
+    /// Live edit of the name or formula in row `idx`.
+    NamedParametersInput {
+        idx: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+        value: String,
+    },
+    /// Append a blank parameter row.
+    NamedParametersAdd,
+    /// Remove parameter row `idx`.
+    NamedParametersRemove(usize),
+    /// Commit the edited rows to `Scene::named_parameters` (Apply button)
+    /// and re-solve every constraint that reads a named parameter; stays
+    /// open.
+    NamedParametersApply,
     // ── About window ────────────────────────────────────────────────────
     AboutOpen,
     /// Close whatever in-canvas modal dialog is open (Plan B).
@@ -3378,6 +3414,7 @@ impl OpenCADStudio {
             crosshair_color: None,
             crosshair_color_input: String::new(),
             lineweight_display_scale: 100,
+            ui_scale: 100,
             isometric_drafting: false,
             iso_plane: settings::IsoPlane::Left,
             snap_angle_deg: 0.0,
@@ -3579,6 +3616,7 @@ impl OpenCADStudio {
             // Command aliases (populated from ocad.pgp just after construction)
             command_aliases: rustc_hash::FxHashMap::default(),
             alias_editor_rows: Vec::new(),
+            named_parameter_editor_rows: Vec::new(),
             // Layout Manager
             layout_manager_selected: "Model".to_string(),
             layer_state_selected: None,
@@ -3978,6 +4016,7 @@ pub fn run() -> iced::Result {
         ..iced::Settings::default()
     })
     .subscription(OpenCADStudio::subscription)
+    .scale_factor(|state: &OpenCADStudio, _window: window::Id| state.ui_scale as f32 / 100.0)
     .title(|state: &OpenCADStudio, window_id: window::Id| {
         let _ = window_id; // all dialogs are in-canvas modals now
         if let Some(tab) = state.tabs.get(state.active_tab) {
@@ -4022,6 +4061,7 @@ pub fn run_web() -> iced::Result {
         OpenCADStudio::view_main,
     )
     .subscription(OpenCADStudio::subscription)
+    .scale_factor(|state: &OpenCADStudio| state.ui_scale as f32 / 100.0)
     .title(|_state: &OpenCADStudio| {
         concat!("Open CAD Studio ", env!("OCS_APP_VERSION")).to_string()
     })

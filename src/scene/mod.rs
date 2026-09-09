@@ -36,6 +36,8 @@ mod group_layer;
 mod layout;
 mod limits;
 mod modify;
+pub mod named_parameters;
+mod named_parameters_persist;
 mod mspace;
 mod page_setup;
 mod paper;
@@ -1934,6 +1936,17 @@ pub struct Scene {
     /// touches directly, materialized into `document.objects` only right
     /// before a save and read back right after a load.
     pub(crate) sketch_constraints: Vec<sketch_constraints::SketchConstraintSet>,
+    /// Document-wide named-parameter/expression table (`docs/
+    /// named_parameters_design.md`). One table per document (not per-scope,
+    /// unlike `sketch_constraints` — a parameter is meant to be shared
+    /// across the whole drawing), lives on `Scene` for the same reason
+    /// `sketch_constraints` does: co-located with the `document: CadDocument`
+    /// it's synced against. Synced with a single document-level
+    /// `OCS_NAMED_PARAMETERS` XRecord (hung off `document.header.
+    /// named_objects_dict_handle`, not a per-`BlockRecord` one) around
+    /// open/save (`named_parameters_persist.rs`, same "lazy" model as
+    /// `sketch_persist.rs`).
+    pub(crate) named_parameters: named_parameters::ParameterTable,
     /// Tessellated block definitions in block-local coords, keyed by render
     /// background and block epoch. Model and Paper adapt black/white colours
     /// differently; retaining both variants prevents a full block rebuild on
@@ -2167,6 +2180,7 @@ impl Scene {
             dependency_index_cache: RefCell::new(None),
             associative_hatch_source_cache: RefCell::new(None),
             sketch_constraints: Vec::new(),
+            named_parameters: named_parameters::ParameterTable::new(),
             has_associative_centers: std::cell::Cell::new(None),
             block_defn_cache: RefCell::new(HashMap::default()),
             entity_index_cache: RefCell::new(None),

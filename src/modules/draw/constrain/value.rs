@@ -19,8 +19,29 @@ use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::scene::named_parameters::DrivingValue;
 use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
 use crate::scene::Scene;
+
+/// Recognizes a typed prompt token as either a numeric literal or a
+/// reference to an existing named parameter (`docs/
+/// named_parameters_design.md` stage 4's "a way to pick a named parameter
+/// instead of typing a literal" — the same prompt takes either, mirroring
+/// how AutoCAD's own dimensional-constraint prompts accept an expression in
+/// place of a bare value). `known_names` is a one-time snapshot taken at
+/// command construction (`DistanceConstraintCommand`/`AngleConstraintCommand
+/// ::new`, which already has `&Scene`) since `on_text_input` itself has no
+/// document access — the same constraint `default_value` already works
+/// around. Only *existence* is checked here; the actual value is resolved
+/// fresh at solve time (`sketch_solve::build_constraint`), consistent with
+/// this project's "no incremental/cached resolution" approach throughout.
+fn parse_driving_value(text: &str, known_names: &[String]) -> Option<DrivingValue> {
+    let text = text.trim();
+    if let Ok(value) = text.parse::<f64>() {
+        return Some(DrivingValue::Literal(value));
+    }
+    known_names.iter().find(|n| n.as_str() == text).map(|n| DrivingValue::Named(n.clone()))
+}
 
 pub mod distance_tool {
     use super::*;
@@ -55,6 +76,9 @@ pub struct DistanceConstraintCommand {
     /// split between line-length (`Distance`) and circle-radius (`Radius`).
     is_circle: bool,
     default_value: f64,
+    /// Snapshot of `Scene::named_parameters`' names at construction time —
+    /// see `parse_driving_value`'s doc comment for why a snapshot.
+    known_param_names: Vec<String>,
 }
 
 impl DistanceConstraintCommand {
@@ -70,12 +94,15 @@ impl DistanceConstraintCommand {
             EntityType::Circle(c) => (true, c.radius),
             _ => return None,
         };
-        Some(Self { handle, is_circle, default_value })
+        let known_param_names = scene.named_parameters().iter().map(|p| p.name.clone()).collect();
+        Some(Self { handle, is_circle, default_value, known_param_names })
     }
 
-    fn build(&self, target: f64) -> Option<CmdResult> {
-        if target <= 0.0 {
-            return None;
+    fn build(&self, target: DrivingValue) -> Option<CmdResult> {
+        if let DrivingValue::Literal(v) = target {
+            if v <= 0.0 {
+                return None;
+            }
         }
         let (kind, refs, label) = if self.is_circle {
             (ConstraintKind::Radius, vec![SketchRef::whole(self.handle)], "Radius constraint")
@@ -108,11 +135,11 @@ impl CadCommand for DistanceConstraintCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        self.build(self.default_value).unwrap_or(CmdResult::Cancel)
+        self.build(DrivingValue::Literal(self.default_value)).unwrap_or(CmdResult::Cancel)
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let value: f64 = text.trim().parse().ok()?;
+        let value = parse_driving_value(text, &self.known_param_names)?;
         self.build(value)
     }
 
@@ -126,6 +153,9 @@ pub struct AngleConstraintCommand {
     fixed_handle: Handle,
     moving_handle: Handle,
     default_value: f64,
+    /// Snapshot of `Scene::named_parameters`' names at construction time —
+    /// see `parse_driving_value`'s doc comment for why a snapshot.
+    known_param_names: Vec<String>,
 }
 
 impl AngleConstraintCommand {
@@ -139,14 +169,15 @@ impl AngleConstraintCommand {
         let a1 = (f.end.y - f.start.y).atan2(f.end.x - f.start.x);
         let a2 = (m.end.y - m.start.y).atan2(m.end.x - m.start.x);
         let default_value = (a2 - a1).to_degrees();
-        Some(Self { fixed_handle: fixed, moving_handle: moving, default_value })
+        let known_param_names = scene.named_parameters().iter().map(|p| p.name.clone()).collect();
+        Some(Self { fixed_handle: fixed, moving_handle: moving, default_value, known_param_names })
     }
 
-    fn build(&self, target_degrees: f64) -> Option<CmdResult> {
+    fn build(&self, target: DrivingValue) -> Option<CmdResult> {
         Some(CmdResult::AddSketchConstraint {
             kind: ConstraintKind::Angle,
             refs: vec![SketchRef::whole(self.fixed_handle), SketchRef::whole(self.moving_handle)],
-            driving_param: Some(target_degrees),
+            driving_param: Some(target),
             label: "Angle constraint",
         })
     }
@@ -170,15 +201,42 @@ impl CadCommand for AngleConstraintCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        self.build(self.default_value).unwrap_or(CmdResult::Cancel)
+        self.build(DrivingValue::Literal(self.default_value)).unwrap_or(CmdResult::Cancel)
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let value: f64 = text.trim().parse().ok()?;
+        let value = parse_driving_value(text, &self.known_param_names)?;
         self.build(value)
     }
 
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_driving_value_prefers_a_numeric_literal() {
+        let known = vec!["hole_dia".to_string()];
+        assert_eq!(parse_driving_value("12.5", &known), Some(DrivingValue::Literal(12.5)));
+        // Distance's own `build` rejects a non-positive target later; the
+        // parse step itself accepts any number, negative included.
+        assert_eq!(parse_driving_value("-3", &known), Some(DrivingValue::Literal(-3.0)));
+    }
+
+    #[test]
+    fn parse_driving_value_recognizes_a_known_parameter_name() {
+        let known = vec!["hole_dia".to_string(), "plate_len".to_string()];
+        assert_eq!(parse_driving_value("hole_dia", &known), Some(DrivingValue::Named("hole_dia".to_string())));
+    }
+
+    #[test]
+    fn parse_driving_value_rejects_an_unknown_token() {
+        let known = vec!["hole_dia".to_string()];
+        assert_eq!(parse_driving_value("bogus", &known), None);
+        assert_eq!(parse_driving_value("", &known), None);
     }
 }

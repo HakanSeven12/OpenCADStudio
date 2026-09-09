@@ -48,7 +48,15 @@ fn remove_xrecord(document: &mut CadDocument, owner: Handle, key: &str) {
 /// or panicking — design doc §5.2's explicit call-out, and §7's flagged
 /// "no migration path designed yet": bumping this is the signal a real
 /// migration is needed, not a substitute for one.
-const FORMAT_VERSION: u8 = 1;
+///
+/// Bumped 1 -> 2 by `named_parameters_design.md` stage 3:
+/// `SketchConstraint::driving_param` changed from a bare `Option<f64>` to
+/// `Option<named_parameters::DrivingValue>` (an enum, with its own
+/// discriminant), so a version-1 blob's bytes no longer line up with the
+/// current struct shape — exactly the "detected and gracefully skipped"
+/// case this version byte exists for, not something to migrate (no
+/// migration path exists yet, per the call-out above).
+const FORMAT_VERSION: u8 = 2;
 
 fn encode(set: &SketchConstraintSet) -> Option<Vec<u8>> {
     let mut bytes = vec![FORMAT_VERSION];
@@ -192,7 +200,11 @@ mod tests {
             vec![SketchRef::point(a, 1), SketchRef::point(b, 0)],
             None,
         );
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(ConstraintKind::Distance, vec![SketchRef::whole(b)], Some(12.5));
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Distance,
+            vec![SketchRef::whole(b)],
+            Some(crate::scene::named_parameters::DrivingValue::Literal(12.5)),
+        );
 
         scene.materialize_sketch_constraints_for_save();
         let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
@@ -213,7 +225,7 @@ mod tests {
         assert_eq!(restored.constraints.len(), 2);
         assert_eq!(restored.constraints[0].kind, ConstraintKind::Coincident);
         assert_eq!(restored.constraints[1].kind, ConstraintKind::Distance);
-        assert_eq!(restored.constraints[1].driving_param, Some(12.5));
+        assert_eq!(restored.constraints[1].driving_param, Some(crate::scene::named_parameters::DrivingValue::Literal(12.5)));
     }
 
     #[test]
@@ -222,7 +234,7 @@ mod tests {
         assert_eq!(restored.constraints.len(), 2);
         assert_eq!(restored.constraints[0].kind, ConstraintKind::Coincident);
         assert_eq!(restored.constraints[1].kind, ConstraintKind::Distance);
-        assert_eq!(restored.constraints[1].driving_param, Some(12.5));
+        assert_eq!(restored.constraints[1].driving_param, Some(crate::scene::named_parameters::DrivingValue::Literal(12.5)));
     }
 
     #[test]

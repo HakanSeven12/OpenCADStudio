@@ -951,6 +951,81 @@ impl OpenCADStudio {
         self.push_sketch_constraints_history(i, label, scope, constraints_before);
     }
 
+    /// PARAMETERS' Apply button (`docs/named_parameters_design.md` stage 4):
+    /// rebuilds the active tab's `Scene::named_parameters` from the
+    /// editor's working buffer, reports any row that failed to validate via
+    /// the command line, and re-solves every scope with a constraint driven
+    /// by a named parameter — the entire point of a *named* parameter is
+    /// that editing it ripples to whatever references it, the same way
+    /// editing a constraint's literal value already does.
+    ///
+    /// **Deliberate scope-down, matching this project's established
+    /// treatment of undo-granularity questions** (design doc §5 open
+    /// question 3, and the sibling constraint-system project's stage 9): the
+    /// geometry this ripple moves is bracketed into one undo step below
+    /// (same `begin_undo`/`bump_entities`/`commit_undo_delta` pattern
+    /// `resolve_one_sketch_conflict` above uses), but the parameter *table*
+    /// edit itself has no undo entry of its own yet — that would need a new
+    /// `HistorySnapshot` variant mirroring `SketchConstraints`
+    /// (`push_sketch_constraints_history`). Left for a follow-up, not
+    /// silently dropped: undoing after an Apply undoes the geometry it
+    /// moved, not the parameter values themselves.
+    pub(super) fn apply_named_parameter_editor_rows(&mut self) {
+        let i = self.active_tab;
+        // A name shared by more than one row can't be resolved by picking
+        // one arbitrarily (`ParameterTable::set` would just let the last
+        // one silently win) -- refuse every row sharing that name up front,
+        // same as `named_parameters::preview`'s live check.
+        let duplicates = crate::ui::window::named_parameters::duplicate_name_rows(&self.named_parameter_editor_rows);
+        let mut table = crate::scene::named_parameters::ParameterTable::new();
+        let mut failed = 0usize;
+        for (idx, row) in self.named_parameter_editor_rows.iter().enumerate() {
+            let name = row.name.trim();
+            if name.is_empty() || duplicates.contains(&idx) {
+                continue;
+            }
+            if let Err(e) = table.set(name, row.formula.trim()) {
+                self.command_line.push_error(crate::tf!("Parameter '{}': {}", name, e).as_ref());
+                failed += 1;
+            }
+        }
+        if !duplicates.is_empty() {
+            self.command_line.push_error(crate::tf!("{} row(s) skipped: duplicate parameter name.", duplicates.len()).as_ref());
+            failed += duplicates.len();
+        }
+        let param_count = table.len();
+        self.tabs[i].scene.named_parameters = table;
+
+        // The whole table just changed, not one isolated value, so there is
+        // no cheaper "which handles actually moved" test worth doing here —
+        // re-solve every scope with a constraint driven by *any* named
+        // parameter (mirrors `solve_scope`'s own "full rebuild, not
+        // incremental" philosophy).
+        let touched: Vec<Handle> = self.tabs[i]
+            .scene
+            .sketch_constraints
+            .iter()
+            .flat_map(|set| set.constraints.iter())
+            .filter(|c| c.enabled && matches!(c.driving_param, Some(crate::scene::named_parameters::DrivingValue::Named(_))))
+            .flat_map(|c| c.refs.iter().map(|r| r.entity))
+            .collect();
+
+        if !touched.is_empty() {
+            let pending = self.begin_undo(i, "Apply named parameters", touched.len(), true);
+            let changes: Vec<(Handle, crate::scene::ChangeKind)> =
+                touched.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
+            self.tabs[i].scene.bump_entities(&changes);
+            if let Some(pd) = pending {
+                self.commit_undo_delta(i, pd);
+            }
+        }
+
+        self.tabs[i].dirty = true;
+        if failed == 0 {
+            self.command_line.push_info(crate::tf!("{} parameter(s) applied.", param_count).as_ref());
+        }
+    }
+
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         let preserve_commit_layer = self.tabs[i]
@@ -6073,6 +6148,93 @@ mod sketch_constraint_undo_tests {
         }
         let set = app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap();
         assert_eq!(set.constraints.len(), 2, "undo should restore the removed constraint");
+    }
+
+    /// `named_parameters_design.md` stage 4: applying the PARAMETERS editor's
+    /// working buffer both defines the parameter and re-solves whatever
+    /// constraint already references it by name — the entire point of a
+    /// *named* parameter, not just data plumbing.
+    #[test]
+    fn applying_named_parameter_rows_defines_and_resolves_referencing_constraints() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let line = add_line(&mut app, 0.0, 0.0, 10.0, 0.0);
+
+        // The constraint is added *before* the parameter exists -- allowed,
+        // same as `ParameterTable::set`'s own forward-reference tolerance;
+        // it just doesn't resolve to anything until the parameter is defined.
+        let _ = app.apply_cmd_result(CmdResult::AddSketchConstraint {
+            kind: ConstraintKind::Distance,
+            refs: vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+            driving_param: Some(crate::scene::named_parameters::DrivingValue::Named("target_len".to_string())),
+            label: "Distance constraint",
+        });
+
+        app.named_parameter_editor_rows =
+            vec![crate::ui::window::named_parameters::ParamEditorRow { name: "target_len".to_string(), formula: "8".to_string() }];
+        app.apply_named_parameter_editor_rows();
+
+        assert_eq!(app.tabs[app.active_tab].scene.named_parameters().resolve("target_len"), Ok(8.0));
+        let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
+            Some(acadrust::EntityType::Line(l)) => (l.start, l.end),
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
+        assert!((len - 8.0).abs() < 1e-6, "length should track the applied parameter, got {len}");
+
+        // Redefining the parameter and re-applying should ripple again.
+        app.named_parameter_editor_rows[0].formula = "3".to_string();
+        app.apply_named_parameter_editor_rows();
+        let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
+            Some(acadrust::EntityType::Line(l)) => (l.start, l.end),
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
+        assert!((len - 3.0).abs() < 1e-6, "length should track the redefined parameter, got {len}");
+    }
+
+    /// A row that fails to validate (here, a formula that doesn't parse)
+    /// must not silently vanish or corrupt the table: it's reported as an
+    /// error and simply isn't added, while a valid row alongside it still
+    /// commits — the same isolate-the-failure treatment
+    /// `ParameterTable::resolve_all` already gives a bad reference.
+    #[test]
+    fn applying_a_row_with_a_malformed_formula_reports_an_error_and_keeps_the_good_row() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+
+        app.named_parameter_editor_rows = vec![
+            crate::ui::window::named_parameters::ParamEditorRow { name: "good".to_string(), formula: "10".to_string() },
+            crate::ui::window::named_parameters::ParamEditorRow { name: "bad".to_string(), formula: "1 +".to_string() },
+        ];
+        app.apply_named_parameter_editor_rows();
+
+        assert_eq!(app.tabs[app.active_tab].scene.named_parameters().resolve("good"), Ok(10.0));
+        assert!(!app.tabs[app.active_tab].scene.named_parameters().contains("bad"), "a malformed row must not be added");
+        assert!(
+            app.command_line.history.iter().any(|e| e.kind == crate::ui::command_line::EntryKind::Error),
+            "a malformed row must be reported as an error, not silently dropped"
+        );
+    }
+
+    /// Two rows typed with the same name must not silently collapse into
+    /// "whichever `set` call happens last wins" — both are refused, and an
+    /// unrelated row still commits normally.
+    #[test]
+    fn applying_rows_with_a_duplicate_name_refuses_both_and_keeps_the_unrelated_row() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+
+        app.named_parameter_editor_rows = vec![
+            crate::ui::window::named_parameters::ParamEditorRow { name: "x".to_string(), formula: "1".to_string() },
+            crate::ui::window::named_parameters::ParamEditorRow { name: "x".to_string(), formula: "2".to_string() },
+            crate::ui::window::named_parameters::ParamEditorRow { name: "y".to_string(), formula: "3".to_string() },
+        ];
+        app.apply_named_parameter_editor_rows();
+
+        assert!(!app.tabs[app.active_tab].scene.named_parameters().contains("x"), "a duplicated name must not be added at all");
+        assert_eq!(app.tabs[app.active_tab].scene.named_parameters().resolve("y"), Ok(3.0));
+        assert!(app.command_line.history.iter().any(|e| e.kind == crate::ui::command_line::EntryKind::Error));
     }
 
     /// Design doc §6.1's manual Coincident UI: two picks landing on two

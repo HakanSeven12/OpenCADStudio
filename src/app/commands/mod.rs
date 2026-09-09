@@ -292,6 +292,8 @@ pub fn start_allowed(cmd: &str) -> bool {
             | "PERF"
             | "CUI"
             | "ALIASEDIT"
+            | "OPTIONS"
+            | "OP"
             | "CUILOAD"
             | "CUIIMPORT"
     )
@@ -312,6 +314,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "CLEANSCREEN",
         "CUI",
         "DSETTINGS",
+        "PARAMETERS",
         "GRID",
         "ISODRAFT",
         "ISOPLANE",

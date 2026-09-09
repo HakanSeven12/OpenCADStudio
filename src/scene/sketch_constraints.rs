@@ -11,6 +11,7 @@
 //! entities and is meant to be re-solved every time referenced geometry
 //! changes, not applied once.
 
+use super::named_parameters::DrivingValue;
 use acadrust::types::{Handle, Vector3};
 use serde::{Deserialize, Serialize};
 
@@ -90,11 +91,14 @@ pub struct SketchConstraint {
     pub id: ConstraintId,
     pub kind: ConstraintKind,
     pub refs: Vec<SketchRef>,
-    /// The typed target for a dimensional constraint (a `Distance`'s
-    /// length, an `Angle`'s degrees, a `Radius`'s radius). `None` for every
-    /// purely-geometric kind (Coincident, Horizontal, Vertical, Parallel,
-    /// Perpendicular, Equal, Tangent).
-    pub driving_param: Option<f64>,
+    /// The target for a dimensional constraint (a `Distance`'s length, an
+    /// `Angle`'s degrees, a `Radius`'s radius) — a literal number or a
+    /// named-parameter reference (`docs/named_parameters_design.md`,
+    /// resolved through `Scene::named_parameters` at solve time by
+    /// `sketch_solve::build_constraint`). `None` for every purely-geometric
+    /// kind (Coincident, Horizontal, Vertical, Parallel, Perpendicular,
+    /// Equal, Tangent).
+    pub driving_param: Option<DrivingValue>,
     /// Lets a user suppress a constraint without losing it — a re-solve
     /// skips a disabled constraint entirely.
     pub enabled: bool,
@@ -160,7 +164,7 @@ impl SketchConstraintSet {
     }
 
     /// Appends a constraint, assigning it a fresh id unique within this set.
-    pub fn add(&mut self, kind: ConstraintKind, refs: Vec<SketchRef>, driving_param: Option<f64>) -> ConstraintId {
+    pub fn add(&mut self, kind: ConstraintKind, refs: Vec<SketchRef>, driving_param: Option<DrivingValue>) -> ConstraintId {
         let id = self.next_id;
         self.next_id += 1;
         self.constraints.push(SketchConstraint { id, kind, refs, driving_param, enabled: true });
@@ -348,9 +352,17 @@ impl ConstraintKind {
 /// The full glyph text for one constraint: its symbol, plus the driving
 /// value for a dimensional kind (Distance/Angle/Radius).
 pub(crate) fn glyph_label(constraint: &SketchConstraint) -> String {
-    match (constraint.kind, constraint.driving_param) {
-        (ConstraintKind::Angle, Some(value)) => format!("{} {value:.1}°", constraint.kind.glyph_symbol()),
-        (_, Some(value)) => format!("{} {value:.2}", constraint.kind.glyph_symbol()),
+    match (constraint.kind, &constraint.driving_param) {
+        (ConstraintKind::Angle, Some(DrivingValue::Literal(value))) => format!("{} {value:.1}°", constraint.kind.glyph_symbol()),
+        (_, Some(DrivingValue::Literal(value))) => format!("{} {value:.2}", constraint.kind.glyph_symbol()),
+        // A named reference has no single resolved number to show without
+        // threading `ParameterTable` into every glyph-render call site
+        // (`src/ui/overlay.rs`) — showing the name itself is enough for now;
+        // stage 4's parameters panel is the natural place to reconsider this
+        // once a named `driving_param` can actually be authored through the
+        // UI (nothing can yet — this arm exists so the match is exhaustive
+        // and correct ahead of that UI, not because it's reachable today).
+        (_, Some(DrivingValue::Named(name))) => format!("{} {name}", constraint.kind.glyph_symbol()),
         (_, None) => constraint.kind.glyph_symbol().to_string(),
     }
 }
@@ -415,7 +427,7 @@ impl super::Scene {
         if handle_map.is_empty() {
             return;
         }
-        let mut to_add: Vec<(usize, ConstraintKind, Vec<SketchRef>, Option<f64>)> = Vec::new();
+        let mut to_add: Vec<(usize, ConstraintKind, Vec<SketchRef>, Option<DrivingValue>)> = Vec::new();
         for (scope_index, set) in self.sketch_constraints.iter().enumerate() {
             for c in &set.constraints {
                 if !c.enabled || !c.refs.iter().all(|r| handle_map.contains_key(&r.entity)) {
@@ -423,7 +435,7 @@ impl super::Scene {
                 }
                 let new_refs: Vec<SketchRef> =
                     c.refs.iter().map(|r| SketchRef { entity: handle_map[&r.entity], marker: r.marker }).collect();
-                to_add.push((scope_index, c.kind, new_refs, c.driving_param));
+                to_add.push((scope_index, c.kind, new_refs, c.driving_param.clone()));
             }
         }
         if to_add.is_empty() {
@@ -453,10 +465,10 @@ mod tests {
     fn add_assigns_increasing_ids_and_get_finds_them() {
         let mut set = SketchConstraintSet::new(SketchScope::ModelSpace);
         let a = set.add(ConstraintKind::Horizontal, vec![SketchRef::whole(h(1))], None);
-        let b = set.add(ConstraintKind::Distance, vec![SketchRef::whole(h(1))], Some(25.0));
+        let b = set.add(ConstraintKind::Distance, vec![SketchRef::whole(h(1))], Some(DrivingValue::Literal(25.0)));
         assert_ne!(a, b);
         assert_eq!(set.get(a).unwrap().kind, ConstraintKind::Horizontal);
-        assert_eq!(set.get(b).unwrap().driving_param, Some(25.0));
+        assert_eq!(set.get(b).unwrap().driving_param, Some(DrivingValue::Literal(25.0)));
     }
 
     #[test]
@@ -521,14 +533,14 @@ mod tests {
     fn sketch_constraint_set_round_trips_through_bincode() {
         let mut set = SketchConstraintSet::new(SketchScope::Block(h(5)));
         set.add(ConstraintKind::Coincident, vec![SketchRef::point(h(1), 0), SketchRef::point(h(2), 1)], None);
-        set.add(ConstraintKind::Distance, vec![SketchRef::whole(h(3))], Some(12.5));
+        set.add(ConstraintKind::Distance, vec![SketchRef::whole(h(3))], Some(DrivingValue::Literal(12.5)));
 
         let bytes = bincode::serialize(&set).expect("serialize");
         let restored: SketchConstraintSet = bincode::deserialize(&bytes).expect("deserialize");
 
         assert_eq!(restored.scope, set.scope);
         assert_eq!(restored.constraints.len(), set.constraints.len());
-        assert_eq!(restored.constraints[1].driving_param, Some(12.5));
+        assert_eq!(restored.constraints[1].driving_param, Some(DrivingValue::Literal(12.5)));
         assert_eq!(restored.constraints[0].refs, set.constraints[0].refs);
     }
 }

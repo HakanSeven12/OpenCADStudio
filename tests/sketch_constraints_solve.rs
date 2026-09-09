@@ -5,6 +5,7 @@
 // constrained neighbors, produces the expected change list, and an
 // unrelated edit doesn't touch anything (§4.3's "what does NOT trigger").
 
+use OpenCADStudio::scene::named_parameters::DrivingValue;
 use OpenCADStudio::scene::sketch_constraints::{ConstraintKind, SketchRef, SketchScope};
 use OpenCADStudio::scene::{ChangeKind, Scene};
 use acadrust::entities::EntityType;
@@ -96,7 +97,7 @@ fn distance_constraint_holds_the_target_length_after_an_unrelated_endpoint_edit(
     scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
         ConstraintKind::Distance,
         vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
-        Some(20.0),
+        Some(DrivingValue::Literal(20.0)),
     );
 
     set_line_end(&mut scene, line, Vector3::new(5.0, 5.0, 0.0)); // arbitrary edit, not length=20
@@ -105,6 +106,63 @@ fn distance_constraint_holds_the_target_length_after_an_unrelated_endpoint_edit(
     let (start, end) = line_endpoints(&scene, line);
     let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
     assert!((len - 20.0).abs() < 1e-6, "length should have been solved to the driving value, got {len}");
+}
+
+/// `named_parameters_design.md` stage 3: a `Distance` constraint's driving
+/// value can be a named-parameter reference instead of a literal, resolved
+/// through `Scene::named_parameters` at solve time.
+#[test]
+fn distance_constraint_resolves_a_named_parameter_reference() {
+    let mut scene = Scene::new();
+    let line = add_line(&mut scene, 0.0, 0.0, 10.0, 0.0);
+    scene.named_parameters_mut().set("target_len", "20").unwrap();
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Distance,
+        vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+        Some(DrivingValue::Named("target_len".to_string())),
+    );
+
+    set_line_end(&mut scene, line, Vector3::new(5.0, 5.0, 0.0)); // arbitrary edit, not length=20
+    scene.bump_entities(&[(line, ChangeKind::Modified)]);
+
+    let (start, end) = line_endpoints(&scene, line);
+    let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
+    assert!((len - 20.0).abs() < 1e-6, "length should have resolved the named parameter, got {len}");
+
+    // Editing the parameter itself and touching the scope again should
+    // ripple through, same as editing a literal driving value would.
+    scene.named_parameters_mut().set("target_len", "8").unwrap();
+    scene.bump_entities(&[(line, ChangeKind::Modified)]);
+    let (start, end) = line_endpoints(&scene, line);
+    let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
+    assert!((len - 8.0).abs() < 1e-6, "length should track the redefined parameter value, got {len}");
+}
+
+/// A `driving_param` referencing a named parameter that doesn't (or no
+/// longer) exists must not panic the solve — same "skip, don't panic"
+/// contract `build_constraint`'s doc comment gives every other unbuildable
+/// constraint. The referenced line's two endpoint coordinates are still
+/// registered (via `point_ref`) even though the constraint itself can't be
+/// built, so they're just left free — the edit that triggered this solve is
+/// not undone or altered.
+#[test]
+fn distance_constraint_with_an_undefined_named_reference_is_skipped_not_panicked() {
+    let mut scene = Scene::new();
+    let line = add_line(&mut scene, 0.0, 0.0, 10.0, 0.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Distance,
+        vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+        Some(DrivingValue::Named("does_not_exist".to_string())),
+    );
+
+    let edited_end = Vector3::new(5.0, 5.0, 0.0);
+    set_line_end(&mut scene, line, edited_end);
+    scene.bump_entities(&[(line, ChangeKind::Modified)]); // must not panic
+
+    let (_, end) = line_endpoints(&scene, line);
+    assert_eq!(end, edited_end, "an unresolvable driving reference must leave the edit alone, not move it toward a phantom target");
 }
 
 #[test]
@@ -285,8 +343,8 @@ fn two_conflicting_distance_targets_are_reported_as_conflicting() {
     let mut scene = Scene::new();
     let a = add_line(&mut scene, 0.0, 0.0, 10.0, 0.0);
     let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
-    let first = set.add(ConstraintKind::Distance, vec![SketchRef::point(a, 0), SketchRef::point(a, 1)], Some(20.0));
-    let second = set.add(ConstraintKind::Distance, vec![SketchRef::point(a, 0), SketchRef::point(a, 1)], Some(50.0));
+    let first = set.add(ConstraintKind::Distance, vec![SketchRef::point(a, 0), SketchRef::point(a, 1)], Some(DrivingValue::Literal(20.0)));
+    let second = set.add(ConstraintKind::Distance, vec![SketchRef::point(a, 0), SketchRef::point(a, 1)], Some(DrivingValue::Literal(50.0)));
 
     scene.bump_entities(&[(a, ChangeKind::Modified)]);
 

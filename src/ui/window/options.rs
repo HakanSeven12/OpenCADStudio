@@ -41,6 +41,7 @@ pub fn view_window<'a>(
     crosshair_color: Option<[u8; 3]>,
     crosshair_color_input: &'a str,
     lineweight_display_scale: i32,
+    ui_scale: i32,
     ribbon_label_font_size: i32,
     ribbon_group_title_font_size: i32,
     model_space: &'a crate::app::config::ModelSpaceThemeConfig,
@@ -349,6 +350,24 @@ pub fn view_window<'a>(
         });
 
     let mut display = column![
+        text(crate::t!("UI Scale")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Overall size")).size(12).width(150),
+            slider(50..=200, ui_scale.clamp(50, 200), Message::UiScaleChanged)
+                .step(5)
+                .width(Fill),
+            text(format!("{}%", ui_scale.clamp(50, 200))).size(11).width(44),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+        Space::new().height(8),
+        text(crate::t!(
+            "Scales the whole interface at once — every panel, dialog, the ribbon, and their text — rather than one widget's font size. Takes effect immediately."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(24),
         text(crate::tr!("options", "theme-section")).size(15),
         Space::new().height(10),
         row![

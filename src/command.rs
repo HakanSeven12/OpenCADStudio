@@ -1336,9 +1336,14 @@ pub enum CmdResult {
     AddSketchConstraint {
         kind: crate::scene::sketch_constraints::ConstraintKind,
         refs: Vec<crate::scene::sketch_constraints::SketchRef>,
-        /// The typed target for a dimensional kind (Distance/Angle/Radius);
-        /// `None` for a purely geometric one.
-        driving_param: Option<f64>,
+        /// The typed target for a dimensional kind (Distance/Angle/Radius) —
+        /// a literal number, or a named-parameter reference
+        /// (`docs/named_parameters_design.md` stage 4, recognized by
+        /// `DistanceConstraintCommand`/`AngleConstraintCommand::
+        /// on_text_input` when the typed token matches a known parameter
+        /// name instead of parsing as a number); `None` for a purely
+        /// geometric kind.
+        driving_param: Option<crate::scene::named_parameters::DrivingValue>,
         /// Undo-history label, e.g. `"Horizontal constraint"`.
         label: &'static str,
     },

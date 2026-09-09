@@ -240,6 +240,25 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::AliasEditorOpen));
             }
 
+            // ── OPTIONS — app preferences dialog ────────────────────────────
+            // Registered for autocomplete (`commands/mod.rs`'s "one-shot
+            // commands" list) but had no actual dispatch arm anywhere — the
+            // Start-tab welcome screen's "Options" button emits
+            // `Message::OptionsOpen` directly and was the only way to reach
+            // it. Found while live-testing the new UI-scale setting (nothing
+            // to do with that feature itself, just discovered along the
+            // way). "OP" is AutoCAD's own short alias for this command.
+            "OPTIONS" | "OP" => {
+                return Some(Task::done(Message::OptionsOpen));
+            }
+
+            // ── PARAMETERS — named-parameter/expression table editor ───────
+            // `docs/named_parameters_design.md` stage 4. AutoCAD's own
+            // command name for the equivalent feature (Parameters Manager).
+            "PARAMETERS" => {
+                return Some(Task::done(Message::NamedParametersOpen));
+            }
+
             // ── CUI — keyboard shortcut / key-binding editor ───────────────
             "CUI" => {
                 return Some(Task::done(Message::ShortcutsPanelOpen));

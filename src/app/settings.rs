@@ -166,6 +166,14 @@ pub struct UserSettings {
     pub crosshair_color: Option<[u8; 3]>,
     /// Model-space lineweight preview scale as a percentage.
     pub lineweight_display_scale: i32,
+    /// Whole-interface scale, as a percentage — every panel, dialog, the
+    /// ribbon, and their text, not just one widget's font size. Wired
+    /// straight into iced's own per-window `scale_factor` hook
+    /// (`OpenCADStudio::run`), so a change takes effect immediately with no
+    /// per-panel plumbing needed. Relies on the struct-level `#[serde(default)]`
+    /// (via `impl Default` below) to backfill this field for a config file
+    /// saved before this setting existed, same as every other field here.
+    pub ui_scale: i32,
     /// Isometric drafting changes the grid and crosshair to the active axis pair.
     pub isometric_drafting: bool,
     pub iso_plane: IsoPlane,
@@ -310,6 +318,7 @@ impl Default for UserSettings {
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,
             lineweight_display_scale: 100,
+            ui_scale: 100,
             isometric_drafting: false,
             iso_plane: IsoPlane::Left,
             snap_angle_deg: 0.0,

@@ -353,7 +353,32 @@ impl OpenCADStudio {
             self.reset_tracking_after_point();
             self.push_ucs_to_cmd(i);
         }
-        if let StepInput::EntityPick(handle, _) = &input {
+        if let StepInput::EntityPick(handle, point) = &input {
+            let solid_pick = matches!(
+                self.tabs[i].scene.document.get_entity(*handle),
+                Some(
+                    acadrust::EntityType::Solid3D(_)
+                        | acadrust::EntityType::Surface(_)
+                        | acadrust::EntityType::Region(_)
+                        | acadrust::EntityType::Body(_)
+                )
+            );
+            let direction = if solid_pick {
+                self.tabs[i]
+                    .scene
+                    .solid_planar_face_normal_at(*handle, *point)
+            } else {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(*handle)
+                    .and_then(crate::entities::curve::entity_curve)
+                    .and_then(|curve| curve.plane.normal())
+                    .map(glam::DVec3::from_array)
+            };
+            if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                command.set_entity_pick_direction(direction);
+            }
             if self.tabs[i].active_cmd.as_ref()
                 .is_some_and(|command| command.inject_before_entity_pick())
             {

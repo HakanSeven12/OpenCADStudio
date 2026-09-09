@@ -5248,6 +5248,21 @@ impl OpenCADStudio {
             Message::PropColorFieldChanged { field, color } => {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
+                if field == "indicator_fill_color" {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(acadrust::EntityType::Extended(extended)) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            if let acadrust::entities::ExtendedEntityData::SectionObject(data) =
+                                &mut extended.data
+                            {
+                                data.indicator_color = color;
+                            }
+                        }
+                    });
+                    self.tabs[i].properties.open_color_field = None;
+                    return Task::none();
+                }
                 // Dim-line colour override (Leader / Dimension): write it as an
                 // ACAD_DSTYLE code-176 override (an ACI index) so it round-trips
                 // through DWG and DXF. RGB picks collapse to the nearest ACI, in

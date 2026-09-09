@@ -66,6 +66,11 @@ pub fn ui_name(e: &EntityType) -> &'static str {
         EntityType::Light(_) => "Light",
         EntityType::SectionSymbol(_) => "Section Symbol",
         EntityType::ViewBorder(_) => "View Border",
+        EntityType::Extended(extended)
+            if matches!(
+                extended.data,
+                acadrust::entities::ExtendedEntityData::SectionObject(_)
+            ) => "Section Plane",
         EntityType::Extended(_) => "Extended Entity",
         EntityType::Seqend(_) => "Seqend",
         EntityType::Unknown(_) => "Unknown",
@@ -79,6 +84,12 @@ pub fn ui_name(e: &EntityType) -> &'static str {
 /// (the numeric `DWG_TYPE_<n>` placeholder).
 pub fn ui_name_or_class(e: &EntityType) -> String {
     if let EntityType::Extended(entity) = e {
+        if matches!(
+            entity.data,
+            acadrust::entities::ExtendedEntityData::SectionObject(_)
+        ) {
+            return "Section Plane".to_string();
+        }
         return entity.class_name().to_string();
     }
     if let EntityType::Unknown(u) = e {
@@ -148,6 +159,11 @@ pub fn dxf_name(e: &EntityType) -> &'static str {
         EntityType::Light(_) => "LIGHT",
         EntityType::SectionSymbol(_) => "SECTIONLINE",
         EntityType::ViewBorder(_) => "DRAWINGVIEW",
+        EntityType::Extended(extended)
+            if matches!(
+                extended.data,
+                acadrust::entities::ExtendedEntityData::SectionObject(_)
+            ) => "SECTIONOBJECT",
         _ => "ENTITY",
     }
 }

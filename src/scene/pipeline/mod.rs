@@ -2449,11 +2449,17 @@ impl Pipeline {
         if instances.is_empty() {
             vec![]
         } else {
+            let mut sorted = instances.to_vec();
+            sorted.sort_by(|a, b| {
+                a.params[2]
+                    .partial_cmp(&b.params[2])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             vec![CircleGpu::from_instances(
                 device,
                 queue,
                 "viewer.circles",
-                instances,
+                &sorted,
             )]
         }
     }
@@ -2489,11 +2495,17 @@ impl Pipeline {
         if instances.is_empty() {
             vec![]
         } else {
+            let mut sorted = instances.to_vec();
+            sorted.sort_by(|a, b| {
+                a.params[2]
+                    .partial_cmp(&b.params[2])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             vec![EllipseGpu::from_instances(
                 device,
                 queue,
                 "viewer.ellipses",
-                instances,
+                &sorted,
             )]
         }
     }

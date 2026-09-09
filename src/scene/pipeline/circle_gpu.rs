@@ -145,7 +145,7 @@ pub fn create_pipelines(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth24PlusStencil8,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(false),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: content_stencil.clone(),
             bias: wgpu::DepthBiasState::default(),

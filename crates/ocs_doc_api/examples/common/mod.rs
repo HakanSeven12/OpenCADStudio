@@ -402,14 +402,14 @@ impl DocApiBackend for MockBackend {
         Ok(id)
     }
     fn set_xrecord(&mut self, id: ObjectId, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<()> {
-        if !self.entity_exists(id) {
+        if !self.object_exists(id) {
             return Err(ApiError::UnknownId(id));
         }
         self.xrecord_store.insert(id, spec.clone());
         Ok(())
     }
     fn xrecord(&self, id: ObjectId) -> ApiResult<Option<ocs_doc_api::XRecordSpec>> {
-        if !self.entity_exists(id) {
+        if !self.object_exists(id) {
             return Err(ApiError::UnknownId(id));
         }
         Ok(self.xrecord_store.get(&id).cloned())
@@ -433,7 +433,10 @@ impl DocApiBackend for MockBackend {
     fn update_layer(&mut self, name: &str, info: &LayerInfo) -> ApiResult<()> {
         let name_upper = name.to_ascii_uppercase();
         if !self.layers.contains_key(&name_upper) {
-            return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+            return Err(ApiError::validation(
+                "UpdateLayer",
+                format!("layer '{name}' does not exist"),
+            ));
         }
         let mut stored = info.clone();
         stored.name = name_upper.clone();
@@ -456,7 +459,10 @@ impl DocApiBackend for MockBackend {
             ));
         }
         if self.layers.remove(&name_upper).is_none() {
-            return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                format!("layer '{name}' does not exist"),
+            ));
         }
         Ok(())
     }
@@ -503,6 +509,7 @@ impl DocApiBackend for MockBackend {
         &self,
         kind: Option<&str>,
         layer: Option<&str>,
+        include_bounds: bool,
     ) -> ApiResult<Vec<EntityView>> {
         let mut out = Vec::new();
         for (id, kind_name) in &self.kinds {
@@ -521,7 +528,11 @@ impl DocApiBackend for MockBackend {
                     continue;
                 }
             }
-            let bounds = self.curves.get(id).map(curve_bounds);
+            let bounds = if include_bounds {
+                self.curves.get(id).map(curve_bounds)
+            } else {
+                None
+            };
             out.push(EntityView {
                 id: *id,
                 kind: kind_name.clone(),
@@ -615,6 +626,9 @@ impl DocApiBackend for MockBackend {
     }
     fn entity_exists(&self, id: ObjectId) -> bool {
         self.kinds.contains_key(&id)
+    }
+    fn object_exists(&self, id: ObjectId) -> bool {
+        self.xrecord_store.contains_key(&id)
     }
     fn revision(&self) -> GeometryRevision {
         GeometryRevision(self.revision)

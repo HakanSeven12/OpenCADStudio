@@ -71,9 +71,12 @@ pub enum Query {
         id: ObjectId,
     },
     /// Enumerate first-class entities, optionally filtered by kind and/or layer.
+    /// `include_bounds` populates `EntityView::bounds`; leave it false for a
+    /// lightweight list view.
     EnumerateEntities {
         kind: Option<String>,
         layer: Option<String>,
+        include_bounds: bool,
     },
     /// The WCS location of a Point entity.
     GetPointPosition {

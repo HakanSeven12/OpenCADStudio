@@ -396,7 +396,7 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             OpOutcome::NewId(id)
         }
         Operation::SetXRecord { id, spec } => {
-            require_exists(b, *id, name)?;
+            require_object_exists(b, *id, name)?;
             b.push_undo(name);
             b.set_xrecord(*id, spec)?;
             b.finalize_op();
@@ -483,8 +483,12 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
             Query::GetEntityLayer { id } => {
                 QueryResult::EntityLayer(b.entity_layer(*id).map_err(|e| label(qname, e))?)
             }
-            Query::EnumerateEntities { kind, layer } => QueryResult::Entities(
-                b.enumerate_entities(kind.as_deref(), layer.as_deref())
+            Query::EnumerateEntities {
+                kind,
+                layer,
+                include_bounds,
+            } => QueryResult::Entities(
+                b.enumerate_entities(kind.as_deref(), layer.as_deref(), *include_bounds)
                     .map_err(|e| label(qname, e))?,
             ),
             Query::GetPointPosition { id } => QueryResult::PointPosition(
@@ -530,6 +534,15 @@ fn profile_curves<B: DocApiBackend>(
 /// Validate that an entity exists before performing an operation.
 fn require_exists<B: DocApiBackend>(b: &B, id: ObjectId, op: &'static str) -> ApiResult<()> {
     if b.entity_exists(id) {
+        Ok(())
+    } else {
+        Err(ApiError::validation(op, format!("unknown ObjectId {id:?}")))
+    }
+}
+
+/// Validate that a named object exists before performing an operation.
+fn require_object_exists<B: DocApiBackend>(b: &B, id: ObjectId, op: &'static str) -> ApiResult<()> {
+    if b.object_exists(id) {
         Ok(())
     } else {
         Err(ApiError::validation(op, format!("unknown ObjectId {id:?}")))

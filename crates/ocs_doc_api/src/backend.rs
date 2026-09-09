@@ -181,10 +181,11 @@ pub trait DocApiBackend {
     /// Create a new layer. Fails with `Validation` if the name already exists or is reserved.
     fn create_layer(&mut self, info: &crate::ops::LayerInfo) -> ApiResult<()>;
 
-    /// Update an existing layer's properties by name. Fails with `UnknownId` if absent.
+    /// Update an existing layer's properties by name. Fails with `Validation` if absent.
     fn update_layer(&mut self, name: &str, info: &crate::ops::LayerInfo) -> ApiResult<()>;
 
-    /// Delete a layer by name. Fails if the layer is "0", the current layer, or has entities.
+    /// Delete a layer by name. Fails with `Validation` if the layer is "0",
+    /// the current layer, does not exist, or has entities.
     fn delete_layer(&mut self, name: &str) -> ApiResult<()>;
 
     /// Move an entity to a different layer. The target layer must exist.
@@ -197,10 +198,13 @@ pub trait DocApiBackend {
     fn entity_layer(&self, id: ObjectId) -> ApiResult<String>;
 
     /// Enumerate first-class entities, optionally filtered by kind and/or layer.
+    /// `include_bounds` controls whether `EntityView::bounds` is populated; skip it
+    /// for lightweight list views.
     fn enumerate_entities(
         &self,
         kind: Option<&str>,
         layer: Option<&str>,
+        include_bounds: bool,
     ) -> ApiResult<Vec<EntityView>>;
 
     /// The WCS location of a Point entity.
@@ -234,6 +238,10 @@ pub trait DocApiBackend {
             Err(ApiError::UnknownId(id))
         }
     }
+
+    /// Whether an object (named-object / XRecord / dictionary) exists. Distinct
+    /// from `entity_exists`, which is for first-class entities only.
+    fn object_exists(&self, id: ObjectId) -> bool;
 
     /// A generic, untyped view of any entity (id + kind + coarse bounds).
     fn get_entity(&mut self, id: ObjectId) -> ApiResult<EntityView>;

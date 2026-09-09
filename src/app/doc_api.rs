@@ -1,7 +1,7 @@
 //! Native document API adapter over the existing scene, history and kernel paths.
 
 use acadrust::entities::Solid3D;
-use acadrust::objects::ObjectType;
+use acadrust::objects::{Dictionary, ObjectType};
 use acadrust::{EntityType, Handle};
 use ocs_doc_api::backend::{DocApiBackend, KernelBody};
 use ocs_doc_api::{
@@ -9,11 +9,44 @@ use ocs_doc_api::{
     LayerFlags, LayerInfo, LineWeight, ObjectId, PlacementSpec,
 };
 
+use crate::scene::annotative::root_named_dict_handle;
 use crate::scene::convert::acis_export;
 use crate::scene::model::solid_model;
 use ocs_doc_api::convert;
 
 use super::plugin_host::HostSession;
+
+const XRECORD_DICT_NAME: &str = "OCS_XRECORD_DICT";
+
+/// Return the stable named-object dictionary used to hold `XRecord` objects.
+/// Created on first use under the root named-objects dictionary and reused
+/// thereafter.
+fn xrecord_dictionary_handle(doc: &mut acadrust::CadDocument) -> Handle {
+    let root_h = root_named_dict_handle(doc);
+    let existing = match doc.objects.get(&root_h) {
+        Some(ObjectType::Dictionary(root)) => root
+            .entries
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(XRECORD_DICT_NAME))
+            .map(|(_, handle)| *handle),
+        _ => None,
+    };
+    match existing.filter(|handle| matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_)))) {
+        Some(handle) => handle,
+        None => {
+            let handle = doc.allocate_handle();
+            let mut dict = Dictionary::new();
+            dict.handle = handle;
+            dict.owner = root_h;
+            doc.objects.insert(handle, ObjectType::Dictionary(dict));
+            if let Some(ObjectType::Dictionary(root)) = doc.objects.get_mut(&root_h) {
+                root.entries.retain(|(name, _)| !name.eq_ignore_ascii_case(XRECORD_DICT_NAME));
+                root.add_entry(XRECORD_DICT_NAME, handle);
+            }
+            handle
+        }
+    }
+}
 
 /// Entry point called by the `HostApi::doc_api_dispatch` override (below) and by
 // the in-process path. Deserializes the envelope, runs the crate executor,
@@ -682,8 +715,13 @@ impl DocApiBackend for HostSession<'_> {
         }))
     }
 
+    fn object_exists(&self, id: ObjectId) -> bool {
+        let handle = obj_to_handle(id);
+        self.document().objects.contains_key(&handle)
+    }
+
     fn add_xrecord(&mut self, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<ObjectId> {
-        use acadrust::objects::{Dictionary, ObjectType, XRecord};
+        use acadrust::objects::{ObjectType, XRecord};
         let mut record = XRecord::named(spec.name.clone());
         record.cloning_flags = cloning_flags_to_acadrust(spec.cloning_flags);
         record.entries = spec
@@ -699,25 +737,23 @@ impl DocApiBackend for HostSession<'_> {
                 .insert(handle, ObjectType::XRecord(record));
             handle
         };
-        // Attach the new XRecord to a root-level dictionary so it is reachable
-        // as a standalone named object (model-space owner, no entity owner).
-        let mut root_dict = Dictionary::new();
-        let root_handle = {
-            let doc = self.document_mut();
-            let h = doc.allocate_handle();
-            root_dict.handle = h;
-            root_dict.owner = doc.header.model_space_block_handle;
-            root_dict.hard_owner = true;
-            root_dict.entries.push((spec.name.clone(), record_handle));
-            doc.objects.insert(h, ObjectType::Dictionary(root_dict));
-            h
-        };
-        let _ = root_handle;
+        // Attach the new XRecord to the stable named-object dictionary so it is
+        // reachable as a standalone named object.
+        let dict_h = xrecord_dictionary_handle(self.document_mut());
+        if let Some(ObjectType::Dictionary(dict)) = self.document_mut().objects.get_mut(&dict_h) {
+            dict.entries.retain(|(name, _)| !name.eq_ignore_ascii_case(&spec.name));
+            dict.add_entry(spec.name.clone(), record_handle);
+        }
         Ok(handle_to_obj(record_handle))
     }
 
     fn set_xrecord(&mut self, id: ObjectId, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<()> {
-        self.can_modify(id)?;
+        if !self.object_exists(id) {
+            return Err(ApiError::validation(
+                "SetXRecord",
+                format!("unknown ObjectId {id:?}"),
+            ));
+        }
         let handle = obj_to_handle(id);
         let Some(ObjectType::XRecord(record)) = self.document().objects.get(&handle) else {
             return Err(ApiError::Unsupported(format!("ObjectId {id:?} is not an XRecord")));
@@ -778,7 +814,10 @@ impl DocApiBackend for HostSession<'_> {
         let deps = {
             let doc = self.document_mut();
             let Some(existing) = doc.layers.get(name).cloned() else {
-                return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+                return Err(ApiError::validation(
+                    "UpdateLayer",
+                    format!("layer '{name}' does not exist"),
+                ));
             };
             let new_name = info.name.trim();
             if new_name.is_empty() {
@@ -793,7 +832,10 @@ impl DocApiBackend for HostSession<'_> {
                     .map_err(|e| ApiError::validation("UpdateLayer", e))?;
             }
             let Some(layer) = doc.layers.get_mut(new_name) else {
-                return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+                return Err(ApiError::validation(
+                    "UpdateLayer",
+                    format!("layer '{name}' does not exist"),
+                ));
             };
             apply_layer_info(layer, info);
             [existing.name.clone(), layer.name.clone()]
@@ -802,14 +844,16 @@ impl DocApiBackend for HostSession<'_> {
         self.scene_mut().invalidate_layer_dependencies(&deps);
         Ok(())
     }
-
     fn delete_layer(&mut self, name: &str) -> ApiResult<()> {
         let name_upper = acadrust::tables::normalize_name(name);
         if name_upper == "0" {
             return Err(ApiError::validation("DeleteLayer", "cannot delete layer 0"));
         }
         if !self.document().layers.contains(name) {
-            return Err(ApiError::UnknownId(ObjectId::from_u64(0)));
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                format!("layer '{name}' does not exist"),
+            ));
         }
         if acadrust::tables::normalize_name(&self.document().header.current_layer_name) == name_upper
         {
@@ -831,6 +875,7 @@ impl DocApiBackend for HostSession<'_> {
         self.document_mut().layers.remove(name);
         Ok(())
     }
+
 
     fn set_entity_layer(&mut self, id: ObjectId, layer: &str) -> ApiResult<()> {
         self.can_modify(id)?;
@@ -886,6 +931,7 @@ impl DocApiBackend for HostSession<'_> {
         &self,
         kind: Option<&str>,
         layer: Option<&str>,
+        include_bounds: bool,
     ) -> ApiResult<Vec<EntityView>> {
         let doc = self.document();
         let mut out = Vec::new();
@@ -907,7 +953,11 @@ impl DocApiBackend for HostSession<'_> {
                 id,
                 kind: entity_kind.to_string(),
                 layer: entity.common().layer.clone(),
-                bounds: convert::entity_bounds(Some(entity), id).ok(),
+                bounds: if include_bounds {
+                    convert::entity_bounds(Some(entity), id).ok()
+                } else {
+                    None
+                },
             });
         }
         Ok(out)
@@ -4148,6 +4198,7 @@ mod tests {
             DocApiEnvelope::queries(vec![Query::EnumerateEntities {
                 kind: None,
                 layer: None,
+                include_bounds: true,
             }]),
         )
         .unwrap();
@@ -4163,6 +4214,7 @@ mod tests {
             DocApiEnvelope::queries(vec![Query::EnumerateEntities {
                 kind: Some("Line".into()),
                 layer: None,
+                include_bounds: true,
             }]),
         )
         .unwrap();
@@ -4178,6 +4230,7 @@ mod tests {
             DocApiEnvelope::queries(vec![Query::EnumerateEntities {
                 kind: None,
                 layer: Some("Markers".into()),
+                include_bounds: true,
             }]),
         )
         .unwrap();

@@ -3803,6 +3803,126 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
 
+            CmdResult::ThickenEntities { handles, distance } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+
+                if handles.is_empty() {
+                    self.command_line
+                        .push_output(crate::t!("No surfaces selected.").as_ref());
+                    return Task::none();
+                }
+                if !distance.is_finite() {
+                    self.command_line.push_error(
+                        crate::t!("Requires numeric distance or two points.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                if distance.abs() <= f64::EPSILON {
+                    return Task::none();
+                }
+
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                let pending = self.begin_undo(i, "THICKEN", handles.len(), true);
+                let mut created = 0usize;
+                let mut failed = 0usize;
+                let mut self_intersections = 0usize;
+                for handle in handles {
+                    let Some(acadrust::EntityType::Surface(surface)) =
+                        self.tabs[i].scene.document.get_entity(handle)
+                    else {
+                        failed += 1;
+                        continue;
+                    };
+                    let kernel_distance = if surface.kind
+                        == acadrust::entities::SurfaceKind::Revolved
+                    {
+                        -distance
+                    } else {
+                        distance
+                    };
+                    let body = self.tabs[i]
+                        .scene
+                        .solid_models
+                        .get(&handle)
+                        .cloned()
+                        .or_else(|| {
+                            crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
+                        });
+                    let Some(body) = body else {
+                        failed += 1;
+                        continue;
+                    };
+                    let solid = match cadkernel::brep::thicken(&body, kernel_distance) {
+                        Ok(solid) => solid,
+                        Err(cadkernel::brep::ThickenError::SelfIntersection) => {
+                            failed += 1;
+                            self_intersections += 1;
+                            continue;
+                        }
+                        Err(_) => {
+                            failed += 1;
+                            continue;
+                        }
+                    };
+                    let history = crate::scene::model::solid_history::brep_op(&solid);
+                    if self
+                        .add_solid_model(empty_solid3d(), solid, history)
+                        .is_null()
+                    {
+                        failed += 1;
+                    } else {
+                        created += 1;
+                    }
+                }
+
+                if created > 0 {
+                    self.tabs[i].dirty = true;
+                    if self_intersections > 0 {
+                        let message = if self_intersections == 1 {
+                            "1 surface cannot be thickened with the specified value. Object intersects itself."
+                                .to_owned()
+                        } else {
+                            format!(
+                                "{} surfaces cannot be thickened with the specified value. Objects intersect themselves.",
+                                self_intersections
+                            )
+                        };
+                        self.command_line.push_error(&message);
+                    }
+                    if failed > 0 {
+                        self.command_line.push_output(&format!(
+                            "THICKEN: created {created} solid(s); {failed} surface(s) could not be thickened."
+                        ));
+                    }
+                    if let Some(pending) = pending {
+                        self.commit_undo_delta(i, pending);
+                    }
+                } else {
+                    if self_intersections > 0 {
+                        let message = if self_intersections == 1 {
+                            "1 surface cannot be thickened with the specified value. Object intersects itself."
+                                .to_owned()
+                        } else {
+                            format!(
+                                "{} surfaces cannot be thickened with the specified value. Objects intersect themselves.",
+                                self_intersections
+                            )
+                        };
+                        self.command_line.push_error(&message);
+                    } else {
+                        self.command_line
+                            .push_error(&format!("{failed} surface(s) could not be thickened."));
+                    }
+                    if let Some(pending) = pending {
+                        self.commit_undo_delta(i, pending);
+                    }
+                }
+                self.refresh_properties();
+            }
+
             CmdResult::PresspullPick { handle, point, offset, multiple: _ } => {
                 self.presspull_pick(handle, point, offset);
             }

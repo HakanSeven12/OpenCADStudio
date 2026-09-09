@@ -513,6 +513,172 @@ impl CadCommand for ExtrudeCommand {
     }
 }
 
+// ── THICKEN command ────────────────────────────────────────────────────────
+
+pub struct ThickenCommand {
+    step: ThickenStep,
+    handles: Vec<Handle>,
+    first_point: Option<DVec3>,
+    last_distance: f64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ThickenStep {
+    Pick,
+    Distance,
+    SecondPoint,
+}
+
+fn thicken_default() -> &'static Mutex<f64> {
+    static DEFAULT: OnceLock<Mutex<f64>> = OnceLock::new();
+    DEFAULT.get_or_init(|| Mutex::new(0.0))
+}
+
+impl ThickenCommand {
+    pub fn new(preselection: Vec<(Handle, EntityType)>) -> Self {
+        let handles = preselection
+            .into_iter()
+            .filter_map(|(handle, entity)| {
+                matches!(entity, EntityType::Surface(_)).then_some(handle)
+            })
+            .collect::<Vec<_>>();
+        Self {
+            step: if handles.is_empty() {
+                ThickenStep::Pick
+            } else {
+                ThickenStep::Distance
+            },
+            handles,
+            first_point: None,
+            last_distance: *thicken_default()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        }
+    }
+
+    fn finish(&mut self, distance: f64) -> CmdResult {
+        self.last_distance = distance;
+        *thicken_default()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = distance;
+        CmdResult::ThickenEntities {
+            handles: self.handles.clone(),
+            distance,
+        }
+    }
+}
+
+impl CadCommand for ThickenCommand {
+    fn name(&self) -> &'static str {
+        "THICKEN"
+    }
+
+    fn prompt(&self) -> String {
+        match self.step {
+            ThickenStep::Pick => t!("Select surfaces to thicken:").into_owned(),
+            ThickenStep::Distance => format!(
+                "{} <{}>:",
+                t!("Specify thickness"),
+                crate::entities::common::format_length(self.last_distance)
+            ),
+            ThickenStep::SecondPoint => {
+                t!("Specify second point:").into_owned()
+            }
+        }
+    }
+
+    fn wants_text_input(&self) -> bool {
+        self.step == ThickenStep::Distance
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.step != ThickenStep::Distance {
+            return None;
+        }
+        let value = text.trim();
+        if value.is_empty() {
+            return None;
+        }
+        Some(match crate::entities::common::parse_typed_length(value) {
+            Some(distance) if distance.is_finite() => self.finish(distance),
+            _ => CmdResult::ReportError(
+                t!("Requires numeric distance or two points.").into_owned(),
+            ),
+        })
+    }
+
+    fn on_point(&mut self, point: DVec3) -> CmdResult {
+        match self.step {
+            ThickenStep::Distance => {
+                self.first_point = Some(point);
+                self.step = ThickenStep::SecondPoint;
+                CmdResult::NeedPoint
+            }
+            ThickenStep::SecondPoint => {
+                let distance = point.distance(self.first_point.unwrap_or(point));
+                if distance.is_finite() {
+                    self.finish(distance)
+                } else {
+                    CmdResult::ReportError(
+                        t!("Requires numeric distance or two points.").into_owned(),
+                    )
+                }
+            }
+            ThickenStep::Pick => CmdResult::NeedPoint,
+        }
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        match self.step {
+            ThickenStep::Pick if self.handles.is_empty() => {
+                CmdResult::Measurement(t!("No surfaces selected.").into_owned())
+            }
+            ThickenStep::Pick => {
+                self.step = ThickenStep::Distance;
+                CmdResult::NeedPoint
+            }
+            ThickenStep::Distance => self.finish(self.last_distance),
+            ThickenStep::SecondPoint => CmdResult::ReportError(
+                t!("Requires numeric distance or two points.").into_owned(),
+            ),
+        }
+    }
+
+    fn is_selection_gathering(&self) -> bool {
+        self.step == ThickenStep::Pick
+    }
+
+    fn selection_forces_add(&self) -> bool {
+        self.step == ThickenStep::Pick
+    }
+
+    fn inject_selection_entities(&mut self, entities: Vec<SelectionEntity>) {
+        if self.step != ThickenStep::Pick {
+            return;
+        }
+        self.handles = entities
+            .into_iter()
+            .filter_map(|entry| {
+                matches!(entry.entity, EntityType::Surface(_)).then_some(entry.handle)
+            })
+            .collect();
+    }
+
+    fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_undo_step(&mut self) -> Option<CmdResult> {
+        if self.step == ThickenStep::SecondPoint {
+            self.first_point = None;
+            self.step = ThickenStep::Distance;
+            Some(CmdResult::NeedPoint)
+        } else {
+            None
+        }
+    }
+}
+
 // ── PRESSPULL command ─────────────────────────────────────────────────────
 
 pub struct PresspullCommand {

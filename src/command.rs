@@ -1518,6 +1518,11 @@ pub enum CmdResult {
         taper_angle: f64,
         color: [f32; 4],
     },
+    /// Thicken one or more persistent surface bodies without consuming them.
+    ThickenEntities {
+        handles: Vec<Handle>,
+        distance: f64,
+    },
     /// Resolve a profile, bounded area, or solid face for PRESSPULL.
     PresspullPick {
         handle: Option<Handle>,

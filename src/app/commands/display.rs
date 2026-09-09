@@ -734,7 +734,7 @@ impl OpenCADStudio {
             }
 
             // ── EXTRUDE ────────────────────────────────────────────────────
-            "EXTRUDE" | "THICKEN" => {
+            "EXTRUDE" => {
                 use crate::modules::insert::solid3d_cmds::ExtrudeCommand;
                 // A preselection becomes the complete source set; otherwise
                 // the interactive command gathers any number of profiles.
@@ -767,6 +767,19 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }
+            }
+
+            "THICKEN" => {
+                use crate::modules::insert::solid3d_cmds::ThickenCommand;
+                let selected = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(handle, entity)| (handle, entity.clone()))
+                    .collect();
+                let command = ThickenCommand::new(selected);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "PRESSPULL" => {

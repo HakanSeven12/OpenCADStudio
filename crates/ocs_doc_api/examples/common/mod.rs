@@ -403,14 +403,20 @@ impl DocApiBackend for MockBackend {
     }
     fn set_xrecord(&mut self, id: ObjectId, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<()> {
         if !self.object_exists(id) {
-            return Err(ApiError::UnknownId(id));
+            return Err(ApiError::validation(
+                "SetXRecord",
+                format!("unknown ObjectId {id:?}"),
+            ));
         }
         self.xrecord_store.insert(id, spec.clone());
         Ok(())
     }
     fn xrecord(&self, id: ObjectId) -> ApiResult<Option<ocs_doc_api::XRecordSpec>> {
         if !self.object_exists(id) {
-            return Err(ApiError::UnknownId(id));
+            return Err(ApiError::validation(
+                "GetXRecord",
+                format!("unknown ObjectId {id:?}"),
+            ));
         }
         Ok(self.xrecord_store.get(&id).cloned())
     }

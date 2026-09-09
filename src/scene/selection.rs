@@ -4,11 +4,110 @@ impl Scene {
     // ── Selection ─────────────────────────────────────────────────────────
     /// Treat a classic LEADER and its attached annotation as one logical object.
     /// Clicking/copying/deleting either side expands to the complete pair.
+    /// Every LEADER that points at `annotation`, resolved once per
+    /// `geometry_epoch` rather than by walking the document per handle.
+    fn leaders_by_annotation(
+        &self,
+    ) -> std::cell::Ref<'_, (u64, HashMap<Handle, Vec<Handle>>)> {
+        {
+            let cache = self.leaders_by_annotation_cache.borrow();
+            if cache.as_ref().is_some_and(|(epoch, _)| *epoch == self.geometry_epoch) {
+                drop(cache);
+                return std::cell::Ref::map(
+                    self.leaders_by_annotation_cache.borrow(),
+                    |c| c.as_ref().unwrap(),
+                );
+            }
+        }
+        let mut by_annotation: HashMap<Handle, Vec<Handle>> = HashMap::default();
+        for entity in self.document.entities() {
+            if let EntityType::Leader(leader) = entity {
+                if !leader.annotation_handle.is_null() {
+                    by_annotation
+                        .entry(leader.annotation_handle)
+                        .or_default()
+                        .push(entity.common().handle);
+                }
+            }
+        }
+        *self.leaders_by_annotation_cache.borrow_mut() =
+            Some((self.geometry_epoch, by_annotation));
+        std::cell::Ref::map(self.leaders_by_annotation_cache.borrow(), |c| {
+            c.as_ref().unwrap()
+        })
+    }
+
+    /// The handles plus their leader/annotation partners, in the order given.
+    ///
+    /// Kept separate from the sorted, deduplicated form because a bulk
+    /// selection has to preserve pick order — `selected_handles_in_order`
+    /// reports it — and because sorting per handle is what made selecting
+    /// 186 000 entities one call at a time expensive.
+    fn expanded_with_leaders(&self, handles: &[Handle]) -> Vec<Handle> {
+        let leaders = self.leaders_by_annotation();
+        let mut expanded = Vec::with_capacity(handles.len());
+        for &handle in handles {
+            expanded.push(handle);
+            if let Some(EntityType::Leader(leader)) = self.document.get_entity(handle) {
+                if !leader.annotation_handle.is_null() {
+                    expanded.push(leader.annotation_handle);
+                }
+            }
+            if let Some(pointing) = leaders.1.get(&handle) {
+                expanded.extend(pointing.iter().copied());
+            }
+        }
+        expanded
+    }
+
+    /// Select many handles in one pass.
+    ///
+    /// The single-handle path allocates, sorts and deduplicates for every
+    /// entity, and a box selection called it once per entity — most of the
+    /// remaining 786 ms of a 186 460-entity selection.
+    pub fn select_entities(&mut self, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let expanded = self.expanded_with_leaders(handles);
+        let mut changed = false;
+        for handle in expanded {
+            if self.selected.insert(handle) {
+                self.selected_order.push(handle);
+                changed = true;
+            }
+        }
+        if changed {
+            self.bump_selection_set();
+        }
+    }
+
+    /// Deselect many handles in one pass.
+    ///
+    /// `deselect_entity` rebuilds `selected_order` with a `retain` per handle,
+    /// so removing N of M selected entities walked the order list N times.
+    pub fn deselect_entities(&mut self, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let doomed: HashSet<Handle> =
+            self.expanded_with_leaders(handles).into_iter().collect();
+        let mut changed = false;
+        for handle in &doomed {
+            changed |= self.selected.remove(handle);
+        }
+        if changed {
+            self.selected_order.retain(|handle| !doomed.contains(handle));
+            self.bump_selection_set();
+        }
+    }
+
     pub(crate) fn handles_expanded_for_leader_annotations(
         &self,
         handles: &[Handle],
     ) -> Vec<Handle> {
         let mut expanded = handles.to_vec();
+        let leaders = self.leaders_by_annotation();
 
         for &handle in handles {
             // LEADER -> annotation.
@@ -19,15 +118,9 @@ impl Scene {
             }
 
             // Annotation -> LEADER.
-            expanded.extend(self.document.entities().filter_map(|entity| match entity {
-                EntityType::Leader(leader)
-                    if !leader.annotation_handle.is_null()
-                        && leader.annotation_handle == handle =>
-                {
-                    Some(entity.common().handle)
-                }
-                _ => None,
-            }));
+            if let Some(pointing) = leaders.1.get(&handle) {
+                expanded.extend(pointing.iter().copied());
+            }
         }
 
         expanded.sort_unstable_by_key(|handle| handle.value());
@@ -1003,6 +1096,135 @@ impl Scene {
 mod tests {
     use super::*;
 
+    /// A box selection used to call `select_entity` once per entity. The bulk
+    /// path has to land on the same selection, in the same pick order —
+    /// `selected_handles_in_order` is read by commands such as DIM, where the
+    /// order the user picked things in decides what they mean.
+    #[test]
+    fn bulk_selection_matches_selecting_one_at_a_time() {
+        use acadrust::entities::Line;
+        use acadrust::types::Vector3;
+
+        let build = || {
+            let mut scene = Scene::new();
+            let handles: Vec<_> = (0..40)
+                .map(|k| {
+                    let x = k as f64;
+                    scene.add_entity(EntityType::Line(Line::from_points(
+                        Vector3::new(x, 0.0, 0.0),
+                        Vector3::new(x + 1.0, 0.0, 0.0),
+                    )))
+                })
+                .collect();
+            (scene, handles)
+        };
+
+        // Picked in an order that is neither creation nor handle order.
+        let picked = |handles: &[Handle]| -> Vec<Handle> {
+            let mut order: Vec<_> = handles.iter().copied().collect();
+            order.reverse();
+            order.retain(|h| h.value() % 3 != 0);
+            order
+        };
+
+        let (mut one_at_a_time, handles) = build();
+        let order = picked(&handles);
+        for &handle in &order {
+            one_at_a_time.select_entity(handle, false);
+        }
+
+        let (mut in_bulk, handles) = build();
+        in_bulk.select_entities(&picked(&handles));
+
+        assert_eq!(
+            in_bulk.selected_handles_in_order(),
+            one_at_a_time.selected_handles_in_order(),
+            "the bulk path must select the same entities in the same order",
+        );
+
+        // And removing a subset must agree too.
+        let drop: Vec<_> = order.iter().copied().take(7).collect();
+        for &handle in &drop {
+            one_at_a_time.deselect_entity(handle);
+        }
+        in_bulk.deselect_entities(&drop);
+        assert_eq!(
+            in_bulk.selected_handles_in_order(),
+            one_at_a_time.selected_handles_in_order(),
+            "the bulk removal must leave the same selection in the same order",
+        );
+    }
+
+    /// Selecting an entity pulls in any LEADER pointing at it, and that was
+    /// answered by walking the whole document once per selected handle —
+    /// selecting 471 583 entities in a 585 786-entity drawing did not finish
+    /// inside eight minutes. The reverse index has to give exactly what the
+    /// walk gave.
+    #[test]
+    fn the_leader_index_matches_a_document_walk() {
+        use acadrust::entities::Leader;
+        use acadrust::types::Vector3;
+
+        let mut scene = Scene::new();
+        let line = |x: f64| {
+            EntityType::Line(acadrust::entities::Line::from_points(
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x + 1.0, 0.0, 0.0),
+            ))
+        };
+        let annotation = scene.add_entity(line(0.0));
+        let unrelated = scene.add_entity(line(5.0));
+        let mut leader_on = |target: Handle| {
+            let mut leader = Leader::default();
+            leader.annotation_handle = target;
+            scene.add_entity(EntityType::Leader(leader))
+        };
+        // Two leaders share one annotation; a third points nowhere.
+        let first = leader_on(annotation);
+        let second = leader_on(annotation);
+        let dangling = leader_on(Handle::NULL);
+
+        // The walk this replaced, written out so the index is compared against
+        // behaviour rather than against itself.
+        let by_walk = |handle: Handle| -> Vec<Handle> {
+            let mut out = vec![handle];
+            if let Some(EntityType::Leader(leader)) = scene.document.get_entity(handle) {
+                if !leader.annotation_handle.is_null() {
+                    out.push(leader.annotation_handle);
+                }
+            }
+            out.extend(scene.document.entities().filter_map(|entity| match entity {
+                EntityType::Leader(leader)
+                    if !leader.annotation_handle.is_null()
+                        && leader.annotation_handle == handle =>
+                {
+                    Some(entity.common().handle)
+                }
+                _ => None,
+            }));
+            out.sort_unstable_by_key(Handle::value);
+            out.dedup();
+            out
+        };
+
+        for handle in [annotation, unrelated, first, second, dangling] {
+            assert_eq!(
+                scene.handles_expanded_for_leader_annotations(&[handle]),
+                by_walk(handle),
+                "the index must answer exactly what the walk answered",
+            );
+        }
+        let expanded = scene.handles_expanded_for_leader_annotations(&[annotation]);
+        assert!(
+            expanded.contains(&first) && expanded.contains(&second),
+            "both leaders on one annotation must come back, not just one",
+        );
+    }
+
+    /// The reason the cache carries a set as well as a list: drawing into a
+    /// drawing that already has that type must not rebuild either, because the
+    /// rebuild walks every entity the layout owns — 444 937 of them on the
+    /// reproducer, ~100 ms, on every single drawn point.
     #[test]
     fn adding_a_type_already_present_reuses_the_list() {
         use acadrust::entities::{Circle, EntityType, Line};

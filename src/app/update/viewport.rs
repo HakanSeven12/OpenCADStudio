@@ -4186,8 +4186,9 @@ impl OpenCADStudio {
                         self.refresh_properties();
                         if crate::perf::enabled() {
                             crate::perf_record!(
-                                "[perf] select-commit kind=drag-box candidates={cand_ms:.1}ms \
-hit={hit_ms:.1}ms apply={apply_ms:.1}ms properties={:.1}ms picked={}",
+                                "[perf] select-commit kind=drag-box crossing={crossing} \
+candidates={cand_ms:.1}ms hit={hit_ms:.1}ms apply={apply_ms:.1}ms \
+properties={:.1}ms picked={}",
                                 t_props.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0),
                                 handles.len(),
                             );
@@ -4564,8 +4565,9 @@ hit={hit_ms:.1}ms apply={apply_ms:.1}ms properties={:.1}ms picked={}",
                     self.refresh_properties();
                     if crate::perf::enabled() {
                         crate::perf_record!(
-                            "[perf] select-commit kind=window candidates={cand_ms:.1}ms \
-hit={hit_ms:.1}ms filter={filter_ms:.1}ms apply={apply_ms:.1}ms properties={:.1}ms picked={}",
+                            "[perf] select-commit kind=window crossing={crossing} \
+candidates={cand_ms:.1}ms hit={hit_ms:.1}ms filter={filter_ms:.1}ms \
+apply={apply_ms:.1}ms properties={:.1}ms picked={}",
                             t_props.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0),
                             handles.len(),
                         );

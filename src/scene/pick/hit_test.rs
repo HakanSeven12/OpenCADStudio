@@ -13,7 +13,7 @@ use iced::{Point, Rectangle};
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::mesh_model::MeshModel;
 use crate::scene::model::wire_model::WireModel;
-use crate::scene::pick::interaction_index::WireSource;
+use crate::scene::pick::interaction_index::{SegmentRef, WireSource};
 
 /// Pick radius for one wire, in screen pixels.
 ///
@@ -1247,13 +1247,14 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
             || (0..4).any(|edge| segments_intersect(a, b, corners[edge], corners[(edge + 1) % 4]))
     };
 
-    for segment in wires.segments().unwrap_or_default() {
-        let Some(wire) = wires.source_wire(segment.wire) else {
-            continue;
-        };
+    // One projection pair per segment, reading nothing but the wire, the view
+    // and the box. Hoisted into a closure so the sequential and the parallel
+    // path below run identical code.
+    let hit_name = |segment: &SegmentRef| -> Option<&'a str> {
+        let wire = wires.source_wire(segment.wire)?;
         let start = segment.start as usize;
         if start + 1 >= wire.points.len() {
-            continue;
+            return None;
         }
         let a = world_to_screen(
             wire_point_world(wire, start, view_rot, eye),
@@ -1267,8 +1268,35 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
             eye,
             bounds,
         );
-        if segment_hits(a, b) && seen.insert(wire.name.as_str()) {
-            out.push(wire.name.as_str());
+        segment_hits(a, b).then_some(wire.name.as_str())
+    };
+
+    // A crossing selection over a whole drawing spends its time here, not in
+    // the window branch of `box_hit`: every measured `select-commit` line read
+    // `crossing=true`.
+    //
+    // The scan stops projecting a wire once that wire is in. A circle or a
+    // polyline contributes one segment per tessellated span, and every span
+    // after the first that hits can only re-add a name already present — at 24
+    // spans per wire that is 23 projection pairs out of 24 skipped, which took
+    // a 4.4 M-segment scan from ~1 s to 42 ms. The wire is keyed by index, an
+    // integer to hash rather than a string, and the name set still runs behind
+    // it because one entity can produce several wires sharing a name.
+    //
+    // Fanning this out across cores was tried and removed: with the early-out
+    // the remaining work is small enough that per-chunk sets, which cannot see
+    // wires already hit in another chunk, measured *slower* than one pass
+    // (45.6 ms against 42.4 ms at 186 468 wires).
+    let mut wire_hit: HashSet<u32> = HashSet::default();
+    for segment in wires.segments().unwrap_or_default() {
+        if wire_hit.contains(&segment.wire) {
+            continue;
+        }
+        if let Some(name) = hit_name(segment) {
+            wire_hit.insert(segment.wire);
+            if seen.insert(name) {
+                out.push(name);
+            }
         }
     }
     for wire in wires.iter().filter(|wire| wire.point_marker.is_some()) {
@@ -2712,3 +2740,90 @@ mod aabb_reject_tests {
     }
 }
 
+#[cfg(test)]
+mod parallel_selection_tests {
+    use super::*;
+    use crate::scene::pick::interaction_index::{InteractionCandidates, InteractionIndex};
+    use std::sync::Arc;
+
+    // Enough wires to clear the 4096 default several times over, laid on a
+    // diagonal so the selection box catches a known prefix of them rather than
+    // all or nothing — an "everything hits" case would not notice a reordering.
+    // A drawing is not made of single segments: a circle or an arc tessellates
+    // into dozens of spans, and a polyline carries as many as it has vertices.
+    // A one-segment-per-wire sample makes the per-wire early-out invisible and
+    // the whole measurement optimistic, so the benchmark uses `spans` per wire.
+    fn many_wires_with_spans(count: usize, spans: usize) -> Vec<WireModel> {
+        (0..count)
+            .map(|i| {
+                let t = i as f32 / count as f32;
+                let x = -0.95 + 1.9 * t;
+                let y = -0.95 + 1.9 * t;
+                let points: Vec<[f32; 3]> = (0..=spans)
+                    .map(|s| {
+                        let f = s as f32 / spans as f32;
+                        [x + 0.01 * f, y + 0.01 * f, 0.0]
+                    })
+                    .collect();
+                let mut w = WireModel::solid(
+                    (i as u64 + 1).to_string(),
+                    points,
+                    [1.0; 4],
+                    false,
+                );
+                w.aabb = [x, y, x + 0.01, y + 0.01];
+                w
+            })
+            .collect()
+    }
+
+    // Not a correctness test — a measurement, at the size the user's drawing
+    // actually is. Run it deliberately:
+    //
+    //     cargo test --release --lib selection_scaling -- --ignored --nocapture
+    #[test]
+    #[ignore = "measurement, not a check"]
+    fn selection_scaling_numbers() {
+        use std::time::Instant;
+        let wires = many_wires_with_spans(186_468, 24);
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+        let aabb = [-2.0, -2.0, 2.0, 2.0];
+
+        let t = Instant::now();
+        let full = index.query_xy(Arc::clone(&arc), aabb);
+        let full_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+        let t = Instant::now();
+        let area = index.query_xy_area(Arc::clone(&arc), aabb);
+        let area_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 200.0,
+        };
+        let run = |candidates: &InteractionCandidates| {
+            let t = Instant::now();
+            let hits = box_hit(
+                Point::new(0.0, 0.0),
+                Point::new(200.0, 200.0),
+                true,
+                candidates,
+                Mat4::IDENTITY,
+                glam::DVec3::ZERO,
+                bounds,
+            );
+            (t.elapsed().as_secs_f64() * 1000.0, hits.len())
+        };
+        let (scan_ms, scan_n) = run(&area);
+
+        println!(
+            "candidates: full={full_ms:.1}ms ({} wires) area={area_ms:.1}ms ({} wires)",
+            full.len(),
+            area.len(),
+        );
+        println!("crossing scan: {scan_ms:.1}ms ({scan_n} hits)");
+    }
+}

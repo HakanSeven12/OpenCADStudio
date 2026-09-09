@@ -1287,13 +1287,30 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
     // the remaining work is small enough that per-chunk sets, which cannot see
     // wires already hit in another chunk, measured *slower* than one pass
     // (45.6 ms against 42.4 ms at 186 468 wires).
-    let mut wire_hit: HashSet<u32> = HashSet::default();
+    // A bitmap over wire indices rather than a hash set: this is consulted once
+    // per segment, triangle and glyph inside the box — millions of times on a
+    // whole-drawing selection — and an array index beats hashing a `u32`, let
+    // alone hashing the wire's name, which is what the primitive loops below
+    // used to do. `seen` stays for the names, because several wires can share
+    // one entity's name and the output dedups by name.
+    let mut wire_hit: Vec<bool> = Vec::new();
+    fn mark(wire_hit: &mut Vec<bool>, wire: u32) {
+        let index = wire as usize;
+        if index >= wire_hit.len() {
+            wire_hit.resize(index + 1, false);
+        }
+        wire_hit[index] = true;
+    }
+    fn already(wire_hit: &[bool], wire: u32) -> bool {
+        wire_hit.get(wire as usize).copied().unwrap_or(false)
+    }
+
     for segment in wires.segments().unwrap_or_default() {
-        if wire_hit.contains(&segment.wire) {
+        if already(&wire_hit, segment.wire) {
             continue;
         }
         if let Some(name) = hit_name(segment) {
-            wire_hit.insert(segment.wire);
+            mark(&mut wire_hit, segment.wire);
             if seen.insert(name) {
                 out.push(name);
             }
@@ -1315,7 +1332,7 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(triangle.wire) else {
                 continue;
             };
-            if seen.contains(wire.name.as_str()) {
+            if already(&wire_hit, triangle.wire) {
                 continue;
             }
             if projected_wire_triangle(
@@ -1327,9 +1344,11 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
                 bounds,
             )
             .is_some_and(|triangle| triangle_crosses_box(triangle, corners))
-                && seen.insert(wire.name.as_str())
             {
-                out.push(wire.name.as_str());
+                mark(&mut wire_hit, triangle.wire);
+                if seen.insert(wire.name.as_str()) {
+                    out.push(wire.name.as_str());
+                }
             }
         }
     }
@@ -1337,7 +1356,7 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
         let Some(wire) = wires.source_wire(glyph.wire) else {
             continue;
         };
-        if seen.contains(wire.name.as_str()) {
+        if already(&wire_hit, glyph.wire) {
             continue;
         }
         let Some(screen) =
@@ -1358,11 +1377,15 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
 
     // Degenerate point-only wires have no indexed segment or surface primitive.
     for wire in wires.iter() {
-        if seen.contains(wire.name.as_str())
-            || wire.points.len() >= 2
+        // Structural tests first: `||` short-circuits, so putting the name
+        // lookup last means a wire with two or more points — very nearly all
+        // of them — is dropped without hashing its name. This loop walks every
+        // candidate, so that was one string hash per wire in the box.
+        if wire.points.len() >= 2
             || !wire.fill_tris.is_empty()
             || !wire.pick_tris.is_empty()
             || !wire.text_verts.is_empty()
+            || seen.contains(wire.name.as_str())
         {
             continue;
         }
@@ -1568,11 +1591,15 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         }
     }
     for wire in wires.iter() {
-        if seen.contains(wire.name.as_str())
-            || wire.points.len() >= 2
+        // Structural tests first: `||` short-circuits, so putting the name
+        // lookup last means a wire with two or more points — very nearly all
+        // of them — is dropped without hashing its name. This loop walks every
+        // candidate, so that was one string hash per wire in the box.
+        if wire.points.len() >= 2
             || !wire.fill_tris.is_empty()
             || !wire.pick_tris.is_empty()
             || !wire.text_verts.is_empty()
+            || seen.contains(wire.name.as_str())
         {
             continue;
         }

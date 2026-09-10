@@ -6,6 +6,49 @@ pushed.
 
 ## Unreleased (since `3d0a41b6`)
 
+- **Feature:** Properties panel gains a "Parameters" section (shown with no
+  selection) for inline named-parameter name/formula editing, add, and
+  delete, and a "Constraints" section (shown for a single selected entity)
+  listing every constraint touching it as a clickable link that selects
+  the linked entities in the viewport — danger-tinted when the constraint
+  conflicts. A newly-added parameter's formula now defaults to `1`, not
+  `0`, since a 0-length seed value is a genuine solver singularity for a
+  Distance constraint driven by that parameter (no defined direction to
+  grow back out of).
+  ([command_driver.rs](src/app/command_driver.rs),
+  [properties.rs](src/app/properties.rs),
+  [ui/properties.rs](src/ui/properties.rs))
+
+- **Feature:** new Options > General toggle, "Show values and parameter
+  names on constraint markers" (on by default, persisted). Off, every
+  constraint pill in the viewport shows just its bare glyph instead of
+  glyph-plus-driven-value/parameter-name — the glyph alone is enough to
+  see a constraint is present, without the value text covering nearby
+  geometry on a dense sketch.
+  ([options.rs](src/ui/window/options.rs),
+  [view/mod.rs](src/app/view/mod.rs))
+
+- **Feature:** all 18 constraint-ribbon icons (including the plain "F",
+  "L", "M", "S" letter glyphs) replaced with proper SVGs under
+  `assets/icons/constrain/`, matching the Modify section's two-color style
+  (`#B4B6B9` white / `#6DB7ED` blue, consistent stroke width). Tangent
+  reuses the Draw section's white-arc-plus-blue-dots motif.
+  ([assets/icons/constrain](assets/icons/constrain),
+  [tools.rs](src/modules/draw/constrain/tools.rs))
+
+- **Fix:** a Concentric or CenterPoint constraint that moved an ellipse's
+  center visibly rotated and reshaped the ellipse, even though nothing
+  constrained its shape. Root cause: `ocs_gcs::geo::Ellipse` stores
+  `focus1` as an absolute point rather than an offset from `center`, so
+  when a constraint pulled only on `center`, `focus1`'s absolute
+  coordinates stayed put while `center` moved — changing the derived
+  `focus1 - center` vector that `major_axis`/`minor_axis_ratio` are
+  computed from on write-back. The solver now adds two constraints per
+  registered ellipse pinning that offset to its pre-solve value, so
+  `focus1` translates rigidly with `center` unless something actually
+  constrains it.
+  ([sketch_solve.rs](src/scene/sketch_solve.rs))
+
 - **Fix:** a sketch's constraint set (or the named-parameter table) silently
   lost *all* of its entries on the next DWG open once its serialized size
   passed 255 bytes — roughly 5-6 constraints, easily reached by a real

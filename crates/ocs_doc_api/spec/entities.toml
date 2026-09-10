@@ -458,6 +458,50 @@ args = [{ name = "insertion_point", ty = "[f64; 3]" }, { name = "data", ty = "&[
 op = "CreateTable"
 
 # ============================================================================
+# XDATA / XRECORD FAMILY — application-specific extended data roundtrip
+# ============================================================================
+[[family]]
+name = "XRecord"
+acadrust_variant = "XRecord"
+handle = "XRecord"
+collection = "entities"
+description = "Extended record (XRecord): arbitrary DXF group-code/value pairs. Roundtripped verbatim as an XRecordSpec payload."
+
+[[family.constructor]]
+name = "create_xrecord"
+args = [{ name = "spec", ty = "XRecordSpec" }]
+op = "CreateXRecord"
+returns = "Entity"
+
+[[family.method]]
+name = "payload"
+kind = "query"
+query = "GetXRecord"
+returns = "XRecordSpec"
+
+[[family.method]]
+name = "set_payload"
+kind = "op"
+op = "SetXRecord"
+args = [{ name = "spec", ty = "XRecordSpec" }]
+returns = "()"
+
+# Cross-cutting: every Entity handle can read/write its own XDATA.
+[[family.method]]
+name = "xdata"
+kind = "query"
+query = "GetXData"
+args = [{ name = "application_name", ty = "&str" }]
+returns = "Option<XDataRecord>"
+
+[[family.method]]
+name = "set_xdata"
+kind = "op"
+op = "SetXData"
+args = [{ name = "application_name", ty = "&str" }, { name = "record", ty = "Option<XDataRecord>" }]
+returns = "()"
+
+# ============================================================================
 # Cross-cutting ops (generic handles + bulk) — documented in build.rs
 # ============================================================================
 # - Generic handle methods on EVERY handle: bounds() -> Aabb, transform(placement),
@@ -468,6 +512,42 @@ op = "CreateTable"
 #   via upfront validation, item-capped (BULK_ITEM_CAP).
 # - Read-only batching: query_batch(|q| ...) — one round-trip, no revision bump.
 # - OpGroup: best-effort client-side failure cleanup (NOT a transaction).
+
+# ============================================================================
+# LAYER family (named drawing layers)
+# ============================================================================
+[[family]]
+name = "Layer"
+handle = "Layer"
+collection = "layers"
+description = "Named drawing layer (color, linetype, lineweight, visibility). Not an entity handle; accessed through Document::layers()."
+
+[[family.method]]
+name = "list"
+kind = "query"
+query = "ListLayers"
+returns = "Vec<LayerInfo>"
+
+[[family.method]]
+name = "create"
+kind = "op"
+op = "CreateLayer"
+args = [{ name = "info", ty = "LayerInfo" }]
+returns = "()"
+
+[[family.method]]
+name = "update"
+kind = "op"
+op = "UpdateLayer"
+args = [{ name = "name", ty = "String" }, { name = "info", ty = "LayerInfo" }]
+returns = "()"
+
+[[family.method]]
+name = "delete"
+kind = "op"
+op = "DeleteLayer"
+args = [{ name = "name", ty = "String" }]
+returns = "()"
 
 # ---- Kernel/op mapping (reference for the executor + docs) ----
 [[kernel_map]]

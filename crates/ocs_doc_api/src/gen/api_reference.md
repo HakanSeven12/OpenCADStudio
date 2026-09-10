@@ -192,6 +192,32 @@ Table: create_table(insertion_point, data[row][col]) builds rows x columns of te
 
 - **create_table**(insertion_point: [f64; 3], data: &[Vec<String>]) -> `Entity` — `CreateTable`
 
+## `XRecord` (acadrust `XRecord`, collection `entities`)
+
+Extended record (XRecord): arbitrary DXF group-code/value pairs. Roundtripped verbatim as an XRecordSpec payload.
+
+### Constructors (`doc.entities()`)
+
+- **create_xrecord**(spec: XRecordSpec) -> `Entity` — `CreateXRecord`
+
+### Methods
+
+- **payload**() -> `XRecordSpec` — query `GetXRecord`
+- **set_payload**(spec: XRecordSpec) -> `()` — op `SetXRecord`
+- **xdata**(application_name: &str) -> `Option<XDataRecord>` — query `GetXData`
+- **set_xdata**(application_name: &str, record: Option<XDataRecord>) -> `()` — op `SetXData`
+
+## `Layer` (acadrust `-`, collection `layers`)
+
+Named drawing layer (color, linetype, lineweight, visibility). Not an entity handle; accessed through Document::layers().
+
+### Methods
+
+- **list**() -> `Vec<LayerInfo>` — query `ListLayers`
+- **create**(info: LayerInfo) -> `()` — op `CreateLayer`
+- **update**(name: String, info: LayerInfo) -> `()` — op `UpdateLayer`
+- **delete**(name: String) -> `()` — op `DeleteLayer`
+
 ## Generic methods (every handle)
 
 Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
@@ -204,9 +230,31 @@ Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
 - **`transform(placement)`** — in-place rigid similarity (same `ObjectId`). **v1:
   solids only.**
 - **`delete()`** — remove the entity (one undo step).
+- **`layer()` -> `String`** — the name of the layer the entity is on.
+- **`set_layer(layer)`** — move the entity to an existing layer (one undo step;
+  blocked if the entity or target layer is locked).
 
 `Entity` additionally has `view()` (id + kind + bounds) and `as_solid()` (typed
 downcast when `kind == "Solid3D"`).
+
+## Layer table
+
+Layers are a named document table, not an entity family. `Document::layers()`
+lists all layers as `Vec<LayerInfo>`. Table-level ops are `CreateLayer(info)`,
+`UpdateLayer { name, info }` and `DeleteLayer { name }`. `Entity::layer()`
+returns the layer name and `Entity::set_layer(layer)` moves the entity to an
+existing layer. The host rejects duplicate names, deletion of layer "0" or the
+current layer, and removing a layer that still has entities assigned.
+
+## Transports
+
+- **`InProcess`** (feature `host`) — drives a `DocApiBackend` directly in the host.
+- **`OcsPluginApiIpc`** (feature `ipc`) — serializes envelopes over the
+  `ocs_plugin_api` `PluginRequestSender`/`PluginRequest` channel. The host routes
+  `DocApiRequest { tab_id, bytes }` to the same executor.
+- **`doc_api_for_host(host)`** (feature `doc_api_host`) — convenience helper that
+  builds a `DocApi` from any `ocs_plugin_api::host::HostApi` exposing a
+  `PluginRequestSender` (out-of-process / worker-thread plugins).
 
 ## Collections & cross-cutting
 
@@ -284,6 +332,14 @@ Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-
 - `CreateAttributeDefinition(AttributeDefinitionSpec)`
 - `CreateTable(TableSpec)`
 - `CreateDimensionAngular2Ln(DimensionAngularSpec)`
+- `SetXData { id: ObjectId, application_name: String, record: Option<XDataRecord> }`
+- `CreateXRecord(XRecordSpec)`
+- `SetXRecord { id: ObjectId, spec: XRecordSpec }`
+- `CreateLayer(LayerInfo)`
+- `UpdateLayer { name: String, info: LayerInfo }`
+- `DeleteLayer { name: String }`
+- `SetEntityLayer { id: ObjectId, layer: String }`
+- `SetXDataMany(Vec<(ObjectId, String, Option<XDataRecord)>)`
 
 ### `Query`
 
@@ -299,6 +355,10 @@ Every `Operation` is ONE atomic write op (one undo step); every `Query` is read-
 - `GetAttributes { id: ObjectId }`
 - `GetBlockEntities { block_name: String }`
 - `GetViewportView { id: ObjectId }`
+- `GetXData { id: ObjectId, application_name: String }`
+- `GetXRecord { id: ObjectId }`
+- `ListLayers`
+- `GetEntityLayer { id: ObjectId }`
 
 ## Errors (`ApiError`)
 

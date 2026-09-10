@@ -168,9 +168,31 @@ Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
 - **`transform(placement)`** — in-place rigid similarity (same `ObjectId`). **v1:
   solids only.**
 - **`delete()`** — remove the entity (one undo step).
+- **`layer()` -> `String`** — the name of the layer the entity is on.
+- **`set_layer(layer)`** — move the entity to an existing layer (one undo step;
+  blocked if the entity or target layer is locked).
 
 `Entity` additionally has `view()` (id + kind + bounds) and `as_solid()` (typed
 downcast when `kind == "Solid3D"`).
+
+## Layer table
+
+Layers are a named document table, not an entity family. `Document::layers()`
+lists all layers as `Vec<LayerInfo>`. Table-level ops are `CreateLayer(info)`,
+`UpdateLayer { name, info }` and `DeleteLayer { name }`. `Entity::layer()`
+returns the layer name and `Entity::set_layer(layer)` moves the entity to an
+existing layer. The host rejects duplicate names, deletion of layer "0" or the
+current layer, and removing a layer that still has entities assigned.
+
+## Transports
+
+- **`InProcess`** (feature `host`) — drives a `DocApiBackend` directly in the host.
+- **`OcsPluginApiIpc`** (feature `ipc`) — serializes envelopes over the
+  `ocs_plugin_api` `PluginRequestSender`/`PluginRequest` channel. The host routes
+  `DocApiRequest { tab_id, bytes }` to the same executor.
+- **`doc_api_for_host(host)`** (feature `doc_api_host`) — convenience helper that
+  builds a `DocApi` from any `ocs_plugin_api::host::HostApi` exposing a
+  `PluginRequestSender` (out-of-process / worker-thread plugins).
 
 ## Collections & cross-cutting
 

@@ -1114,6 +1114,13 @@ impl OpenCADStudio {
             // REGION — convert selected closed boundaries (closed polylines /
             // circles) into Region entities (one wire loop each).
             "REGION" | "REG" => {
+                if self.tabs[i].scene.selected_entities().is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let command = SelectObjectsCommand::new("REGION");
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                    return Some(iced::Task::none());
+                }
                 use acadrust::entities::Region;
                 use acadrust::types::Vector3;
                 let mut regions = Vec::new();

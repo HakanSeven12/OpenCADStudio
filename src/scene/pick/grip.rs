@@ -54,6 +54,8 @@ pub struct GripEdit {
 pub enum GripEditMode {
     Stretch,
     Lengthen,
+    Radius,
+    ArcLength,
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +92,18 @@ impl GripEdit {
     pub fn lengthen(handle: Handle, grip_id: usize, world: DVec3) -> Self {
         let mut edit = Self::single(handle, grip_id, false, world);
         edit.mode = GripEditMode::Lengthen;
+        edit
+    }
+
+    pub fn radius(handle: Handle, grip_id: usize, world: DVec3) -> Self {
+        let mut edit = Self::single(handle, grip_id, false, world);
+        edit.mode = GripEditMode::Radius;
+        edit
+    }
+
+    pub fn arc_length(handle: Handle, grip_id: usize, world: DVec3) -> Self {
+        let mut edit = Self::single(handle, grip_id, false, world);
+        edit.mode = GripEditMode::ArcLength;
         edit
     }
 }

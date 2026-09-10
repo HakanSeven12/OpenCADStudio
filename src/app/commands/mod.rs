@@ -75,6 +75,10 @@ impl OpenCADStudio {
                 .dispatch_families(cmd, i)
                 .unwrap_or_else(Task::none);
         }
+        // A new command owns subsequent keyboard input. Any unfinished grip
+        // menu value prompt must not survive and intercept that command's
+        // coordinates or its final empty Enter.
+        self.grip_pending = None;
         // Starting a command closes any open ribbon dropdown (e.g. a style
         // combo left open) so it does not stay stuck behind the new tool.
         self.ribbon.close_dropdown();

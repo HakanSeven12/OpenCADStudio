@@ -1583,6 +1583,24 @@ impl OpenCADStudio {
                 }
                 let live_input = s.clone();
                 self.command_line.input = live_input.clone();
+                let i = self.active_tab;
+                if self.dyn_input
+                    && self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
+                        matches!(
+                            grip.mode,
+                            crate::scene::pick::grip::GripEditMode::Lengthen
+                                | crate::scene::pick::grip::GripEditMode::Radius
+                                | crate::scene::pick::grip::GripEditMode::ArcLength
+                        )
+                    })
+                    && !self.tabs[i].dyn_fields.is_empty()
+                {
+                    let a = self.tabs[i]
+                        .dyn_active
+                        .min(self.tabs[i].dyn_fields.len() - 1);
+                    self.tabs[i].dyn_fields[a].buffer =
+                        (!live_input.is_empty()).then_some(live_input.clone());
+                }
                 self.command_line.autocomplete_cursor = None;
                 self.command_line.cancel_history_navigation();
                 // Live incremental search for INSERT/MINSERT: update picker on each keystroke

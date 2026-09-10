@@ -21,6 +21,21 @@ use acadrust::{CadDocument, Handle};
 
 const XRECORD_KEY: &str = "OCS_SKETCH_CONSTRAINTS";
 
+/// The vendored DWG writer's `XRecordValue::Chunk` encoder packs a single
+/// `u8` length prefix per entry and silently truncates anything longer
+/// (`cadcodec`'s `io/dwg/dwg_stream_writers/object_writer/objects.rs`,
+/// `encode_xrecord_entries`) — unlike the DXF writer, which has no such
+/// limit. A constraint set past a handful of entries serializes past 255
+/// bytes easily, so a single `XRecordEntry` silently loses the tail and
+/// `bincode::deserialize` then fails on the truncated bytes, dropping the
+/// *entire* scope's constraints on the next DWG load — reproduced and
+/// root-caused live (not from a change log): a 5-entry set round-tripped
+/// clean, a 6-entry set of the same shapes lost everything. Splitting the
+/// blob across as many same-code `310` entries as needed (below) works
+/// around it without touching the vendored crate — `CadDocument::xrecord`'s
+/// `entries: Vec<XRecordEntry>` already supports repeating a code.
+const MAX_CHUNK_BYTES: usize = u8::MAX as usize;
+
 /// Removes a named XRecord from `owner`'s extension dictionary, if present.
 /// The dictionary itself is left in place even if now empty — other code may
 /// already reference it via `xdictionary_handle`, and an empty extension
@@ -107,12 +122,14 @@ impl Scene {
             self.document.ensure_xrecord(owner, XRECORD_KEY);
             if let Some(record) = self.document.xrecord_mut(owner, XRECORD_KEY) {
                 // Overwrite, not append: a resave must replace the prior
-                // blob, not accumulate one more Chunk entry every time.
+                // blob, not accumulate more Chunk entries every time.
                 record.entries.clear();
-                record.entries.push(acadrust::objects::XRecordEntry::new(
-                    310,
-                    acadrust::objects::XRecordValue::Chunk(bytes),
-                ));
+                for chunk in bytes.chunks(MAX_CHUNK_BYTES) {
+                    record.entries.push(acadrust::objects::XRecordEntry::new(
+                        310,
+                        acadrust::objects::XRecordValue::Chunk(chunk.to_vec()),
+                    ));
+                }
             }
         }
     }
@@ -132,12 +149,18 @@ impl Scene {
             self.document.block_records.iter().map(|record| record.handle).collect();
         for owner in owners {
             let Some(record) = self.document.xrecord(owner, XRECORD_KEY) else { continue };
-            let Some(bytes) = record.entries.iter().find_map(|entry| match &entry.value {
-                acadrust::objects::XRecordValue::Chunk(bytes) => Some(bytes.clone()),
-                _ => None,
-            }) else {
+            // Concatenate every Chunk entry in order, not just the first —
+            // a set materialized past `MAX_CHUNK_BYTES` spans more than one
+            // same-code `310` entry (see that constant's doc comment).
+            let mut bytes = Vec::new();
+            for entry in &record.entries {
+                if let acadrust::objects::XRecordValue::Chunk(chunk) = &entry.value {
+                    bytes.extend_from_slice(chunk);
+                }
+            }
+            if bytes.is_empty() {
                 continue;
-            };
+            }
             if let Some(set) = decode(&bytes) {
                 self.sketch_constraints.push(set);
             }

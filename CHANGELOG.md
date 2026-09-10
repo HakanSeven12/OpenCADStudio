@@ -6,6 +6,23 @@ pushed.
 
 ## Unreleased (since `3d0a41b6`)
 
+- **Fix:** a sketch's constraint set (or the named-parameter table) silently
+  lost *all* of its entries on the next DWG open once its serialized size
+  passed 255 bytes — roughly 5-6 constraints, easily reached by a real
+  sketch. Root cause: the vendored DWG writer packs an `XRecord` binary
+  `Chunk` entry's length as a single `u8` and truncates anything longer
+  (`cadcodec`'s `encode_xrecord_entries`), so the truncated bytes then
+  failed to `bincode::deserialize` on load and the loader silently dropped
+  the whole scope rather than erroring. DXF was unaffected (its writer has
+  no such cap), which is what made this findable — the exact same document
+  round-tripped constraint-for-constraint through DXF and came back empty
+  through DWG. Fixed entirely on the OCS side, no dependency patch needed:
+  the blob is now split across as many same-code `310` entries as it takes
+  (below 255 bytes each) on save, and every entry for that key is
+  concatenated back together on load, instead of just the first one.
+  ([sketch_persist.rs](src/scene/sketch_persist.rs),
+  [named_parameters_persist.rs](src/scene/named_parameters_persist.rs))
+
 - **Fix:** none of the 17 sketch-constraint commands (`HCONSTRAINT`,
   `VCONSTRAINT`, `PCONSTRAINT`, `QCONSTRAINT`, `ECONSTRAINT`, `TCONSTRAINT`,
   `NCONSTRAINT`, `NRCONSTRAINT`, `LCONSTRAINT`, `FXCONSTRAINT`,

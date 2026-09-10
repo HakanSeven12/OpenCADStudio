@@ -48,6 +48,12 @@ use super::Scene;
 
 const XRECORD_KEY: &str = "OCS_NAMED_PARAMETERS";
 
+/// See `sketch_persist::MAX_CHUNK_BYTES`'s doc comment: the vendored DWG
+/// writer truncates any single `XRecordValue::Chunk` entry to `u8::MAX`
+/// bytes, so a table past a handful of parameters must be split across
+/// multiple same-code `310` entries on write and concatenated back on read.
+const MAX_CHUNK_BYTES: usize = u8::MAX as usize;
+
 /// Prefixed onto the serialized blob so a future schema change can be
 /// detected and gracefully skipped rather than silently misreading bytes —
 /// same call-out as `sketch_persist::FORMAT_VERSION`, same caveat that the
@@ -91,11 +97,13 @@ impl Scene {
         self.document.ensure_xrecord(owner, XRECORD_KEY);
         if let Some(record) = self.document.xrecord_mut(owner, XRECORD_KEY) {
             // Overwrite, not append: a resave must replace the prior blob,
-            // not accumulate one more Chunk entry every time.
+            // not accumulate more Chunk entries every time.
             record.entries.clear();
-            record
-                .entries
-                .push(acadrust::objects::XRecordEntry::new(310, acadrust::objects::XRecordValue::Chunk(bytes)));
+            for chunk in bytes.chunks(MAX_CHUNK_BYTES) {
+                record
+                    .entries
+                    .push(acadrust::objects::XRecordEntry::new(310, acadrust::objects::XRecordValue::Chunk(chunk.to_vec())));
+            }
         }
     }
 
@@ -114,12 +122,17 @@ impl Scene {
             return;
         }
         let Some(record) = self.document.xrecord(owner, XRECORD_KEY) else { return };
-        let Some(bytes) = record.entries.iter().find_map(|entry| match &entry.value {
-            acadrust::objects::XRecordValue::Chunk(bytes) => Some(bytes.clone()),
-            _ => None,
-        }) else {
+        // Concatenate every Chunk entry in order, not just the first — see
+        // `MAX_CHUNK_BYTES`'s doc comment.
+        let mut bytes = Vec::new();
+        for entry in &record.entries {
+            if let acadrust::objects::XRecordValue::Chunk(chunk) = &entry.value {
+                bytes.extend_from_slice(chunk);
+            }
+        }
+        if bytes.is_empty() {
             return;
-        };
+        }
         if let Some(table) = decode(&bytes) {
             self.named_parameters = table;
         }

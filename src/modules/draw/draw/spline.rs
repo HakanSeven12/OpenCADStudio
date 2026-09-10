@@ -3,9 +3,9 @@
 // Command:  SPLINE (SPL)
 //   Click to add fit points. Enter (≥2 pts) → commits EntityType::Spline.
 
+use crate::t;
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Spline};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -30,27 +30,35 @@ pub struct SplineCommand {
 
 impl SplineCommand {
     pub fn new() -> Self {
-        Self { pts: Vec::new(), control_vertices: false, choosing_method: false }
+        Self {
+            pts: Vec::new(),
+            control_vertices: false,
+            choosing_method: false,
+        }
     }
 
     pub fn control_vertices() -> Self {
-        Self { control_vertices: true, ..Self::new() }
+        Self {
+            control_vertices: true,
+            ..Self::new()
+        }
     }
 
     fn build(&self, closed: bool) -> Option<EntityType> {
         if self.pts.len() < 2 {
             return None;
         }
-        Some(EntityType::Spline(make_spline(&self.pts, closed, self.control_vertices)))
+        Some(EntityType::Spline(make_spline(
+            &self.pts,
+            closed,
+            self.control_vertices,
+        )))
     }
 }
 
 /// Store the chosen construction method directly in the persistent spline.
 fn make_spline(pts: &[DVec3], closed: bool, control_vertices: bool) -> Spline {
-    let mut points: Vec<Vector3> = pts
-            .iter()
-            .map(|p| Vector3::new(p.x, p.y, p.z))
-            .collect();
+    let mut points: Vec<Vector3> = pts.iter().map(|p| Vector3::new(p.x, p.y, p.z)).collect();
     let mut spline = if control_vertices {
         if closed && pts.first() != pts.last() {
             points.push(points[0]);
@@ -61,9 +69,13 @@ fn make_spline(pts: &[DVec3], closed: bool, control_vertices: bool) -> Spline {
         // Open uniform knot vector: degree + 1 equal knots at each endpoint.
         let knots = (0..count + degree + 1)
             .map(|index| {
-                if index <= degree { 0.0 }
-                else if index >= count { 1.0 }
-                else { (index - degree) as f64 / spans as f64 }
+                if index <= degree {
+                    0.0
+                } else if index >= count {
+                    1.0
+                } else {
+                    (index - degree) as f64 / spans as f64
+                }
             })
             .collect();
         Spline {
@@ -103,7 +115,11 @@ fn sample_curve(pts: &[DVec3], closed: bool, control_vertices: bool) -> Vec<[f32
 
 impl CadCommand for SplineCommand {
     fn name(&self) -> &'static str {
-        if self.control_vertices { "SPLINECV" } else { "SPLINE" }
+        if self.control_vertices {
+            "SPLINECV"
+        } else {
+            "SPLINE"
+        }
     }
 
     fn prompt(&self) -> String {
@@ -122,7 +138,10 @@ impl CadCommand for SplineCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         if self.choosing_method {
-            return vec![CmdOption::new("Fit", "FIT"), CmdOption::new("Control vertices", "CV")];
+            return vec![
+                CmdOption::new("Fit", "FIT"),
+                CmdOption::new("Control vertices", "CV"),
+            ];
         }
         if self.pts.is_empty() {
             return vec![CmdOption::new(t!("Method").as_ref(), "M")];
@@ -213,6 +232,32 @@ impl CadCommand for SplineCommand {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_vertices_make_a_clamped_finite_spline() {
+        let points = [
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(1.0, 2.0, 0.0),
+            DVec3::new(2.0, 2.0, 0.0),
+            DVec3::new(3.0, 0.0, 0.0),
+        ];
+        let spline = make_spline(&points, false, true);
+
+        assert_eq!(spline.degree, 3);
+        assert_eq!(spline.control_points.len(), 4);
+        assert_eq!(spline.knots, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(spline.weights, vec![1.0; 4]);
+        assert!(sample_curve(&points, false, true)
+            .iter()
+            .flatten()
+            .all(|value| value.is_finite()));
+    }
+}
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["SPLINE", "SPLINECV"] });  // SplineCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["SPLINE", "SPLINECV"]
+}); // SplineCommand

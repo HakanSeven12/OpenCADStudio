@@ -4,10 +4,10 @@
 //          Produces a Ray entity; repeats until Enter/Esc.
 //  XLINE — infinite construction line: same two-click pattern, yields XLine.
 
+use crate::t;
 use acadrust::entities::{Ray as RayEnt, XLine as XLineEnt};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::model::wire_model::WireModel;
@@ -226,7 +226,34 @@ impl CadCommand for XLineCommand {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_rays_and_xlines_keep_their_first_point() {
+        let base = DVec3::new(2.0, 3.0, 4.0);
+        let mut ray = RayCommand::new();
+        let mut xline = XLineCommand::new();
+        assert!(matches!(ray.on_point(base), CmdResult::NeedPoint));
+        assert!(matches!(xline.on_point(base), CmdResult::NeedPoint));
+
+        for through in [DVec3::new(3.0, 3.0, 4.0), DVec3::new(2.0, 5.0, 4.0)] {
+            let CmdResult::CommitEntity(EntityType::Ray(entity)) = ray.on_point(through) else {
+                panic!("ray was not committed");
+            };
+            assert_eq!(entity.base_point, Vector3::new(base.x, base.y, base.z));
+
+            let CmdResult::CommitEntity(EntityType::XLine(entity)) = xline.on_point(through) else {
+                panic!("construction line was not committed");
+            };
+            assert_eq!(entity.base_point, Vector3::new(base.x, base.y, base.z));
+        }
+    }
+}
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["RAY"] });  // RayCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["CONSTRUCTIONLINE", "XLINE"] });  // XLineCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["RAY"] }); // RayCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CONSTRUCTIONLINE", "XLINE"]
+}); // XLineCommand

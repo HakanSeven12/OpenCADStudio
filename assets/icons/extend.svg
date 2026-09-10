@@ -6,7 +6,7 @@
    version="1.1"
    id="svg4"
    sodipodi:docname="extend.svg"
-   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -23,9 +23,9 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#505050"
      showgrid="true"
-     inkscape:zoom="11.265625"
-     inkscape:cx="31.955617"
-     inkscape:cy="29.869626"
+     inkscape:zoom="7.258968"
+     inkscape:cx="30.58286"
+     inkscape:cy="34.92232"
      inkscape:window-width="1920"
      inkscape:window-height="939"
      inkscape:window-x="0"
@@ -49,27 +49,27 @@
   </sodipodi:namedview>
   <!-- Boundary line (horizontal) at top -->
   <line
-     x1="3"
+     x1="1.3321468"
      y1="2.625"
-     x2="21"
+     x2="22.72109"
      y2="2.625"
-     stroke="#B4B6B9"
+     stroke="#b4b6b9"
      stroke-width="1.5"
      stroke-linecap="round"
      id="line1"
-     style="stroke-width:2.25;stroke-dasharray:none" />
+     style="stroke-width:2.45268;stroke-dasharray:none" />
   <!-- Left line: already reaches boundary -->
   <!-- Right line: short (doesn't reach) -->
   <line
      x1="12"
-     y1="14.0625"
+     y1="13.349622"
      x2="12"
      y2="21.5625"
-     stroke="#B4B6B9"
+     stroke="#b4b6b9"
      stroke-width="1.67705"
      stroke-linecap="round"
      id="line3"
-     style="stroke-width:2.25;stroke-dasharray:none" />
+     style="stroke-width:2.3545;stroke-dasharray:none" />
   <!-- Extended portion (from short line up to boundary, blue) -->
   <line
      x1="12"

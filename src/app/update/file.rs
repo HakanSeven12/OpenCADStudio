@@ -355,21 +355,34 @@ impl OpenCADStudio {
         }
     }
 
-    /// Write a tessellation-affecting header variable on the active drawing.
+    /// Write a header variable on the active drawing and mark it modified.
     ///
-    /// These decide how solids and surfaces are tessellated, so the geometry
-    /// has to be rebuilt for the change to appear — the same reason `LTSCALE`
-    /// bumps it. Marking the tab modified is what makes the new value reach
-    /// the file.
-    pub(in crate::app) fn set_drawing_tessellation_var(
+    /// Deliberately does no geometry work. The variables the Options pages
+    /// write differ in what they cost to apply, and treating them alike is
+    /// wrong in both directions: `DISPSILH` is read at render time and needs
+    /// nothing, `SURFU`/`SURFV`/`SURFTYPE` are inputs to PEDIT's smoothing and
+    /// need nothing until it runs, while `ISOLINES` is baked into solid meshes
+    /// at tessellation and needs more than a bump — see `regenerate_meshes`.
+    pub(in crate::app) fn set_drawing_var(
         &mut self,
         write: impl FnOnce(&mut acadrust::document::HeaderVariables),
     ) {
         let i = self.active_tab;
         if let Some(tab) = self.tabs.get_mut(i) {
             write(&mut tab.scene.document.header);
-            tab.scene.bump_geometry();
             tab.dirty = true;
+        }
+    }
+
+    /// Re-tessellate the active drawing's solids from the document.
+    ///
+    /// What REGEN does, and the only thing that makes a changed `ISOLINES`
+    /// reach solids that already exist. Costly on a solid-heavy drawing, so
+    /// callers driven by a slider run it when the drag ends, not per tick.
+    pub(in crate::app) fn regenerate_meshes(&mut self) {
+        let i = self.active_tab;
+        if let Some(tab) = self.tabs.get_mut(i) {
+            tab.scene.populate_meshes_from_document();
         }
     }
 

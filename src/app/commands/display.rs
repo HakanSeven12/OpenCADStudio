@@ -508,7 +508,18 @@ impl OpenCADStudio {
             // "modified" merely because tessellation caches were invalidated (C7).
             // REGENALL is functionally identical (C5).
             "REGEN" | "REGENALL" => {
-                self.tabs[i].scene.bump_geometry();
+                // Solid meshes carry the isoline count they were tessellated
+                // with: `add_entity_internal` and `update_entity` pass
+                // `header.isolines` into `tessellate_volume` and store the
+                // result. Bumping the geometry epoch clears the wire memo but
+                // never re-runs that, so changing ISOLINES left every existing
+                // solid showing the density it was born with, and REGEN — the
+                // command whose whole job is this — did not help.
+                //
+                // `populate_meshes_from_document` re-tessellates from the
+                // document and bumps the epoch itself, so it replaces the bump
+                // rather than adding to it.
+                self.tabs[i].scene.populate_meshes_from_document();
                 self.command_line.push_output(crate::t!("REGEN: regenerated model.").as_ref());
                 return Some(Task::none());
             }
@@ -1893,3 +1904,110 @@ mod tests {
         assert!(!app.tabs[i].dirty, "REGENALL must not dirty the document either");
     }
 }
+
+#[cfg(test)]
+mod regen_tests {
+    use crate::app::OpenCADStudio;
+
+    /// A solid's mesh carries the isoline count it was tessellated with:
+    /// `add_entity_internal` and `update_entity` pass `header.isolines` into
+    /// `tessellate_volume` and store the result. REGEN used to bump the
+    /// geometry epoch and stop, which clears the wire memo but leaves
+    /// `scene.meshes` exactly as it was — reported on #1123 as "REGEN should
+    /// fix this, but the isolines keep visible".
+    ///
+    /// Building ACIS geometry here would be out of proportion, so the mesh map
+    /// is seeded with a stale entry instead: REGEN must rebuild the map from
+    /// the document, and an entry belonging to no entity cannot survive that.
+    /// Bumping alone would leave it in place.
+    #[test]
+    fn regen_rebuilds_the_mesh_map_rather_than_only_bumping_the_epoch() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        // An entry belonging to no entity. Rebuilding the map from the document
+        // drops it; bumping the geometry epoch leaves it exactly where it is,
+        // which is the whole difference this fix turns on.
+        let stale = acadrust::Handle::new(0xDEAD);
+        app.tabs[i].scene.meshes.insert(stale, stale_mesh());
+        let epoch_before = app.tabs[i].scene.geometry_epoch;
+
+        let _ = app.run_command_line("REGEN");
+
+        assert!(
+            !app.tabs[i].scene.meshes.contains_key(&stale),
+            "REGEN must rebuild the mesh map, not leave what was there",
+        );
+        assert_ne!(
+            app.tabs[i].scene.geometry_epoch, epoch_before,
+            "and it still has to bump the geometry epoch",
+        );
+    }
+
+    /// Dragging the isolines slider must not rebuild every solid's mesh on the
+    /// way — a drag emits a message per pixel, and the rebuild is the same work
+    /// REGEN does. It waits for the release, and only runs if the value moved.
+    #[test]
+    fn the_isolines_slider_rebuilds_once_on_release_and_not_while_dragging() {
+        use crate::app::Message;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let seed = |app: &mut OpenCADStudio, i: usize| {
+            let stale = acadrust::Handle::new(0xBEEF);
+            app.tabs[i].scene.meshes.insert(stale, stale_mesh());
+            stale
+        };
+        let stale = seed(&mut app, i);
+
+        for value in [4i16, 3, 2, 1, 0] {
+            let _ = app.update(Message::IsolinesChanged(value));
+        }
+        assert!(
+            app.tabs[i].scene.meshes.contains_key(&stale),
+            "the drag itself must not rebuild the meshes",
+        );
+        assert_eq!(app.tabs[i].scene.document.header.isolines, 0);
+
+        let _ = app.update(Message::IsolinesReleased);
+        assert!(
+            !app.tabs[i].scene.meshes.contains_key(&stale),
+            "releasing after a change rebuilds them",
+        );
+
+        // A release with nothing changed since the last one is a click that
+        // moved nothing, and must not pay for a rebuild.
+        let stale = seed(&mut app, i);
+        let _ = app.update(Message::IsolinesChanged(0));
+        let _ = app.update(Message::IsolinesReleased);
+        assert!(
+            app.tabs[i].scene.meshes.contains_key(&stale),
+            "releasing without a change must rebuild nothing",
+        );
+    }
+
+    fn stale_mesh() -> crate::scene::model::mesh_model::MeshLodSet {
+        crate::scene::model::mesh_model::MeshLodSet {
+            lods: Vec::new(),
+            material: None,
+            face_materials: Default::default(),
+            visual_style: None,
+            complete: true,
+            edge_verts: Vec::new(),
+            edge_verts_low: Vec::new(),
+            curved_gens: Vec::new(),
+            metrics: Default::default(),
+            world_aabb: [0.0; 4],
+            z_aabb: [0.0; 2],
+            instance_source: None,
+            instance_transform: None,
+            instance_handle: None,
+            instance_color: None,
+            instance_aabb: None,
+        }
+    }
+}
+

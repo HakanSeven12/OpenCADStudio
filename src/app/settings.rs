@@ -145,6 +145,27 @@ pub(crate) fn snaps_from_osmode(osmode: i32) -> (Vec<SnapType>, bool) {
     (modes, osmode & OSMODE_SUPPRESS == 0)
 }
 
+fn deserialize_options_tab<'de, D>(
+    deserializer: D,
+) -> Result<crate::ui::window::options::OptionsTab, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use crate::ui::window::options::OptionsTab;
+    use serde::Deserialize;
+    let name = String::deserialize(deserializer).unwrap_or_default();
+    Ok(match name.as_str() {
+        "files" => OptionsTab::Files,
+        "open-and-save" => OptionsTab::OpenAndSave,
+        "display" => OptionsTab::Display,
+        "drafting" => OptionsTab::Drafting,
+        "modeling" => OptionsTab::Modeling,
+        "selection" => OptionsTab::Selection,
+        "user-preferences" => OptionsTab::UserPreferences,
+        _ => OptionsTab::General,
+    })
+}
+
 /// Render a drafting angle without a trailing `.0`, so `22.5` but `30`.
 ///
 /// The polar pop-up formats its presets the same way; both are showing the
@@ -183,6 +204,12 @@ pub struct UserSettings {
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
     /// Which Options page was showing when the dialog was last closed.
+    ///
+    /// Read leniently: `AppConfig::load` discards the *whole* file when any
+    /// field fails to parse, so a page name that no longer exists — a tab
+    /// renamed or merged away between versions — would silently reset every
+    /// setting the user has. An unknown name falls back to the first page.
+    #[serde(default, deserialize_with = "deserialize_options_tab")]
     pub options_tab: crate::ui::window::options::OptionsTab,
     /// Show the navigation cube (NAVVCUBE).
     pub show_viewcube: bool,
@@ -427,4 +454,29 @@ mod tests {
         let b: std::collections::HashSet<_> = back.into_iter().collect();
         assert_eq!(a, b);
     }
+
+    /// `AppConfig::load` throws the whole file away when any field fails to
+    /// parse, so a page name that no longer exists would quietly reset every
+    /// preference the user has. This branch removed the Drawing page, and
+    /// anyone who had it open when they last closed the dialog has that name
+    /// on disk.
+    #[test]
+    fn a_page_name_that_no_longer_exists_does_not_cost_the_other_settings() {
+        let json = r#"{
+            "settings": {
+                "options_tab": "drawing",
+                "pick_add": false,
+                "savetime_min": 42
+            }
+        }"#;
+        let cfg: crate::app::config::AppConfig =
+            serde_json::from_str(json).expect("an unknown page name must not fail the parse");
+        assert_eq!(
+            cfg.settings.options_tab,
+            crate::ui::window::options::OptionsTab::General,
+        );
+        assert!(!cfg.settings.pick_add, "the rest of the file must survive");
+        assert_eq!(cfg.settings.savetime_min, 42);
+    }
 }
+

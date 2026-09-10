@@ -517,6 +517,10 @@ pub(super) struct OpenCADStudio {
     crosshair_color: Option<[u8; 3]>,
     /// Editable Options buffer for the crosshair colour.
     crosshair_color_input: String,
+    /// Set while the isolines slider is being dragged with a value that
+    /// differs from the drawing's, so the costly mesh rebuild runs once on
+    /// release rather than on every pixel of the drag.
+    isolines_awaiting_regen: bool,
     /// Edit buffer for the SNAPANG field on the Options Drafting page. Kept
     /// separate from `snap_angle_deg` so a half-typed angle is not parsed.
     snap_angle_input: String,
@@ -2048,6 +2052,8 @@ pub enum Message {
     OpenFolder(String),
     /// Change isolines per surface in the current drawing (ISOLINES).
     IsolinesChanged(i16),
+    /// The isolines slider was released; rebuild the meshes if it moved.
+    IsolinesReleased,
     /// Toggle silhouette edges in the current drawing (DISPSILH).
     DispSilhChanged(bool),
     /// Change surface density U in the current drawing (SURFU).
@@ -3460,6 +3466,7 @@ impl OpenCADStudio {
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),
+            isolines_awaiting_regen: false,
             snap_angle_input: "0".to_string(),
             lineweight_display_scale: 100,
             isometric_drafting: false,

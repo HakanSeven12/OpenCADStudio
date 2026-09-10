@@ -191,7 +191,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             c.is_ascii_digit()
                                 || matches!(c, '.' | '-' | '+' | '*' | '/' | '^' | '%' | '(' | ')')
                         });
-                    if dyn_field_char && self.dyn_input && !self.tabs[i].dyn_fields.is_empty() {
+                    if dyn_field_char
+                        && self.command_line.input.is_empty()
+                        && self.dyn_input
+                        && !self.tabs[i].dyn_fields.is_empty()
+                    {
                         let a = self.tabs[i]
                             .dyn_active
                             .min(self.tabs[i].dyn_fields.len() - 1);
@@ -634,6 +638,30 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         .map(|c| c.is_free_text_step())
                         .unwrap_or(false);
                     let raw = self.command_line.input.trim().to_string();
+                    let is_mtp = raw.trim_start_matches('_').eq_ignore_ascii_case("MTP")
+                        || raw.trim_start_matches('_').eq_ignore_ascii_case("M2P");
+                    if is_mtp {
+                        let is_point_step = !self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .map(|c| c.input_kind().wants_text())
+                            .unwrap_or(true)
+                            || self.tabs[i]
+                                .active_cmd
+                                .as_ref()
+                                .map(|c| c.point_step_accepts_keywords())
+                                .unwrap_or(false);
+                        let not_entity_pick = !self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .map(|c| c.needs_entity_pick())
+                            .unwrap_or(false);
+                        if is_point_step && not_entity_pick {
+                            self.command_line.input.clear();
+                            self.start_mtp_modifier(i);
+                            return self.focus_cmd_input();
+                        }
+                    }
                     let text = if free_text {
                         raw
                     } else {

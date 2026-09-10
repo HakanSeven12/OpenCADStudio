@@ -671,6 +671,29 @@ impl OpenCADStudio {
             }
             return Task::none();
         }
+        let is_mtp = token.trim_start_matches('_').eq_ignore_ascii_case("MTP")
+            || token.trim_start_matches('_').eq_ignore_ascii_case("M2P");
+        if is_mtp {
+            let is_point_step = !self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.input_kind().wants_text())
+                .unwrap_or(true)
+                || self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.point_step_accepts_keywords())
+                    .unwrap_or(false);
+            let not_entity_pick = !self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.needs_entity_pick())
+                .unwrap_or(false);
+            if is_point_step && not_entity_pick {
+                self.start_mtp_modifier(i);
+                return Task::none();
+            }
+        }
         if let Some((coord, kind)) = super::helpers::parse_coord(token) {
             // Match the GUI command line: typed coordinates are in the active
             // UCS (relative offsets are rotated by the UCS axes), so a multi-
@@ -712,7 +735,22 @@ impl OpenCADStudio {
     /// pick-first selector relaunching MOVE on the picked set works this way).
     /// Pure-selection commands (SELECTALL, QSELECT, …) run without an active
     /// command, so `was_active` is false and their selection is preserved.
-    pub(super) fn apply_cmd_result(&mut self, result: CmdResult) -> Task<Message> {
+    pub(super) fn apply_cmd_result(&mut self, mut result: CmdResult) -> Task<Message> {
+        let i = self.active_tab;
+        if let CmdResult::ReturnPoint(pt) = result {
+            self.tabs[i].scene.clear_preview_wire();
+            if let Some(mut suspended) = self.tabs[i].suspended_cmd.take() {
+                self.last_point = Some(pt);
+                let next_res = suspended.on_point(pt);
+                self.tabs[i].active_cmd = Some(suspended);
+                result = next_res;
+            } else {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                return Task::none();
+            }
+        }
         let settings = self.tabs[self.active_tab]
             .active_cmd
             .as_ref()
@@ -875,6 +913,18 @@ impl OpenCADStudio {
             .push_info(&crate::command::CadCommand::prompt(&command));
         self.tabs[i].active_cmd = Some(Box::new(command));
         TableCellEditStart::Started
+    }
+
+    pub(in crate::app) fn start_mtp_modifier(&mut self, i: usize) {
+        let parent = self.tabs[i].active_cmd.take();
+        self.tabs[i].suspended_cmd = parent;
+        self.tabs[i].scene.clear_preview_wire();
+        let cmd = crate::command::Mid2PointCommand::new();
+        let prompt = crate::command::CadCommand::prompt(&cmd);
+        self.tabs[i].active_cmd = Some(Box::new(cmd));
+        self.command_line.push_info(&prompt);
+        self.command_line.set_step_options(Vec::new());
+        self.refresh_active_cmd_preview(i);
     }
 
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
@@ -2439,14 +2489,30 @@ impl OpenCADStudio {
             cancel @ (CmdResult::Cancel | CmdResult::CancelForSpaceChange) => {
                 let space_changed = matches!(cancel, CmdResult::CancelForSpaceChange);
                 self.tabs[i].scene.clear_preview_wire();
-                self.tabs[i].active_cmd = None;
-                self.tabs[i].snap_result = None;
-                self.restore_pre_cmd_tangent();
-                self.command_line.push_info(crate::t!(if space_changed {
-                    "Command cancelled because the active drawing space changed."
+                if !space_changed && self.tabs[i].suspended_cmd.is_some() {
+                    self.tabs[i].active_cmd = self.tabs[i].suspended_cmd.take();
+                    let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                    if let Some(p) = prompt {
+                        self.command_line.push_info(&p);
+                    }
+                    let opts = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|c| c.options())
+                        .unwrap_or_default();
+                    self.command_line.set_step_options(opts);
+                    self.refresh_active_cmd_preview(i);
                 } else {
-                    "Command cancelled."
-                }).as_ref());
+                    self.tabs[i].suspended_cmd = None;
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.restore_pre_cmd_tangent();
+                    self.command_line.push_info(crate::t!(if space_changed {
+                        "Command cancelled because the active drawing space changed."
+                    } else {
+                        "Command cancelled."
+                    }).as_ref());
+                }
             }
             CmdResult::SelectByPath {
                 path,
@@ -4746,6 +4812,12 @@ impl OpenCADStudio {
                     self.command_line
                         .push_error(crate::t!("DDEDIT: entity type not supported.").as_ref());
                 }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+            CmdResult::ReturnPoint(_) => {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();

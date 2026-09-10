@@ -256,7 +256,89 @@ impl RenderConvertible for Circle {
     }
 }
 
-crate::impl_entity_basics!(Circle);
+impl crate::entities::traits::Grippable for Circle {
+    fn grips(&self) -> Vec<GripDef> {
+        grips(self)
+    }
+
+    fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
+        apply_grip(self, grip_id, apply);
+    }
+
+    fn grip_menu(
+        &self,
+        grip_id: usize,
+    ) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+        let mut items = vec![GripMenuItem {
+            label: "Stretch",
+            action: GripMenuAction::Stretch,
+        }];
+        if (1..=4).contains(&grip_id) {
+            items.push(GripMenuItem {
+                label: "Radius",
+                action: GripMenuAction::Radius,
+            });
+        }
+        items
+    }
+
+    fn grip_menu_value_prompt(
+        &self,
+        _grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) -> Option<&'static str> {
+        matches!(action, crate::scene::model::object::GripMenuAction::Radius)
+            .then_some("New radius")
+    }
+
+    fn grip_menu_point_value(
+        &self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+        point: glam::DVec3,
+    ) -> Option<f64> {
+        if !matches!(action, crate::scene::model::object::GripMenuAction::Radius)
+            || !(1..=4).contains(&grip_id)
+        {
+            return None;
+        }
+        let plane = crate::entities::curve::circle_curve(self).plane;
+        let point = plane.project(point.to_array())?;
+        let radius = (point[0] - self.center.x).hypot(point[1] - self.center.y);
+        (radius > 1.0e-9).then_some(radius)
+    }
+
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+        value: f64,
+    ) {
+        if matches!(action, crate::scene::model::object::GripMenuAction::Radius)
+            && (1..=4).contains(&grip_id)
+            && value > 1.0e-9
+        {
+            self.radius = value;
+        }
+    }
+}
+
+impl crate::entities::traits::PropertyEditable for Circle {
+    fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
+        properties(self)
+    }
+
+    fn apply_geom_prop(&mut self, field: &str, value: &str) {
+        apply_geom_prop(self, field, value);
+    }
+}
+
+impl crate::entities::traits::Transformable for Circle {
+    fn apply_transform(&mut self, transform: &EntityTransform) {
+        apply_transform(self, transform);
+    }
+}
 
 impl crate::entities::traits::MassPropsCalc for Circle {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
@@ -275,6 +357,28 @@ impl crate::entities::traits::MassPropsCalc for Circle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quadrant_grips_offer_interactive_radius() {
+        use crate::entities::traits::Grippable;
+        use crate::scene::model::object::GripMenuAction;
+
+        let mut circle = Circle::default();
+        circle.radius = 2.0;
+
+        assert_eq!(circle.grip_menu(0).len(), 1);
+        assert!(circle
+            .grip_menu(1)
+            .iter()
+            .any(|item| item.action == GripMenuAction::Radius));
+        assert_eq!(
+            circle.grip_menu_value_prompt(1, GripMenuAction::Radius),
+            Some("New radius")
+        );
+
+        circle.apply_grip_menu_value(1, GripMenuAction::Radius, 5.0);
+        assert_eq!(circle.radius, 5.0);
+    }
 
     #[test]
     fn test_circle_segments_scales_with_zoom() {
@@ -361,4 +465,3 @@ mod tests {
         assert!(close_count > far_count, "{close_count} <= {far_count}");
     }
 }
-

@@ -11,6 +11,7 @@ fn tessellate_acis(
     facet_res: f64,
     chordal_deflection: Option<f64>,
     isolines: usize,
+    planar_isolines: bool,
 ) -> Option<MeshLodSet> {
     crate::scene::convert::acis_kernel::tessellate_sat(
         sat,
@@ -19,6 +20,7 @@ fn tessellate_acis(
         facet_res,
         chordal_deflection,
         isolines,
+        planar_isolines,
     )
 }
 
@@ -219,6 +221,7 @@ fn finish(
     facet_res: f64,
     chordal_deflection: Option<f64>,
     isolines: usize,
+    planar_isolines: bool,
     acis: &acadrust::entities::AcisData,
 ) -> Option<MeshLodSet> {
     let mut set = tessellate_acis(
@@ -228,6 +231,7 @@ fn finish(
         facet_res,
         chordal_deflection,
         isolines,
+        planar_isolines,
     )?;
     remap_acis_material_bindings(&mut set, acis);
     Some(set)
@@ -252,6 +256,7 @@ pub fn tessellate_region(
         facet_res,
         chordal_deflection,
         isolines,
+        false,
         &region.acis_data,
     )
 }
@@ -275,6 +280,7 @@ pub fn tessellate_body(
         facet_res,
         chordal_deflection,
         isolines,
+        false,
         &body.acis_data,
     )
 }
@@ -298,6 +304,7 @@ pub fn tessellate_surface(
         facet_res,
         chordal_deflection,
         isolines,
+        true,
         &surface.acis_data,
     )
 }
@@ -321,6 +328,7 @@ pub fn tessellate_solid3d(
         facet_res,
         chordal_deflection,
         isolines,
+        false,
         &solid.acis_data,
     )
 }

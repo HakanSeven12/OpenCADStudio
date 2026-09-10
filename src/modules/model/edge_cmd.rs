@@ -210,7 +210,7 @@ impl SolidEdgeCommand {
             )
             .ok()?,
         };
-        let mut wires = crate::scene::model::solid_model::grip_preview_wires(&result, handle);
+        let mut wires = crate::scene::model::solid_model::grip_preview_wires(&result, handle, 0);
         for wire in &mut wires {
             wire.color = self.preview_color;
             wire.name = format!("{}-{}-PREVIEW", handle.value(), self.name());

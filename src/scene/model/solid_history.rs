@@ -3537,21 +3537,32 @@ pub fn primitive_grips(
                 if let (Some(center), Some(base)) = (profile_center, matrix(value.base.transform)) {
                     let direction = base.transform_vector3(glam::DVec3::from_array(direction));
                     if direction.length_squared() > 1e-12 {
-                        grips.push(grip(
+                        let mut height_grip = grip(
                             GRIP_HEIGHT,
                             center + direction,
                             GripShape::Triangle,
                             Some(direction.normalize()),
-                        ));
+                        );
+                        if is_surface {
+                            // Surface construction arrows keep one stable screen
+                            // orientation while their world-space axis continues to
+                            // constrain the edit.
+                            height_grip.dir = None;
+                        }
+                        grips.push(height_grip);
                     }
                 }
                 if let Some((world, _, radial, _, _)) = extrusion_draft_grip(value) {
-                    grips.push(grip(
+                    let mut draft_grip = grip(
                         GRIP_DRAFT,
                         world,
                         GripShape::Triangle,
                         Some(radial),
-                    ));
+                    );
+                    if is_surface {
+                        draft_grip.dir = None;
+                    }
+                    grips.push(draft_grip);
                 }
             }
         }

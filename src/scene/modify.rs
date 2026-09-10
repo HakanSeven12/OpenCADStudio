@@ -1043,7 +1043,15 @@ impl Scene {
         }
         self.solid_history_preview_wires.insert(
             handle,
-            crate::scene::model::solid_model::grip_preview_wires(&body, handle),
+            crate::scene::model::solid_model::grip_preview_wires(
+                &body,
+                handle,
+                if matches!(self.document.get_entity(handle), Some(EntityType::Surface(_))) {
+                    self.document.header.isolines.max(0) as usize
+                } else {
+                    0
+                },
+            ),
         );
         true
     }

@@ -23,6 +23,7 @@ fn display_tessellation(
     facet_resolution: f64,
     chordal_deflection: Option<f64>,
     isolines: usize,
+    planar_isolines: bool,
 ) -> brep::mesh::BodyMesh {
     let resolution = if facet_resolution.is_finite() && facet_resolution > 0.0 {
         facet_resolution.clamp(0.01, 10.0)
@@ -34,7 +35,8 @@ fn display_tessellation(
         |_| cadkernel::tessellation::display_angle_for_resolution(resolution),
     );
     let mut tolerance = brep::mesh::TessellationTolerance::new(max_angle, TOL)
-        .with_isolines(isolines);
+        .with_isolines(isolines)
+        .with_planar_isolines(planar_isolines);
     if let Some(deflection) = chordal_deflection {
         tolerance = tolerance.with_chordal_deflection(deflection);
     }
@@ -267,20 +269,41 @@ pub fn edge_wires(body: &Body) -> Vec<acadrust::entities::Wire> {
         .collect()
 }
 
-/// White wireframe used while a solid-history grip is hot.
+/// White wireframe used while a solid-history grip is hot. Surface previews
+/// include the requested construction isolines so their cage follows the edit.
 ///
 /// This deliberately does not touch the resident solid mesh or its entity
 /// wires: the selected source stays visible in blue while the candidate body
 /// is presented as a separate, non-pickable outline until placement.
-pub fn grip_preview_wires(body: &Body, handle: acadrust::Handle) -> Vec<WireModel> {
-    tessellation(body)
+pub fn grip_preview_wires(
+    body: &Body,
+    handle: acadrust::Handle,
+    isolines: usize,
+) -> Vec<WireModel> {
+    let tessellation = brep::mesh::tessellate(
+        body,
+        brep::mesh::TessellationTolerance::new(
+            cadkernel::tessellation::DEFAULT_ANGLE,
+            TOL,
+        )
+        .with_isolines(isolines)
+        .with_planar_isolines(isolines > 0),
+    );
+    tessellation
         .edges
         .into_iter()
-        .filter(|edge| edge.positions.len() >= 2)
-        .map(|edge| {
+        .map(|edge| edge.positions)
+        .chain(
+            tessellation
+                .isolines
+                .into_iter()
+                .map(|isoline| isoline.positions),
+        )
+        .filter(|positions| positions.len() >= 2)
+        .map(|positions| {
             WireModel::solid_f64(
                 format!("{}-GRIP-PREVIEW", handle.value()),
-                edge.positions,
+                positions,
                 WireModel::WHITE,
                 false,
             )
@@ -454,6 +477,7 @@ pub fn display_from_solid(
     facet_resolution: f64,
     chordal_deflection: Option<f64>,
     isolines: usize,
+    planar_isolines: bool,
 ) -> Option<(MeshLodSet, Vec<acadrust::entities::Wire>, [f64; 3])> {
     use acadrust::types::Vector3;
     let tessellation = display_tessellation(
@@ -461,6 +485,7 @@ pub fn display_from_solid(
         facet_resolution,
         chordal_deflection,
         isolines,
+        planar_isolines,
     );
     let center = mesh_center(&tessellation.mesh)?;
     let wires = tessellation
@@ -541,7 +566,7 @@ mod tests {
     use super::*;
 
     fn tri_count(body: &Body) -> usize {
-        display_from_solid(body, [0.7, 0.7, 0.7, 1.0], 1.0, None, 0)
+        display_from_solid(body, [0.7, 0.7, 0.7, 1.0], 1.0, None, 0, false)
             .map(|(m, _, _)| m.lods[0].indices.len() / 3)
             .unwrap_or(0)
     }

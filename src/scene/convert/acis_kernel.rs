@@ -25,6 +25,7 @@ pub fn tessellate_sat(
     facet_res: f64,
     chordal_deflection: Option<f64>,
     isolines: usize,
+    planar_isolines: bool,
 ) -> Option<MeshLodSet> {
     let (bodies, loss) = lift(document);
     if bodies.is_empty() {
@@ -114,7 +115,8 @@ pub fn tessellate_sat(
             max_angle,
             source_fit * placement_scale,
         )
-        .with_isolines(isolines);
+        .with_isolines(isolines)
+        .with_planar_isolines(planar_isolines);
         if let Some(deflection) = chordal_deflection {
             tolerance = tolerance.with_chordal_deflection(deflection);
         }

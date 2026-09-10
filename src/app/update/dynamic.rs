@@ -65,19 +65,30 @@ impl OpenCADStudio {
 
         // A normal 2D grip stretch behaves like a point-placement step:
         // distance and angle are measured from the grip's original position.
+        // Lengthen uses the same overlay machinery, but it only needs the
+        // distance field: the entity itself determines the endpoint direction
+        // (or arc sweep), so an angle entry would be misleading.
         //
         // Grip editing is not an `active_cmd`, so handle it before the normal
         // command-only path below.
         let grip_origin = self.tabs[i]
             .active_grip
             .as_ref()
-            .filter(|grip| {
-                grip.mode == crate::scene::pick::grip::GripEditMode::Stretch
-            })
-            .map(|grip| grip.origin_world);
+            .map(|grip| match grip.mode {
+                crate::scene::pick::grip::GripEditMode::Stretch => {
+                    (grip.origin_world, false)
+                }
+                crate::scene::pick::grip::GripEditMode::Lengthen => {
+                    (grip.origin_world, true)
+                }
+            });
 
-        if let Some(origin) = grip_origin {
-            let wanted = [DynComponent::Distance, DynComponent::Angle];
+        if let Some((origin, lengthen)) = grip_origin {
+            let wanted: &[DynComponent] = if lengthen {
+                &[DynComponent::Distance]
+            } else {
+                &[DynComponent::Distance, DynComponent::Angle]
+            };
             let current: Vec<DynComponent> = self.tabs[i]
                 .dyn_fields
                 .iter()
@@ -86,13 +97,18 @@ impl OpenCADStudio {
 
             if current.as_slice() != wanted {
                 self.tabs[i].dyn_fields = wanted
-                    .into_iter()
+                    .iter()
+                    .copied()
                     .map(DynFieldEntry::new)
                     .collect();
                 self.tabs[i].dyn_active = 0;
             }
 
-            self.tabs[i].dyn_guide = crate::command::DynGuide::Polar;
+            self.tabs[i].dyn_guide = if lengthen {
+                crate::command::DynGuide::Radius
+            } else {
+                crate::command::DynGuide::Polar
+            };
             self.tabs[i].dyn_anchor = Some(origin);
             self.tabs[i].dyn_ref = None;
             return;

@@ -927,7 +927,23 @@ bg={bg_ms:.1}ms n={view_count}"
                 // A command may drive a typed scalar by mouse (e.g. a
                 // perpendicular distance to a picked object); show that live
                 // value in the box until the user types over it.
-                let live = tab.active_cmd.as_ref().and_then(|c| c.dyn_live_value(w));
+                let live = tab.active_cmd.as_ref().and_then(|c| c.dyn_live_value(w)).or_else(|| {
+                    let grip = tab.active_grip.as_ref()?;
+                    if grip.mode != crate::scene::pick::grip::GripEditMode::Lengthen {
+                        return None;
+                    }
+                    let original = self
+                        .grip_originals
+                        .iter()
+                        .find(|(handle, _)| *handle == grip.handle)
+                        .map(|(_, entity)| entity)?;
+                    crate::scene::view::dispatch::grip_menu_point_value(
+                        original,
+                        grip.grip_id,
+                        crate::scene::model::object::GripMenuAction::Lengthen,
+                        w,
+                    )
+                });
                 let boxes: Vec<crate::ui::overlay::DynBox> = tab
                     .dyn_fields
                     .iter()

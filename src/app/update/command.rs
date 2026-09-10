@@ -283,7 +283,15 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.cancel_active_grip_edit();
                         return Task::none();
                     }
-                    let raw = crate::app::expr_eval::eval_to_string(self.command_line.input.trim());
+                    // Dynamic Input keeps numeric typing in its focused field.
+                    // Fall back to the command-line buffer so the established
+                    // prompt workflow remains unchanged when DYN is disabled.
+                    let dyn_value = self.tabs[i]
+                        .dyn_fields
+                        .iter()
+                        .find_map(|field| field.buffer.as_deref());
+                    let entered = dyn_value.unwrap_or(self.command_line.input.trim());
+                    let raw = crate::app::expr_eval::eval_to_string(entered);
                     self.command_line.input.clear();
                     let Ok(v) = raw.parse::<f64>() else {
                         self.command_line.push_error(crate::tf!(
@@ -1321,6 +1329,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 grip.world,
                             ));
                         }
+                        // Popup actions do not pass through the normal grip
+                        // press handler, which is where dynamic fields are
+                        // usually seeded. Build the Lengthen distance field
+                        // immediately so it is visible before the next mouse
+                        // move (and so keyboard input has a field to target).
+                        self.sync_dyn_fields();
                         self.command_line
                             .push_info(crate::t!("Specify point or enter distance:").as_ref());
                     } else {

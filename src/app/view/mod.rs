@@ -1712,9 +1712,11 @@ bg={bg_ms:.1}ms n={view_count}"
         // viewport stack rather than as a separate row in the main
         // column — frees up vertical space when no command is active
         // and keeps the input close to where the cursor is drawing.
-        // Autocomplete shows only when no command is collecting its
-        // own input (otherwise typed prefixes are coordinates / values).
-        let allow_autocomplete = tab.active_cmd.is_none();
+        // Autocomplete shows only when no command or grip-menu action is
+        // collecting its own input. A pending Lengthen / Radius / Arc Length
+        // value is numeric input, not the prefix of a new command (for example,
+        // `3` must not open the 3DALIGN / 3DARRAY suggestions).
+        let allow_autocomplete = tab.active_cmd.is_none() && self.grip_pending.is_none();
         // Dynamic input captures keystrokes when its fields are showing,
         // so the command-line field must release focus / its on_input.
         // The MText preview also captures keystrokes (typing edits it), so the

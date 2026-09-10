@@ -162,7 +162,7 @@ pub(super) struct RenderModeChoice(pub acadrust::entities::ViewportRenderMode);
 
 impl std::fmt::Display for RenderModeChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(crate::modules::view::visual_style::label_for(self.0))
+        f.write_str(crate::t!(crate::modules::view::visual_style::label_for(self.0)).as_ref())
     }
 }
 

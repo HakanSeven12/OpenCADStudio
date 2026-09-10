@@ -207,32 +207,48 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>) -> bool {
     let is_full_or_in_sweep = (sweep >= TAU - 1e-5) || (d_theta <= sweep);
 
     if in.is_world > 0.5 {
-        // Physical world-unit width (thick analytical circular arcs, donuts, tapered segments).
-        // Distance-to-edge calculations are strictly performed in the circle plane's world units
-        // so that 3D perspective projection yields exact concentric ellipses with invariant
-        // physical stroke widths across any camera tilt or acute perspective angle.
-        if is_full_or_in_sweep {
-            let t = select(0.0, clamp(d_theta / sweep, 0.0, 1.0), sweep > 1e-5);
-            let world_hw = mix(in.hw_ends.x, in.hw_ends.y, t);
-            let eff_hw = max(world_hw, 0.5 * fw);
+        let is_full = sweep >= TAU - 1e-5;
+        if is_full {
+            let eff_hw = max(in.hw_ends.x, 0.5 * fw);
             let d_world = abs(r - in.radius);
             let delta_px = (eff_hw - d_world) / fw;
             let cov = clamp(0.5 + delta_px, 0.0, 1.0);
-            let subpixel_fade = min(1.0, (2.0 * world_hw) / fw);
+            let subpixel_fade = min(1.0, (2.0 * in.hw_ends.x) / fw);
             alpha_cov = cov * subpixel_fade;
             arc_dist = in.radius * d_theta;
         } else {
-            // Outside sweep: evaluate distance to start and end endpoints for smooth round end caps
-            let p_start = in.radius * vec2<f32>(cos(sa), sin(sa));
-            let p_end = in.radius * vec2<f32>(cos(ea), sin(ea));
-            let d_start = length(in.local_pos - p_start);
-            let d_end = length(in.local_pos - p_end);
-            let eff_hw_a = max(in.hw_ends.x, 0.5 * fw);
-            let eff_hw_b = max(in.hw_ends.y, 0.5 * fw);
-            let cov_start = clamp(0.5 + (eff_hw_a - d_start) / fw, 0.0, 1.0) * min(1.0, (2.0 * in.hw_ends.x) / fw);
-            let cov_end = clamp(0.5 + (eff_hw_b - d_end) / fw, 0.0, 1.0) * min(1.0, (2.0 * in.hw_ends.y) / fw);
-            alpha_cov = max(cov_start, cov_end);
-            arc_dist = select(in.radius * sweep, 0.0, cov_start >= cov_end);
+            // Flat (radial) end caps perpendicular to arc tangent at start_angle and end_angle.
+            let d_start_rad = r * d_theta;
+            let d_end_rad = r * (sweep - d_theta);
+            let d_before_sa = r * mod_tau(sa - theta);
+            let d_after_ea = r * mod_tau(theta - ea);
+
+            var cov_angular: f32 = 0.0;
+            var world_hw: f32 = 0.0;
+
+            if is_full_or_in_sweep {
+                let t = select(0.0, clamp(d_theta / sweep, 0.0, 1.0), sweep > 1e-5);
+                world_hw = mix(in.hw_ends.x, in.hw_ends.y, t);
+                let d_inside = min(d_start_rad, d_end_rad);
+                cov_angular = clamp(0.5 + d_inside / fw, 0.0, 1.0);
+                arc_dist = in.radius * d_theta;
+            } else {
+                let d_outside = min(d_before_sa, d_after_ea);
+                if d_outside <= 0.5 * fw {
+                    cov_angular = clamp(0.5 - d_outside / fw, 0.0, 1.0);
+                    world_hw = select(in.hw_ends.y, in.hw_ends.x, d_before_sa <= d_after_ea);
+                    arc_dist = select(in.radius * sweep, 0.0, d_before_sa <= d_after_ea);
+                }
+            }
+
+            if cov_angular > 0.0 {
+                let eff_hw = max(world_hw, 0.5 * fw);
+                let d_world = abs(r - in.radius);
+                let delta_px = (eff_hw - d_world) / fw;
+                let cov_radial = clamp(0.5 + delta_px, 0.0, 1.0);
+                let subpixel_fade = min(1.0, (2.0 * world_hw) / fw);
+                alpha_cov = cov_radial * cov_angular * subpixel_fade;
+            }
         }
     } else {
         // Lineweight stroke (screen-pixel width)

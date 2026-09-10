@@ -199,6 +199,16 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .buffer
                             .get_or_insert_with(String::new)
                             .push_str(&s);
+                        if self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
+                            matches!(
+                                grip.mode,
+                                GripEditMode::Lengthen
+                                    | GripEditMode::Radius
+                                    | GripEditMode::ArcLength
+                            )
+                        }) {
+                            self.command_line.input.push_str(&s);
+                        }
                     } else {
                         // Command-line entry is shown uppercase — except in
                         // free-form text prompts, where the typed case is the
@@ -242,6 +252,16 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         if buf.is_empty() {
                             self.tabs[i].dyn_fields[a].buffer = None;
                         }
+                        if self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
+                            matches!(
+                                grip.mode,
+                                GripEditMode::Lengthen
+                                    | GripEditMode::Radius
+                                    | GripEditMode::ArcLength
+                            )
+                        }) {
+                            self.command_line.input.pop();
+                        }
                         return self.focus_cmd_input();
                     }
                 }
@@ -277,13 +297,49 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 }
                 // Grip-menu value prompt — consume the typed number and
                 // route it through `apply_grip_menu_value`.
+                // Interactive grip prompts are valid only while their matching
+                // grip edit is alive. Do not let a stale Radius / Lengthen /
+                // Arc Length prompt consume Enter or coordinates from a later
+                // drawing command.
+                let stale_interactive_grip_prompt = self.grip_pending.as_ref().is_some_and(|pending| {
+                    let expected_mode = match pending.action {
+                        crate::scene::model::object::GripMenuAction::Lengthen => {
+                            Some(GripEditMode::Lengthen)
+                        }
+                        crate::scene::model::object::GripMenuAction::Radius => {
+                            Some(GripEditMode::Radius)
+                        }
+                        crate::scene::model::object::GripMenuAction::ArcLength => {
+                            Some(GripEditMode::ArcLength)
+                        }
+                        _ => None,
+                    };
+                    expected_mode.is_some_and(|mode| {
+                        !self.tabs[self.active_tab].active_grip.as_ref().is_some_and(|grip| {
+                            grip.mode == mode
+                                && grip.handle == pending.handle
+                                && grip.grip_id == pending.grip_id
+                        })
+                    })
+                });
+                if stale_interactive_grip_prompt {
+                    self.grip_pending = None;
+                }
                 if let Some(pending) = self.grip_pending.take() {
                     let i = self.active_tab;
                     if self.reject_locked_edit(i, pending.handle) {
                         self.cancel_active_grip_edit();
                         return Task::none();
                     }
-                    let raw = crate::app::expr_eval::eval_to_string(self.command_line.input.trim());
+                    // Dynamic Input keeps numeric typing in its focused field.
+                    // Fall back to the command-line buffer so the established
+                    // prompt workflow remains unchanged when DYN is disabled.
+                    let dyn_value = self.tabs[i]
+                        .dyn_fields
+                        .iter()
+                        .find_map(|field| field.buffer.as_deref());
+                    let entered = dyn_value.unwrap_or(self.command_line.input.trim());
+                    let raw = crate::app::expr_eval::eval_to_string(entered);
                     self.command_line.input.clear();
                     let Ok(v) = raw.parse::<f64>() else {
                         self.command_line.push_error(crate::tf!(
@@ -293,15 +349,27 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.grip_pending = Some(pending);
                         return self.focus_cmd_input();
                     };
-                    let interactive_lengthen = self.tabs[i]
+                    let interactive_value_grip = self.tabs[i]
                         .active_grip
                         .as_ref()
                         .is_some_and(|grip| {
-                            grip.mode == GripEditMode::Lengthen
+                            matches!(
+                                (grip.mode, pending.action),
+                                (
+                                    GripEditMode::Lengthen,
+                                    crate::scene::model::object::GripMenuAction::Lengthen,
+                                ) | (
+                                    GripEditMode::Radius,
+                                    crate::scene::model::object::GripMenuAction::Radius,
+                                ) | (
+                                    GripEditMode::ArcLength,
+                                    crate::scene::model::object::GripMenuAction::ArcLength,
+                                )
+                            )
                                 && grip.handle == pending.handle
                                 && grip.grip_id == pending.grip_id
                         });
-                    if interactive_lengthen {
+                    if interactive_value_grip {
                         self.cancel_active_grip_edit();
                     }
                     use crate::entities::traits::EntityTypeOps;
@@ -1306,7 +1374,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         action: item.action,
                         label,
                     });
-                    if matches!(item.action, GripMenuAction::Lengthen) {
+                    if matches!(
+                        item.action,
+                        GripMenuAction::Lengthen
+                            | GripMenuAction::Radius
+                            | GripMenuAction::ArcLength
+                    ) {
                         if let Some((_, grip)) = self.tabs[i]
                             .selected_grip_handles
                             .iter()
@@ -1315,14 +1388,52 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 **owner == popup.handle && grip.id == popup.grip_id
                             })
                         {
-                            self.tabs[i].active_grip = Some(GripEdit::lengthen(
-                                popup.handle,
-                                popup.grip_id,
-                                grip.world,
-                            ));
+                            if self.grip_originals.is_empty() {
+                                self.grip_originals = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .get_entity(popup.handle)
+                                    .cloned()
+                                    .map(|entity| vec![(popup.handle, entity)])
+                                    .unwrap_or_default();
+                            }
+                            self.tabs[i].active_grip = Some(match item.action {
+                                GripMenuAction::Radius => GripEdit::radius(
+                                    popup.handle,
+                                    popup.grip_id,
+                                    grip.world,
+                                ),
+                                GripMenuAction::ArcLength => GripEdit::arc_length(
+                                    popup.handle,
+                                    popup.grip_id,
+                                    grip.world,
+                                ),
+                                _ => GripEdit::lengthen(
+                                    popup.handle,
+                                    popup.grip_id,
+                                    grip.world,
+                                ),
+                            });
                         }
-                        self.command_line
-                            .push_info(crate::t!("Specify point or enter distance:").as_ref());
+                        // Popup actions do not pass through the normal grip
+                        // press handler, which is where dynamic fields are
+                        // usually seeded. Build the value field
+                        // immediately so it is visible before the next mouse
+                        // move (and so keyboard input has a field to target).
+                        self.sync_dyn_fields();
+                        if matches!(item.action, GripMenuAction::Radius) {
+                            self.command_line.push_info(
+                                crate::t!("Specify point or enter radius:").as_ref(),
+                            );
+                        } else if matches!(item.action, GripMenuAction::ArcLength) {
+                            self.command_line.push_info(
+                                crate::t!("Specify point or enter arc length:").as_ref(),
+                            );
+                        } else {
+                            self.command_line.push_info(
+                                crate::t!("Specify point or enter distance:").as_ref(),
+                            );
+                        }
                     } else {
                         self.command_line.push_info(crate::tf!("{label}:").as_ref());
                     }
@@ -1443,24 +1554,25 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     }
                 }
                 // One-shot action — apply immediately.
-                let unchanged = self.tabs[i]
-                    .scene
-                    .document
-                    .get_entity(popup.handle)
-                    .is_some_and(|entity| match (item.action, entity) {
-                        (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
-                            !spline.cv_frame_visible
-                                && crate::entities::spline::uses_fit_method(spline)
-                        }
-                        (
-                            GripMenuAction::ShowControlVertices,
-                            acadrust::EntityType::Spline(spline),
-                        ) => {
-                            spline.cv_frame_visible
-                                || !crate::entities::spline::uses_fit_method(spline)
-                        }
-                        _ => false,
-                    });
+                let unchanged = item.label.starts_with('✓')
+                    || self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(popup.handle)
+                        .is_some_and(|entity| match (item.action, entity) {
+                            (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
+                                !spline.cv_frame_visible
+                                    && crate::entities::spline::uses_fit_method(spline)
+                            }
+                            (
+                                GripMenuAction::ShowControlVertices,
+                                acadrust::EntityType::Spline(spline),
+                            ) => {
+                                spline.cv_frame_visible
+                                    || !crate::entities::spline::uses_fit_method(spline)
+                            }
+                            _ => false,
+                        });
                 if unchanged {
                     return Task::none();
                 }
@@ -2002,7 +2114,51 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
             }
             self.push_undo_snapshot(i, "CHPROP");
 
-            if crate::scene::model::solid_history::is_loft_geometry_choice(field) {
+            if crate::scene::model::solid_history::is_surface_property_choice(field) {
+                use crate::scene::model::solid_history::{
+                    PROP_SURFACE_MAINTAIN_ASSOCIATIVITY, PROP_SURFACE_SHOW_ASSOCIATIVITY,
+                    PROP_SURFACE_WIREFRAME_TYPE,
+                };
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    let Some(mut state) = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .and_then(|entity| match entity {
+                            acadrust::EntityType::Surface(surface) => Some(
+                                crate::entities::solid3d::surface_property_state(surface),
+                            ),
+                            _ => None,
+                        })
+                    else {
+                        continue;
+                    };
+                    match field {
+                        PROP_SURFACE_WIREFRAME_TYPE => {
+                            state.isolines = !value.eq_ignore_ascii_case("Isoparms")
+                        }
+                        PROP_SURFACE_MAINTAIN_ASSOCIATIVITY => {
+                            state.maintain_associativity = value.eq_ignore_ascii_case("Yes")
+                        }
+                        PROP_SURFACE_SHOW_ASSOCIATIVITY => {
+                            state.show_associativity = value.eq_ignore_ascii_case("Yes")
+                        }
+                        _ => continue,
+                    }
+                    crate::scene::view::dispatch::set_entity_xdata(
+                        &mut self.tabs[i].scene.document,
+                        handle,
+                        crate::entities::solid3d::SURFACE_PROPERTIES_APP,
+                        Some(crate::entities::solid3d::surface_property_xdata_values(state)),
+                    );
+                    if field == PROP_SURFACE_WIREFRAME_TYPE {
+                        self.tabs[i].scene.reseed_derived_caches(handle);
+                    }
+                }
+            } else if crate::scene::model::solid_history::is_loft_geometry_choice(field) {
                 // These choices change the generated body, not just history
                 // flags. Use the same transactional rebuild as numeric edits.
                 for &handle in &handles {
@@ -2979,6 +3135,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                         );
                                                     }
                                                 }
+                                            }
+                                            if matches!(field, "srf_u_isolines" | "srf_v_isolines")
+                                            {
+                                                self.tabs[i].scene.reseed_derived_caches(handle);
                                             }
                                         }
                                     }

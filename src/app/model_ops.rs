@@ -402,6 +402,24 @@ impl super::OpenCADStudio {
         self.add_surface_model_inner(entity, surface, true)
     }
 
+    pub(super) fn add_surface_model_with_history(
+        &mut self,
+        entity: EntityType,
+        surface: Body,
+        history: SolidHistoryOperation,
+    ) -> Handle {
+        let i = self.active_tab;
+        let handle = self.add_surface_model_inner(entity, surface, true);
+        if handle.is_null() {
+            return handle;
+        }
+        if !self.tabs[i].scene.create_solid_history(handle, history) {
+            self.tabs[i].scene.rollback_new_entities(&[handle]);
+            return Handle::NULL;
+        }
+        handle
+    }
+
     fn add_surface_model_preserving_style(
         &mut self,
         entity: EntityType,

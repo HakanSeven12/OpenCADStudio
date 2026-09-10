@@ -62,7 +62,7 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::ImagePick));
             }
 
-            "REVCLOUD" => {
+            "REVCLOUD" | "REVCLOUD_RECTANGULAR" | "REVCLOUD_POLYGONAL" | "REVCLOUD_FREEHAND" => {
                 use crate::modules::draw::draw::revcloud::RevCloudCommand;
                 let view_height = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0;
                 let default_arc_length = (view_height * 0.0125).max(1.0e-6);
@@ -72,9 +72,12 @@ impl OpenCADStudio {
                     .entities()
                     .map(|entity| (entity.common().handle, entity.clone()))
                     .collect();
-                let cmd = RevCloudCommand::new(default_arc_length, sources);
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                let mut command = RevCloudCommand::new(default_arc_length, sources);
+                if let Some(mode) = cmd.strip_prefix("REVCLOUD_") {
+                    command.on_text_input(mode);
+                }
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "ATTDEF" => {
@@ -872,9 +875,13 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "SPLINE" => {
+            "SPLINE" | "SPLINECV" => {
                 use crate::modules::draw::draw::spline::SplineCommand;
-                let new_cmd = SplineCommand::new();
+                let new_cmd = if cmd == "SPLINECV" {
+                    SplineCommand::control_vertices()
+                } else {
+                    SplineCommand::new()
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -1110,6 +1117,13 @@ impl OpenCADStudio {
             // REGION — convert selected closed boundaries (closed polylines /
             // circles) into Region entities (one wire loop each).
             "REGION" | "REG" => {
+                if self.tabs[i].scene.selected_entities().is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let command = SelectObjectsCommand::new("REGION");
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                    return Some(iced::Task::none());
+                }
                 use acadrust::entities::Region;
                 use acadrust::types::Vector3;
                 let mut regions = Vec::new();

@@ -1124,6 +1124,128 @@
       "handle": "Entity",
       "methods": [],
       "name": "Table"
+    },
+    {
+      "acadrust_variant": "XRecord",
+      "collection": "entities",
+      "constructors": [
+        {
+          "args": [
+            {
+              "name": "spec",
+              "ty": "XRecordSpec"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "name": "create_xrecord",
+          "op": "CreateXRecord",
+          "returns": "XRecord"
+        }
+      ],
+      "handle": "XRecord",
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "payload",
+          "op": null,
+          "query": "GetXRecord",
+          "read_only": true,
+          "returns": "XRecordSpec"
+        },
+        {
+          "args": [
+            {
+              "name": "spec",
+              "ty": "XRecordSpec"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "set_payload",
+          "op": "SetXRecord",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        }
+      ],
+      "name": "XRecord"
+    },
+    {
+      "acadrust_variant": null,
+      "collection": "layers",
+      "constructors": [],
+      "handle": "Layer",
+      "methods": [
+        {
+          "args": [],
+          "bulk": false,
+          "fixed": null,
+          "kind": "query",
+          "name": "list",
+          "op": null,
+          "query": "ListLayers",
+          "read_only": true,
+          "returns": "Vec<LayerInfo>"
+        },
+        {
+          "args": [
+            {
+              "name": "info",
+              "ty": "LayerInfo"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "create",
+          "op": "CreateLayer",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        },
+        {
+          "args": [
+            {
+              "name": "name",
+              "ty": "String"
+            },
+            {
+              "name": "info",
+              "ty": "LayerInfo"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "update",
+          "op": "UpdateLayer",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        },
+        {
+          "args": [
+            {
+              "name": "name",
+              "ty": "String"
+            }
+          ],
+          "bulk": false,
+          "fixed": null,
+          "kind": "op",
+          "name": "delete",
+          "op": "DeleteLayer",
+          "query": null,
+          "read_only": false,
+          "returns": "()"
+        }
+      ],
+      "name": "Layer"
     }
   ],
   "layouts": {
@@ -1164,7 +1286,15 @@
         "CreateDimensionAngular(DimensionAngularSpec)",
         "CreateAttributeDefinition(AttributeDefinitionSpec)",
         "CreateTable(TableSpec)",
-        "CreateDimensionAngular2Ln(DimensionAngularSpec)"
+        "CreateDimensionAngular2Ln(DimensionAngularSpec)",
+        "SetXData { id: ObjectId, application_name: String, record: Option<XDataRecord> }",
+        "CreateXRecord(XRecordSpec)",
+        "SetXRecord { id: ObjectId, spec: XRecordSpec }",
+        "CreateLayer(LayerInfo)",
+        "UpdateLayer { name: String, info: LayerInfo }",
+        "DeleteLayer { name: String }",
+        "SetEntityLayer { id: ObjectId, layer: String }",
+        "SetXDataMany(Vec<(ObjectId, String, Option<XDataRecord)>)"
       ]
     },
     "Query": {
@@ -1180,7 +1310,11 @@
         "GetDimensionMeasurement { id: ObjectId }",
         "GetAttributes { id: ObjectId }",
         "GetBlockEntities { block_name: String }",
-        "GetViewportView { id: ObjectId }"
+        "GetViewportView { id: ObjectId }",
+        "GetXData { id: ObjectId, application_name: String }",
+        "GetXRecord { id: ObjectId }",
+        "ListLayers",
+        "GetEntityLayer { id: ObjectId }"
       ]
     }
   },
@@ -1205,7 +1339,9 @@
       "XLine",
       "Text",
       "MText",
-      "Dimension"
+      "Dimension",
+      "XRecord",
+      "Layer"
     ],
     "root": "DocApi"
   },

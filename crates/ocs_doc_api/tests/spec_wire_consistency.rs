@@ -38,7 +38,8 @@ fn spec() -> Spec {
 /// The variant names of the `Operation` enum, in declaration order.
 fn operation_variants() -> Vec<String> {
     use ocs_doc_api::ops::{
-        BoolOp, Curve2Spec, InsertSpec, Operation, PlacementSpec, SolidPrimitive, ViewportSpec,
+        BoolOp, Curve2Spec, InsertSpec, LayerInfo, Operation, PlacementSpec, SolidPrimitive,
+        ViewportSpec,
     };
     use ocs_doc_api::ObjectId;
     let _marker: Vec<Operation> = vec![
@@ -46,7 +47,10 @@ fn operation_variants() -> Vec<String> {
             centre: [0.0; 3],
             radius: 1.0,
         }),
-        Operation::CreateCurve(Curve2Spec::Point { position: [0.0; 3] }),
+        Operation::CreateCurve(Curve2Spec::Point {
+            position: [0.0; 3],
+            layer: None,
+        }),
         Operation::Extrude {
             profile: ObjectId::from_u64(0),
             direction: [0.0; 3],
@@ -167,6 +171,37 @@ fn operation_variants() -> Vec<String> {
             second_point: [0.0; 3],
             arc_location: [0.0; 3],
         }),
+        Operation::SetXData {
+            id: ObjectId::from_u64(0),
+            application_name: String::new(),
+            record: None,
+        },
+        Operation::SetXDataMany(vec![]),
+        Operation::CreateXRecord(ocs_doc_api::ops::XRecordSpec {
+            name: String::new(),
+            cloning_flags: ocs_doc_api::ops::XRecordCloningFlags::NotApplicable,
+            entries: vec![],
+        }),
+        Operation::SetXRecord {
+            id: ObjectId::from_u64(0),
+            spec: ocs_doc_api::ops::XRecordSpec {
+                name: String::new(),
+                cloning_flags: ocs_doc_api::ops::XRecordCloningFlags::NotApplicable,
+                entries: vec![],
+            },
+        },
+        Operation::CreateLayer(LayerInfo::new("LAYER")),
+        Operation::UpdateLayer {
+            name: String::new(),
+            info: LayerInfo::new("LAYER"),
+        },
+        Operation::DeleteLayer {
+            name: String::new(),
+        },
+        Operation::SetEntityLayer {
+            id: ObjectId::from_u64(0),
+            layer: String::new(),
+        },
     ];
     _marker
         .iter()
@@ -178,7 +213,7 @@ fn operation_variants() -> Vec<String> {
                 index
             );
             let dbg = format!("{:?}", op);
-            dbg.split(|c: char| c == '(' || c == ' ' || c == '{')
+            dbg.split(['(', ' ', '{'])
                 .next()
                 .unwrap_or("")
                 .to_string()
@@ -226,6 +261,17 @@ fn query_variants() -> Vec<String> {
         Query::GetViewportView {
             id: ObjectId::from_u64(0),
         },
+        Query::GetXData {
+            id: ObjectId::from_u64(0),
+            application_name: String::new(),
+        },
+        Query::GetXRecord {
+            id: ObjectId::from_u64(0),
+        },
+        Query::ListLayers,
+        Query::GetEntityLayer {
+            id: ObjectId::from_u64(0),
+        },
     ];
     marker
         .iter()
@@ -237,7 +283,7 @@ fn query_variants() -> Vec<String> {
                 index
             );
             let dbg = format!("{:?}", q);
-            dbg.split(|c: char| c == '(' || c == ' ' || c == '{')
+            dbg.split(['(', ' ', '{'])
                 .next()
                 .unwrap_or("")
                 .to_string()
@@ -309,6 +355,14 @@ const OPERATION_BASELINE: &[&str] = &[
     "CreateAttributeDefinition",
     "CreateTable",
     "CreateDimensionAngular2Ln",
+    "SetXData",
+    "SetXDataMany",
+    "CreateXRecord",
+    "SetXRecord",
+    "CreateLayer",
+    "UpdateLayer",
+    "DeleteLayer",
+    "SetEntityLayer",
 ];
 
 /// Recorded baseline of the `Query` variant order.
@@ -325,6 +379,10 @@ const QUERY_BASELINE: &[&str] = &[
     "GetAttributes",
     "GetBlockEntities",
     "GetViewportView",
+    "GetXData",
+    "GetXRecord",
+    "ListLayers",
+    "GetEntityLayer",
 ];
 
 #[test]

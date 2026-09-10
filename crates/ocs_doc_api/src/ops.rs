@@ -8,12 +8,152 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::gen::Operation;
 
+/// An XDATA record payload: one registered application name plus its typed
+/// value list. This is a plain-data, serde-compatible mirror of
+/// `acadrust::xdata::ExtendedDataRecord` so the wire DTO stays independent of
+/// the host dependency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XDataRecord {
+    pub application_name: String,
+    pub values: Vec<XDataValue>,
+}
+
+/// A single XDATA value. Mirrors `acadrust::xdata::XDataValue`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum XDataValue {
+    String(String),
+    ControlString(String),
+    LayerName(String),
+    BinaryData(Vec<u8>),
+    Handle(u64),
+    Point3D([f64; 3]),
+    Position3D([f64; 3]),
+    Displacement3D([f64; 3]),
+    Direction3D([f64; 3]),
+    Real(f64),
+    Distance(f64),
+    ScaleFactor(f64),
+    Integer16(i16),
+    Integer32(i32),
+}
+
+/// Construction spec for an `XRECORD` object. Mirrors the acadrust
+/// `XRecord` payload (name + cloning flags + group-code entries) in a
+/// serde-compatible, host-independent form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XRecordSpec {
+    pub name: String,
+    pub cloning_flags: XRecordCloningFlags,
+    pub entries: Vec<XRecordEntry>,
+}
+
+/// XRecord cloning behavior flags. Mirror of
+/// `acadrust::objects::DictionaryCloningFlags`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum XRecordCloningFlags {
+    #[default]
+    NotApplicable,
+    KeepExisting,
+    UseClone,
+    XrefName,
+    Name,
+    UnmangleName,
+}
+
+/// One XRECORD group-code entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XRecordEntry {
+    pub code: i32,
+    pub value: XRecordValue,
+}
+
+/// A single XRECORD value. Mirrors `acadrust::objects::XRecordValue`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum XRecordValue {
+    String(String),
+    Double(f64),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Byte(u8),
+    Bool(bool),
+    Handle(u64),
+    Point3D([f64; 3]),
+    Chunk(Vec<u8>),
+}
+
 /// Boolean operation kind for [`Operation::SolidBoolean`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoolOp {
     Union,
     Intersection,
     Difference,
+}
+
+/// A plain-data color value. Mirrors `acadrust::types::Color` for wire
+/// independence from the host dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Color {
+    ByLayer,
+    None,
+    ByBlock,
+    Index(u8),
+    Rgb { r: u8, g: u8, b: u8 },
+}
+
+impl Color {
+    pub const WHITE: Color = Color::Index(7);
+}
+
+/// A plain-data line weight. Mirrors `acadrust::types::LineWeight`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LineWeight {
+    #[default]
+    ByLayer,
+    ByBlock,
+    Default,
+    /// Specific line weight in 1/100 mm.
+    Value(i16),
+}
+
+/// Layer visibility/lock flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct LayerFlags {
+    pub frozen: bool,
+    pub locked: bool,
+    pub frozen_in_new_viewport: bool,
+    pub off: bool,
+}
+
+/// A plain-data layer table entry. Mirrors `acadrust::tables::Layer`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LayerInfo {
+    pub name: String,
+    pub flags: LayerFlags,
+    pub color: Color,
+    pub line_type: String,
+    pub line_weight: LineWeight,
+    pub plot_style: String,
+    pub is_plottable: bool,
+}
+
+impl LayerInfo {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            flags: LayerFlags::default(),
+            color: Color::WHITE,
+            line_type: "Continuous".to_string(),
+            line_weight: LineWeight::Default,
+            plot_style: String::new(),
+            is_plottable: true,
+        }
+    }
+
+    /// The normalized (trimmed + uppercased) lookup key for this layer name.
+    pub fn normalized_name(&self) -> String {
+        crate::layer::normalize_layer_name(&self.name)
+    }
 }
 
 /// Construction spec for a B-rep solid primitive (plain-data mirror of the
@@ -55,17 +195,25 @@ pub enum Curve2Spec {
     Line {
         start: [f64; 3],
         end: [f64; 3],
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
     Circle {
         centre: [f64; 3],
         radius: f64,
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
     Polyline {
         points: Vec<[f64; 3]>,
         closed: bool,
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
     Point {
         position: [f64; 3],
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
     /// Circular arc, counter-clockwise from `start_angle` to `end_angle` (radians).
     Arc {
@@ -73,6 +221,8 @@ pub enum Curve2Spec {
         radius: f64,
         start_angle: f64,
         end_angle: f64,
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
     /// Ellipse: `major_axis` is the major-axis endpoint relative to `centre`;
     /// `ratio` = minor/major. `start`/`end` parameters 0..2π (full ellipse = 0..2π).
@@ -82,6 +232,8 @@ pub enum Curve2Spec {
         ratio: f64,
         start: f64,
         end: f64,
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
     /// NURBS spline (control points + knots + weights; `degree` typically 3).
     Spline {
@@ -89,17 +241,40 @@ pub enum Curve2Spec {
         control_points: Vec<[f64; 3]>,
         knots: Vec<f64>,
         weights: Vec<f64>,
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
     /// A ray from `origin` along `direction` (bounded at origin only).
     Ray {
         origin: [f64; 3],
         direction: [f64; 3],
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
     /// An infinite construction line through `origin` along `direction`.
     XLine {
         origin: [f64; 3],
         direction: [f64; 3],
+        /// Target layer name. `None` places the entity on the current layer.
+        layer: Option<String>,
     },
+}
+
+impl Curve2Spec {
+    /// The target layer name, if any.
+    pub fn layer(&self) -> Option<&str> {
+        match self {
+            Curve2Spec::Line { layer, .. }
+            | Curve2Spec::Circle { layer, .. }
+            | Curve2Spec::Polyline { layer, .. }
+            | Curve2Spec::Point { layer, .. }
+            | Curve2Spec::Arc { layer, .. }
+            | Curve2Spec::Ellipse { layer, .. }
+            | Curve2Spec::Spline { layer, .. }
+            | Curve2Spec::Ray { layer, .. }
+            | Curve2Spec::XLine { layer, .. } => layer.as_deref(),
+        }
+    }
 }
 
 /// A generic entity-construction payload used by the bulk op
@@ -109,6 +284,16 @@ pub enum Curve2Spec {
 pub enum EntitySpec {
     Curve(Curve2Spec),
     Solid(SolidPrimitive),
+}
+
+impl EntitySpec {
+    /// The target layer name for this spec, if explicitly set.
+    pub fn layer(&self) -> Option<&str> {
+        match self {
+            EntitySpec::Curve(c) => c.layer(),
+            EntitySpec::Solid(_) => None,
+        }
+    }
 }
 
 /// Construction spec for a block reference (`INSERT`): place the block
@@ -291,6 +476,14 @@ impl crate::gen::Operation {
             CreateAttributeDefinition(_) => "CreateAttributeDefinition",
             CreateTable(_) => "CreateTable",
             CreateDimensionAngular2Ln(_) => "CreateDimensionAngular2Ln",
+            SetXData { .. } => "SetXData",
+            SetXDataMany(_) => "SetXDataMany",
+            CreateXRecord(_) => "CreateXRecord",
+            SetXRecord { .. } => "SetXRecord",
+            CreateLayer(_) => "CreateLayer",
+            UpdateLayer { .. } => "UpdateLayer",
+            DeleteLayer { .. } => "DeleteLayer",
+            SetEntityLayer { .. } => "SetEntityLayer",
         }
     }
 }

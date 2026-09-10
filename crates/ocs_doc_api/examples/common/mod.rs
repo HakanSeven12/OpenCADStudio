@@ -8,11 +8,12 @@ use std::collections::HashMap;
 
 use ocs_doc_api::backend::{DocApiBackend, KernelBody};
 use ocs_doc_api::{
-    Aabb, ApiError, ApiResult, Curve2Spec, EntityView, GeometryErrorKind, GeometryRevision,
-    ObjectId, PlacementSpec,
+    normalize_layer_name, Aabb, ApiError, ApiResult, Curve2Spec, EntityView, GeometryErrorKind,
+    GeometryRevision, LayerInfo, ObjectId, PlacementSpec,
 };
 
-#[derive(Default, Clone)]
+
+#[derive(Clone)]
 pub struct MockBackend {
     next_id: u64,
     revision: u64,
@@ -31,6 +32,38 @@ pub struct MockBackend {
     attributes_store: HashMap<ObjectId, Vec<(String, String)>>,
     /// Stored viewport views (target, height).
     viewport_views: HashMap<ObjectId, ([f64; 3], f64)>,
+    /// Stored XDATA records keyed by (entity id, application name).
+    xdata_store: HashMap<(ObjectId, String), ocs_doc_api::XDataRecord>,
+    /// Stored XRECORD payloads keyed by entity id.
+    xrecord_store: HashMap<ObjectId, ocs_doc_api::XRecordSpec>,
+    /// Stored layer table.
+    layers: HashMap<String, LayerInfo>,
+    /// Layer name assigned to each entity.
+    entity_layers: HashMap<ObjectId, String>,
+}
+
+impl Default for MockBackend {
+    fn default() -> Self {
+        let mut backend = Self {
+            next_id: 0,
+            revision: 0,
+            undo_steps: 0,
+            bodies: HashMap::new(),
+            kinds: HashMap::new(),
+            curves: HashMap::new(),
+            text_values: HashMap::new(),
+            hatch_boundaries: HashMap::new(),
+            dimension_measurements: HashMap::new(),
+            attributes_store: HashMap::new(),
+            viewport_views: HashMap::new(),
+            xdata_store: HashMap::new(),
+            xrecord_store: HashMap::new(),
+            layers: HashMap::new(),
+            entity_layers: HashMap::new(),
+        };
+        backend.layers.insert("0".to_string(), LayerInfo::new("0"));
+        backend
+    }
 }
 
 impl MockBackend {
@@ -52,7 +85,7 @@ impl MockBackend {
 /// Coarse bounds for a stored 2D curve spec (mirrors the host's entity_bounds).
 fn curve_bounds(spec: &Curve2Spec) -> Aabb {
     match spec {
-        Curve2Spec::Line { start, end } => Aabb {
+        Curve2Spec::Line { start, end, .. } => Aabb {
             min: [
                 start[0].min(end[0]),
                 start[1].min(end[1]),
@@ -64,11 +97,11 @@ fn curve_bounds(spec: &Curve2Spec) -> Aabb {
                 start[2].max(end[2]),
             ],
         },
-        Curve2Spec::Circle { centre, radius } => Aabb {
+        Curve2Spec::Circle { centre, radius, .. } => Aabb {
             min: [centre[0] - radius, centre[1] - radius, centre[2]],
             max: [centre[0] + radius, centre[1] + radius, centre[2]],
         },
-        Curve2Spec::Point { position } => Aabb {
+        Curve2Spec::Point { position, .. } => Aabb {
             min: *position,
             max: *position,
         },
@@ -133,6 +166,15 @@ impl DocApiBackend for MockBackend {
         Ok(())
     }
     fn create_many(&mut self, specs: &[ocs_doc_api::EntitySpec]) -> ApiResult<Vec<ObjectId>> {
+        // Validate per-spec layers up front so the op is atomic.
+        for spec in specs {
+            if let Some(name) = spec.layer() {
+                self.lookup_layer(name).map_err(|e| ApiError::validation(
+                    "CreateMany",
+                    e.to_string(),
+                ))?;
+            }
+        }
         let mut next = self.clone();
         let ids = specs
             .iter()
@@ -173,9 +215,28 @@ impl DocApiBackend for MockBackend {
             Curve2Spec::Ray { .. } => "Ray",
             Curve2Spec::XLine { .. } => "XLine",
         };
+        let layer = spec
+            .layer()
+            .map(|name| {
+                self.lookup_layer(name).map(|info| info.normalized_name())
+            })
+            .transpose()?;
         let id = self.alloc(kind);
         self.curves.insert(id, spec.clone());
+        self.entity_layers
+            .insert(id, layer.unwrap_or_else(|| "0".to_string()));
         Ok(id)
+    }
+
+    fn lookup_layer(&self, name: &str) -> ApiResult<LayerInfo> {
+        let norm = normalize_layer_name(name);
+        if norm.is_empty() {
+            return Err(ApiError::validation("LookupLayer", "empty layer name"));
+        }
+        self.layers
+            .get(&norm)
+            .cloned()
+            .ok_or_else(|| ApiError::validation("LookupLayer", format!("layer '{name}' does not exist")))
     }
     fn add_insert(&mut self, spec: &ocs_doc_api::ops::InsertSpec) -> ApiResult<ObjectId> {
         if spec.block_name.is_empty() {
@@ -355,6 +416,144 @@ impl DocApiBackend for MockBackend {
             .copied()
             .ok_or(ApiError::UnknownId(id))
     }
+    fn set_xdata(
+        &mut self,
+        id: ObjectId,
+        application_name: &str,
+        record: Option<&ocs_doc_api::XDataRecord>,
+    ) -> ApiResult<()> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        let key = (id, application_name.to_string());
+        match record {
+            Some(r) => {
+                self.xdata_store.insert(key, r.clone());
+            }
+            None => {
+                self.xdata_store.remove(&key);
+            }
+        }
+        Ok(())
+    }
+    fn xdata(
+        &self,
+        id: ObjectId,
+        application_name: &str,
+    ) -> ApiResult<Option<ocs_doc_api::XDataRecord>> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        Ok(self
+            .xdata_store
+            .get(&(id, application_name.to_string()))
+            .cloned())
+    }
+    fn add_xrecord(&mut self, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<ObjectId> {
+        let id = self.alloc("XRecord");
+        self.xrecord_store.insert(id, spec.clone());
+        Ok(id)
+    }
+    fn set_xrecord(&mut self, id: ObjectId, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<()> {
+        if !self.object_exists(id) {
+            return Err(ApiError::validation(
+                "SetXRecord",
+                format!("unknown ObjectId {id:?}"),
+            ));
+        }
+        self.xrecord_store.insert(id, spec.clone());
+        Ok(())
+    }
+    fn xrecord(&self, id: ObjectId) -> ApiResult<Option<ocs_doc_api::XRecordSpec>> {
+        if !self.object_exists(id) {
+            return Err(ApiError::validation(
+                "GetXRecord",
+                format!("unknown ObjectId {id:?}"),
+            ));
+        }
+        Ok(self.xrecord_store.get(&id).cloned())
+    }
+    fn create_layer(&mut self, info: &LayerInfo) -> ApiResult<()> {
+        let name = normalize_layer_name(&info.name);
+        if name.is_empty() {
+            return Err(ApiError::validation("CreateLayer", "empty layer name"));
+        }
+        if self.layers.contains_key(&name) {
+            return Err(ApiError::validation(
+                "CreateLayer",
+                format!("layer '{name}' already exists"),
+            ));
+        }
+        let mut stored = info.clone();
+        stored.name = name.clone();
+        self.layers.insert(name, stored);
+        Ok(())
+    }
+    fn update_layer(&mut self, name: &str, info: &LayerInfo) -> ApiResult<()> {
+        let name_upper = normalize_layer_name(name);
+        if !self.layers.contains_key(&name_upper) {
+            return Err(ApiError::validation(
+                "UpdateLayer",
+                format!("layer '{name}' does not exist"),
+            ));
+        }
+        let mut stored = info.clone();
+        stored.name = name_upper.clone();
+        self.layers.insert(name_upper, stored);
+        Ok(())
+    }
+    fn delete_layer(&mut self, name: &str) -> ApiResult<()> {
+        let name_upper = normalize_layer_name(name);
+        if name_upper == "0" {
+            return Err(ApiError::validation("DeleteLayer", "cannot delete layer 0"));
+        }
+        if self.entity_layers.values().any(|l| normalize_layer_name(l) == name_upper) {
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                format!("layer '{name_upper}' still in use"),
+            ));
+        }
+        if self.layers.remove(&name_upper).is_none() {
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                format!("layer '{name}' does not exist"),
+            ));
+        }
+        Ok(())
+    }
+    fn set_entity_layer(&mut self, id: ObjectId, layer: &str) -> ApiResult<()> {
+        if !self.entity_exists(id) {
+            return Err(ApiError::UnknownId(id));
+        }
+        let layer_upper = normalize_layer_name(layer);
+        let target = self
+            .layers
+            .get(&layer_upper)
+            .ok_or_else(|| {
+                ApiError::validation(
+                    "SetEntityLayer",
+                    format!("layer '{layer_upper}' does not exist"),
+                )
+            })?;
+        if target.flags.locked {
+            return Err(ApiError::Unsupported(format!(
+                "entity {id:?} cannot be moved to locked layer '{layer_upper}'"
+            )));
+        }
+        self.entity_layers.insert(id, layer_upper);
+        Ok(())
+    }
+    fn layers(&self) -> ApiResult<Vec<LayerInfo>> {
+        let mut v: Vec<_> = self.layers.values().cloned().collect();
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(v)
+    }
+    fn entity_layer(&self, id: ObjectId) -> ApiResult<String> {
+        self.entity_layers
+            .get(&id)
+            .cloned()
+            .ok_or(ApiError::UnknownId(id))
+    }
     fn add_vertex(&mut self, id: ObjectId, _at: usize, _point: [f64; 3]) -> ApiResult<()> {
         if self.entity_exists(id) {
             Ok(())
@@ -364,17 +563,85 @@ impl DocApiBackend for MockBackend {
     }
     fn remove_entity(&mut self, id: ObjectId) -> ApiResult<bool> {
         self.bodies.remove(&id);
+        self.xdata_store.retain(|(k, _), _| *k != id);
+        self.xrecord_store.remove(&id);
+        self.entity_layers.remove(&id);
         Ok(self.kinds.remove(&id).is_some())
+    }
+    fn enumerate_entities(
+        &self,
+        kind: Option<&str>,
+        layer: Option<&str>,
+        include_bounds: bool,
+    ) -> ApiResult<Vec<EntityView>> {
+        let mut out = Vec::new();
+        for (id, kind_name) in &self.kinds {
+            if let Some(k) = kind {
+                if !k.eq_ignore_ascii_case(kind_name) {
+                    continue;
+                }
+            }
+            let entity_layer = self
+                .entity_layers
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| "0".to_string());
+            if let Some(l) = layer {
+                if !l.eq_ignore_ascii_case(&entity_layer) {
+                    continue;
+                }
+            }
+            let bounds = if include_bounds {
+                self.curves.get(id).map(curve_bounds)
+            } else {
+                None
+            };
+            out.push(EntityView {
+                id: *id,
+                kind: kind_name.clone(),
+                layer: entity_layer,
+                bounds,
+            });
+        }
+        Ok(out)
+    }
+    fn point_position(&self, id: ObjectId) -> ApiResult<[f64; 3]> {
+        let spec = self.curves.get(&id).ok_or(ApiError::UnknownId(id))?;
+        match spec {
+            Curve2Spec::Point { position, .. } => Ok(*position),
+            _ => Err(ApiError::Unsupported(
+                "GetPointPosition is only for Point entities".into(),
+            )),
+        }
+    }
+    fn line_geometry(&self, id: ObjectId) -> ApiResult<([f64; 3], [f64; 3])> {
+        let spec = self.curves.get(&id).ok_or(ApiError::UnknownId(id))?;
+        match spec {
+            Curve2Spec::Line { start, end, .. } => Ok((*start, *end)),
+            _ => Err(ApiError::Unsupported(
+                "GetLineGeometry is only for Line entities".into(),
+            )),
+        }
     }
     fn get_entity(&mut self, id: ObjectId) -> ApiResult<EntityView> {
         let kind = self.kinds.get(&id).ok_or(ApiError::UnknownId(id))?.clone();
+        let layer = self
+            .entity_layers
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| "0".to_string());
         let bounds = self.bodies.get(&id).and_then(|b| {
             cadkernel::brep::body_bounds(b).map(|bb| Aabb {
                 min: bb.min,
                 max: bb.max,
             })
         });
-        Ok(EntityView { id, kind, bounds })
+        Ok(EntityView {
+            id,
+            kind,
+            layer,
+            bounds,
+        })
     }
     fn transform_entity(&mut self, id: ObjectId, placement: &PlacementSpec) -> ApiResult<()> {
         if !self.entity_exists(id) {
@@ -422,6 +689,9 @@ impl DocApiBackend for MockBackend {
     }
     fn entity_exists(&self, id: ObjectId) -> bool {
         self.kinds.contains_key(&id)
+    }
+    fn object_exists(&self, id: ObjectId) -> bool {
+        self.xrecord_store.contains_key(&id)
     }
     fn revision(&self) -> GeometryRevision {
         GeometryRevision(self.revision)

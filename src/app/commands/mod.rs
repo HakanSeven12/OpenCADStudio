@@ -75,6 +75,12 @@ impl OpenCADStudio {
                 .dispatch_families(cmd, i)
                 .unwrap_or_else(Task::none);
         }
+        // A new command abandons any grip edit and its numeric input.
+        let had_pending_grip_input = self.grip_pending.take().is_some();
+        let had_active_grip = self.cancel_active_grip_edit();
+        if had_pending_grip_input || had_active_grip {
+            self.command_line.input.clear();
+        }
         // Starting a command closes any open ribbon dropdown (e.g. a style
         // combo left open) so it does not stay stuck behind the new tool.
         self.ribbon.close_dropdown();
@@ -554,6 +560,11 @@ inventory::submit!(crate::command::CommandRegistration {
         "GRIPHOT",
         "GRIPHOVER",
         "GRIPOBJLIMIT",
+        // Dispatched all along, but absent from the registry, so command-line
+        // completion never offered them.
+        "ISAVEBAK",
+        "SAVETIME",
+        "FILEASSOC",
         // Reset selected entities' overrides to follow their layer.
         "SETBYLAYER",
         // Remove duplicate objects; set drawing base point; audit integrity;
@@ -703,7 +714,10 @@ inventory::submit!(crate::command::CommandRegistration {
 
 #[cfg(test)]
 mod marquee_cancel_tests {
-    use crate::app::OpenCADStudio;
+    use crate::app::{GripPendingValue, OpenCADStudio};
+    use crate::scene::model::object::GripMenuAction;
+    use crate::scene::pick::grip::GripEdit;
+    use acadrust::Handle;
     use iced::time::Instant;
 
     fn fresh() -> OpenCADStudio {
@@ -816,5 +830,34 @@ mod marquee_cancel_tests {
         assert!(sel.box_current.is_some());
         assert!(sel.box_crossing);
         assert!(sel.box_crossing_locked);
+    }
+
+    #[test]
+    fn starting_a_command_cancels_a_grip_value_edit() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        let handle = Handle::new(42);
+        app.tabs[i].active_grip = Some(GripEdit::radius(
+            handle,
+            1,
+            glam::DVec3::new(2.0, 0.0, 0.0),
+        ));
+        app.grip_pending = Some(GripPendingValue {
+            handle,
+            grip_id: 1,
+            action: GripMenuAction::Radius,
+            label: "New radius",
+        });
+        app.command_line.input = "5".to_string();
+
+        let _ = app.dispatch_command("LINE");
+
+        assert!(app.tabs[i].active_grip.is_none());
+        assert!(app.grip_pending.is_none());
+        assert!(app.command_line.input.is_empty());
+        assert_eq!(
+            app.tabs[i].active_cmd.as_deref().map(|cmd| cmd.name()),
+            Some("LINE")
+        );
     }
 }

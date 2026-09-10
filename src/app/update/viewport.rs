@@ -1535,15 +1535,30 @@ impl OpenCADStudio {
             }
 
             if let Some(axis) = grip.axis {
-                snapped = cursor_on_projected_axis(
-                    p,
-                    bounds,
-                    view_rot,
-                    eye,
-                    grip.origin_world,
-                    axis,
-                )
-                .unwrap_or(snapped);
+                let acquired_point = otrack_hit.is_some()
+                    || snap_hit.is_some_and(|hit| {
+                        hit.snap_type != crate::snap::SnapType::Grid
+                    });
+                if acquired_point {
+                    if let Some(axis) = axis.try_normalize() {
+                        // An axis grip still moves on its construction axis, but
+                        // an acquired object point supplies the exact coordinate
+                        // along that axis. This lets height and draft arrows seat
+                        // back onto existing surface/solid geometry.
+                        snapped = grip.origin_world
+                            + axis * (snapped - grip.origin_world).dot(axis);
+                    }
+                } else {
+                    snapped = cursor_on_projected_axis(
+                        p,
+                        bounds,
+                        view_rot,
+                        eye,
+                        grip.origin_world,
+                        axis,
+                    )
+                    .unwrap_or(snapped);
+                }
             }
 
             let snap_ms = snap_started.elapsed().as_secs_f64() * 1000.0;
@@ -1565,8 +1580,19 @@ impl OpenCADStudio {
 
             let apply_started = Instant::now();
             let delta = snapped - grip.last_world;
-            let lengthen = grip.mode == GripEditMode::Lengthen;
-            let actions: Vec<_> = if lengthen {
+            let menu_action = match grip.mode {
+                GripEditMode::Lengthen => {
+                    Some(crate::scene::model::object::GripMenuAction::Lengthen)
+                }
+                GripEditMode::Radius => {
+                    Some(crate::scene::model::object::GripMenuAction::Radius)
+                }
+                GripEditMode::ArcLength => {
+                    Some(crate::scene::model::object::GripMenuAction::ArcLength)
+                }
+                GripEditMode::Stretch => None,
+            };
+            let actions: Vec<_> = if menu_action.is_some() {
                 Vec::new()
             } else {
                 grip.targets
@@ -1581,14 +1607,13 @@ impl OpenCADStudio {
                     })
                     .collect()
             };
-            if lengthen {
+            if let Some(action) = menu_action {
                 let original = self
                     .grip_originals
                     .iter()
                     .find(|(handle, _)| *handle == grip.handle)
                     .map(|(_, entity)| entity.clone());
                 if let Some(original) = original {
-                    let action = crate::scene::model::object::GripMenuAction::Lengthen;
                     let value = crate::scene::view::dispatch::grip_menu_point_value(
                         &original,
                         grip.grip_id,
@@ -1751,6 +1776,26 @@ impl OpenCADStudio {
             let preview_ms = preview_started.elapsed().as_secs_f64() * 1000.0;
             let geometry_ms = grip_started.elapsed().as_secs_f64() * 1000.0;
             self.refresh_selected_grips();
+            // A history rebuild can clamp a requested value or move a derived
+            // construction handle non-linearly. Rebase each active target onto
+            // the freshly rebuilt grip so the hot arrow remains attached to the
+            // live surface and reverses immediately from a geometric limit.
+            let refreshed_targets: Vec<_> = self.tabs[i]
+                .selected_grip_handles
+                .iter()
+                .copied()
+                .zip(self.tabs[i].selected_grips.iter())
+                .map(|(handle, grip)| ((handle, grip.id), grip.world))
+                .collect();
+            if let Some(active) = self.tabs[i].active_grip.as_mut() {
+                for target in &mut active.targets {
+                    if let Some((_, world)) = refreshed_targets.iter().find(|((handle, id), _)| {
+                        *handle == target.handle && *id == target.grip_id
+                    }) {
+                        target.last_world = *world;
+                    }
+                }
+            }
             let grips_ms = grip_started.elapsed().as_secs_f64() * 1000.0 - geometry_ms;
             // Properties are refreshed when the grip is committed or cancelled.
             // Rebuilding the inspector on every pointer event adds no drawing
@@ -3049,7 +3094,11 @@ impl OpenCADStudio {
                         return Task::none();
                     };
                     let grip_shape = self.tabs[i].selected_grips[grip_index].shape;
-                    if grip_shape == crate::scene::model::object::GripShape::Dropdown {
+                    if matches!(
+                        grip_shape,
+                        crate::scene::model::object::GripShape::Dropdown
+                            | crate::scene::model::object::GripShape::DropdownAdjacent
+                    ) {
                         use crate::entities::traits::EntityTypeOps;
                         let items = self.tabs[i]
                             .scene
@@ -3193,7 +3242,10 @@ impl OpenCADStudio {
                 // Engaging click — stay hot, wait for the placement click.
                 return Task::none();
             }
-            if grip.mode == GripEditMode::Lengthen {
+            if matches!(
+                grip.mode,
+                GripEditMode::Lengthen | GripEditMode::Radius | GripEditMode::ArcLength
+            ) {
                 self.grip_pending = None;
                 self.command_line.input.clear();
             }

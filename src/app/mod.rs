@@ -517,6 +517,11 @@ pub(super) struct OpenCADStudio {
     crosshair_color: Option<[u8; 3]>,
     /// Editable Options buffer for the crosshair colour.
     crosshair_color_input: String,
+    /// Defer the ISOLINES mesh rebuild until the slider is released.
+    isolines_awaiting_regen: bool,
+    /// Edit buffer for the SNAPANG field on the Options Drafting page. Kept
+    /// separate from `snap_angle_deg` so a half-typed angle is not parsed.
+    snap_angle_input: String,
     /// Model-space lineweight preview scale, in percent (25..=200).
     lineweight_display_scale: i32,
     /// Isometric drafting state and active axis pair.
@@ -2007,6 +2012,58 @@ pub enum Message {
     ShiftToAddToggled(bool),
     /// Toggle press-and-drag drawing a rectangle instead of a lasso (PICKDRAG).
     PickDragRectToggled(bool),
+    /// Change the automatic-save interval in minutes; 0 disables it (SAVETIME).
+    SaveTimeChanged(i32),
+    /// Toggle keeping a `.bak` copy when overwriting a drawing (ISAVEBAK).
+    BackupOnSaveChanged(bool),
+    /// Toggle filled TrueType glyphs (TEXTFILL).
+    TextFillChanged(bool),
+    /// Change how many prompt lines sit above the command window (CLIPROMPTLINES).
+    ClipromptLinesChanged(i32),
+    /// Change how long command-line history lines stay visible (COMMANDLINEFADETIME).
+    CommandLineFadeChanged(i32),
+    /// Toggle reversing the mouse-wheel zoom direction (ZOOMWHEEL).
+    ZoomWheelReversedChanged(bool),
+    /// Change how far one wheel notch zooms (ZOOMFACTOR, 3..=100).
+    ZoomFactorChanged(i32),
+    /// Toggle TEXTEDIT ending after one object (TEXTEDITMODE).
+    TextEditModeChanged(bool),
+    /// Toggle continued dimensions inheriting the base style (DIMCONTINUEMODE).
+    DimContinueModeChanged(bool),
+    /// Change which points QDIM measures from (0 endpoints, 1 intersections).
+    QdimSnapPriorityChanged(u8),
+    /// Change which annotative objects pick up a new scale (ANNOAUTOSCALE).
+    AnnoAutoScaleChanged(i8),
+    /// Edit the drafting rotation field; parsed when it holds a valid angle (SNAPANG).
+    SnapAngleInputChanged(String),
+    /// Change the polar tracking increment in degrees.
+    PolarIncrementChanged(f32),
+    /// Toggle the navigation cube (NAVVCUBE).
+    ShowViewCubeChanged(bool),
+    /// Toggle the UCS icon (UCSICON).
+    ShowUcsIconChanged(bool),
+    /// Toggle drawing the UCS icon at the origin (UCSICON ORigin).
+    UcsIconAtOriginChanged(bool),
+    /// Toggle selection cycling from Options; the status-bar pill toggles the same flag.
+    SelectionCyclingChanged(bool),
+    /// Reveal one of the application's own folders in the system file manager.
+    OpenFolder(String),
+    /// Change isolines per surface in the current drawing (ISOLINES).
+    IsolinesChanged(i16),
+    /// The isolines slider was released; rebuild the meshes if it moved.
+    IsolinesReleased,
+    /// Toggle silhouette edges in the current drawing (DISPSILH).
+    DispSilhChanged(bool),
+    /// Change surface density U in the current drawing (SURFU).
+    SurfaceUChanged(i16),
+    /// Change surface density V in the current drawing (SURFV).
+    SurfaceVChanged(i16),
+    /// Change the surface type in the current drawing (SURFTYPE).
+    SurfaceTypeChanged(i16),
+    /// Toggle recording composite-solid history in the current drawing (SOLIDHIST).
+    SolidHistChanged(bool),
+    /// Change when solid history is shown in the current drawing (SHOWHIST).
+    ShowHistChanged(i16),
     /// Restore Model Space display/canvas appearance to defaults.
     RestoreModelSpaceDisplayDefaults,
     /// Restore Selection visual effect settings to defaults.
@@ -3407,6 +3464,8 @@ impl OpenCADStudio {
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),
+            isolines_awaiting_regen: false,
+            snap_angle_input: "0".to_string(),
             lineweight_display_scale: 100,
             isometric_drafting: false,
             iso_plane: settings::IsoPlane::Left,
@@ -3802,7 +3861,16 @@ impl OpenCADStudio {
 
     #[cfg(test)]
     pub(crate) fn new_for_test() -> Self {
-        Self::new()
+        let mut app = Self::new();
+        // `new` loads the real settings file, so without this every test runs
+        // against whatever the developer last set in the application — a suite
+        // that passes on a clean machine and fails on a used one. It surfaced
+        // when a persisted `GRIPOBJLIMIT` made the grip-limit test see 32767
+        // where it expected the default, and the number of persisted settings
+        // only grows.
+        app.apply_config(crate::app::config::AppConfig::default());
+        app.last_saved_config = Some(app.current_config());
+        app
     }
 
     /// Install `cmd` as the active interactive command for tab `tab`.

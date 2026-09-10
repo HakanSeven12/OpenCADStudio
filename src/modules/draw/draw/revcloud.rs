@@ -933,4 +933,6 @@ fn style_from_entity(entity: &EntityType) -> Option<CloudStyle> {
     })
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["REVCLOUD"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["REVCLOUD", "REVCLOUD_RECTANGULAR", "REVCLOUD_POLYGONAL", "REVCLOUD_FREEHAND"]
+});

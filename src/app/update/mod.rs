@@ -1583,6 +1583,24 @@ impl OpenCADStudio {
                 }
                 let live_input = s.clone();
                 self.command_line.input = live_input.clone();
+                let i = self.active_tab;
+                if self.dyn_input
+                    && self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
+                        matches!(
+                            grip.mode,
+                            crate::scene::pick::grip::GripEditMode::Lengthen
+                                | crate::scene::pick::grip::GripEditMode::Radius
+                                | crate::scene::pick::grip::GripEditMode::ArcLength
+                        )
+                    })
+                    && !self.tabs[i].dyn_fields.is_empty()
+                {
+                    let a = self.tabs[i]
+                        .dyn_active
+                        .min(self.tabs[i].dyn_fields.len() - 1);
+                    self.tabs[i].dyn_fields[a].buffer =
+                        (!live_input.is_empty()).then_some(live_input.clone());
+                }
                 self.command_line.autocomplete_cursor = None;
                 self.command_line.cancel_history_navigation();
                 // Live incremental search for INSERT/MINSERT: update picker on each keystroke
@@ -6187,6 +6205,188 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+
+            Message::SaveTimeChanged(minutes) => {
+                self.savetime_min = minutes.max(0);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::BackupOnSaveChanged(enabled) => {
+                self.backup_on_save = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::TextFillChanged(filled) => {
+                crate::scene::text::sdf_atlas::set_textfill(filled);
+                self.invalidate_text_everywhere();
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::ClipromptLinesChanged(lines) => {
+                let lines = crate::app::settings::clamp_clipromptlines(lines);
+                self.cliprompt_lines = lines;
+                self.command_line.set_cliprompt_lines(lines.clamp(0, 50) as u8);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::CommandLineFadeChanged(ms) => {
+                let ms = crate::app::settings::clamp_commandline_fade_ms(ms);
+                self.commandline_fade_ms = ms;
+                self.command_line.set_commandline_fade_ms(ms.max(0) as u32);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::ZoomWheelReversedChanged(reversed) => {
+                self.zoom_wheel_reversed = reversed;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::ZoomFactorChanged(factor) => {
+                self.zoom_factor = factor.clamp(3, 100);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::TextEditModeChanged(single) => {
+                self.texteditmode = single;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::DimContinueModeChanged(inherit) => {
+                self.dimension_continue_mode = i16::from(inherit);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::QdimSnapPriorityChanged(priority) => {
+                self.quick_dimension_snap_priority = priority.min(1);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // The sign carries on/off and the magnitude the mode, so switching
+            // off and back on has to return to the mode that was chosen — the
+            // same convention the status-bar pill uses when it negates.
+            Message::AnnoAutoScaleChanged(mode) => {
+                self.annotation_auto_scale = if mode == 0 {
+                    -self.annotation_auto_scale.abs().max(1)
+                } else {
+                    mode.clamp(1, 4)
+                };
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // Typed into freely; only committed when it parses, so clearing
+            // the field to retype does not snap the crosshair back to zero.
+            Message::SnapAngleInputChanged(value) => {
+                self.snap_angle_input = value;
+                if let Ok(angle) = self.snap_angle_input.trim().parse::<f32>() {
+                    if angle.is_finite() {
+                        self.snap_angle_deg = angle.rem_euclid(360.0);
+                        self.persist_settings_if_changed();
+                    }
+                }
+                Task::none()
+            }
+
+            Message::PolarIncrementChanged(deg) => {
+                if deg.is_finite() && deg > 0.0 {
+                    self.polar_increment_deg = deg;
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+
+            Message::ShowViewCubeChanged(show) => {
+                self.show_viewcube = show;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::ShowUcsIconChanged(show) => {
+                self.show_ucs_icon = show;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::UcsIconAtOriginChanged(at_origin) => {
+                self.ucs_icon_at_origin = at_origin;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // ISOLINES is baked into solid meshes, so rebuild once on release.
+            Message::IsolinesChanged(value) => {
+                let value = value.max(0);
+                let changed = self
+                    .tabs
+                    .get(self.active_tab)
+                    .is_some_and(|tab| tab.scene.document.header.isolines != value);
+                if changed {
+                    self.set_drawing_var(|header| header.isolines = value);
+                    self.isolines_awaiting_regen = true;
+                }
+                Task::none()
+            }
+
+            Message::IsolinesReleased => {
+                if std::mem::take(&mut self.isolines_awaiting_regen) {
+                    self.regenerate_meshes();
+                }
+                Task::none()
+            }
+
+            Message::DispSilhChanged(on) => {
+                self.set_drawing_var(|header| header.display_silhouette = on);
+                Task::none()
+            }
+
+            Message::SurfaceUChanged(value) => {
+                self.set_drawing_var(|header| header.surface_u_density = value.clamp(0, 200));
+                Task::none()
+            }
+
+            Message::SurfaceVChanged(value) => {
+                self.set_drawing_var(|header| header.surface_v_density = value.clamp(0, 200));
+                Task::none()
+            }
+
+            Message::SurfaceTypeChanged(value) => {
+                self.set_drawing_var(|header| header.surface_type = value);
+                Task::none()
+            }
+
+            Message::SolidHistChanged(record) => {
+                self.set_drawing_var(|header| header.record_solid_history = record);
+                Task::none()
+            }
+
+            Message::ShowHistChanged(mode) => {
+                self.set_drawing_var(|header| {
+                    header.show_solid_history = mode.clamp(0, 2)
+                });
+                let i = self.active_tab;
+                if let Some(tab) = self.tabs.get_mut(i) {
+                    tab.scene.bump_geometry();
+                }
+                Task::none()
+            }
+
+            Message::SelectionCyclingChanged(on) => {
+                self.selection_cycling = on;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::OpenFolder(path) => crate::sys::open_url(&path, None),
 
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;

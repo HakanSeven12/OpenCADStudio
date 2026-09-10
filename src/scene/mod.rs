@@ -3082,7 +3082,13 @@ impl Scene {
         let facet_resolution = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_resolution);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let (isolines, planar_isolines) = match self.document.get_entity(handle) {
+            Some(EntityType::Surface(surface)) => (
+                crate::entities::solid3d::surface_isoline_counts(surface),
+                crate::entities::solid3d::surface_property_state(surface).isolines,
+            ),
+            _ => ([self.document.header.isolines.max(0) as usize; 2], false),
+        };
         let (mut set, wires, center) =
             crate::scene::model::solid_model::display_from_solid(
                 solid,
@@ -3090,6 +3096,7 @@ impl Scene {
                 facet_resolution,
                 chordal_deflection,
                 isolines,
+                planar_isolines,
             )?;
         let name = handle.value().to_string();
         for mesh in &mut set.lods {
@@ -5410,8 +5417,12 @@ impl Scene {
         // changed entities into it, instead of re-cloning + re-sorting the whole
         // set. Falls back to the full build below when it can't (no cache entry,
         // journal un-replayable, or a structural assumption violated).
-        if let Some(arc) =
-            self.try_resident_patch(
+        // A live section changes the displayed wires of every intersected
+        // solid, even when the delta journal contains only the section entity.
+        // Rebuild the resident set in that case so an incremental patch cannot
+        // retain the source solid's uncut edge cache.
+        if self.active_live_section(block).is_none() {
+            if let Some(arc) = self.try_resident_patch(
                 key,
                 block,
                 bg,
@@ -5420,9 +5431,9 @@ impl Scene {
                 all_visible,
                 frozen_layers,
                 style_viewport,
-            )
-        {
-            return arc;
+            ) {
+                return arc;
+            }
         }
         // Build once: full tessellation, no cull, no zoom LOD — the resident
         // set is zoom-independent (GPU analytical circles/arcs/ellipses).
@@ -6994,6 +7005,48 @@ impl Scene {
     ) -> Result<Option<cadkernel::brep::Body>, ()> {
         let body = self.section_source_body(handle).ok_or(())?;
         Self::section_body(&body, &section.data, section.slice_depth, None)
+    }
+
+    /// Build a temporary entity whose wire data matches the live-section body.
+    /// The document entity stays unchanged so disabling the section restores
+    /// the complete source geometry and saving never persists the clipped body.
+    fn sectioned_wire_entity(
+        &self,
+        handle: Handle,
+        section: &LiveSection,
+    ) -> Result<Option<EntityType>, ()> {
+        let Some(body) = self.sectioned_body(handle, section)? else {
+            return Ok(None);
+        };
+        let (_, wires, center) = self
+            .prepare_solid_model_display(handle, &body)
+            .ok_or(())?;
+        let mut entity = self.document.get_entity(handle).cloned().ok_or(())?;
+        let reference = acadrust::types::Vector3::new(center[0], center[1], center[2]);
+        match &mut entity {
+            EntityType::Solid3D(solid) => {
+                solid.point_of_reference = reference;
+                solid.wires = wires;
+                solid.silhouettes.clear();
+            }
+            EntityType::Surface(surface) => {
+                surface.point_of_reference = reference;
+                surface.wires = wires;
+                surface.silhouettes.clear();
+            }
+            EntityType::Region(region) => {
+                region.point_of_reference = reference;
+                region.wires = wires;
+                region.silhouettes.clear();
+            }
+            EntityType::Body(body) => {
+                body.point_of_reference = reference;
+                body.wires = wires;
+                body.silhouettes.clear();
+            }
+            _ => return Err(()),
+        }
+        Ok(Some(entity))
     }
 
     fn section_source_body(
@@ -9709,6 +9762,45 @@ impl Scene {
             memo_misses = visible_count;
             out
         };
+
+        // Normal Wireframe renders the persisted entity wires, whereas shaded
+        // and 3D Wireframe modes render the temporary sectioned mesh. Replace
+        // only the displayed wire run with one tessellated from that same
+        // temporary body so every visual style shows the identical live cut.
+        if let Some(section) = self.active_live_section(block_handle) {
+            let handles: Vec<Handle> = self.meshes.keys().copied().collect();
+            for handle in handles {
+                let Some(source) = self.document.get_entity(handle) else {
+                    continue;
+                };
+                if !visibility_ok(source) {
+                    continue;
+                }
+                let replacement = match self.sectioned_wire_entity(handle, &section) {
+                    Ok(Some(entity)) => Some(tessellate_entity(
+                        doc,
+                        sel,
+                        avp,
+                        bg,
+                        anno,
+                        annotation_scale_handle,
+                        &entity,
+                        Some(blk_ref),
+                        view_aabb,
+                        wpp,
+                        paper,
+                    )),
+                    Ok(None) => Some(Vec::new()),
+                    Err(()) => None,
+                };
+                let Some(replacement) = replacement else {
+                    continue;
+                };
+                let name = handle.value().to_string();
+                wires.retain(|wire| wire.name != name);
+                wires.extend(replacement);
+            }
+        }
         let build_ms = crate::perf::elapsed_ms(t_build);
 
         // Resolve display colours for the live background. Memo hits were

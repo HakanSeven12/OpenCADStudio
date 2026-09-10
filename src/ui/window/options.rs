@@ -7,13 +7,106 @@ use iced::widget::{
 use iced::{Background, Border, Element, Fill, Theme};
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Width of the vertical tab rail. Wide enough for the longest translated
+/// page name; German and Russian are the ones that set it.
+const TAB_RAIL_WIDTH: f32 = 178.0;
+/// The dialog's own size when the modal is laid out intrinsically.
+const DIALOG_WIDTH: f32 = 880.0;
+const DIALOG_HEIGHT: f32 = 620.0;
+
+/// Which page of the Options dialog is showing.
+///
+/// Persisted: with nine pages, reopening on General every time means hunting
+/// for the one you were last in.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum OptionsTab {
     #[default]
     General,
+    Files,
+    OpenAndSave,
     Display,
+    Drafting,
+    Modeling,
     Selection,
-    Drawing,
+    UserPreferences,
+}
+
+/// Application preferences the dialog reads that are plain scalars on the app.
+///
+/// Gathered rather than passed one by one: `view_window` already carries a
+/// long positional list, and several of these are adjacent `bool`s that would
+/// swap silently at the call site.
+#[derive(Clone, Copy)]
+pub struct AppPrefs {
+    /// SAVETIME, minutes between recovery saves; 0 disables.
+    pub savetime_min: i32,
+    /// ISAVEBAK: keep a `.bak` when overwriting.
+    pub backup_on_save: bool,
+    /// TEXTFILL: fill TrueType glyphs rather than drawing them hollow.
+    pub textfill: bool,
+    /// CLIPROMPTLINES: prompt lines shown above the command window.
+    pub cliprompt_lines: i32,
+    /// COMMANDLINEFADETIME: how long overlay history lines stay visible, in ms.
+    pub commandline_fade_ms: i32,
+    /// ZOOMWHEEL: reverse the mouse-wheel zoom direction.
+    pub zoom_wheel_reversed: bool,
+    /// ZOOMFACTOR, 3..=100.
+    pub zoom_factor: i32,
+    /// TEXTEDITMODE: TEXTEDIT keeps prompting for the next object.
+    pub texteditmode: bool,
+    /// DIMCONTINUEMODE: continued dimensions inherit the base dimension's style.
+    pub dimension_continue_mode: i16,
+    /// QDIM extension-origin priority: 0 endpoints, 1 intersections.
+    pub qdim_snap_priority: u8,
+    /// ANNOAUTOSCALE, -4..=4. The sign is on/off; the magnitude selects which
+    /// objects a newly added scale reaches.
+    pub annotation_auto_scale: i8,
+    /// Polar tracking increment in degrees.
+    pub polar_increment_deg: f32,
+    /// NAVVCUBE: show the navigation cube.
+    pub show_viewcube: bool,
+    /// UCSICON: show the UCS icon.
+    pub show_ucs_icon: bool,
+    /// UCSICON ORigin: draw it at the origin rather than the corner.
+    pub ucs_icon_at_origin: bool,
+}
+
+/// The fixed locations the Files page lists.
+///
+/// `None` where the platform could not give one — the row then says so and
+/// its button is disabled rather than opening nothing.
+#[derive(Clone, Default)]
+pub struct Folders {
+    pub config: Option<String>,
+    pub plot_styles: Option<String>,
+    pub plugins: Option<String>,
+    pub autosave: Option<String>,
+}
+
+/// Values read from the current drawing's header rather than from preferences.
+///
+/// These are saved in the DWG, so they follow the drawing rather than the
+/// application — the page labels them as such. `available` is false when no
+/// drawing is open and the controls are not drawn at all.
+#[derive(Clone, Copy)]
+pub struct DrawingPrefs {
+    pub available: bool,
+    /// ISOLINES.
+    pub isolines: i16,
+    /// DISPSILH.
+    pub display_silhouette: bool,
+    /// SURFU / SURFV.
+    pub surface_u: i16,
+    pub surface_v: i16,
+    /// SURFTYPE: 5, 6 or 8.
+    pub surface_type: i16,
+    /// SOLIDHIST.
+    pub record_solid_history: bool,
+    /// SHOWHIST, 0..=2.
+    pub show_solid_history: i16,
 }
 
 /// The Selection-card settings that live on `UserSettings` rather than on the
@@ -32,6 +125,8 @@ pub struct SelectionPrefs {
     pub pick_drag_rect: bool,
     /// GRIPOBJLIMIT, 0..=32767; 0 = no limit.
     pub grip_object_limit: i32,
+    /// Selection cycling: a click where objects overlap opens a picker.
+    pub selection_cycling: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,6 +151,10 @@ pub fn view_window<'a>(
     active_tab: OptionsTab,
     cursor_size: i32,
     selection: SelectionPrefs,
+    prefs: AppPrefs,
+    snap_angle_input: &'a str,
+    drawing_prefs: DrawingPrefs,
+    folders: Folders,
     double_click_block_refedit: bool,
     double_click_block_attedit: bool,
     cursor_type: CursorType,
@@ -173,8 +272,50 @@ pub fn view_window<'a>(
         ]
         .spacing(12)
         .align_y(iced::Center),
-        Space::new().height(22),
-        text(crate::tr!("options", "open-save-section")).size(15),
+        Space::new().height(24),
+        text(crate::t!("Applications")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Installed plugins and their sources")).size(12).width(Fill),
+            button(text(crate::t!("Plugins…")).size(11))
+                .on_press(Message::PluginManagerOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Keyboard shortcuts")).size(12).width(Fill),
+            button(text(crate::t!("Keyboard Shortcuts…")).size(11))
+                .on_press(Message::ShortcutsPanelOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Command aliases")).size(12).width(Fill),
+            button(text(crate::t!("Command Aliases…")).size(11))
+                .on_press(Message::AliasEditorOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
+
+    // Saving preferences, gathered onto one page. The format and the file
+    // association were on General, which had become a page of three unrelated
+    // controls; the autosave interval and the backup toggle have existed since
+    // #205 with no control at all.
+    let open_and_save = column![
+        text(crate::t!("Open and Save")).size(15),
+        Space::new().height(10),
         Space::new().height(10),
         row![
             text(crate::tr!("options", "default-save-format-label")).size(12).width(150),
@@ -208,6 +349,53 @@ pub fn view_window<'a>(
         ))
         .size(11)
         .width(sizing.width),
+        Space::new().height(22),
+        text(crate::t!("File Safety")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Automatic save")).size(12).width(150),
+            slider(0..=120, prefs.savetime_min.clamp(0, 120), Message::SaveTimeChanged)
+                .step(1)
+                .width(Fill),
+            text(if prefs.savetime_min <= 0 {
+                crate::t!("Off").into_owned()
+            } else {
+                format!("{} min", prefs.savetime_min)
+            })
+            .size(11)
+            .width(52),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Minutes between recovery saves to a .sv$ file; 0 turns it off (SAVETIME)."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(14),
+        row![
+            iced::widget::checkbox(prefs.backup_on_save)
+                .on_toggle(Message::BackupOnSaveChanged)
+                .size(15),
+            text(crate::t!("Keep a .bak copy when overwriting a drawing (ISAVEBAK)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(22),
+        text(crate::t!("Plotting")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Plot device, paper, scale and plot styles"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Plot and Page Setup…")).size(11))
+                .on_press(Message::PlotDialogOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
     ]
     .spacing(0)
     .width(sizing.width);
@@ -556,6 +744,75 @@ pub fn view_window<'a>(
             text(crate::t!("Changes the on-screen width in Model without affecting plotted output."))
                 .size(11)
                 .width(sizing.width),
+        )
+        .push(Space::new().height(14))
+        .push(
+            row![
+                iced::widget::checkbox(prefs.textfill)
+                    .on_toggle(Message::TextFillChanged)
+                    .size(15),
+                text(crate::t!("Fill TrueType glyphs (TEXTFILL)")).size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(24))
+        .push(text(crate::t!("Command Line")).size(15))
+        .push(Space::new().height(10))
+        .push(
+            row![
+                text(crate::t!("Prompt lines")).size(12).width(140),
+                slider(
+                    0..=50,
+                    prefs.cliprompt_lines.clamp(0, 50),
+                    Message::ClipromptLinesChanged,
+                )
+                .step(1)
+                .width(Fill),
+                text(prefs.cliprompt_lines.clamp(0, 50).to_string())
+                    .size(11)
+                    .width(44),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(6))
+        .push(
+            text(crate::t!(
+                "Temporary prompt lines shown above the command window (CLIPROMPTLINES)."
+            ))
+            .size(11)
+            .width(sizing.width),
+        )
+        .push(Space::new().height(12))
+        .push(
+            row![
+                text(crate::t!("History fade time")).size(12).width(140),
+                slider(
+                    0..=60000,
+                    prefs.commandline_fade_ms.clamp(0, 60000),
+                    Message::CommandLineFadeChanged,
+                )
+                .step(250)
+                .width(Fill),
+                text(if prefs.commandline_fade_ms <= 0 {
+                    crate::t!("Off").into_owned()
+                } else {
+                    format!("{:.1} s", prefs.commandline_fade_ms as f32 / 1000.0)
+                })
+                .size(11)
+                .width(44),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(6))
+        .push(
+            text(crate::t!(
+                "How long overlay history lines stay visible; 0 skips them (COMMANDLINEFADETIME)."
+            ))
+            .size(11)
+            .width(sizing.width),
         );
 
     let display_element = display.spacing(0).width(sizing.width);
@@ -601,6 +858,15 @@ pub fn view_window<'a>(
                 "Press and drag draws a rectangle instead of a lasso (PICKDRAG)"
             ))
             .size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(selection.selection_cycling)
+                .on_toggle(Message::SelectionCyclingChanged)
+                .size(15),
+            text(crate::t!("Clicking overlapping objects opens a picker")).size(12),
         ]
         .spacing(8)
         .align_y(iced::Center),
@@ -810,7 +1076,129 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
-    let drawing = column![
+    // ANNOAUTOSCALE's magnitude decides which objects a newly added scale
+    // reaches — 1 skips layers that are off, frozen, locked or frozen in the
+    // viewport, 2 keeps locked ones, 3 skips only locked, 4 takes everything.
+    // The sign is the on/off the status-bar pill flips, so the mode survives
+    // being switched off and back on.
+    let auto_scale_options = [
+        (0i8, "Off"),
+        (1, "Skip objects on layers that are off, frozen or locked"),
+        (2, "Skip objects on layers that are off or frozen"),
+        (3, "Skip objects on locked layers"),
+        (4, "All annotative objects"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        value,
+        label: crate::t!(label).into_owned(),
+    })
+    .collect::<Vec<_>>();
+    let selected_auto_scale = auto_scale_options
+        .iter()
+        .find(|choice| choice.value == prefs.annotation_auto_scale.max(0))
+        .cloned();
+
+    let qdim_options = [
+        (0u8, "Endpoints"),
+        (1, "Intersections"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        value,
+        label: crate::t!(label).into_owned(),
+    })
+    .collect::<Vec<_>>();
+    let selected_qdim = qdim_options
+        .iter()
+        .find(|choice| choice.value == prefs.qdim_snap_priority)
+        .cloned();
+
+    let user_prefs = column![
+        text(crate::t!("User Preferences")).size(15),
+        Space::new().height(10),
+        text(crate::t!("Zoom")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.zoom_wheel_reversed)
+                .on_toggle(Message::ZoomWheelReversedChanged)
+                .size(15),
+            text(crate::t!("Reverse mouse wheel zoom (ZOOMWHEEL)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            text(crate::t!("Zoom factor")).size(12).width(150),
+            slider(3..=100, prefs.zoom_factor.clamp(3, 100), Message::ZoomFactorChanged)
+                .step(1)
+                .width(Fill),
+            text(prefs.zoom_factor.clamp(3, 100).to_string()).size(11).width(44),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!("How far one wheel notch zooms (ZOOMFACTOR)."))
+            .size(11)
+            .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Text and Dimensions")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.texteditmode)
+                .on_toggle(Message::TextEditModeChanged)
+                .size(15),
+            text(crate::t!("TEXTEDIT edits one object and ends (TEXTEDITMODE)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            iced::widget::checkbox(prefs.dimension_continue_mode == 1)
+                .on_toggle(Message::DimContinueModeChanged)
+                .size(15),
+            text(crate::t!(
+                "Continued dimensions inherit the base dimension's layer and style (DIMCONTINUEMODE)"
+            ))
+            .size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            text(crate::t!("QDIM origin priority")).size(12).width(150),
+            iced::widget::pick_list(selected_qdim, qdim_options, |choice| choice.label.clone())
+                .on_select(|choice| Message::QdimSnapPriorityChanged(choice.value))
+                .width(Fill),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Which points QDIM measures from. Also settable inside the command."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Annotation")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Add scales automatically")).size(12).width(150),
+            iced::widget::pick_list(selected_auto_scale, auto_scale_options, |choice| {
+                choice.label.clone()
+            })
+            .on_select(|choice| Message::AnnoAutoScaleChanged(choice.value))
+            .width(Fill),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Which annotative objects pick up a newly set annotation scale (ANNOAUTOSCALE)."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(24),
         text(crate::t!("Block Edit")).size(15),
         Space::new().height(10),
         row![
@@ -830,6 +1218,336 @@ pub fn view_window<'a>(
         ]
         .spacing(8)
         .align_y(iced::Center),
+        Space::new().height(24),
+        text(crate::t!("Drawing Units")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Length, angle and insertion units"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Drawing Units…")).size(11))
+                .on_press(Message::OpenDrawingUnits)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
+
+    // Snap modes, grid and object snap stay in the Drafting Settings dialog.
+    // These two have no home: Drafting Settings shows the rotation angle but
+    // offers only Reset, and the polar increment lives solely in a status-bar
+    // pop-up.
+    let polar_options = [90.0f32, 45.0, 30.0, 22.5, 18.0, 15.0, 10.0, 5.0, 1.0]
+        .into_iter()
+        .map(|value| Labelled {
+            label: format!("{}°", crate::app::settings::format_snap_angle(value)),
+            value,
+        })
+        .collect::<Vec<_>>();
+    let selected_polar = polar_options
+        .iter()
+        .find(|choice| (choice.value - prefs.polar_increment_deg).abs() < 1e-4)
+        .cloned()
+        .unwrap_or_else(|| Labelled {
+            value: prefs.polar_increment_deg,
+            label: format!(
+                "{}°",
+                crate::app::settings::format_snap_angle(prefs.polar_increment_deg)
+            ),
+        });
+
+    let drafting = column![
+        text(crate::t!("Drafting")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Drafting rotation")).size(12).width(150),
+            text_input("0", snap_angle_input)
+                .on_input(Message::SnapAngleInputChanged)
+                .width(110),
+            text(crate::t!("degrees")).size(11),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Rotates the crosshair and the snap grid in the active UCS (SNAPANG)."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(14),
+        row![
+            text(crate::t!("Polar tracking increment")).size(12).width(150),
+            iced::widget::pick_list(Some(selected_polar), polar_options, |choice| {
+                choice.label.clone()
+            })
+            .on_select(|choice| Message::PolarIncrementChanged(choice.value))
+            .width(Fill),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(24),
+        text(crate::t!("Snap and Grid")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Snap modes, grid spacing and object snap"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Drafting Settings…")).size(11))
+                .on_press(Message::ToggleSnapPopup)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
+
+    let surface_type_options = [
+        (5i16, "Quadratic B-spline"),
+        (6, "Cubic B-spline"),
+        (8, "Bezier"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        value,
+        label: format!("{} ({value})", crate::t!(label)),
+    })
+    .collect::<Vec<_>>();
+    let selected_surface_type = surface_type_options
+        .iter()
+        .find(|choice| choice.value == drawing_prefs.surface_type)
+        .cloned();
+
+    let show_history_options = [
+        (0i16, "Never"),
+        (1, "As set per solid"),
+        (2, "Always"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        value,
+        label: crate::t!(label).into_owned(),
+    })
+    .collect::<Vec<_>>();
+    let selected_show_history = show_history_options
+        .iter()
+        .find(|choice| choice.value == drawing_prefs.show_solid_history.clamp(0, 2))
+        .cloned();
+
+    let mut modeling = column![
+        text(crate::t!("3D Modeling")).size(15),
+        Space::new().height(10),
+        text(crate::t!("Display Tools")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.show_viewcube)
+                .on_toggle(Message::ShowViewCubeChanged)
+                .size(15),
+            text(crate::t!("Show the navigation cube (NAVVCUBE)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.show_ucs_icon)
+                .on_toggle(Message::ShowUcsIconChanged)
+                .size(15),
+            text(crate::t!("Show the UCS icon (UCSICON)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.ucs_icon_at_origin)
+                .on_toggle(Message::UcsIconAtOriginChanged)
+                .size(15),
+            text(crate::t!("Place the UCS icon at the origin (UCSICON ORigin)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    ];
+
+    if drawing_prefs.available {
+        modeling = modeling
+            .push(Space::new().height(24))
+            .push(
+                row![
+                    text(crate::t!("Display Resolution")).size(15),
+                    Space::new().width(10),
+                    text(crate::t!("applies to the current drawing")).size(11),
+                ]
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Isolines per surface")).size(12).width(150),
+                    // Retessellate once when dragging ends.
+                    slider(
+                        0..=64,
+                        drawing_prefs.isolines.clamp(0, 64),
+                        Message::IsolinesChanged,
+                    )
+                    .step(1i16)
+                    .on_release(Message::IsolinesReleased)
+                    .width(Fill),
+                    text(drawing_prefs.isolines.clamp(0, 64).to_string())
+                        .size(11)
+                        .width(44),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    iced::widget::checkbox(drawing_prefs.display_silhouette)
+                        .on_toggle(Message::DispSilhChanged)
+                        .size(15),
+                    text(crate::t!("Show silhouette edges on solids (DISPSILH)")).size(12),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Surface density U")).size(12).width(150),
+                    slider(
+                        0..=200,
+                        drawing_prefs.surface_u.clamp(0, 200),
+                        Message::SurfaceUChanged,
+                    )
+                    .step(1i16)
+                    .width(Fill),
+                    text(drawing_prefs.surface_u.clamp(0, 200).to_string())
+                        .size(11)
+                        .width(44),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Surface density V")).size(12).width(150),
+                    slider(
+                        0..=200,
+                        drawing_prefs.surface_v.clamp(0, 200),
+                        Message::SurfaceVChanged,
+                    )
+                    .step(1i16)
+                    .width(Fill),
+                    text(drawing_prefs.surface_v.clamp(0, 200).to_string())
+                        .size(11)
+                        .width(44),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Surface type")).size(12).width(150),
+                    iced::widget::pick_list(
+                        selected_surface_type,
+                        surface_type_options,
+                        |choice| choice.label.clone(),
+                    )
+                    .on_select(|choice| Message::SurfaceTypeChanged(choice.value))
+                    .width(Fill),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(24))
+            .push(
+                row![
+                    text(crate::t!("Solid History")).size(15),
+                    Space::new().width(10),
+                    text(crate::t!("applies to the current drawing")).size(11),
+                ]
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    iced::widget::checkbox(drawing_prefs.record_solid_history)
+                        .on_toggle(Message::SolidHistChanged)
+                        .size(15),
+                    text(crate::t!("Record the history of composite solids (SOLIDHIST)"))
+                        .size(12),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Show solid history")).size(12).width(150),
+                    iced::widget::pick_list(
+                        selected_show_history,
+                        show_history_options,
+                        |choice| choice.label.clone(),
+                    )
+                    .on_select(|choice| Message::ShowHistChanged(choice.value))
+                    .width(Fill),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            );
+    }
+
+    let modeling = modeling.spacing(0).width(sizing.width);
+
+
+    // The application has no support-file search path, so this page does not
+    // pretend to offer one. It shows where things actually live and opens the
+    // folder — which is the question people are really asking when they go
+    // looking for a Files page.
+    let folder_row = |label: std::borrow::Cow<'a, str>, path: Option<String>| {
+        let shown = path.clone().unwrap_or_else(|| crate::t!("Not available").into_owned());
+        let mut open = button(text(crate::t!("Open folder")).size(11))
+            .padding([4, 10])
+            .style(button::secondary);
+        if let Some(path) = path {
+            open = open.on_press(Message::OpenFolder(path));
+        }
+        row![
+            column![
+                text(label).size(12),
+                text(shown).size(11),
+            ]
+            .spacing(2)
+            .width(Fill),
+            open,
+        ]
+        .spacing(10)
+        .align_y(iced::Center)
+    };
+
+    let files = column![
+        text(crate::t!("Files")).size(15),
+        Space::new().height(6),
+        text(crate::t!(
+            "Where the application keeps its own files. These locations are fixed."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(16),
+        folder_row(crate::t!("Configuration"), folders.config.clone()),
+        Space::new().height(12),
+        folder_row(crate::t!("Plot styles"), folders.plot_styles.clone()),
+        Space::new().height(12),
+        folder_row(crate::t!("Plugins"), folders.plugins.clone()),
+        Space::new().height(12),
+        folder_row(crate::t!("Autosave files"), folders.autosave.clone()),
     ]
     .spacing(0)
     .width(sizing.width);
@@ -838,41 +1556,56 @@ pub fn view_window<'a>(
         OptionsTab::General => general.into(),
         OptionsTab::Display => display_element.into(),
         OptionsTab::Selection => selection.into(),
-        OptionsTab::Drawing => drawing.into(),
+        OptionsTab::Files => files.into(),
+        OptionsTab::OpenAndSave => open_and_save.into(),
+        OptionsTab::Drafting => drafting.into(),
+        OptionsTab::Modeling => modeling.into(),
+        OptionsTab::UserPreferences => user_prefs.into(),
     };
 
+    // A vertical rail rather than a horizontal strip: the tab names are
+    // translated into 21 languages, and a row of them stops fitting long
+    // before the list of pages is complete.
     let tab_button = |label, tab| {
         let selected = active_tab == tab;
-        button(text(label).size(12))
+        button(text(label).size(12.5))
             .on_press(Message::OptionsTabChanged(tab))
-            .padding([6, 14])
-            .style(if selected { button::primary } else { button::secondary })
+            .padding([7, 12])
+            .width(Fill)
+            .style(if selected { button::primary } else { button::text })
     };
-    let tabs = row![
+    let tabs = column![
         tab_button(crate::t!("General"), OptionsTab::General),
+        tab_button(crate::t!("Files"), OptionsTab::Files),
+        tab_button(crate::t!("Open and Save"), OptionsTab::OpenAndSave),
         tab_button(crate::t!("Display"), OptionsTab::Display),
+        tab_button(crate::t!("Drafting"), OptionsTab::Drafting),
+        tab_button(crate::t!("3D Modeling"), OptionsTab::Modeling),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
-        tab_button(crate::t!("Drawing"), OptionsTab::Drawing),
+        tab_button(crate::t!("User Preferences"), OptionsTab::UserPreferences),
     ]
-    .spacing(6);
+    .spacing(2)
+    .width(iced::Length::Fixed(TAB_RAIL_WIDTH));
 
-    let body = column![
-        tabs,
-        Space::new().height(12),
+    let pane = column![
         // Keep the scrollbar in its own lane instead of floating over the
         // controls at the trailing edge of the Options content.
-        scrollable(content).spacing(8).height(sizing.height),
+        scrollable(content).spacing(8).height(Fill),
         Space::new().height(12),
-        row![Space::new().width(sizing.width), close],
+        row![Space::new().width(Fill), close],
     ]
-    .width(sizing.width)
+    .width(Fill)
     .height(sizing.height);
+
+    let body = row![tabs, Space::new().width(18), pane]
+        .width(sizing.width)
+        .height(sizing.height);
 
     let intrinsic = sizing.width == crate::ui::modal::ModalSizing::INTRINSIC.width;
     container(body)
         .style(container::rounded_box)
         .padding([16, 18])
-        .width(if intrinsic { iced::Length::Fixed(540.0) } else { sizing.width })
-        .height(if intrinsic { iced::Length::Fixed(560.0) } else { sizing.height })
+        .width(if intrinsic { iced::Length::Fixed(DIALOG_WIDTH) } else { sizing.width })
+        .height(if intrinsic { iced::Length::Fixed(DIALOG_HEIGHT) } else { sizing.height })
         .into()
 }

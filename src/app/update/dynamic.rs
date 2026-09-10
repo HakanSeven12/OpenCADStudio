@@ -65,34 +65,55 @@ impl OpenCADStudio {
 
         // A normal 2D grip stretch behaves like a point-placement step:
         // distance and angle are measured from the grip's original position.
+        // Lengthen uses the same overlay machinery, but it only needs the
+        // distance field: the entity itself determines the endpoint direction
+        // (or arc sweep), so an angle entry would be misleading.
         //
         // Grip editing is not an `active_cmd`, so handle it before the normal
         // command-only path below.
-        let grip_origin = self.tabs[i]
+        let grip_input = self.tabs[i]
             .active_grip
             .as_ref()
-            .filter(|grip| {
-                grip.mode == crate::scene::pick::grip::GripEditMode::Stretch
-            })
-            .map(|grip| grip.origin_world);
+            .map(|grip| match grip.mode {
+                crate::scene::pick::grip::GripEditMode::Stretch => {
+                    (grip.origin_world, None)
+                }
+                crate::scene::pick::grip::GripEditMode::Lengthen => {
+                    (grip.origin_world, Some(crate::command::DynRole::Distance))
+                }
+                crate::scene::pick::grip::GripEditMode::Radius => {
+                    (grip.origin_world, Some(crate::command::DynRole::Radius))
+                }
+                crate::scene::pick::grip::GripEditMode::ArcLength => {
+                    (grip.origin_world, Some(crate::command::DynRole::Distance))
+                }
+            });
 
-        if let Some(origin) = grip_origin {
-            let wanted = [DynComponent::Distance, DynComponent::Angle];
-            let current: Vec<DynComponent> = self.tabs[i]
+        if let Some((origin, scalar_role)) = grip_input {
+            let wanted_roles: Vec<crate::command::DynRole> = scalar_role.map_or_else(
+                || vec![crate::command::DynRole::Distance, crate::command::DynRole::Angle],
+                |role| vec![role],
+            );
+            let current: Vec<crate::command::DynRole> = self.tabs[i]
                 .dyn_fields
                 .iter()
-                .map(|field| field.component)
+                .map(|field| field.role)
                 .collect();
 
-            if current.as_slice() != wanted {
-                self.tabs[i].dyn_fields = wanted
-                    .into_iter()
-                    .map(DynFieldEntry::new)
+            if current != wanted_roles {
+                self.tabs[i].dyn_fields = wanted_roles
+                    .iter()
+                    .copied()
+                    .map(DynFieldEntry::from_role)
                     .collect();
                 self.tabs[i].dyn_active = 0;
             }
 
-            self.tabs[i].dyn_guide = crate::command::DynGuide::Polar;
+            self.tabs[i].dyn_guide = if scalar_role.is_some() {
+                crate::command::DynGuide::Radius
+            } else {
+                crate::command::DynGuide::Polar
+            };
             self.tabs[i].dyn_anchor = Some(origin);
             self.tabs[i].dyn_ref = None;
             return;

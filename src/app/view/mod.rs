@@ -162,7 +162,7 @@ pub(super) struct RenderModeChoice(pub acadrust::entities::ViewportRenderMode);
 
 impl std::fmt::Display for RenderModeChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(crate::modules::view::visual_style::label_for(self.0))
+        f.write_str(crate::t!(crate::modules::view::visual_style::label_for(self.0)).as_ref())
     }
 }
 
@@ -927,7 +927,32 @@ bg={bg_ms:.1}ms n={view_count}"
                 // A command may drive a typed scalar by mouse (e.g. a
                 // perpendicular distance to a picked object); show that live
                 // value in the box until the user types over it.
-                let live = tab.active_cmd.as_ref().and_then(|c| c.dyn_live_value(w));
+                let live = tab.active_cmd.as_ref().and_then(|c| c.dyn_live_value(w)).or_else(|| {
+                    let grip = tab.active_grip.as_ref()?;
+                    let action = match grip.mode {
+                        crate::scene::pick::grip::GripEditMode::Lengthen => {
+                            crate::scene::model::object::GripMenuAction::Lengthen
+                        }
+                        crate::scene::pick::grip::GripEditMode::Radius => {
+                            crate::scene::model::object::GripMenuAction::Radius
+                        }
+                        crate::scene::pick::grip::GripEditMode::ArcLength => {
+                            crate::scene::model::object::GripMenuAction::ArcLength
+                        }
+                        _ => return None,
+                    };
+                    let original = self
+                        .grip_originals
+                        .iter()
+                        .find(|(handle, _)| *handle == grip.handle)
+                        .map(|(_, entity)| entity)?;
+                    crate::scene::view::dispatch::grip_menu_point_value(
+                        original,
+                        grip.grip_id,
+                        action,
+                        w,
+                    )
+                });
                 let boxes: Vec<crate::ui::overlay::DynBox> = tab
                     .dyn_fields
                     .iter()
@@ -1687,17 +1712,28 @@ bg={bg_ms:.1}ms n={view_count}"
         // viewport stack rather than as a separate row in the main
         // column — frees up vertical space when no command is active
         // and keeps the input close to where the cursor is drawing.
-        // Autocomplete shows only when no command is collecting its
-        // own input (otherwise typed prefixes are coordinates / values).
-        let allow_autocomplete = tab.active_cmd.is_none();
+        // Autocomplete shows only when no command or grip-menu action is
+        // collecting its own input. A pending Lengthen / Radius / Arc Length
+        // value is numeric input, not the prefix of a new command (for example,
+        // `3` must not open the 3DALIGN / 3DARRAY suggestions).
+        let allow_autocomplete = tab.active_cmd.is_none() && self.grip_pending.is_none();
         // Dynamic input captures keystrokes when its fields are showing,
         // so the command-line field must release focus / its on_input.
         // The MText preview also captures keystrokes (typing edits it), so the
         // command line must likewise release its on_input there.
+        let interactive_value_grip = tab.active_grip.as_ref().is_some_and(|grip| {
+            matches!(
+                grip.mode,
+                crate::scene::pick::grip::GripEditMode::Lengthen
+                    | crate::scene::pick::grip::GripEditMode::Radius
+                    | crate::scene::pick::grip::GripEditMode::ArcLength
+            )
+        });
         let dyn_capturing =
             (self.dyn_input
                 && (tab.active_cmd.is_some() || tab.active_grip.is_some())
-                && !tab.dyn_fields.is_empty())
+                && !tab.dyn_fields.is_empty()
+                && !interactive_value_grip)
                 || self.mtext_editor.as_ref().is_some_and(|e| e.show_preview)
                 || self.text_inline.is_some();
         // The workspace row is: left edge stack, viewport, right edge stack.

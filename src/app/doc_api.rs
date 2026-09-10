@@ -1,18 +1,74 @@
 //! Native document API adapter over the existing scene, history and kernel paths.
 
 use acadrust::entities::Solid3D;
+use acadrust::objects::{Dictionary, ObjectType};
 use acadrust::{EntityType, Handle};
 use ocs_doc_api::backend::{DocApiBackend, KernelBody};
 use ocs_doc_api::{
-    Aabb, ApiError, ApiResult, Curve2Spec, EntityView, GeometryErrorKind, GeometryRevision,
-    ObjectId, PlacementSpec,
+    Aabb, ApiError, ApiResult, Color, Curve2Spec, EntityView, GeometryErrorKind, GeometryRevision,
+    LayerFlags, LayerInfo, LineWeight, ObjectId, PlacementSpec,
 };
 
+use crate::scene::annotative::root_named_dict_handle;
 use crate::scene::convert::acis_export;
 use crate::scene::model::solid_model;
 use ocs_doc_api::convert;
 
 use super::plugin_host::HostSession;
+
+const XRECORD_DICT_NAME: &str = "OCS_XRECORD_DICT";
+
+/// Return the stable named-object dictionary used to hold `XRecord` objects.
+/// Created on first use under the root named-objects dictionary and reused
+/// thereafter.
+fn xrecord_dictionary_handle(doc: &mut acadrust::CadDocument) -> Handle {
+    let root_h = root_named_dict_handle(doc);
+    let existing = match doc.objects.get(&root_h) {
+        Some(ObjectType::Dictionary(root)) => root
+            .entries
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(XRECORD_DICT_NAME))
+            .map(|(_, handle)| *handle),
+        _ => None,
+    };
+    match existing.filter(|handle| matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_)))) {
+        Some(handle) => handle,
+        None => {
+            let handle = doc.allocate_handle();
+            let mut dict = Dictionary::new();
+            dict.handle = handle;
+            dict.owner = root_h;
+            doc.objects.insert(handle, ObjectType::Dictionary(dict));
+            if let Some(ObjectType::Dictionary(root)) = doc.objects.get_mut(&root_h) {
+                root.entries.retain(|(name, _)| !name.eq_ignore_ascii_case(XRECORD_DICT_NAME));
+                root.add_entry(XRECORD_DICT_NAME, handle);
+            }
+            handle
+        }
+    }
+}
+
+fn xrecord_owner_dictionary(
+    doc: &acadrust::CadDocument,
+    record_handle: Handle,
+    owner: Handle,
+) -> Option<Handle> {
+    let owns_record = |handle: Handle| {
+        matches!(doc.objects.get(&handle), Some(ObjectType::Dictionary(dict)) if
+            dict.entries.iter().any(|(_, child)| *child == record_handle))
+    };
+    if owns_record(owner) {
+        return Some(owner);
+    }
+    doc.objects.iter().find_map(|(handle, object)| match object {
+        ObjectType::Dictionary(dict)
+            if dict.entries.iter().any(|(_, child)| *child == record_handle) =>
+        {
+            Some(*handle)
+        }
+        _ => None,
+    })
+}
 
 /// Entry point called by the `HostApi::doc_api_dispatch` override (below) and by
 // the in-process path. Deserializes the envelope, runs the crate executor,
@@ -63,6 +119,10 @@ fn handle_to_obj(h: Handle) -> ObjectId {
     ObjectId::from_handle(h)
 }
 
+fn v3_to_array(v: acadrust::types::Vector3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
 impl DocApiBackend for HostSession<'_> {
     fn resolve_body(&mut self, id: ObjectId) -> ApiResult<KernelBody> {
         let handle = obj_to_handle(id);
@@ -104,16 +164,32 @@ impl DocApiBackend for HostSession<'_> {
     }
 
     fn create_many(&mut self, specs: &[ocs_doc_api::EntitySpec]) -> ApiResult<Vec<ObjectId>> {
+        // Validate per-spec layers up front so the op is atomic.
+        for spec in specs {
+            if let Some(name) = spec.layer() {
+                self.lookup_layer(name).map_err(|e| ApiError::validation(
+                    "CreateMany",
+                    e.to_string(),
+                ))?;
+            }
+        }
         let mut prepared = Vec::with_capacity(specs.len());
         for spec in specs {
             prepared.push(match spec {
                 ocs_doc_api::EntitySpec::Solid(spec) => {
                     self.prepare_doc_solid(ocs_doc_api::geom::make_solid(spec)?, None)?
                 }
-                ocs_doc_api::EntitySpec::Curve(spec) => PreparedDocEntity {
-                    entity: convert::curve_spec_to_entity(spec)?,
-                    solid: None,
-                },
+                ocs_doc_api::EntitySpec::Curve(spec) => {
+                    let mut entity = convert::curve_spec_to_entity(spec)?;
+                    if let Some(name) = spec.layer() {
+                        entity.common_mut().layer =
+                            acadrust::tables::normalize_name(name.trim());
+                    }
+                    PreparedDocEntity {
+                        entity,
+                        solid: None,
+                    }
+                }
             });
         }
         DocApiBackend::push_undo(self, "CreateMany");
@@ -139,9 +215,36 @@ impl DocApiBackend for HostSession<'_> {
     }
 
     fn add_curve(&mut self, spec: &Curve2Spec) -> ApiResult<ObjectId> {
-        let entity = convert::curve_spec_to_entity(spec)?;
+        let layer_name = spec.layer();
+        if let Some(name) = layer_name {
+            self.lookup_layer(name).map_err(|e| ApiError::validation(
+                "CreateCurve",
+                e.to_string(),
+            ))?;
+        }
+        let mut entity = convert::curve_spec_to_entity(spec)?;
+        if let Some(name) = layer_name {
+            entity.common_mut().layer = acadrust::tables::normalize_name(name.trim());
+        }
         let handle = self.scene_mut().add_entity(entity);
         Ok(handle_to_obj(handle))
+    }
+
+    fn lookup_layer(&self, name: &str) -> ApiResult<ocs_doc_api::LayerInfo> {
+        let norm = acadrust::tables::normalize_name(name.trim());
+        if norm.is_empty() {
+            return Err(ApiError::validation("LookupLayer", "empty layer name"));
+        }
+        self.document()
+            .layers
+            .get(&norm)
+            .map(|l| layer_info_from_acadrust(l))
+            .ok_or_else(|| {
+                ApiError::validation(
+                    "LookupLayer",
+                    format!("layer '{name}' does not exist"),
+                )
+            })
     }
 
     fn add_insert(&mut self, spec: &ocs_doc_api::ops::InsertSpec) -> ApiResult<ObjectId> {
@@ -422,17 +525,19 @@ impl DocApiBackend for HostSession<'_> {
     ) -> ApiResult<ObjectId> {
         use acadrust::entities::AttributeDefinition;
         use acadrust::types::Vector3;
-        let mut att = AttributeDefinition::default();
-        att.tag = spec.tag.clone();
-        att.prompt = spec.prompt.clone();
-        att.default_value = spec.default_value.clone();
-        att.insertion_point = Vector3::new(
-            spec.insertion_point[0],
-            spec.insertion_point[1],
-            spec.insertion_point[2],
-        );
-        att.height = spec.height;
-        att.rotation = spec.rotation;
+        let att = AttributeDefinition {
+            tag: spec.tag.clone(),
+            prompt: spec.prompt.clone(),
+            default_value: spec.default_value.clone(),
+            insertion_point: Vector3::new(
+                spec.insertion_point[0],
+                spec.insertion_point[1],
+                spec.insertion_point[2],
+            ),
+            height: spec.height,
+            rotation: spec.rotation,
+            ..Default::default()
+        };
         let handle = self
             .scene_mut()
             .add_entity(EntityType::AttributeDefinition(att));
@@ -493,10 +598,12 @@ impl DocApiBackend for HostSession<'_> {
         if let Some(attr) = ins.attributes.iter_mut().find(|a| a.tag == tag) {
             attr.value = value.to_string();
         } else {
-            let mut attr = acadrust::entities::AttributeEntity::default();
-            attr.tag = tag.to_string();
-            attr.value = value.to_string();
-            attr.insertion_point = ins.insert_point;
+            let attr = acadrust::entities::AttributeEntity {
+                tag: tag.to_string(),
+                value: value.to_string(),
+                insertion_point: ins.insert_point,
+                ..Default::default()
+            };
             ins.attributes.push(attr);
         }
         if !self.scene_mut().update_entity(EntityType::Insert(ins)) {
@@ -543,7 +650,16 @@ impl DocApiBackend for HostSession<'_> {
                 ),
                 None => ("Missing".to_string(), None),
             };
-            out.push(EntityView { id, kind, bounds });
+            let layer = match self.document().get_entity(*h) {
+                Some(e) => e.common().layer.clone(),
+                None => String::new(),
+            };
+            out.push(EntityView {
+                id,
+                kind,
+                layer,
+                bounds,
+            });
         }
         Ok(out)
     }
@@ -602,16 +718,18 @@ impl DocApiBackend for HostSession<'_> {
         // non-empty, a known image extension, and not a UNC/network path or
         // parent-traversal (which could point the host at unintended resources).
         validate_image_path(&spec.file_path)?;
-        let mut img = RasterImage::default();
-        img.file_path = spec.file_path.clone();
-        img.insertion_point = Vector3::new(
-            spec.insertion_point[0],
-            spec.insertion_point[1],
-            spec.insertion_point[2],
-        );
-        img.u_vector = Vector3::new(spec.u_vector[0], spec.u_vector[1], spec.u_vector[2]);
-        img.v_vector = Vector3::new(spec.v_vector[0], spec.v_vector[1], spec.v_vector[2]);
-        img.size = Vector2::new(spec.size[0], spec.size[1]);
+        let img = RasterImage {
+            file_path: spec.file_path.clone(),
+            insertion_point: Vector3::new(
+                spec.insertion_point[0],
+                spec.insertion_point[1],
+                spec.insertion_point[2],
+            ),
+            u_vector: Vector3::new(spec.u_vector[0], spec.u_vector[1], spec.u_vector[2]),
+            v_vector: Vector3::new(spec.v_vector[0], spec.v_vector[1], spec.v_vector[2]),
+            size: Vector2::new(spec.size[0], spec.size[1]),
+            ..Default::default()
+        };
         // add_entity auto-registers the ImageDefinition (scene/entity.rs).
         let handle = self.scene_mut().add_entity(EntityType::RasterImage(img));
         Ok(handle_to_obj(handle))
@@ -624,6 +742,353 @@ impl DocApiBackend for HostSession<'_> {
         let body = cadkernel::brep::loft(sections)
             .ok_or_else(|| ApiError::geometry(GeometryErrorKind::InvalidInput, "loft failed"))?;
         self.store_solid(&body)
+    }
+
+    fn set_xdata(
+        &mut self,
+        id: ObjectId,
+        application_name: &str,
+        record: Option<&ocs_doc_api::XDataRecord>,
+    ) -> ApiResult<()> {
+        self.can_modify(id)?;
+        let handle = obj_to_handle(id);
+        let values = record.map(|r| {
+            r.values
+                .iter()
+                .map(|v| xdata_value_to_acadrust(v, self.document()))
+                .collect::<Vec<_>>()
+        });
+        crate::scene::view::dispatch::set_entity_xdata(
+            self.document_mut(),
+            handle,
+            application_name,
+            values,
+        );
+        Ok(())
+    }
+
+    fn xdata(&self, id: ObjectId, application_name: &str) -> ApiResult<Option<ocs_doc_api::XDataRecord>> {
+        let handle = obj_to_handle(id);
+        let entity = self
+            .document()
+            .get_entity(handle)
+            .ok_or(ApiError::UnknownId(id))?;
+        let Some(rec) = entity.common().extended_data.get_record(application_name) else {
+            return Ok(None);
+        };
+        Ok(Some(ocs_doc_api::XDataRecord {
+            application_name: rec.application_name.clone(),
+            values: rec
+                .values
+                .iter()
+                .map(xdata_value_from_acadrust)
+                .collect(),
+        }))
+    }
+
+    fn object_exists(&self, id: ObjectId) -> bool {
+        let handle = obj_to_handle(id);
+        self.document().objects.contains_key(&handle)
+    }
+
+    fn add_xrecord(&mut self, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<ObjectId> {
+        use acadrust::objects::{ObjectType, XRecord};
+        let dict_h = xrecord_dictionary_handle(self.document_mut());
+        if matches!(self.document().objects.get(&dict_h), Some(ObjectType::Dictionary(dict)) if
+            dict.entries.iter().any(|(name, _)| name.eq_ignore_ascii_case(&spec.name)))
+        {
+            return Err(ApiError::validation(
+                "CreateXRecord",
+                format!("XRecord '{}' already exists", spec.name),
+            ));
+        }
+        let mut record = XRecord::named(spec.name.clone());
+        record.owner = dict_h;
+        record.cloning_flags = cloning_flags_to_acadrust(spec.cloning_flags);
+        record.entries = spec
+            .entries
+            .iter()
+            .map(xrecord_entry_to_acadrust)
+            .collect();
+        record.synchronize_object_references();
+        let record_handle = {
+            let doc = self.document_mut();
+            let handle = doc.allocate_handle();
+            record.handle = handle;
+            doc.objects
+                .insert(handle, ObjectType::XRecord(record));
+            handle
+        };
+        // Attach the new XRecord to the stable named-object dictionary so it is
+        // reachable as a standalone named object.
+        if let Some(ObjectType::Dictionary(dict)) = self.document_mut().objects.get_mut(&dict_h) {
+            dict.add_entry(spec.name.clone(), record_handle);
+        }
+        Ok(handle_to_obj(record_handle))
+    }
+
+    fn set_xrecord(&mut self, id: ObjectId, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<()> {
+        if !self.object_exists(id) {
+            return Err(ApiError::validation(
+                "SetXRecord",
+                format!("unknown ObjectId {id:?}"),
+            ));
+        }
+        let handle = obj_to_handle(id);
+        let Some(ObjectType::XRecord(record)) = self.document().objects.get(&handle) else {
+            return Err(ApiError::Unsupported(format!("ObjectId {id:?} is not an XRecord")));
+        };
+        let mut updated = record.clone();
+        let dict_h = xrecord_owner_dictionary(self.document(), handle, record.owner)
+            .unwrap_or_else(|| xrecord_dictionary_handle(self.document_mut()));
+        if matches!(self.document().objects.get(&dict_h), Some(ObjectType::Dictionary(dict)) if
+            dict.entries.iter().any(|(name, child)| {
+                *child != handle && name.eq_ignore_ascii_case(&spec.name)
+            }))
+        {
+            return Err(ApiError::validation(
+                "SetXRecord",
+                format!("XRecord '{}' already exists", spec.name),
+            ));
+        }
+        updated.name = spec.name.clone();
+        updated.owner = dict_h;
+        updated.cloning_flags = cloning_flags_to_acadrust(spec.cloning_flags);
+        updated.entries = spec
+            .entries
+            .iter()
+            .map(xrecord_entry_to_acadrust)
+            .collect();
+        updated.synchronize_object_references();
+        self.document_mut()
+            .objects
+            .insert(handle, acadrust::objects::ObjectType::XRecord(updated));
+        if let Some(ObjectType::Dictionary(dict)) = self.document_mut().objects.get_mut(&dict_h) {
+            dict.entries.retain(|(_, child)| *child != handle);
+            dict.add_entry(spec.name.clone(), handle);
+        }
+        Ok(())
+    }
+
+    fn xrecord(&self, id: ObjectId) -> ApiResult<Option<ocs_doc_api::XRecordSpec>> {
+        let handle = obj_to_handle(id);
+        let Some(ObjectType::XRecord(record)) = self.document().objects.get(&handle) else {
+            return Ok(None);
+        };
+        Ok(Some(ocs_doc_api::XRecordSpec {
+            name: record.name.clone(),
+            cloning_flags: cloning_flags_from_acadrust(record.cloning_flags),
+            entries: record
+                .entries
+                .iter()
+                .map(xrecord_entry_from_acadrust)
+                .collect(),
+        }))
+    }
+
+    fn create_layer(&mut self, info: &LayerInfo) -> ApiResult<()> {
+        let name = acadrust::tables::normalize_name(info.name.trim());
+        if name.is_empty() {
+            return Err(ApiError::validation("CreateLayer", "empty layer name"));
+        }
+        if self.document().layers.contains(&name) {
+            return Err(ApiError::validation(
+                "CreateLayer",
+                format!("layer '{name}' already exists"),
+            ));
+        }
+        let mut layer = acadrust::tables::Layer::new(&name);
+        layer.handle = self.document_mut().allocate_handle();
+        apply_layer_info(&mut layer, info);
+        self.document_mut()
+            .layers
+            .add(layer)
+            .map_err(|e| ApiError::validation("CreateLayer", e))?;
+        Ok(())
+    }
+
+    fn update_layer(&mut self, name: &str, info: &LayerInfo) -> ApiResult<()> {
+        let deps = {
+            let doc = self.document_mut();
+            let name_upper = acadrust::tables::normalize_name(name.trim());
+            let Some(existing) = doc.layers.get(&name_upper).cloned() else {
+                return Err(ApiError::validation(
+                    "UpdateLayer",
+                    format!("layer '{name}' does not exist"),
+                ));
+            };
+            let new_name = acadrust::tables::normalize_name(info.name.trim());
+            if new_name.is_empty() {
+                return Err(ApiError::validation("UpdateLayer", "empty layer name"));
+            }
+            // Rename if the key changed (preserves handle and table position).
+            if name_upper != new_name {
+                doc.layers
+                    .rename(&name_upper, new_name.clone())
+                    .map_err(|e| ApiError::validation("UpdateLayer", e))?;
+            }
+            let Some(layer) = doc.layers.get_mut(&new_name) else {
+                return Err(ApiError::validation(
+                    "UpdateLayer",
+                    format!("layer '{name}' does not exist"),
+                ));
+            };
+            apply_layer_info(layer, info);
+            [existing.name.clone(), layer.name.clone()]
+        };
+        // By-layer appearance changed: rebuild derived geometry that resolved it.
+        self.scene_mut().invalidate_layer_dependencies(&deps);
+        Ok(())
+    }
+    fn delete_layer(&mut self, name: &str) -> ApiResult<()> {
+        let name_upper = acadrust::tables::normalize_name(name.trim());
+        if name_upper == "0" {
+            return Err(ApiError::validation("DeleteLayer", "cannot delete layer 0"));
+        }
+        if !self.document().layers.contains(&name_upper) {
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                format!("layer '{name}' does not exist"),
+            ));
+        }
+        if acadrust::tables::normalize_name(&self.document().header.current_layer_name) == name_upper
+        {
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                "cannot delete the current layer",
+            ));
+        }
+        if self
+            .document()
+            .entities()
+            .any(|e| acadrust::tables::normalize_name(&e.common().layer) == name_upper)
+        {
+            return Err(ApiError::validation(
+                "DeleteLayer",
+                format!("layer '{name}' is still in use"),
+            ));
+        }
+        // Remove by the normalized name so a differently-cased request behaves
+        // consistently with the rest of the layer table API.
+        self.document_mut().layers.remove(&name_upper);
+        Ok(())
+    }
+
+
+    fn set_entity_layer(&mut self, id: ObjectId, layer: &str) -> ApiResult<()> {
+        self.can_modify(id)?;
+        let handle = obj_to_handle(id);
+        let layer_upper = acadrust::tables::normalize_name(layer.trim());
+        let target = self.document().layers.get(&layer_upper).cloned();
+        let Some(target) = target else {
+            return Err(ApiError::validation(
+                "SetEntityLayer",
+                format!("layer '{layer}' does not exist"),
+            ));
+        };
+        if target.is_locked() {
+            return Err(ApiError::Unsupported(format!(
+                "entity {id:?} cannot be moved to locked layer '{layer}'"
+            )));
+        }
+        let mut entity = self
+            .document()
+            .get_entity(handle)
+            .cloned()
+            .ok_or(ApiError::UnknownId(id))?;
+        entity.common_mut().layer = target.name.clone();
+        if !self.scene_mut().update_entity(entity) {
+            return Err(ApiError::Unsupported(format!(
+                "entity {id:?} is on a locked layer"
+            )));
+        }
+        Ok(())
+    }
+
+    fn layers(&self) -> ApiResult<Vec<LayerInfo>> {
+        let mut v: Vec<_> = self
+            .document()
+            .layers
+            .iter()
+            .map(layer_info_from_acadrust)
+            .collect();
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(v)
+    }
+
+    fn entity_layer(&self, id: ObjectId) -> ApiResult<String> {
+        let handle = obj_to_handle(id);
+        let entity = self
+            .document()
+            .get_entity(handle)
+            .ok_or(ApiError::UnknownId(id))?;
+        Ok(entity.common().layer.clone())
+    }
+
+    fn enumerate_entities(
+        &self,
+        kind: Option<&str>,
+        layer: Option<&str>,
+        include_bounds: bool,
+    ) -> ApiResult<Vec<EntityView>> {
+        let doc = self.document();
+        let mut out = Vec::new();
+        for entity in doc.entities() {
+            let handle = entity.common().handle;
+            let id = handle_to_obj(handle);
+            let entity_kind = convert::entity_kind_name(entity);
+            if let Some(k) = kind {
+                if !entity_kind.eq_ignore_ascii_case(k) {
+                    continue;
+                }
+            }
+            if let Some(l) = layer {
+                if acadrust::tables::normalize_name(&entity.common().layer)
+                    != acadrust::tables::normalize_name(l.trim())
+                {
+                    continue;
+                }
+            }
+            out.push(EntityView {
+                id,
+                kind: entity_kind.to_string(),
+                layer: entity.common().layer.clone(),
+                bounds: if include_bounds {
+                    convert::entity_bounds(Some(entity), id).ok()
+                } else {
+                    None
+                },
+            });
+        }
+        Ok(out)
+    }
+
+    fn point_position(&self, id: ObjectId) -> ApiResult<[f64; 3]> {
+        let handle = obj_to_handle(id);
+        let entity = self
+            .document()
+            .get_entity(handle)
+            .ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Point(pt) = entity else {
+            return Err(ApiError::Unsupported(
+                "GetPointPosition is only for Point entities".into(),
+            ));
+        };
+        Ok(v3_to_array(pt.location))
+    }
+
+    fn line_geometry(&self, id: ObjectId) -> ApiResult<([f64; 3], [f64; 3])> {
+        let handle = obj_to_handle(id);
+        let entity = self
+            .document()
+            .get_entity(handle)
+            .ok_or(ApiError::UnknownId(id))?;
+        let EntityType::Line(line) = entity else {
+            return Err(ApiError::Unsupported(
+                "GetLineGeometry is only for Line entities".into(),
+            ));
+        };
+        Ok((v3_to_array(line.start), v3_to_array(line.end)))
     }
 
     fn add_vertex(&mut self, id: ObjectId, at: usize, point: [f64; 3]) -> ApiResult<()> {
@@ -746,6 +1211,7 @@ impl DocApiBackend for HostSession<'_> {
         Ok(EntityView {
             id,
             kind: convert::entity_kind_name(entity).to_string(),
+            layer: entity.common().layer.clone(),
             bounds: self.bounds(id).ok(),
         })
     }
@@ -831,16 +1297,15 @@ impl DocApiBackend for HostSession<'_> {
 
 // â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+type SolidDisplay = (
+    crate::scene::model::mesh_model::MeshLodSet,
+    Vec<acadrust::entities::Wire>,
+    [f64; 3],
+);
+
 struct PreparedDocEntity {
     entity: EntityType,
-    solid: Option<(
-        KernelBody,
-        (
-            crate::scene::model::mesh_model::MeshLodSet,
-            Vec<acadrust::entities::Wire>,
-            [f64; 3],
-        ),
-    )>,
+    solid: Option<(KernelBody, SolidDisplay)>,
 }
 
 impl HostSession<'_> {
@@ -999,13 +1464,235 @@ fn kernel_placement(p: &PlacementSpec) -> cadkernel::brep::Placement {
     }
 }
 
+// Conversions between ocs_doc_api plain-data DTOs and acadrust types.
+// Kept in this file because they are host-side implementation details.
+
+fn cloning_flags_to_acadrust(
+    flags: ocs_doc_api::XRecordCloningFlags,
+) -> acadrust::objects::DictionaryCloningFlags {
+    use acadrust::objects::DictionaryCloningFlags as F;
+    match flags {
+        ocs_doc_api::XRecordCloningFlags::NotApplicable => F::NotApplicable,
+        ocs_doc_api::XRecordCloningFlags::KeepExisting => F::KeepExisting,
+        ocs_doc_api::XRecordCloningFlags::UseClone => F::UseClone,
+        ocs_doc_api::XRecordCloningFlags::XrefName => F::XrefName,
+        ocs_doc_api::XRecordCloningFlags::Name => F::Name,
+        ocs_doc_api::XRecordCloningFlags::UnmangleName => F::UnmangleName,
+    }
+}
+
+fn cloning_flags_from_acadrust(
+    flags: acadrust::objects::DictionaryCloningFlags,
+) -> ocs_doc_api::XRecordCloningFlags {
+    use acadrust::objects::DictionaryCloningFlags as F;
+    match flags {
+        F::NotApplicable => ocs_doc_api::XRecordCloningFlags::NotApplicable,
+        F::KeepExisting => ocs_doc_api::XRecordCloningFlags::KeepExisting,
+        F::UseClone => ocs_doc_api::XRecordCloningFlags::UseClone,
+        F::XrefName => ocs_doc_api::XRecordCloningFlags::XrefName,
+        F::Name => ocs_doc_api::XRecordCloningFlags::Name,
+        F::UnmangleName => ocs_doc_api::XRecordCloningFlags::UnmangleName,
+    }
+}
+
+fn xdata_value_to_acadrust(
+    value: &ocs_doc_api::XDataValue,
+    _doc: &acadrust::CadDocument,
+) -> acadrust::xdata::XDataValue {
+    use acadrust::types::Vector3;
+    use ocs_doc_api::XDataValue as V;
+    match value {
+        V::String(s) => acadrust::xdata::XDataValue::String(s.clone()),
+        V::ControlString(s) => acadrust::xdata::XDataValue::ControlString(s.clone()),
+        V::LayerName(s) => acadrust::xdata::XDataValue::LayerName(s.clone()),
+        V::BinaryData(b) => acadrust::xdata::XDataValue::BinaryData(b.clone()),
+        V::Handle(h) => acadrust::xdata::XDataValue::Handle(acadrust::Handle::new(*h)),
+        V::Point3D(p) => acadrust::xdata::XDataValue::Point3D(Vector3::new(p[0], p[1], p[2])),
+        V::Position3D(p) => acadrust::xdata::XDataValue::Position3D(Vector3::new(p[0], p[1], p[2])),
+        V::Displacement3D(p) => {
+            acadrust::xdata::XDataValue::Displacement3D(Vector3::new(p[0], p[1], p[2]))
+        }
+        V::Direction3D(p) => acadrust::xdata::XDataValue::Direction3D(Vector3::new(p[0], p[1], p[2])),
+        V::Real(r) => acadrust::xdata::XDataValue::Real(*r),
+        V::Distance(d) => acadrust::xdata::XDataValue::Distance(*d),
+        V::ScaleFactor(s) => acadrust::xdata::XDataValue::ScaleFactor(*s),
+        V::Integer16(i) => acadrust::xdata::XDataValue::Integer16(*i),
+        V::Integer32(i) => acadrust::xdata::XDataValue::Integer32(*i),
+    }
+}
+
+fn xdata_value_from_acadrust(value: &acadrust::xdata::XDataValue) -> ocs_doc_api::XDataValue {
+    use acadrust::xdata::XDataValue as V;
+    match value {
+        V::String(s) => ocs_doc_api::XDataValue::String(s.clone()),
+        V::ControlString(s) => ocs_doc_api::XDataValue::ControlString(s.clone()),
+        V::LayerName(s) => ocs_doc_api::XDataValue::LayerName(s.clone()),
+        V::BinaryData(b) => ocs_doc_api::XDataValue::BinaryData(b.clone()),
+        V::Handle(h) => ocs_doc_api::XDataValue::Handle(h.value()),
+        V::Point3D(v) => ocs_doc_api::XDataValue::Point3D([v.x, v.y, v.z]),
+        V::Position3D(v) => ocs_doc_api::XDataValue::Position3D([v.x, v.y, v.z]),
+        V::Displacement3D(v) => ocs_doc_api::XDataValue::Displacement3D([v.x, v.y, v.z]),
+        V::Direction3D(v) => ocs_doc_api::XDataValue::Direction3D([v.x, v.y, v.z]),
+        V::Real(r) => ocs_doc_api::XDataValue::Real(*r),
+        V::Distance(d) => ocs_doc_api::XDataValue::Distance(*d),
+        V::ScaleFactor(s) => ocs_doc_api::XDataValue::ScaleFactor(*s),
+        V::Integer16(i) => ocs_doc_api::XDataValue::Integer16(*i),
+        V::Integer32(i) => ocs_doc_api::XDataValue::Integer32(*i),
+    }
+}
+
+fn xrecord_value_to_acadrust(value: &ocs_doc_api::XRecordValue) -> acadrust::objects::XRecordValue {
+    use ocs_doc_api::XRecordValue as V;
+    match value {
+        V::String(s) => acadrust::objects::XRecordValue::String(s.clone()),
+        V::Double(d) => acadrust::objects::XRecordValue::Double(*d),
+        V::Int16(i) => acadrust::objects::XRecordValue::Int16(*i),
+        V::Int32(i) => acadrust::objects::XRecordValue::Int32(*i),
+        V::Int64(i) => acadrust::objects::XRecordValue::Int64(*i),
+        V::Byte(b) => acadrust::objects::XRecordValue::Byte(*b),
+        V::Bool(b) => acadrust::objects::XRecordValue::Bool(*b),
+        V::Handle(h) => acadrust::objects::XRecordValue::Handle(acadrust::Handle::new(*h)),
+        V::Point3D(p) => acadrust::objects::XRecordValue::Point3D(p[0], p[1], p[2]),
+        V::Chunk(c) => acadrust::objects::XRecordValue::Chunk(c.clone()),
+    }
+}
+
+fn xrecord_value_from_acadrust(
+    value: &acadrust::objects::XRecordValue,
+) -> ocs_doc_api::XRecordValue {
+    use acadrust::objects::XRecordValue as V;
+    match value {
+        V::String(s) => ocs_doc_api::XRecordValue::String(s.clone()),
+        V::Double(d) => ocs_doc_api::XRecordValue::Double(*d),
+        V::Int16(i) => ocs_doc_api::XRecordValue::Int16(*i),
+        V::Int32(i) => ocs_doc_api::XRecordValue::Int32(*i),
+        V::Int64(i) => ocs_doc_api::XRecordValue::Int64(*i),
+        V::Byte(b) => ocs_doc_api::XRecordValue::Byte(*b),
+        V::Bool(b) => ocs_doc_api::XRecordValue::Bool(*b),
+        V::Handle(h) => ocs_doc_api::XRecordValue::Handle(h.value()),
+        V::Point3D(x, y, z) => ocs_doc_api::XRecordValue::Point3D([*x, *y, *z]),
+        V::Chunk(c) => ocs_doc_api::XRecordValue::Chunk(c.clone()),
+    }
+}
+
+fn xrecord_entry_to_acadrust(
+    entry: &ocs_doc_api::XRecordEntry,
+) -> acadrust::objects::XRecordEntry {
+    acadrust::objects::XRecordEntry {
+        code: entry.code,
+        value: xrecord_value_to_acadrust(&entry.value),
+    }
+}
+
+fn xrecord_entry_from_acadrust(
+    entry: &acadrust::objects::XRecordEntry,
+) -> ocs_doc_api::XRecordEntry {
+    ocs_doc_api::XRecordEntry {
+        code: entry.code,
+        value: xrecord_value_from_acadrust(&entry.value),
+    }
+}
+
+// ── layer conversions ─────────────────────────────────────────────────────
+
+fn color_to_acadrust(c: Color) -> acadrust::types::Color {
+    use acadrust::types::Color as A;
+    match c {
+        Color::ByLayer => A::ByLayer,
+        Color::None => A::None,
+        Color::ByBlock => A::ByBlock,
+        Color::Index(i) => A::Index(i),
+        Color::Rgb { r, g, b } => A::Rgb { r, g, b },
+    }
+}
+
+fn color_from_acadrust(c: acadrust::types::Color) -> Color {
+    use acadrust::types::Color as A;
+    match c {
+        A::ByLayer => Color::ByLayer,
+        A::None => Color::None,
+        A::ByBlock => Color::ByBlock,
+        A::Index(i) => Color::Index(i),
+        A::Rgb { r, g, b } => Color::Rgb { r, g, b },
+    }
+}
+
+fn line_weight_to_acadrust(lw: LineWeight) -> acadrust::types::LineWeight {
+    use acadrust::types::LineWeight as A;
+    match lw {
+        LineWeight::ByLayer => A::ByLayer,
+        LineWeight::ByBlock => A::ByBlock,
+        LineWeight::Default => A::Default,
+        LineWeight::Value(v) => A::Value(v),
+    }
+}
+
+fn line_weight_from_acadrust(lw: acadrust::types::LineWeight) -> LineWeight {
+    use acadrust::types::LineWeight as A;
+    match lw {
+        A::ByLayer => LineWeight::ByLayer,
+        A::ByBlock => LineWeight::ByBlock,
+        A::Default => LineWeight::Default,
+        A::Value(v) => LineWeight::Value(v),
+    }
+}
+
+fn layer_flags_to_acadrust(f: LayerFlags) -> acadrust::tables::LayerFlags {
+    acadrust::tables::LayerFlags {
+        frozen: f.frozen,
+        locked: f.locked,
+        frozen_in_new_viewport: f.frozen_in_new_viewport,
+        off: f.off,
+        xref_dependent: false,
+    }
+}
+
+fn layer_flags_from_acadrust(f: acadrust::tables::LayerFlags) -> LayerFlags {
+    LayerFlags {
+        frozen: f.frozen,
+        locked: f.locked,
+        frozen_in_new_viewport: f.frozen_in_new_viewport,
+        off: f.off,
+    }
+}
+
+fn apply_layer_info(layer: &mut acadrust::tables::Layer, info: &LayerInfo) {
+    layer.name = info.name.trim().to_string();
+    layer.flags = layer_flags_to_acadrust(info.flags);
+    layer.color = color_to_acadrust(info.color);
+    layer.color_name = None;
+    layer.book_name = None;
+    layer.line_type = info.line_type.clone();
+    layer.line_weight = line_weight_to_acadrust(info.line_weight);
+    layer.plot_style = info.plot_style.clone();
+    layer.is_plottable = info.is_plottable;
+}
+
+fn layer_info_from_acadrust(layer: &acadrust::tables::Layer) -> LayerInfo {
+    LayerInfo {
+        name: layer.name.clone(),
+        flags: layer_flags_from_acadrust(layer.flags),
+        color: color_from_acadrust(layer.color),
+        line_type: layer.line_type.clone(),
+        line_weight: line_weight_from_acadrust(layer.line_weight),
+        plot_style: layer.plot_style.clone(),
+        is_plottable: layer.is_plottable,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::plugin_host::HostSession;
     use crate::app::OpenCADStudio;
-    use ocs_doc_api::ops::{BoolOp, SolidPrimitive};
-    use ocs_doc_api::{DocApiEnvelope, HasId, ObjectId, Operation, Query, QueryResult, Receipt};
+    use ocs_doc_api::ops::{
+        BoolOp, Color, LayerFlags, LayerInfo, LineWeight, SolidPrimitive, XDataRecord,
+        XDataValue, XRecordEntry, XRecordSpec, XRecordValue,
+    };
+    use ocs_doc_api::{
+        DocApiEnvelope, HasId, ObjectId, Operation, Query, QueryResult, Receipt,
+        XRecordCloningFlags,
+    };
 
     fn dispatch(host: &mut HostSession<'_>, env: DocApiEnvelope) -> ApiResult<Receipt> {
         let bytes = bincode::serialize(&env).unwrap();
@@ -1139,7 +1826,7 @@ mod tests {
     fn phase0_add_vertex_to_polyline() {
         let mut app = OpenCADStudio::new_for_test();
         let mut host = HostSession::new(&mut app, 0);
-        let mk_poly = Operation::CreateCurve(Curve2Spec::Polyline {
+        let mk_poly = Operation::CreateCurve(Curve2Spec::Polyline { layer: None,
             points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
             closed: false,
         });
@@ -1179,7 +1866,7 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         let mut host = HostSession::new(&mut app, 0);
         // A closed rectangular 2x3 profile in XY.
-        let mk_profile = Operation::CreateCurve(Curve2Spec::Polyline {
+        let mk_profile = Operation::CreateCurve(Curve2Spec::Polyline { layer: None,
             points: vec![
                 [0.0, 0.0, 0.0],
                 [2.0, 0.0, 0.0],
@@ -1217,7 +1904,7 @@ mod tests {
         let mut host = HostSession::new(&mut app, 0);
         // A 1-wide, 2-tall rectangle offset 1 from the Y axis; revolve about the Y
         // axis by 2*pi -> a cylinder-ish annulus (outer r=2, inner r=1, h=2): pi*(4-1)*2 = 6pi ≈ 18.85.
-        let mk_profile = Operation::CreateCurve(Curve2Spec::Polyline {
+        let mk_profile = Operation::CreateCurve(Curve2Spec::Polyline { layer: None,
             points: vec![
                 [1.0, 0.0, 0.0],
                 [2.0, 0.0, 0.0],
@@ -1259,7 +1946,7 @@ mod tests {
     fn phase0_non_solid_transform_line_and_circle() {
         let mut app = OpenCADStudio::new_for_test();
         let mut host = HostSession::new(&mut app, 0);
-        let mk_line = Operation::CreateCurve(Curve2Spec::Line {
+        let mk_line = Operation::CreateCurve(Curve2Spec::Line { layer: None,
             start: [0.0; 3],
             end: [10.0; 3],
         });
@@ -1291,7 +1978,7 @@ mod tests {
         let circle = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle { layer: None,
                     centre: [0.0; 3],
                     radius: 2.0,
                 })),
@@ -1319,7 +2006,7 @@ mod tests {
         let arc = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Arc {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Arc { layer: None,
                     centre: [5.0, 5.0, 0.0],
                     radius: 4.0,
                     start_angle: 0.0,
@@ -1352,7 +2039,7 @@ mod tests {
         let ell = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ellipse {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ellipse { layer: None,
                     centre: [0.0, 0.0, 0.0],
                     major_axis: [6.0, 0.0, 0.0],
                     ratio: 0.5,
@@ -1377,7 +2064,7 @@ mod tests {
         let spline = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Spline {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Spline { layer: None,
                     degree: 3,
                     control_points: vec![
                         [0.0, 0.0, 0.0],
@@ -1429,7 +2116,7 @@ mod tests {
         let ray = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ray {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ray { layer: None,
                     origin: [1.0, 2.0, 0.0],
                     direction: [1.0, 0.0, 0.0],
                 })),
@@ -1439,7 +2126,7 @@ mod tests {
         let xline = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::XLine {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::XLine { layer: None,
                     origin: [0.0, 0.0, 0.0],
                     direction: [0.0, 1.0, 0.0],
                 })),
@@ -1561,7 +2248,7 @@ mod tests {
         let circle = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle { layer: None,
                     centre: [0.0, 0.0, 0.0],
                     radius: 1.0,
                 })),
@@ -1609,7 +2296,7 @@ mod tests {
         let ray = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ray {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ray { layer: None,
                     origin: [0.0, 0.0, 0.0],
                     direction: [1.0, 0.0, 0.0],
                 })),
@@ -1637,7 +2324,7 @@ mod tests {
         let ell = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ellipse {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ellipse { layer: None,
                     centre: [0.0; 3],
                     major_axis: [4.0, 0.0, 0.0],
                     ratio: 0.5,
@@ -1668,7 +2355,7 @@ mod tests {
         let arc = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Arc {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Arc { layer: None,
                     centre: [0.0; 3],
                     radius: 2.0,
                     start_angle: 0.0,
@@ -1704,7 +2391,7 @@ mod tests {
         let a = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point { layer: None,
                     position: [0.0; 3],
                 })),
             )
@@ -1713,7 +2400,7 @@ mod tests {
         let b = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point { layer: None,
                     position: [1.0; 3],
                 })),
             )
@@ -1808,7 +2495,7 @@ mod tests {
         let line = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Line {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Line { layer: None,
                     start: [0.0; 3],
                     end: [1.0; 3],
                 })),
@@ -1869,7 +2556,7 @@ mod tests {
         let c1 = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle { layer: None,
                     centre: [0.0, 0.0, 0.0],
                     radius: 5.0,
                 })),
@@ -1879,7 +2566,7 @@ mod tests {
         let c2 = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle { layer: None,
                     centre: [0.0, 0.0, 10.0],
                     radius: 2.0,
                 })),
@@ -1920,7 +2607,7 @@ mod tests {
         let poly = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Polyline {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Polyline { layer: None,
                     points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
                     closed: false,
                 })),
@@ -1967,7 +2654,7 @@ mod tests {
         if let cadkernel::geom2d::Curve::Arc(arc) = &neg {
             // 90° arc, chord 1: radius = 0.5/sin(45°) ≈ 0.7071; center y must be negative.
             assert!(
-                (arc.radius - 0.7071).abs() < 0.01,
+                (arc.radius - std::f64::consts::FRAC_1_SQRT_2).abs() < 0.01,
                 "cw arc radius {}",
                 arc.radius
             );
@@ -2286,8 +2973,8 @@ mod tests {
         let rev_before = host.scene().geometry_epoch;
         // A valid point + an invalid ellipse (ratio > 1) in one CreateMany batch.
         let specs = vec![
-            ocs_doc_api::ops::EntitySpec::Curve(Curve2Spec::Point { position: [0.0; 3] }),
-            ocs_doc_api::ops::EntitySpec::Curve(Curve2Spec::Ellipse {
+            ocs_doc_api::ops::EntitySpec::Curve(Curve2Spec::Point { layer: None, position: [0.0; 3] }),
+            ocs_doc_api::ops::EntitySpec::Curve(Curve2Spec::Ellipse { layer: None,
                 centre: [0.0; 3],
                 major_axis: [1.0; 3],
                 ratio: 2.0,
@@ -2314,7 +3001,7 @@ mod tests {
         let ell = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ellipse {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Ellipse { layer: None,
                     centre: [0.0; 3],
                     major_axis: [4.0, 0.0, 0.0],
                     ratio: 0.5,
@@ -2392,24 +3079,28 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         let mut host = HostSession::new(&mut app, 0);
         // Leader with vertices at (0,0,0),(5,5,0),(10,0,0) -> bounds x[0,10] y[0,5].
-        let mut leader = acadrust::entities::Leader::default();
-        leader.vertices = vec![
-            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(5.0, 5.0, 0.0),
-            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
-        ];
+        let leader = acadrust::entities::Leader {
+            vertices: vec![
+                acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+                acadrust::types::Vector3::new(5.0, 5.0, 0.0),
+                acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+            ],
+            ..Default::default()
+        };
         let leader_h = host
             .document_mut()
             .add_entity(EntityType::Leader(leader))
             .unwrap();
         // Mesh with vertices in a unit cube at (2..3, 2..3, 0).
-        let mut mesh = acadrust::entities::Mesh::default();
-        mesh.vertices = vec![
-            acadrust::types::Vector3::new(2.0, 2.0, 0.0),
-            acadrust::types::Vector3::new(3.0, 2.0, 0.0),
-            acadrust::types::Vector3::new(3.0, 3.0, 0.0),
-            acadrust::types::Vector3::new(2.0, 3.0, 0.0),
-        ];
+        let mesh = acadrust::entities::Mesh {
+            vertices: vec![
+                acadrust::types::Vector3::new(2.0, 2.0, 0.0),
+                acadrust::types::Vector3::new(3.0, 2.0, 0.0),
+                acadrust::types::Vector3::new(3.0, 3.0, 0.0),
+                acadrust::types::Vector3::new(2.0, 3.0, 0.0),
+            ],
+            ..Default::default()
+        };
         let mesh_h = host
             .document_mut()
             .add_entity(EntityType::Mesh(mesh))
@@ -2562,7 +3253,7 @@ mod tests {
         let line = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Line {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Line { layer: None,
                     start: [0.0; 3],
                     end: [1.0; 3],
                 })),
@@ -2594,7 +3285,7 @@ mod tests {
         let line = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Line {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Line { layer: None,
                     start: [0.0; 3],
                     end: [10.0; 3],
                 })),
@@ -2811,11 +3502,13 @@ mod tests {
         let img = {
             use acadrust::entities::RasterImage;
             use acadrust::types::{Vector2, Vector3};
-            let mut img = RasterImage::default();
-            img.insertion_point = Vector3::new(10.0, 20.0, 0.0);
-            img.u_vector = Vector3::new(0.5, 0.0, 0.0); // 0.5 world-units/pixel in X
-            img.v_vector = Vector3::new(0.0, 0.5, 0.0);
-            img.size = Vector2::new(100.0, 50.0);
+            let img = RasterImage {
+                insertion_point: Vector3::new(10.0, 20.0, 0.0),
+                u_vector: Vector3::new(0.5, 0.0, 0.0), // 0.5 world-units/pixel in X
+                v_vector: Vector3::new(0.0, 0.5, 0.0),
+                size: Vector2::new(100.0, 50.0),
+                ..Default::default()
+            };
             host.document_mut()
                 .add_entity(EntityType::RasterImage(img))
                 .unwrap()
@@ -2927,7 +3620,7 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         let mut host = HostSession::new(&mut app, 0);
         // A request naming a DIFFERENT tab than the bound one is rejected.
-        let env = DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point {
+        let env = DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point { layer: None,
             position: [0.0; 3],
         }));
         let bytes = bincode::serialize(&env).unwrap();
@@ -2967,7 +3660,7 @@ mod tests {
         let line = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Line {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Line { layer: None,
                     start: [0.0, 0.0, 0.0],
                     end: [10.0, 0.0, 0.0],
                 })),
@@ -3000,7 +3693,7 @@ mod tests {
         let circle = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Circle { layer: None,
                     centre: [5.0, 5.0, 0.0],
                     radius: 3.0,
                 })),
@@ -3026,7 +3719,7 @@ mod tests {
         let point = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Point { layer: None,
                     position: [1.0, 2.0, 3.0],
                 })),
             )
@@ -3046,7 +3739,7 @@ mod tests {
         let poly = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Polyline {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Polyline { layer: None,
                     points: vec![
                         [0.0, 0.0, 0.0],
                         [1.0, 0.0, 0.0],
@@ -3247,17 +3940,17 @@ mod tests {
             let mut host = HostSession::new(&mut app, 0);
             let invalid_ops = vec![
                 Operation::CreateMany(vec![
-                    EntitySpec::Curve(Curve2Spec::Point { position: [0.0; 3] }),
+                    EntitySpec::Curve(Curve2Spec::Point { layer: None, position: [0.0; 3] }),
                     EntitySpec::Solid(SolidPrimitive::Sphere {
                         centre: [0.0; 3],
                         radius: f64::NAN,
                     }),
                 ]),
-                Operation::CreateCurve(Curve2Spec::Circle {
+                Operation::CreateCurve(Curve2Spec::Circle { layer: None,
                     centre: [0.0; 3],
                     radius: -1.0,
                 }),
-                Operation::CreateCurve(Curve2Spec::Polyline {
+                Operation::CreateCurve(Curve2Spec::Polyline { layer: None,
                     points: vec![[0.0; 3], [1.0; 3]],
                     closed: false,
                 }),
@@ -3290,7 +3983,7 @@ mod tests {
             let receipt = dispatch(
                 &mut host,
                 DocApiEnvelope::op(Operation::CreateMany(vec![
-                    EntitySpec::Curve(Curve2Spec::Point { position: [1.0; 3] }),
+                    EntitySpec::Curve(Curve2Spec::Point { layer: None, position: [1.0; 3] }),
                     EntitySpec::Solid(SolidPrimitive::Cuboid {
                         origin: [0.0; 3],
                         size: [2.0; 3],
@@ -3360,7 +4053,7 @@ mod tests {
         let profile = new_id(
             &dispatch(
                 &mut host,
-                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Polyline {
+                DocApiEnvelope::op(Operation::CreateCurve(Curve2Spec::Polyline { layer: None,
                     points: vec![
                         [0.0, 0.0, 7.0],
                         [2.0, 0.0, 7.0],
@@ -3472,5 +4165,337 @@ mod tests {
             .get_entity(obj_to_handle(id))
             .is_some());
         assert!(app.tabs[0].scene.document.objects.len() > objects);
+    }
+
+    #[test]
+    fn doc_api_layer_crud_roundtrip_and_entity_assignment() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Create a line to assign to a layer later.
+        let line = new_id(
+            &dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateCurve(ocs_doc_api::Curve2Spec::Line { layer: None,
+                    start: [0.0; 3],
+                    end: [1.0; 3],
+                })),
+            )
+            .unwrap(),
+        );
+
+        // List default layers — must include "0".
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::ListLayers])).unwrap();
+        let QueryResult::Layers(list) = &receipt.query_results[0] else {
+            panic!("expected Layers result");
+        };
+        assert!(list.iter().any(|l| l.name == "0"));
+
+        // Create a new layer.
+        let mut info = LayerInfo::new("Walls");
+        info.color = Color::Index(1);
+        info.line_weight = LineWeight::Value(25);
+        info.flags = LayerFlags {
+            frozen: false,
+            locked: false,
+            frozen_in_new_viewport: false,
+            off: false,
+        };
+        dispatch(&mut host, DocApiEnvelope::op(Operation::CreateLayer(info.clone()))).unwrap();
+
+        // Update the layer color.
+        let mut updated = info.clone();
+        updated.color = Color::Index(2);
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::UpdateLayer {
+                name: " Walls ".into(),
+                info: updated.clone(),
+            }),
+        )
+        .unwrap();
+
+        // Assign the line to the new layer.
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetEntityLayer {
+                id: line,
+                layer: "Walls".into(),
+            }),
+        )
+        .unwrap();
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::GetEntityLayer { id: line }]),
+        )
+        .unwrap();
+        assert!(matches!(&receipt.query_results[0], QueryResult::EntityLayer(name) if name == "Walls"));
+
+        // Deleting a layer still in use fails.
+        let err = dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::DeleteLayer {
+                name: "Walls".into(),
+            }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ApiError::Validation { .. }));
+
+        // Move the line back to "0", then delete the layer.
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetEntityLayer {
+                id: line,
+                layer: "0".into(),
+            }),
+        )
+        .unwrap();
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::DeleteLayer {
+                name: " Walls ".into(),
+            }),
+        )
+        .unwrap();
+        let receipt = dispatch(&mut host, DocApiEnvelope::queries(vec![Query::ListLayers])).unwrap();
+        let QueryResult::Layers(list) = &receipt.query_results[0] else {
+            panic!("expected Layers result");
+        };
+        assert!(!list.iter().any(|l| l.name == "Walls"));
+    }
+
+    #[test]
+    fn doc_api_xdata_batch_rejects_a_locked_entity_before_mutating() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let line = |host: &mut HostSession<'_>| {
+            new_id(&dispatch(
+                host,
+                DocApiEnvelope::op(Operation::CreateCurve(ocs_doc_api::Curve2Spec::Line {
+                    start: [0.0; 3],
+                    end: [1.0; 3],
+                    layer: None,
+                })),
+            ).unwrap())
+        };
+        let first = line(&mut host);
+        let locked = line(&mut host);
+
+        let mut layer = LayerInfo::new("Locked");
+        dispatch(&mut host, DocApiEnvelope::op(Operation::CreateLayer(layer.clone()))).unwrap();
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetEntityLayer {
+                id: locked,
+                layer: layer.name.clone(),
+            }),
+        )
+        .unwrap();
+        layer.flags.locked = true;
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::UpdateLayer {
+                name: layer.name.clone(),
+                info: layer,
+            }),
+        )
+        .unwrap();
+
+        let record = |application_name: &str| XDataRecord {
+            application_name: application_name.into(),
+            values: vec![XDataValue::Integer32(42)],
+        };
+        let result = dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetXDataMany(vec![
+                (first, "FIRST".into(), Some(record("FIRST"))),
+                (locked, "LOCKED".into(), Some(record("LOCKED"))),
+            ])),
+        );
+        assert!(matches!(result, Err(ApiError::Validation { .. })));
+        assert!(host.xdata(first, "FIRST").unwrap().is_none());
+    }
+
+    #[test]
+    fn doc_api_xrecords_keep_one_named_owner() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let spec = |name: &str| XRecordSpec {
+            name: name.into(),
+            cloning_flags: XRecordCloningFlags::NotApplicable,
+            entries: vec![XRecordEntry {
+                code: 1,
+                value: XRecordValue::String("value".into()),
+            }],
+        };
+
+        let first = new_id(&dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::CreateXRecord(spec("FIRST"))),
+        ).unwrap());
+        let first_handle = obj_to_handle(first);
+        let ObjectType::XRecord(first_record) = host.document().objects.get(&first_handle).unwrap()
+        else {
+            panic!("expected XRecord")
+        };
+        let owner = first_record.owner;
+        assert!(matches!(host.document().objects.get(&owner), Some(ObjectType::Dictionary(dict)) if
+            dict.entries.iter().any(|(name, child)| name == "FIRST" && *child == first_handle)));
+
+        let object_count = host.document().objects.len();
+        assert!(matches!(
+            dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateXRecord(spec("first"))),
+            ),
+            Err(ApiError::Validation { .. })
+        ));
+        assert_eq!(host.document().objects.len(), object_count);
+
+        let second = new_id(&dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::CreateXRecord(spec("SECOND"))),
+        ).unwrap());
+        assert!(matches!(
+            dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::SetXRecord {
+                    id: second,
+                    spec: spec("FIRST"),
+                }),
+            ),
+            Err(ApiError::Validation { .. })
+        ));
+        assert_eq!(host.xrecord(second).unwrap().unwrap().name, "SECOND");
+
+        let mut invalid = spec("INVALID");
+        invalid.entries[0] = XRecordEntry {
+            code: 1,
+            value: XRecordValue::Int32(7),
+        };
+        assert!(matches!(
+            dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateXRecord(invalid)),
+            ),
+            Err(ApiError::Validation { .. })
+        ));
+    }
+
+    #[test]
+    fn doc_api_enumerate_entities_and_geometry_queries() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Create entities on different layers.
+        let line_id = new_id(
+            &dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateCurve(ocs_doc_api::Curve2Spec::Line { layer: None,
+                    start: [1.0, 2.0, 3.0],
+                    end: [4.0, 5.0, 6.0],
+                })),
+            )
+            .unwrap(),
+        );
+        let point_id = new_id(
+            &dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateCurve(ocs_doc_api::Curve2Spec::Point { layer: None,
+                    position: [7.0, 8.0, 9.0],
+                })),
+            )
+            .unwrap(),
+        );
+
+        // Create a layer and move the point to it.
+        let mut info = LayerInfo::new("Markers");
+        info.color = Color::Index(3);
+        dispatch(&mut host, DocApiEnvelope::op(Operation::CreateLayer(info))).unwrap();
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetEntityLayer {
+                id: point_id,
+                layer: "Markers".into(),
+            }),
+        )
+        .unwrap();
+
+        // Enumerate all entities.
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::EnumerateEntities {
+                kind: None,
+                layer: None,
+                include_bounds: true,
+            }]),
+        )
+        .unwrap();
+        let QueryResult::Entities(all) = &receipt.query_results[0] else {
+            panic!("expected Entities result");
+        };
+        assert!(all.iter().any(|e| e.id == line_id && e.kind == "Line" && e.layer == "0"));
+        assert!(all.iter().any(|e| e.id == point_id && e.kind == "Point" && e.layer == "Markers"));
+
+        // Filter by kind.
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::EnumerateEntities {
+                kind: Some("Line".into()),
+                layer: None,
+                include_bounds: true,
+            }]),
+        )
+        .unwrap();
+        let QueryResult::Entities(lines) = &receipt.query_results[0] else {
+            panic!("expected Entities result");
+        };
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].id, line_id);
+
+        // Filter by layer.
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::EnumerateEntities {
+                kind: None,
+                layer: Some(" Markers ".into()),
+                include_bounds: true,
+            }]),
+        )
+        .unwrap();
+        let QueryResult::Entities(markers) = &receipt.query_results[0] else {
+            panic!("expected Entities result");
+        };
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].id, point_id);
+
+        // Geometry queries.
+        let receipt = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![
+                Query::GetPointPosition { id: point_id },
+                Query::GetLineGeometry { id: line_id },
+            ]),
+        )
+        .unwrap();
+        let QueryResult::PointPosition(pos) = &receipt.query_results[0] else {
+            panic!("expected PointPosition result");
+        };
+        assert!((pos[0] - 7.0).abs() < 1e-9);
+        assert!((pos[1] - 8.0).abs() < 1e-9);
+        assert!((pos[2] - 9.0).abs() < 1e-9);
+        let QueryResult::LineGeometry((start, end)) = &receipt.query_results[1] else {
+            panic!("expected LineGeometry result");
+        };
+        assert!((start[0] - 1.0).abs() < 1e-9);
+        assert!((end[0] - 4.0).abs() < 1e-9);
+
+        // Wrong entity family is rejected.
+        let err = dispatch(
+            &mut host,
+            DocApiEnvelope::queries(vec![Query::GetPointPosition { id: line_id }]),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ApiError::Unsupported { .. }));
     }
 }

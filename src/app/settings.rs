@@ -145,6 +145,18 @@ pub(crate) fn snaps_from_osmode(osmode: i32) -> (Vec<SnapType>, bool) {
     (modes, osmode & OSMODE_SUPPRESS == 0)
 }
 
+/// Render a drafting angle without a trailing `.0`, so `22.5` but `30`.
+///
+/// The polar pop-up formats its presets the same way; both are showing the
+/// same kind of number to the same person.
+pub fn format_snap_angle(deg: f32) -> String {
+    if (deg - deg.round()).abs() < 1e-4 {
+        format!("{}", deg.round() as i32)
+    } else {
+        format!("{deg}")
+    }
+}
+
 /// GRIPOBJLIMIT default: past this many selected objects, no grips are drawn.
 pub const DEFAULT_GRIP_OBJECT_LIMIT: i32 = 100;
 

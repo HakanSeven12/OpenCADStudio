@@ -452,6 +452,9 @@ impl OpenCADStudio {
         } else {
             0.0
         };
+        // The Options field edits a buffer rather than the value, so it has to
+        // be reseeded whenever the value is restored from behind it.
+        self.snap_angle_input = crate::app::settings::format_snap_angle(self.snap_angle_deg);
         // Ortho + running OSNAP are per-drawing (adopted from the header on
         // open / tab switch), not app-global, so they are not applied here.
         self.snapper.otrack_enabled = s.otrack;

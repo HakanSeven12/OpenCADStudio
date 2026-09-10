@@ -27,6 +27,7 @@ pub enum OptionsTab {
     General,
     OpenAndSave,
     Display,
+    Drafting,
     Selection,
     UserPreferences,
     Drawing,
@@ -62,6 +63,8 @@ pub struct AppPrefs {
     /// ANNOAUTOSCALE, -4..=4. The sign is on/off; the magnitude selects which
     /// objects a newly added scale reaches.
     pub annotation_auto_scale: i8,
+    /// Polar tracking increment in degrees.
+    pub polar_increment_deg: f32,
 }
 
 /// The Selection-card settings that live on `UserSettings` rather than on the
@@ -105,6 +108,7 @@ pub fn view_window<'a>(
     cursor_size: i32,
     selection: SelectionPrefs,
     prefs: AppPrefs,
+    snap_angle_input: &'a str,
     double_click_block_refedit: bool,
     double_click_block_attedit: bool,
     cursor_type: CursorType,
@@ -1150,11 +1154,83 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
+
+    // Snap modes, grid and object snap stay in the Drafting Settings dialog.
+    // These two have no home: Drafting Settings shows the rotation angle but
+    // offers only Reset, and the polar increment lives solely in a status-bar
+    // pop-up.
+    let polar_options = [90.0f32, 45.0, 30.0, 22.5, 18.0, 15.0, 10.0, 5.0, 1.0]
+        .into_iter()
+        .map(|value| Labelled {
+            label: format!("{}°", crate::app::settings::format_snap_angle(value)),
+            value,
+        })
+        .collect::<Vec<_>>();
+    let selected_polar = polar_options
+        .iter()
+        .find(|choice| (choice.value - prefs.polar_increment_deg).abs() < 1e-4)
+        .cloned()
+        .unwrap_or_else(|| Labelled {
+            value: prefs.polar_increment_deg,
+            label: format!(
+                "{}°",
+                crate::app::settings::format_snap_angle(prefs.polar_increment_deg)
+            ),
+        });
+
+    let drafting = column![
+        text(crate::t!("Drafting")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Drafting rotation")).size(12).width(150),
+            text_input("0", snap_angle_input)
+                .on_input(Message::SnapAngleInputChanged)
+                .width(110),
+            text(crate::t!("degrees")).size(11),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Rotates the crosshair and the snap grid in the active UCS (SNAPANG)."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(14),
+        row![
+            text(crate::t!("Polar tracking increment")).size(12).width(150),
+            iced::widget::pick_list(Some(selected_polar), polar_options, |choice| {
+                choice.label.clone()
+            })
+            .on_select(|choice| Message::PolarIncrementChanged(choice.value))
+            .width(Fill),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(24),
+        text(crate::t!("Snap and Grid")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Snap modes, grid spacing and object snap"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Drafting Settings…")).size(11))
+                .on_press(Message::ToggleSnapPopup)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
     let content: Element<'a, Message> = match active_tab {
         OptionsTab::General => general.into(),
         OptionsTab::Display => display_element.into(),
         OptionsTab::Selection => selection.into(),
         OptionsTab::OpenAndSave => open_and_save.into(),
+        OptionsTab::Drafting => drafting.into(),
         OptionsTab::UserPreferences => user_prefs.into(),
         OptionsTab::Drawing => drawing.into(),
     };
@@ -1174,6 +1250,7 @@ pub fn view_window<'a>(
         tab_button(crate::t!("General"), OptionsTab::General),
         tab_button(crate::t!("Open and Save"), OptionsTab::OpenAndSave),
         tab_button(crate::t!("Display"), OptionsTab::Display),
+        tab_button(crate::t!("Drafting"), OptionsTab::Drafting),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
         tab_button(crate::t!("User Preferences"), OptionsTab::UserPreferences),
         tab_button(crate::t!("Drawing"), OptionsTab::Drawing),

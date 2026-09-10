@@ -517,6 +517,9 @@ pub(super) struct OpenCADStudio {
     crosshair_color: Option<[u8; 3]>,
     /// Editable Options buffer for the crosshair colour.
     crosshair_color_input: String,
+    /// Edit buffer for the SNAPANG field on the Options Drafting page. Kept
+    /// separate from `snap_angle_deg` so a half-typed angle is not parsed.
+    snap_angle_input: String,
     /// Model-space lineweight preview scale, in percent (25..=200).
     lineweight_display_scale: i32,
     /// Isometric drafting state and active axis pair.
@@ -2029,6 +2032,10 @@ pub enum Message {
     QdimSnapPriorityChanged(u8),
     /// Change which annotative objects pick up a new scale (ANNOAUTOSCALE).
     AnnoAutoScaleChanged(i8),
+    /// Edit the drafting rotation field; parsed when it holds a valid angle (SNAPANG).
+    SnapAngleInputChanged(String),
+    /// Change the polar tracking increment in degrees.
+    PolarIncrementChanged(f32),
     /// Restore Model Space display/canvas appearance to defaults.
     RestoreModelSpaceDisplayDefaults,
     /// Restore Selection visual effect settings to defaults.
@@ -3429,6 +3436,7 @@ impl OpenCADStudio {
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),
+            snap_angle_input: "0".to_string(),
             lineweight_display_scale: 100,
             isometric_drafting: false,
             iso_plane: settings::IsoPlane::Left,

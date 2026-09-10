@@ -6266,6 +6266,27 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            // Typed into freely; only committed when it parses, so clearing
+            // the field to retype does not snap the crosshair back to zero.
+            Message::SnapAngleInputChanged(value) => {
+                self.snap_angle_input = value;
+                if let Ok(angle) = self.snap_angle_input.trim().parse::<f32>() {
+                    if angle.is_finite() {
+                        self.snap_angle_deg = angle.rem_euclid(360.0);
+                        self.persist_settings_if_changed();
+                    }
+                }
+                Task::none()
+            }
+
+            Message::PolarIncrementChanged(deg) => {
+                if deg.is_finite() && deg > 0.0 {
+                    self.polar_increment_deg = deg;
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;
                 self.persist_settings_if_changed();

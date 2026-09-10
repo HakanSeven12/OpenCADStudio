@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use iced::widget::{button, column, container, row, scrollable, text, tooltip};
-use iced::{Element, Fill, Length, Theme};
+use iced::{Element, Fill, Theme};
 
 use super::widgets::{make_icon, make_tip, muted_text_style, popup_panel_style, popup_row_style, tip_style, tool_btn_style};
 use super::{dropdown_backdrop, position_ribbon_dropdown, Ribbon};

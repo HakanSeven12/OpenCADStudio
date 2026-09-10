@@ -1370,7 +1370,7 @@ fn render_group<'a>(
             r.push(e)
         });
 
-    column![
+    draw_panel::group_anchor(group.title, column![
         tools_el,
         draw_panel::group_title(group.title, open_dd),
     ]
@@ -1378,7 +1378,7 @@ fn render_group<'a>(
     .spacing(0)
     .padding([3u16, 4])
     .height(Length::Fixed(TOOL_BAR_H))
-    .into()
+    .into())
 }
 
 /// The top-level command id of a ribbon item, if it has one.

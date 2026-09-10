@@ -365,6 +365,7 @@ impl OpenCADStudio {
             zoom_factor: self.zoom_factor,
             cursor_size: self.cursor_size,
             pick_box: self.pick_box,
+            options_tab: self.options_tab,
             double_click_block_refedit: self.double_click_block_refedit,
             double_click_block_attedit: self.double_click_block_attedit,
             grip_object_limit: self.grip_object_limit,
@@ -422,6 +423,7 @@ impl OpenCADStudio {
         self.zoom_factor = s.zoom_factor.clamp(3, 100);
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
+        self.options_tab = s.options_tab;
         self.double_click_block_refedit = s.double_click_block_refedit;
         self.double_click_block_attedit = s.double_click_block_attedit;
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);

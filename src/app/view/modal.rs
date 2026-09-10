@@ -175,8 +175,8 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::Options => sized_flow(
                 ex,
-                540,
-                560,
+                880,
+                620,
                 |flow| {
                     crate::ui::window::options::view_window(
                         &self.default_save_format,

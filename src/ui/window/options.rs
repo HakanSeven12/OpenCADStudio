@@ -7,7 +7,21 @@ use iced::widget::{
 use iced::{Background, Border, Element, Fill, Theme};
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Width of the vertical tab rail. Wide enough for the longest translated
+/// page name; German and Russian are the ones that set it.
+const TAB_RAIL_WIDTH: f32 = 178.0;
+/// The dialog's own size when the modal is laid out intrinsically.
+const DIALOG_WIDTH: f32 = 880.0;
+const DIALOG_HEIGHT: f32 = 620.0;
+
+/// Which page of the Options dialog is showing.
+///
+/// Persisted: with nine pages, reopening on General every time means hunting
+/// for the one you were last in.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum OptionsTab {
     #[default]
     General,
@@ -841,38 +855,45 @@ pub fn view_window<'a>(
         OptionsTab::Drawing => drawing.into(),
     };
 
+    // A vertical rail rather than a horizontal strip: the tab names are
+    // translated into 21 languages, and a row of them stops fitting long
+    // before the list of pages is complete.
     let tab_button = |label, tab| {
         let selected = active_tab == tab;
-        button(text(label).size(12))
+        button(text(label).size(12.5))
             .on_press(Message::OptionsTabChanged(tab))
-            .padding([6, 14])
-            .style(if selected { button::primary } else { button::secondary })
+            .padding([7, 12])
+            .width(Fill)
+            .style(if selected { button::primary } else { button::text })
     };
-    let tabs = row![
+    let tabs = column![
         tab_button(crate::t!("General"), OptionsTab::General),
         tab_button(crate::t!("Display"), OptionsTab::Display),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
         tab_button(crate::t!("Drawing"), OptionsTab::Drawing),
     ]
-    .spacing(6);
+    .spacing(2)
+    .width(iced::Length::Fixed(TAB_RAIL_WIDTH));
 
-    let body = column![
-        tabs,
-        Space::new().height(12),
+    let pane = column![
         // Keep the scrollbar in its own lane instead of floating over the
         // controls at the trailing edge of the Options content.
-        scrollable(content).spacing(8).height(sizing.height),
+        scrollable(content).spacing(8).height(Fill),
         Space::new().height(12),
-        row![Space::new().width(sizing.width), close],
+        row![Space::new().width(Fill), close],
     ]
-    .width(sizing.width)
+    .width(Fill)
     .height(sizing.height);
+
+    let body = row![tabs, Space::new().width(18), pane]
+        .width(sizing.width)
+        .height(sizing.height);
 
     let intrinsic = sizing.width == crate::ui::modal::ModalSizing::INTRINSIC.width;
     container(body)
         .style(container::rounded_box)
         .padding([16, 18])
-        .width(if intrinsic { iced::Length::Fixed(540.0) } else { sizing.width })
-        .height(if intrinsic { iced::Length::Fixed(560.0) } else { sizing.height })
+        .width(if intrinsic { iced::Length::Fixed(DIALOG_WIDTH) } else { sizing.width })
+        .height(if intrinsic { iced::Length::Fixed(DIALOG_HEIGHT) } else { sizing.height })
         .into()
 }

@@ -170,6 +170,8 @@ pub struct UserSettings {
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
+    /// Which Options page was showing when the dialog was last closed.
+    pub options_tab: crate::ui::window::options::OptionsTab,
     /// CURSORTYPE: crosshair or the platform pointer over the drawing.
     pub cursor_type: CursorType,
     /// Explicit crosshair RGB. `None` keeps automatic background contrast.
@@ -325,6 +327,7 @@ impl Default for UserSettings {
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
+            options_tab: crate::ui::window::options::OptionsTab::General,
             double_click_block_refedit: false,
             double_click_block_attedit: true,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,

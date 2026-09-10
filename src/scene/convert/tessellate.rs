@@ -282,7 +282,53 @@ fn split_mixed_polyline(
             end_angle,
         } = *tg
         {
+            let (sw, ew) = if let Some(&(w0, w1)) = seg_widths.get(i) {
+                (w0, w1)
+            } else if global_world_width > 1e-9 {
+                (global_world_width, global_world_width)
+            } else {
+                (0.0, 0.0)
+            };
+
+            // Check if the CCW start_angle of this TangentGeom::Arc corresponds
+            // to the segment's end vertex (clockwise bulge arc in CAD where
+            // bulge_arc_to_tangent inverted start_angle and end_angle to enforce CCW).
+            let (p_seg_start, p_seg_end) = if i + 1 < key_vertices.len() {
+                (key_vertices[i], key_vertices[i + 1])
+            } else if !key_vertices.is_empty() {
+                (
+                    key_vertices[i % key_vertices.len()],
+                    key_vertices[(i + 1) % key_vertices.len()],
+                )
+            } else {
+                ([0.0; 3], [0.0; 3])
+            };
+
+            let p_sa = [
+                center[0] + radius * (start_angle.cos() * axis_x[0] + start_angle.sin() * axis_y[0]),
+                center[1] + radius * (start_angle.cos() * axis_x[1] + start_angle.sin() * axis_y[1]),
+                center[2] + radius * (start_angle.cos() * axis_x[2] + start_angle.sin() * axis_y[2]),
+            ];
+            let is_reversed = if !key_vertices.is_empty() {
+                let d_start_sq = (p_sa[0] - p_seg_start[0]).powi(2)
+                    + (p_sa[1] - p_seg_start[1]).powi(2)
+                    + (p_sa[2] - p_seg_start[2]).powi(2);
+                let d_end_sq = (p_sa[0] - p_seg_end[0]).powi(2)
+                    + (p_sa[1] - p_seg_end[1]).powi(2)
+                    + (p_sa[2] - p_seg_end[2]).powi(2);
+                d_end_sq < d_start_sq
+            } else {
+                false
+            };
+
+            let (w_at_sa, w_at_ea) = if is_reversed {
+                (ew, sw)
+            } else {
+                (sw, ew)
+            };
+
             let mut arc_pts = Vec::with_capacity(17);
+            let mut arc_widths = Vec::with_capacity(17);
             let n = 16;
             let sweep = if end_angle >= start_angle {
                 end_angle - start_angle
@@ -298,25 +344,12 @@ fn split_mixed_polyline(
                     center[2] + radius * (ang.cos() * axis_x[2] + ang.sin() * axis_y[2]),
                 ];
                 arc_pts.push(p);
+                arc_widths.push(w_at_sa + (w_at_ea - w_at_sa) * frac as f32);
             }
             let (points, points_low) = points_to_ds(arc_pts);
 
-            let (sw, ew) = if let Some(&(w0, w1)) = seg_widths.get(i) {
-                if w0 > 1e-9 || w1 > 1e-9 {
-                    (w0, w1)
-                } else if global_world_width > 1e-9 {
-                    (global_world_width, global_world_width)
-                } else {
-                    (0.0, 0.0)
-                }
-            } else if global_world_width > 1e-9 {
-                (global_world_width, global_world_width)
-            } else {
-                (0.0, 0.0)
-            };
-
-            let taper_widths = if (sw - ew).abs() > 1e-6 {
-                vec![sw, ew]
+            let taper_widths = if (w_at_sa - w_at_ea).abs() > 1e-6 {
+                arc_widths
             } else {
                 Vec::new()
             };
@@ -367,43 +400,77 @@ fn split_mixed_polyline(
 
     // Collect straight lines into a line wire
     let mut straight_pts: Vec<[f64; 3]> = Vec::new();
+    let mut straight_widths: Vec<f32> = Vec::new();
     let mut straight_tangents: Vec<TangentGeom> = Vec::new();
     let mut last_end: Option<[f64; 3]> = None;
+    let mut last_end_w: f32 = 0.0;
 
     for (i, tg) in tangent_geoms.iter().enumerate() {
         if let TangentGeom::Line { p1, p2 } = tg {
             straight_tangents.push(tg.clone());
-            let (p_start, p_end) = if i + 1 < key_vertices.len() {
-                (key_vertices[i], key_vertices[i + 1])
+            let p_start = if i + 1 < key_vertices.len()
+                && (key_vertices[i][0] as f32 - p1[0]).abs() < 1e-3
+                && (key_vertices[i][1] as f32 - p1[1]).abs() < 1e-3
+                && (key_vertices[i][2] as f32 - p1[2]).abs() < 1e-3
+            {
+                key_vertices[i]
             } else {
-                (
-                    [p1[0] as f64, p1[1] as f64, p1[2] as f64],
-                    [p2[0] as f64, p2[1] as f64, p2[2] as f64],
-                )
+                [p1[0] as f64, p1[1] as f64, p1[2] as f64]
+            };
+            let p_end = if i + 1 < key_vertices.len()
+                && (key_vertices[i + 1][0] as f32 - p2[0]).abs() < 1e-3
+                && (key_vertices[i + 1][1] as f32 - p2[1]).abs() < 1e-3
+                && (key_vertices[i + 1][2] as f32 - p2[2]).abs() < 1e-3
+            {
+                key_vertices[i + 1]
+            } else {
+                [p2[0] as f64, p2[1] as f64, p2[2] as f64]
+            };
+            let (sw, ew) = if let Some(&(w0, w1)) = seg_widths.get(i) {
+                (w0, w1)
+            } else if global_world_width > 1e-9 {
+                (global_world_width, global_world_width)
+            } else {
+                (0.0, 0.0)
             };
             if !plinegen {
                 if !straight_pts.is_empty() {
                     straight_pts.push([f64::NAN; 3]);
+                    straight_widths.push(0.0);
                 }
                 straight_pts.push(p_start);
+                straight_widths.push(sw);
                 straight_pts.push(p_end);
+                straight_widths.push(ew);
             } else {
                 if let Some(prev) = last_end {
                     if (prev[0] - p_start[0]).abs() < 1e-7
                         && (prev[1] - p_start[1]).abs() < 1e-7
                         && (prev[2] - p_start[2]).abs() < 1e-7
+                        && (last_end_w - sw).abs() < 1e-6
                     {
                         straight_pts.push(p_end);
+                        straight_widths.push(ew);
                     } else {
                         straight_pts.push([f64::NAN; 3]);
+                        straight_widths.push(0.0);
                         straight_pts.push(p_start);
+                        straight_widths.push(sw);
                         straight_pts.push(p_end);
+                        straight_widths.push(ew);
                     }
                 } else {
+                    if !straight_pts.is_empty() {
+                        straight_pts.push([f64::NAN; 3]);
+                        straight_widths.push(0.0);
+                    }
                     straight_pts.push(p_start);
+                    straight_widths.push(sw);
                     straight_pts.push(p_end);
+                    straight_widths.push(ew);
                 }
                 last_end = Some(p_end);
+                last_end_w = ew;
             }
         } else {
             last_end = None;
@@ -417,12 +484,24 @@ fn split_mixed_polyline(
         } else {
             (Vec::new(), Vec::new())
         };
+        let line_world_width = straight_widths
+            .iter()
+            .copied()
+            .fold(0.0f32, f32::max);
+        let has_line_taper = straight_widths
+            .first()
+            .map_or(false, |&w0| straight_widths.iter().any(|&w| (w - w0).abs() > 1e-6));
+        let taper_widths = if has_line_taper || straight_widths.iter().any(|&w| w > 1e-6) {
+            straight_widths
+        } else {
+            Vec::new()
+        };
         out.push(WireModel {
             bg_adapt: None,
             point_marker,
-            taper_widths: Vec::new(),
+            taper_widths,
             pattern_stations: Vec::new(),
-            world_width: global_world_width,
+            world_width: line_world_width,
             depth_override: None,
             display_visible: true,
             plot_visible: true,
@@ -2977,5 +3056,178 @@ pub(crate) fn normalized_or(v: Vec3, fallback: Vec3) -> Vec3 {
         fallback
     } else {
         v.normalize()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_mixed_polyline_straight_lines_have_taper_widths() {
+        let tg_line = TangentGeom::Line {
+            p1: [0.0, 0.0, 0.0],
+            p2: [10.0, 0.0, 0.0],
+        };
+        let tg_arc = TangentGeom::Arc {
+            center: [10.0, 5.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 5.0,
+            start_angle: -std::f64::consts::FRAC_PI_2,
+            end_angle: 0.0,
+        };
+        let tgs = vec![tg_line, tg_arc];
+        let kv = vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [15.0, 5.0, 0.0]];
+        let seg_widths = vec![(0.0f32, 10.0f32), (10.0f32, 20.0f32)];
+
+        let wires = split_mixed_polyline(
+            &tgs,
+            &kv,
+            "mixed",
+            [1.0, 1.0, 1.0, 1.0],
+            false,
+            0.0,
+            [0.0; 8],
+            1.0,
+            Vec::new(),
+            None,
+            true,
+            &seg_widths,
+            20.0,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        // Arc wire + Line wire
+        assert_eq!(wires.len(), 2);
+        let arc_wire = &wires[0];
+        assert_eq!(arc_wire.taper_widths.first().copied(), Some(10.0));
+        assert_eq!(arc_wire.taper_widths.last().copied(), Some(20.0));
+
+        let line_wire = &wires[1];
+        assert_eq!(line_wire.taper_widths, vec![0.0, 10.0]);
+        assert_eq!(line_wire.world_width, 10.0);
+    }
+
+    #[test]
+    fn test_split_mixed_polyline_zero_width_segments_after_tapered_segment() {
+        let tg_line = TangentGeom::Line {
+            p1: [0.0, 0.0, 0.0],
+            p2: [10.0, 0.0, 0.0],
+        };
+        let tg_arc1 = TangentGeom::Arc {
+            center: [10.0, 5.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 5.0,
+            start_angle: -std::f64::consts::FRAC_PI_2,
+            end_angle: 0.0,
+        };
+        let tg_arc2 = TangentGeom::Arc {
+            center: [15.0, 10.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 5.0,
+            start_angle: -std::f64::consts::FRAC_PI_2,
+            end_angle: 0.0,
+        };
+        let tgs = vec![tg_line, tg_arc1, tg_arc2];
+        let kv = vec![
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [15.0, 5.0, 0.0],
+            [20.0, 10.0, 0.0],
+        ];
+        // Segment 0 has width (2.0, 0.0), segment 1 and 2 have width (0.0, 0.0)
+        let seg_widths = vec![(2.0f32, 0.0f32), (0.0f32, 0.0f32), (0.0f32, 0.0f32)];
+
+        let wires = split_mixed_polyline(
+            &tgs,
+            &kv,
+            "taper_then_zero",
+            [1.0, 1.0, 1.0, 1.0],
+            false,
+            0.0,
+            [0.0; 8],
+            1.0,
+            Vec::new(),
+            None,
+            true,
+            &seg_widths,
+            2.0,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        // 2 arc wires + 1 line wire = 3 wires
+        assert_eq!(wires.len(), 3);
+        let arc1 = &wires[0];
+        let arc2 = &wires[1];
+        let line = &wires[2];
+
+        // Arcs must have world_width = 0.0 and empty taper_widths
+        assert_eq!(arc1.world_width, 0.0);
+        assert!(arc1.taper_widths.is_empty());
+        assert_eq!(arc2.world_width, 0.0);
+        assert!(arc2.taper_widths.is_empty());
+
+        let inst1 = crate::scene::pipeline::circle_gpu::extract_circle_instance(arc1, 0.0)
+            .expect("arc1 instance");
+        assert_eq!(inst1.start_width, 0.0);
+        assert_eq!(inst1.params[3], 0.0);
+
+        // Straight line must have world_width = 2.0 and taper_widths = [2.0, 0.0]
+        assert_eq!(line.world_width, 2.0);
+        assert_eq!(line.taper_widths, vec![2.0, 0.0]);
+    }
+
+    #[test]
+    fn test_split_mixed_polyline_reversed_arc_aligns_endpoints() {
+        // Clockwise arc from (10.0, 0.0) to (15.0, 5.0).
+        // bulge_arc_to_tangent inverts angles so start_angle is at (15.0, 5.0) and end_angle at (10.0, 0.0).
+        let tg_arc_reversed = TangentGeom::Arc {
+            center: [10.0, 5.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 5.0,
+            start_angle: 0.0, // at (15.0, 5.0) - physical end!
+            end_angle: -std::f64::consts::FRAC_PI_2, // at (10.0, 0.0) - physical start!
+        };
+        let tgs = vec![tg_arc_reversed];
+        let kv = vec![[10.0, 0.0, 0.0], [15.0, 5.0, 0.0]];
+        let seg_widths = vec![(5.0f32, 25.0f32)]; // sw=5.0 at start, ew=25.0 at end
+
+        let wires = split_mixed_polyline(
+            &tgs,
+            &kv,
+            "arc_rev",
+            [1.0, 1.0, 1.0, 1.0],
+            false,
+            0.0,
+            [0.0; 8],
+            1.0,
+            Vec::new(),
+            None,
+            true,
+            &seg_widths,
+            25.0,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert_eq!(wires.len(), 1);
+        let arc_wire = &wires[0];
+        // In CCW shader angles, start_angle is at (15.0, 5.0) which is physical end (ew = 25.0).
+        // end_angle is at (10.0, 0.0) which is physical start (sw = 5.0).
+        assert_eq!(arc_wire.taper_widths.first().copied(), Some(25.0));
+        assert_eq!(arc_wire.taper_widths.last().copied(), Some(5.0));
+
+        let inst = crate::scene::pipeline::circle_gpu::extract_circle_instance(arc_wire, 0.0)
+            .expect("arc instance extracted");
+        // start_width is at start_angle (physical end, 25.0)
+        assert_eq!(inst.start_width, 25.0);
+        // params.w (end_width) is at end_angle (physical start, 5.0)
+        assert_eq!(inst.params[3], 5.0);
     }
 }

@@ -116,7 +116,7 @@ pub struct WireConst {
     /// the quad by `world_half_width / world_per_pixel` so the band tracks zoom
     /// in drawing units.
     pub world_half_width: f32,
-    pub _pad1: f32,
+    pub is_tapered: f32,
     pub _pad2: f32,
     /// Point-marker origin as a double-single pair. `marker_normal_scale.w`
     /// stores the viewport-height percentage; zero disables marker scaling.
@@ -592,7 +592,14 @@ pub(crate) fn emit_wire_packed(
     let (dists, align_end, align_total) = wire_distances(wire);
     let (marker_origin_high, marker_origin_low, marker_normal_scale) = marker_metadata(wire);
     let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).copied().unwrap_or([0.0; 3]) };
-    let tw = |i: usize| -> f32 { wire.taper_widths.get(i).copied().unwrap_or(0.0) * 0.5 };
+    let is_tapered = !wire.taper_widths.is_empty();
+    let tw = |i: usize| -> f32 {
+        if is_tapered {
+            wire.taper_widths.get(i).copied().unwrap_or(0.0) * 0.5
+        } else {
+            -1.0
+        }
+    };
     let mut instances: Vec<PackedWireInstance> = Vec::with_capacity(seg_count);
     for i in 0..seg_count {
         let a = wire.points[i];
@@ -636,6 +643,7 @@ pub(crate) fn emit_wire_native(
 ) -> (Vec<WireInstance>, WireConst) {
     let (dists, align_end, align_total) = wire_distances(wire);
     let (marker_origin_high, marker_origin_low, marker_normal_scale) = marker_metadata(wire);
+    let is_tapered = !wire.taper_widths.is_empty();
     let cst = WireConst {
         color,
         pat0: [wire.pattern[0], wire.pattern[1], wire.pattern[2], wire.pattern[3]],
@@ -646,7 +654,7 @@ pub(crate) fn emit_wire_native(
         align_end,
         align_total,
         world_half_width: wire.world_width * 0.5,
-        _pad1: 0.0,
+        is_tapered: if is_tapered { 1.0 } else { 0.0 },
         _pad2: 0.0,
         marker_origin_high,
         marker_origin_low,
@@ -658,18 +666,12 @@ pub(crate) fn emit_wire_native(
         return (Vec::new(), cst);
     }
     let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).copied().unwrap_or([0.0; 3]) };
-    // Store an endpoint/max-width ratio. The shared f32 maximum keeps drawing
-    // units and range out of the packed field; UNORM16 contributes only a
-    // relative error below 1/65535. Preserve zero as the existing constant
-    // width fallback sentinel.
     let taper_ratio = |i: usize| -> u16 {
-        let width = wire.taper_widths.get(i).copied().unwrap_or(0.0);
-        if width <= 0.0 || wire.world_width <= 0.0 {
+        if !is_tapered || wire.world_width <= 0.0 {
             0
         } else {
-            ((width / wire.world_width).clamp(0.0, 1.0) * u16::MAX as f32)
-                .round()
-                .max(1.0) as u16
+            let width = wire.taper_widths.get(i).copied().unwrap_or(0.0);
+            ((width / wire.world_width).clamp(0.0, 1.0) * u16::MAX as f32).round() as u16
         }
     };
     let mut instances: Vec<WireInstance> = Vec::with_capacity(seg_count);

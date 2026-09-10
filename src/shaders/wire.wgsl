@@ -102,7 +102,7 @@ struct VertexOut {
 // constant world-unit band, then the screen-pixel lineweight (LWDISPLAY off
 // collapses to a hairline).
 fn resolve_hw(taper: f32, world_hw: f32, px_hw: f32) -> f32 {
-    if taper > 0.0 { return max(taper / u.world_per_pixel, 0.5); }
+    if taper >= 0.0 { return max(taper / u.world_per_pixel, 0.5); }
     if world_hw > 0.0 { return max(world_hw / u.world_per_pixel, 0.5); }
     var display_hw = max(px_hw * u.lineweight_scale, 0.5);
     if u.lineweight_scale < 0.0 {
@@ -156,7 +156,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, instance: 
     // UTM-scale coordinates and after a cross-drawing paste, with no jitter.
     let rel_a = marker_relative(in.pos_a, in.pos_a_low, in);
     let rel_b = marker_relative(in.pos_b, in.pos_b_low, in);
-    let is_world = in.misc.w > 0.0 || in.taper.x > 0.0 || in.taper.y > 0.0;
+    let is_world = in.misc.w > 0.0 || in.taper.x >= 0.0 || in.taper.y >= 0.0;
 
     var final_clip: vec4<f32>;
     var out_dist: f32;
@@ -169,8 +169,8 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, instance: 
         // the segment and the plane normal), so the rectangle remains hosted rigidly
         // on the 3D plane when the camera rotates, orbits, or tilts, matching CAD
         // behavior and circle.wgsl planar arcs.
-        let world_hw_a = select(in.misc.w, in.taper.x, in.taper.x > 0.0);
-        let world_hw_b = select(in.misc.w, in.taper.y, in.taper.y > 0.0);
+        let world_hw_a = select(in.misc.w, in.taper.x, in.taper.x >= 0.0);
+        let world_hw_b = select(in.misc.w, in.taper.y, in.taper.y >= 0.0);
         let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
         let eff_hw = max(cur_world_hw, 0.5 * u.world_per_pixel);
 

@@ -32,7 +32,7 @@ struct WireConst {
     align_end:      f32,
     align_total:    f32,
     world_half_width: f32,
-    _pad1:          f32,
+    is_tapered:     f32,
     _pad2:          f32,
     marker_origin_high: vec4<f32>,
     marker_origin_low: vec4<f32>,
@@ -128,7 +128,8 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
 
     let rel_a = marker_relative(in.pos_a, in.pos_a_low, c);
     let rel_b = marker_relative(in.pos_b, in.pos_b_low, c);
-    let is_world = c.world_half_width > 0.0 || in.taper_ratio.x > 0.0 || in.taper_ratio.y > 0.0;
+    let is_tapered = c.is_tapered > 0.5;
+    let is_world = c.world_half_width > 0.0;
 
     var final_clip: vec4<f32>;
     var out_dist: f32;
@@ -141,8 +142,8 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         // the segment and the plane normal), so the rectangle remains hosted rigidly
         // on the 3D plane when the camera rotates, orbits, or tilts, matching CAD
         // behavior and circle.wgsl planar arcs.
-        let world_hw_a = select(c.world_half_width, in.taper_ratio.x * c.world_half_width, in.taper_ratio.x > 0.0);
-        let world_hw_b = select(c.world_half_width, in.taper_ratio.y * c.world_half_width, in.taper_ratio.y > 0.0);
+        let world_hw_a = select(c.world_half_width, in.taper_ratio.x * c.world_half_width, is_tapered);
+        let world_hw_b = select(c.world_half_width, in.taper_ratio.y * c.world_half_width, is_tapered);
         let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
         let eff_hw = max(cur_world_hw, 0.5 * u.world_per_pixel);
 

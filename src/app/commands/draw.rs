@@ -62,7 +62,7 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::ImagePick));
             }
 
-            "REVCLOUD" => {
+            "REVCLOUD" | "REVCLOUD_RECTANGULAR" | "REVCLOUD_POLYGONAL" | "REVCLOUD_FREEHAND" => {
                 use crate::modules::draw::draw::revcloud::RevCloudCommand;
                 let view_height = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0;
                 let default_arc_length = (view_height * 0.0125).max(1.0e-6);
@@ -72,9 +72,12 @@ impl OpenCADStudio {
                     .entities()
                     .map(|entity| (entity.common().handle, entity.clone()))
                     .collect();
-                let cmd = RevCloudCommand::new(default_arc_length, sources);
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                let mut command = RevCloudCommand::new(default_arc_length, sources);
+                if let Some(mode) = cmd.strip_prefix("REVCLOUD_") {
+                    command.on_text_input(mode);
+                }
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "ATTDEF" => {

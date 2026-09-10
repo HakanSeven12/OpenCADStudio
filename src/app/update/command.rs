@@ -1443,24 +1443,25 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     }
                 }
                 // One-shot action — apply immediately.
-                let unchanged = self.tabs[i]
-                    .scene
-                    .document
-                    .get_entity(popup.handle)
-                    .is_some_and(|entity| match (item.action, entity) {
-                        (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
-                            !spline.cv_frame_visible
-                                && crate::entities::spline::uses_fit_method(spline)
-                        }
-                        (
-                            GripMenuAction::ShowControlVertices,
-                            acadrust::EntityType::Spline(spline),
-                        ) => {
-                            spline.cv_frame_visible
-                                || !crate::entities::spline::uses_fit_method(spline)
-                        }
-                        _ => false,
-                    });
+                let unchanged = item.label.starts_with('✓')
+                    || self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(popup.handle)
+                        .is_some_and(|entity| match (item.action, entity) {
+                            (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
+                                !spline.cv_frame_visible
+                                    && crate::entities::spline::uses_fit_method(spline)
+                            }
+                            (
+                                GripMenuAction::ShowControlVertices,
+                                acadrust::EntityType::Spline(spline),
+                            ) => {
+                                spline.cv_frame_visible
+                                    || !crate::entities::spline::uses_fit_method(spline)
+                            }
+                            _ => false,
+                        });
                 if unchanged {
                     return Task::none();
                 }

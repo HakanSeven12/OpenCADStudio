@@ -2179,6 +2179,12 @@ impl Grippable for ExtendedEntity {
             GripMenuAction::SectionVolume => "Volume",
             _ => return,
         };
+        let ExtendedEntityData::SectionObject(data) = &self.data else {
+            return;
+        };
+        if section_kind(self, data) == value {
+            return;
+        }
         apply_section_prop(self, "ext_section_state", value);
     }
 }
@@ -2196,5 +2202,37 @@ impl PropertyEditable for ExtendedEntity {
 impl Transformable for ExtendedEntity {
     fn apply_transform(&mut self, transform: &EntityTransform) {
         apply_transform(self, transform);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::entities::EntityCommon;
+    use acadrust::types::Color;
+
+    #[test]
+    fn reselecting_slice_keeps_its_depth() {
+        let mut entity = ExtendedEntity {
+            common: EntityCommon::new(),
+            data: ExtendedEntityData::SectionObject(SectionObjectData {
+                state: 1,
+                flags: 5,
+                name: String::new(),
+                vertical_direction: Vector3::UNIT_Z,
+                top_height: 1.0,
+                bottom_height: 1.0,
+                indicator_alpha: 70,
+                indicator_color: Color::from_index(9),
+                back_line_vertices: Vec::new(),
+                vertices: vec![Vector3::ZERO, Vector3::new(60.0, 0.0, 0.0)],
+                settings_handle: Handle::NULL,
+            }),
+        };
+        set_section_slice_metadata(&mut entity, true, 0.25);
+
+        entity.apply_grip_menu(SECTION_GRIP_STATE, GripMenuAction::SectionSlice);
+
+        assert_eq!(section_slice_depth(&entity), Some(0.25));
     }
 }

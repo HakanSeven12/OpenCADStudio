@@ -141,3 +141,20 @@ pub mod symmetric {
         }
     }
 }
+
+// ── Autocomplete registry ─────────────────────────────────
+inventory::submit!(crate::command::CommandRegistration {
+    names: &[
+        "HCONSTRAINT",
+        "VCONSTRAINT",
+        "PCONSTRAINT",
+        "QCONSTRAINT",
+        "ECONSTRAINT",
+        "TCONSTRAINT",
+        "NCONSTRAINT",
+        "NRCONSTRAINT",
+        "LCONSTRAINT",
+        "FXCONSTRAINT",
+        "SYCONSTRAINT",
+    ]
+});

@@ -4,7 +4,34 @@ Notable changes on `feature/parametric-constraint-system` since each push to
 GitHub. Newest entries first. "Unreleased" covers local changes not yet
 pushed.
 
-## Unreleased (since `eb96e8b6`)
+## Unreleased (since `3d0a41b6`)
+
+- **Fix:** none of the 17 sketch-constraint commands (`HCONSTRAINT`,
+  `VCONSTRAINT`, `PCONSTRAINT`, `QCONSTRAINT`, `ECONSTRAINT`, `TCONSTRAINT`,
+  `NCONSTRAINT`, `NRCONSTRAINT`, `LCONSTRAINT`, `FXCONSTRAINT`,
+  `SYCONSTRAINT`, `CCONSTRAINT`, `EDCONSTRAINT`, `CPCONSTRAINT`,
+  `MPCONSTRAINT`, `OCCONSTRAINT`, `DCONSTRAINT`, `ACONSTRAINT`) carried an
+  `inventory::submit!` registration — a pre-existing gap the
+  `docs/command_reference.md` generator had already flagged, which meant
+  every constraint command (including this session's new `NRCONSTRAINT`)
+  was invisible to command-line autocomplete and the MCP server's
+  `commands` listing, despite working fine when typed exactly. Each
+  constraint module now registers itself, with a regression test pinning
+  it so the gap can't silently reappear.
+  - The same missing registration also broke the **keyboard-shortcut
+    editor** (`ALIASEDIT`): it validates a custom shortcut's target
+    against this same registry and silently rejected anything not in it,
+    so a user could not assign a custom shortcut to *any* constraint
+    command — not just the new ones, the original `HCONSTRAINT`/
+    `CCONSTRAINT`/etc. family too. Fixed by the same change.
+  ([tools.rs](src/modules/draw/constrain/tools.rs),
+  [coincident.rs](src/modules/draw/constrain/coincident.rs),
+  [equal_distance.rs](src/modules/draw/constrain/equal_distance.rs),
+  [point_on_entity.rs](src/modules/draw/constrain/point_on_entity.rs),
+  [value.rs](src/modules/draw/constrain/value.rs),
+  [command.rs](src/command.rs))
+
+## Pushed 2026-09-10 (`eb96e8b6` → `3d0a41b6`)
 
 - **Fix:** a dimensional constraint's value prompt (e.g. `DCONSTRAINT`'s
   "Specify distance:") rejected a named parameter typed in its own

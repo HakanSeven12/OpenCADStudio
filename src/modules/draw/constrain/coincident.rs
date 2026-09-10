@@ -71,3 +71,6 @@ impl CadCommand for CoincidentConstraintCommand {
         CmdResult::Cancel
     }
 }
+
+// ── Autocomplete registry ─────────────────────────────────
+inventory::submit!(crate::command::CommandRegistration { names: &["CCONSTRAINT"] });

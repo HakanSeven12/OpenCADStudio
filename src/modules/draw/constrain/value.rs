@@ -307,6 +307,9 @@ impl CadCommand for AngleConstraintCommand {
     }
 }
 
+// ── Autocomplete registry ─────────────────────────────────
+inventory::submit!(crate::command::CommandRegistration { names: &["DCONSTRAINT", "ACONSTRAINT"] });
+
 #[cfg(test)]
 mod tests {
     use super::*;

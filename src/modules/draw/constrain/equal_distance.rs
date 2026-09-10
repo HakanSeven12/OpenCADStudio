@@ -65,3 +65,6 @@ impl CadCommand for EqualDistanceConstraintCommand {
         CmdResult::Cancel
     }
 }
+
+// ── Autocomplete registry ─────────────────────────────────
+inventory::submit!(crate::command::CommandRegistration { names: &["EDCONSTRAINT"] });

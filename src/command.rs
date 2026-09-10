@@ -2445,3 +2445,43 @@ pub fn all_registered_command_names() -> Vec<&'static str> {
         .flat_map(|r| r.names.iter().copied())
         .collect()
 }
+
+#[cfg(test)]
+mod constraint_registry_tests {
+    use super::*;
+
+    /// Regression guard: the whole `src/modules/draw/constrain/` family
+    /// (17 command ids, every one of the geometric/dimensional constraint
+    /// commands) predated `inventory::submit!` and was invisible to
+    /// command-line autocomplete and the MCP `commands` listing —
+    /// `docs/command_reference.md`'s own generator flagged this. Each
+    /// constraint module now registers itself; this pins that so the gap
+    /// can't silently reappear (e.g. a new constraint command added
+    /// without its own registration).
+    #[test]
+    fn every_constraint_command_is_in_the_autocomplete_registry() {
+        let names = all_registered_command_names();
+        for id in [
+            "CCONSTRAINT",
+            "EDCONSTRAINT",
+            "CPCONSTRAINT",
+            "MPCONSTRAINT",
+            "OCCONSTRAINT",
+            "HCONSTRAINT",
+            "VCONSTRAINT",
+            "PCONSTRAINT",
+            "QCONSTRAINT",
+            "ECONSTRAINT",
+            "TCONSTRAINT",
+            "NCONSTRAINT",
+            "NRCONSTRAINT",
+            "LCONSTRAINT",
+            "FXCONSTRAINT",
+            "SYCONSTRAINT",
+            "DCONSTRAINT",
+            "ACONSTRAINT",
+        ] {
+            assert!(names.contains(&id), "{id} is missing from the command registry");
+        }
+    }
+}

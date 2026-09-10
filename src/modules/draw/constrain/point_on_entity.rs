@@ -89,3 +89,6 @@ impl CadCommand for PointOnEntityConstraintCommand {
         CmdResult::Cancel
     }
 }
+
+// ── Autocomplete registry ─────────────────────────────────
+inventory::submit!(crate::command::CommandRegistration { names: &["CPCONSTRAINT", "MPCONSTRAINT", "OCCONSTRAINT"] });

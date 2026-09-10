@@ -1572,6 +1572,9 @@ impl OpenCADStudio {
                 GripEditMode::Radius => {
                     Some(crate::scene::model::object::GripMenuAction::Radius)
                 }
+                GripEditMode::ArcLength => {
+                    Some(crate::scene::model::object::GripMenuAction::ArcLength)
+                }
                 GripEditMode::Stretch => None,
             };
             let actions: Vec<_> = if menu_action.is_some() {
@@ -3200,7 +3203,10 @@ impl OpenCADStudio {
                 // Engaging click — stay hot, wait for the placement click.
                 return Task::none();
             }
-            if matches!(grip.mode, GripEditMode::Lengthen | GripEditMode::Radius) {
+            if matches!(
+                grip.mode,
+                GripEditMode::Lengthen | GripEditMode::Radius | GripEditMode::ArcLength
+            ) {
                 self.grip_pending = None;
                 self.command_line.input.clear();
             }

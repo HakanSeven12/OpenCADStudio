@@ -84,6 +84,9 @@ impl OpenCADStudio {
                 crate::scene::pick::grip::GripEditMode::Radius => {
                     (grip.origin_world, Some(crate::command::DynRole::Radius))
                 }
+                crate::scene::pick::grip::GripEditMode::ArcLength => {
+                    (grip.origin_world, Some(crate::command::DynRole::Distance))
+                }
             });
 
         if let Some((origin, scalar_role)) = grip_input {

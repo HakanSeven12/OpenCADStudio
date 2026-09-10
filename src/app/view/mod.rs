@@ -936,6 +936,9 @@ bg={bg_ms:.1}ms n={view_count}"
                         crate::scene::pick::grip::GripEditMode::Radius => {
                             crate::scene::model::object::GripMenuAction::Radius
                         }
+                        crate::scene::pick::grip::GripEditMode::ArcLength => {
+                            crate::scene::model::object::GripMenuAction::ArcLength
+                        }
                         _ => return None,
                     };
                     let original = self
@@ -1721,6 +1724,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 grip.mode,
                 crate::scene::pick::grip::GripEditMode::Lengthen
                     | crate::scene::pick::grip::GripEditMode::Radius
+                    | crate::scene::pick::grip::GripEditMode::ArcLength
             )
         });
         let dyn_capturing =

@@ -1590,6 +1590,7 @@ impl OpenCADStudio {
                             grip.mode,
                             crate::scene::pick::grip::GripEditMode::Lengthen
                                 | crate::scene::pick::grip::GripEditMode::Radius
+                                | crate::scene::pick::grip::GripEditMode::ArcLength
                         )
                     })
                     && !self.tabs[i].dyn_fields.is_empty()

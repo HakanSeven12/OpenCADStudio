@@ -200,7 +200,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .get_or_insert_with(String::new)
                             .push_str(&s);
                         if self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
-                            matches!(grip.mode, GripEditMode::Lengthen | GripEditMode::Radius)
+                            matches!(
+                                grip.mode,
+                                GripEditMode::Lengthen
+                                    | GripEditMode::Radius
+                                    | GripEditMode::ArcLength
+                            )
                         }) {
                             self.command_line.input.push_str(&s);
                         }
@@ -248,7 +253,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             self.tabs[i].dyn_fields[a].buffer = None;
                         }
                         if self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
-                            matches!(grip.mode, GripEditMode::Lengthen | GripEditMode::Radius)
+                            matches!(
+                                grip.mode,
+                                GripEditMode::Lengthen
+                                    | GripEditMode::Radius
+                                    | GripEditMode::ArcLength
+                            )
                         }) {
                             self.command_line.input.pop();
                         }
@@ -287,6 +297,34 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 }
                 // Grip-menu value prompt — consume the typed number and
                 // route it through `apply_grip_menu_value`.
+                // Interactive grip prompts are valid only while their matching
+                // grip edit is alive. Do not let a stale Radius / Lengthen /
+                // Arc Length prompt consume Enter or coordinates from a later
+                // drawing command.
+                let stale_interactive_grip_prompt = self.grip_pending.as_ref().is_some_and(|pending| {
+                    let expected_mode = match pending.action {
+                        crate::scene::model::object::GripMenuAction::Lengthen => {
+                            Some(GripEditMode::Lengthen)
+                        }
+                        crate::scene::model::object::GripMenuAction::Radius => {
+                            Some(GripEditMode::Radius)
+                        }
+                        crate::scene::model::object::GripMenuAction::ArcLength => {
+                            Some(GripEditMode::ArcLength)
+                        }
+                        _ => None,
+                    };
+                    expected_mode.is_some_and(|mode| {
+                        !self.tabs[self.active_tab].active_grip.as_ref().is_some_and(|grip| {
+                            grip.mode == mode
+                                && grip.handle == pending.handle
+                                && grip.grip_id == pending.grip_id
+                        })
+                    })
+                });
+                if stale_interactive_grip_prompt {
+                    self.grip_pending = None;
+                }
                 if let Some(pending) = self.grip_pending.take() {
                     let i = self.active_tab;
                     if self.reject_locked_edit(i, pending.handle) {
@@ -323,6 +361,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 ) | (
                                     GripEditMode::Radius,
                                     crate::scene::model::object::GripMenuAction::Radius,
+                                ) | (
+                                    GripEditMode::ArcLength,
+                                    crate::scene::model::object::GripMenuAction::ArcLength,
                                 )
                             )
                                 && grip.handle == pending.handle
@@ -1333,7 +1374,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         action: item.action,
                         label,
                     });
-                    if matches!(item.action, GripMenuAction::Lengthen | GripMenuAction::Radius) {
+                    if matches!(
+                        item.action,
+                        GripMenuAction::Lengthen
+                            | GripMenuAction::Radius
+                            | GripMenuAction::ArcLength
+                    ) {
                         if let Some((_, grip)) = self.tabs[i]
                             .selected_grip_handles
                             .iter()
@@ -1357,6 +1403,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     popup.grip_id,
                                     grip.world,
                                 ),
+                                GripMenuAction::ArcLength => GripEdit::arc_length(
+                                    popup.handle,
+                                    popup.grip_id,
+                                    grip.world,
+                                ),
                                 _ => GripEdit::lengthen(
                                     popup.handle,
                                     popup.grip_id,
@@ -1373,6 +1424,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         if matches!(item.action, GripMenuAction::Radius) {
                             self.command_line.push_info(
                                 crate::t!("Specify point or enter radius:").as_ref(),
+                            );
+                        } else if matches!(item.action, GripMenuAction::ArcLength) {
+                            self.command_line.push_info(
+                                crate::t!("Specify point or enter arc length:").as_ref(),
                             );
                         } else {
                             self.command_line.push_info(

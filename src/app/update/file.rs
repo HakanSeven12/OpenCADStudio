@@ -435,8 +435,6 @@ impl OpenCADStudio {
             pick_add: self.pick_add,
             pick_drag_rect: self.pick_drag_rect,
             quick_properties: self.quick_properties,
-            bg_color: None,
-            paper_bg_color: None,
             language: self.language,
             cliprompt_lines: crate::app::settings::clamp_clipromptlines(self.cliprompt_lines),
             commandline_fade_ms: crate::app::settings::clamp_commandline_fade_ms(
@@ -516,7 +514,6 @@ impl OpenCADStudio {
         self.pick_add = s.pick_add;
         self.pick_drag_rect = s.pick_drag_rect;
         self.quick_properties = s.quick_properties;
-        // Legacy settings.bg_color / paper_bg_color are superseded by model_space config.
         if crate::i18n::set_language(s.language).is_ok() {
             self.language = s.language;
         }

@@ -269,12 +269,6 @@ pub struct UserSettings {
     pub pick_drag_rect: bool,
     /// Show the floating Quick Properties panel when objects are selected.
     pub quick_properties: bool,
-    /// Persisted viewport background colours (0–255 RGB); `None` = app default
-    /// (dark grey model / off-white paper). Applied to every drawing tab on
-    /// launch and to tabs opened later, so a chosen background survives restarts
-    /// (#188).
-    pub bg_color: Option<[u8; 3]>,
-    pub paper_bg_color: Option<[u8; 3]>,
     /// Interface language preference. `System` negotiates against the
     /// platform locale on every launch.
     pub language: crate::i18n::Language,
@@ -384,8 +378,6 @@ impl Default for UserSettings {
             pick_add: true,
             pick_drag_rect: false,
             quick_properties: false,
-            bg_color: None,
-            paper_bg_color: None,
             language: crate::i18n::Language::default(),
             cliprompt_lines: 3,
             commandline_fade_ms: 3000,

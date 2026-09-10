@@ -203,12 +203,7 @@ pub struct UserSettings {
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
-    /// Which Options page was showing when the dialog was last closed.
-    ///
-    /// Read leniently: `AppConfig::load` discards the *whole* file when any
-    /// field fails to parse, so a page name that no longer exists — a tab
-    /// renamed or merged away between versions — would silently reset every
-    /// setting the user has. An unknown name falls back to the first page.
+    /// Last Options page; unknown saved names fall back without rejecting the config.
     #[serde(default, deserialize_with = "deserialize_options_tab")]
     pub options_tab: crate::ui::window::options::OptionsTab,
     /// Show the navigation cube (NAVVCUBE).
@@ -455,11 +450,6 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    /// `AppConfig::load` throws the whole file away when any field fails to
-    /// parse, so a page name that no longer exists would quietly reset every
-    /// preference the user has. This branch removed the Drawing page, and
-    /// anyone who had it open when they last closed the dialog has that name
-    /// on disk.
     #[test]
     fn a_page_name_that_no_longer_exists_does_not_cost_the_other_settings() {
         let json = r#"{
@@ -479,4 +469,3 @@ mod tests {
         assert_eq!(cfg.settings.savetime_min, 42);
     }
 }
-

@@ -356,13 +356,6 @@ impl OpenCADStudio {
     }
 
     /// Write a header variable on the active drawing and mark it modified.
-    ///
-    /// Deliberately does no geometry work. The variables the Options pages
-    /// write differ in what they cost to apply, and treating them alike is
-    /// wrong in both directions: `DISPSILH` is read at render time and needs
-    /// nothing, `SURFU`/`SURFV`/`SURFTYPE` are inputs to PEDIT's smoothing and
-    /// need nothing until it runs, while `ISOLINES` is baked into solid meshes
-    /// at tessellation and needs more than a bump — see `regenerate_meshes`.
     pub(in crate::app) fn set_drawing_var(
         &mut self,
         write: impl FnOnce(&mut acadrust::document::HeaderVariables),
@@ -374,11 +367,7 @@ impl OpenCADStudio {
         }
     }
 
-    /// Re-tessellate the active drawing's solids from the document.
-    ///
-    /// What REGEN does, and the only thing that makes a changed `ISOLINES`
-    /// reach solids that already exist. Costly on a solid-heavy drawing, so
-    /// callers driven by a slider run it when the drag ends, not per tick.
+    /// Re-tessellate active-drawing solids after an ISOLINES change.
     pub(in crate::app) fn regenerate_meshes(&mut self) {
         let i = self.active_tab;
         if let Some(tab) = self.tabs.get_mut(i) {

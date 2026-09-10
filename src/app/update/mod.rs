@@ -6305,15 +6305,7 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            // Drawing variables: they go into the header of the active
-            // drawing and mark it modified, as SETVAR does. What each one
-            // costs to apply differs, so they are not treated alike.
-            //
-            // ISOLINES is baked into a solid's mesh when it is tessellated, so
-            // an existing solid keeps the density it was born with until the
-            // meshes are rebuilt. That is expensive, and a slider emits on
-            // every pixel of a drag, so the rebuild waits for the release —
-            // and only happens if the value actually moved.
+            // ISOLINES is baked into solid meshes, so rebuild once on release.
             Message::IsolinesChanged(value) => {
                 let value = value.max(0);
                 let changed = self
@@ -6334,14 +6326,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            // Read at render time, so nothing has to be rebuilt for it.
             Message::DispSilhChanged(on) => {
                 self.set_drawing_var(|header| header.display_silhouette = on);
                 Task::none()
             }
 
-            // Inputs to PEDIT's mesh smoothing; they change nothing until it
-            // runs, so writing the header is the whole job.
             Message::SurfaceUChanged(value) => {
                 self.set_drawing_var(|header| header.surface_u_density = value.clamp(0, 200));
                 Task::none()
@@ -6357,14 +6346,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            // Whether history is recorded from now on; nothing to redraw.
             Message::SolidHistChanged(record) => {
                 self.set_drawing_var(|header| header.record_solid_history = record);
                 Task::none()
             }
 
-            // Read while building geometry, so this one does bump — the same
-            // thing the SHOWHIST command does.
             Message::ShowHistChanged(mode) => {
                 self.set_drawing_var(|header| {
                     header.show_solid_history = mode.clamp(0, 2)

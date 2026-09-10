@@ -1076,9 +1076,6 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
-
-
-
     // ANNOAUTOSCALE's magnitude decides which objects a newly added scale
     // reaches — 1 skips layers that are off, frozen, locked or frozen in the
     // viewport, 2 keeps locked ones, 3 skips only locked, 4 takes everything.
@@ -1391,9 +1388,7 @@ pub fn view_window<'a>(
             .push(
                 row![
                     text(crate::t!("Isolines per surface")).size(12).width(150),
-                    // Rebuilding every solid's mesh is what makes a new
-                    // isoline count reach solids that already exist, and it is
-                    // far too costly to do on each pixel of a drag.
+                    // Retessellate once when dragging ends.
                     slider(
                         0..=64,
                         drawing_prefs.isolines.clamp(0, 64),

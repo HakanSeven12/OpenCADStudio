@@ -16,8 +16,11 @@ use crate::t;
 use crate::ui::{icons, wrap_bar::PosReport};
 
 const PANEL_ID: &str = "draw_extension";
-const CELL: f32 = 36.0;
-const GAP: f32 = 3.0;
+const GROUP_ID: &str = "draw_extension_group";
+const SCALE: f32 = 0.7;
+const CELL: f32 = 36.0 * SCALE;
+const GAP: f32 = 3.0 * SCALE;
+const OPTION_HEIGHT: f32 = 30.0 * SCALE;
 
 struct Tool {
     command: &'static str,
@@ -122,6 +125,14 @@ pub(super) fn owns_dropdown(id: &str) -> bool {
             .any(|tool| tool.command == id && !tool.options.is_empty())
 }
 
+pub(super) fn group_anchor<'a>(title: &str, content: Element<'a, Message>) -> Element<'a, Message> {
+    if title == "Draw" {
+        PosReport::new(GROUP_ID, content).into()
+    } else {
+        content
+    }
+}
+
 pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Element<'a, Message> {
     if title != "Draw" || TOOLS.is_empty() {
         return container(text(t!(title)).size(9).style(muted_text_style))
@@ -149,7 +160,7 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
 }
 
 fn tool_button(tool: &Tool, active: bool) -> Element<'static, Message> {
-    let face = button(make_icon(IconKind::Svg(tool.icon), 23.0))
+    let face = button(make_icon(IconKind::Svg(tool.icon), 23.0 * SCALE))
         .on_press(Message::DropdownSelectItem {
             dropdown_id: PANEL_ID,
             cmd: tool.command,
@@ -158,10 +169,10 @@ fn tool_button(tool: &Tool, active: bool) -> Element<'static, Message> {
         .width(if tool.options.is_empty() {
             CELL
         } else {
-            CELL - 11.0
+            CELL - 11.0 * SCALE
         })
         .height(CELL)
-        .padding(3);
+        .padding(3.0 * SCALE);
     let tip = format!("{}\n{} {}", t!(tool.label), t!("Command:"), tool.command);
     let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
         .delay(Duration::from_millis(400))
@@ -170,12 +181,12 @@ fn tool_button(tool: &Tool, active: bool) -> Element<'static, Message> {
     if !tool.options.is_empty() {
         row![
             face,
-            button(icons::themed_arrow_down(6.0))
+            button(icons::themed_arrow_down(6.0 * SCALE))
                 .on_press(Message::ToggleRibbonDropdown(tool.command.to_string()))
                 .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
-                .width(11)
+                .width(11.0 * SCALE)
                 .height(CELL)
-                .padding(2)
+                .padding(2.0 * SCALE)
         ]
         .into()
     } else {
@@ -186,7 +197,7 @@ fn tool_button(tool: &Tool, active: bool) -> Element<'static, Message> {
 pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element<'a, Message> {
     let width = (7.0 * (CELL + GAP) - GAP + 12.0).min((win.0 - 8.0).max(CELL + 12.0));
     let (_, x, anchor_top) = ribbon.dd_anchor(PANEL_ID, width, win.0);
-    let anchor = crate::ui::wrap_bar::dropdown_bounds(PANEL_ID);
+    let anchor = crate::ui::wrap_bar::dropdown_bounds(GROUP_ID);
     let left = anchor
         .map_or(x, |b| b.x)
         .clamp(0.0, (win.0 - width).max(0.0));
@@ -198,7 +209,7 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
         .find(|tool| tool.command == id && !tool.options.is_empty());
     let content_height = option_tool.map_or_else(
         || TOOLS.len().div_ceil(cols) as f32 * (CELL + GAP) - GAP + 12.0,
-        |tool| tool.options.len() as f32 * 30.0,
+        |tool| tool.options.len() as f32 * OPTION_HEIGHT,
     );
     let contents: Element<'static, Message> = if let Some(tool) = option_tool {
         column(
@@ -212,8 +223,8 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
                         })
                         .style(popup_row_style)
                         .width(Fill)
-                        .height(30)
-                        .padding([6, 10])
+                        .height(OPTION_HEIGHT)
+                        .padding([3, 7])
                         .into()
                 })
                 .collect::<Vec<Element<'static, Message>>>(),
@@ -241,6 +252,10 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
     };
     let panel = container(scrollable(contents).height(content_height.min(available_height)))
         .width(width)
-        .style(popup_panel_style);
+        .style(|theme: &Theme| {
+            let mut style = popup_panel_style(theme);
+            style.border.color = theme.palette().primary.base.color;
+            style
+        });
     dropdown_backdrop(position_ribbon_dropdown(panel.into(), false, left, top))
 }

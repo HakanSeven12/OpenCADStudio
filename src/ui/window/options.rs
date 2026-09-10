@@ -25,9 +25,23 @@ const DIALOG_HEIGHT: f32 = 620.0;
 pub enum OptionsTab {
     #[default]
     General,
+    OpenAndSave,
     Display,
     Selection,
     Drawing,
+}
+
+/// Application preferences the dialog reads that are plain scalars on the app.
+///
+/// Gathered rather than passed one by one: `view_window` already carries a
+/// long positional list, and several of these are adjacent `bool`s that would
+/// swap silently at the call site.
+#[derive(Clone, Copy)]
+pub struct AppPrefs {
+    /// SAVETIME, minutes between recovery saves; 0 disables.
+    pub savetime_min: i32,
+    /// ISAVEBAK: keep a `.bak` when overwriting.
+    pub backup_on_save: bool,
 }
 
 /// The Selection-card settings that live on `UserSettings` rather than on the
@@ -70,6 +84,7 @@ pub fn view_window<'a>(
     active_tab: OptionsTab,
     cursor_size: i32,
     selection: SelectionPrefs,
+    prefs: AppPrefs,
     double_click_block_refedit: bool,
     double_click_block_attedit: bool,
     cursor_type: CursorType,
@@ -187,8 +202,18 @@ pub fn view_window<'a>(
         ]
         .spacing(12)
         .align_y(iced::Center),
-        Space::new().height(22),
-        text(crate::tr!("options", "open-save-section")).size(15),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
+
+    // Saving preferences, gathered onto one page. The format and the file
+    // association were on General, which had become a page of three unrelated
+    // controls; the autosave interval and the backup toggle have existed since
+    // #205 with no control at all.
+    let open_and_save = column![
+        text(crate::t!("Open and Save")).size(15),
+        Space::new().height(10),
         Space::new().height(10),
         row![
             text(crate::tr!("options", "default-save-format-label")).size(12).width(150),
@@ -222,6 +247,53 @@ pub fn view_window<'a>(
         ))
         .size(11)
         .width(sizing.width),
+        Space::new().height(22),
+        text(crate::t!("File Safety")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Automatic save")).size(12).width(150),
+            slider(0..=120, prefs.savetime_min.clamp(0, 120), Message::SaveTimeChanged)
+                .step(1)
+                .width(Fill),
+            text(if prefs.savetime_min <= 0 {
+                crate::t!("Off").into_owned()
+            } else {
+                format!("{} min", prefs.savetime_min)
+            })
+            .size(11)
+            .width(52),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Minutes between recovery saves to a .sv$ file; 0 turns it off (SAVETIME)."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(14),
+        row![
+            iced::widget::checkbox(prefs.backup_on_save)
+                .on_toggle(Message::BackupOnSaveChanged)
+                .size(15),
+            text(crate::t!("Keep a .bak copy when overwriting a drawing (ISAVEBAK)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(22),
+        text(crate::t!("Plotting")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Plot device, paper, scale and plot styles"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Plot and Page Setup…")).size(11))
+                .on_press(Message::PlotDialogOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
     ]
     .spacing(0)
     .width(sizing.width);
@@ -852,6 +924,7 @@ pub fn view_window<'a>(
         OptionsTab::General => general.into(),
         OptionsTab::Display => display_element.into(),
         OptionsTab::Selection => selection.into(),
+        OptionsTab::OpenAndSave => open_and_save.into(),
         OptionsTab::Drawing => drawing.into(),
     };
 
@@ -868,6 +941,7 @@ pub fn view_window<'a>(
     };
     let tabs = column![
         tab_button(crate::t!("General"), OptionsTab::General),
+        tab_button(crate::t!("Open and Save"), OptionsTab::OpenAndSave),
         tab_button(crate::t!("Display"), OptionsTab::Display),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
         tab_button(crate::t!("Drawing"), OptionsTab::Drawing),

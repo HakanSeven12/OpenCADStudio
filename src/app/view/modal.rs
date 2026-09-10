@@ -192,6 +192,10 @@ impl OpenCADStudio {
                             pick_drag_rect: self.pick_drag_rect,
                             grip_object_limit: self.grip_object_limit,
                         },
+                        crate::ui::window::options::AppPrefs {
+                            savetime_min: self.savetime_min,
+                            backup_on_save: self.backup_on_save,
+                        },
                         self.double_click_block_refedit,
                         self.double_click_block_attedit,
                         self.cursor_type,

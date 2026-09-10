@@ -2007,6 +2007,10 @@ pub enum Message {
     ShiftToAddToggled(bool),
     /// Toggle press-and-drag drawing a rectangle instead of a lasso (PICKDRAG).
     PickDragRectToggled(bool),
+    /// Change the automatic-save interval in minutes; 0 disables it (SAVETIME).
+    SaveTimeChanged(i32),
+    /// Toggle keeping a `.bak` copy when overwriting a drawing (ISAVEBAK).
+    BackupOnSaveChanged(bool),
     /// Restore Model Space display/canvas appearance to defaults.
     RestoreModelSpaceDisplayDefaults,
     /// Restore Selection visual effect settings to defaults.

@@ -6188,6 +6188,18 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::SaveTimeChanged(minutes) => {
+                self.savetime_min = minutes.max(0);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::BackupOnSaveChanged(enabled) => {
+                self.backup_on_save = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;
                 self.persist_settings_if_changed();

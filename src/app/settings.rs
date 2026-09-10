@@ -184,6 +184,15 @@ pub struct UserSettings {
     pub grip_object_limit: i32,
     /// Which Options page was showing when the dialog was last closed.
     pub options_tab: crate::ui::window::options::OptionsTab,
+    /// Show the navigation cube (NAVVCUBE).
+    pub show_viewcube: bool,
+    /// Show the UCS icon (UCSICON).
+    pub show_ucs_icon: bool,
+    /// Draw the UCS icon at the origin rather than in the corner
+    /// (UCSICON ORigin / NOorigin).
+    pub ucs_icon_at_origin: bool,
+    /// Selection cycling: a click where objects overlap opens a picker.
+    pub selection_cycling: bool,
     /// CURSORTYPE: crosshair or the platform pointer over the drawing.
     pub cursor_type: CursorType,
     /// Explicit crosshair RGB. `None` keeps automatic background contrast.
@@ -340,6 +349,10 @@ impl Default for UserSettings {
             cursor_size: 5,
             pick_box: 3,
             options_tab: crate::ui::window::options::OptionsTab::General,
+            show_viewcube: true,
+            show_ucs_icon: true,
+            ucs_icon_at_origin: true,
+            selection_cycling: false,
             double_click_block_refedit: false,
             double_click_block_attedit: true,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,

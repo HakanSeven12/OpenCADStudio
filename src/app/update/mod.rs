@@ -6287,6 +6287,82 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::ShowViewCubeChanged(show) => {
+                self.show_viewcube = show;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::ShowUcsIconChanged(show) => {
+                self.show_ucs_icon = show;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::UcsIconAtOriginChanged(at_origin) => {
+                self.ucs_icon_at_origin = at_origin;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // The five below are drawing variables: they go into the header of
+            // the active drawing and mark it modified, exactly as SETVAR does.
+            // The four that feed solid tessellation also bump the geometry, or
+            // the change is invisible until an unrelated edit rebuilds it.
+            Message::IsolinesChanged(value) => {
+                self.set_drawing_tessellation_var(|header| header.isolines = value.max(0));
+                Task::none()
+            }
+
+            Message::DispSilhChanged(on) => {
+                self.set_drawing_tessellation_var(|header| header.display_silhouette = on);
+                Task::none()
+            }
+
+            Message::SurfaceUChanged(value) => {
+                self.set_drawing_tessellation_var(|header| {
+                    header.surface_u_density = value.clamp(0, 200)
+                });
+                Task::none()
+            }
+
+            Message::SurfaceVChanged(value) => {
+                self.set_drawing_tessellation_var(|header| {
+                    header.surface_v_density = value.clamp(0, 200)
+                });
+                Task::none()
+            }
+
+            Message::SurfaceTypeChanged(value) => {
+                self.set_drawing_tessellation_var(|header| header.surface_type = value);
+                Task::none()
+            }
+
+            Message::SolidHistChanged(record) => {
+                let i = self.active_tab;
+                if let Some(tab) = self.tabs.get_mut(i) {
+                    tab.scene.document.header.record_solid_history = record;
+                    tab.dirty = true;
+                }
+                Task::none()
+            }
+
+            Message::ShowHistChanged(mode) => {
+                let i = self.active_tab;
+                if let Some(tab) = self.tabs.get_mut(i) {
+                    tab.scene.document.header.show_solid_history = mode.clamp(0, 2);
+                    tab.scene.bump_geometry();
+                    tab.dirty = true;
+                }
+                Task::none()
+            }
+
+            Message::SelectionCyclingChanged(on) => {
+                self.selection_cycling = on;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;
                 self.persist_settings_if_changed();

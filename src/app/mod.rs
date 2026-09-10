@@ -2036,6 +2036,28 @@ pub enum Message {
     SnapAngleInputChanged(String),
     /// Change the polar tracking increment in degrees.
     PolarIncrementChanged(f32),
+    /// Toggle the navigation cube (NAVVCUBE).
+    ShowViewCubeChanged(bool),
+    /// Toggle the UCS icon (UCSICON).
+    ShowUcsIconChanged(bool),
+    /// Toggle drawing the UCS icon at the origin (UCSICON ORigin).
+    UcsIconAtOriginChanged(bool),
+    /// Toggle selection cycling from Options; the status-bar pill toggles the same flag.
+    SelectionCyclingChanged(bool),
+    /// Change isolines per surface in the current drawing (ISOLINES).
+    IsolinesChanged(i16),
+    /// Toggle silhouette edges in the current drawing (DISPSILH).
+    DispSilhChanged(bool),
+    /// Change surface density U in the current drawing (SURFU).
+    SurfaceUChanged(i16),
+    /// Change surface density V in the current drawing (SURFV).
+    SurfaceVChanged(i16),
+    /// Change the surface type in the current drawing (SURFTYPE).
+    SurfaceTypeChanged(i16),
+    /// Toggle recording composite-solid history in the current drawing (SOLIDHIST).
+    SolidHistChanged(bool),
+    /// Change when solid history is shown in the current drawing (SHOWHIST).
+    ShowHistChanged(i16),
     /// Restore Model Space display/canvas appearance to defaults.
     RestoreModelSpaceDisplayDefaults,
     /// Restore Selection visual effect settings to defaults.

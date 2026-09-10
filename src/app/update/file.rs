@@ -355,6 +355,24 @@ impl OpenCADStudio {
         }
     }
 
+    /// Write a tessellation-affecting header variable on the active drawing.
+    ///
+    /// These decide how solids and surfaces are tessellated, so the geometry
+    /// has to be rebuilt for the change to appear — the same reason `LTSCALE`
+    /// bumps it. Marking the tab modified is what makes the new value reach
+    /// the file.
+    pub(in crate::app) fn set_drawing_tessellation_var(
+        &mut self,
+        write: impl FnOnce(&mut acadrust::document::HeaderVariables),
+    ) {
+        let i = self.active_tab;
+        if let Some(tab) = self.tabs.get_mut(i) {
+            write(&mut tab.scene.document.header);
+            tab.scene.bump_geometry();
+            tab.dirty = true;
+        }
+    }
+
     /// Rebuild text geometry in every open drawing.
     ///
     /// `TEXTFILL` is a process-global, so a change to it invalidates the text
@@ -377,6 +395,10 @@ impl OpenCADStudio {
             cursor_size: self.cursor_size,
             pick_box: self.pick_box,
             options_tab: self.options_tab,
+            show_viewcube: self.show_viewcube,
+            show_ucs_icon: self.show_ucs_icon,
+            ucs_icon_at_origin: self.ucs_icon_at_origin,
+            selection_cycling: self.selection_cycling,
             double_click_block_refedit: self.double_click_block_refedit,
             double_click_block_attedit: self.double_click_block_attedit,
             grip_object_limit: self.grip_object_limit,
@@ -435,6 +457,13 @@ impl OpenCADStudio {
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
         self.options_tab = s.options_tab;
+        // These four drive real features with commands and status-bar pills,
+        // but they lived only on the app struct: turning the ViewCube off and
+        // restarting brought it straight back.
+        self.show_viewcube = s.show_viewcube;
+        self.show_ucs_icon = s.show_ucs_icon;
+        self.ucs_icon_at_origin = s.ucs_icon_at_origin;
+        self.selection_cycling = s.selection_cycling;
         self.double_click_block_refedit = s.double_click_block_refedit;
         self.double_click_block_attedit = s.double_click_block_attedit;
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);

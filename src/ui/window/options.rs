@@ -28,6 +28,7 @@ pub enum OptionsTab {
     OpenAndSave,
     Display,
     Drafting,
+    Modeling,
     Selection,
     UserPreferences,
     Drawing,
@@ -65,6 +66,35 @@ pub struct AppPrefs {
     pub annotation_auto_scale: i8,
     /// Polar tracking increment in degrees.
     pub polar_increment_deg: f32,
+    /// NAVVCUBE: show the navigation cube.
+    pub show_viewcube: bool,
+    /// UCSICON: show the UCS icon.
+    pub show_ucs_icon: bool,
+    /// UCSICON ORigin: draw it at the origin rather than the corner.
+    pub ucs_icon_at_origin: bool,
+}
+
+/// Values read from the current drawing's header rather than from preferences.
+///
+/// These are saved in the DWG, so they follow the drawing rather than the
+/// application — the page labels them as such. `available` is false when no
+/// drawing is open and the controls are not drawn at all.
+#[derive(Clone, Copy)]
+pub struct DrawingPrefs {
+    pub available: bool,
+    /// ISOLINES.
+    pub isolines: i16,
+    /// DISPSILH.
+    pub display_silhouette: bool,
+    /// SURFU / SURFV.
+    pub surface_u: i16,
+    pub surface_v: i16,
+    /// SURFTYPE: 5, 6 or 8.
+    pub surface_type: i16,
+    /// SOLIDHIST.
+    pub record_solid_history: bool,
+    /// SHOWHIST, 0..=2.
+    pub show_solid_history: i16,
 }
 
 /// The Selection-card settings that live on `UserSettings` rather than on the
@@ -83,6 +113,8 @@ pub struct SelectionPrefs {
     pub pick_drag_rect: bool,
     /// GRIPOBJLIMIT, 0..=32767; 0 = no limit.
     pub grip_object_limit: i32,
+    /// Selection cycling: a click where objects overlap opens a picker.
+    pub selection_cycling: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,6 +141,7 @@ pub fn view_window<'a>(
     selection: SelectionPrefs,
     prefs: AppPrefs,
     snap_angle_input: &'a str,
+    drawing_prefs: DrawingPrefs,
     double_click_block_refedit: bool,
     double_click_block_attedit: bool,
     cursor_type: CursorType,
@@ -783,6 +816,15 @@ pub fn view_window<'a>(
         ]
         .spacing(8)
         .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(selection.selection_cycling)
+                .on_toggle(Message::SelectionCyclingChanged)
+                .size(15),
+            text(crate::t!("Clicking overlapping objects opens a picker")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
         Space::new().height(24),
         row![
             text(crate::t!("Visual Effect Settings")).size(15),
@@ -1225,12 +1267,210 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
+
+    let surface_type_options = [
+        (5i16, "Quadratic B-spline"),
+        (6, "Cubic B-spline"),
+        (8, "Bezier"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        value,
+        label: format!("{} ({value})", crate::t!(label)),
+    })
+    .collect::<Vec<_>>();
+    let selected_surface_type = surface_type_options
+        .iter()
+        .find(|choice| choice.value == drawing_prefs.surface_type)
+        .cloned();
+
+    let show_history_options = [
+        (0i16, "Never"),
+        (1, "As set per solid"),
+        (2, "Always"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        value,
+        label: crate::t!(label).into_owned(),
+    })
+    .collect::<Vec<_>>();
+    let selected_show_history = show_history_options
+        .iter()
+        .find(|choice| choice.value == drawing_prefs.show_solid_history.clamp(0, 2))
+        .cloned();
+
+    let mut modeling = column![
+        text(crate::t!("3D Modeling")).size(15),
+        Space::new().height(10),
+        text(crate::t!("Display Tools")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.show_viewcube)
+                .on_toggle(Message::ShowViewCubeChanged)
+                .size(15),
+            text(crate::t!("Show the navigation cube (NAVVCUBE)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.show_ucs_icon)
+                .on_toggle(Message::ShowUcsIconChanged)
+                .size(15),
+            text(crate::t!("Show the UCS icon (UCSICON)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.ucs_icon_at_origin)
+                .on_toggle(Message::UcsIconAtOriginChanged)
+                .size(15),
+            text(crate::t!("Place the UCS icon at the origin (UCSICON ORigin)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    ];
+
+    if drawing_prefs.available {
+        modeling = modeling
+            .push(Space::new().height(24))
+            .push(
+                row![
+                    text(crate::t!("Display Resolution")).size(15),
+                    Space::new().width(10),
+                    text(crate::t!("applies to the current drawing")).size(11),
+                ]
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Isolines per surface")).size(12).width(150),
+                    slider(
+                        0..=64,
+                        drawing_prefs.isolines.clamp(0, 64),
+                        Message::IsolinesChanged,
+                    )
+                    .step(1i16)
+                    .width(Fill),
+                    text(drawing_prefs.isolines.clamp(0, 64).to_string())
+                        .size(11)
+                        .width(44),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    iced::widget::checkbox(drawing_prefs.display_silhouette)
+                        .on_toggle(Message::DispSilhChanged)
+                        .size(15),
+                    text(crate::t!("Show silhouette edges on solids (DISPSILH)")).size(12),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Surface density U")).size(12).width(150),
+                    slider(
+                        0..=200,
+                        drawing_prefs.surface_u.clamp(0, 200),
+                        Message::SurfaceUChanged,
+                    )
+                    .step(1i16)
+                    .width(Fill),
+                    text(drawing_prefs.surface_u.clamp(0, 200).to_string())
+                        .size(11)
+                        .width(44),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Surface density V")).size(12).width(150),
+                    slider(
+                        0..=200,
+                        drawing_prefs.surface_v.clamp(0, 200),
+                        Message::SurfaceVChanged,
+                    )
+                    .step(1i16)
+                    .width(Fill),
+                    text(drawing_prefs.surface_v.clamp(0, 200).to_string())
+                        .size(11)
+                        .width(44),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Surface type")).size(12).width(150),
+                    iced::widget::pick_list(
+                        selected_surface_type,
+                        surface_type_options,
+                        |choice| choice.label.clone(),
+                    )
+                    .on_select(|choice| Message::SurfaceTypeChanged(choice.value))
+                    .width(Fill),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(24))
+            .push(
+                row![
+                    text(crate::t!("Solid History")).size(15),
+                    Space::new().width(10),
+                    text(crate::t!("applies to the current drawing")).size(11),
+                ]
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    iced::widget::checkbox(drawing_prefs.record_solid_history)
+                        .on_toggle(Message::SolidHistChanged)
+                        .size(15),
+                    text(crate::t!("Record the history of composite solids (SOLIDHIST)"))
+                        .size(12),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .push(Space::new().height(10))
+            .push(
+                row![
+                    text(crate::t!("Show solid history")).size(12).width(150),
+                    iced::widget::pick_list(
+                        selected_show_history,
+                        show_history_options,
+                        |choice| choice.label.clone(),
+                    )
+                    .on_select(|choice| Message::ShowHistChanged(choice.value))
+                    .width(Fill),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            );
+    }
+
+    let modeling = modeling.spacing(0).width(sizing.width);
+
     let content: Element<'a, Message> = match active_tab {
         OptionsTab::General => general.into(),
         OptionsTab::Display => display_element.into(),
         OptionsTab::Selection => selection.into(),
         OptionsTab::OpenAndSave => open_and_save.into(),
         OptionsTab::Drafting => drafting.into(),
+        OptionsTab::Modeling => modeling.into(),
         OptionsTab::UserPreferences => user_prefs.into(),
         OptionsTab::Drawing => drawing.into(),
     };
@@ -1251,6 +1491,7 @@ pub fn view_window<'a>(
         tab_button(crate::t!("Open and Save"), OptionsTab::OpenAndSave),
         tab_button(crate::t!("Display"), OptionsTab::Display),
         tab_button(crate::t!("Drafting"), OptionsTab::Drafting),
+        tab_button(crate::t!("3D Modeling"), OptionsTab::Modeling),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
         tab_button(crate::t!("User Preferences"), OptionsTab::UserPreferences),
         tab_button(crate::t!("Drawing"), OptionsTab::Drawing),

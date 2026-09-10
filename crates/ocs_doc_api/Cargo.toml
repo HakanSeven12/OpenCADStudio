@@ -34,6 +34,8 @@ default = []
 host = ["acadrust", "cadkernel"]
 # ipc: pull ocs_plugin_api for the IPC transport adapter (plugin side).
 ipc = ["acadrust", "ocs_plugin_api"]
+# doc_api_host: convenience helper that builds a DocApi from a HostApi (IPC-only).
+doc_api_host = ["ipc"]
 
 [lib]
 name = "ocs_doc_api"

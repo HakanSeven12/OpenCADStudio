@@ -113,19 +113,19 @@ pub fn bulge_arc_segment(
 pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
     crate::validation::curve(spec)?;
     let entity = match spec {
-        Curve2Spec::Line { start, end } => {
+        Curve2Spec::Line { start, end, .. } => {
             let mut e = Line::new();
             e.start = v3(*start);
             e.end = v3(*end);
             EntityType::Line(e)
         }
-        Curve2Spec::Circle { centre, radius } => {
+        Curve2Spec::Circle { centre, radius, .. } => {
             let mut e = Circle::new();
             e.center = v3(*centre);
             e.radius = *radius;
             EntityType::Circle(e)
         }
-        Curve2Spec::Polyline { points, closed } => {
+        Curve2Spec::Polyline { points, closed, .. } => {
             let mut e = LwPolyline::new();
             e.vertices = points
                 .iter()
@@ -147,7 +147,7 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             e.is_closed = *closed;
             EntityType::LwPolyline(e)
         }
-        Curve2Spec::Point { position } => {
+        Curve2Spec::Point { position, .. } => {
             let mut e = Point::new();
             e.location = v3(*position);
             EntityType::Point(e)
@@ -157,6 +157,7 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             radius,
             start_angle,
             end_angle,
+            ..
         } => {
             let mut e = Arc::new();
             e.center = v3(*centre);
@@ -171,6 +172,7 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             ratio,
             start,
             end,
+            ..
         } => {
             // Validate the minor/major ratio so the (major-axis) bounds never
             // under-bound: ratio must be in (0, 1].
@@ -193,6 +195,7 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             control_points,
             knots,
             weights,
+            ..
         } => {
             let mut e = Spline::new();
             e.degree = *degree;
@@ -201,10 +204,10 @@ pub fn curve_spec_to_entity(spec: &Curve2Spec) -> ApiResult<EntityType> {
             e.weights = weights.clone();
             EntityType::Spline(e)
         }
-        Curve2Spec::Ray { origin, direction } => {
+        Curve2Spec::Ray { origin, direction, .. } => {
             EntityType::Ray(Ray::new(v3(*origin), v3(*direction)))
         }
-        Curve2Spec::XLine { origin, direction } => {
+        Curve2Spec::XLine { origin, direction, .. } => {
             EntityType::XLine(XLine::new(v3(*origin), v3(*direction)))
         }
     };

@@ -25,14 +25,35 @@ pub fn apply_op<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt
 fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Receipt> {
     let name = op.op_name();
     crate::validation::operation(&op)?;
-    if let Operation::TransformMany { ids, .. } | Operation::DeleteMany(ids) = &op {
-        let unique: std::collections::HashSet<_> = ids.iter().collect();
-        if ids.is_empty() || unique.len() != ids.len() {
-            return Err(ApiError::validation(
-                name,
-                "batch ids must be nonempty and unique",
-            ));
+    match &op {
+        Operation::TransformMany { ids, .. } | Operation::DeleteMany(ids) => {
+            let unique: std::collections::HashSet<_> = ids.iter().collect();
+            if ids.is_empty() || unique.len() != ids.len() {
+                return Err(ApiError::validation(
+                    name,
+                    "batch ids must be nonempty and unique",
+                ));
+            }
         }
+        Operation::SetXDataMany(records) => {
+            if records.is_empty() {
+                return Err(ApiError::validation(
+                    name,
+                    "SetXDataMany records must be nonempty",
+                ));
+            }
+            if records.len() > BULK_ITEM_CAP {
+                return Err(over_cap(name, records.len()));
+            }
+            let unique: std::collections::HashSet<_> = records.iter().map(|(id, _, _)| id).collect();
+            if unique.len() != records.len() {
+                return Err(ApiError::validation(
+                    name,
+                    "SetXDataMany records must have unique entity ids",
+                ));
+            }
+        }
+        _ => {}
     }
     if let Operation::Transform { placement, .. } | Operation::TransformMany { placement, .. } = &op
     {
@@ -353,6 +374,70 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             b.finalize_op();
             OpOutcome::NewId(id)
         }
+        Operation::CreateLayer(info) => {
+            b.push_undo(name);
+            b.create_layer(info)?;
+            b.finalize_op();
+            OpOutcome::Updated(ObjectId::NULL)
+        }
+        Operation::UpdateLayer { name, info } => {
+            b.push_undo(name);
+            b.update_layer(name, info)?;
+            b.finalize_op();
+            OpOutcome::Updated(ObjectId::NULL)
+        }
+        Operation::DeleteLayer { name } => {
+            b.push_undo(name);
+            b.delete_layer(name)?;
+            b.finalize_op();
+            OpOutcome::Updated(ObjectId::NULL)
+        }
+        Operation::SetEntityLayer { id, layer } => {
+            require_exists(b, *id, name)?;
+            b.push_undo(name);
+            b.set_entity_layer(*id, layer)?;
+            b.finalize_op();
+            OpOutcome::Updated(*id)
+        }
+        Operation::SetXData {
+            id,
+            application_name,
+            record,
+        } => {
+            require_exists(b, *id, name)?;
+            b.push_undo(name);
+            b.set_xdata(*id, application_name, record.as_ref())?;
+            b.finalize_op();
+            OpOutcome::Updated(*id)
+        }
+        Operation::SetXDataMany(records) => {
+            // Pre-validate every entity id before any mutation.
+            for (id, app, _) in records {
+                require_exists(b, *id, name)?;
+                if app.is_empty() {
+                    return Err(ApiError::validation(name, "empty application_name"));
+                }
+            }
+            b.push_undo(name);
+            for (id, application_name, record) in records {
+                b.set_xdata(*id, application_name, record.as_ref())?;
+            }
+            b.finalize_op();
+            OpOutcome::Updated(ObjectId::NULL)
+        }
+        Operation::CreateXRecord(spec) => {
+            b.push_undo(name);
+            let id = b.add_xrecord(spec)?;
+            b.finalize_op();
+            OpOutcome::NewId(id)
+        }
+        Operation::SetXRecord { id, spec } => {
+            require_object_exists(b, *id, name)?;
+            b.push_undo(name);
+            b.set_xrecord(*id, spec)?;
+            b.finalize_op();
+            OpOutcome::Updated(*id)
+        }
     };
     Ok(Receipt {
         outcome: Some(outcome),
@@ -417,6 +502,38 @@ pub fn apply_queries<B: DocApiBackend>(b: &mut B, queries: Vec<Query>) -> ApiRes
                 let (target, height) = b.viewport_view(*id).map_err(|e| label(qname, e))?;
                 QueryResult::ViewportView { target, height }
             }
+            Query::GetXData {
+                id,
+                application_name,
+            } => QueryResult::XData(
+                b.xdata(*id, application_name)
+                    .map_err(|e| label(qname, e))?
+                    .clone(),
+            ),
+            Query::GetXRecord { id } => {
+                QueryResult::XRecord(b.xrecord(*id).map_err(|e| label(qname, e))?.ok_or_else(
+                    || ApiError::validation(qname, format!("ObjectId {id:?} is not an XRecord")),
+                )?)
+            }
+            Query::ListLayers => QueryResult::Layers(b.layers().map_err(|e| label(qname, e))?),
+            Query::GetEntityLayer { id } => {
+                QueryResult::EntityLayer(b.entity_layer(*id).map_err(|e| label(qname, e))?)
+            }
+            Query::EnumerateEntities {
+                kind,
+                layer,
+                include_bounds,
+            } => QueryResult::Entities(
+                b.enumerate_entities(kind.as_deref(), layer.as_deref(), *include_bounds)
+                    .map_err(|e| label(qname, e))?,
+            ),
+            Query::GetPointPosition { id } => QueryResult::PointPosition(
+                b.point_position(*id).map_err(|e| label(qname, e))?,
+            ),
+            Query::GetLineGeometry { id } => {
+                let (start, end) = b.line_geometry(*id).map_err(|e| label(qname, e))?;
+                QueryResult::LineGeometry((start, end))
+            }
         };
         results.push(r);
     }
@@ -453,6 +570,15 @@ fn profile_curves<B: DocApiBackend>(
 /// Validate that an entity exists before performing an operation.
 fn require_exists<B: DocApiBackend>(b: &B, id: ObjectId, op: &'static str) -> ApiResult<()> {
     if b.entity_exists(id) {
+        Ok(())
+    } else {
+        Err(ApiError::validation(op, format!("unknown ObjectId {id:?}")))
+    }
+}
+
+/// Validate that a named object exists before performing an operation.
+fn require_object_exists<B: DocApiBackend>(b: &B, id: ObjectId, op: &'static str) -> ApiResult<()> {
+    if b.object_exists(id) {
         Ok(())
     } else {
         Err(ApiError::validation(op, format!("unknown ObjectId {id:?}")))

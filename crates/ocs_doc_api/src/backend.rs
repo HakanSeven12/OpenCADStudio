@@ -5,7 +5,7 @@
 
 use crate::error::{ApiError, ApiResult};
 use crate::id::ObjectId;
-use crate::ops::Curve2Spec;
+use crate::ops::{Curve2Spec, LayerInfo};
 use crate::query::{Aabb, EntityView};
 use crate::revision::GeometryRevision;
 
@@ -152,6 +152,85 @@ pub trait DocApiBackend {
         sections: &[(cadkernel::space::Plane, Vec<cadkernel::geom2d::Curve>)],
     ) -> ApiResult<ObjectId>;
 
+    /// Attach or replace an XDATA record for `application_name` on `id`.
+    /// `None` removes any existing record for that application.
+    fn set_xdata(
+        &mut self,
+        id: ObjectId,
+        application_name: &str,
+        record: Option<&crate::ops::XDataRecord>,
+    ) -> ApiResult<()>;
+
+    /// Read the XDATA record for `application_name` on `id` (`None` if absent).
+    fn xdata(
+        &self,
+        id: ObjectId,
+        application_name: &str,
+    ) -> ApiResult<Option<crate::ops::XDataRecord>>;
+
+    /// Create a standalone `XRECORD` object from a spec; returns the fresh `ObjectId`.
+    fn add_xrecord(&mut self, spec: &crate::ops::XRecordSpec) -> ApiResult<ObjectId>;
+
+    /// Replace an existing `XRECORD` object's payload in place.
+    fn set_xrecord(&mut self, id: ObjectId, spec: &crate::ops::XRecordSpec) -> ApiResult<()>;
+
+    /// Read an existing `XRECORD` object's payload (`None` if `id` is not an XRecord).
+    fn xrecord(&self, id: ObjectId) -> ApiResult<Option<crate::ops::XRecordSpec>>;
+
+    // ── layer CRUD ─────────────────────────────────────────────────────────
+    /// Create a new layer. Fails with `Validation` if the name already exists or is reserved.
+    fn create_layer(&mut self, info: &crate::ops::LayerInfo) -> ApiResult<()>;
+
+    /// Update an existing layer's properties by name. Fails with `Validation` if absent.
+    fn update_layer(&mut self, name: &str, info: &crate::ops::LayerInfo) -> ApiResult<()>;
+
+    /// Delete a layer by name. Fails with `Validation` if the layer is "0",
+    /// the current layer, does not exist, or has entities.
+    fn delete_layer(&mut self, name: &str) -> ApiResult<()>;
+
+    /// Look up a layer by raw name, normalizing it. Default implementation scans
+    /// `layers()`; backends with O(1) lookup should override.
+    fn lookup_layer(&self, name: &str) -> ApiResult<LayerInfo> {
+        let norm = crate::layer::normalize_layer_name(name);
+        if norm.is_empty() {
+            return Err(ApiError::validation("LookupLayer", "empty layer name"));
+        }
+        self.layers()?
+            .into_iter()
+            .find(|l| l.normalized_name() == norm)
+            .ok_or_else(|| {
+                ApiError::validation(
+                    "LookupLayer",
+                    format!("layer '{name}' does not exist"),
+                )
+            })
+    }
+
+    /// Move an entity to a different layer. The target layer must exist.
+    fn set_entity_layer(&mut self, id: ObjectId, layer: &str) -> ApiResult<()>;
+
+    /// List all layers in the document.
+    fn layers(&self) -> ApiResult<Vec<crate::ops::LayerInfo>>;
+
+    /// The layer name of an entity.
+    fn entity_layer(&self, id: ObjectId) -> ApiResult<String>;
+
+    /// Enumerate first-class entities, optionally filtered by kind and/or layer.
+    /// `include_bounds` controls whether `EntityView::bounds` is populated; skip it
+    /// for lightweight list views.
+    fn enumerate_entities(
+        &self,
+        kind: Option<&str>,
+        layer: Option<&str>,
+        include_bounds: bool,
+    ) -> ApiResult<Vec<EntityView>>;
+
+    /// The WCS location of a Point entity.
+    fn point_position(&self, id: ObjectId) -> ApiResult<[f64; 3]>;
+
+    /// The start and end WCS points of a Line entity.
+    fn line_geometry(&self, id: ObjectId) -> ApiResult<([f64; 3], [f64; 3])>;
+
     /// Can `id` be modified in place right now (exists, is the expected family,
     /// not on a locked layer)? Read-only pre-check used before mutations.
     /// Default: existence + not-locked (backends narrow the family check).
@@ -177,6 +256,10 @@ pub trait DocApiBackend {
             Err(ApiError::UnknownId(id))
         }
     }
+
+    /// Whether an object (named-object / XRecord / dictionary) exists. Distinct
+    /// from `entity_exists`, which is for first-class entities only.
+    fn object_exists(&self, id: ObjectId) -> bool;
 
     /// A generic, untyped view of any entity (id + kind + coarse bounds).
     fn get_entity(&mut self, id: ObjectId) -> ApiResult<EntityView>;

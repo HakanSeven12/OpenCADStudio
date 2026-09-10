@@ -1,5 +1,5 @@
 //! Reject invalid numeric inputs before the backend starts an undo operation.
-use crate::{ops::*, ApiError, ApiResult};
+use crate::{id::ObjectId, ops::*, ApiError, ApiResult};
 
 fn finite(values: &[f64]) -> bool {
     values.iter().all(|v| v.is_finite())
@@ -24,16 +24,17 @@ fn check(valid: bool, op: &'static str) -> ApiResult<()> {
 pub(crate) fn curve(spec: &Curve2Spec) -> ApiResult<()> {
     use Curve2Spec::*;
     let valid = match spec {
-        Line { start, end } => finite(start) && finite(end) && start != end,
-        Circle { centre, radius } => finite(centre) && positive(*radius),
-        Point { position } => finite(position),
+        Line { start, end, .. } => finite(start) && finite(end) && start != end,
+        Circle { centre, radius, .. } => finite(centre) && positive(*radius),
+        Point { position, .. } => finite(position),
         Arc {
             centre,
             radius,
             start_angle,
             end_angle,
+            ..
         } => finite(centre) && positive(*radius) && finite(&[*start_angle, *end_angle]),
-        Polyline { points, closed } => {
+        Polyline { points, closed, .. } => {
             points.len() >= if *closed { 3 } else { 2 }
                 && points.len() <= BULK_ITEM_CAP
                 && points.iter().all(|p| finite(p) && p[2] == points[0][2])
@@ -44,6 +45,7 @@ pub(crate) fn curve(spec: &Curve2Spec) -> ApiResult<()> {
             ratio,
             start,
             end,
+            ..
         } => {
             finite(centre)
                 && direction(major_axis)
@@ -56,6 +58,7 @@ pub(crate) fn curve(spec: &Curve2Spec) -> ApiResult<()> {
             control_points,
             knots,
             weights,
+            ..
         } => {
             *degree > 0
                 && control_points.len() <= BULK_ITEM_CAP
@@ -76,10 +79,12 @@ pub(crate) fn curve(spec: &Curve2Spec) -> ApiResult<()> {
         Ray {
             origin,
             direction: d,
+            ..
         }
         | XLine {
             origin,
             direction: d,
+            ..
         } => finite(origin) && direction(d),
     };
     check(valid, "CreateCurve")
@@ -111,6 +116,11 @@ pub(crate) fn operation(op: &Operation) -> ApiResult<()> {
         }
         CreateText(s) => finite(&s.insertion_point) && positive(s.height) && s.rotation.is_finite(),
         CreateMText(s) => finite(&s.insertion_point) && positive(s.height),
+        SetXDataMany(records) => records.iter().all(|(id, app, record)| {
+            let app_ok = !app.is_empty();
+            let record_ok = record.as_ref().map_or(true, |r| !r.application_name.is_empty() && !r.application_name.contains('\0'));
+            *id != ObjectId::NULL && app_ok && record_ok
+        }),
         CreateHatch(s) => {
             (3..=BULK_ITEM_CAP).contains(&s.boundary.len()) && s.boundary.iter().all(|p| finite(p))
         }

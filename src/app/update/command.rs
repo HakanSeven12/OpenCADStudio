@@ -2002,7 +2002,48 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
             }
             self.push_undo_snapshot(i, "CHPROP");
 
-            if crate::scene::model::solid_history::is_loft_geometry_choice(field) {
+            if crate::scene::model::solid_history::is_surface_property_choice(field) {
+                use crate::scene::model::solid_history::{
+                    PROP_SURFACE_MAINTAIN_ASSOCIATIVITY, PROP_SURFACE_SHOW_ASSOCIATIVITY,
+                    PROP_SURFACE_WIREFRAME_TYPE,
+                };
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    let Some(mut state) = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .and_then(|entity| match entity {
+                            acadrust::EntityType::Surface(surface) => Some(
+                                crate::entities::solid3d::surface_property_state(surface),
+                            ),
+                            _ => None,
+                        })
+                    else {
+                        continue;
+                    };
+                    match field {
+                        PROP_SURFACE_WIREFRAME_TYPE => {
+                            state.isolines = !value.eq_ignore_ascii_case("Isoparms")
+                        }
+                        PROP_SURFACE_MAINTAIN_ASSOCIATIVITY => {
+                            state.maintain_associativity = value.eq_ignore_ascii_case("Yes")
+                        }
+                        PROP_SURFACE_SHOW_ASSOCIATIVITY => {
+                            state.show_associativity = value.eq_ignore_ascii_case("Yes")
+                        }
+                        _ => continue,
+                    }
+                    crate::scene::view::dispatch::set_entity_xdata(
+                        &mut self.tabs[i].scene.document,
+                        handle,
+                        crate::entities::solid3d::SURFACE_PROPERTIES_APP,
+                        Some(crate::entities::solid3d::surface_property_xdata_values(state)),
+                    );
+                }
+            } else if crate::scene::model::solid_history::is_loft_geometry_choice(field) {
                 // These choices change the generated body, not just history
                 // flags. Use the same transactional rebuild as numeric edits.
                 for &handle in &handles {

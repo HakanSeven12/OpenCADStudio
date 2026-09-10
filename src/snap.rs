@@ -1023,12 +1023,25 @@ impl Snapper {
                 f32::MAX
             }
         };
+        let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
+            && view_rot.z_axis.y.abs() < 1e-9
+            && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
 
         // Returns false when the wire's AABB does not overlap the snap circle —
         // safe to skip all vertex work for this wire.
         // UNBOUNDED_AABB (±infinity) passes through automatically without a
         // special-case branch because the arithmetic is exact for infinities.
         let wire_in_range = |wire: &WireModel| -> bool {
+            // In a tilted or perspective view `cursor_world` lies on the active
+            // construction plane, while the visible vertex may be anywhere on
+            // the same view ray. A world-XY AABB comparison can therefore reject
+            // a 3-D solid corner that is directly under the cursor. The scene's
+            // screen-space interaction index already performs the broad phase
+            // for those views; small unindexed drawings are cheap enough to let
+            // the exact screen-aperture checks below decide.
+            if !flat_ortho {
+                return true;
+            }
             // The AABB is stored in f32, so at UTM-scale coordinates each bound
             // is quantized by up to ~1 ulp (≈ coord × 2⁻²³ ≈ 0.7 m at 5.7e6).
             // When zoomed in hard the snap radius shrinks below that, so the

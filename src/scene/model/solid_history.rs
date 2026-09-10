@@ -94,6 +94,14 @@ pub const PROP_LOFT_CLOSED: &str = "solid_history_loft_closed";
 pub const PROP_LOFT_PERIODIC: &str = "solid_history_loft_periodic";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
+pub const PROP_SURFACE_TYPE: &str = "surface_type";
+pub const PROP_SURFACE_WIREFRAME_TYPE: &str = "srf_wireframe_type";
+pub const PROP_SURFACE_U_ISOLINES: &str = "srf_u_isolines";
+pub const PROP_SURFACE_V_ISOLINES: &str = "srf_v_isolines";
+pub const PROP_SURFACE_MAINTAIN_ASSOCIATIVITY: &str = "srf_maintain_associativity";
+pub const PROP_SURFACE_SHOW_ASSOCIATIVITY: &str = "srf_show_associativity";
+pub const PROP_SURFACE_TRIMMED: &str = "srf_trimmed";
+pub const PROP_SURFACE_TRIMMING_EDGES: &str = "srf_trimming_edges";
 
 fn history_prop(label: &str, field: &'static str, value: impl ToString) -> Property {
     Property {
@@ -101,6 +109,23 @@ fn history_prop(label: &str, field: &'static str, value: impl ToString) -> Prope
         field,
         value: PropValue::EditText(value.to_string()),
     }
+}
+
+fn compact_surface_number(mut value: String) -> String {
+    if value.ends_with('°') {
+        value.pop();
+    }
+    if let Some(decimal) = value.rfind('.') {
+        if value[decimal + 1..].chars().all(|character| character.is_ascii_digit()) {
+            while value.ends_with('0') {
+                value.pop();
+            }
+            if value.ends_with('.') {
+                value.pop();
+            }
+        }
+    }
+    value
 }
 
 fn history_flags(
@@ -239,9 +264,14 @@ pub fn has_compact_solid_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
 ) -> bool {
-    document
-        .get_entity(handle)
-        .is_some_and(|entity| matches!(entity, acadrust::EntityType::Solid3D(_)))
+    match document.get_entity(handle) {
+        Some(acadrust::EntityType::Solid3D(_)) => true,
+        Some(acadrust::EntityType::Surface(_)) => matches!(
+            primitive_property_operation(document, handle),
+            Some(SolidHistoryOperation::Extrusion(_))
+        ),
+        _ => false,
+    }
 }
 
 pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3> {
@@ -403,10 +433,6 @@ fn extrusion_properties(
             |direction| crate::entities::common::format_length(direction[axis]),
         )),
     };
-    let (record_history, object_show_history, show_history_mode) =
-        history_flags(document, handle).unwrap_or((false, false, 1));
-    let (show_history, show_history_editable) =
-        displayed_history_state(object_show_history, show_history_mode);
     let path_length = sweep_path_length(value);
     let height_value = path_length.unwrap_or(value.end_draft_distance);
     let height = if value.path_entity.is_some() {
@@ -419,6 +445,134 @@ fn extrusion_properties(
     } else {
         PropValue::EditText(crate::entities::common::format_angle(value.draft_angle))
     };
+    if let Some(EntityType::Surface(surface)) = document.get_entity(handle) {
+        let state = crate::entities::solid3d::surface_property_state(surface);
+        let surface_height = if value.path_entity.is_some() {
+            PropValue::ReadOnly(compact_surface_number(
+                crate::entities::common::format_length(height_value),
+            ))
+        } else {
+            PropValue::EditText(compact_surface_number(
+                crate::entities::common::format_length(height_value),
+            ))
+        };
+        let surface_taper = if value.path_entity.is_some() {
+            PropValue::ReadOnly(compact_surface_number(
+                crate::entities::common::format_angle(value.draft_angle),
+            ))
+        } else {
+            PropValue::EditText(compact_surface_number(
+                crate::entities::common::format_angle(value.draft_angle),
+            ))
+        };
+        let surface_direction_property =
+            |label: &str, field: &'static str, axis: usize| Property {
+                label: label.to_string(),
+                field,
+                value: PropValue::ReadOnly(direction.map_or_else(
+                    || t!("Unavailable").into_owned(),
+                    |direction| {
+                        compact_surface_number(crate::entities::common::format_length(
+                            direction[axis],
+                        ))
+                    },
+                )),
+            };
+        let yes_no_choice = |selected: bool| PropValue::Choice {
+            selected: if selected { "Yes" } else { "No" }.to_string(),
+            options: vec!["Yes".to_string(), "No".to_string()],
+        };
+        return vec![
+            PropSection {
+                title: t!("Geometry").into_owned(),
+                props: vec![
+                    Property {
+                        label: t!("Surface Type").into_owned(),
+                        field: PROP_SURFACE_TYPE,
+                        value: PropValue::ReadOnly(t!("Extrusion").into_owned()),
+                    },
+                    Property {
+                        label: t!("Height").into_owned(),
+                        field: PROP_EXTRUSION_HEIGHT,
+                        value: surface_height,
+                    },
+                    Property {
+                        label: t!("Taper angle").into_owned(),
+                        field: PROP_TAPER_ANGLE,
+                        value: surface_taper,
+                    },
+                    surface_direction_property(
+                        t!("Direction X").as_ref(),
+                        PROP_EXTRUSION_DIRECTION_X,
+                        0,
+                    ),
+                    surface_direction_property(
+                        t!("Direction Y").as_ref(),
+                        PROP_EXTRUSION_DIRECTION_Y,
+                        1,
+                    ),
+                    surface_direction_property(
+                        t!("Direction Z").as_ref(),
+                        PROP_EXTRUSION_DIRECTION_Z,
+                        2,
+                    ),
+                    Property {
+                        label: t!("Wireframe type").into_owned(),
+                        field: PROP_SURFACE_WIREFRAME_TYPE,
+                        value: PropValue::Choice {
+                            selected: if state.isolines { "Isolines" } else { "Isoparms" }
+                                .to_string(),
+                            options: vec!["Isolines".to_string(), "Isoparms".to_string()],
+                        },
+                    },
+                    Property {
+                        label: t!("U isolines").into_owned(),
+                        field: PROP_SURFACE_U_ISOLINES,
+                        value: PropValue::EditText(surface.u_isolines.max(0).to_string()),
+                    },
+                    Property {
+                        label: t!("V isolines").into_owned(),
+                        field: PROP_SURFACE_V_ISOLINES,
+                        value: PropValue::EditText(surface.v_isolines.max(0).to_string()),
+                    },
+                ],
+            },
+            PropSection {
+                title: t!("Surface Associativity").into_owned(),
+                props: vec![
+                    Property {
+                        label: t!("Maintain associativity").into_owned(),
+                        field: PROP_SURFACE_MAINTAIN_ASSOCIATIVITY,
+                        value: yes_no_choice(state.maintain_associativity),
+                    },
+                    Property {
+                        label: t!("Show associativity").into_owned(),
+                        field: PROP_SURFACE_SHOW_ASSOCIATIVITY,
+                        value: yes_no_choice(state.show_associativity),
+                    },
+                ],
+            },
+            PropSection {
+                title: t!("Trims").into_owned(),
+                props: vec![
+                    Property {
+                        label: t!("Trimmed surface").into_owned(),
+                        field: PROP_SURFACE_TRIMMED,
+                        value: PropValue::ReadOnly("No".to_string()),
+                    },
+                    Property {
+                        label: t!("Trimming edges").into_owned(),
+                        field: PROP_SURFACE_TRIMMING_EDGES,
+                        value: PropValue::ReadOnly("0".to_string()),
+                    },
+                ],
+            },
+        ];
+    }
+    let (record_history, object_show_history, show_history_mode) =
+        history_flags(document, handle).unwrap_or((false, false, 1));
+    let (show_history, show_history_editable) =
+        displayed_history_state(object_show_history, show_history_mode);
     vec![
         PropSection {
             title: t!("Geometry").into_owned(),
@@ -1531,6 +1685,15 @@ pub fn is_history_choice(field: &str) -> bool {
     matches!(field, PROP_HISTORY | PROP_SHOW_HISTORY)
 }
 
+pub fn is_surface_property_choice(field: &str) -> bool {
+    matches!(
+        field,
+        PROP_SURFACE_WIREFRAME_TYPE
+            | PROP_SURFACE_MAINTAIN_ASSOCIATIVITY
+            | PROP_SURFACE_SHOW_ASSOCIATIVITY
+    )
+}
+
 pub fn is_loft_geometry_choice(field: &str) -> bool {
     matches!(field, PROP_LOFT_NORMALS | PROP_LOFT_CLOSED | PROP_LOFT_PERIODIC)
 }
@@ -1538,7 +1701,11 @@ pub fn is_loft_geometry_choice(field: &str) -> bool {
 pub fn is_specialized_property(field: &str) -> bool {
     matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH
         | PROP_LOFT_TYPE | PROP_LOFT_SECTION_COUNT
-        | PROP_EXTRUSION_DIRECTION_X | PROP_EXTRUSION_DIRECTION_Y | PROP_EXTRUSION_DIRECTION_Z)
+        | PROP_EXTRUSION_DIRECTION_X | PROP_EXTRUSION_DIRECTION_Y | PROP_EXTRUSION_DIRECTION_Z
+        | PROP_SURFACE_TYPE | PROP_SURFACE_WIREFRAME_TYPE
+        | PROP_SURFACE_U_ISOLINES | PROP_SURFACE_V_ISOLINES
+        | PROP_SURFACE_MAINTAIN_ASSOCIATIVITY | PROP_SURFACE_SHOW_ASSOCIATIVITY
+        | PROP_SURFACE_TRIMMED | PROP_SURFACE_TRIMMING_EDGES)
         || is_primitive_property(field)
         || is_history_choice(field)
 }
@@ -3018,11 +3185,6 @@ fn extrusion_draft_grip(
     if !inverse.is_finite() {
         return None;
     }
-    let profile = value.sweep_entity.as_ref().and_then(embedded_entity)?;
-    let normal = crate::entities::curve::entity_curve(&profile)?.plane.normal()?;
-    let normal = transform
-        .transform_vector3(glam::DVec3::from_array(normal))
-        .try_normalize()?;
     let center_local = inverse.transform_point3(center);
     let anchor = profile_grips
         .into_iter()
@@ -3057,7 +3219,7 @@ fn extrusion_draft_grip(
         value.direction.y,
         value.direction.z,
     ));
-    let height = direction.dot(normal).abs();
+    let height = direction.length();
     if !direction.is_finite() || !height.is_finite() || height <= 1e-6 {
         return None;
     }

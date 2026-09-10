@@ -1041,16 +1041,20 @@ impl Scene {
         {
             return false;
         }
+        let (isoline_counts, planar_isolines) = match self.document.get_entity(handle) {
+            Some(EntityType::Surface(surface)) => (
+                crate::entities::solid3d::surface_isoline_counts(surface),
+                crate::entities::solid3d::surface_property_state(surface).isolines,
+            ),
+            _ => ([0; 2], false),
+        };
         self.solid_history_preview_wires.insert(
             handle,
             crate::scene::model::solid_model::grip_preview_wires(
                 &body,
                 handle,
-                if matches!(self.document.get_entity(handle), Some(EntityType::Surface(_))) {
-                    self.document.header.isolines.max(0) as usize
-                } else {
-                    0
-                },
+                isoline_counts,
+                planar_isolines,
             ),
         );
         true

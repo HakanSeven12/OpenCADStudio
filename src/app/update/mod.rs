@@ -6305,54 +6305,73 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            // The five below are drawing variables: they go into the header of
-            // the active drawing and mark it modified, exactly as SETVAR does.
-            // The four that feed solid tessellation also bump the geometry, or
-            // the change is invisible until an unrelated edit rebuilds it.
+            // Drawing variables: they go into the header of the active
+            // drawing and mark it modified, as SETVAR does. What each one
+            // costs to apply differs, so they are not treated alike.
+            //
+            // ISOLINES is baked into a solid's mesh when it is tessellated, so
+            // an existing solid keeps the density it was born with until the
+            // meshes are rebuilt. That is expensive, and a slider emits on
+            // every pixel of a drag, so the rebuild waits for the release —
+            // and only happens if the value actually moved.
             Message::IsolinesChanged(value) => {
-                self.set_drawing_tessellation_var(|header| header.isolines = value.max(0));
-                Task::none()
-            }
-
-            Message::DispSilhChanged(on) => {
-                self.set_drawing_tessellation_var(|header| header.display_silhouette = on);
-                Task::none()
-            }
-
-            Message::SurfaceUChanged(value) => {
-                self.set_drawing_tessellation_var(|header| {
-                    header.surface_u_density = value.clamp(0, 200)
-                });
-                Task::none()
-            }
-
-            Message::SurfaceVChanged(value) => {
-                self.set_drawing_tessellation_var(|header| {
-                    header.surface_v_density = value.clamp(0, 200)
-                });
-                Task::none()
-            }
-
-            Message::SurfaceTypeChanged(value) => {
-                self.set_drawing_tessellation_var(|header| header.surface_type = value);
-                Task::none()
-            }
-
-            Message::SolidHistChanged(record) => {
-                let i = self.active_tab;
-                if let Some(tab) = self.tabs.get_mut(i) {
-                    tab.scene.document.header.record_solid_history = record;
-                    tab.dirty = true;
+                let value = value.max(0);
+                let changed = self
+                    .tabs
+                    .get(self.active_tab)
+                    .is_some_and(|tab| tab.scene.document.header.isolines != value);
+                if changed {
+                    self.set_drawing_var(|header| header.isolines = value);
+                    self.isolines_awaiting_regen = true;
                 }
                 Task::none()
             }
 
+            Message::IsolinesReleased => {
+                if std::mem::take(&mut self.isolines_awaiting_regen) {
+                    self.regenerate_meshes();
+                }
+                Task::none()
+            }
+
+            // Read at render time, so nothing has to be rebuilt for it.
+            Message::DispSilhChanged(on) => {
+                self.set_drawing_var(|header| header.display_silhouette = on);
+                Task::none()
+            }
+
+            // Inputs to PEDIT's mesh smoothing; they change nothing until it
+            // runs, so writing the header is the whole job.
+            Message::SurfaceUChanged(value) => {
+                self.set_drawing_var(|header| header.surface_u_density = value.clamp(0, 200));
+                Task::none()
+            }
+
+            Message::SurfaceVChanged(value) => {
+                self.set_drawing_var(|header| header.surface_v_density = value.clamp(0, 200));
+                Task::none()
+            }
+
+            Message::SurfaceTypeChanged(value) => {
+                self.set_drawing_var(|header| header.surface_type = value);
+                Task::none()
+            }
+
+            // Whether history is recorded from now on; nothing to redraw.
+            Message::SolidHistChanged(record) => {
+                self.set_drawing_var(|header| header.record_solid_history = record);
+                Task::none()
+            }
+
+            // Read while building geometry, so this one does bump — the same
+            // thing the SHOWHIST command does.
             Message::ShowHistChanged(mode) => {
+                self.set_drawing_var(|header| {
+                    header.show_solid_history = mode.clamp(0, 2)
+                });
                 let i = self.active_tab;
                 if let Some(tab) = self.tabs.get_mut(i) {
-                    tab.scene.document.header.show_solid_history = mode.clamp(0, 2);
                     tab.scene.bump_geometry();
-                    tab.dirty = true;
                 }
                 Task::none()
             }

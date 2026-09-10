@@ -32,7 +32,6 @@ pub enum OptionsTab {
     Modeling,
     Selection,
     UserPreferences,
-    Drawing,
 }
 
 /// Application preferences the dialog reads that are plain scalars on the app.
@@ -1077,29 +1076,7 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
-    let drawing = column![
-        text(crate::t!("Block Edit")).size(15),
-        Space::new().height(10),
-        row![
-            iced::widget::checkbox(double_click_block_refedit)
-                .on_toggle(Message::DoubleClickBlockRefeditChanged)
-                .size(15),
-            text(crate::t!("Double-click to edit block in-place (REFEDIT)")).size(12),
-        ]
-        .spacing(8)
-        .align_y(iced::Center),
-        Space::new().height(18),
-        row![
-            iced::widget::checkbox(double_click_block_attedit)
-                .on_toggle(Message::DoubleClickBlockAtteditChanged)
-                .size(15),
-            text(crate::t!("Double-click attributed blocks to edit attributes (ATTEDIT)")).size(12),
-        ]
-        .spacing(8)
-        .align_y(iced::Center),
-    ]
-    .spacing(0)
-    .width(sizing.width);
+
 
 
     // ANNOAUTOSCALE's magnitude decides which objects a newly added scale
@@ -1224,6 +1201,26 @@ pub fn view_window<'a>(
         ))
         .size(11)
         .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Block Edit")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(double_click_block_refedit)
+                .on_toggle(Message::DoubleClickBlockRefeditChanged)
+                .size(15),
+            text(crate::t!("Double-click to edit block in-place (REFEDIT)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(18),
+        row![
+            iced::widget::checkbox(double_click_block_attedit)
+                .on_toggle(Message::DoubleClickBlockAtteditChanged)
+                .size(15),
+            text(crate::t!("Double-click attributed blocks to edit attributes (ATTEDIT)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
         Space::new().height(24),
         text(crate::t!("Drawing Units")).size(15),
         Space::new().height(10),
@@ -1394,12 +1391,16 @@ pub fn view_window<'a>(
             .push(
                 row![
                     text(crate::t!("Isolines per surface")).size(12).width(150),
+                    // Rebuilding every solid's mesh is what makes a new
+                    // isoline count reach solids that already exist, and it is
+                    // far too costly to do on each pixel of a drag.
                     slider(
                         0..=64,
                         drawing_prefs.isolines.clamp(0, 64),
                         Message::IsolinesChanged,
                     )
                     .step(1i16)
+                    .on_release(Message::IsolinesReleased)
                     .width(Fill),
                     text(drawing_prefs.isolines.clamp(0, 64).to_string())
                         .size(11)
@@ -1565,7 +1566,6 @@ pub fn view_window<'a>(
         OptionsTab::Drafting => drafting.into(),
         OptionsTab::Modeling => modeling.into(),
         OptionsTab::UserPreferences => user_prefs.into(),
-        OptionsTab::Drawing => drawing.into(),
     };
 
     // A vertical rail rather than a horizontal strip: the tab names are
@@ -1588,7 +1588,6 @@ pub fn view_window<'a>(
         tab_button(crate::t!("3D Modeling"), OptionsTab::Modeling),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
         tab_button(crate::t!("User Preferences"), OptionsTab::UserPreferences),
-        tab_button(crate::t!("Drawing"), OptionsTab::Drawing),
     ]
     .spacing(2)
     .width(iced::Length::Fixed(TAB_RAIL_WIDTH));

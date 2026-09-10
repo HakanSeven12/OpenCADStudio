@@ -4,6 +4,7 @@
 use std::path::Path;
 
 fn main() {
+    generate_draw_panel_tools();
     let version = std::env::var("CARGO_PKG_VERSION").expect("Cargo package version");
     let parts: Vec<&str> = version.split('.').collect();
     let app_version = if parts.len() == 3 && parts[0].len() == 4
@@ -80,4 +81,28 @@ fn main() {
             }
         }
     }
+}
+
+/// Each drawing button can contribute its own expression without editing a registry.
+fn generate_draw_panel_tools() {
+    let manifest = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"));
+    let directory = manifest.join("src/ui/ribbon/draw_tools");
+    println!("cargo:rerun-if-changed={}", directory.display());
+    let mut files = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries.map(|entry| entry.expect("Draw tool directory entry").path())
+            .filter(|path| path.is_file() && path.extension().is_some_and(|extension| extension == "rs"))
+            .collect::<Vec<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => panic!("Cannot read Draw tool contributions: {error}"),
+    };
+    files.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    let mut source = String::from("const TOOLS: &[Tool] = &[\n");
+    for path in files {
+        println!("cargo:rerun-if-changed={}", path.display());
+        // Debug string formatting produces a quoted Rust literal, including Windows escapes.
+        source.push_str(&format!("    include!({:?}),\n", path.to_str().expect("UTF-8 Draw tool path")));
+    }
+    source.push_str("];\n");
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output directory"));
+    std::fs::write(output.join("draw_panel_tools.rs"), source).expect("Write Draw tool registry");
 }

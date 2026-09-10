@@ -21,6 +21,7 @@ use crate::plugin::all_ribbon_modules;
 use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod widgets;
+mod draw_panel;
 use widgets::{StyleContext, *};
 mod collapse;
 use collapse::{CollapsePanels, Panel};
@@ -339,6 +340,9 @@ impl Ribbon {
             self.open_dropdown = None;
         } else {
             self.open_dropdown = Some(id.to_string());
+            if draw_panel::owns_dropdown(id) {
+                self.collapsed_open = None;
+            }
         }
     }
     pub fn close_dropdown(&mut self) {
@@ -391,7 +395,7 @@ impl Ribbon {
 
     pub fn select_dropdown_item(&mut self, dropdown_id: &'static str, cmd: &'static str) {
         self.last_cmd.insert(dropdown_id, cmd);
-        self.open_dropdown = None;
+        self.close_dropdown();
     }
 
     // ── View ──────────────────────────────────────────────────────────────
@@ -724,6 +728,10 @@ impl Ribbon {
             return None;
         }
         let open_id = self.open_dropdown.as_deref()?;
+
+        if draw_panel::owns_dropdown(open_id) {
+            return Some(draw_panel::overlay(self, open_id, win));
+        }
 
         if open_id == UNDO_HISTORY_ID || open_id == REDO_HISTORY_ID {
             let is_undo = open_id == UNDO_HISTORY_ID;
@@ -1364,7 +1372,7 @@ fn render_group<'a>(
 
     column![
         tools_el,
-        container(text(t!(group.title)).size(9).style(muted_text_style)).padding([1, 4]),
+        draw_panel::group_title(group.title, open_dd),
     ]
     .align_x(iced::Center)
     .spacing(0)

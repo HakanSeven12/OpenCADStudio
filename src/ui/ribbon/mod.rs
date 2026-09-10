@@ -340,6 +340,9 @@ impl Ribbon {
             self.open_dropdown = None;
         } else {
             self.open_dropdown = Some(id.to_string());
+            if draw_panel::owns_dropdown(id) {
+                self.collapsed_open = None;
+            }
         }
     }
     pub fn close_dropdown(&mut self) {

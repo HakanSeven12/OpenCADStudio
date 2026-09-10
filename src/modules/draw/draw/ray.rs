@@ -61,9 +61,7 @@ impl CadCommand for RayCommand {
                 Vector3::new(base.x, base.y, base.z),
                 Vector3::new(dir_n.x, dir_n.y, dir_n.z),
             );
-            // Stay active: new base = same base (can keep clicking through points)
-            // Actually AutoCAD prompts for new start after each ray — reset base.
-            self.base = None;
+            // Repeated through points share the original start point.
             CmdResult::CommitEntity(EntityType::Ray(ray))
         } else {
             self.base = Some(pt);

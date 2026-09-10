@@ -145,6 +145,18 @@ pub(crate) fn snaps_from_osmode(osmode: i32) -> (Vec<SnapType>, bool) {
     (modes, osmode & OSMODE_SUPPRESS == 0)
 }
 
+/// Render a drafting angle without a trailing `.0`, so `22.5` but `30`.
+///
+/// The polar pop-up formats its presets the same way; both are showing the
+/// same kind of number to the same person.
+pub fn format_snap_angle(deg: f32) -> String {
+    if (deg - deg.round()).abs() < 1e-4 {
+        format!("{}", deg.round() as i32)
+    } else {
+        format!("{deg}")
+    }
+}
+
 /// GRIPOBJLIMIT default: past this many selected objects, no grips are drawn.
 pub const DEFAULT_GRIP_OBJECT_LIMIT: i32 = 100;
 
@@ -170,6 +182,17 @@ pub struct UserSettings {
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
+    /// Which Options page was showing when the dialog was last closed.
+    pub options_tab: crate::ui::window::options::OptionsTab,
+    /// Show the navigation cube (NAVVCUBE).
+    pub show_viewcube: bool,
+    /// Show the UCS icon (UCSICON).
+    pub show_ucs_icon: bool,
+    /// Draw the UCS icon at the origin rather than in the corner
+    /// (UCSICON ORigin / NOorigin).
+    pub ucs_icon_at_origin: bool,
+    /// Selection cycling: a click where objects overlap opens a picker.
+    pub selection_cycling: bool,
     /// CURSORTYPE: crosshair or the platform pointer over the drawing.
     pub cursor_type: CursorType,
     /// Explicit crosshair RGB. `None` keeps automatic background contrast.
@@ -246,12 +269,6 @@ pub struct UserSettings {
     pub pick_drag_rect: bool,
     /// Show the floating Quick Properties panel when objects are selected.
     pub quick_properties: bool,
-    /// Persisted viewport background colours (0–255 RGB); `None` = app default
-    /// (dark grey model / off-white paper). Applied to every drawing tab on
-    /// launch and to tabs opened later, so a chosen background survives restarts
-    /// (#188).
-    pub bg_color: Option<[u8; 3]>,
-    pub paper_bg_color: Option<[u8; 3]>,
     /// Interface language preference. `System` negotiates against the
     /// platform locale on every launch.
     pub language: crate::i18n::Language,
@@ -325,6 +342,11 @@ impl Default for UserSettings {
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
+            options_tab: crate::ui::window::options::OptionsTab::General,
+            show_viewcube: true,
+            show_ucs_icon: true,
+            ucs_icon_at_origin: true,
+            selection_cycling: false,
             double_click_block_refedit: false,
             double_click_block_attedit: true,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
@@ -356,8 +378,6 @@ impl Default for UserSettings {
             pick_add: true,
             pick_drag_rect: false,
             quick_properties: false,
-            bg_color: None,
-            paper_bg_color: None,
             language: crate::i18n::Language::default(),
             cliprompt_lines: 3,
             commandline_fade_ms: 3000,

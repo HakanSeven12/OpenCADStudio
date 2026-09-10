@@ -4149,6 +4149,29 @@ mod grip_limit_tests {
         );
     }
 
+    /// The ViewCube, the UCS icon and selection cycling all have commands and
+    /// status-bar pills, but their values lived only on the app struct: turn
+    /// the ViewCube off, restart, and it came straight back. Nothing failed —
+    /// the setting simply evaporated — which is exactly the kind of thing a
+    /// round-trip test catches and a person does not.
+    #[test]
+    fn the_view_toggles_survive_a_save_and_load() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.show_viewcube = false;
+        app.show_ucs_icon = false;
+        app.ucs_icon_at_origin = false;
+        app.selection_cycling = true;
+
+        let saved = app.current_settings();
+        let mut restored = OpenCADStudio::new_for_test();
+        restored.apply_settings(&saved);
+
+        assert!(!restored.show_viewcube, "the ViewCube must stay off");
+        assert!(!restored.show_ucs_icon);
+        assert!(!restored.ucs_icon_at_origin);
+        assert!(restored.selection_cycling);
+    }
+
     /// The Options card writes these four straight onto the app and relies on
     /// the snapshot/restore pair to carry them across a restart. Three of them
     /// had no UI until now and so no reason for anyone to notice if the pair

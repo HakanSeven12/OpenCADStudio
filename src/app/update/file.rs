@@ -355,6 +355,35 @@ impl OpenCADStudio {
         }
     }
 
+    /// Write a tessellation-affecting header variable on the active drawing.
+    ///
+    /// These decide how solids and surfaces are tessellated, so the geometry
+    /// has to be rebuilt for the change to appear — the same reason `LTSCALE`
+    /// bumps it. Marking the tab modified is what makes the new value reach
+    /// the file.
+    pub(in crate::app) fn set_drawing_tessellation_var(
+        &mut self,
+        write: impl FnOnce(&mut acadrust::document::HeaderVariables),
+    ) {
+        let i = self.active_tab;
+        if let Some(tab) = self.tabs.get_mut(i) {
+            write(&mut tab.scene.document.header);
+            tab.scene.bump_geometry();
+            tab.dirty = true;
+        }
+    }
+
+    /// Rebuild text geometry in every open drawing.
+    ///
+    /// `TEXTFILL` is a process-global, so a change to it invalidates the text
+    /// in every tab. Doing only the active one leaves the others rendering the
+    /// previous setting until some unrelated edit happens to rebuild them.
+    pub(in crate::app) fn invalidate_text_everywhere(&mut self) {
+        for tab in &mut self.tabs {
+            tab.scene.invalidate_text_geometry_dependencies();
+        }
+    }
+
     /// Snapshot the persisted UI preferences from live state.
     pub(in crate::app) fn current_settings(&self) -> crate::app::settings::UserSettings {
         crate::app::settings::UserSettings {
@@ -365,6 +394,11 @@ impl OpenCADStudio {
             zoom_factor: self.zoom_factor,
             cursor_size: self.cursor_size,
             pick_box: self.pick_box,
+            options_tab: self.options_tab,
+            show_viewcube: self.show_viewcube,
+            show_ucs_icon: self.show_ucs_icon,
+            ucs_icon_at_origin: self.ucs_icon_at_origin,
+            selection_cycling: self.selection_cycling,
             double_click_block_refedit: self.double_click_block_refedit,
             double_click_block_attedit: self.double_click_block_attedit,
             grip_object_limit: self.grip_object_limit,
@@ -401,8 +435,6 @@ impl OpenCADStudio {
             pick_add: self.pick_add,
             pick_drag_rect: self.pick_drag_rect,
             quick_properties: self.quick_properties,
-            bg_color: None,
-            paper_bg_color: None,
             language: self.language,
             cliprompt_lines: crate::app::settings::clamp_clipromptlines(self.cliprompt_lines),
             commandline_fade_ms: crate::app::settings::clamp_commandline_fade_ms(
@@ -422,6 +454,14 @@ impl OpenCADStudio {
         self.zoom_factor = s.zoom_factor.clamp(3, 100);
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
+        self.options_tab = s.options_tab;
+        // These four drive real features with commands and status-bar pills,
+        // but they lived only on the app struct: turning the ViewCube off and
+        // restarting brought it straight back.
+        self.show_viewcube = s.show_viewcube;
+        self.show_ucs_icon = s.show_ucs_icon;
+        self.ucs_icon_at_origin = s.ucs_icon_at_origin;
+        self.selection_cycling = s.selection_cycling;
         self.double_click_block_refedit = s.double_click_block_refedit;
         self.double_click_block_attedit = s.double_click_block_attedit;
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
@@ -439,6 +479,9 @@ impl OpenCADStudio {
         } else {
             0.0
         };
+        // The Options field edits a buffer rather than the value, so it has to
+        // be reseeded whenever the value is restored from behind it.
+        self.snap_angle_input = crate::app::settings::format_snap_angle(self.snap_angle_deg);
         // Ortho + running OSNAP are per-drawing (adopted from the header on
         // open / tab switch), not app-global, so they are not applied here.
         self.snapper.otrack_enabled = s.otrack;
@@ -471,7 +514,6 @@ impl OpenCADStudio {
         self.pick_add = s.pick_add;
         self.pick_drag_rect = s.pick_drag_rect;
         self.quick_properties = s.quick_properties;
-        // Legacy settings.bg_color / paper_bg_color are superseded by model_space config.
         if crate::i18n::set_language(s.language).is_ok() {
             self.language = s.language;
         }

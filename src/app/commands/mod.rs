@@ -554,6 +554,11 @@ inventory::submit!(crate::command::CommandRegistration {
         "GRIPHOT",
         "GRIPHOVER",
         "GRIPOBJLIMIT",
+        // Dispatched all along, but absent from the registry, so command-line
+        // completion never offered them.
+        "ISAVEBAK",
+        "SAVETIME",
+        "FILEASSOC",
         // Reset selected entities' overrides to follow their layer.
         "SETBYLAYER",
         // Remove duplicate objects; set drawing base point; audit integrity;

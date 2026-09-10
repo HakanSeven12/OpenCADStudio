@@ -2043,6 +2043,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         crate::entities::solid3d::SURFACE_PROPERTIES_APP,
                         Some(crate::entities::solid3d::surface_property_xdata_values(state)),
                     );
+                    if field == PROP_SURFACE_WIREFRAME_TYPE {
+                        self.tabs[i].scene.reseed_derived_caches(handle);
+                    }
                 }
             } else if crate::scene::model::solid_history::is_loft_geometry_choice(field) {
                 // These choices change the generated body, not just history
@@ -3021,6 +3024,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                         );
                                                     }
                                                 }
+                                            }
+                                            if matches!(field, "srf_u_isolines" | "srf_v_isolines")
+                                            {
+                                                self.tabs[i].scene.reseed_derived_caches(handle);
                                             }
                                         }
                                     }

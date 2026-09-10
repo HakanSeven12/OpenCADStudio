@@ -585,6 +585,23 @@ mod tests {
     }
 
     #[test]
+    fn planar_display_uses_independent_isoline_counts() {
+        let body = box_solid([0.0; 3], 10.0, 10.0, 10.0).unwrap();
+        let display = |counts, planar| {
+            display_from_solid(&body, [0.7, 0.7, 0.7, 1.0], 1.0, None, counts, planar)
+                .unwrap()
+                .0
+                .edge_verts
+                .len()
+        };
+        let boundaries = display([0, 0], false);
+
+        assert_eq!(display([1, 0], true) - boundaries, 12);
+        assert_eq!(display([0, 2], true) - boundaries, 24);
+        assert_eq!(display([2, 2], false), boundaries);
+    }
+
+    #[test]
     fn every_primitive_is_the_size_it_was_asked_for() {
         // Triangle counts say a mesh exists; the volume says it is the right
         // shape and the right way out. A face left out reads far too small

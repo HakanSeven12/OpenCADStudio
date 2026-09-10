@@ -68,20 +68,25 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
     let left = anchor.map_or(x, |b| b.x).clamp(0.0, (win.0 - width).max(0.0));
     let top = anchor_top.min((win.1 - 80.0).max(0.0));
     let available_height = (win.1 - top - 4.0).max(1.0);
-    let contents: Element<'static, Message> = if let Some(tool) = TOOLS.iter().find(|tool| tool.command == id && !tool.options.is_empty()) {
+    let cols = (((width - 12.0 + GAP) / (CELL + GAP)).floor() as usize).clamp(1, 7);
+    let option_tool = TOOLS.iter().find(|tool| tool.command == id && !tool.options.is_empty());
+    let content_height = option_tool.map_or_else(
+        || TOOLS.len().div_ceil(cols) as f32 * (CELL + GAP) - GAP + 12.0,
+        |tool| tool.options.len() as f32 * 30.0,
+    );
+    let contents: Element<'static, Message> = if let Some(tool) = option_tool {
         column(tool.options.iter().map(|&(cmd, label)| {
             button(text(t!(label)).size(11))
                 .on_press(Message::DropdownSelectItem { dropdown_id: tool.command, cmd })
-                .style(popup_row_style).width(Fill).padding([6, 10]).into()
+                .style(popup_row_style).width(Fill).height(30).padding([6, 10]).into()
         }).collect::<Vec<Element<'static, Message>>>()).into()
     } else {
-        let cols = (((width - 12.0 + GAP) / (CELL + GAP)).floor() as usize).clamp(1, 7);
         column(TOOLS.chunks(cols).map(|tools| {
             row(tools.iter().map(|tool| tool_button(tool, ribbon.active_tool.as_deref() == Some(tool.command)))
                 .collect::<Vec<_>>()).spacing(GAP).into()
         }).collect::<Vec<Element<'static, Message>>>()).spacing(GAP).padding(6).into()
     };
-    let panel = container(scrollable(contents).height(Length::Shrink))
-        .max_height(available_height).width(width).style(popup_panel_style);
+    let panel = container(scrollable(contents).height(content_height.min(available_height)))
+        .width(width).style(popup_panel_style);
     dropdown_backdrop(position_ribbon_dropdown(panel.into(), false, left, top))
 }

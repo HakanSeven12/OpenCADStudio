@@ -948,6 +948,48 @@ fn a_tilted_ellipse_round_trips_through_the_solver_without_drifting() {
 }
 
 #[test]
+fn concentric_constraint_does_not_reshape_the_ellipse_when_its_center_actually_moves() {
+    // Regression test for a real solver bug: `a_tilted_ellipse_round_trips_
+    // through_the_solver_without_drifting` (above) uses a circle that's
+    // ALREADY concentric with the ellipse, so Concentric's equations start
+    // out satisfied and the ellipse's center never actually has to move —
+    // it doesn't exercise the bug at all. Here the circle starts elsewhere,
+    // forcing a real center move, which is exactly when `ocs_gcs::geo::
+    // Ellipse`'s absolute `focus1` point used to get left behind: `center`
+    // moved to meet the circle, `focus1` didn't (nothing else referenced
+    // it), so the derived major-axis direction/length and minor/major
+    // ratio changed even though only a center-to-center constraint was
+    // ever applied. The fix ties `focus1`'s offset from `center` to its
+    // seeded value, so it translates along with `center` instead.
+    let mut scene = Scene::new();
+    let ellipse = add_ellipse(&mut scene, 0.0, 0.0, (4.0, 0.0), 0.5);
+    let circle = add_circle(&mut scene, 10.0, 7.0, 1.5);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Concentric,
+        vec![SketchRef::center(ellipse), SketchRef::center(circle)],
+        None,
+    );
+    scene.bump_entities(&[(ellipse, ChangeKind::Modified), (circle, ChangeKind::Modified)]);
+
+    let (ellipse_center, major_axis, ratio) = ellipse_geom(&scene, ellipse);
+    let (circle_center, _) = circle_geom(&scene, circle);
+
+    assert!(
+        (ellipse_center.x - circle_center.x).abs() < 1e-6 && (ellipse_center.y - circle_center.y).abs() < 1e-6,
+        "concentric constraint should still hold: ellipse={ellipse_center:?} circle={circle_center:?}"
+    );
+    // The whole point: the center was free to move (nothing else pinned
+    // either entity), so it's not expected to still sit at (0,0) — but the
+    // ellipse's *shape* must be exactly what it was before solving.
+    assert!(
+        (major_axis.x - 4.0).abs() < 1e-6 && (major_axis.y - 0.0).abs() < 1e-6,
+        "major axis must not rotate or resize just because the center moved: {major_axis:?}"
+    );
+    assert!((ratio - 0.5).abs() < 1e-6, "minor/major ratio must not change just because the center moved: {ratio}");
+}
+
+#[test]
 fn fixed_constraint_holds_an_ellipse_in_place_despite_a_connected_edit() {
     let mut scene = Scene::new();
     let ellipse = add_ellipse(&mut scene, 0.0, 0.0, (6.0, 0.0), 0.5);

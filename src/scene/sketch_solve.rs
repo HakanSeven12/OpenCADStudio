@@ -50,6 +50,32 @@
 //! `Normal`'s own inline matches (which don't go through `whole_circle`)
 //! have explicit `EntityGeom::Arc` arms alongside their `Circle` ones for
 //! the same reason.
+//!
+//! An `Ellipse` registers as `ocs_gcs::geo::Ellipse { center, focus1,
+//! radmin }` (`register_entity`'s `Ellipse` arm converts acadrust's
+//! center/major-axis-vector/ratio parametrization to this one). Unlike
+//! Arc's `start`/`end`, `focus1` isn't an extra derived point on top of the
+//! "real" shape params — it *is* one, jointly with `radmin`, encoding
+//! orientation and eccentricity. But it's stored as an absolute point, not
+//! an offset from `center`, so a constraint that pulls only on `center`
+//! (Concentric/CenterPoint being the natural case) leaves `focus1`
+//! genuinely untouched — correct for the solver, wrong for the geometry:
+//! `center` moved, `focus1` didn't, so the vector `focus1 - center` (what
+//! write-back actually derives `major_axis`/`minor_axis_ratio` from) has
+//! changed, and the ellipse appears to rotate and reshape even though
+//! nothing asked it to. `solve_scope` adds two ellipse-rules
+//! `ocs_gcs::constraints::point_line::Difference` constraints per
+//! registered ellipse — `focus1.x - center.x` and `focus1.y - center.y`
+//! pinned to their pre-solve values — so `focus1` translates rigidly with
+//! `center` whenever nothing else constrains it, the same "stays put
+//! unless something actually pulls on it" behavior Arc's own spare DOF
+//! already has. `radmin` needs no equivalent: as a lone scalar it isn't
+//! coupled to `center`'s movement, so it already stays at its seed value
+//! once unreferenced by anything. Because these rules already pin `focus1`
+//! once `center` is pinned, `Fixed`'s `Ellipse` arm only pins `center`/
+//! `radmin` directly, not `focus1` — pinning it too would be redundant
+//! with the rules, same as `Fixed`'s `Arc` arm not re-pinning `start`/
+//! `end`.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -85,10 +111,12 @@ enum EntityGeom {
     /// for every registered arc. See this module's doc comment.
     Arc(GArc),
     /// Center-and-shape support only — see `register_entity`'s `Ellipse`
-    /// arm for the acadrust-to-`ocs_gcs` parametrization conversion, and
-    /// this module's doc comment for what isn't wired up yet (major/minor
-    /// axis dimensional constraints, `PointOnEllipse`-based Coincident/
-    /// Tangent).
+    /// arm for the acadrust-to-`ocs_gcs` parametrization conversion, the
+    /// ellipse-rules `Difference` constraints `solve_scope` adds for every
+    /// registered ellipse to keep `focus1` translating rigidly with
+    /// `center` (this module's doc comment), and that same doc comment for
+    /// what isn't wired up yet (major/minor axis dimensional constraints,
+    /// `PointOnEllipse`-based Coincident/Tangent).
     Ellipse(GEllipse),
 }
 
@@ -412,16 +440,20 @@ fn build_constraint(
                         Rc::new(Equal::new(a.end_angle, sys.add_param(ea, true), 1.0)),
                     ]
                 }
+                // Pinning center + radmin is enough — `focus1` is already
+                // tied to `center` by the ellipse-rules `Difference`
+                // constraints `solve_scope` adds for every registered
+                // ellipse (see this module's doc comment), so with `center`
+                // pinned here too, pinning `focus1` again would just be
+                // redundant (same reasoning as Arc's `Fixed` arm above).
                 EntityGeom::Ellipse(el) => {
-                    let (cx, cy, fx, fy, b) = {
+                    let (cx, cy, b) = {
                         let store = sys.store();
-                        (store.get(el.center.x), store.get(el.center.y), store.get(el.focus1.x), store.get(el.focus1.y), store.get(el.radmin))
+                        (store.get(el.center.x), store.get(el.center.y), store.get(el.radmin))
                     };
                     vec![
                         Rc::new(Equal::new(el.center.x, sys.add_param(cx, true), 1.0)),
                         Rc::new(Equal::new(el.center.y, sys.add_param(cy, true), 1.0)),
-                        Rc::new(Equal::new(el.focus1.x, sys.add_param(fx, true), 1.0)),
-                        Rc::new(Equal::new(el.focus1.y, sys.add_param(fy, true), 1.0)),
                         Rc::new(Equal::new(el.radmin, sys.add_param(b, true), 1.0)),
                     ]
                 }
@@ -613,6 +645,33 @@ fn solve_scope(
         sys.add_constraint(Rc::new(CurveValue::new(arc.start, arc.start.y, curve.clone(), arc.start_angle)));
         sys.add_constraint(Rc::new(CurveValue::new(arc.end, arc.end.x, curve.clone(), arc.end_angle)));
         sys.add_constraint(Rc::new(CurveValue::new(arc.end, arc.end.y, curve, arc.end_angle)));
+    }
+
+    // Ellipse rules (same motivation as arc rules, different mechanism):
+    // `ocs_gcs::geo::Ellipse` stores `focus1` as an absolute point, not an
+    // offset from `center`. If some constraint (e.g. Concentric) pulls only
+    // on `center` and nothing references `focus1`/`radmin`, the solver
+    // correctly leaves `focus1`'s *absolute* coordinates untouched — but
+    // `center` moved and `focus1` didn't, so the derived vector
+    // `focus1 - center` (which is what `major_axis` direction/length and
+    // `minor_axis_ratio` are actually computed from on write-back) changes
+    // anyway, making the ellipse appear to rotate and reshape even though
+    // no shape parameter was itself pulled on. Pinning `focus1 - center` to
+    // its pre-solve (seed) value forces `focus1` to translate rigidly with
+    // `center`, keeping orientation/eccentricity invariant unless something
+    // actually constrains `focus1`/`radmin` directly (only `Fixed` does
+    // today). `radmin` needs no equivalent rule — as a lone scalar it isn't
+    // coupled to `center`'s movement, so it already stays put on its own.
+    for geom in cache.values() {
+        let EntityGeom::Ellipse(el) = geom else { continue };
+        let (cx, cy, fx, fy) = {
+            let store = sys.store();
+            (store.get(el.center.x), store.get(el.center.y), store.get(el.focus1.x), store.get(el.focus1.y))
+        };
+        let dx = sys.add_param(fx - cx, true);
+        let dy = sys.add_param(fy - cy, true);
+        sys.add_constraint(Rc::new(Difference::new(el.center.x, el.focus1.x, dx)));
+        sys.add_constraint(Rc::new(Difference::new(el.center.y, el.focus1.y, dy)));
     }
 
     let partitions = sys.partition();

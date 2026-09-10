@@ -929,9 +929,15 @@ bg={bg_ms:.1}ms n={view_count}"
                 // value in the box until the user types over it.
                 let live = tab.active_cmd.as_ref().and_then(|c| c.dyn_live_value(w)).or_else(|| {
                     let grip = tab.active_grip.as_ref()?;
-                    if grip.mode != crate::scene::pick::grip::GripEditMode::Lengthen {
-                        return None;
-                    }
+                    let action = match grip.mode {
+                        crate::scene::pick::grip::GripEditMode::Lengthen => {
+                            crate::scene::model::object::GripMenuAction::Lengthen
+                        }
+                        crate::scene::pick::grip::GripEditMode::Radius => {
+                            crate::scene::model::object::GripMenuAction::Radius
+                        }
+                        _ => return None,
+                    };
                     let original = self
                         .grip_originals
                         .iter()
@@ -940,7 +946,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     crate::scene::view::dispatch::grip_menu_point_value(
                         original,
                         grip.grip_id,
-                        crate::scene::model::object::GripMenuAction::Lengthen,
+                        action,
                         w,
                     )
                 });
@@ -1710,10 +1716,18 @@ bg={bg_ms:.1}ms n={view_count}"
         // so the command-line field must release focus / its on_input.
         // The MText preview also captures keystrokes (typing edits it), so the
         // command line must likewise release its on_input there.
+        let interactive_value_grip = tab.active_grip.as_ref().is_some_and(|grip| {
+            matches!(
+                grip.mode,
+                crate::scene::pick::grip::GripEditMode::Lengthen
+                    | crate::scene::pick::grip::GripEditMode::Radius
+            )
+        });
         let dyn_capturing =
             (self.dyn_input
                 && (tab.active_cmd.is_some() || tab.active_grip.is_some())
-                && !tab.dyn_fields.is_empty())
+                && !tab.dyn_fields.is_empty()
+                && !interactive_value_grip)
                 || self.mtext_editor.as_ref().is_some_and(|e| e.show_preview)
                 || self.text_inline.is_some();
         // The workspace row is: left edge stack, viewport, right edge stack.

@@ -199,6 +199,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .buffer
                             .get_or_insert_with(String::new)
                             .push_str(&s);
+                        if self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
+                            matches!(grip.mode, GripEditMode::Lengthen | GripEditMode::Radius)
+                        }) {
+                            self.command_line.input.push_str(&s);
+                        }
                     } else {
                         // Command-line entry is shown uppercase — except in
                         // free-form text prompts, where the typed case is the
@@ -241,6 +246,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         buf.pop();
                         if buf.is_empty() {
                             self.tabs[i].dyn_fields[a].buffer = None;
+                        }
+                        if self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
+                            matches!(grip.mode, GripEditMode::Lengthen | GripEditMode::Radius)
+                        }) {
+                            self.command_line.input.pop();
                         }
                         return self.focus_cmd_input();
                     }
@@ -301,15 +311,24 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.grip_pending = Some(pending);
                         return self.focus_cmd_input();
                     };
-                    let interactive_lengthen = self.tabs[i]
+                    let interactive_value_grip = self.tabs[i]
                         .active_grip
                         .as_ref()
                         .is_some_and(|grip| {
-                            grip.mode == GripEditMode::Lengthen
+                            matches!(
+                                (grip.mode, pending.action),
+                                (
+                                    GripEditMode::Lengthen,
+                                    crate::scene::model::object::GripMenuAction::Lengthen,
+                                ) | (
+                                    GripEditMode::Radius,
+                                    crate::scene::model::object::GripMenuAction::Radius,
+                                )
+                            )
                                 && grip.handle == pending.handle
                                 && grip.grip_id == pending.grip_id
                         });
-                    if interactive_lengthen {
+                    if interactive_value_grip {
                         self.cancel_active_grip_edit();
                     }
                     use crate::entities::traits::EntityTypeOps;
@@ -1314,7 +1333,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         action: item.action,
                         label,
                     });
-                    if matches!(item.action, GripMenuAction::Lengthen) {
+                    if matches!(item.action, GripMenuAction::Lengthen | GripMenuAction::Radius) {
                         if let Some((_, grip)) = self.tabs[i]
                             .selected_grip_handles
                             .iter()
@@ -1323,20 +1342,43 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 **owner == popup.handle && grip.id == popup.grip_id
                             })
                         {
-                            self.tabs[i].active_grip = Some(GripEdit::lengthen(
-                                popup.handle,
-                                popup.grip_id,
-                                grip.world,
-                            ));
+                            if self.grip_originals.is_empty() {
+                                self.grip_originals = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .get_entity(popup.handle)
+                                    .cloned()
+                                    .map(|entity| vec![(popup.handle, entity)])
+                                    .unwrap_or_default();
+                            }
+                            self.tabs[i].active_grip = Some(match item.action {
+                                GripMenuAction::Radius => GripEdit::radius(
+                                    popup.handle,
+                                    popup.grip_id,
+                                    grip.world,
+                                ),
+                                _ => GripEdit::lengthen(
+                                    popup.handle,
+                                    popup.grip_id,
+                                    grip.world,
+                                ),
+                            });
                         }
                         // Popup actions do not pass through the normal grip
                         // press handler, which is where dynamic fields are
-                        // usually seeded. Build the Lengthen distance field
+                        // usually seeded. Build the value field
                         // immediately so it is visible before the next mouse
                         // move (and so keyboard input has a field to target).
                         self.sync_dyn_fields();
-                        self.command_line
-                            .push_info(crate::t!("Specify point or enter distance:").as_ref());
+                        if matches!(item.action, GripMenuAction::Radius) {
+                            self.command_line.push_info(
+                                crate::t!("Specify point or enter radius:").as_ref(),
+                            );
+                        } else {
+                            self.command_line.push_info(
+                                crate::t!("Specify point or enter distance:").as_ref(),
+                            );
+                        }
                     } else {
                         self.command_line.push_info(crate::tf!("{label}:").as_ref());
                     }

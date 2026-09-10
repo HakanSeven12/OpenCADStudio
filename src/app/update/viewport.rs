@@ -1565,8 +1565,16 @@ impl OpenCADStudio {
 
             let apply_started = Instant::now();
             let delta = snapped - grip.last_world;
-            let lengthen = grip.mode == GripEditMode::Lengthen;
-            let actions: Vec<_> = if lengthen {
+            let menu_action = match grip.mode {
+                GripEditMode::Lengthen => {
+                    Some(crate::scene::model::object::GripMenuAction::Lengthen)
+                }
+                GripEditMode::Radius => {
+                    Some(crate::scene::model::object::GripMenuAction::Radius)
+                }
+                GripEditMode::Stretch => None,
+            };
+            let actions: Vec<_> = if menu_action.is_some() {
                 Vec::new()
             } else {
                 grip.targets
@@ -1581,14 +1589,13 @@ impl OpenCADStudio {
                     })
                     .collect()
             };
-            if lengthen {
+            if let Some(action) = menu_action {
                 let original = self
                     .grip_originals
                     .iter()
                     .find(|(handle, _)| *handle == grip.handle)
                     .map(|(_, entity)| entity.clone());
                 if let Some(original) = original {
-                    let action = crate::scene::model::object::GripMenuAction::Lengthen;
                     let value = crate::scene::view::dispatch::grip_menu_point_value(
                         &original,
                         grip.grip_id,
@@ -3193,7 +3200,7 @@ impl OpenCADStudio {
                 // Engaging click — stay hot, wait for the placement click.
                 return Task::none();
             }
-            if grip.mode == GripEditMode::Lengthen {
+            if matches!(grip.mode, GripEditMode::Lengthen | GripEditMode::Radius) {
                 self.grip_pending = None;
                 self.command_line.input.clear();
             }

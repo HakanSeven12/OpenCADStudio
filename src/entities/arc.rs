@@ -365,13 +365,20 @@ impl crate::entities::traits::Grippable for Arc {
         point: glam::DVec3,
     ) -> Option<f64> {
         use crate::scene::model::object::GripMenuAction as A;
-        if !matches!(action, A::Lengthen) || self.radius <= 1.0e-9 {
+        if self.radius <= 1.0e-9 {
             return None;
         }
         let (x, y, _) = crate::scene::view::transform::wcs_point_to_ocs(
             (point.x, point.y, point.z),
             (self.normal.x, self.normal.y, self.normal.z),
         );
+        if matches!(action, A::Radius) && grip_id == 3 {
+            let radius = ((x - self.center.x).powi(2) + (y - self.center.y).powi(2)).sqrt();
+            return (radius > 1.0e-9).then_some(radius);
+        }
+        if !matches!(action, A::Lengthen) {
+            return None;
+        }
         let cursor_angle = (y - self.center.y).atan2(x - self.center.x);
         let current_sweep = (self.end_angle - self.start_angle).rem_euclid(TAU);
         let desired_sweep = match grip_id {

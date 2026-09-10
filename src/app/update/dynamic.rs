@@ -71,40 +71,42 @@ impl OpenCADStudio {
         //
         // Grip editing is not an `active_cmd`, so handle it before the normal
         // command-only path below.
-        let grip_origin = self.tabs[i]
+        let grip_input = self.tabs[i]
             .active_grip
             .as_ref()
             .map(|grip| match grip.mode {
                 crate::scene::pick::grip::GripEditMode::Stretch => {
-                    (grip.origin_world, false)
+                    (grip.origin_world, None)
                 }
                 crate::scene::pick::grip::GripEditMode::Lengthen => {
-                    (grip.origin_world, true)
+                    (grip.origin_world, Some(crate::command::DynRole::Distance))
+                }
+                crate::scene::pick::grip::GripEditMode::Radius => {
+                    (grip.origin_world, Some(crate::command::DynRole::Radius))
                 }
             });
 
-        if let Some((origin, lengthen)) = grip_origin {
-            let wanted: &[DynComponent] = if lengthen {
-                &[DynComponent::Distance]
-            } else {
-                &[DynComponent::Distance, DynComponent::Angle]
-            };
-            let current: Vec<DynComponent> = self.tabs[i]
+        if let Some((origin, scalar_role)) = grip_input {
+            let wanted_roles: Vec<crate::command::DynRole> = scalar_role.map_or_else(
+                || vec![crate::command::DynRole::Distance, crate::command::DynRole::Angle],
+                |role| vec![role],
+            );
+            let current: Vec<crate::command::DynRole> = self.tabs[i]
                 .dyn_fields
                 .iter()
-                .map(|field| field.component)
+                .map(|field| field.role)
                 .collect();
 
-            if current.as_slice() != wanted {
-                self.tabs[i].dyn_fields = wanted
+            if current != wanted_roles {
+                self.tabs[i].dyn_fields = wanted_roles
                     .iter()
                     .copied()
-                    .map(DynFieldEntry::new)
+                    .map(DynFieldEntry::from_role)
                     .collect();
                 self.tabs[i].dyn_active = 0;
             }
 
-            self.tabs[i].dyn_guide = if lengthen {
+            self.tabs[i].dyn_guide = if scalar_role.is_some() {
                 crate::command::DynGuide::Radius
             } else {
                 crate::command::DynGuide::Polar

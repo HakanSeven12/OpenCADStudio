@@ -1051,6 +1051,147 @@ impl OpenCADStudio {
         }
     }
 
+    /// Re-solves every entity touched by an enabled constraint driven by
+    /// `name` — the targeted, single-row counterpart to
+    /// `apply_named_parameter_editor_rows`'s "re-solve what it affects": an
+    /// inline Properties-panel edit changes one parameter, not the whole
+    /// table, so unlike that whole-table Apply this can cheaply scope the
+    /// re-solve to just the entities that actually reference it.
+    fn resolve_named_parameter_edit(&mut self, i: usize, name: &str) {
+        let touched: Vec<Handle> = self.tabs[i]
+            .scene
+            .sketch_constraints
+            .iter()
+            .flat_map(|set| set.constraints.iter())
+            .filter(|c| {
+                c.enabled
+                    && matches!(&c.driving_param, Some(crate::scene::named_parameters::DrivingValue::Named(n)) if n == name)
+            })
+            .flat_map(|c| c.refs.iter().map(|r| r.entity))
+            .collect();
+        self.tabs[i].dirty = true;
+        if touched.is_empty() {
+            return;
+        }
+        let pending = self.begin_undo(i, "Edit named parameter", touched.len(), true);
+        let changes: Vec<(Handle, crate::scene::ChangeKind)> =
+            touched.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
+        self.tabs[i].scene.bump_entities(&changes);
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
+    }
+
+    /// Commits one field of one Parameters-section row (Properties panel) —
+    /// the per-row, commit-on-submit counterpart to
+    /// `apply_named_parameter_editor_rows`'s whole-table Apply. A Formula
+    /// edit is a plain redefine (`ParameterTable::set` on the existing
+    /// name); a Name edit is a remove-then-set (there's no rename primitive
+    /// — `ParameterTable` upserts by name), restoring the old name if the
+    /// new one fails to validate so nothing is silently lost. Either way
+    /// this only re-solves what actually depends on this one parameter —
+    /// no "duplicate name" scan across the whole table is needed the way
+    /// the buffered modal Apply needs one, since every row here is always
+    /// already a real, distinct table entry.
+    pub(super) fn on_prop_param_commit(
+        &mut self,
+        index: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+    ) -> Task<Message> {
+        use crate::ui::properties::FieldKey;
+        use crate::ui::window::named_parameters::ParamField;
+        let i = self.active_tab;
+        let key = FieldKey::Param(index, field);
+        self.tabs[i].properties.active_field = None;
+        let Some(typed) = self.tabs[i].properties.edit_buf.remove(&key) else {
+            return Task::none();
+        };
+        let typed = typed.trim().to_string();
+        let Some(current) = self.tabs[i].scene.named_parameters().iter().nth(index).cloned() else {
+            self.refresh_properties();
+            return Task::none();
+        };
+
+        let (result, resolve_name) = match field {
+            ParamField::Formula => {
+                if typed.is_empty() || typed == current.source {
+                    self.refresh_properties();
+                    return Task::none();
+                }
+                (self.tabs[i].scene.named_parameters_mut().set(&current.name, &typed), current.name.clone())
+            }
+            ParamField::Name => {
+                if typed.is_empty() || typed == current.name {
+                    self.refresh_properties();
+                    return Task::none();
+                }
+                if self.tabs[i].scene.named_parameters().contains(&typed) {
+                    self.command_line.push_error(crate::tf!("Parameter '{}' already exists.", typed).as_ref());
+                    self.refresh_properties();
+                    return Task::none();
+                }
+                self.tabs[i].scene.named_parameters_mut().remove(&current.name);
+                let outcome = self.tabs[i].scene.named_parameters_mut().set(&typed, &current.source);
+                if outcome.is_err() {
+                    let _ = self.tabs[i].scene.named_parameters_mut().set(&current.name, &current.source);
+                }
+                (outcome, typed.clone())
+            }
+        };
+
+        if let Err(e) = result {
+            self.command_line.push_error(crate::tf!("Parameter '{}': {}", current.name, e).as_ref());
+            self.refresh_properties();
+            return Task::none();
+        }
+        self.resolve_named_parameter_edit(i, &resolve_name);
+        self.refresh_properties();
+        Task::none()
+    }
+
+    /// Removes Parameters-section row `index` immediately — no confirmation,
+    /// matching AutoCAD's own Parameters Manager delete button. Any
+    /// constraint that referenced it gets the same "undefined reference"
+    /// resolve-failure treatment a formula's own bad reference already gets
+    /// (`build_constraint`) — re-solving surfaces that rather than needing
+    /// special-case handling here.
+    pub(super) fn on_prop_param_delete(&mut self, index: usize) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(name) = self.tabs[i].scene.named_parameters().iter().nth(index).map(|p| p.name.clone()) else {
+            return Task::none();
+        };
+        self.tabs[i].scene.named_parameters_mut().remove(&name);
+        self.resolve_named_parameter_edit(i, &name);
+        self.refresh_properties();
+        Task::none()
+    }
+
+    /// The Parameters section's "+ Add parameter" row: appends a fresh,
+    /// uniquely-named parameter (`param1`, `param2`, …) the user then
+    /// renames/redefines inline via `on_prop_param_commit`. Defaults to `1`,
+    /// not `0`: renaming this onto a name an existing Distance/Radius
+    /// constraint already references (unusual, but reachable — define
+    /// first, wire up the constraint's reference later) would otherwise
+    /// briefly collapse that geometry to a zero-length/zero-radius
+    /// degenerate state, which is a genuine numerical singularity for a
+    /// point-to-point distance constraint to grow back out of (no defined
+    /// direction to separate two exactly-coincident points from). `1` never
+    /// hits that.
+    pub(super) fn on_prop_param_add_new(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let mut n = 1usize;
+        let name = loop {
+            let candidate = format!("param{n}");
+            if !self.tabs[i].scene.named_parameters().contains(&candidate) {
+                break candidate;
+            }
+            n += 1;
+        };
+        let _ = self.tabs[i].scene.named_parameters_mut().set(&name, "1");
+        self.refresh_properties();
+        Task::none()
+    }
+
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         let preserve_commit_layer = self.tabs[i]
@@ -6368,6 +6509,80 @@ mod sketch_constraint_undo_tests {
         };
         let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
         assert!((len - 3.0).abs() < 1e-6, "length should track the redefined parameter, got {len}");
+    }
+
+    /// End-to-end through the actual `Message` handlers a Properties-panel
+    /// click/keystroke would fire — not `apply_named_parameter_editor_rows`
+    /// directly — covering the whole Parameters-section lifecycle: add,
+    /// rename, redefine, and confirm a referencing constraint re-solves
+    /// after each commit (not just after a whole-table Apply, since this
+    /// path commits per field).
+    #[test]
+    fn properties_panel_parameter_row_add_rename_redefine_and_delete() {
+        use crate::ui::window::named_parameters::ParamField;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let line = add_line(&mut app, 0.0, 0.0, 10.0, 0.0);
+        let _ = app.apply_cmd_result(CmdResult::AddSketchConstraint {
+            kind: ConstraintKind::Distance,
+            refs: vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+            driving_param: Some(crate::scene::named_parameters::DrivingValue::Named("len".to_string())),
+            label: "Distance constraint",
+        });
+
+        // Add: the first row is auto-named "param1".
+        let _ = app.update(Message::PropParamAddNew);
+        assert!(app.tabs[app.active_tab].scene.named_parameters().contains("param1"));
+        let index = app.tabs[app.active_tab].scene.named_parameters().iter().position(|p| p.name == "param1").unwrap();
+
+        // Rename param1 -> len (commit-on-submit, not per keystroke: input
+        // alone must not touch the table yet).
+        let _ = app.update(Message::PropParamInput { index, field: ParamField::Name, value: "len".to_string() });
+        assert!(app.tabs[app.active_tab].scene.named_parameters().contains("param1"), "typing alone must not commit");
+        let _ = app.update(Message::PropParamCommit { index, field: ParamField::Name });
+        assert!(!app.tabs[app.active_tab].scene.named_parameters().contains("param1"));
+        assert!(app.tabs[app.active_tab].scene.named_parameters().contains("len"));
+
+        // Redefine its formula to 8 and confirm the Distance constraint
+        // (already referencing "len" by name, defined before this) re-solves.
+        let _ = app.update(Message::PropParamInput { index, field: ParamField::Formula, value: "8".to_string() });
+        let _ = app.update(Message::PropParamCommit { index, field: ParamField::Formula });
+        assert_eq!(app.tabs[app.active_tab].scene.named_parameters().resolve("len"), Ok(8.0));
+        let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
+            Some(acadrust::EntityType::Line(l)) => (l.start, l.end),
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
+        assert!((len - 8.0).abs() < 1e-6, "length should track the redefined parameter, got {len}");
+
+        // Delete: the row is gone from the table.
+        let _ = app.update(Message::PropParamDelete(index));
+        assert!(!app.tabs[app.active_tab].scene.named_parameters().contains("len"));
+    }
+
+    /// A Constraints-section row click selects every entity the constraint
+    /// references, replacing whatever was selected before.
+    #[test]
+    fn properties_panel_constraint_link_click_selects_its_entities() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let a = add_line(&mut app, 0.0, 0.0, 10.0, 0.0);
+        let b = add_line(&mut app, 0.0, 5.0, 10.0, 5.0);
+        let unrelated = add_line(&mut app, 20.0, 20.0, 30.0, 20.0);
+        let _ = app.apply_cmd_result(CmdResult::AddSketchConstraint {
+            kind: ConstraintKind::Parallel,
+            refs: vec![SketchRef::whole(a), SketchRef::whole(b)],
+            driving_param: None,
+            label: "Parallel constraint",
+        });
+        app.tabs[app.active_tab].scene.select_entity(unrelated, true);
+
+        let _ = app.update(Message::PropConstraintLinkClick(vec![a, b]));
+
+        let selected: std::collections::HashSet<Handle> =
+            app.tabs[app.active_tab].scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+        assert_eq!(selected, std::collections::HashSet::from([a, b]));
     }
 
     /// A row that fails to validate (here, a formula that doesn't parse)

@@ -24,7 +24,7 @@ pub mod center_point_tool {
         ToolDef {
             id: "CPCONSTRAINT",
             label: "Center Point",
-            icon: IconKind::Glyph("⊕"),
+            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/center_point.svg")),
             event: ModuleEvent::Command("CPCONSTRAINT".to_string()),
         }
     }
@@ -36,7 +36,7 @@ pub mod midpoint_tool {
         ToolDef {
             id: "MPCONSTRAINT",
             label: "Midpoint",
-            icon: IconKind::Glyph("M"),
+            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/midpoint.svg")),
             event: ModuleEvent::Command("MPCONSTRAINT".to_string()),
         }
     }
@@ -48,7 +48,7 @@ pub mod point_on_curve_tool {
         ToolDef {
             id: "OCCONSTRAINT",
             label: "Point on Curve",
-            icon: IconKind::Glyph("∈"),
+            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/point_on_curve.svg")),
             event: ModuleEvent::Command("OCCONSTRAINT".to_string()),
         }
     }

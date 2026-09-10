@@ -397,6 +397,7 @@ impl OpenCADStudio {
             backup_on_save: self.backup_on_save,
             file_assoc_enabled: self.file_assoc_enabled,
             write_dwg_native_constraints: self.write_dwg_native_constraints,
+            show_constraint_values: self.show_constraint_values,
             savetime_min: self.savetime_min,
             default_save_format: self.default_save_format.clone(),
             pick_add: self.pick_add,
@@ -467,6 +468,7 @@ impl OpenCADStudio {
         self.backup_on_save = s.backup_on_save;
         self.file_assoc_enabled = s.file_assoc_enabled;
         self.write_dwg_native_constraints = s.write_dwg_native_constraints;
+        self.show_constraint_values = s.show_constraint_values;
         self.savetime_min = s.savetime_min;
         self.default_save_format =
             crate::io::canonical_save_format(&s.default_save_format).to_string();

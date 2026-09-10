@@ -839,10 +839,12 @@ bg={bg_ms:.1}ms n={view_count}"
                                 )?;
                                 let point = iced::Point::new(bounds.x + screen.x, bounds.y + screen.y);
                                 let is_conflicting = set.conflicts.iter().any(|(id, _)| *id == c.id);
-                                point
-                                    .x
-                                    .is_finite()
-                                    .then(|| (point, crate::scene::sketch_constraints::glyph_label(c), is_conflicting))
+                                let label = if self.show_constraint_values {
+                                    crate::scene::sketch_constraints::glyph_label(c)
+                                } else {
+                                    c.kind.glyph_symbol().to_string()
+                                };
+                                point.x.is_finite().then(|| (point, label, is_conflicting))
                             })
                             .collect()
                     }

@@ -23,7 +23,7 @@ pub mod coincident_tool {
         ToolDef {
             id: "CCONSTRAINT",
             label: "Coincident",
-            icon: IconKind::Glyph("≡"),
+            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/coincident.svg")),
             event: ModuleEvent::Command("CCONSTRAINT".to_string()),
         }
     }

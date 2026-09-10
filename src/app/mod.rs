@@ -557,6 +557,13 @@ pub(super) struct OpenCADStudio {
     /// this only governs whether the graph is *created* in a scope that
     /// doesn't have one yet.
     pub write_dwg_native_constraints: bool,
+    /// When true (default), a sketch constraint's viewport pill shows its
+    /// glyph plus a driven value or named-parameter name (e.g. "⌀ 5.000" or
+    /// "⌀ hole_dia"). When false, every pill shows just the bare glyph — the
+    /// value/name text can cover important canvas detail on a dense sketch,
+    /// and the glyph alone is already enough to see *that* a constraint is
+    /// present (`docs/parametric_system_design.md` §6.3/§7).
+    pub show_constraint_values: bool,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
     pub savetime_min: i32,
@@ -2046,6 +2053,9 @@ pub enum Message {
     /// Toggle writing AutoCAD-native constraint objects on save, from
     /// Options. See `write_dwg_native_constraints`'s doc comment.
     WriteDwgNativeConstraintsChanged(bool),
+    /// Toggle showing driven values/named-parameter names on constraint
+    /// pills, from Options. See `show_constraint_values`'s doc comment.
+    ShowConstraintValuesChanged(bool),
     /// Switch the interface language and redraw localized views.
     LanguageChanged(crate::i18n::Language),
     /// Drop every entity from the active drawing.
@@ -2790,6 +2800,31 @@ pub enum Message {
     /// and re-solve every constraint that reads a named parameter; stays
     /// open.
     NamedParametersApply,
+    // ── Parameters / Constraints sections embedded in the Properties panel
+    // (AutoCAD-style: a live section instead of the modal above, per-row
+    // commit-on-submit instead of a whole-table Apply) ─────────────────────
+    /// Live text of one column of parameter row `index`, keyed by its
+    /// `ParameterTable::iter()` position — see `PropValue::ParamRow`.
+    PropParamInput {
+        index: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+        value: String,
+    },
+    /// Commit row `index`'s buffered edit for `field` to `Scene::
+    /// named_parameters` (Enter / losing focus) and re-solve whatever it
+    /// drives.
+    PropParamCommit {
+        index: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+    },
+    /// Remove parameter row `index` immediately (no confirmation, matching
+    /// AutoCAD's own Parameters Manager delete button).
+    PropParamDelete(usize),
+    /// Append a fresh, uniquely-named parameter to `Scene::named_parameters`.
+    PropParamAddNew,
+    /// A Constraints-section row was clicked: select every entity in the
+    /// list (replacing the current selection) in the viewport.
+    PropConstraintLinkClick(Vec<acadrust::Handle>),
     // ── About window ────────────────────────────────────────────────────
     AboutOpen,
     /// Close whatever in-canvas modal dialog is open (Plan B).
@@ -3479,6 +3514,7 @@ impl OpenCADStudio {
             backup_on_save: true,
             file_assoc_enabled: true,
             write_dwg_native_constraints: false,
+            show_constraint_values: true,
             savetime_min: 10,
             default_bg_color: None,
             default_paper_bg_color: None,

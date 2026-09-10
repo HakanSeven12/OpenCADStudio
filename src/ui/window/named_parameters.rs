@@ -88,7 +88,7 @@ fn used_by_cell<'a>(scene: &Scene, name: &str) -> Element<'a, Message> {
 }
 
 /// Which column of a parameter row a text edit targets.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ParamField {
     Name,
     Formula,

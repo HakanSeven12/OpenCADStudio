@@ -17,7 +17,7 @@ pub mod equal_distance_tool {
         ToolDef {
             id: "EDCONSTRAINT",
             label: "Equal Distance",
-            icon: IconKind::Glyph("≐"),
+            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/equal_distance.svg")),
             event: ModuleEvent::Command("EDCONSTRAINT".to_string()),
         }
     }

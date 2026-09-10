@@ -51,6 +51,7 @@ pub fn view_window<'a>(
     default_save_format: &'a str,
     file_assoc_enabled: bool,
     write_dwg_native_constraints: bool,
+    show_constraint_values: bool,
     ui_theme: &'a UiThemeConfig,
     theme_color_inputs: &'a [String; 6],
     language: crate::i18n::Language,
@@ -227,6 +228,23 @@ pub fn view_window<'a>(
              this app's own format, so other CAD software recognizes them. Off by default — \
              adds some file size on every save. A drawing that already has these objects keeps \
              them up to date regardless of this setting."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(14),
+        row![
+            iced::widget::checkbox(show_constraint_values)
+                .on_toggle(Message::ShowConstraintValuesChanged)
+                .size(15),
+            text(crate::t!("Show values and parameter names on constraint markers")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "On by default. Turn off to show just the constraint glyph in the viewport — \
+             enough to see that a constraint is present — without the driven value or named \
+             parameter text covering nearby geometry."
         ))
         .size(11)
         .width(sizing.width),

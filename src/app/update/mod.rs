@@ -5949,6 +5949,28 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            // ── Parameters / Constraints sections embedded in the
+            // Properties panel ──────────────────────────────────────────────
+            Message::PropParamInput { index, field, value } => {
+                self.tabs[self.active_tab]
+                    .properties
+                    .edit_buf
+                    .insert(crate::ui::properties::FieldKey::Param(index, field), value);
+                Task::none()
+            }
+            Message::PropParamCommit { index, field } => self.on_prop_param_commit(index, field),
+            Message::PropParamDelete(index) => self.on_prop_param_delete(index),
+            Message::PropParamAddNew => self.on_prop_param_add_new(),
+            Message::PropConstraintLinkClick(handles) => {
+                let i = self.active_tab;
+                self.tabs[i].scene.deselect_all();
+                for h in handles {
+                    self.tabs[i].scene.select_entity(h, false);
+                }
+                self.refresh_properties();
+                Task::none()
+            }
+
             // ── Options / About windows ───────────────────────────────────
             Message::OptionsOpen => {
                 self.active_modal = Some(super::ModalKind::Options);
@@ -6309,6 +6331,11 @@ impl OpenCADStudio {
             }
             Message::WriteDwgNativeConstraintsChanged(enabled) => {
                 self.write_dwg_native_constraints = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::ShowConstraintValuesChanged(enabled) => {
+                self.show_constraint_values = enabled;
                 self.persist_settings_if_changed();
                 Task::none()
             }

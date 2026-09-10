@@ -6223,6 +6223,49 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::ZoomWheelReversedChanged(reversed) => {
+                self.zoom_wheel_reversed = reversed;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::ZoomFactorChanged(factor) => {
+                self.zoom_factor = factor.clamp(3, 100);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::TextEditModeChanged(single) => {
+                self.texteditmode = single;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::DimContinueModeChanged(inherit) => {
+                self.dimension_continue_mode = i16::from(inherit);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::QdimSnapPriorityChanged(priority) => {
+                self.quick_dimension_snap_priority = priority.min(1);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // The sign carries on/off and the magnitude the mode, so switching
+            // off and back on has to return to the mode that was chosen — the
+            // same convention the status-bar pill uses when it negates.
+            Message::AnnoAutoScaleChanged(mode) => {
+                self.annotation_auto_scale = if mode == 0 {
+                    -self.annotation_auto_scale.abs().max(1)
+                } else {
+                    mode.clamp(1, 4)
+                };
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;
                 self.persist_settings_if_changed();

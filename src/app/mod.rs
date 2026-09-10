@@ -2017,6 +2017,18 @@ pub enum Message {
     ClipromptLinesChanged(i32),
     /// Change how long command-line history lines stay visible (COMMANDLINEFADETIME).
     CommandLineFadeChanged(i32),
+    /// Toggle reversing the mouse-wheel zoom direction (ZOOMWHEEL).
+    ZoomWheelReversedChanged(bool),
+    /// Change how far one wheel notch zooms (ZOOMFACTOR, 3..=100).
+    ZoomFactorChanged(i32),
+    /// Toggle TEXTEDIT ending after one object (TEXTEDITMODE).
+    TextEditModeChanged(bool),
+    /// Toggle continued dimensions inheriting the base style (DIMCONTINUEMODE).
+    DimContinueModeChanged(bool),
+    /// Change which points QDIM measures from (0 endpoints, 1 intersections).
+    QdimSnapPriorityChanged(u8),
+    /// Change which annotative objects pick up a new scale (ANNOAUTOSCALE).
+    AnnoAutoScaleChanged(i8),
     /// Restore Model Space display/canvas appearance to defaults.
     RestoreModelSpaceDisplayDefaults,
     /// Restore Selection visual effect settings to defaults.

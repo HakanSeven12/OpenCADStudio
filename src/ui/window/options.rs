@@ -28,6 +28,7 @@ pub enum OptionsTab {
     OpenAndSave,
     Display,
     Selection,
+    UserPreferences,
     Drawing,
 }
 
@@ -48,6 +49,19 @@ pub struct AppPrefs {
     pub cliprompt_lines: i32,
     /// COMMANDLINEFADETIME: how long overlay history lines stay visible, in ms.
     pub commandline_fade_ms: i32,
+    /// ZOOMWHEEL: reverse the mouse-wheel zoom direction.
+    pub zoom_wheel_reversed: bool,
+    /// ZOOMFACTOR, 3..=100.
+    pub zoom_factor: i32,
+    /// TEXTEDITMODE: TEXTEDIT keeps prompting for the next object.
+    pub texteditmode: bool,
+    /// DIMCONTINUEMODE: continued dimensions inherit the base dimension's style.
+    pub dimension_continue_mode: i16,
+    /// QDIM extension-origin priority: 0 endpoints, 1 intersections.
+    pub qdim_snap_priority: u8,
+    /// ANNOAUTOSCALE, -4..=4. The sign is on/off; the magnitude selects which
+    /// objects a newly added scale reaches.
+    pub annotation_auto_scale: i8,
 }
 
 /// The Selection-card settings that live on `UserSettings` rather than on the
@@ -995,11 +1009,153 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
+
+    // ANNOAUTOSCALE's magnitude decides which objects a newly added scale
+    // reaches — 1 skips layers that are off, frozen, locked or frozen in the
+    // viewport, 2 keeps locked ones, 3 skips only locked, 4 takes everything.
+    // The sign is the on/off the status-bar pill flips, so the mode survives
+    // being switched off and back on.
+    let auto_scale_options = [
+        (0i8, "Off"),
+        (1, "Skip objects on layers that are off, frozen or locked"),
+        (2, "Skip objects on layers that are off or frozen"),
+        (3, "Skip objects on locked layers"),
+        (4, "All annotative objects"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        value,
+        label: crate::t!(label).into_owned(),
+    })
+    .collect::<Vec<_>>();
+    let selected_auto_scale = auto_scale_options
+        .iter()
+        .find(|choice| choice.value == prefs.annotation_auto_scale.max(0))
+        .cloned();
+
+    let qdim_options = [
+        (0u8, "Endpoints"),
+        (1, "Intersections"),
+    ]
+    .into_iter()
+    .map(|(value, label)| Labelled {
+        value,
+        label: crate::t!(label).into_owned(),
+    })
+    .collect::<Vec<_>>();
+    let selected_qdim = qdim_options
+        .iter()
+        .find(|choice| choice.value == prefs.qdim_snap_priority)
+        .cloned();
+
+    let user_prefs = column![
+        text(crate::t!("User Preferences")).size(15),
+        Space::new().height(10),
+        text(crate::t!("Zoom")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.zoom_wheel_reversed)
+                .on_toggle(Message::ZoomWheelReversedChanged)
+                .size(15),
+            text(crate::t!("Reverse mouse wheel zoom (ZOOMWHEEL)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            text(crate::t!("Zoom factor")).size(12).width(150),
+            slider(3..=100, prefs.zoom_factor.clamp(3, 100), Message::ZoomFactorChanged)
+                .step(1)
+                .width(Fill),
+            text(prefs.zoom_factor.clamp(3, 100).to_string()).size(11).width(44),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!("How far one wheel notch zooms (ZOOMFACTOR)."))
+            .size(11)
+            .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Text and Dimensions")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.texteditmode)
+                .on_toggle(Message::TextEditModeChanged)
+                .size(15),
+            text(crate::t!("TEXTEDIT edits one object and ends (TEXTEDITMODE)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            iced::widget::checkbox(prefs.dimension_continue_mode == 1)
+                .on_toggle(Message::DimContinueModeChanged)
+                .size(15),
+            text(crate::t!(
+                "Continued dimensions inherit the base dimension's layer and style (DIMCONTINUEMODE)"
+            ))
+            .size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            text(crate::t!("QDIM origin priority")).size(12).width(150),
+            iced::widget::pick_list(selected_qdim, qdim_options, |choice| choice.label.clone())
+                .on_select(|choice| Message::QdimSnapPriorityChanged(choice.value))
+                .width(Fill),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Which points QDIM measures from. Also settable inside the command."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Annotation")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Add scales automatically")).size(12).width(150),
+            iced::widget::pick_list(selected_auto_scale, auto_scale_options, |choice| {
+                choice.label.clone()
+            })
+            .on_select(|choice| Message::AnnoAutoScaleChanged(choice.value))
+            .width(Fill),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Which annotative objects pick up a newly set annotation scale (ANNOAUTOSCALE)."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Drawing Units")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Length, angle and insertion units"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Drawing Units…")).size(11))
+                .on_press(Message::OpenDrawingUnits)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
     let content: Element<'a, Message> = match active_tab {
         OptionsTab::General => general.into(),
         OptionsTab::Display => display_element.into(),
         OptionsTab::Selection => selection.into(),
         OptionsTab::OpenAndSave => open_and_save.into(),
+        OptionsTab::UserPreferences => user_prefs.into(),
         OptionsTab::Drawing => drawing.into(),
     };
 
@@ -1019,6 +1175,7 @@ pub fn view_window<'a>(
         tab_button(crate::t!("Open and Save"), OptionsTab::OpenAndSave),
         tab_button(crate::t!("Display"), OptionsTab::Display),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
+        tab_button(crate::t!("User Preferences"), OptionsTab::UserPreferences),
         tab_button(crate::t!("Drawing"), OptionsTab::Drawing),
     ]
     .spacing(2)

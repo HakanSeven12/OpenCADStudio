@@ -2142,6 +2142,17 @@ impl OpenCADStudio {
                                 entity_type_label(entity)
                             }
                         }
+                        acadrust::EntityType::Surface(_)
+                            if matches!(
+                                crate::scene::model::solid_history::primitive_property_operation(
+                                    &self.tabs[i].scene.document,
+                                    handle,
+                                ),
+                                Some(acadrust::objects::SolidHistoryOperation::Extrusion(_))
+                            ) =>
+                        {
+                            format!("{} ({})", t!("Surface"), t!("Extrusion"))
+                        }
                         _ => entity_type_label(entity),
                     };
                     ui::PropertiesPanel {
@@ -2249,23 +2260,22 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                             );
                         }
                     }
-                    if local_refs.iter().all(|(handle, _)| {
+                    let compact_solids = local_refs.iter().all(|(handle, _)| {
                         crate::scene::model::solid_history::has_compact_solid_properties(
                             &self.tabs[i].scene.document,
                             *handle,
                         )
-                    }) {
-                        sections.retain(|section| {
-                            !section.props.iter().any(|property| {
-                                property.field.starts_with("acis_")
-                                    || property.field.starts_with("s3d_")
-                            })
-                        });
+                    });
+                    if compact_solids {
+                        retain_compact_solid_sections(&mut sections);
                     }
                     sections.extend(aggregate_solid_history_sections(
                         &self.tabs[i].scene.document,
                         &local_refs.iter().map(|(handle, _)| *handle).collect::<Vec<_>>(),
                     ));
+                    if compact_solids {
+                        retain_compact_solid_sections(&mut sections);
+                    }
                     ui::PropertiesPanel {
                         choice_combos: sections
                             .iter()
@@ -3205,6 +3215,10 @@ fn retain_compact_solid_sections(
     sections: &mut Vec<crate::scene::model::object::PropSection>,
 ) {
     sections.iter_mut().for_each(|section| {
+        let internal_surface_section = section
+            .props
+            .iter()
+            .any(|property| property.field == "srf_kind");
         section.props.retain(|property| {
             matches!(
                 property.field,
@@ -3217,7 +3231,8 @@ fn retain_compact_solid_sections(
                     | "transparency"
                     | "hyperlink"
                     | "material"
-            ) || crate::scene::model::solid_history::is_specialized_property(property.field)
+            ) || (!internal_surface_section
+                && crate::scene::model::solid_history::is_specialized_property(property.field))
         });
     });
     sections.retain(|section| !section.props.is_empty());

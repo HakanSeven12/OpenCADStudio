@@ -3082,7 +3082,13 @@ impl Scene {
         let facet_resolution = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_resolution);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let (isolines, planar_isolines) = match self.document.get_entity(handle) {
+            Some(EntityType::Surface(surface)) => (
+                crate::entities::solid3d::surface_isoline_counts(surface),
+                crate::entities::solid3d::surface_property_state(surface).isolines,
+            ),
+            _ => ([self.document.header.isolines.max(0) as usize; 2], false),
+        };
         let (mut set, wires, center) =
             crate::scene::model::solid_model::display_from_solid(
                 solid,
@@ -3090,6 +3096,7 @@ impl Scene {
                 facet_resolution,
                 chordal_deflection,
                 isolines,
+                planar_isolines,
             )?;
         let name = handle.value().to_string();
         for mesh in &mut set.lods {

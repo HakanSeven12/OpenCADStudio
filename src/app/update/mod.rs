@@ -6363,6 +6363,8 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::OpenFolder(path) => crate::sys::open_url(&path, None),
+
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;
                 self.persist_settings_if_changed();

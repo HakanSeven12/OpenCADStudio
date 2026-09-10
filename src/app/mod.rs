@@ -2044,6 +2044,8 @@ pub enum Message {
     UcsIconAtOriginChanged(bool),
     /// Toggle selection cycling from Options; the status-bar pill toggles the same flag.
     SelectionCyclingChanged(bool),
+    /// Reveal one of the application's own folders in the system file manager.
+    OpenFolder(String),
     /// Change isolines per surface in the current drawing (ISOLINES).
     IsolinesChanged(i16),
     /// Toggle silhouette edges in the current drawing (DISPSILH).

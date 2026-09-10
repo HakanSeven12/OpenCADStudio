@@ -25,6 +25,7 @@ const DIALOG_HEIGHT: f32 = 620.0;
 pub enum OptionsTab {
     #[default]
     General,
+    Files,
     OpenAndSave,
     Display,
     Drafting,
@@ -72,6 +73,18 @@ pub struct AppPrefs {
     pub show_ucs_icon: bool,
     /// UCSICON ORigin: draw it at the origin rather than the corner.
     pub ucs_icon_at_origin: bool,
+}
+
+/// The fixed locations the Files page lists.
+///
+/// `None` where the platform could not give one — the row then says so and
+/// its button is disabled rather than opening nothing.
+#[derive(Clone, Default)]
+pub struct Folders {
+    pub config: Option<String>,
+    pub plot_styles: Option<String>,
+    pub plugins: Option<String>,
+    pub autosave: Option<String>,
 }
 
 /// Values read from the current drawing's header rather than from preferences.
@@ -142,6 +155,7 @@ pub fn view_window<'a>(
     prefs: AppPrefs,
     snap_angle_input: &'a str,
     drawing_prefs: DrawingPrefs,
+    folders: Folders,
     double_click_block_refedit: bool,
     double_click_block_attedit: bool,
     cursor_type: CursorType,
@@ -258,6 +272,38 @@ pub fn view_window<'a>(
             .width(sizing.width),
         ]
         .spacing(12)
+        .align_y(iced::Center),
+        Space::new().height(24),
+        text(crate::t!("Applications")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Installed plugins and their sources")).size(12).width(Fill),
+            button(text(crate::t!("Plugins…")).size(11))
+                .on_press(Message::PluginManagerOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Keyboard shortcuts")).size(12).width(Fill),
+            button(text(crate::t!("Keyboard Shortcuts…")).size(11))
+                .on_press(Message::ShortcutsPanelOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Command aliases")).size(12).width(Fill),
+            button(text(crate::t!("Command Aliases…")).size(11))
+                .on_press(Message::AliasEditorOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
         .align_y(iced::Center),
     ]
     .spacing(0)
@@ -1464,10 +1510,57 @@ pub fn view_window<'a>(
 
     let modeling = modeling.spacing(0).width(sizing.width);
 
+
+    // The application has no support-file search path, so this page does not
+    // pretend to offer one. It shows where things actually live and opens the
+    // folder — which is the question people are really asking when they go
+    // looking for a Files page.
+    let folder_row = |label: std::borrow::Cow<'a, str>, path: Option<String>| {
+        let shown = path.clone().unwrap_or_else(|| crate::t!("Not available").into_owned());
+        let mut open = button(text(crate::t!("Open folder")).size(11))
+            .padding([4, 10])
+            .style(button::secondary);
+        if let Some(path) = path {
+            open = open.on_press(Message::OpenFolder(path));
+        }
+        row![
+            column![
+                text(label).size(12),
+                text(shown).size(11),
+            ]
+            .spacing(2)
+            .width(Fill),
+            open,
+        ]
+        .spacing(10)
+        .align_y(iced::Center)
+    };
+
+    let files = column![
+        text(crate::t!("Files")).size(15),
+        Space::new().height(6),
+        text(crate::t!(
+            "Where the application keeps its own files. These locations are fixed."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(16),
+        folder_row(crate::t!("Configuration"), folders.config.clone()),
+        Space::new().height(12),
+        folder_row(crate::t!("Plot styles"), folders.plot_styles.clone()),
+        Space::new().height(12),
+        folder_row(crate::t!("Plugins"), folders.plugins.clone()),
+        Space::new().height(12),
+        folder_row(crate::t!("Autosave files"), folders.autosave.clone()),
+    ]
+    .spacing(0)
+    .width(sizing.width);
+
     let content: Element<'a, Message> = match active_tab {
         OptionsTab::General => general.into(),
         OptionsTab::Display => display_element.into(),
         OptionsTab::Selection => selection.into(),
+        OptionsTab::Files => files.into(),
         OptionsTab::OpenAndSave => open_and_save.into(),
         OptionsTab::Drafting => drafting.into(),
         OptionsTab::Modeling => modeling.into(),
@@ -1488,6 +1581,7 @@ pub fn view_window<'a>(
     };
     let tabs = column![
         tab_button(crate::t!("General"), OptionsTab::General),
+        tab_button(crate::t!("Files"), OptionsTab::Files),
         tab_button(crate::t!("Open and Save"), OptionsTab::OpenAndSave),
         tab_button(crate::t!("Display"), OptionsTab::Display),
         tab_button(crate::t!("Drafting"), OptionsTab::Drafting),

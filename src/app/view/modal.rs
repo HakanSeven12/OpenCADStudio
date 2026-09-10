@@ -230,6 +230,17 @@ impl OpenCADStudio {
                                     .map_or(1, |h| h.show_solid_history),
                             }
                         },
+                        crate::ui::window::options::Folders {
+                            config: crate::config::config_dir()
+                                .map(|p| p.display().to_string()),
+                            plot_styles: crate::io::plot_style::plot_styles_dir()
+                                .ok()
+                                .map(|p| p.display().to_string()),
+                            plugins: crate::plugin::external::plugins_dir()
+                                .map(|p| p.display().to_string()),
+                            autosave: crate::config::config_dir()
+                                .map(|_| std::env::temp_dir().display().to_string()),
+                        },
                         self.double_click_block_refedit,
                         self.double_click_block_attedit,
                         self.cursor_type,

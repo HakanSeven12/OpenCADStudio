@@ -3756,10 +3756,36 @@ impl OpenCADStudio {
                         let direction = direction
                             .or(path_direction)
                             .unwrap_or(glam::DVec3::ZERO);
-                        self.add_surface_model(
-                            empty_extruded_surface(direction, taper_angle),
-                            body,
-                        )
+                        let history = path
+                            .is_none()
+                            .then(|| {
+                                sweep_model::extrusion_history(
+                                    &entity,
+                                    None,
+                                    direction.to_array(),
+                                    taper_angle,
+                                    profile.plane.origin,
+                                )
+                            })
+                            .flatten();
+                        let mut surface = empty_extruded_surface(direction, taper_angle);
+                        if let (
+                            Some(acadrust::objects::SolidHistoryOperation::Extrusion(value)),
+                            acadrust::EntityType::Surface(entity),
+                        ) = (&history, &mut surface)
+                        {
+                            if let Some(data) =
+                                crate::scene::model::solid_history::extrusion_surface_data(value)
+                            {
+                                entity.surface_data = data;
+                            }
+                        }
+                        match history {
+                            Some(history) => {
+                                self.add_surface_model_with_history(surface, body, history)
+                            }
+                            None => self.add_surface_model(surface, body),
+                        }
                     } else {
                             let direction = direction.unwrap_or(glam::DVec3::ZERO);
                             let history = path

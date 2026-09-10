@@ -3307,6 +3307,7 @@ pub fn primitive_grips(
     if let SolidHistoryOperation::Chamfer(value) = operation {
         return chamfer_distance_grips(document, handle, value);
     }
+    let is_surface = matches!(document.get_entity(handle), Some(EntityType::Surface(_)));
     let mut grips = Vec::new();
     let mut add = |id, transform, point, shape, axis: Option<[f64; 3]>| {
         if let Some(world) = world_point(transform, point) {
@@ -3528,7 +3529,9 @@ pub fn primitive_grips(
         }
         SolidHistoryOperation::Extrusion(value) => {
             let (profile_grips, profile_center) = extrusion_profile_grips(value);
-            grips.extend(profile_grips);
+            if !is_surface {
+                grips.extend(profile_grips);
+            }
             let direction = [value.direction.x, value.direction.y, value.direction.z];
             if value.path_entity.is_none() {
                 if let (Some(center), Some(base)) = (profile_center, matrix(value.base.transform)) {

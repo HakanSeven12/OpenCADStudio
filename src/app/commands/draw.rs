@@ -872,9 +872,13 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "SPLINE" => {
+            "SPLINE" | "SPLINECV" => {
                 use crate::modules::draw::draw::spline::SplineCommand;
-                let new_cmd = SplineCommand::new();
+                let new_cmd = if cmd == "SPLINECV" {
+                    SplineCommand::control_vertices()
+                } else {
+                    SplineCommand::new()
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

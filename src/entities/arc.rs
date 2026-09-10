@@ -364,38 +364,44 @@ impl crate::entities::traits::Grippable for Arc {
         action: crate::scene::model::object::GripMenuAction,
         point: glam::DVec3,
     ) -> Option<f64> {
+        use cadkernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
         use crate::scene::model::object::GripMenuAction as A;
         if self.radius <= 1.0e-9 {
             return None;
         }
-        let (x, y, _) = crate::scene::view::transform::wcs_point_to_ocs(
-            (point.x, point.y, point.z),
-            (self.normal.x, self.normal.y, self.normal.z),
-        );
+        let curve = crate::entities::curve::arc_curve(self);
+        let point = curve.plane.project(point.to_array())?;
+        let KernelCurve::Arc(arc) = &curve.curve else {
+            unreachable!("arc entity must produce an arc curve")
+        };
         if matches!(action, A::Radius) && grip_id == 3 {
-            let radius = ((x - self.center.x).powi(2) + (y - self.center.y).powi(2)).sqrt();
+            let radius = Vec2::from(point).distance(Vec2::from(arc.centre));
             return (radius > 1.0e-9).then_some(radius);
         }
         if matches!(action, A::ArcLength) && grip_id == 3 {
-            let sweep = (self.end_angle - self.start_angle).rem_euclid(TAU);
-            let middle_angle = self.start_angle + sweep * 0.5;
-            let middle_x = self.center.x + self.radius * middle_angle.cos();
-            let middle_y = self.center.y + self.radius * middle_angle.sin();
-            let tangent_x = -middle_angle.sin();
-            let tangent_y = middle_angle.cos();
-            let delta = (x - middle_x) * tangent_x + (y - middle_y) * tangent_y;
-            let length = self.radius * sweep + delta;
-            return (length > 1.0e-9 && length < self.radius * TAU - 1.0e-9)
-                .then_some(length);
+            let middle = Vec2::from(curve.curve.point_at(0.5));
+            let tangent = Vec2::from(curve.curve.tangent_at(0.5)).normalize()?;
+            let length = curve.length() + (Vec2::from(point) - middle).dot(tangent);
+            let circumference = KernelCircle {
+                centre: arc.centre,
+                radius: arc.radius,
+            }
+            .length();
+            return (length > 1.0e-9 && length < circumference - 1.0e-9).then_some(length);
         }
         if !matches!(action, A::Lengthen) {
             return None;
         }
-        let cursor_angle = (y - self.center.y).atan2(x - self.center.x);
-        let current_sweep = (self.end_angle - self.start_angle).rem_euclid(TAU);
+        let cursor_angle = KernelCurve::Circle(KernelCircle {
+            centre: arc.centre,
+            radius: arc.radius,
+        })
+        .parameter_at(point)
+            * TAU;
+        let current_sweep = arc.sweep();
         let desired_sweep = match grip_id {
-            1 => (self.end_angle - cursor_angle).rem_euclid(TAU),
-            2 => (cursor_angle - self.start_angle).rem_euclid(TAU),
+            1 => (arc.end_angle - cursor_angle).rem_euclid(TAU),
+            2 => (cursor_angle - arc.start_angle).rem_euclid(TAU),
             _ => return None,
         };
         if desired_sweep <= 1.0e-9 {
@@ -475,5 +481,50 @@ impl crate::entities::traits::MassPropsCalc for acadrust::entities::Arc {
             cx: centroid[0],
             cy: centroid[1],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::traits::Grippable;
+    use crate::scene::model::object::GripMenuAction;
+
+    #[test]
+    fn midpoint_grip_drives_radius_and_arc_length_in_entity_plane() {
+        let mut arc = Arc::default();
+        arc.center = acadrust::types::Vector3::new(1.0, 2.0, 3.0);
+        arc.normal = acadrust::types::Vector3::new(0.0, 1.0, 0.0);
+        arc.radius = 2.0;
+        arc.start_angle = 0.0;
+        arc.end_angle = std::f64::consts::FRAC_PI_2;
+
+        let curve = crate::entities::curve::arc_curve(&arc);
+        let middle_angle = std::f64::consts::FRAC_PI_4;
+        let radius_point = curve.plane.point_at([
+            arc.center.x + 5.0 * middle_angle.cos(),
+            arc.center.y + 5.0 * middle_angle.sin(),
+        ]);
+        let radius = arc
+            .grip_menu_point_value(3, GripMenuAction::Radius, radius_point.into())
+            .expect("radius value");
+        assert!((radius - 5.0).abs() < 1.0e-9);
+
+        let middle = glam::DVec3::from_array(curve.point_at(0.5));
+        let tangent = glam::DVec3::from_array(curve.tangent_at(0.5)).normalize();
+        let wanted_length = curve.length() + 1.25;
+        let arc_length = arc
+            .grip_menu_point_value(
+                3,
+                GripMenuAction::ArcLength,
+                middle + tangent * 1.25,
+            )
+            .expect("arc length value");
+        assert!((arc_length - wanted_length).abs() < 1.0e-9);
+
+        arc.apply_grip_menu_value(3, GripMenuAction::ArcLength, arc_length);
+        assert!(
+            (crate::entities::curve::arc_curve(&arc).length() - wanted_length).abs() < 1.0e-9
+        );
     }
 }

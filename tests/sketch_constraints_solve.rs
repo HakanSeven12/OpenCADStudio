@@ -42,6 +42,44 @@ fn circle_geom(scene: &Scene, handle: Handle) -> (Vector3, f64) {
     }
 }
 
+fn add_arc(scene: &mut Scene, cx: f64, cy: f64, radius: f64, start_angle: f64, end_angle: f64) -> Handle {
+    scene.add_entity(EntityType::Arc(acadrust::entities::Arc::from_center_radius_angles(
+        Vector3::new(cx, cy, 0.0),
+        radius,
+        start_angle,
+        end_angle,
+    )))
+}
+
+fn arc_geom(scene: &Scene, handle: Handle) -> (Vector3, f64) {
+    match scene.document.get_entity(handle).expect("entity exists") {
+        EntityType::Arc(a) => (a.center, a.radius),
+        other => panic!("expected an Arc, got {other:?}"),
+    }
+}
+
+fn arc_angles(scene: &Scene, handle: Handle) -> (f64, f64, f64) {
+    match scene.document.get_entity(handle).expect("entity exists") {
+        EntityType::Arc(a) => (a.radius, a.start_angle, a.end_angle),
+        other => panic!("expected an Arc, got {other:?}"),
+    }
+}
+
+fn add_ellipse(scene: &mut Scene, cx: f64, cy: f64, major_axis: (f64, f64), ratio: f64) -> Handle {
+    scene.add_entity(EntityType::Ellipse(acadrust::entities::Ellipse::from_center_axes(
+        Vector3::new(cx, cy, 0.0),
+        Vector3::new(major_axis.0, major_axis.1, 0.0),
+        ratio,
+    )))
+}
+
+fn ellipse_geom(scene: &Scene, handle: Handle) -> (Vector3, Vector3, f64) {
+    match scene.document.get_entity(handle).expect("entity exists") {
+        EntityType::Ellipse(e) => (e.center, e.major_axis, e.minor_axis_ratio),
+        other => panic!("expected an Ellipse, got {other:?}"),
+    }
+}
+
 #[test]
 fn horizontal_constraint_levels_the_line_when_an_endpoint_moves() {
     let mut scene = Scene::new();
@@ -562,4 +600,392 @@ fn symmetric_constraint_mirrors_one_circles_center_across_the_axis_line() {
         (cb.x - -3.0).abs() < 1e-5 && (cb.y - 4.0).abs() < 1e-5,
         "b's center should have been pulled to a's mirror image across the axis: expected (-3, 4), got {cb:?}"
     );
+}
+
+// Phase 1 of docs' constraint-parity plan: an Arc registers in the solver
+// as its own center/radius (an `EntityGeom::Circle`), so every whole-circle
+// constraint kind — Radius, Tangent, Concentric among them — already works
+// on it. These mirror the equivalent Circle tests above one-for-one.
+
+#[test]
+fn radius_constraint_on_an_arc_solves_to_the_target() {
+    let mut scene = Scene::new();
+    let arc = add_arc(&mut scene, 0.0, 0.0, 3.0, 0.0, std::f64::consts::FRAC_PI_2);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Radius,
+        vec![SketchRef::whole(arc)],
+        Some(DrivingValue::Literal(7.5)),
+    );
+    scene.bump_entities(&[(arc, ChangeKind::Modified)]);
+
+    let (_, radius) = arc_geom(&scene, arc);
+    assert!((radius - 7.5).abs() < 1e-6, "arc radius should have solved to the driven target: got {radius}");
+}
+
+#[test]
+fn tangent_constraint_between_a_line_and_an_arc_solves_to_touching() {
+    let mut scene = Scene::new();
+    let arc = add_arc(&mut scene, 0.0, 0.0, 5.0, 0.0, std::f64::consts::PI);
+    let line = add_line(&mut scene, -10.0, 10.0, 10.0, 10.0); // clear of the arc's circle
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(ConstraintKind::Tangent, vec![SketchRef::whole(arc), SketchRef::whole(line)], None);
+    scene.bump_entities(&[(arc, ChangeKind::Modified), (line, ChangeKind::Modified)]);
+
+    let (center, radius) = arc_geom(&scene, arc);
+    let (p1, p2) = line_endpoints(&scene, line);
+    let line_dir = (p2.x - p1.x, p2.y - p1.y);
+    let line_len = (line_dir.0 * line_dir.0 + line_dir.1 * line_dir.1).sqrt();
+    let signed_dist = (line_dir.0 * (center.y - p1.y) - line_dir.1 * (center.x - p1.x)) / line_len;
+    assert!((signed_dist.abs() - radius).abs() < 1e-6, "center-to-line distance should equal the arc's radius after solving: dist={signed_dist} radius={radius}");
+}
+
+#[test]
+fn concentric_constraint_between_an_arc_and_a_circle_pulls_centers_together() {
+    let mut scene = Scene::new();
+    let arc = add_arc(&mut scene, 0.0, 0.0, 4.0, 0.0, std::f64::consts::PI);
+    let circle = add_circle(&mut scene, 10.0, -6.0, 2.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Concentric,
+        vec![SketchRef::center(arc), SketchRef::center(circle)],
+        None,
+    );
+    scene.bump_entities(&[(arc, ChangeKind::Modified), (circle, ChangeKind::Modified)]);
+
+    let (arc_center, _) = arc_geom(&scene, arc);
+    let (circle_center, _) = circle_geom(&scene, circle);
+    assert!(
+        (arc_center.x - circle_center.x).abs() < 1e-6 && (arc_center.y - circle_center.y).abs() < 1e-6,
+        "arc and circle centers should coincide after solving: arc={arc_center:?} circle={circle_center:?}"
+    );
+}
+
+// Phase 4b of the same plan: an arc's actual endpoints (marker 0/1, not
+// just its center or whole curve) are now real, solvable points — kept
+// consistent with center/radius/angle by the "arc rules" `CurveValue`
+// constraints `solve_scope` adds for every registered arc. Coincident/
+// PointOnCurve/etc. touching an arc endpoint need no kind-specific code at
+// all: they resolve through the same generic `point_ref`/`point_for_marker`
+// path every other point-ref constraint already uses.
+
+fn arc_start_point(scene: &Scene, handle: Handle) -> Vector3 {
+    match scene.document.get_entity(handle).expect("entity exists") {
+        EntityType::Arc(a) => a.start_point(),
+        other => panic!("expected an Arc, got {other:?}"),
+    }
+}
+
+#[test]
+fn coincident_constraint_pulls_a_lines_endpoint_onto_an_arcs_start_point() {
+    let mut scene = Scene::new();
+    let arc = add_arc(&mut scene, 0.0, 0.0, 5.0, 0.0, std::f64::consts::FRAC_PI_2);
+    let line = add_line(&mut scene, 20.0, 20.0, 30.0, 30.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Coincident,
+        vec![SketchRef::point(arc, 0), SketchRef::point(line, 0)],
+        None,
+    );
+
+    // Move the arc directly (bypassing the solver), same pattern as the
+    // equivalent Circle/Ellipse CenterPoint tests — the constraint is a
+    // symmetric point-equality, so what's checked is that both sides end
+    // up equal to *each other*, not at some hardcoded absolute position.
+    if let Some(EntityType::Arc(a)) = scene.document.get_entity_mut(arc) {
+        a.center = Vector3::new(-8.0, 3.0, 0.0);
+    }
+    scene.bump_entities(&[(arc, ChangeKind::Modified)]);
+
+    let arc_start = arc_start_point(&scene, arc);
+    let (line_start, _) = line_endpoints(&scene, line);
+    assert!(
+        (arc_start.x - line_start.x).abs() < 1e-6 && (arc_start.y - line_start.y).abs() < 1e-6,
+        "the line's start should sit exactly at the arc's start point: arc_start={arc_start:?} line_start={line_start:?}"
+    );
+}
+
+#[test]
+fn an_arcs_endpoint_stays_consistent_with_its_center_radius_and_angle_after_solving() {
+    // The actual "arc rules" guarantee: after a solve that moved a
+    // constrained endpoint, recomputing the arc's start point from its
+    // (possibly also moved) center/radius/start_angle must land exactly on
+    // the same point the constraint pulled the endpoint to — not just "some
+    // point near it". This is what would drift if the `CurveValue` ties
+    // were missing or wrong.
+    let mut scene = Scene::new();
+    let arc = add_arc(&mut scene, 0.0, 0.0, 5.0, 0.0, std::f64::consts::PI);
+    let anchor = add_line(&mut scene, 12.0, 7.0, 12.0, 7.0);
+
+    let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+    set.add(ConstraintKind::Fixed, vec![SketchRef::whole(anchor)], None);
+    set.add(ConstraintKind::Coincident, vec![SketchRef::point(arc, 0), SketchRef::point(anchor, 0)], None);
+    scene.bump_entities(&[(arc, ChangeKind::Modified)]);
+
+    let (center, radius, start_angle, _) = {
+        match scene.document.get_entity(arc).expect("entity exists") {
+            EntityType::Arc(a) => (a.center, a.radius, a.start_angle, a.end_angle),
+            other => panic!("expected an Arc, got {other:?}"),
+        }
+    };
+    let recomputed_start = Vector3::new(center.x + radius * start_angle.cos(), center.y + radius * start_angle.sin(), 0.0);
+    let actual_start = arc_start_point(&scene, arc);
+    assert!(
+        (recomputed_start.x - actual_start.x).abs() < 1e-6 && (recomputed_start.y - actual_start.y).abs() < 1e-6,
+        "start_point() must match center+radius*angle exactly: recomputed={recomputed_start:?} actual={actual_start:?}"
+    );
+    assert!(
+        (actual_start.x - 12.0).abs() < 1e-6 && (actual_start.y - 7.0).abs() < 1e-6,
+        "the constrained endpoint itself should have reached the fixed anchor: {actual_start:?}"
+    );
+}
+
+#[test]
+fn point_on_curve_constraint_pulls_a_point_onto_an_arcs_underlying_circle() {
+    let mut scene = Scene::new();
+    let arc = add_arc(&mut scene, 0.0, 0.0, 5.0, 0.0, std::f64::consts::PI);
+    let marker = add_line(&mut scene, 20.0, 20.0, 21.0, 20.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::PointOnCurve,
+        vec![SketchRef::point(marker, 0), SketchRef::whole(arc)],
+        None,
+    );
+    scene.bump_entities(&[(marker, ChangeKind::Modified)]);
+
+    let (center, radius) = arc_geom(&scene, arc);
+    let (p, _) = line_endpoints(&scene, marker);
+    let dist = ((p.x - center.x).powi(2) + (p.y - center.y).powi(2)).sqrt();
+    assert!((dist - radius).abs() < 1e-6, "point should land exactly on the arc's circle: dist={dist} radius={radius}");
+}
+
+#[test]
+fn radius_and_endpoint_coincident_constraints_coexist_on_the_same_arc() {
+    // Exercises both registration paths for the same arc in one solve: the
+    // whole-circle path (`Radius`, via `.circle`) and the endpoint path
+    // (`Coincident` on marker 0, via the arc-rules-anchored `start` point).
+    let mut scene = Scene::new();
+    let arc = add_arc(&mut scene, 0.0, 0.0, 3.0, 0.0, std::f64::consts::FRAC_PI_2);
+    let anchor = add_line(&mut scene, 9.0, -4.0, 9.0, -4.0);
+
+    let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+    set.add(ConstraintKind::Fixed, vec![SketchRef::whole(anchor)], None);
+    set.add(ConstraintKind::Coincident, vec![SketchRef::point(arc, 0), SketchRef::point(anchor, 0)], None);
+    set.add(ConstraintKind::Radius, vec![SketchRef::whole(arc)], Some(DrivingValue::Literal(6.0)));
+    scene.bump_entities(&[(arc, ChangeKind::Modified)]);
+
+    let (_, radius) = arc_geom(&scene, arc);
+    assert!((radius - 6.0).abs() < 1e-6, "Radius constraint should still hold: got {radius}");
+    let actual_start = arc_start_point(&scene, arc);
+    assert!(
+        (actual_start.x - 9.0).abs() < 1e-6 && (actual_start.y - -4.0).abs() < 1e-6,
+        "the arc's start point should have reached the fixed anchor despite the simultaneous Radius constraint: {actual_start:?}"
+    );
+}
+
+// Phase 2 of the same plan: `Diameter`/`DistanceX`/`DistanceY` reuse
+// existing `ocs_gcs` primitives (`Equal`'s `ratio`, `Difference`) with no
+// new solver-crate code.
+
+#[test]
+fn diameter_constraint_drives_the_radius_to_half_the_target() {
+    let mut scene = Scene::new();
+    let circle = add_circle(&mut scene, 0.0, 0.0, 3.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Diameter,
+        vec![SketchRef::whole(circle)],
+        Some(DrivingValue::Literal(16.0)),
+    );
+    scene.bump_entities(&[(circle, ChangeKind::Modified)]);
+
+    let (_, radius) = circle_geom(&scene, circle);
+    assert!((radius - 8.0).abs() < 1e-6, "radius should be half the diameter target: got {radius}");
+}
+
+#[test]
+fn distance_x_constraint_pins_only_the_x_component() {
+    let mut scene = Scene::new();
+    // Deliberately not axis-aligned so DistanceX and DistanceY are
+    // distinguishable from a plain Distance/Horizontal outcome.
+    let line = add_line(&mut scene, 0.0, 0.0, 6.0, 8.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::DistanceX,
+        vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+        Some(DrivingValue::Literal(10.0)),
+    );
+    scene.bump_entities(&[(line, ChangeKind::Modified)]);
+
+    let (start, end) = line_endpoints(&scene, line);
+    assert!((end.x - start.x - 10.0).abs() < 1e-6, "x component should equal the target: dx={}", end.x - start.x);
+}
+
+// Phase 3 of the same plan: `Normal` reduces to "line passes through the
+// circle's center" for the Line/Circle-only entity model, reusing
+// `PointOnLine` (the same primitive `PointOnCurve` already uses).
+
+#[test]
+fn normal_constraint_pulls_the_line_through_the_circles_center() {
+    let mut scene = Scene::new();
+    let circle = add_circle(&mut scene, 5.0, 5.0, 2.0);
+    // A horizontal line well clear of the circle's center.
+    let line = add_line(&mut scene, -10.0, 0.0, 10.0, 0.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(ConstraintKind::Normal, vec![SketchRef::whole(circle), SketchRef::whole(line)], None);
+    scene.bump_entities(&[(circle, ChangeKind::Modified), (line, ChangeKind::Modified)]);
+
+    let (center, _) = circle_geom(&scene, circle);
+    let (p1, p2) = line_endpoints(&scene, line);
+    let line_dir = (p2.x - p1.x, p2.y - p1.y);
+    let line_len = (line_dir.0 * line_dir.0 + line_dir.1 * line_dir.1).sqrt();
+    let signed_dist = (line_dir.0 * (center.y - p1.y) - line_dir.1 * (center.x - p1.x)) / line_len;
+    assert!(signed_dist.abs() < 1e-6, "the circle's center should lie on the (infinite) line after solving: dist={signed_dist}");
+}
+
+// Phase 4a of the same plan: `ArcLength` registers an arc's
+// `start_angle`/`end_angle` separately from its center/radius (which still
+// flow through the existing `EntityGeom::Circle` aliasing), so it can
+// combine with a `Radius` constraint on the same arc in one solve.
+
+#[test]
+fn arc_length_constraint_drives_the_swept_length_to_the_target() {
+    let mut scene = Scene::new();
+    // radius 5, a 90° span (length ≈ 7.85) — deliberately not the target.
+    let arc = add_arc(&mut scene, 0.0, 0.0, 5.0, 0.0, std::f64::consts::FRAC_PI_2);
+
+    let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+    set.add(ConstraintKind::Radius, vec![SketchRef::whole(arc)], Some(DrivingValue::Literal(5.0)));
+    set.add(ConstraintKind::ArcLength, vec![SketchRef::whole(arc)], Some(DrivingValue::Literal(10.0)));
+    scene.bump_entities(&[(arc, ChangeKind::Modified)]);
+
+    let (radius, start_angle, end_angle) = arc_angles(&scene, arc);
+    assert!((radius - 5.0).abs() < 1e-6, "Radius constraint should still hold: got {radius}");
+    let length = radius * (end_angle - start_angle);
+    assert!((length - 10.0).abs() < 1e-5, "swept length should equal the ArcLength target: got {length}");
+}
+
+// Phase 5 of the same plan: an `Ellipse` registers center/focus1/minor-
+// radius (converted from acadrust's center + major-axis-vector + ratio
+// parametrization). Only center-based whole-entity constraints are wired
+// up so far — Concentric, CenterPoint, Fixed — mirroring how Arc started
+// at "center/radius only" in Phase 1. Axis-length constraints and
+// `PointOnEllipse`-based Coincident/Tangent are a further follow-up.
+
+#[test]
+fn concentric_constraint_between_an_ellipse_and_a_circle_pulls_centers_together() {
+    let mut scene = Scene::new();
+    let ellipse = add_ellipse(&mut scene, 0.0, 0.0, (6.0, 0.0), 0.5);
+    let circle = add_circle(&mut scene, 10.0, -6.0, 2.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Concentric,
+        vec![SketchRef::center(ellipse), SketchRef::center(circle)],
+        None,
+    );
+    scene.bump_entities(&[(ellipse, ChangeKind::Modified), (circle, ChangeKind::Modified)]);
+
+    let (ellipse_center, _, _) = ellipse_geom(&scene, ellipse);
+    let (circle_center, _) = circle_geom(&scene, circle);
+    assert!(
+        (ellipse_center.x - circle_center.x).abs() < 1e-6 && (ellipse_center.y - circle_center.y).abs() < 1e-6,
+        "ellipse and circle centers should coincide after solving: ellipse={ellipse_center:?} circle={circle_center:?}"
+    );
+}
+
+#[test]
+fn center_point_constraint_pulls_a_lines_endpoint_onto_an_ellipses_center() {
+    let mut scene = Scene::new();
+    let ellipse = add_ellipse(&mut scene, 0.0, 0.0, (5.0, 0.0), 0.6);
+    let line = add_line(&mut scene, 10.0, 10.0, 20.0, 20.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::CenterPoint,
+        vec![SketchRef::point(line, 0), SketchRef::center(ellipse)],
+        None,
+    );
+
+    // Move the ellipse directly (bypassing the solver) before the first
+    // solve, same as the equivalent Circle test — the constraint is a
+    // symmetric point-equality, so what's checked is that both sides end
+    // up equal to *each other*, not at some hardcoded absolute position.
+    if let Some(EntityType::Ellipse(e)) = scene.document.get_entity_mut(ellipse) {
+        e.center = Vector3::new(-6.0, 9.0, 0.0);
+    }
+    scene.bump_entities(&[(ellipse, ChangeKind::Modified)]);
+
+    let (center, _, _) = ellipse_geom(&scene, ellipse);
+    let (line_start, _) = line_endpoints(&scene, line);
+    assert!(
+        (center.x - line_start.x).abs() < 1e-6 && (center.y - line_start.y).abs() < 1e-6,
+        "the line's start should sit exactly at the ellipse's center: center={center:?} start={line_start:?}"
+    );
+}
+
+#[test]
+fn a_tilted_ellipse_round_trips_through_the_solver_without_drifting() {
+    // The riskiest part of Ellipse support: converting acadrust's center +
+    // major-axis-*vector* + minor/major ratio into `ocs_gcs`'s center +
+    // focus + minor-radius, then back, for a major axis that ISN'T
+    // axis-aligned (an axis-aligned one wouldn't exercise the direction
+    // math at all). A solve with nothing actually pulling on it should
+    // reproduce the same ellipse, not drift.
+    let mut scene = Scene::new();
+    let ellipse = add_ellipse(&mut scene, 2.0, -3.0, (4.0, 3.0), 0.6); // major radius 5, tilted
+    let circle = add_circle(&mut scene, 2.0, -3.0, 1.0); // already concentric — no solving needed
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::Concentric,
+        vec![SketchRef::center(ellipse), SketchRef::center(circle)],
+        None,
+    );
+    scene.bump_entities(&[(ellipse, ChangeKind::Modified)]);
+
+    let (center, major_axis, ratio) = ellipse_geom(&scene, ellipse);
+    assert!((center.x - 2.0).abs() < 1e-6 && (center.y - -3.0).abs() < 1e-6, "center should not have drifted: {center:?}");
+    assert!((major_axis.x - 4.0).abs() < 1e-6 && (major_axis.y - 3.0).abs() < 1e-6, "major axis should not have drifted: {major_axis:?}");
+    assert!((ratio - 0.6).abs() < 1e-6, "minor/major ratio should not have drifted: {ratio}");
+}
+
+#[test]
+fn fixed_constraint_holds_an_ellipse_in_place_despite_a_connected_edit() {
+    let mut scene = Scene::new();
+    let ellipse = add_ellipse(&mut scene, 0.0, 0.0, (6.0, 0.0), 0.5);
+    let line = add_line(&mut scene, 0.0, 0.0, 5.0, 5.0);
+
+    let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+    set.add(ConstraintKind::Fixed, vec![SketchRef::whole(ellipse)], None);
+    set.add(ConstraintKind::CenterPoint, vec![SketchRef::point(line, 0), SketchRef::center(ellipse)], None);
+
+    let before = ellipse_geom(&scene, ellipse);
+
+    // Drag the line's start away — without Fixed this would pull the
+    // ellipse's center along with it; Fixed should hold the ellipse
+    // exactly in place and let the line's start follow back to it instead.
+    set_line_start(&mut scene, line, Vector3::new(20.0, -8.0, 0.0));
+    scene.bump_entities(&[(line, ChangeKind::Modified)]);
+
+    let after = ellipse_geom(&scene, ellipse);
+    assert_eq!(before, after, "Fixed ellipse must not move at all (center, major axis, or ratio)");
+    let (start, _) = line_endpoints(&scene, line);
+    assert!(
+        (start.x - before.0.x).abs() < 1e-6 && (start.y - before.0.y).abs() < 1e-6,
+        "line's start should have been pulled back to the (unmoved) ellipse center"
+    );
+}
+
+#[test]
+fn distance_y_constraint_pins_only_the_y_component() {
+    let mut scene = Scene::new();
+    let line = add_line(&mut scene, 0.0, 0.0, 6.0, 8.0);
+
+    scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+        ConstraintKind::DistanceY,
+        vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+        Some(DrivingValue::Literal(-3.0)),
+    );
+    scene.bump_entities(&[(line, ChangeKind::Modified)]);
+
+    let (start, end) = line_endpoints(&scene, line);
+    assert!((end.y - start.y - -3.0).abs() < 1e-6, "y component should equal the (signed) target: dy={}", end.y - start.y);
 }

@@ -121,7 +121,20 @@ impl<'a> GroupBuilder<'a> {
     /// (well: `BoundedLine`, §4 — nothing we draw is an infinite
     /// construction line), `Circle`, or `Arc` node the first time this
     /// entity is referenced. Returns `None` for an entity kind this pass
-    /// doesn't support as constraint geometry.
+    /// doesn't support as constraint geometry — currently including
+    /// `Ellipse` (constraint-parity Phase 5): the solver
+    /// (`sketch_solve.rs`) and this app's own XRecord format both support
+    /// ellipse-referencing constraints already, but `acadrust`'s
+    /// `AssocConstraintNodeData::Ellipse`/`BoundedEllipse` variants have a
+    /// different field shape from `Circle`/`Arc`'s here (`owner_id`/
+    /// `is_implied`/`is_active` instead of `geometry_dependency`/
+    /// `geometry_node_id`, i.e. they don't obviously look like the same
+    /// "geometry dependency for an entity reference" role) — without
+    /// confirming that against a real AutoCAD-written file, guessing would
+    /// risk writing a wrong-but-plausible-looking object graph, which is
+    /// worse than the honest "not persisted to DWG yet" gap this already
+    /// degrades to (same contract as `ArcLength`, which has no native
+    /// representation at all).
     fn geometry_node(&mut self, handle: Handle) -> Option<i32> {
         if let Some(existing) = self.entities.get(&handle) {
             if existing.geometry_node_id != 0 {
@@ -269,6 +282,10 @@ fn geometrical_class_name(kind: ConstraintKind) -> Option<&'static str> {
         ConstraintKind::Vertical => Some("ACVERTICALCONSTRAINT"),
         ConstraintKind::Perpendicular => Some("ACPERPENDICULARCONSTRAINT"),
         ConstraintKind::Tangent => Some("ACTANGENTCONSTRAINT"),
+        // AutoCAD's own `GeomConstraintType` enum (ObjectARX's
+        // `AcGeomConstraint.h`) lists `kNormal` alongside `kPerpendicular`
+        // as a distinct, real geometric-constraint kind.
+        ConstraintKind::Normal => Some("ACNORMALCONSTRAINT"),
         ConstraintKind::Concentric => Some("ACCONCENTRICCONSTRAINT"),
         ConstraintKind::CenterPoint => Some("ACCENTERPOINTCONSTRAINT"),
         ConstraintKind::Colinear => Some("ACCOLINEARCONSTRAINT"),
@@ -285,15 +302,29 @@ fn geometrical_class_name(kind: ConstraintKind) -> Option<&'static str> {
         // (design doc §5) needs the resolved entity types, not just the
         // ConstraintKind, so it's handled by the caller instead of here.
         ConstraintKind::Equal | ConstraintKind::Parallel | ConstraintKind::Distance
-        | ConstraintKind::Angle | ConstraintKind::Radius => None,
+        | ConstraintKind::Angle | ConstraintKind::Radius | ConstraintKind::Diameter
+        | ConstraintKind::DistanceX | ConstraintKind::DistanceY => None,
+        // No native DWG representation exists at all: neither
+        // `AcExplicitConstr.h` (Distance/Angle/RadiusDiameter — no
+        // ArcLength-shaped class) nor `acadrust`'s `AssocConstraintNodeData`
+        // has anything for it. `constraint_node` below falls through to
+        // its own `_ => None` for this kind, same "can't persist to DWG,
+        // XRecord-only" gap the dependency-chain DXF omission already
+        // documents.
+        ConstraintKind::ArcLength => None,
     }
 }
 
+/// `Diameter`/`DistanceX`/`DistanceY` reuse `Radius`'/`Distance`'s own DWG
+/// class — real AutoCAD represents them as the same
+/// `AcRadiusDiameterConstraint`/`AcDistanceConstraint` object with a
+/// different `RadiusDiameterConstrType`/`DirectionType` mode byte (set in
+/// `constraint_node` below), not a distinct native class.
 const fn dimensional_class_name(kind: ConstraintKind) -> &'static str {
     match kind {
-        ConstraintKind::Distance => "ACDISTANCECONSTRAINT",
+        ConstraintKind::Distance | ConstraintKind::DistanceX | ConstraintKind::DistanceY => "ACDISTANCECONSTRAINT",
         ConstraintKind::Angle => "ACANGLECONSTRAINT",
-        ConstraintKind::Radius => "ACRADIUSDIAMETERCONSTRAINT",
+        ConstraintKind::Radius | ConstraintKind::Diameter => "ACRADIUSDIAMETERCONSTRAINT",
         _ => "",
     }
 }
@@ -361,9 +392,10 @@ fn constraint_node(
             builder.connect(node_id, nb);
             Some(node_id)
         }
-        ConstraintKind::Distance | ConstraintKind::Angle | ConstraintKind::Radius => {
+        ConstraintKind::Distance | ConstraintKind::DistanceX | ConstraintKind::DistanceY
+        | ConstraintKind::Angle | ConstraintKind::Radius | ConstraintKind::Diameter => {
             let target_refs: Vec<i32> = match constraint.kind {
-                ConstraintKind::Radius => vec![builder.ref_node(*refs.first()?)?],
+                ConstraintKind::Radius | ConstraintKind::Diameter => vec![builder.ref_node(*refs.first()?)?],
                 _ => {
                     let [a, b] = refs else { return None };
                     vec![builder.ref_node(*a)?, builder.ref_node(*b)?]
@@ -372,6 +404,7 @@ fn constraint_node(
             let owner_id = *target_refs.first()?;
             let node_id = builder.alloc_node_id();
             let data = match constraint.kind {
+                // Plain two-point distance: undirected (`kNotDirected`).
                 ConstraintKind::Distance => AssocConstraintNodeData::Distance {
                     owner_id,
                     is_implied: false,
@@ -380,6 +413,28 @@ fn constraint_node(
                     dimension_dependency: Handle::NULL,
                     direction_type: 0,
                     distance: None,
+                },
+                // X-only/Y-only: `kFixedDirection` with the fixed unit
+                // vector the distance is measured along — AutoCAD's own
+                // representation of DistanceX/DistanceY, not a distinct
+                // constraint class.
+                ConstraintKind::DistanceX => AssocConstraintNodeData::Distance {
+                    owner_id,
+                    is_implied: false,
+                    is_active: true,
+                    value_dependency: Handle::NULL,
+                    dimension_dependency: Handle::NULL,
+                    direction_type: 1,
+                    distance: Some(Vector3::new(1.0, 0.0, 0.0)),
+                },
+                ConstraintKind::DistanceY => AssocConstraintNodeData::Distance {
+                    owner_id,
+                    is_implied: false,
+                    is_active: true,
+                    value_dependency: Handle::NULL,
+                    dimension_dependency: Handle::NULL,
+                    direction_type: 1,
+                    distance: Some(Vector3::new(0.0, 1.0, 0.0)),
                 },
                 ConstraintKind::Angle => AssocConstraintNodeData::Angle {
                     owner_id,
@@ -396,6 +451,16 @@ fn constraint_node(
                     value_dependency: Handle::NULL,
                     dimension_dependency: Handle::NULL,
                     mode: 0,
+                },
+                // `kCircleDiameter` — same class as Radius (`mode: 0` /
+                // `kCircleRadius`), different mode byte.
+                ConstraintKind::Diameter => AssocConstraintNodeData::RadiusDiameter {
+                    owner_id,
+                    is_implied: false,
+                    is_active: true,
+                    value_dependency: Handle::NULL,
+                    dimension_dependency: Handle::NULL,
+                    mode: 1,
                 },
                 _ => unreachable!(),
             };
@@ -847,7 +912,7 @@ impl Scene {
 mod tests {
     use super::super::sketch_constraints::SketchScope;
     use super::*;
-    use acadrust::entities::{Circle, Line};
+    use acadrust::entities::{Arc, Circle, Line};
 
     fn line_entity(scene: &mut Scene, start: (f64, f64), end: (f64, f64)) -> Handle {
         scene.add_entity(EntityType::Line(Line::from_points(
@@ -858,6 +923,15 @@ mod tests {
 
     fn circle_entity(scene: &mut Scene, center: (f64, f64), radius: f64) -> Handle {
         scene.add_entity(EntityType::Circle(Circle::from_center_radius(Vector3::new(center.0, center.1, 0.0), radius)))
+    }
+
+    fn arc_entity(scene: &mut Scene, center: (f64, f64), radius: f64) -> Handle {
+        scene.add_entity(EntityType::Arc(Arc::from_center_radius_angles(
+            Vector3::new(center.0, center.1, 0.0),
+            radius,
+            0.0,
+            std::f64::consts::PI,
+        )))
     }
 
     /// Digs a scope's materialized native graph back out of `document`:
@@ -1133,7 +1207,7 @@ mod tests {
         );
     }
 
-    /// The 8 new `ConstraintKind`s all reuse the same generic
+    /// These `ConstraintKind`s all reuse the same generic
     /// `Geometrical`-shaped node path `geometrical_class_name` drives (see
     /// its own doc comment) — one representative mix of ref shapes (2 whole
     /// entities, an asymmetric point+whole pair, and a 3-ref case) is
@@ -1167,6 +1241,7 @@ mod tests {
                 vec![SketchRef::center(circle_a), SketchRef::center(circle_b), SketchRef::whole(axis)],
                 None,
             );
+            set.add(ConstraintKind::Normal, vec![SketchRef::whole(circle_a), SketchRef::whole(line_a)], None);
 
             scene.materialize_dwg_native_constraints_for_save(true);
             let owner = scene.document.header.model_space_block_handle;
@@ -1178,6 +1253,7 @@ mod tests {
 
             let group = native_group(&reloaded, owner);
             let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+
             for expected in [
                 "ACCONCENTRICCONSTRAINT",
                 "ACCOLINEARCONSTRAINT",
@@ -1187,9 +1263,258 @@ mod tests {
                 "ACPOINTCURVECONSTRAINT",
                 "ACEQUALDISTANCECONSTRAINT",
                 "ACSYMMETRICCONSTRAINT",
+                "ACNORMALCONSTRAINT",
             ] {
                 assert!(class_names.contains(&expected), "{ext}: missing {expected} node, got {class_names:?}");
             }
+        }
+    }
+
+    /// Constraint-parity Phase 1: an Arc registers in the solver as its own
+    /// center/radius (`sketch_solve.rs`'s `EntityGeom::Circle` reuse), and
+    /// this module already had `ACCONSTRAINEDARC` geometry-dependency
+    /// support in place before that. This confirms the two sides actually
+    /// meet: a Concentric/Tangent/Radius constraint referencing an arc
+    /// still gets its expected class names AND its geometry node is the
+    /// arc-specific one, through a real DWG/DXF byte round trip — not just
+    /// the in-memory graph this test module builds directly.
+    #[test]
+    fn constraints_referencing_an_arc_round_trip_with_the_arc_geometry_node() {
+        for ext in ["dxf", "dwg"] {
+            let mut scene = Scene::new();
+            let arc = arc_entity(&mut scene, (0.0, 0.0), 4.0);
+            let circle = circle_entity(&mut scene, (10.0, -6.0), 2.0);
+
+            let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+            set.add(ConstraintKind::Concentric, vec![SketchRef::center(arc), SketchRef::center(circle)], None);
+            set.add(
+                ConstraintKind::Radius,
+                vec![SketchRef::whole(arc)],
+                Some(crate::scene::named_parameters::DrivingValue::Literal(9.0)),
+            );
+
+            scene.materialize_dwg_native_constraints_for_save(true);
+            let owner = scene.document.header.model_space_block_handle;
+
+            let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
+                .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
+            let reloaded = crate::io::load_bytes(&format!("arc_ref.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+
+            let group = native_group(&reloaded, owner);
+            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            assert!(class_names.contains(&"ACCONCENTRICCONSTRAINT"), "{ext}: missing ACCONCENTRICCONSTRAINT, got {class_names:?}");
+            assert!(class_names.contains(&"ACRADIUSDIAMETERCONSTRAINT"), "{ext}: missing ACRADIUSDIAMETERCONSTRAINT, got {class_names:?}");
+            assert!(
+                group.nodes.iter().any(|n| n.class_name == "ACCONSTRAINEDARC"),
+                "{ext}: the arc should have its own geometry node, got {class_names:?}"
+            );
+        }
+    }
+
+    /// Constraint-parity Phase 4b: a Coincident constraint referencing an
+    /// arc's actual *endpoint* (marker 0, not its center via `-3` or its
+    /// whole curve) round-trips correctly too — `SketchRef`'s marker is
+    /// serialized generically regardless of what entity type or point it
+    /// addresses, so this needs no dedicated DWG-side wiring beyond what
+    /// already existed; this test is here to actually confirm that rather
+    /// than assume it.
+    #[test]
+    fn a_coincident_constraint_on_an_arcs_endpoint_round_trips() {
+        for ext in ["dxf", "dwg"] {
+            let mut scene = Scene::new();
+            let arc = arc_entity(&mut scene, (0.0, 0.0), 4.0);
+            let line = line_entity(&mut scene, (20.0, 20.0), (21.0, 20.0));
+
+            scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+                ConstraintKind::Coincident,
+                vec![SketchRef::point(arc, 0), SketchRef::point(line, 0)],
+                None,
+            );
+
+            scene.materialize_dwg_native_constraints_for_save(true);
+            let owner = scene.document.header.model_space_block_handle;
+
+            let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
+                .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
+            let reloaded =
+                crate::io::load_bytes(&format!("arc_endpoint_ref.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+
+            let group = native_group(&reloaded, owner);
+            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            assert!(class_names.contains(&"ACPOINTCOINCIDENCECONSTRAINT"), "{ext}: missing ACPOINTCOINCIDENCECONSTRAINT, got {class_names:?}");
+            assert!(
+                group.nodes.iter().any(|n| n.class_name == "ACCONSTRAINEDARC"),
+                "{ext}: the arc should still have its own geometry node, got {class_names:?}"
+            );
+        }
+    }
+
+    /// Constraint-parity Phase 5: an ellipse isn't a supported geometry
+    /// node type in `geometry_node` yet (see its own doc comment for why),
+    /// so a Concentric constraint referencing one degrades to "not in the
+    /// native graph" — the same "skip, don't error" contract every other
+    /// unbuildable native-constraint case gets — while the other
+    /// constraint in the same scope (Fixed, on a plain circle) still
+    /// persists normally, and the ellipse constraint itself still survives
+    /// in this app's own XRecord format.
+    #[test]
+    fn a_constraint_referencing_an_ellipse_is_absent_from_the_native_graph_but_not_from_xrecord() {
+        for ext in ["dxf", "dwg"] {
+            let mut scene = Scene::new();
+            let ellipse = scene.add_entity(EntityType::Ellipse(acadrust::entities::Ellipse::from_center_axes(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(4.0, 0.0, 0.0),
+                0.5,
+            )));
+            let circle = circle_entity(&mut scene, (10.0, 10.0), 2.0);
+
+            let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+            set.add(ConstraintKind::Concentric, vec![SketchRef::center(ellipse), SketchRef::center(circle)], None);
+            set.add(ConstraintKind::Fixed, vec![SketchRef::whole(circle)], None);
+
+            scene.materialize_sketch_constraints_for_save();
+            scene.materialize_dwg_native_constraints_for_save(true);
+            let owner = scene.document.header.model_space_block_handle;
+
+            let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
+                .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
+            let reloaded_doc =
+                crate::io::load_bytes(&format!("ellipse_ref.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+
+            let group = native_group(&reloaded_doc, owner);
+            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            assert!(class_names.contains(&"ACFIXEDCONSTRAINT"), "{ext}: the other constraint should still persist, got {class_names:?}");
+            assert!(
+                !class_names.contains(&"ACCONCENTRICCONSTRAINT"),
+                "{ext}: the ellipse-referencing Concentric constraint has no supported geometry node and must not appear, got {class_names:?}"
+            );
+
+            let mut reloaded_scene = Scene::new();
+            reloaded_scene.document = reloaded_doc;
+            reloaded_scene.load_sketch_constraints_from_document();
+            let restored = reloaded_scene
+                .sketch_constraint_set(SketchScope::ModelSpace)
+                .unwrap_or_else(|| panic!("{ext}: no ModelSpace constraint set survived the round trip"));
+            let kinds: Vec<ConstraintKind> = restored.constraints.iter().map(|c| c.kind).collect();
+            assert!(kinds.contains(&ConstraintKind::Concentric), "{ext}: the ellipse constraint should still round-trip via XRecord, got {kinds:?}");
+        }
+    }
+
+    /// Constraint-parity Phase 4a: `ArcLength` has no ObjectARX class at
+    /// all (confirmed against `AcExplicitConstr.h`) — this asserts the
+    /// degradation is exactly as documented: the native DWG/DXF graph
+    /// gets every *other* constraint on the arc (Radius, here) but no
+    /// ArcLength-shaped node, while the app's own constraint set (what
+    /// XRecord persistence actually serializes, per `sketch_persist.rs`'s
+    /// fully-generic encode/decode) still carries it untouched.
+    #[test]
+    fn arc_length_has_no_native_class_but_survives_in_the_apps_own_constraint_set() {
+        for ext in ["dxf", "dwg"] {
+            let mut scene = Scene::new();
+            let arc = arc_entity(&mut scene, (0.0, 0.0), 4.0);
+
+            let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+            set.add(ConstraintKind::Radius, vec![SketchRef::whole(arc)], Some(DrivingValue::Literal(4.0)));
+            set.add(ConstraintKind::ArcLength, vec![SketchRef::whole(arc)], Some(DrivingValue::Literal(6.0)));
+
+            // Both materializers, "called alongside, not instead of" each
+            // other (`materialize_dwg_native_constraints_for_save`'s own
+            // doc comment) — the native graph and this app's own XRecord
+            // format are independent, additive persistence paths.
+            scene.materialize_sketch_constraints_for_save();
+            scene.materialize_dwg_native_constraints_for_save(true);
+            let owner = scene.document.header.model_space_block_handle;
+
+            let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
+                .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
+            let reloaded_doc =
+                crate::io::load_bytes(&format!("arc_length.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+
+            let group = native_group(&reloaded_doc, owner);
+            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            assert!(class_names.contains(&"ACRADIUSDIAMETERCONSTRAINT"), "{ext}: missing ACRADIUSDIAMETERCONSTRAINT, got {class_names:?}");
+            assert!(
+                !class_names.iter().any(|n| n.contains("ARCLENGTH")),
+                "{ext}: ArcLength has no native DWG class and must not appear here, got {class_names:?}"
+            );
+
+            // Still present in this app's own (XRecord-backed) constraint
+            // set — reload into a fresh `Scene` and read it back the same
+            // way `sketch_persist.rs`'s own round-trip tests do.
+            let mut reloaded_scene = Scene::new();
+            reloaded_scene.document = reloaded_doc;
+            reloaded_scene.load_sketch_constraints_from_document();
+            let restored = reloaded_scene
+                .sketch_constraint_set(SketchScope::ModelSpace)
+                .unwrap_or_else(|| panic!("{ext}: no ModelSpace constraint set survived the round trip"));
+            let kinds: Vec<ConstraintKind> = restored.constraints.iter().map(|c| c.kind).collect();
+            assert!(kinds.contains(&ConstraintKind::ArcLength), "{ext}: ArcLength should still round-trip via XRecord, got {kinds:?}");
+        }
+    }
+
+    /// Constraint-parity Phase 2: `Diameter`/`DistanceX`/`DistanceY` reuse
+    /// `Radius`'/`Distance`'s own DWG class with a different
+    /// `RadiusDiameterConstrType`/`DirectionType` mode byte, matching real
+    /// AutoCAD's representation (this module's own research, folded into
+    /// `dimensional_class_name`'s doc comment). Confirms that byte actually
+    /// survives a real DWG/DXF write+read, not just the in-memory node this
+    /// module built.
+    #[test]
+    fn diameter_and_directed_distance_constraints_round_trip_with_their_mode_byte() {
+        for ext in ["dxf", "dwg"] {
+            let mut scene = Scene::new();
+            let circle = circle_entity(&mut scene, (0.0, 0.0), 3.0);
+            let line = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
+
+            let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
+            set.add(ConstraintKind::Diameter, vec![SketchRef::whole(circle)], Some(DrivingValue::Literal(16.0)));
+            set.add(
+                ConstraintKind::DistanceX,
+                vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+                Some(DrivingValue::Literal(10.0)),
+            );
+            set.add(
+                ConstraintKind::DistanceY,
+                vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+                Some(DrivingValue::Literal(3.0)),
+            );
+
+            scene.materialize_dwg_native_constraints_for_save(true);
+            let owner = scene.document.header.model_space_block_handle;
+
+            let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
+                .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
+            let reloaded =
+                crate::io::load_bytes(&format!("diameter_directed.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+
+            let group = native_group(&reloaded, owner);
+            let radius_diameter_nodes: Vec<_> = group
+                .nodes
+                .iter()
+                .filter_map(|n| match &n.data {
+                    AssocConstraintNodeData::RadiusDiameter { mode, .. } => Some(*mode),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(radius_diameter_nodes, vec![1], "{ext}: Diameter should round-trip as mode=1 (kCircleDiameter), got {radius_diameter_nodes:?}");
+
+            let distance_nodes: Vec<_> = group
+                .nodes
+                .iter()
+                .filter_map(|n| match &n.data {
+                    AssocConstraintNodeData::Distance { direction_type, distance, .. } => Some((*direction_type, *distance)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(distance_nodes.len(), 2, "{ext}: expected DistanceX and DistanceY nodes, got {distance_nodes:?}");
+            assert!(
+                distance_nodes.contains(&(1, Some(Vector3::new(1.0, 0.0, 0.0)))),
+                "{ext}: DistanceX should round-trip as direction_type=1 with a (1,0,0) direction, got {distance_nodes:?}"
+            );
+            assert!(
+                distance_nodes.contains(&(1, Some(Vector3::new(0.0, 1.0, 0.0)))),
+                "{ext}: DistanceY should round-trip as direction_type=1 with a (0,1,0) direction, got {distance_nodes:?}"
+            );
         }
     }
 }

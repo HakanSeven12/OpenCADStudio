@@ -86,6 +86,26 @@ pub mod concentric {
     }
 }
 
+/// A line perpendicular to a circle/arc's tangent at their point of
+/// contact — for the Line/Circle-only entity model this is equivalent to
+/// "the line passes through the circle's center" (a circle's radius is
+/// always normal to its own tangent), so it's built from the same
+/// `PointOnLine` primitive `PointOnCurve` already uses for a point-on-line
+/// case (`sketch_solve.rs`). Distinct from `Perpendicular`, which only
+/// covers line-to-line — AutoCAD's own `GeomConstraintType` enum lists
+/// `kNormal` and `kPerpendicular` separately for exactly this reason.
+pub mod normal {
+    use super::*;
+    pub fn tool() -> ToolDef {
+        ToolDef {
+            id: "NRCONSTRAINT",
+            label: "Normal",
+            icon: IconKind::Glyph("⊾"),
+            event: ModuleEvent::Command("NRCONSTRAINT".to_string()),
+        }
+    }
+}
+
 pub mod colinear {
     use super::*;
     pub fn tool() -> ToolDef {

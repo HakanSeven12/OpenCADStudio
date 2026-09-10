@@ -40,7 +40,15 @@ fn parse_driving_value(text: &str, known_names: &[String]) -> Option<DrivingValu
     if let Ok(value) = text.parse::<f64>() {
         return Some(DrivingValue::Literal(value));
     }
-    known_names.iter().find(|n| n.as_str() == text).map(|n| DrivingValue::Named(n.clone()))
+    // Case-insensitive: the command line uppercases `SingleToken` input
+    // (InputKind::SingleToken) before it reaches this parser, so a typed
+    // lowercase parameter name like "hole_dia" arrives here as "HOLE_DIA".
+    // Matching case-insensitively and returning the canonically-cased name
+    // keeps the driving link pointed at the actual parameter.
+    known_names
+        .iter()
+        .find(|n| n.eq_ignore_ascii_case(text))
+        .map(|n| DrivingValue::Named(n.clone()))
 }
 
 pub mod distance_tool {
@@ -67,35 +75,62 @@ pub mod angle_tool {
     }
 }
 
-/// Constrains a single line's length (between its two endpoints) or a
-/// circle's radius, to a typed target value.
+/// Which flavor of dimensional constraint the typed value ultimately
+/// drives — selectable via a prompt keyword before the value itself is
+/// typed, mirroring how real AutoCAD's own `DCCONSTRAINT` offers
+/// `[Xdistance/Ydistance]` or `[Diameter]` as options on the same command
+/// rather than as separate tools.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DistanceMode {
+    /// Line length (two-point distance) or a circle/arc's radius —
+    /// whichever `is_circle` selects.
+    Auto,
+    X,
+    Y,
+    Diameter,
+    /// Arc length — only offered when `is_arc` (not a plain Circle, which
+    /// has no "arc length" distinct from its circumference).
+    ArcLength,
+}
+
+/// Constrains a single line's length (or its X/Y-only component) between
+/// its two endpoints, or a circle/arc's radius (or diameter, or — for an
+/// arc specifically — its swept arc length), to a typed target value.
 pub struct DistanceConstraintCommand {
     handle: Handle,
-    /// Which kind this becomes once a value comes in — decided once at
-    /// construction from the entity's type, matching `ConstraintKind`'s own
-    /// split between line-length (`Distance`) and circle-radius (`Radius`).
+    /// Whether `handle` is a circle/arc (Radius/Diameter) or a line
+    /// (Distance/DistanceX/DistanceY) — decided once at construction from
+    /// the entity's type.
     is_circle: bool,
+    /// Whether `handle` is specifically an Arc (as opposed to a full
+    /// Circle) — gates the `[Arclength]` prompt option.
+    is_arc: bool,
+    mode: DistanceMode,
     default_value: f64,
+    /// The entity's current arc length, for `ArcLength` mode's `<default>`
+    /// — meaningless (left at 0) unless `is_arc`.
+    default_arc_length: f64,
     /// Snapshot of `Scene::named_parameters`' names at construction time —
     /// see `parse_driving_value`'s doc comment for why a snapshot.
     known_param_names: Vec<String>,
 }
 
 impl DistanceConstraintCommand {
-    /// `None` if `handle` isn't a Line or Circle.
+    /// `None` if `handle` isn't a Line, Circle, or Arc.
     pub fn new(scene: &Scene, handle: Handle) -> Option<Self> {
         let entity = scene.document.get_entity(handle)?;
-        let (is_circle, default_value) = match entity {
+        let (is_circle, is_arc, default_value, default_arc_length) = match entity {
             EntityType::Line(l) => {
                 let dx = l.end.x - l.start.x;
                 let dy = l.end.y - l.start.y;
-                (false, (dx * dx + dy * dy).sqrt())
+                (false, false, (dx * dx + dy * dy).sqrt(), 0.0)
             }
-            EntityType::Circle(c) => (true, c.radius),
+            EntityType::Circle(c) => (true, false, c.radius, 0.0),
+            EntityType::Arc(a) => (true, true, a.radius, a.arc_length()),
             _ => return None,
         };
         let known_param_names = scene.named_parameters().iter().map(|p| p.name.clone()).collect();
-        Some(Self { handle, is_circle, default_value, known_param_names })
+        Some(Self { handle, is_circle, is_arc, mode: DistanceMode::Auto, default_value, default_arc_length, known_param_names })
     }
 
     fn build(&self, target: DrivingValue) -> Option<CmdResult> {
@@ -104,14 +139,27 @@ impl DistanceConstraintCommand {
                 return None;
             }
         }
-        let (kind, refs, label) = if self.is_circle {
-            (ConstraintKind::Radius, vec![SketchRef::whole(self.handle)], "Radius constraint")
-        } else {
-            (
+        let (kind, refs, label) = match (self.is_circle, self.mode) {
+            (true, DistanceMode::Diameter) => (ConstraintKind::Diameter, vec![SketchRef::whole(self.handle)], "Diameter constraint"),
+            (true, DistanceMode::ArcLength) if self.is_arc => {
+                (ConstraintKind::ArcLength, vec![SketchRef::whole(self.handle)], "Arc length constraint")
+            }
+            (true, _) => (ConstraintKind::Radius, vec![SketchRef::whole(self.handle)], "Radius constraint"),
+            (false, DistanceMode::X) => (
+                ConstraintKind::DistanceX,
+                vec![SketchRef::point(self.handle, 0), SketchRef::point(self.handle, 1)],
+                "DistanceX constraint",
+            ),
+            (false, DistanceMode::Y) => (
+                ConstraintKind::DistanceY,
+                vec![SketchRef::point(self.handle, 0), SketchRef::point(self.handle, 1)],
+                "DistanceY constraint",
+            ),
+            (false, _) => (
                 ConstraintKind::Distance,
                 vec![SketchRef::point(self.handle, 0), SketchRef::point(self.handle, 1)],
                 "Distance constraint",
-            )
+            ),
         };
         Some(CmdResult::AddSketchConstraint { kind, refs, driving_param: Some(target), label })
     }
@@ -123,7 +171,17 @@ impl CadCommand for DistanceConstraintCommand {
     }
 
     fn prompt(&self) -> String {
-        format!("Specify distance <{:.4}>: ", self.default_value)
+        match (self.is_circle, self.mode) {
+            (true, DistanceMode::Diameter) => format!("Specify diameter <{:.4}> or [Radius]: ", self.default_value * 2.0),
+            (true, DistanceMode::ArcLength) if self.is_arc => {
+                format!("Specify arc length <{:.4}> or [Radius]: ", self.default_arc_length)
+            }
+            (true, _) if self.is_arc => format!("Specify distance <{:.4}> or [Diameter/Arclength]: ", self.default_value),
+            (true, _) => format!("Specify distance <{:.4}> or [Diameter]: ", self.default_value),
+            (false, DistanceMode::X) => format!("Specify X distance <{:.4}>: ", self.default_value),
+            (false, DistanceMode::Y) => format!("Specify Y distance <{:.4}>: ", self.default_value),
+            (false, _) => format!("Specify distance <{:.4}> or [Xdistance/Ydistance]: ", self.default_value),
+        }
     }
 
     fn input_kind(&self) -> InputKind {
@@ -135,10 +193,45 @@ impl CadCommand for DistanceConstraintCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        self.build(DrivingValue::Literal(self.default_value)).unwrap_or(CmdResult::Cancel)
+        let default = match self.mode {
+            DistanceMode::Diameter => self.default_value * 2.0,
+            DistanceMode::ArcLength if self.is_arc => self.default_arc_length,
+            _ => self.default_value,
+        };
+        self.build(DrivingValue::Literal(default)).unwrap_or(CmdResult::Cancel)
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        // Mode-switch keywords re-prompt instead of building — consumed
+        // inputs return `Some(NeedPoint)` so the driver doesn't re-offer
+        // the same token a second time (matches e.g. `trim.rs`'s
+        // `T`/`B`/`F` keyword handling). Defensively uppercased same as
+        // `trim.rs` even though `SingleToken` input already arrives
+        // uppercased from the command line.
+        let keyword = text.trim().to_uppercase();
+        match (self.is_circle, keyword.as_str()) {
+            (true, "D" | "DIAMETER") => {
+                self.mode = DistanceMode::Diameter;
+                return Some(CmdResult::NeedPoint);
+            }
+            (true, "A" | "ARCLENGTH") if self.is_arc => {
+                self.mode = DistanceMode::ArcLength;
+                return Some(CmdResult::NeedPoint);
+            }
+            (true, "R" | "RADIUS") => {
+                self.mode = DistanceMode::Auto;
+                return Some(CmdResult::NeedPoint);
+            }
+            (false, "X" | "XDISTANCE") => {
+                self.mode = DistanceMode::X;
+                return Some(CmdResult::NeedPoint);
+            }
+            (false, "Y" | "YDISTANCE") => {
+                self.mode = DistanceMode::Y;
+                return Some(CmdResult::NeedPoint);
+            }
+            _ => {}
+        }
         let value = parse_driving_value(text, &self.known_param_names)?;
         self.build(value)
     }
@@ -238,5 +331,129 @@ mod tests {
         let known = vec!["hole_dia".to_string()];
         assert_eq!(parse_driving_value("bogus", &known), None);
         assert_eq!(parse_driving_value("", &known), None);
+    }
+
+    #[test]
+    fn parse_driving_value_matches_a_known_parameter_regardless_of_typed_case() {
+        // The command line uppercases `SingleToken` input before it reaches
+        // here, so a lowercase-named parameter must still resolve — and
+        // resolve to its canonically-cased name, not the uppercased token.
+        let known = vec!["hole_dia".to_string()];
+        assert_eq!(parse_driving_value("HOLE_DIA", &known), Some(DrivingValue::Named("hole_dia".to_string())));
+        assert_eq!(parse_driving_value("Hole_Dia", &known), Some(DrivingValue::Named("hole_dia".to_string())));
+    }
+
+    fn add_line(scene: &mut Scene) -> Handle {
+        scene.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(6.0, 8.0, 0.0),
+        )))
+    }
+
+    fn add_circle(scene: &mut Scene) -> Handle {
+        scene.add_entity(EntityType::Circle(acadrust::entities::Circle::from_center_radius(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            3.0,
+        )))
+    }
+
+    fn add_arc(scene: &mut Scene) -> Handle {
+        scene.add_entity(EntityType::Arc(acadrust::entities::Arc::from_center_radius_angles(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            3.0,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        )))
+    }
+
+    #[test]
+    fn x_keyword_switches_mode_and_then_builds_a_distance_x_constraint() {
+        let mut scene = Scene::new();
+        let line = add_line(&mut scene);
+        let mut cmd = DistanceConstraintCommand::new(&scene, line).expect("Line supports DCONSTRAINT");
+
+        // The keyword itself only switches mode and re-prompts — it must
+        // not build a constraint yet.
+        assert!(matches!(cmd.on_text_input("X"), Some(CmdResult::NeedPoint)));
+        assert!(cmd.prompt().contains("X distance"), "prompt should reflect the new mode: {}", cmd.prompt());
+
+        match cmd.on_text_input("10") {
+            Some(CmdResult::AddSketchConstraint { kind, driving_param: Some(DrivingValue::Literal(v)), .. }) => {
+                assert_eq!(kind, ConstraintKind::DistanceX);
+                assert_eq!(v, 10.0);
+            }
+            _ => panic!("expected an AddSketchConstraint{{DistanceX}}, got a different result"),
+        }
+    }
+
+    #[test]
+    fn d_keyword_switches_a_circles_command_to_diameter_mode() {
+        let mut scene = Scene::new();
+        let circle = add_circle(&mut scene);
+        let mut cmd = DistanceConstraintCommand::new(&scene, circle).expect("Circle supports DCONSTRAINT");
+
+        assert!(matches!(cmd.on_text_input("D"), Some(CmdResult::NeedPoint)));
+        assert!(cmd.prompt().contains("diameter"), "prompt should reflect Diameter mode: {}", cmd.prompt());
+
+        match cmd.on_text_input("16") {
+            Some(CmdResult::AddSketchConstraint { kind, driving_param: Some(DrivingValue::Literal(v)), .. }) => {
+                assert_eq!(kind, ConstraintKind::Diameter);
+                assert_eq!(v, 16.0);
+            }
+            _ => panic!("expected an AddSketchConstraint{{Diameter}}"),
+        }
+    }
+
+    #[test]
+    fn default_mode_still_builds_a_plain_radius_constraint() {
+        let mut scene = Scene::new();
+        let circle = add_circle(&mut scene);
+        let mut cmd = DistanceConstraintCommand::new(&scene, circle).expect("Circle supports DCONSTRAINT");
+
+        match cmd.on_text_input("5") {
+            Some(CmdResult::AddSketchConstraint { kind, .. }) => assert_eq!(kind, ConstraintKind::Radius),
+            _ => panic!("expected an AddSketchConstraint{{Radius}}"),
+        }
+    }
+
+    #[test]
+    fn a_keyword_switches_an_arcs_command_to_arc_length_mode() {
+        let mut scene = Scene::new();
+        let arc = add_arc(&mut scene);
+        let mut cmd = DistanceConstraintCommand::new(&scene, arc).expect("Arc supports DCONSTRAINT");
+
+        assert!(matches!(cmd.on_text_input("A"), Some(CmdResult::NeedPoint)));
+        assert!(cmd.prompt().contains("arc length"), "prompt should reflect ArcLength mode: {}", cmd.prompt());
+
+        match cmd.on_text_input("8") {
+            Some(CmdResult::AddSketchConstraint { kind, driving_param: Some(DrivingValue::Literal(v)), .. }) => {
+                assert_eq!(kind, ConstraintKind::ArcLength);
+                assert_eq!(v, 8.0);
+            }
+            _ => panic!("expected an AddSketchConstraint{{ArcLength}}"),
+        }
+    }
+
+    #[test]
+    fn arc_length_keyword_is_not_offered_for_a_plain_circle() {
+        let mut scene = Scene::new();
+        let circle = add_circle(&mut scene);
+        let mut cmd = DistanceConstraintCommand::new(&scene, circle).expect("Circle supports DCONSTRAINT");
+
+        assert!(!cmd.prompt().contains("Arclength"), "a plain circle has no arc length option: {}", cmd.prompt());
+        // "A" isn't a recognized keyword here and doesn't parse as a
+        // number or a named parameter either, so it's rejected outright.
+        assert!(cmd.on_text_input("A").is_none());
+    }
+
+    #[test]
+    fn arc_length_default_is_the_arcs_current_swept_length() {
+        let mut scene = Scene::new();
+        let arc = add_arc(&mut scene); // radius 3, 90° sweep -> length = 3 * pi/2
+        let mut cmd = DistanceConstraintCommand::new(&scene, arc).expect("Arc supports DCONSTRAINT");
+        cmd.on_text_input("A");
+
+        let expected = 3.0 * std::f64::consts::FRAC_PI_2;
+        assert!(cmd.prompt().contains(&format!("{expected:.4}")), "prompt should default to the arc's current length: {}", cmd.prompt());
     }
 }

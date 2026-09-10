@@ -114,6 +114,42 @@ pub enum ConstraintKind {
     /// point-symmetry about a point, and symmetry between two lines, aren't
     /// modeled.
     Symmetric,
+    /// A circle/arc's diameter (twice `Radius`'s target) — `refs`:
+    /// `[whole(circle_or_arc)]`. Same DWG class as `Radius`
+    /// (`ACRADIUSDIAMETERCONSTRAINT`), distinguished only by the
+    /// `RadiusDiameterConstrType` mode byte
+    /// (`dwg_native_constraints.rs`), matching how real AutoCAD represents
+    /// it — not a distinct native object type.
+    Diameter,
+    /// The X-only (resp. Y-only) component of the distance between two
+    /// points — `refs`: `[p1, p2]`, same shape as `Distance`. Same DWG
+    /// class as `Distance` (`ACDISTANCECONSTRAINT`) with its
+    /// `DirectionType` set to a fixed `(1,0,0)`/`(0,1,0)` direction, again
+    /// matching AutoCAD's own representation rather than inventing a new
+    /// class.
+    DistanceX,
+    DistanceY,
+    /// A line perpendicular to a circle/arc's tangent at their point of
+    /// contact — `refs`: `[whole(a), whole(b)]`, either order. For the
+    /// Line/Circle-only entity model this is equivalent to "the line
+    /// passes through the circle's center" (a circle's radius is always
+    /// normal to its own tangent), so it solves via the same `PointOnLine`
+    /// primitive `PointOnCurve` already uses. Distinct from
+    /// `Perpendicular` (line-to-line only) — AutoCAD's own
+    /// `GeomConstraintType` enum lists `kNormal` and `kPerpendicular`
+    /// separately for exactly this reason. Line-Line has no meaning here
+    /// (that's plain `Perpendicular`) and isn't buildable.
+    Normal,
+    /// An arc's arc length (`radius * sweep angle`) — `refs`:
+    /// `[whole(arc)]`. Solves against the arc's own `start_angle`/
+    /// `end_angle`, registered separately from its center/radius
+    /// (`sketch_solve.rs`'s `arc_angles` cache) — no native DWG
+    /// representation exists for this (neither `AcExplicitConstr.h` nor
+    /// `acadrust`'s `AssocConstraintNodeData` has an ArcLength-shaped
+    /// class/variant), so it persists in this app's own XRecord format
+    /// only, the same "DWG can't carry everything" gap the dependency-chain
+    /// DXF-omission precedent already documents.
+    ArcLength,
 }
 
 pub type ConstraintId = u32;
@@ -388,6 +424,11 @@ impl ConstraintKind {
             ConstraintKind::PointOnCurve => "∈",
             ConstraintKind::EqualDistance => "≐",
             ConstraintKind::Symmetric => "S",
+            ConstraintKind::Diameter => "⌀",
+            ConstraintKind::DistanceX => "↔ₓ",
+            ConstraintKind::DistanceY => "↔ᵧ",
+            ConstraintKind::Normal => "⊾",
+            ConstraintKind::ArcLength => "⌢",
         }
     }
 }
@@ -494,6 +535,40 @@ impl super::Scene {
         let changes: Vec<(Handle, super::ChangeKind)> = touched.into_iter().map(|h| (h, super::ChangeKind::Modified)).collect();
         self.bump_entities(&changes);
     }
+
+    /// Every persistent constraint, in any scope, currently driven by the
+    /// named parameter `name` — what the Named Parameters panel's "used by"
+    /// column shows. `entities` is the constraint's own referenced handles
+    /// (deduplicated; a two-point constraint on the same entity's own two
+    /// markers would otherwise list it twice), not resolved against the
+    /// live document — a caller wanting an entity's current type/position
+    /// still needs `Scene::document.get_entity`.
+    pub fn parameter_usage(&self, name: &str) -> Vec<ParameterUsage> {
+        let mut out = Vec::new();
+        for set in &self.sketch_constraints {
+            for c in &set.constraints {
+                let Some(DrivingValue::Named(n)) = &c.driving_param else { continue };
+                if n != name {
+                    continue;
+                }
+                let mut entities: Vec<Handle> = c.refs.iter().map(|r| r.entity).collect();
+                entities.sort();
+                entities.dedup();
+                out.push(ParameterUsage { scope: set.scope, constraint_id: c.id, kind: c.kind, entities });
+            }
+        }
+        out
+    }
+}
+
+/// One persistent constraint driven by a named parameter — [`Scene::parameter_usage`]'s
+/// result type.
+#[derive(Debug, Clone)]
+pub struct ParameterUsage {
+    pub scope: SketchScope,
+    pub constraint_id: ConstraintId,
+    pub kind: ConstraintKind,
+    pub entities: Vec<Handle>,
 }
 
 #[cfg(test)]
@@ -585,5 +660,69 @@ mod tests {
         assert_eq!(restored.constraints.len(), set.constraints.len());
         assert_eq!(restored.constraints[1].driving_param, Some(DrivingValue::Literal(12.5)));
         assert_eq!(restored.constraints[0].refs, set.constraints[0].refs);
+    }
+
+    #[test]
+    fn parameter_usage_finds_every_constraint_driven_by_the_named_parameter() {
+        let mut scene = super::super::Scene::new();
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Distance,
+            vec![SketchRef::point(h(1), 0), SketchRef::point(h(1), 1)],
+            Some(DrivingValue::Named("gap".to_string())),
+        );
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Radius,
+            vec![SketchRef::whole(h(2))],
+            Some(DrivingValue::Named("gap".to_string())),
+        );
+        // Unrelated: a literal-driven constraint and one driven by a
+        // different name must not show up.
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Radius,
+            vec![SketchRef::whole(h(3))],
+            Some(DrivingValue::Literal(5.0)),
+        );
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Distance,
+            vec![SketchRef::point(h(4), 0), SketchRef::point(h(4), 1)],
+            Some(DrivingValue::Named("other".to_string())),
+        );
+
+        let usage = scene.parameter_usage("gap");
+        assert_eq!(usage.len(), 2, "exactly the two constraints driven by 'gap', got {usage:?}");
+        assert!(usage.iter().any(|u| u.kind == ConstraintKind::Distance && u.entities == vec![h(1)]));
+        assert!(usage.iter().any(|u| u.kind == ConstraintKind::Radius && u.entities == vec![h(2)]));
+
+        assert_eq!(scene.parameter_usage("nonexistent").len(), 0);
+    }
+
+    #[test]
+    fn parameter_usage_searches_every_scope_not_just_model_space() {
+        let mut scene = super::super::Scene::new();
+        let block = h(99);
+        scene.sketch_constraint_set_mut(SketchScope::Block(block)).add(
+            ConstraintKind::Radius,
+            vec![SketchRef::whole(h(1))],
+            Some(DrivingValue::Named("r".to_string())),
+        );
+        let usage = scene.parameter_usage("r");
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].scope, SketchScope::Block(block));
+    }
+
+    #[test]
+    fn parameter_usage_deduplicates_an_entity_referenced_by_two_markers() {
+        let mut scene = super::super::Scene::new();
+        // A Distance constraint whose two points are both on the same
+        // entity (e.g. a line's own start and end) must list that entity
+        // once, not twice.
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Distance,
+            vec![SketchRef::point(h(1), 0), SketchRef::point(h(1), 1)],
+            Some(DrivingValue::Named("len".to_string())),
+        );
+        let usage = scene.parameter_usage("len");
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].entities, vec![h(1)]);
     }
 }

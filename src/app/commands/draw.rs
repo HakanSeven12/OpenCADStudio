@@ -1000,7 +1000,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" | "LCONSTRAINT" => {
+            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" | "LCONSTRAINT" | "NRCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1019,6 +1019,7 @@ impl OpenCADStudio {
                         "QCONSTRAINT" => (ConstraintKind::Perpendicular, "Perpendicular constraint"),
                         "TCONSTRAINT" => (ConstraintKind::Tangent, "Tangent constraint"),
                         "LCONSTRAINT" => (ConstraintKind::Colinear, "Colinear constraint"),
+                        "NRCONSTRAINT" => (ConstraintKind::Normal, "Normal constraint"),
                         _ => (ConstraintKind::Equal, "Equal constraint"),
                     };
                     return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {

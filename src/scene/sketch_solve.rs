@@ -13,14 +13,43 @@
 //! Maps every [`ConstraintKind`]. `Tangent` covers Line-Circle
 //! (`C2LDistance` with a driven zero-distance target aliased to the
 //! circle's own radius via `internal: false`) and Circle-Circle
-//! (`TangentCircumf`) — Line-Line has no meaning and Arc isn't a supported
-//! [`EntityGeom`] yet (matches that type's own documented scope), so those
-//! ref shapes build nothing, same "skip, don't panic" contract every other
-//! unbuildable constraint already gets. `ccw`/`internal` are picked from
-//! the pair's *current* geometry (which side of the line the circle already
-//! sits on; whether the circles are already nested) so the very first solve
-//! doesn't have to cross a sign-flip singularity to reach the nearest valid
+//! (`TangentCircumf`) — Line-Line has no meaning, so that ref shape builds
+//! nothing, same "skip, don't panic" contract every other unbuildable
+//! constraint already gets. `ccw`/`internal` are picked from the pair's
+//! *current* geometry (which side of the line the circle already sits on;
+//! whether the circles are already nested) so the very first solve doesn't
+//! have to cross a sign-flip singularity to reach the nearest valid
 //! tangent configuration.
+//!
+//! An `Arc` registers as a full [`EntityGeom::Arc`]: center, radius,
+//! `start_angle`/`end_angle`, *and* real `start`/`end` points (marker `0`/
+//! `1`, matching `Line`'s own convention — see `sketch_constraints::
+//! resolve_point`'s read-side counterpart). Naively, `start`/`end` would be
+//! independent free params that drift away from "actually on the circle at
+//! that angle" the moment anything pulls on them — planegcs itself avoids
+//! that by adding "arc rules" constraints internally whenever an arc is
+//! created; `ocs_gcs` has no dedicated helper for that, but it turns out not
+//! to need one: `ocs_gcs::constraints::curve_generic::CurveValue` already
+//! ties a point's `x`/`y` to *any* `Curve`'s value at a parameter, and
+//! `geo::Arc` already implements `Curve` (its `value(u)` is exactly
+//! "point on the circle at angle `u`"). So `solve_scope` adds four
+//! `CurveValue` constraints per registered arc — `start.x`/`start.y` tied
+//! to the curve at `start_angle`, `end.x`/`end.y` tied to it at
+//! `end_angle` — right after building every `SketchConstraint`'s own
+//! system-level constraints, unconditionally, the same way planegcs's own
+//! arc rules apply regardless of which constraints actually reference the
+//! arc. That's what makes Coincident/PointOnCurve/Midpoint/EqualDistance/
+//! Symmetric on an arc's actual endpoint (as opposed to its whole curve or
+//! its center) work: they resolve through the ordinary `point_ref`/
+//! `point_for_marker` machinery once markers `0`/`1` return real,
+//! consistency-anchored points, no per-kind special-casing needed.
+//!
+//! Every whole-circle-shaped kind (Concentric, Tangent, Equal, CenterPoint,
+//! Radius, Diameter, Fixed, Normal) still works on an arc via its
+//! `.circle` field — `whole_circle` extracts it generically; `Tangent`/
+//! `Normal`'s own inline matches (which don't go through `whole_circle`)
+//! have explicit `EntityGeom::Arc` arms alongside their `Circle` ones for
+//! the same reason.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -29,13 +58,14 @@ use acadrust::entities::EntityType;
 use acadrust::types::Handle;
 
 use ocs_gcs::constraints::angle_distance::L2LAngle;
-use ocs_gcs::constraints::circle_arc::{C2LDistance, P2CDistance, TangentCircumf};
+use ocs_gcs::constraints::circle_arc::{ArcLength, C2LDistance, P2CDistance, TangentCircumf};
+use ocs_gcs::constraints::curve_generic::CurveValue;
 use ocs_gcs::constraints::point_line::{
-    CenterOfGravity, Equal, EqualLineLength, MidpointOnLine, Parallel as ParallelConstraint,
+    CenterOfGravity, Difference, Equal, EqualLineLength, MidpointOnLine, Parallel as ParallelConstraint,
     Perpendicular as PerpendicularConstraint, PointOnLine, P2PDistance,
 };
 use ocs_gcs::constraints::Constraint;
-use ocs_gcs::geo::{Circle as GCircle, Line as GLine, Point as GPoint};
+use ocs_gcs::geo::{Arc as GArc, Circle as GCircle, Ellipse as GEllipse, Line as GLine, Point as GPoint};
 use ocs_gcs::solvers::dogleg::solve_dl;
 use ocs_gcs::system::System;
 
@@ -44,14 +74,22 @@ use super::sketch_constraints::{ConstraintId, ConstraintKind, SketchConstraint, 
 use super::{ChangeKind, Scene};
 
 /// One referenced entity's geometry, registered into an `ocs_gcs::System`'s
-/// parameter store. Only the two entity types the existing one-shot
-/// constraint commands already support (`crate::modules::draw::constrain`)
-/// — extending this to arcs/ellipses is future work, not a gap introduced
-/// here.
+/// parameter store.
 #[derive(Clone, Copy)]
 enum EntityGeom {
     Line(GLine),
     Circle(GCircle),
+    /// Full `geo::Arc` — center/radius (via `.circle`), `start_angle`/
+    /// `end_angle`, and real `start`/`end` points kept consistent with
+    /// those by the arc-rules `CurveValue` constraints `solve_scope` adds
+    /// for every registered arc. See this module's doc comment.
+    Arc(GArc),
+    /// Center-and-shape support only — see `register_entity`'s `Ellipse`
+    /// arm for the acadrust-to-`ocs_gcs` parametrization conversion, and
+    /// this module's doc comment for what isn't wired up yet (major/minor
+    /// axis dimensional constraints, `PointOnEllipse`-based Coincident/
+    /// Tangent).
+    Ellipse(GEllipse),
 }
 
 impl EntityGeom {
@@ -64,8 +102,31 @@ impl EntityGeom {
             (EntityGeom::Line(l), 0) => Some(l.p1),
             (EntityGeom::Line(l), 1) => Some(l.p2),
             (EntityGeom::Circle(c), -3) => Some(c.center),
+            (EntityGeom::Arc(a), 0) => Some(a.start),
+            (EntityGeom::Arc(a), 1) => Some(a.end),
+            (EntityGeom::Arc(a), -3) => Some(a.circle.center),
+            (EntityGeom::Ellipse(e), -3) => Some(e.center),
             _ => None,
         }
+    }
+}
+
+/// `Tangent`/`Normal` only ever care about "a whole circle-shaped curve" or
+/// "a whole line" — an `Arc` collapses to its `.circle` here exactly like
+/// `whole_circle` does, so those two constraints' own inline matches don't
+/// need every Circle/Arc combination spelled out separately.
+enum CircleOrLine {
+    Circle(GCircle),
+    Line(GLine),
+    Other,
+}
+
+fn as_circle_or_line(g: EntityGeom) -> CircleOrLine {
+    match g {
+        EntityGeom::Circle(c) => CircleOrLine::Circle(c),
+        EntityGeom::Arc(a) => CircleOrLine::Circle(a.circle),
+        EntityGeom::Line(l) => CircleOrLine::Line(l),
+        EntityGeom::Ellipse(_) => CircleOrLine::Other,
     }
 }
 
@@ -90,6 +151,44 @@ fn register_entity(document: &acadrust::CadDocument, sys: &mut System, handle: H
             let center = GPoint::new(sys.add_param(c.center.x, false), sys.add_param(c.center.y, false));
             let rad = sys.add_param(c.radius, false);
             Some(EntityGeom::Circle(GCircle { center, rad }))
+        }
+        EntityType::Arc(a) => {
+            // Full registration: center/radius, both angles, and real
+            // start/end points seeded from acadrust's own `start_point`/
+            // `end_point` (already consistent with center/radius/angle at
+            // registration time) — `solve_scope` adds the arc-rules
+            // constraints that keep them that way under solving. See this
+            // module's doc comment.
+            let center = GPoint::new(sys.add_param(a.center.x, false), sys.add_param(a.center.y, false));
+            let rad = sys.add_param(a.radius, false);
+            let start_angle = sys.add_param(a.start_angle, false);
+            let end_angle = sys.add_param(a.end_angle, false);
+            let start_seed = a.start_point();
+            let end_seed = a.end_point();
+            let start = GPoint::new(sys.add_param(start_seed.x, false), sys.add_param(start_seed.y, false));
+            let end = GPoint::new(sys.add_param(end_seed.x, false), sys.add_param(end_seed.y, false));
+            Some(EntityGeom::Arc(GArc { circle: GCircle { center, rad }, start, end, start_angle, end_angle }))
+        }
+        EntityType::Ellipse(el) => {
+            // acadrust's `Ellipse` is center + major-axis vector (its length
+            // is the major radius) + minor/major ratio; `ocs_gcs::geo::
+            // Ellipse` is center + one focus + minor radius. Converting:
+            // minor_radius = major_radius * ratio, then the focus distance
+            // c follows from a² = b² + c² (standard ellipse identity), and
+            // focus1 sits `c` along the major-axis direction from center.
+            let major_radius = el.major_axis.length();
+            let minor_radius = major_radius * el.minor_axis_ratio;
+            let focus_dist = (major_radius * major_radius - minor_radius * minor_radius).max(0.0).sqrt();
+            // Direction is meaningless once major_radius is ~0 (a
+            // degenerate point-ellipse) — arbitrarily fall back to +X
+            // rather than dividing by ~0 in `normalize`.
+            let unit_major =
+                if major_radius > 1e-9 { el.major_axis.normalize() } else { acadrust::types::Vector3::UNIT_X };
+            let focus1_point = el.center + unit_major * focus_dist;
+            let center = GPoint::new(sys.add_param(el.center.x, false), sys.add_param(el.center.y, false));
+            let focus1 = GPoint::new(sys.add_param(focus1_point.x, false), sys.add_param(focus1_point.y, false));
+            let radmin = sys.add_param(minor_radius, false);
+            Some(EntityGeom::Ellipse(GEllipse { center, focus1, radmin }))
         }
         _ => None,
     }
@@ -142,11 +241,12 @@ fn build_constraint(
 
     let whole_line = |sys: &mut System, cache: &mut HashMap<_, _>, r: SketchRef| match resolve_ref(document, sys, cache, r)? {
         EntityGeom::Line(l) => Some(l),
-        EntityGeom::Circle(_) => None,
+        EntityGeom::Circle(_) | EntityGeom::Arc(_) | EntityGeom::Ellipse(_) => None,
     };
     let whole_circle = |sys: &mut System, cache: &mut HashMap<_, _>, r: SketchRef| match resolve_ref(document, sys, cache, r)? {
         EntityGeom::Circle(circ) => Some(circ),
-        EntityGeom::Line(_) => None,
+        EntityGeom::Arc(a) => Some(a.circle),
+        EntityGeom::Line(_) | EntityGeom::Ellipse(_) => None,
     };
     let point_ref = |sys: &mut System, cache: &mut HashMap<_, _>, r: SketchRef| {
         let marker = r.marker?;
@@ -232,6 +332,18 @@ fn build_constraint(
                     let zero = sys.add_param(0.0, true);
                     vec![Rc::new(P2CDistance::new(circ, p, zero))]
                 }
+                // Same "distance to the underlying circle is zero" relation
+                // as the `Circle` arm — doesn't restrict the point to
+                // within the arc's own sweep, matching that same
+                // pre-existing simplification for `Circle`.
+                EntityGeom::Arc(a) => {
+                    let zero = sys.add_param(0.0, true);
+                    vec![Rc::new(P2CDistance::new(a.circle, p, zero))]
+                }
+                // `PointOnEllipse` (`ocs_gcs::constraints::conic`) isn't
+                // wired up yet — deliberately deferred alongside
+                // ellipse-tangency, same as this module's doc comment.
+                EntityGeom::Ellipse(_) => Vec::new(),
             }
         }
         ConstraintKind::Symmetric => {
@@ -276,6 +388,43 @@ fn build_constraint(
                         Rc::new(Equal::new(circ.rad, sys.add_param(r, true), 1.0)),
                     ]
                 }
+                // Pinning the 5 intrinsic params (center, radius, both
+                // angles) is enough — `start`/`end` are already tied to
+                // those via the arc-rules `CurveValue` constraints
+                // `solve_scope` adds for every arc, so pinning them too
+                // would just be redundant.
+                EntityGeom::Arc(a) => {
+                    let (cx, cy, r, sa, ea) = {
+                        let store = sys.store();
+                        (
+                            store.get(a.circle.center.x),
+                            store.get(a.circle.center.y),
+                            store.get(a.circle.rad),
+                            store.get(a.start_angle),
+                            store.get(a.end_angle),
+                        )
+                    };
+                    vec![
+                        Rc::new(Equal::new(a.circle.center.x, sys.add_param(cx, true), 1.0)),
+                        Rc::new(Equal::new(a.circle.center.y, sys.add_param(cy, true), 1.0)),
+                        Rc::new(Equal::new(a.circle.rad, sys.add_param(r, true), 1.0)),
+                        Rc::new(Equal::new(a.start_angle, sys.add_param(sa, true), 1.0)),
+                        Rc::new(Equal::new(a.end_angle, sys.add_param(ea, true), 1.0)),
+                    ]
+                }
+                EntityGeom::Ellipse(el) => {
+                    let (cx, cy, fx, fy, b) = {
+                        let store = sys.store();
+                        (store.get(el.center.x), store.get(el.center.y), store.get(el.focus1.x), store.get(el.focus1.y), store.get(el.radmin))
+                    };
+                    vec![
+                        Rc::new(Equal::new(el.center.x, sys.add_param(cx, true), 1.0)),
+                        Rc::new(Equal::new(el.center.y, sys.add_param(cy, true), 1.0)),
+                        Rc::new(Equal::new(el.focus1.x, sys.add_param(fx, true), 1.0)),
+                        Rc::new(Equal::new(el.focus1.y, sys.add_param(fy, true), 1.0)),
+                        Rc::new(Equal::new(el.radmin, sys.add_param(b, true), 1.0)),
+                    ]
+                }
             }
         }
         ConstraintKind::Distance => {
@@ -301,13 +450,50 @@ fn build_constraint(
             let target = sys.add_param(resolved, true);
             vec![Rc::new(Equal::new(circle.rad, target, 1.0))]
         }
+        // Same math as `Radius`, just `radius = target / 2` instead of
+        // `radius = target` — `Equal`'s `ratio` param already supports
+        // this, matching how AutoCAD itself stores Diameter as the same
+        // `ACRADIUSDIAMETERCONSTRAINT` class with a different mode byte
+        // rather than a distinct one (`dwg_native_constraints.rs`).
+        ConstraintKind::Diameter => {
+            let Some(r) = c.refs.first() else { return Vec::new() };
+            let Some(circle) = whole_circle(sys, cache, *r) else {
+                return Vec::new();
+            };
+            let Some(Ok(resolved)) = c.driving_param.as_ref().map(|d| d.resolve(params)) else { return Vec::new() };
+            let target = sys.add_param(resolved, true);
+            vec![Rc::new(Equal::new(circle.rad, target, 0.5))]
+        }
+        // Signed X-only/Y-only component of the distance between two
+        // points — `Difference::new(p1, p2, d)` is `p2 - p1 == d`, matching
+        // AutoCAD's own `ACDISTANCECONSTRAINT` with a fixed-direction
+        // vector rather than a distinct native class
+        // (`dwg_native_constraints.rs`).
+        ConstraintKind::DistanceX => {
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(pa), Some(pb)) = (point_ref(sys, cache, *a), point_ref(sys, cache, *b)) else { return Vec::new() };
+            let Some(Ok(resolved)) = c.driving_param.as_ref().map(|d| d.resolve(params)) else { return Vec::new() };
+            let target = sys.add_param(resolved, true);
+            vec![Rc::new(Difference::new(pa.x, pb.x, target))]
+        }
+        ConstraintKind::DistanceY => {
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(pa), Some(pb)) = (point_ref(sys, cache, *a), point_ref(sys, cache, *b)) else { return Vec::new() };
+            let Some(Ok(resolved)) = c.driving_param.as_ref().map(|d| d.resolve(params)) else { return Vec::new() };
+            let target = sys.add_param(resolved, true);
+            vec![Rc::new(Difference::new(pa.y, pb.y, target))]
+        }
         ConstraintKind::Tangent => {
             let [a, b] = c.refs.as_slice() else { return Vec::new() };
             let (Some(ga), Some(gb)) = (resolve_ref(document, sys, cache, *a), resolve_ref(document, sys, cache, *b)) else {
                 return Vec::new();
             };
-            match (ga, gb) {
-                (EntityGeom::Circle(c1), EntityGeom::Circle(c2)) => {
+            // An `Arc`'s `.circle` behaves identically to a plain `Circle`
+            // for tangency math — normalize both refs down first so the
+            // match below doesn't need every Circle/Arc combination
+            // written out separately.
+            match (as_circle_or_line(ga), as_circle_or_line(gb)) {
+                (CircleOrLine::Circle(c1), CircleOrLine::Circle(c2)) => {
                     let store = sys.store();
                     let (x1, y1, r1) = (store.get(c1.center.x), store.get(c1.center.y), store.get(c1.rad));
                     let (x2, y2, r2) = (store.get(c2.center.x), store.get(c2.center.y), store.get(c2.rad));
@@ -319,7 +505,7 @@ fn build_constraint(
                     let internal = center_dist < (r1 - r2).abs();
                     vec![Rc::new(TangentCircumf::new(c1.center, c2.center, c1.rad, c2.rad, internal))]
                 }
-                (EntityGeom::Circle(circ), EntityGeom::Line(line)) | (EntityGeom::Line(line), EntityGeom::Circle(circ)) => {
+                (CircleOrLine::Circle(circ), CircleOrLine::Line(line)) | (CircleOrLine::Line(line), CircleOrLine::Circle(circ)) => {
                     let store = sys.store();
                     let (cx, cy) = (store.get(circ.center.x), store.get(circ.center.y));
                     let (x1, y1) = (store.get(line.p1.x), store.get(line.p1.y));
@@ -336,10 +522,37 @@ fn build_constraint(
                     let zero = sys.add_param(0.0, true);
                     vec![Rc::new(C2LDistance::new(circ, line, zero, ccw, false))]
                 }
-                // Line-Line tangency has no meaning; Arc isn't a supported
-                // `EntityGeom` yet (see that type's own doc comment).
+                // Line-Line tangency has no meaning; either side being an
+                // Ellipse falls here too (`PointOnEllipse`/tangency isn't
+                // wired up yet).
                 _ => Vec::new(),
             }
+        }
+        // A circle's radius is always normal to its own tangent, so
+        // "line normal to circle/arc" reduces to "line passes through the
+        // circle's center" — the same `PointOnLine` primitive
+        // `PointOnCurve` already uses for a point-on-line case.
+        ConstraintKind::Normal => {
+            let [a, b] = c.refs.as_slice() else { return Vec::new() };
+            let (Some(ga), Some(gb)) = (resolve_ref(document, sys, cache, *a), resolve_ref(document, sys, cache, *b)) else {
+                return Vec::new();
+            };
+            match (as_circle_or_line(ga), as_circle_or_line(gb)) {
+                (CircleOrLine::Circle(circ), CircleOrLine::Line(line)) | (CircleOrLine::Line(line), CircleOrLine::Circle(circ)) => {
+                    vec![Rc::new(PointOnLine::new(circ.center, line))]
+                }
+                // Line-Line has no meaning here (that's `Perpendicular`);
+                // Circle-Circle "normal" (orthogonal circles) needs a
+                // different, not-yet-implemented relation.
+                _ => Vec::new(),
+            }
+        }
+        ConstraintKind::ArcLength => {
+            let Some(r) = c.refs.first() else { return Vec::new() };
+            let Some(EntityGeom::Arc(arc)) = resolve_ref(document, sys, cache, *r) else { return Vec::new() };
+            let Some(Ok(resolved)) = c.driving_param.as_ref().map(|d| d.resolve(params)) else { return Vec::new() };
+            let target = sys.add_param(resolved, true);
+            vec![Rc::new(ArcLength::new(arc, target))]
         }
     }
 }
@@ -386,6 +599,22 @@ fn solve_scope(
         return None;
     }
 
+    // Arc rules (this module's doc comment): keep every registered arc's
+    // `start`/`end` points consistent with its center/radius/angle,
+    // unconditionally — planegcs itself adds these the moment an arc
+    // exists, not only when some `SketchConstraint` happens to reference
+    // its endpoint. Not tracked in `owner`: these are solver-internal
+    // bookkeeping, never redundant with anything a user-facing constraint
+    // could name, so there's no `ConstraintId` for them to report against.
+    for geom in cache.values() {
+        let EntityGeom::Arc(arc) = geom else { continue };
+        let curve = Rc::new(*arc);
+        sys.add_constraint(Rc::new(CurveValue::new(arc.start, arc.start.x, curve.clone(), arc.start_angle)));
+        sys.add_constraint(Rc::new(CurveValue::new(arc.start, arc.start.y, curve.clone(), arc.start_angle)));
+        sys.add_constraint(Rc::new(CurveValue::new(arc.end, arc.end.x, curve.clone(), arc.end_angle)));
+        sys.add_constraint(Rc::new(CurveValue::new(arc.end, arc.end.y, curve, arc.end_angle)));
+    }
+
     let partitions = sys.partition();
     for sub in &partitions {
         solve_dl(sub, sys.store_mut());
@@ -404,6 +633,15 @@ fn solve_scope(
         .map(|g| match g {
             EntityGeom::Line(_) => 4,
             EntityGeom::Circle(_) => 3,
+            // Raw param count (center×2, rad, start×2, end×2, both
+            // angles) — same "raw, not netted against its own
+            // constraints" convention as every other arm here. The four
+            // arc-rules `CurveValue` constraints (always present, added
+            // just above) already reduce this to 5 *effective* DOF through
+            // the normal `touched_free`/`diag.dof` accounting below, the
+            // same way any other constraint would.
+            EntityGeom::Arc(_) => 9,
+            EntityGeom::Ellipse(_) => 5,
         })
         .sum();
     let touched_free: usize = partitions.iter().map(|s| s.p_size()).sum();
@@ -456,6 +694,65 @@ fn solve_scope(
                     updated.center.y = cy;
                     updated.radius = r;
                     results.push((handle, EntityType::Circle(updated)));
+                }
+            }
+            (EntityType::Arc(a), EntityGeom::Arc(g)) => {
+                // Center/radius/angles only — `start`/`end` are derived
+                // (acadrust's `Arc` has no separate stored fields for them;
+                // `start_point()`/`end_point()` compute them from these
+                // same four), so nothing further needs writing back for
+                // them specifically.
+                let (cx, cy, r) = (store.get(g.circle.center.x), store.get(g.circle.center.y), store.get(g.circle.rad));
+                let (new_start_angle, new_end_angle) = (store.get(g.start_angle), store.get(g.end_angle));
+                if (cx - a.center.x).abs() > MOVE_EPS
+                    || (cy - a.center.y).abs() > MOVE_EPS
+                    || (r - a.radius).abs() > MOVE_EPS
+                    || (new_start_angle - a.start_angle).abs() > MOVE_EPS
+                    || (new_end_angle - a.end_angle).abs() > MOVE_EPS
+                {
+                    let mut updated = a.clone();
+                    updated.center.x = cx;
+                    updated.center.y = cy;
+                    updated.radius = r;
+                    updated.start_angle = new_start_angle;
+                    updated.end_angle = new_end_angle;
+                    results.push((handle, EntityType::Arc(updated)));
+                }
+            }
+            (EntityType::Ellipse(el), EntityGeom::Ellipse(g)) => {
+                // Converting back to acadrust's center + major-axis-vector +
+                // minor/major-ratio parametrization — the inverse of
+                // `register_entity`'s `Ellipse` arm. `rad_maj_at` (already
+                // provided by `ocs_gcs::geo::Ellipse`) does the a²=b²+c²
+                // algebra; only the major-axis *direction* needs deriving
+                // here, from the (possibly moved) focus relative to center.
+                let (cx, cy) = (store.get(g.center.x), store.get(g.center.y));
+                let (fx, fy) = (store.get(g.focus1.x), store.get(g.focus1.y));
+                let minor_radius = store.get(g.radmin);
+                let (major_radius, _) = g.rad_maj_at(store, None);
+                let focus_dist = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+                // Direction is ill-defined once the ellipse is (near)
+                // circular — keep whatever direction it already had rather
+                // than snapping to an arbitrary axis.
+                let unit_major = if focus_dist > 1e-9 {
+                    acadrust::types::Vector3::new(fx - cx, fy - cy, 0.0).normalize()
+                } else {
+                    el.major_axis.normalize()
+                };
+                let new_major_axis = unit_major * major_radius;
+                let new_ratio = if major_radius > 1e-9 { minor_radius / major_radius } else { 0.0 };
+                if (cx - el.center.x).abs() > MOVE_EPS
+                    || (cy - el.center.y).abs() > MOVE_EPS
+                    || (new_major_axis.x - el.major_axis.x).abs() > MOVE_EPS
+                    || (new_major_axis.y - el.major_axis.y).abs() > MOVE_EPS
+                    || (new_ratio - el.minor_axis_ratio).abs() > MOVE_EPS
+                {
+                    let mut updated = el.clone();
+                    updated.center.x = cx;
+                    updated.center.y = cy;
+                    updated.major_axis = new_major_axis;
+                    updated.minor_axis_ratio = new_ratio;
+                    results.push((handle, EntityType::Ellipse(updated)));
                 }
             }
             _ => {}

@@ -7,8 +7,8 @@
 //! (`src/scene/sketch_solve.rs`). By how they gather input:
 //! - **Plain selection, no picking** — Horizontal, Vertical, Fixed (select
 //!   one entity); Parallel, Perpendicular, Equal, Tangent, Colinear,
-//!   Concentric (select two); Symmetric (select three: the mirrored pair,
-//!   then the mirror line) — dispatch straight to
+//!   Concentric, Normal (select two); Symmetric (select three: the
+//!   mirrored pair, then the mirror line) — dispatch straight to
 //!   `CmdResult::AddSketchConstraint` from `src/app/commands/draw.rs`.
 //! - **A typed value** — Distance, Angle (`value.rs`): the target value
 //!   comes from the command line after the tool is clicked.
@@ -31,6 +31,6 @@ pub use coincident::{coincident_tool, CoincidentConstraintCommand};
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
 pub use point_on_entity::{center_point_tool, midpoint_tool, point_on_curve_tool, PointOnEntityConstraintCommand};
 pub use tools::{
-    concentric, equal, fixed, horizontal, colinear, parallel, perpendicular, symmetric, tangent, vertical,
+    concentric, equal, fixed, horizontal, colinear, normal, parallel, perpendicular, symmetric, tangent, vertical,
 };
 pub use value::{angle_tool, distance_tool, AngleConstraintCommand, DistanceConstraintCommand};

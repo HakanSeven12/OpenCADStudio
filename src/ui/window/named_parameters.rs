@@ -17,9 +17,75 @@
 
 use crate::app::Message;
 use crate::scene::named_parameters::ParameterTable;
+use crate::scene::Scene;
 use crate::t;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use acadrust::types::Handle;
+use acadrust::EntityType;
+use iced::widget::tooltip::Position as TipPos;
+use iced::widget::{button, column, container, row, scrollable, text, text_input, tooltip, Space};
 use iced::{Background, Element, Length, Theme};
+
+/// Short "Kind handle" label for one referenced entity — the same handle
+/// display (`0x…`) AutoCAD/this app's own conventions use, since entities
+/// have no user-facing name to show instead.
+fn entity_label(scene: &Scene, handle: Handle) -> String {
+    match scene.document.get_entity(handle) {
+        Some(EntityType::Line(_)) => format!("Line {handle}"),
+        Some(EntityType::Circle(_)) => format!("Circle {handle}"),
+        Some(EntityType::Arc(_)) => format!("Arc {handle}"),
+        Some(_) => format!("Entity {handle}"),
+        None => format!("(erased {handle})"),
+    }
+}
+
+/// One line per constraint currently driven by `name`, e.g.
+/// `"Distance: Line 0x2A, Line 0x2B"` — empty when nothing references it
+/// yet (a parameter defined but not yet used by any constraint).
+fn usage_lines(scene: &Scene, name: &str) -> Vec<String> {
+    scene
+        .parameter_usage(name)
+        .iter()
+        .map(|u| {
+            let entities = u.entities.iter().map(|h| entity_label(scene, *h)).collect::<Vec<_>>().join(", ");
+            format!("{:?}: {entities}", u.kind)
+        })
+        .collect()
+}
+
+/// The "Used by" column's cell for one row: a compact kind-count summary
+/// (e.g. `"Distance ×2, Radius ×1"`), with the full per-constraint entity
+/// list (`usage_lines`) as a hover tooltip — the column is too narrow to
+/// show entity lists inline once a parameter drives more than one or two
+/// constraints. A blank name (a fresh, not-yet-named row) or a name driving
+/// nothing shows a muted em dash instead.
+fn used_by_cell<'a>(scene: &Scene, name: &str) -> Element<'a, Message> {
+    if name.is_empty() {
+        return Space::new().into();
+    }
+    let lines = usage_lines(scene, name);
+    if lines.is_empty() {
+        return text("—").size(11).style(muted_style).into();
+    }
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for line in &lines {
+        let kind = line.split(':').next().unwrap_or(line).to_string();
+        match counts.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((kind, 1)),
+        }
+    }
+    let summary = counts.iter().map(|(k, n)| format!("{k} ×{n}")).collect::<Vec<_>>().join(", ");
+    let mut body = column![].spacing(2);
+    for line in &lines {
+        body = body.push(text(line.clone()).size(11));
+    }
+    tooltip(
+        text(summary).size(11).style(muted_style),
+        container(body).style(container::bordered_box).padding([4, 8]),
+        TipPos::Top,
+    )
+    .into()
+}
 
 /// Which column of a parameter row a text edit targets.
 #[derive(Clone, Copy, Debug)]
@@ -113,8 +179,12 @@ fn preview(rows: &[ParamEditorRow]) -> Vec<Option<Result<f64, String>>> {
 }
 
 /// Build the named-parameter editor content. `rows` is the live working
-/// buffer.
-pub fn view_window(rows: &[ParamEditorRow], sizing: crate::ui::modal::ModalSizing) -> Element<'_, Message> {
+/// buffer; `scene` supplies the "Used by" column, computed against the
+/// *live*, already-applied constraint set (`Scene::parameter_usage`) —
+/// unapplied edits to a row's name in the buffer don't retroactively
+/// relabel what's shown, same as the rest of this editor only takes effect
+/// on Apply.
+pub fn view_window<'a>(rows: &'a [ParamEditorRow], scene: &'a Scene, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
     let title = text(t!("Named Parameters")).size(15);
     let hint = text(t!(
         "Type a name and a formula (e.g. hole_dia = 12, hole_spacing = 2 * hole_dia + 1.5). Apply to save and re-solve; closing discards unapplied edits."
@@ -124,13 +194,15 @@ pub fn view_window(rows: &[ParamEditorRow], sizing: crate::ui::modal::ModalSizin
 
     let gutter = iced::Padding { top: 0.0, right: GUTTER, bottom: 0.0, left: 0.0 };
     const NAME_WIDTH: f32 = 120.0;
-    const VALUE_WIDTH: f32 = 140.0;
+    const VALUE_WIDTH: f32 = 100.0;
+    const USED_BY_WIDTH: f32 = 160.0;
 
     let head = container(
         row![
             container(text(t!("Name")).size(11).style(muted_style)).width(Length::Fixed(NAME_WIDTH)),
             container(text(t!("Formula")).size(11).style(muted_style)).width(sizing.width),
             container(text(t!("Value")).size(11).style(muted_style)).width(Length::Fixed(VALUE_WIDTH)),
+            container(text(t!("Used by")).size(11).style(muted_style)).width(Length::Fixed(USED_BY_WIDTH)),
             Space::new().width(Length::Fixed(30.0)),
         ]
         .spacing(8),
@@ -155,14 +227,21 @@ pub fn view_window(rows: &[ParamEditorRow], sizing: crate::ui::modal::ModalSizin
             Some(Err(msg)) => container(text(msg).size(11).style(danger_style)).into(),
             None => Space::new().into(),
         };
+        let used_by_cell = used_by_cell(scene, row.name.trim());
         let del = button(crate::ui::icons::themed_danger_text(crate::ui::icons::CLOSE, 12.0))
             .on_press(Message::NamedParametersRemove(idx))
             .padding([2, 6])
             .style(button::danger);
         list = list.push(
-            row![name_box, formula_box, container(value_cell).width(Length::Fixed(VALUE_WIDTH)), del]
-                .spacing(8)
-                .align_y(iced::Center),
+            row![
+                name_box,
+                formula_box,
+                container(value_cell).width(Length::Fixed(VALUE_WIDTH)),
+                container(used_by_cell).width(Length::Fixed(USED_BY_WIDTH)),
+                del
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
         );
     }
 
@@ -254,5 +333,38 @@ mod tests {
         assert!(matches!(&results[0], Some(Err(e)) if e.contains("duplicate")));
         assert!(matches!(&results[1], Some(Err(e)) if e.contains("duplicate")));
         assert_eq!(results[2], Some(Ok(3.0)), "an unrelated row's name must not be affected");
+    }
+
+    #[test]
+    fn usage_lines_names_the_constraint_kind_and_its_entities() {
+        use crate::scene::sketch_constraints::{ConstraintKind, SketchRef, SketchScope};
+        let mut scene = Scene::new();
+        let line = scene.add_entity(acadrust::EntityType::Line(acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        )));
+        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
+            ConstraintKind::Distance,
+            vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+            Some(crate::scene::named_parameters::DrivingValue::Named("gap".to_string())),
+        );
+
+        let lines = usage_lines(&scene, "gap");
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("Distance: Line "), "got {lines:?}");
+        assert!(lines[0].contains(&format!("{line}")), "should name the actual entity handle, got {lines:?}");
+    }
+
+    #[test]
+    fn usage_lines_is_empty_for_a_parameter_nothing_references() {
+        let scene = Scene::new();
+        assert!(usage_lines(&scene, "unused").is_empty());
+    }
+
+    #[test]
+    fn entity_label_reports_erased_for_a_dangling_handle() {
+        let scene = Scene::new();
+        let label = entity_label(&scene, acadrust::types::Handle::new(999));
+        assert!(label.starts_with("(erased "), "got {label}");
     }
 }

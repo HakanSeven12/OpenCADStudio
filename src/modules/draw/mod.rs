@@ -36,7 +36,7 @@ impl CadModule for DrawModule {
         use clipboard::{copy_clip, cut, paste};
         use constrain::{
             angle_tool, center_point_tool, coincident_tool, colinear, concentric, distance_tool, equal,
-            equal_distance_tool, fixed, horizontal, midpoint_tool, parallel, perpendicular, point_on_curve_tool,
+            equal_distance_tool, fixed, horizontal, midpoint_tool, normal, parallel, perpendicular, point_on_curve_tool,
             symmetric, tangent, vertical,
         };
         use draw::{arc, circle, ellipse, hatch, line, polyline, shapes};
@@ -135,6 +135,7 @@ impl CadModule for DrawModule {
                         perpendicular::tool().into(),
                         equal::tool().into(),
                         tangent::tool().into(),
+                        normal::tool().into(),
                         coincident_tool::tool().into(),
                         distance_tool::tool().into(),
                         angle_tool::tool().into(),

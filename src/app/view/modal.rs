@@ -175,13 +175,15 @@ impl OpenCADStudio {
                 )
             }
             super::super::ModalKind::NamedParameters => {
+                let scene = &self.tabs[self.active_tab].scene;
                 sized_flow(
                     ex,
-                    620,
+                    820,
                     520,
                     |flow| {
                         crate::ui::window::named_parameters::view_window(
                             &self.named_parameter_editor_rows,
+                            scene,
                             flow,
                         )
                     },

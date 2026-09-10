@@ -167,7 +167,6 @@ impl CadCommand for XLineCommand {
                 Vector3::new(base.x, base.y, base.z),
                 Vector3::new(dir_n.x, dir_n.y, dir_n.z),
             );
-            self.base = None;
             CmdResult::CommitEntity(EntityType::XLine(xline))
         } else {
             self.base = Some(pt);

@@ -1610,10 +1610,10 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
                 grips.push(GripDef {
                     id: SECTION_GRIP_NORMAL,
                     world: glam::DVec3::new(center.x, center.y, center.z)
-                        + normal_world * offset,
+                        - normal_world * offset,
                     is_midpoint: false,
                     shape: crate::scene::model::object::GripShape::Triangle,
-                    dir: Some(normal_world),
+                    dir: Some(-normal_world),
                     axis: Some(normal_world),
                 });
             }
@@ -1709,7 +1709,7 @@ fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
                     .zip(data.vertices.last())
                     .map_or(1.0, |(first, last)| (*last - *first).length());
                 let offset = (span * 0.08).max(1.0e-6);
-                let current = center + normal * offset;
+                let current = center - normal * offset;
                 let delta = match apply {
                     GripApply::Translate(delta) => Vector3::new(delta.x, delta.y, delta.z),
                     GripApply::Absolute(position) => {
